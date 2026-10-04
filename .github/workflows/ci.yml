@@ -6,6 +6,8 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions: read-all
+
 jobs:
   build-and-test:
     name: Build & Test All Suites
@@ -18,6 +20,9 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
+      - name: Vulnerable Package Audit
+        run: dotnet list package --vulnerable --include-transitive
 
       - name: Test Autheris Solution
         run: dotnet test Autheris.sln -c Release --verbosity normal

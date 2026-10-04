@@ -75,10 +75,11 @@ public static class GatewayRoleExtensions
             return true;
         }
 
-        // TenantAdmin implies GovernanceAdmin, stewardship, publishing, auditing, consumer (within tenant scope, never ClusterAdmin)
+        // SEC M-1: TenantAdmin implies stewardship, publishing, auditing, consumer within tenant scope.
+        // It NEVER implies GovernanceAdmin (global governance) or ClusterAdmin.
         if (granted == GatewayRole.TenantAdmin)
         {
-            return required is GatewayRole.GovernanceAdmin or GatewayRole.DataOwner or GatewayRole.DataSteward or GatewayRole.SchemaPublisher or GatewayRole.SecurityAuditor or GatewayRole.Consumer;
+            return required is GatewayRole.DataOwner or GatewayRole.DataSteward or GatewayRole.SchemaPublisher or GatewayRole.SecurityAuditor or GatewayRole.Consumer;
         }
 
         // GovernanceAdmin implies stewardship, publishing, auditing, consumer

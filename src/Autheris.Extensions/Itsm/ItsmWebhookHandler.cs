@@ -350,7 +350,7 @@ public sealed class ItsmWebhookHandler(
 
             // SEC M-2: Route approval through ApproveConsentRequestStepAsync to enforce separation of duties,
             // approver != requester check, and four-eyes verification rather than bypassing directly to ActivateConsentAsync.
-            var stepResult = await governanceRepo.ApproveConsentRequestStepAsync(request.Id, actor, ct).ConfigureAwait(false);
+            var stepResult = await governanceRepo.ApproveConsentRequestStepAsync(request.Id, actor, isExternalItsmApproval: true, ct).ConfigureAwait(false);
 
             if (string.Equals(stepResult.Status, "APPROVED", StringComparison.OrdinalIgnoreCase))
             {

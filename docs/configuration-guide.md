@@ -836,7 +836,11 @@ spec:
       - X-Forwarded-Email
       - X-Forwarded-Groups
       - X-Forwarded-Roles
+      - X-Forwarded-Tenant
 ```
+
+> [!SECURITY]
+> **SEC H-1 Tenant-Isolation**: `X-Forwarded-Tenant` wird von Autheris standardmäßig ignoriert (`TrustUpstreamTenant = false`), um Header-Spoofing durch Clients zu verhindern. Falls der Reverse Proxy den Tenant setzt, muss `Authentication:ForwardAuth:TrustUpstreamTenant = true` und eine explizite Positivliste `Authentication:ForwardAuth:AllowedTenantIds` konfiguriert werden. Ist `AllowedTenantIds` leer, schlägt jede Authentifizierung fail-closed fehl.
 
 #### 3.3.2 Traefik Shared-Secret Middleware (Anti-Spoofing)
 

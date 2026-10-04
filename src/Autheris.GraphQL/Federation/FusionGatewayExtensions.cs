@@ -46,6 +46,7 @@ public static class FusionGatewayExtensions
                 client.BaseAddress = new Uri(subgraph.Url);
                 client.Timeout = TimeSpan.FromSeconds(subgraph.TimeoutSeconds > 0 ? subgraph.TimeoutSeconds : 30);
             })
+            .ConfigurePrimaryHttpMessageHandler(sp => Autheris.Application.Security.SecureOutboundHttp.CreatePrimaryHandler(sp, subgraphName))
             .AddHttpMessageHandler(sp => sp.GetRequiredService<SubgraphSecurityDelegatingHandler>());
         }
 

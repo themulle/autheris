@@ -204,12 +204,18 @@ public static class GovernanceEndpoints
                                context.User.IsInRole("DataProtectionOfficer") ||
                                context.User.IsInRole("ClusterAdmin");
 
+            var targetKey = ResolveTenantBoundClientId(context, clientId, out var isForbidden);
+            if (isForbidden)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             if (!isPrivileged && !string.Equals(clientId, authenticatedClientId, StringComparison.OrdinalIgnoreCase))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var budget = await dpEngine.GetBudgetAsync(clientId, context.RequestAborted);
+            var budget = await dpEngine.GetBudgetAsync(targetKey, context.RequestAborted);
             return Results.Ok(budget);
         }).RequireAuthorization();
 
@@ -229,24 +235,13 @@ public static class GovernanceEndpoints
             }
 
             // SEC M-4: Non-canonical cluster admins may only reset clients within their tenant scope
-            if (!isCanonicalClusterAdmin)
+            var targetKey = ResolveTenantBoundClientId(context, clientId, out var isForbidden);
+            if (isForbidden)
             {
-                var reqTenant = EndpointSecurity.GetRequestTenant(context).Value;
-                if (!string.IsNullOrWhiteSpace(reqTenant))
-                {
-                    var colonIdx = clientId.IndexOf(':');
-                    if (colonIdx > 0)
-                    {
-                        var targetTenant = clientId[..colonIdx];
-                        if (!string.Equals(targetTenant, reqTenant, StringComparison.OrdinalIgnoreCase))
-                        {
-                            return Results.StatusCode(StatusCodes.Status403Forbidden);
-                        }
-                    }
-                }
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            await dpEngine.ResetBudgetAsync(clientId, context.RequestAborted);
+            await dpEngine.ResetBudgetAsync(targetKey, context.RequestAborted);
             return Results.Ok(new { message = $"Privacy budget reset for client '{clientId}'." });
         }).RequireAuthorization();
 
@@ -277,10 +272,17 @@ public static class GovernanceEndpoints
                     request = request with { ClientId = authenticatedClientId };
                 }
 
-                var result = await dpEngine.PerturbAsync(request, context.RequestAborted);
+                var targetKey = ResolveTenantBoundClientId(context, request.ClientId, out var isForbidden);
+                if (isForbidden)
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+
+                var boundRequest = request with { ClientId = targetKey };
+                var result = await dpEngine.PerturbAsync(boundRequest, context.RequestAborted);
                 context.Response.Headers["X-Privacy-Budget-Consumed"] = result.ConsumedEpsilon.ToString("F2");
                 context.Response.Headers["X-Privacy-Budget-Remaining"] = result.RemainingEpsilon.ToString("F2");
-                return Results.Ok(result);
+                return Results.Ok(result with { ClientId = request.ClientId });
             }
             catch (PrivacyBudgetExhaustedException ex)
             {
@@ -403,5 +405,26 @@ public static class GovernanceEndpoints
         }).RequireAuthorization();
 
         return app;
+    }
+
+    private static string ResolveTenantBoundClientId(HttpContext context, string clientId, out bool isForbidden)
+    {
+        isForbidden = false;
+        var reqTenant = EndpointSecurity.GetRequestTenant(context).Value;
+        var isCanonicalClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
+
+        var colonIdx = clientId.IndexOf(':');
+        if (colonIdx > 0)
+        {
+            var targetTenant = clientId[..colonIdx];
+            if (!isCanonicalClusterAdmin && !string.Equals(targetTenant, reqTenant, StringComparison.OrdinalIgnoreCase))
+            {
+                isForbidden = true;
+                return clientId;
+            }
+            return clientId;
+        }
+
+        return string.IsNullOrWhiteSpace(reqTenant) ? clientId : $"{reqTenant}:{clientId}";
     }
 }
