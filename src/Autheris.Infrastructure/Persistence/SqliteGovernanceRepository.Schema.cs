@@ -15,6 +15,23 @@ public partial class SqliteGovernanceRepository
 {
     private void InitializeDatabase()
     {
+        try
+        {
+            using var pragmaCmd = _connection.CreateCommand();
+            pragmaCmd.CommandText = @"
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = NORMAL;
+                PRAGMA busy_timeout = 5000;
+                PRAGMA cache_size = -64000;
+                PRAGMA temp_store = MEMORY;
+            ";
+            pragmaCmd.ExecuteNonQuery();
+        }
+        catch
+        {
+            // Ignore PRAGMA failures if restricted in test or embedded environments
+        }
+
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS TABLES (

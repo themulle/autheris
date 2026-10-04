@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -18,6 +20,10 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
     internal SqliteConnection Connection => _connection;
     private readonly IEpochValidationService _epochValidationService;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private readonly ConcurrentDictionary<string, TableMetadata?> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Channel<AuditLogEntry> _auditChannel;
+    private readonly CancellationTokenSource _auditCts = new();
+    private readonly Task _auditProcessorTask;
     private string _lastAuditHash = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
     private long _lastAuditSeq;
     private readonly byte[] _auditHmacKey;
@@ -43,6 +49,15 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
         _connection.Open();
 
         InitializeDatabase();
+
+        var channelOptions = new BoundedChannelOptions(100_000)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = true,
+            SingleWriter = false
+        };
+        _auditChannel = Channel.CreateBounded<AuditLogEntry>(channelOptions);
+        _auditProcessorTask = Task.Run(ProcessAuditChannelAsync);
 
         // SEC-04: Resolve or derive dedicated HMAC-SHA256 key for authentic tamper-evident audit logging (N-6)
         byte[]? key = null;
@@ -142,9 +157,47 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
     }
 
 
+    private int _disposed;
+
     public void Dispose()
     {
-        _connection.Dispose();
-        _lock.Dispose();
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        _auditChannel.Writer.TryComplete();
+        try
+        {
+            _auditCts.Cancel();
+        }
+        catch (ObjectDisposedException) { }
+
+        try
+        {
+            _auditProcessorTask.GetAwaiter().GetResult();
+        }
+        catch
+        {
+            // Ignore cancellation or drain exceptions during disposal
+        }
+
+        try
+        {
+            _auditCts.Dispose();
+        }
+        catch (ObjectDisposedException) { }
+
+        try
+        {
+            _connection.Dispose();
+        }
+        catch { }
+
+        try
+        {
+            _lock.Dispose();
+        }
+        catch { }
     }
 }

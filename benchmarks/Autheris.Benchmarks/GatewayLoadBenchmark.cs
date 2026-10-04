@@ -4,9 +4,11 @@ using System.Diagnostics;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Claims;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Caching.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -15,6 +17,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using NSubstitute;
 
 namespace Autheris.Benchmarks;
 
@@ -31,8 +34,18 @@ public class GatewayLoadBenchmark : IDisposable
 
     public GatewayLoadBenchmark()
     {
+        var apiPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../src/Autheris.Api"));
+        if (!Directory.Exists(apiPath))
+        {
+            apiPath = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "src/Autheris.Api"));
+        }
+
         _factory = new WebApplicationFactory<global::Program>().WithWebHostBuilder(builder =>
         {
+            if (Directory.Exists(apiPath))
+            {
+                builder.UseContentRoot(apiPath);
+            }
             builder.UseSetting("Logging:LogLevel:Default", "Warning");
             builder.UseSetting("Logging:LogLevel:Microsoft", "Warning");
             builder.UseSetting("Logging:LogLevel:HotChocolate", "Warning");
@@ -42,6 +55,24 @@ public class GatewayLoadBenchmark : IDisposable
             builder.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "100000");
             builder.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokenBucketCapacity", "100000");
             builder.UseSetting("Gateway:RateLimiting:PostAuthSidRateLimit:TokensPerSecond", "10000");
+            builder.UseSetting("Gateway:ResourceGroups:Interactive:MaxConcurrentRequests", "5000");
+            builder.UseSetting("Gateway:ResourceGroups:Interactive:MaxQueueSize", "50000");
+            builder.UseSetting("Gateway:ResourceGroups:Interactive:QueueTimeoutSeconds", "30");
+
+            builder.ConfigureServices(services =>
+            {
+                var mockTierResolver = Substitute.For<IClientTierResolver>();
+                var unlimitedPolicy = new ClientQuotaPolicy(
+                    ClientTier.Internal,
+                    MaxCostPerQuery: 1_000_000,
+                    MaxComplexityDepth: 100,
+                    MaxTokensCapacity: 1_000_000,
+                    TokenRefillRatePerSecond: 1_000_000,
+                    ExposeCostExtensions: true);
+                mockTierResolver.ResolveAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+                    .Returns(new ClientQuotaContext("bench_user", ClientTier.Internal, unlimitedPolicy));
+                services.AddSingleton<IClientTierResolver>(mockTierResolver);
+            });
         });
 
         var userSid = new Sid("S-1-5-21-9999");
@@ -114,7 +145,11 @@ public class GatewayLoadBenchmark : IDisposable
                     }
                     else
                     {
-                        Interlocked.Increment(ref failures);
+                        if (Interlocked.Increment(ref failures) == 1)
+                        {
+                            var err = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+                            Console.WriteLine($"[BENCHMARK FIRST FAILURE {response.StatusCode}]: {err}");
+                        }
                     }
                 }
                 catch

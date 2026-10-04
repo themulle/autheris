@@ -16,21 +16,182 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 {
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
-        await _lock.WaitAsync(ct);
+        // Tier-A: Security critical mutations, admin actions, or denied requests are synchronous (Fail-Closed)
+        bool isTierA = string.Equals(entry.Decision, "DENY", StringComparison.OrdinalIgnoreCase) ||
+                       (!string.Equals(entry.EventType, "TABLE_QUERY", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(entry.EventType, "WEBSQL_QUERY", StringComparison.OrdinalIgnoreCase));
+
+        if (isTierA)
+        {
+            await _lock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await RecordAuditEventInternalAsync(entry, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _lock.Release();
+            }
+            return;
+        }
+
+        // Tier-B: High-volume query reads (TABLE_QUERY / WEBSQL_QUERY ALLOW) are enqueued to the bounded channel with timeout (fail-closed)
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(2));
         try
         {
-            await RecordAuditEventInternalAsync(entry, ct);
+            await _auditChannel.Writer.WriteAsync(entry, timeoutCts.Token).ConfigureAwait(false);
         }
-        finally
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            _lock.Release();
+            _logger?.LogError("Audit channel saturated; failing closed on Tier-B audit event for table {Table}.", entry.TargetTable);
+            throw new InvalidOperationException("Audit pipeline saturated (fail-closed).");
+        }
+    }
+
+    public async Task FlushAuditChannelAsync(CancellationToken ct = default)
+    {
+        var batch = new List<AuditLogEntry>();
+        while (_auditChannel.Reader.TryRead(out var entry))
+        {
+            batch.Add(entry);
+            if (batch.Count >= 250)
+            {
+                await _lock.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    await RecordAuditEventsBatchInternalAsync(batch, ct).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _lock.Release();
+                }
+                batch.Clear();
+            }
+        }
+
+        if (batch.Count > 0)
+        {
+            await _lock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await RecordAuditEventsBatchInternalAsync(batch, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _lock.Release();
+            }
+        }
+    }
+
+    private async Task ProcessAuditChannelAsync()
+    {
+        var batch = new List<AuditLogEntry>(250);
+        var reader = _auditChannel.Reader;
+
+        try
+        {
+            while (await reader.WaitToReadAsync(_auditCts.Token).ConfigureAwait(false))
+            {
+                batch.Clear();
+                var deadline = DateTime.UtcNow.AddMilliseconds(10);
+
+                while (batch.Count < 250 && (DateTime.UtcNow < deadline || batch.Count == 0))
+                {
+                    if (reader.TryRead(out var entry))
+                    {
+                        batch.Add(entry);
+                    }
+                    else
+                    {
+                        if (batch.Count > 0)
+                        {
+                            break;
+                        }
+                        var delay = deadline - DateTime.UtcNow;
+                        if (delay > TimeSpan.Zero)
+                        {
+                            try
+                            {
+                                await Task.Delay(1, _auditCts.Token).ConfigureAwait(false);
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                if (batch.Count > 0)
+                {
+                    await _lock.WaitAsync(_auditCts.Token).ConfigureAwait(false);
+                    try
+                    {
+                        await RecordAuditEventsBatchInternalAsync(batch, _auditCts.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _logger?.LogError(ex, "Error writing audit batch of {Count} entries to SQLite.", batch.Count);
+                    }
+                    finally
+                    {
+                        _lock.Release();
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Drain remaining on shutdown
+        }
+
+        batch.Clear();
+        while (reader.TryRead(out var entry))
+        {
+            batch.Add(entry);
+            if (batch.Count >= 250)
+            {
+                await _lock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    await RecordAuditEventsBatchInternalAsync(batch, CancellationToken.None).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _lock.Release();
+                }
+                batch.Clear();
+            }
+        }
+
+        if (batch.Count > 0)
+        {
+            await _lock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await RecordAuditEventsBatchInternalAsync(batch, CancellationToken.None).ConfigureAwait(false);
+            }
+            finally
+            {
+                _lock.Release();
+            }
         }
     }
 
     private const string AuditGenesisHash = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
 
-    private async Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct)
+    private Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct) =>
+        RecordAuditEventsBatchInternalAsync([entry], ct);
+
+    private async Task RecordAuditEventsBatchInternalAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct)
     {
+        if (batch.Count == 0) return;
+
         using var tx = _connection.BeginTransaction(System.Data.IsolationLevel.Serializable);
 
         // SEC H-17: the DB tail is compared with the in-memory reference instead of being adopted blindly.
@@ -54,42 +215,63 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             _lastAuditSeq = dbTailSeq;
         }
 
-        var sequence = _lastAuditSeq + 1;
-        entry.PrevHash = _lastAuditHash;
-        entry.EntryHash = ComputeAuditEntryHash(
-            sequence,
-            entry.Id.ToString(),
-            entry.PrevHash,
-            entry.OccurredAt,
-            entry.EventType,
-            entry.ActorSid.Value,
-            entry.TargetTable,
-            entry.TargetColumn,
-            entry.Decision,
-            entry.TraceId,
-            entry.DetailsJson,
-            entry.TenantId.Value);
+        long lastSequence = _lastAuditSeq;
+        string lastEntryHash = _lastAuditHash;
 
-        using (var cmd = _connection.CreateCommand())
+        using var cmd = _connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
+                            VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
+
+        var pId = cmd.Parameters.Add("@id", SqliteType.Text);
+        var pOcc = cmd.Parameters.Add("@occ", SqliteType.Text);
+        var pEvent = cmd.Parameters.Add("@event", SqliteType.Text);
+        var pActor = cmd.Parameters.Add("@actor", SqliteType.Text);
+        var pTarget = cmd.Parameters.Add("@target", SqliteType.Text);
+        var pCol = cmd.Parameters.Add("@col", SqliteType.Text);
+        var pDec = cmd.Parameters.Add("@dec", SqliteType.Text);
+        var pTrace = cmd.Parameters.Add("@trace", SqliteType.Text);
+        var pDet = cmd.Parameters.Add("@det", SqliteType.Text);
+        var pPrev = cmd.Parameters.Add("@prev", SqliteType.Text);
+        var pHash = cmd.Parameters.Add("@hash", SqliteType.Text);
+        var pTenantId = cmd.Parameters.Add("@tenantId", SqliteType.Text);
+        var pSeq = cmd.Parameters.Add("@seq", SqliteType.Integer);
+
+        foreach (var entry in batch)
         {
-            cmd.Transaction = tx;
-            cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
-                                VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
-            cmd.Parameters.AddWithValue("@id", entry.Id.ToString());
-            cmd.Parameters.AddWithValue("@occ", entry.OccurredAt.ToString("O"));
-            cmd.Parameters.AddWithValue("@event", entry.EventType);
-            cmd.Parameters.AddWithValue("@actor", entry.ActorSid.Value);
-            cmd.Parameters.AddWithValue("@target", entry.TargetTable);
-            cmd.Parameters.AddWithValue("@col", (object?)entry.TargetColumn ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@dec", entry.Decision);
-            cmd.Parameters.AddWithValue("@trace", entry.TraceId);
-            cmd.Parameters.AddWithValue("@det", entry.DetailsJson);
-            cmd.Parameters.AddWithValue("@prev", entry.PrevHash);
-            cmd.Parameters.AddWithValue("@hash", entry.EntryHash);
-            cmd.Parameters.AddWithValue("@tenantId", entry.TenantId.Value);
-            cmd.Parameters.AddWithValue("@seq", sequence);
+            lastSequence++;
+            entry.PrevHash = lastEntryHash;
+            entry.EntryHash = ComputeAuditEntryHash(
+                lastSequence,
+                entry.Id.ToString(),
+                entry.PrevHash,
+                entry.OccurredAt,
+                entry.EventType,
+                entry.ActorSid.Value,
+                entry.TargetTable,
+                entry.TargetColumn,
+                entry.Decision,
+                entry.TraceId,
+                entry.DetailsJson,
+                entry.TenantId.Value);
 
-            await cmd.ExecuteNonQueryAsync(ct);
+            pId.Value = entry.Id.ToString();
+            pOcc.Value = entry.OccurredAt.ToString("O");
+            pEvent.Value = entry.EventType;
+            pActor.Value = entry.ActorSid.Value;
+            pTarget.Value = entry.TargetTable;
+            pCol.Value = (object?)entry.TargetColumn ?? DBNull.Value;
+            pDec.Value = entry.Decision;
+            pTrace.Value = entry.TraceId;
+            pDet.Value = entry.DetailsJson;
+            pPrev.Value = entry.PrevHash;
+            pHash.Value = entry.EntryHash;
+            pTenantId.Value = entry.TenantId.Value;
+            pSeq.Value = lastSequence;
+
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+            lastEntryHash = entry.EntryHash;
         }
 
         // SEC H-17: advance the external signed anchor while the write lock is still held. An anchor is never
@@ -99,18 +281,18 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         {
             try
             {
-                _auditAnchorStore.Save(CreateSignedAnchor(sequence, entry.EntryHash));
+                _auditAnchorStore.Save(CreateSignedAnchor(lastSequence, lastEntryHash));
                 anchorAdvanced = true;
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Failed to persist the external audit chain anchor (seq {Sequence}).", sequence);
+                _logger?.LogError(ex, "Failed to persist the external audit chain anchor (seq {Sequence}).", lastSequence);
             }
         }
 
         try
         {
-            await tx.CommitAsync(ct);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
         }
         catch
         {
@@ -129,12 +311,13 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             throw;
         }
 
-        _lastAuditHash = entry.EntryHash;
-        _lastAuditSeq = sequence;
+        _lastAuditHash = lastEntryHash;
+        _lastAuditSeq = lastSequence;
     }
 
     public async Task<IReadOnlyList<AuditLogEntry>> GetAuditLogEntriesAsync(int limit = 100, TenantId? tenantId = null, CancellationToken ct = default)
     {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         await _lock.WaitAsync(ct);
         try
         {
@@ -187,6 +370,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         TenantId? tenantId = null,
         CancellationToken ct = default)
     {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         await _lock.WaitAsync(ct);
         try
         {
@@ -251,6 +435,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
     public async Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default)
     {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         await _lock.WaitAsync(ct);
         try
         {
@@ -374,6 +559,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
     public async Task<AuditChainRange?> GetAuditChainRangeAsync(DateTimeOffset windowFrom, DateTimeOffset windowTo, CancellationToken ct = default)
     {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         await _lock.WaitAsync(ct);
         try
         {
@@ -409,6 +595,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
     public async Task<IReadOnlyList<AuditChainRecord>> GetAuditChainPageAsync(long afterRowId, long lastRowIdInclusive, int pageSize, CancellationToken ct = default)
     {
+        await FlushAuditChannelAsync(ct).ConfigureAwait(false);
         await _lock.WaitAsync(ct);
         try
         {
