@@ -7,6 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCH_DIR="${SCRIPT_DIR}"
+REPO_DIR="$(cd "${BENCH_DIR}/../.." && pwd)"
 HCLOUD_DIR="${BENCH_DIR}/hcloud"
 RESULTS_DIR="${BENCH_DIR}/results"
 
@@ -137,18 +138,18 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLeve
 # Step 2: Deploy & Initialize Database
 echo ""
 echo ">>> Step 2/5: Initializing Database on bench-db (${IP_DB})..."
-ssh ${SSH_OPTS} "root@${IP_DB}" "mkdir -p /root/gql_bench"
-rsync -avz -e "ssh ${SSH_OPTS}" --exclude '.git' --exclude 'results' "${BENCH_DIR}/" "root@${IP_DB}:/root/gql_bench/"
-ssh ${SSH_OPTS} "root@${IP_DB}" "cd /root/gql_bench && ./scripts/02_init_database.sh"
+ssh ${SSH_OPTS} "root@${IP_DB}" "mkdir -p /root/autheris/benchmarks/load"
+rsync -avz -e "ssh ${SSH_OPTS}" --exclude '.git' --exclude 'results' "${BENCH_DIR}/" "root@${IP_DB}:/root/autheris/benchmarks/load/"
+ssh ${SSH_OPTS} "root@${IP_DB}" "cd /root/autheris/benchmarks/load && ./scripts/02_init_database.sh"
 
 # Step 3: Deploy & Start Gateways
 echo ""
 echo ">>> Step 3/5: Deploying & Starting Gateways on bench-gateway (${IP_GW})..."
-ssh ${SSH_OPTS} "root@${IP_GW}" "mkdir -p /root/gql_bench"
-rsync -avz -e "ssh ${SSH_OPTS}" --exclude '.git' --exclude 'results' "${BENCH_DIR}/" "root@${IP_GW}:/root/gql_bench/"
+ssh ${SSH_OPTS} "root@${IP_GW}" "mkdir -p /root/autheris"
+rsync -avz -e "ssh ${SSH_OPTS}" --exclude '.git' --exclude 'bin' --exclude 'obj' --exclude 'results' "${REPO_DIR}/" "root@${IP_GW}:/root/autheris/"
 # Configure Gateways to connect to Postgres over the 10G private network (10.0.1.10)
 ssh ${SSH_OPTS} "root@${IP_GW}" "
-    cd /root/gql_bench
+    cd /root/autheris/benchmarks/load
     export DATABASE_URL='postgres://postgres:REDACTED_HISTORICAL_BENCHMARK_SECRET@10.0.1.10:5432/postgres'
     ./scripts/03_start_gateways.sh
 "
@@ -156,12 +157,12 @@ ssh ${SSH_OPTS} "root@${IP_GW}" "
 # Step 4: Deploy & Run Load Tests from Client Host
 echo ""
 echo ">>> Step 4/5: Running Isolated Benchmark from bench-client (${IP_CLIENT})..."
-ssh ${SSH_OPTS} "root@${IP_CLIENT}" "mkdir -p /root/gql_bench"
-rsync -avz -e "ssh ${SSH_OPTS}" --exclude '.git' --exclude 'results' "${BENCH_DIR}/" "root@${IP_CLIENT}:/root/gql_bench/"
+ssh ${SSH_OPTS} "root@${IP_CLIENT}" "mkdir -p /root/autheris/benchmarks/load"
+rsync -avz -e "ssh ${SSH_OPTS}" --exclude '.git' --exclude 'results' "${BENCH_DIR}/" "root@${IP_CLIENT}:/root/autheris/benchmarks/load/"
 
 # Execute load against Gateway host via 10G private network (10.0.1.20)
 ssh ${SSH_OPTS} "root@${IP_CLIENT}" "
-    cd /root/gql_bench
+    cd /root/autheris/benchmarks/load
     DURATION='${DURATION}' \
     RPS='${RPS}' \
     VUS='${VUS}' \
@@ -173,7 +174,7 @@ ssh ${SSH_OPTS} "root@${IP_CLIENT}" "
 # Step 5: Download Results and Generate Report
 echo ""
 echo ">>> Step 5/5: Collecting Results from bench-client..."
-rsync -avz -e "ssh ${SSH_OPTS}" "root@${IP_CLIENT}:/root/gql_bench/results/" "${RESULTS_DIR}/"
+rsync -avz -e "ssh ${SSH_OPTS}" "root@${IP_CLIENT}:/root/autheris/benchmarks/load/results/" "${RESULTS_DIR}/"
 
 python3 "${BENCH_DIR}/scripts/05_analyze_results.py"
 
