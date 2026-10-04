@@ -1,10 +1,10 @@
 FROM node:20-alpine
 WORKDIR /app
 
-COPY gql_bench/configs/apollo-server/package*.json ./
+COPY benchmarks/load/configs/apollo-server/package*.json ./
 RUN npm install --omit=dev
 
-COPY gql_bench/configs/apollo-server/index.js ./
+COPY benchmarks/load/configs/apollo-server/index.js ./
 
 ENV PORT=4000 \
     NODE_ENV=production

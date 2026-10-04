@@ -81,7 +81,7 @@ services:
   apollo-server:
     build:
       context: ../..
-      dockerfile: gql_bench/docker/Dockerfile.apollo
+      dockerfile: benchmarks/load/docker/Dockerfile.apollo
     container_name: bench-apollo
     restart: unless-stopped
     networks:
@@ -108,7 +108,7 @@ services:
   postgraphile:
     build:
       context: ../..
-      dockerfile: gql_bench/docker/Dockerfile.postgraphile
+      dockerfile: benchmarks/load/docker/Dockerfile.postgraphile
     container_name: bench-postgraphile
     restart: unless-stopped
     networks:
@@ -130,12 +130,12 @@ services:
           memory: 4G
 
   # ==========================================
-  # 5. Target D: GqlGateway (.NET 10)
+  # 5. Target D: Autheris (.NET 10)
   # ==========================================
   gql-gateway:
     build:
       context: ../..
-      dockerfile: gql_bench/docker/Dockerfile.gql
+      dockerfile: benchmarks/load/docker/Dockerfile.gql
     container_name: bench-gqlgateway
     restart: unless-stopped
     networks:
@@ -150,12 +150,20 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       DOTNET_gcServer: 1
       DOTNET_GCConcurrent: 1
+      DOTNET_GCDynamicAdaptationMode: 1
+      DOTNET_TieredPGO: 1
+      DOTNET_TC_QuickJitForLoops: 1
+      DOTNET_ReadyToRun: 1
       Gateway__Authentication__EnableTestAuthHandler: "true"
       Gateway__GovernanceDb__Provider: "Sqlite"
       Gateway__GovernanceDb__ConnectionString: "Data Source=:memory:;Mode=Memory;Cache=Shared"
       Gateway__RateLimiting__PreAuthIpRateLimit__PermitLimit: "500000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokenBucketCapacity: "500000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokensPerSecond: "500000"
+      Gateway__SingleQueryPushdown__Enabled: "true"
+      Gateway__DataSources__Connections__chinook__ConnectionString: "Host=postgres;Port=5432;Database=postgres;Username=postgres;Password=REDACTED_HISTORICAL_BENCHMARK_SECRET;Pooling=true;Maximum Pool Size=100;Minimum Pool Size=10"
+      Gateway__DataSources__Connections__chinook__CommandTimeoutSeconds: "15"
+      Gateway__DataSources__Connections__chinook__Dialect: "PostgreSql"
     deploy:
       resources:
         limits:
