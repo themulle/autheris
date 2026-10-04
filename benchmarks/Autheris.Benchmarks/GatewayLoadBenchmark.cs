@@ -33,8 +33,6 @@ public class GatewayLoadBenchmark : IDisposable
     {
         _factory = new WebApplicationFactory<global::Program>().WithWebHostBuilder(builder =>
         {
-            builder.UseContentRoot("/root/gql/src/Autheris.Api");
-            builder.ConfigureLogging(logging => logging.ClearProviders());
             builder.UseSetting("Logging:LogLevel:Default", "Warning");
             builder.UseSetting("Logging:LogLevel:Microsoft", "Warning");
             builder.UseSetting("Logging:LogLevel:HotChocolate", "Warning");
