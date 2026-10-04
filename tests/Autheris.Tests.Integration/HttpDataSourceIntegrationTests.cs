@@ -220,9 +220,8 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
         };
 
         var response = await client.PostAsJsonAsync("/graphql", gqlQuery);
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-
         var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
         body.ShouldNotContain("FORBIDDEN");
         body.ShouldContain("crm.public.customers");
 

@@ -44,8 +44,10 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
 
+        // SEC H-3: Scoped strictly to caller's tenant
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         var namespaces = allTables
+            .Where(t => string.Equals(t.Identifier.Domain, tenantId, StringComparison.OrdinalIgnoreCase))
             .Where(t => t.Table.DataSourceType == DataSourceType.LakehouseIceberg || t.Table.DataSourceType == DataSourceType.LakehouseDelta)
             .Select(t => t.Identifier.Schema)
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -59,8 +61,10 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(@namespace);
 
+        // SEC H-3: Scoped strictly to caller's tenant
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         var tables = allTables
+            .Where(t => string.Equals(t.Identifier.Domain, tenantId, StringComparison.OrdinalIgnoreCase))
             .Where(t => string.Equals(t.Identifier.Schema, @namespace, StringComparison.OrdinalIgnoreCase))
             .Where(t => t.Table.DataSourceType == DataSourceType.LakehouseIceberg || t.Table.DataSourceType == DataSourceType.LakehouseDelta)
             .Select(t => t.Identifier.TableName)
@@ -93,30 +97,16 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         var tableMeta = await _metadataRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
         if (tableMeta == null)
         {
-            // Fallback lookup by schema and table name
-            var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-            tableMeta = allTables.FirstOrDefault(t =>
-                string.Equals(t.Identifier.Schema, @namespace, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(t.Identifier.TableName, table, StringComparison.OrdinalIgnoreCase));
+            // SEC H-3: Never fall back to tables from other tenants. Return 404.
+            throw new KeyNotFoundException($"Table '{@namespace}.{table}' not found in tenant '{tenantId}'.");
         }
 
-        var location = tableMeta?.Table.Location ?? $"lakehouse/{tenantId}/{@namespace}/{table}";
+        var location = tableMeta.Table.Location ?? $"lakehouse/{tenantId}/{@namespace}/{table}";
 
         // SEC-IRC-02: Path traversal validation on lakehouse location
         LakehouseLocationGuard.EnsureNoTraversal(location, location);
 
-        var cred = await VendCredentialAsync(tenantId, @namespace, table, principal, ct).ConfigureAwait(false);
-
-        var config = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["token"] = cred.SessionToken,
-            ["s3.access-key-id"] = cred.AccessKeyId,
-            ["s3.secret-access-key"] = cred.SecretAccessKey,
-            ["s3.session-token"] = cred.SessionToken,
-            ["s3.scoped-prefix"] = cred.ScopedLocationPrefix,
-            ["s3.token-expires-at"] = cred.ExpirationUtc.ToString("O")
-        };
-
+        var config = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var metadataLocation = $"{location.TrimEnd('/')}/metadata/v2.metadata.json";
 
         return new IcebergLoadTableResponse(
@@ -137,31 +127,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
         ArgumentNullException.ThrowIfNull(principal);
 
-        if (principal.Identity?.IsAuthenticated != true)
-        {
-            throw new SecurityException($"Cannot vend credentials to unauthenticated caller for '{@namespace}.{table}'.");
-        }
-
-        var expiration = DateTimeOffset.UtcNow.AddMinutes(45);
-        var prefix = $"lakehouse/{tenantId}/{@namespace}/{table}";
-
-        var accessKeyId = $"ASIA{RandomNumberGenerator.GetHexString(16).ToUpperInvariant()}";
-        var secretKey = RandomNumberGenerator.GetHexString(32);
-
-        var tokenPayload = $"{tenantId}:{@namespace}:{table}:{expiration.ToUnixTimeSeconds()}";
-        var sessionToken = Convert.ToBase64String(Encoding.UTF8.GetBytes(tokenPayload));
-
-        var credential = new VendedStorageCredential(
-            StorageCredentialType.AwsStsSession,
-            accessKeyId,
-            secretKey,
-            sessionToken,
-            expiration,
-            prefix);
-
-        _logger.LogInformation("Vended temporary STS credential for table '{Namespace}.{Table}' to '{User}' (Expires: {Expires:O}).",
-            @namespace, table, principal.Identity.Name, expiration);
-
-        return ValueTask.FromResult(credential);
+        // SEC H-3: Return 501 Not Implemented instead of vending forgeable random/unsigned fake keys.
+        throw new NotSupportedException("Direct storage STS/SAS credential vending is not supported; access lakehouse datasets via governed SQL endpoints.");
     }
 }

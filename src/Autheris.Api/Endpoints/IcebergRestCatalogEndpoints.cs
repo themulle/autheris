@@ -61,6 +61,10 @@ public static class IcebergRestCatalogEndpoints
                 var tableResponse = await catalogService.LoadTableAsync(tenantId, @namespace, table, context.User, context.RequestAborted);
                 return Results.Ok(tableResponse);
             }
+            catch (System.Collections.Generic.KeyNotFoundException ex)
+            {
+                return Results.NotFound(new { error = ex.Message });
+            }
             catch (SecurityException ex)
             {
                 return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status403Forbidden);
@@ -82,6 +86,10 @@ public static class IcebergRestCatalogEndpoints
             {
                 var credential = await catalogService.VendCredentialAsync(tenantId, @namespace, table, context.User, context.RequestAborted);
                 return Results.Ok(credential);
+            }
+            catch (NotSupportedException ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status501NotImplemented);
             }
             catch (SecurityException ex)
             {

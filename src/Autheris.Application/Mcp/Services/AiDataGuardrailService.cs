@@ -218,7 +218,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                 ? sessionContext.GroupSids.Select(s => new Sid(s)).ToArray()
                 : [];
 
-            var clientIp = System.Net.IPAddress.Loopback;
+            // SEC H-4: Fail closed to IPAddress.None if unresolvable
+            var clientIp = System.Net.IPAddress.None;
             if (!string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var parsedIp))
             {
                 clientIp = parsedIp;

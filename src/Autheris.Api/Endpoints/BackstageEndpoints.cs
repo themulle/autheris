@@ -27,6 +27,11 @@ public static class BackstageEndpoints
             HttpContext context,
             CancellationToken ct) =>
         {
+            if (!IsAuthorizedBackstageReader(context.User))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var accept = context.Request.Headers.Accept.ToString();
             var wantsYaml = string.Equals(format, "yaml", StringComparison.OrdinalIgnoreCase) ||
                             accept.Contains("application/yaml", StringComparison.OrdinalIgnoreCase) ||
@@ -49,6 +54,11 @@ public static class BackstageEndpoints
             HttpContext context,
             CancellationToken ct) =>
         {
+            if (!IsAuthorizedBackstageReader(context.User))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var entity = await backstageService.ExportEntityByNameAsync(name, ct);
             if (entity == null)
             {
@@ -71,12 +81,23 @@ public static class BackstageEndpoints
 
         app.MapGet("/api/integrations/backstage/catalog-info.yaml", async (
             IBackstageCatalogExportService backstageService,
+            HttpContext context,
             CancellationToken ct) =>
         {
+            if (!IsAuthorizedBackstageReader(context.User))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var yaml = await backstageService.ExportCatalogEntitiesYamlAsync(cancellationToken: ct);
             return Results.Content(yaml, "text/yaml; charset=utf-8", Encoding.UTF8);
         }).RequireAuthorization();
 
         return app;
     }
+
+    private static bool IsAuthorizedBackstageReader(System.Security.Claims.ClaimsPrincipal user) =>
+        EndpointSecurity.IsGlobalGovernanceAdmin(user) ||
+        user.IsInRole("CatalogSync") ||
+        user.IsInRole("ClusterAdmin");
 }

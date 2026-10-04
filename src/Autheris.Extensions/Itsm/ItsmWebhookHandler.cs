@@ -346,12 +346,20 @@ public sealed class ItsmWebhookHandler(
 
         if (string.Equals(payload.Action, "APPROVE", StringComparison.OrdinalIgnoreCase))
         {
-            logger.LogInformation("Consent Request {RequestId} via ITSM Ticket {TicketId} ({System}) genehmigt. Aktiviere Consent...", request.Id, payload.TicketId, payload.System);
-            await governanceRepo.ActivateConsentAsync(request.Id, actor, ct).ConfigureAwait(false);
+            logger.LogInformation("Consent Request {RequestId} via ITSM Ticket {TicketId} ({System}) genehmigt. Führe Genehmigungsschritt aus...", request.Id, payload.TicketId, payload.System);
 
-            if (eventBus != null)
+            // SEC M-2: Route approval through ApproveConsentRequestStepAsync to enforce separation of duties,
+            // approver != requester check, and four-eyes verification rather than bypassing directly to ActivateConsentAsync.
+            var stepResult = await governanceRepo.ApproveConsentRequestStepAsync(request.Id, actor, ct).ConfigureAwait(false);
+
+            if (string.Equals(stepResult.Status, "APPROVED", StringComparison.OrdinalIgnoreCase))
             {
-                await eventBus.PublishAsync($"governance:policy-epoch-increment:{request.TenantId.Value}", request.TenantId.Value, ct).ConfigureAwait(false);
+                await governanceRepo.ActivateConsentAsync(request.Id, actor, ct).ConfigureAwait(false);
+
+                if (eventBus != null)
+                {
+                    await eventBus.PublishAsync($"governance:policy-epoch-increment:{request.TenantId.Value}", request.TenantId.Value, ct).ConfigureAwait(false);
+                }
             }
 
             return true;

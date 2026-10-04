@@ -88,38 +88,80 @@ public static class StreamingCdcEndpoints
         // F-EVT-01: CloudEvents Outbound Webhook Subscriptions
         app.MapGet("/api/v1/cdc/subscriptions", async (
             HttpContext context,
-            Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
+            [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
         {
+            if (!IsAuthorizedSubscriptionAdmin(context.User))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
             if (string.IsNullOrWhiteSpace(tenantId))
             {
                 tenantId = "default";
             }
             var subs = await store.ListSubscriptionsAsync(tenantId, context.RequestAborted);
-            return Results.Ok(subs);
+            // SEC M-5: Never return HMAC secrets in GET responses
+            var safeSubs = subs.Select(s => s with { HmacSecret = string.IsNullOrEmpty(s.HmacSecret) ? string.Empty : "[REDACTED]" });
+            return Results.Ok(safeSubs);
         }).RequireAuthorization();
 
         app.MapPost("/api/v1/cdc/subscriptions", async (
             HttpContext context,
             Autheris.Domain.Model.CloudEventWebhookSubscription subscription,
-            Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
+            [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
         {
+            if (!IsAuthorizedSubscriptionAdmin(context.User))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
             if (string.IsNullOrWhiteSpace(tenantId))
             {
                 tenantId = "default";
             }
 
-            var securedSub = subscription with { TenantId = tenantId };
-            await store.RegisterSubscriptionAsync(securedSub, context.RequestAborted);
-            return Results.Created($"/api/v1/cdc/subscriptions/{securedSub.Id}", securedSub);
+            if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
+            {
+                return Results.BadRequest(new { error = "Invalid absolute target URL" });
+            }
+
+            try
+            {
+                await Autheris.Application.Security.EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: false, ct: context.RequestAborted);
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = $"Target URL blocked by SSRF egress policy: {ex.Message}" });
+            }
+
+            // SEC M-5: Server-side ID generation; client-chosen ID is ignored to prevent overwrite attacks
+            var serverId = Guid.NewGuid().ToString("N");
+            var securedSub = subscription with { Id = serverId, TenantId = tenantId };
+            try
+            {
+                await store.RegisterSubscriptionAsync(securedSub, context.RequestAborted);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status429TooManyRequests);
+            }
+
+            var responseSub = securedSub with { HmacSecret = string.IsNullOrEmpty(securedSub.HmacSecret) ? string.Empty : "[REDACTED]" };
+            return Results.Created($"/api/v1/cdc/subscriptions/{securedSub.Id}", responseSub);
         }).RequireAuthorization();
 
         app.MapDelete("/api/v1/cdc/subscriptions/{id}", async (
             string id,
             HttpContext context,
-            Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
+            [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
         {
+            if (!IsAuthorizedSubscriptionAdmin(context.User))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
             if (string.IsNullOrWhiteSpace(tenantId))
             {
@@ -131,6 +173,11 @@ public static class StreamingCdcEndpoints
 
         return app;
     }
+
+    private static bool IsAuthorizedSubscriptionAdmin(ClaimsPrincipal user)
+        => user.IsInRole("GovernanceAdmin") ||
+           user.IsInRole("StreamingAdmin") ||
+           user.IsInRole("ClusterAdmin");
 
     /// <summary>
     /// SEC H-04: Cross-tenant CDC ingestion is decided by roles only. The former substring check ("ADMIN" in SID or

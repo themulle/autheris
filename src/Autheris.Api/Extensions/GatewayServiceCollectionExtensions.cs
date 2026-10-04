@@ -460,9 +460,10 @@ public static class GatewayServiceCollectionExtensions
         }
 
         // F-EVT-01: CloudEvents v1.0 Outbound Webhook Subscriptions
-        services.AddSingleton<Autheris.Application.Events.Interfaces.ICloudEventTransformer, Autheris.Application.Events.Services.CloudEventTransformer>();
         services.AddSingleton<Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore, Autheris.Application.Events.Services.InMemoryCloudEventSubscriptionStore>();
-        services.AddHttpClient<Autheris.Application.Events.Interfaces.ICloudEventWebhookDispatcher, Autheris.Application.Events.Services.CloudEventWebhookDispatcher>();
+        services.AddSingleton<Autheris.Application.Events.Interfaces.ICloudEventTransformer, Autheris.Application.Events.Services.CloudEventTransformer>();
+        services.AddHttpClient<Autheris.Application.Events.Interfaces.ICloudEventWebhookDispatcher, Autheris.Application.Events.Services.CloudEventWebhookDispatcher>()
+            .AddSecureOutboundHandlers("CloudEvents");
 
         // F-ARCH-11: Envoy External Authorization & Istio Service Mesh Adapter
         services.AddSingleton<Autheris.Application.Mesh.Interfaces.IEnvoyExtAuthzService, Autheris.Application.Mesh.Services.EnvoyExtAuthzService>();

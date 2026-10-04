@@ -22,9 +22,9 @@ public static class EnvoyExtAuthzEndpoints
             IEnvoyExtAuthzService authzService,
             HttpContext context) =>
         {
-            var response = await authzService.CheckAsync(request, context.RequestAborted);
+            var response = await authzService.CheckAsync(request, context.User, context.RequestAborted);
             return Results.Ok(response);
-        });
+        }).RequireAuthorization();
 
         // GET or POST /api/v1/envoy/check: Envoy HTTP ext_authz header mode
         app.MapMethods("/api/v1/envoy/check", new[] { "GET", "POST" }, async (
@@ -48,7 +48,7 @@ public static class EnvoyExtAuthzEndpoints
                 }
             }
 
-            var decision = await authzService.CheckHttpAsync(method, path, headerMap, context.RequestAborted);
+            var decision = await authzService.CheckHttpAsync(method, path, headerMap, context.User, context.RequestAborted);
 
             if (decision.Status.Code == 0)
             {
@@ -75,7 +75,7 @@ public static class EnvoyExtAuthzEndpoints
 
             var body = decision.HttpResponse.DeniedResponse?.Body ?? "Access Denied by Autheris PDP";
             return Results.Json(new { error = body, status = statusCode }, statusCode: statusCode);
-        });
+        }).RequireAuthorization();
 
         // GET /api/v1/envoy/export/envoyfilter.yaml: Export Istio EnvoyFilter CRD
         app.MapGet("/api/v1/envoy/export/envoyfilter.yaml", (

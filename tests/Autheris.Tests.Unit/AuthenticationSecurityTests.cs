@@ -314,7 +314,7 @@ public class AuthenticationSecurityTests
         result.Succeeded.ShouldBeTrue();
         result.Principal.ShouldNotBeNull();
         result.Principal.Identity?.Name.ShouldBe("k8s_service_user");
-        result.Principal.GetUserSid()?.Value.ShouldBe("S-1-5-21-FORWARD-K8S_SERVICE_USER");
+        result.Principal.GetUserSid()?.Value.ShouldBe("S-1-5-21-FORWARD-USR-K8S_SERVICE_USER");
         result.Principal.GetGroupSids().Select(g => g.Value).ShouldContain("S-1-5-21-K8S-GRP1");
         result.Principal.GetUserRoles().ShouldContain("FinanceReader");
     }
@@ -371,6 +371,7 @@ public class AuthenticationSecurityTests
                     Enabled = true,
                     RequireTrustedProxy = true,
                     TrustedProxies = ["10.0.0.1"],
+                    TrustUpstreamTenant = true,
                     AllowedTenantIds = ["tenant-a"]
                 }
             }
@@ -384,6 +385,34 @@ public class AuthenticationSecurityTests
         var result = await handler.AuthenticateAsync();
 
         result.Succeeded.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ForwardAuth_TrustUpstreamTenant_DefaultFalse_IgnoresClientTenant()
+    {
+        var options = new GatewayOptions
+        {
+            Authentication = new Autheris.Domain.Options.AuthenticationOptions
+            {
+                ForwardAuth = new ForwardAuthOptions
+                {
+                    Enabled = true,
+                    RequireTrustedProxy = true,
+                    TrustedProxies = ["10.0.0.1"],
+                    TrustUpstreamTenant = false
+                }
+            }
+        };
+
+        var (handler, context) = CreateForwardAuthHandler(options);
+        context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("10.0.0.1");
+        context.Request.Headers["X-Forwarded-User"] = "mallory";
+        context.Request.Headers["X-Forwarded-Tenant"] = "tenant-untrusted";
+
+        var result = await handler.AuthenticateAsync();
+
+        result.Succeeded.ShouldBeTrue();
+        result.Principal!.FindFirst("tenant_id")?.Value.ShouldNotBe("tenant-untrusted");
     }
 
     [Fact]

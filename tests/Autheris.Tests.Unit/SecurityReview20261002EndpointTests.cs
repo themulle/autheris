@@ -733,10 +733,29 @@ public class SecurityReview20261002EndpointTests
             return Task.FromResult(request);
         }
 
+        public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default)
+        {
+            var request = _requests.First(r => r.Id == requestId);
+            var result = new ConsentRequest
+            {
+                Id = request.Id,
+                Status = "APPROVED",
+                TableId = request.TableId,
+                TableIdentifier = request.TableIdentifier,
+                RequesterSid = request.RequesterSid,
+                TenantId = request.TenantId
+            };
+            if (!KeepStatusOnActivate)
+            {
+                request.Status = "APPROVED";
+            }
+
+            return Task.FromResult(result);
+        }
+
         public Task<ConsentRequest> CreateConsentRequestAsync(ConsentRequest request, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<ConsentRequest?> GetConsentRequestAsync(Guid requestId, CancellationToken ct = default) => Task.FromResult(_requests.FirstOrDefault(r => r.Id == requestId));
         public Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default) => throw new NotSupportedException();
         public Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default) => throw new NotSupportedException();
         public Task UpdateConsentRequestTicketIdAsync(Guid requestId, string ticketId, CancellationToken ct = default) => throw new NotSupportedException();
     }

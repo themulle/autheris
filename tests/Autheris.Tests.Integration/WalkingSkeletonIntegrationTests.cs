@@ -98,9 +98,8 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
         };
 
         var response = await client.PostAsJsonAsync("/graphql", query);
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-
         var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
         body.ShouldContain("FORBIDDEN");
         body.ShouldContain("Zero Trust");
     }
@@ -646,7 +645,7 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         json.GetProperty("authenticated").GetBoolean().ShouldBeTrue();
         json.GetProperty("user").GetString().ShouldBe("traefik_k8s_user");
-        json.GetProperty("sid").GetString().ShouldBe("S-1-5-21-FORWARD-TRAEFIK_K8S_USER");
+        json.GetProperty("sid").GetString().ShouldBe("S-1-5-21-FORWARD-USR-TRAEFIK_K8S_USER");
     }
 }
 

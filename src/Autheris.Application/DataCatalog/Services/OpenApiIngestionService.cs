@@ -198,7 +198,8 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                         {
                             BaseUrl = serverUrl,
                             PathTemplate = resolvedPath,
-                            Method = "GET"
+                            Method = "GET",
+                            AuthMode = HttpAuthMode.None
                         }
                     },
                     Columns = columns,

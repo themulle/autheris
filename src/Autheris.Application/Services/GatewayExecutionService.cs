@@ -212,10 +212,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
                 attributes[claim.Type] = claim.Value;
             }
 
-            var clientIp = _clientIpResolver?.ResolveClientIp() ??
-                (principal.FindFirst("ip")?.Value is { Length: > 0 } ipStr && System.Net.IPAddress.TryParse(ipStr, out var parsedIp)
-                    ? parsedIp
-                    : System.Net.IPAddress.Loopback);
+            // SEC H-4: Fail closed to IPAddress.None; never trust 'ip' claims from tokens or loopback fallback
+            var clientIp = _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
 
             var purpose = principal.FindFirst("purpose")?.Value ?? principal.FindFirst("purpose_id")?.Value;
 
@@ -778,10 +776,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
                 attributes[claim.Type] = claim.Value;
             }
 
-            var clientIp = _clientIpResolver?.ResolveClientIp() ??
-                (principal.FindFirst("ip")?.Value is { Length: > 0 } ipStr && System.Net.IPAddress.TryParse(ipStr, out var parsedIp)
-                    ? parsedIp
-                    : System.Net.IPAddress.Loopback);
+            // SEC H-4: Fail closed to IPAddress.None; never trust 'ip' claims from tokens or loopback fallback
+            var clientIp = _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
 
             var purpose = principal.FindFirst("purpose")?.Value ?? principal.FindFirst("purpose_id")?.Value;
 

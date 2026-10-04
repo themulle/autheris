@@ -117,6 +117,15 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
             // Fallback: If session already has an authenticated HttpContext user (from HTTP Upgrade handshake)
             if (isHttpAuthenticated && httpContext != null && httpUser != null)
             {
+                // SEC H-2: Cross-Site WebSocket Hijacking defense:
+                // If an Origin header is present on the HTTP upgrade handshake, ambient HTTP credentials
+                // (Cookie, Negotiate/Kerberos, Basic, ForwardAuth) cannot be used alone without an explicit token in connection_init.
+                if (httpContext.Request.Headers.ContainsKey("Origin"))
+                {
+                    _logger.LogWarning("WebSocket connection_init rejected: Origin header present on ambient credentials without connection_init token.");
+                    return ConnectionStatus.Reject("Cross-site WebSocket protection: token required in connection_init when Origin is present.");
+                }
+
                 var authExpiresUtc = httpContext.Features.Get<IAuthenticateResultFeature>()?.AuthenticateResult?.Properties?.ExpiresUtc;
                 var expiry = ResolveSessionExpiry(httpUser, authExpiresUtc, _timeProvider.GetUtcNow(), _maxSessionLifetime);
                 if (expiry <= _timeProvider.GetUtcNow())

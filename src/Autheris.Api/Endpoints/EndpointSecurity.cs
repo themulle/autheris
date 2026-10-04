@@ -65,6 +65,10 @@ internal static class EndpointSecurity
     public static bool IsClusterAdmin(ClaimsPrincipal? principal)
         => GatewayPolicies.HasAnyRole(principal, GatewayPolicies.ClusterAdminRoles);
 
+    /// <summary>SEC M-1 / M-4: Canonical ClusterAdmin role check (strictly global, not mapped from tenant-scoped aliases).</summary>
+    public static bool IsCanonicalClusterAdmin(ClaimsPrincipal? principal)
+        => Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+
     /// <summary>
     /// SEC M-11: Global (tenant-independent) governance administrators: GovernanceAdmin or ClusterAdmin.
     /// </summary>

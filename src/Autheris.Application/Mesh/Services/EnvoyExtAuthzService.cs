@@ -35,7 +35,10 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async ValueTask<EnvoyCheckResponse> CheckAsync(EnvoyCheckRequest request, CancellationToken ct = default)
+    public async ValueTask<EnvoyCheckResponse> CheckAsync(
+        EnvoyCheckRequest request,
+        System.Security.Claims.ClaimsPrincipal? caller = null,
+        CancellationToken ct = default)
     {
         try
         {
@@ -57,6 +60,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
                 contextExtensions,
                 clientIpStr,
                 sourcePrincipal,
+                caller,
                 ct).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -70,6 +74,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         string method,
         string path,
         IReadOnlyDictionary<string, string> headers,
+        System.Security.Claims.ClaimsPrincipal? caller = null,
         CancellationToken ct = default)
     {
         try
@@ -81,6 +86,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
                 new Dictionary<string, string>(),
                 null,
                 null,
+                caller,
                 ct).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -97,6 +103,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         IReadOnlyDictionary<string, string> contextExtensions,
         string? clientIpStr,
         string? sourcePrincipal,
+        System.Security.Claims.ClaimsPrincipal? caller,
         CancellationToken ct)
     {
         var headerDict = headers != null
@@ -121,24 +128,33 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             return EnvoyCheckResponse.Deny(400, "Bad Request: Invalid or traversing path.");
         }
 
-        // 2. Extract Tenant
+        // 2. Extract Tenant (SEC C-1: Strictly from validated ClaimsPrincipal or trusted static context extensions)
         string tenantStr = "default";
-        if (contextExtensions.TryGetValue("tenant", out var ctxTenant) && !string.IsNullOrWhiteSpace(ctxTenant))
+        if (caller?.Identity?.IsAuthenticated == true)
+        {
+            var tClaim = caller.FindFirst("tenant_id")?.Value
+                      ?? caller.FindFirst("tenant")?.Value
+                      ?? caller.FindFirst("tid")?.Value;
+            if (!string.IsNullOrWhiteSpace(tClaim))
+            {
+                tenantStr = tClaim;
+            }
+        }
+        else if (contextExtensions.TryGetValue("tenant", out var ctxTenant) && !string.IsNullOrWhiteSpace(ctxTenant))
         {
             tenantStr = ctxTenant;
         }
-        else if (headerDict.TryGetValue("x-tenant-id", out var hTenant) && !string.IsNullOrWhiteSpace(hTenant))
-        {
-            tenantStr = hTenant;
-        }
-        else if (headerDict.TryGetValue("x-autheris-tenant", out var aTenant) && !string.IsNullOrWhiteSpace(aTenant))
-        {
-            tenantStr = aTenant;
-        }
 
-        // 3. Extract Principal (Subject)
+        // 3. Extract Principal (SEC C-1: Strictly from validated ClaimsPrincipal or verified mTLS sourcePrincipal)
         string? principal = null;
-        if (!string.IsNullOrWhiteSpace(sourcePrincipal))
+        if (caller?.Identity?.IsAuthenticated == true)
+        {
+            principal = caller.FindFirst(System.Security.Claims.ClaimTypes.PrimarySid)?.Value
+                     ?? caller.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                     ?? caller.FindFirst("sub")?.Value
+                     ?? caller.Identity?.Name;
+        }
+        else if (!string.IsNullOrWhiteSpace(sourcePrincipal))
         {
             principal = sourcePrincipal;
         }
@@ -146,35 +162,25 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         {
             principal = ctxUser;
         }
-        else if (headerDict.TryGetValue("x-autheris-principal", out var hPrin) && !string.IsNullOrWhiteSpace(hPrin))
-        {
-            principal = hPrin;
-        }
-        else if (headerDict.TryGetValue("x-user-id", out var hUser) && !string.IsNullOrWhiteSpace(hUser))
-        {
-            principal = hUser;
-        }
-        else if (headerDict.TryGetValue("authorization", out var authHeader) && !string.IsNullOrWhiteSpace(authHeader))
-        {
-            principal = ExtractPrincipalFromAuthorizationHeader(authHeader, out var tokenTenant);
-            if (!string.IsNullOrWhiteSpace(tokenTenant) && tenantStr == "default")
-            {
-                tenantStr = tokenTenant;
-            }
-        }
 
         if (string.IsNullOrWhiteSpace(principal))
         {
             principal = "anonymous";
         }
 
-        // 4. Extract Groups / Roles
+        // 4. Extract Groups / Roles (SEC C-1: Strictly from validated ClaimsPrincipal)
         var groupList = new List<Sid>();
-        if (headerDict.TryGetValue("x-roles", out var rVal) && !string.IsNullOrWhiteSpace(rVal))
+        if (caller?.Identity?.IsAuthenticated == true)
         {
-            foreach (var r in rVal.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            foreach (var claim in caller.FindAll(c => c.Type is System.Security.Claims.ClaimTypes.Role
+                                                             or System.Security.Claims.ClaimTypes.GroupSid
+                                                             or "groups"
+                                                             or "roles"))
             {
-                groupList.Add(new Sid(r));
+                if (!string.IsNullOrWhiteSpace(claim.Value))
+                {
+                    groupList.Add(new Sid(claim.Value));
+                }
             }
         }
 
@@ -193,19 +199,11 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             resourceName = ExtractResourceFromPath(normalizedPath);
         }
 
-        // Parse Client IP
-        IPAddress clientIp = IPAddress.Loopback;
+        // Parse Client IP (SEC H-4: Fail-closed to IPAddress.None instead of Loopback)
+        IPAddress clientIp = IPAddress.None;
         if (!string.IsNullOrWhiteSpace(clientIpStr) && IPAddress.TryParse(clientIpStr, out var parsedIp))
         {
             clientIp = parsedIp;
-        }
-        else if (headerDict.TryGetValue("x-forwarded-for", out var xff) && !string.IsNullOrWhiteSpace(xff))
-        {
-            var firstIp = xff.Split(',')[0].Trim();
-            if (IPAddress.TryParse(firstIp, out var parsedXff))
-            {
-                clientIp = parsedXff;
-            }
         }
 
         // 6. Security Evaluation Context
@@ -246,7 +244,8 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         _logger.LogInformation("Envoy ext_authz ALLOWED: Subject '{Principal}', Tenant '{Tenant}', Resource '{Resource}'",
             principal, tenantStr, resourceName);
 
-        return EnvoyCheckResponse.Allow(principal, tenantStr, decision.CombinedRowFilterSql);
+        // SEC C-1: Do not leak raw CombinedRowFilterSql in header response
+        return EnvoyCheckResponse.Allow(principal, tenantStr);
     }
 
     private static string? NormalizePath(string rawPath)
@@ -304,61 +303,6 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         return segments[^1].ToLowerInvariant();
     }
 
-    private static string? ExtractPrincipalFromAuthorizationHeader(string authHeader, out string? tenantId)
-    {
-        tenantId = null;
-        if (string.IsNullOrWhiteSpace(authHeader))
-        {
-            return null;
-        }
-
-        if (!authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        var token = authHeader["Bearer ".Length..].Trim();
-        var parts = token.Split('.');
-        if (parts.Length != 3)
-        {
-            return "bearer-token";
-        }
-
-        try
-        {
-            // Parse unencrypted JWT payload for subject & tenant claims
-            var payloadBase64 = parts[1];
-            payloadBase64 = payloadBase64.PadRight(payloadBase64.Length + (4 - payloadBase64.Length % 4) % 4, '=')
-                                         .Replace('-', '+')
-                                         .Replace('_', '/');
-
-            var jsonBytes = Convert.FromBase64String(payloadBase64);
-            using var doc = JsonDocument.Parse(jsonBytes);
-            var root = doc.RootElement;
-
-            if (root.TryGetProperty("tid", out var tidProp) || root.TryGetProperty("tenant_id", out tidProp))
-            {
-                tenantId = tidProp.GetString();
-            }
-
-            if (root.TryGetProperty("sub", out var subProp))
-            {
-                return subProp.GetString();
-            }
-
-            if (root.TryGetProperty("name", out var nameProp))
-            {
-                return nameProp.GetString();
-            }
-        }
-        catch
-        {
-            // Ignore parsing errors and fallback gracefully
-        }
-
-        return "bearer-token";
-    }
-
     public string GenerateIstioEnvoyFilterYaml(EnvoyFilterExportOptions? options = null)
     {
         var opts = options ?? new EnvoyFilterExportOptions();
@@ -399,9 +343,6 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         sb.AppendLine("                allowed_headers:");
         sb.AppendLine("                  patterns:");
         sb.AppendLine("                    - exact: authorization");
-        sb.AppendLine("                    - exact: x-tenant-id");
-        sb.AppendLine("                    - exact: x-autheris-principal");
-        sb.AppendLine("                    - exact: x-roles");
         sb.AppendLine("                    - prefix: x-feature-");
         sb.AppendLine("              authorization_response:");
         sb.AppendLine("                allowed_upstream_headers:");

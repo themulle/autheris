@@ -381,7 +381,8 @@ public sealed class Mutation
         }
 
         // Four-Eyes Principle / Separation of Duties (Funktionstrennung)
-        if (req.RequesterSid == approverSid)
+        // SEC M-3: Multi-IdP / Multi-claim self-approval detection (prevents OID vs Kerberos SID self-approval)
+        if (req.RequesterSid == approverSid || IsSameIdentity(req.RequesterSid.Value, principal))
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
@@ -745,5 +746,34 @@ public sealed class Mutation
             Art9ProtectedTablesCount = result.Art9ProtectedTablesCount,
             Warnings = result.Warnings.ToList()
         };
+    }
+
+    private static bool IsSameIdentity(string requesterSid, ClaimsPrincipal? principal)
+    {
+        if (string.IsNullOrWhiteSpace(requesterSid) || principal == null)
+        {
+            return false;
+        }
+
+        var req = requesterSid.Trim();
+        foreach (var claim in principal.Claims)
+        {
+            if (claim.Type is ClaimTypes.PrimarySid
+                            or ClaimTypes.NameIdentifier
+                            or "objectSid"
+                            or "oid"
+                            or "sub"
+                            or ClaimTypes.Upn
+                            or ClaimTypes.Email
+                            or ClaimTypes.Name)
+            {
+                if (!string.IsNullOrWhiteSpace(claim.Value) && string.Equals(req, claim.Value.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 }

@@ -146,12 +146,17 @@ public sealed class ArrowFlightSqlSecurityTests
         // Arrange
         var table1 = new TableMetadata
         {
-            Identifier = new TableIdentifier("corp", "sales", "orders"),
-            Table = new Table { SourceName = "corp", SchemaName = "sales", TableName = "orders" }
+            Identifier = new TableIdentifier("tenant-1", "sales", "orders"),
+            Table = new Table { SourceName = "tenant-1", SchemaName = "sales", TableName = "orders" }
+        };
+        var tableOther = new TableMetadata
+        {
+            Identifier = new TableIdentifier("tenant-2", "finance", "salaries"),
+            Table = new Table { SourceName = "tenant-2", SchemaName = "finance", TableName = "salaries" }
         };
 
         _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { table1 }));
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { table1, tableOther }));
 
         var server = new ArrowFlightSqlServer(
             _exportService,
@@ -165,7 +170,7 @@ public sealed class ArrowFlightSqlSecurityTests
         // Act
         var tables = await server.GetTablesAsync(principal, new TenantId("tenant-1"));
 
-        // Assert
+        // Assert (SEC M-7: Strict tenant isolation; only tenant-1 returned, never tenant-2)
         tables.Count.ShouldBe(1);
         tables[0].TableName.ShouldBe("orders");
         tables[0].Schema.ShouldBe("sales");
