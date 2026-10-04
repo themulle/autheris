@@ -46,30 +46,53 @@ public sealed class JwtSocketTokenValidator : ISocketTokenValidator
             var jwtOptions = _jwtOptionsMonitor.Get(GatewayAuthSchemes.JwtBearer);
             var validationParameters = jwtOptions.TokenValidationParameters?.Clone();
 
-            if (validationParameters != null &&
-                (validationParameters.IssuerSigningKey != null || (validationParameters.IssuerSigningKeys != null && validationParameters.IssuerSigningKeys.Any())))
+            if (validationParameters != null)
             {
-                var validationResult = await _tokenHandler.ValidateTokenAsync(token, validationParameters);
-                if (!validationResult.IsValid || validationResult.ClaimsIdentity == null)
+                // SEC H-2 / Low-17: Resolve dynamic signing keys from OIDC metadata ConfigurationManager if not statically configured
+                if (validationParameters.IssuerSigningKey == null &&
+                    (validationParameters.IssuerSigningKeys == null || !validationParameters.IssuerSigningKeys.Any()) &&
+                    jwtOptions.ConfigurationManager != null)
                 {
-                    _logger.LogWarning(validationResult.Exception, "WebSocket JWT cryptographic validation failed: {Reason}", validationResult.Exception?.Message);
-                    return (false, null);
+                    try
+                    {
+                        var config = await jwtOptions.ConfigurationManager.GetConfigurationAsync(cancellationToken).ConfigureAwait(false);
+                        if (config?.SigningKeys != null && config.SigningKeys.Count > 0)
+                        {
+                            validationParameters.IssuerSigningKeys = config.SigningKeys;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to dynamically resolve JWT signing keys from ConfigurationManager for WebSocket auth.");
+                    }
                 }
 
-                var identity = validationResult.ClaimsIdentity;
-                var sub = identity.FindFirst("sub")?.Value ?? identity.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-                if (!string.IsNullOrWhiteSpace(sub) &&
-                    (sub.StartsWith("S-1-5-32-", StringComparison.OrdinalIgnoreCase) || sub.EndsWith("-500", StringComparison.OrdinalIgnoreCase)))
+                if (validationParameters.IssuerSigningKey != null || (validationParameters.IssuerSigningKeys != null && validationParameters.IssuerSigningKeys.Any()))
                 {
-                    _logger.LogWarning("WebSocket connection rejected: Attempted use of privileged SID '{Sub}'.", sub);
-                    return (false, null);
+                    var validationResult = await _tokenHandler.ValidateTokenAsync(token, validationParameters);
+                    if (!validationResult.IsValid || validationResult.ClaimsIdentity == null)
+                    {
+                        _logger.LogWarning(validationResult.Exception, "WebSocket JWT cryptographic validation failed: {Reason}", validationResult.Exception?.Message);
+                        return (false, null);
+                    }
+
+                    var identity = validationResult.ClaimsIdentity;
+                    var sub = identity.FindFirst("sub")?.Value ?? identity.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+                    if (!string.IsNullOrWhiteSpace(sub) &&
+                        (sub.StartsWith("S-1-5-32-", StringComparison.OrdinalIgnoreCase) || sub.EndsWith("-500", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        _logger.LogWarning("WebSocket connection rejected: Attempted use of privileged SID '{Sub}'.", sub);
+                        return (false, null);
+                    }
+
+                    return (true, new ClaimsPrincipal(identity));
                 }
 
-                return (true, new ClaimsPrincipal(identity));
+                _logger.LogWarning("WebSocket token rejected: No cryptographic IssuerSigningKey configured.");
+                return (false, null);
             }
 
-            _logger.LogWarning("WebSocket token rejected: No cryptographic IssuerSigningKey configured.");
             return (false, null);
         }
         catch (Exception ex)

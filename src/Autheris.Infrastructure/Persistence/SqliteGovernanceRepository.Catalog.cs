@@ -687,11 +687,9 @@ public partial class SqliteGovernanceRepository
 
     private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, CancellationToken ct)
     {
-        if (approverSid.Value.StartsWith("ITSM", StringComparison.OrdinalIgnoreCase) ||
-            approverSid.Value.StartsWith("S-1-5-21-ITSM-", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
+        var sidVal = approverSid.Value;
+        var colonIdx = sidVal.LastIndexOf(':');
+        var candidateAccount = colonIdx >= 0 ? sidVal[(colonIdx + 1)..] : sidVal;
 
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = @"
@@ -700,24 +698,25 @@ public partial class SqliteGovernanceRepository
             JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
             JOIN TABLES t ON tow.table_id = t.id
             WHERE t.source_name = @domain COLLATE NOCASE AND t.schema_name = @schema COLLATE NOCASE AND t.table_name = @table COLLATE NOCASE
-              AND o.ad_sid = @apprSid AND o.is_active = 1
+              AND (o.ad_sid = @apprSid OR o.ad_account = @candidateAccount OR o.email = @candidateAccount) AND o.is_active = 1
             UNION
             SELECT 1
             FROM DATA_OWNER_DELEGATIONS del
             JOIN TABLE_OWNERS tow ON del.data_owner_id = tow.data_owner_id
             JOIN TABLES t ON tow.table_id = t.id
             WHERE t.source_name = @domain COLLATE NOCASE AND t.schema_name = @schema COLLATE NOCASE AND t.table_name = @table COLLATE NOCASE
-              AND del.delegate_sid = @apprSid AND del.valid_from <= @now AND @now < del.valid_to
+              AND (del.delegate_sid = @apprSid OR del.delegate_sid = @candidateAccount) AND del.valid_from <= @now AND @now < del.valid_to
             UNION
             SELECT 1
             FROM ROLE_MEMBERS rm
             JOIN ROLES r ON rm.role_id = r.id
-            WHERE rm.member_sid = @apprSid AND r.role_name IN ('GovernanceAdmin', 'ClusterAdmin')
+            WHERE (rm.member_sid = @apprSid OR rm.member_sid = @candidateAccount) AND r.role_name IN ('GovernanceAdmin', 'ClusterAdmin')
             LIMIT 1;";
         cmd.Parameters.AddWithValue("@domain", table.Domain);
         cmd.Parameters.AddWithValue("@schema", table.Schema);
         cmd.Parameters.AddWithValue("@table", table.TableName);
         cmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
+        cmd.Parameters.AddWithValue("@candidateAccount", candidateAccount);
         cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
 
         var result = await cmd.ExecuteScalarAsync(ct);

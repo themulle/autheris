@@ -41,7 +41,7 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         var configuredSecret = _options.Value?.Authentication?.ForwardAuth?.SharedSecret;
         _signingSecret = !string.IsNullOrWhiteSpace(configuredSecret)
             ? configuredSecret
-            : "default-secret";
+            : Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
     }
 
     public async ValueTask<FlightSqlInfo> GetFlightInfoAsync(

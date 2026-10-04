@@ -41,9 +41,18 @@ public sealed class IncrementalDeliveryMiddleware
             return;
         }
 
-        var clientKey = context.User.FindFirst("tenant_id")?.Value
-                        ?? context.Connection.RemoteIpAddress?.ToString()
-                        ?? "anonymous";
+        var tenantId = context.User.FindFirst("tenant_id")?.Value;
+        var subjectId = context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                        ?? context.User.FindFirst("sub")?.Value
+                        ?? context.User.FindFirst("oid")?.Value;
+
+        var clientKey = (tenantId, subjectId) switch
+        {
+            (not null, not null) => $"{tenantId}:{subjectId}",
+            (not null, null) => tenantId,
+            (null, not null) => subjectId,
+            _ => context.Connection.RemoteIpAddress?.ToString() ?? "anonymous"
+        };
 
         if (!manager.TryAcquireStreamSlot(clientKey))
         {

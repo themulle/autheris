@@ -60,6 +60,7 @@ public sealed class ConsentRequest
     public DateTimeOffset RequestedValidTo { get; init; }
     public string? ItsmTicketId { get; set; }
     public TenantId TenantId { get; set; } = TenantId.LegacySingleTenant;
+    public List<string> RequesterIdentifiers { get; init; } = new();
     public List<ApprovalStep> ApprovalSteps { get; init; } = new();
 }
 

@@ -305,7 +305,16 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     if (field.SelectionSet != null)
                     {
                         var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions);
-                        cost = SafeAdd(cost, childCost);
+                        if (isList)
+                        {
+                            // SEC M-9: Unpaginated relation lists scale child selection costs by unpaginated list multiplier
+                            var nestedCost = (int)Math.Min((long)int.MaxValue, (long)childCost * 2);
+                            cost = SafeAdd(cost, nestedCost);
+                        }
+                        else
+                        {
+                            cost = SafeAdd(cost, childCost);
+                        }
                     }
                 }
             }

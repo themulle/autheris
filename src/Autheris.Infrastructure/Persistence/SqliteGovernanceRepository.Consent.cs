@@ -755,7 +755,8 @@ public partial class SqliteGovernanceRepository
             using (var checkExistingCmd = _connection.CreateCommand())
             {
                 checkExistingCmd.Transaction = tx;
-                checkExistingCmd.CommandText = "SELECT COUNT(1) FROM CONSENTS WHERE consent_request_id = @reqId AND is_revoked = 0";
+                // SEC N-2: Disallow multiple activations of the same consent_request_id, regardless of revocation status.
+                checkExistingCmd.CommandText = "SELECT COUNT(1) FROM CONSENTS WHERE consent_request_id = @reqId";
                 checkExistingCmd.Parameters.AddWithValue("@reqId", req.Id.ToString());
                 var existingCount = Convert.ToInt32(await checkExistingCmd.ExecuteScalarAsync(ct));
                 if (existingCount > 0)
@@ -902,7 +903,10 @@ public partial class SqliteGovernanceRepository
         }
     }
 
-    public async Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default)
+    public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default)
+        => ApproveConsentRequestStepAsync(requestId, approverSid, isExternalItsmApproval: false, ct);
+
+    public async Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool isExternalItsmApproval, CancellationToken ct = default)
     {
         var req = await GetConsentRequestAsync(requestId, ct);
         if (req == null) throw new InvalidOperationException($"Request {requestId} not found.");
@@ -914,7 +918,7 @@ public partial class SqliteGovernanceRepository
             throw new InvalidOperationException($"Request {requestId} is in status '{req.Status}' and cannot be approved.");
         }
 
-        if (req.RequesterSid == approverSid || approverSid.Value.EndsWith(req.RequesterSid.Value, StringComparison.OrdinalIgnoreCase))
+        if (IsSelfApproval(req, approverSid))
         {
             throw new InvalidOperationException("Funktionstrennung verletzt: Antragsteller darf eigenen Antrag nicht genehmigen.");
         }
@@ -940,15 +944,37 @@ public partial class SqliteGovernanceRepository
             }
 
             // Four-eyes principle / Separation of duties check at repository layer
-            if (req.RequesterSid == approverSid || approverSid.Value.EndsWith(req.RequesterSid.Value, StringComparison.OrdinalIgnoreCase))
+            if (IsSelfApproval(req, approverSid))
             {
                 throw new InvalidOperationException("Funktionstrennung verletzt: Der Antragsteller kann den eigenen Consent-Antrag nicht genehmigen.");
             }
 
-            bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, ct);
-            if (!isAuthorized)
+            if (!isExternalItsmApproval)
             {
-                throw new UnauthorizedAccessException($"Benutzer '{approverSid}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
+                bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, ct);
+                if (!isAuthorized)
+                {
+                    throw new UnauthorizedAccessException($"Benutzer '{approverSid}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
+                }
+            }
+            else
+            {
+                // SEC N-1: In ITSM external approval, verify table owner mapping if an individual human approver is specified and table has configured owners
+                var sidVal = approverSid.Value;
+                var colonCount = sidVal.Count(c => c == ':');
+                bool isSpecificApprover = colonCount >= 2;
+                if (isSpecificApprover)
+                {
+                    bool hasConfiguredOwners = await HasConfiguredDataOwnersAsync(req.TableIdentifier, ct);
+                    if (hasConfiguredOwners)
+                    {
+                        bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, ct);
+                        if (!isAuthorized)
+                        {
+                            throw new UnauthorizedAccessException($"ITSM-Genehmiger '{approverSid}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
+                        }
+                    }
+                }
             }
 
             // Check if table requires four-eyes
@@ -1455,6 +1481,51 @@ public partial class SqliteGovernanceRepository
         {
             _lock.Release();
         }
+    }
+
+    private async Task<bool> HasConfiguredDataOwnersAsync(TableIdentifier table, CancellationToken ct)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = @"
+            SELECT 1
+            FROM TABLE_OWNERS tow
+            JOIN TABLES t ON tow.table_id = t.id
+            WHERE t.source_name = @domain COLLATE NOCASE AND t.schema_name = @schema COLLATE NOCASE AND t.table_name = @table COLLATE NOCASE
+            LIMIT 1;";
+        cmd.Parameters.AddWithValue("@domain", table.Domain);
+        cmd.Parameters.AddWithValue("@schema", table.Schema);
+        cmd.Parameters.AddWithValue("@table", table.TableName);
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result != null && result != DBNull.Value;
+    }
+
+    private static bool IsSelfApproval(ConsentRequest req, Sid approverSid)
+    {
+        if (req.RequesterSid == approverSid)
+        {
+            return true;
+        }
+
+        var candidate = approverSid.Value;
+        var colonIdx = candidate.LastIndexOf(':');
+        if (colonIdx >= 0)
+        {
+            candidate = candidate[(colonIdx + 1)..];
+        }
+
+        if (string.Equals(req.RequesterSid.Value, candidate, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (req.RequesterIdentifiers.Any(id =>
+            string.Equals(id, approverSid.Value, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(id, candidate, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return false;
     }
 }
 

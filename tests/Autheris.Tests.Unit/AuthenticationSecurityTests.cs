@@ -597,6 +597,23 @@ public class AuthenticationSecurityTests
         result.Failure?.Message.ShouldContain("Outside of Development");
     }
 
+    [Theory]
+    [InlineData("GatewayAdmin", false)]
+    [InlineData("PlatformAdmin", false)]
+    [InlineData("TenantAdmin", false)]
+    [InlineData("PrivacyAdmin", false)]
+    [InlineData("GovernanceAdmin", true)]
+    [InlineData("ClusterAdmin", true)]
+    public void M1_TenantAdminAliases_DoNotSatisfyGlobalGovernanceAdmin(string roleName, bool expectedGlobalGov)
+    {
+        var identity = new ClaimsIdentity("TestAuth");
+        identity.AddClaim(new Claim(ClaimTypes.Role, roleName));
+        var principal = new ClaimsPrincipal(identity);
+
+        var isGlobalGov = Autheris.Api.Endpoints.EndpointSecurity.IsGlobalGovernanceAdmin(principal);
+        isGlobalGov.ShouldBe(expectedGlobalGov);
+    }
+
     private sealed class TestOptionsMonitor<T> : IOptionsMonitor<T>
     {
         public T CurrentValue { get; }

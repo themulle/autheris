@@ -138,6 +138,7 @@ public sealed class Mutation
         CancellationToken ct = default)
     {
         var userSid = GetAuthenticatedUserSid(httpContextAccessor);
+        var principal = httpContextAccessor?.HttpContext?.User;
 
         if (string.IsNullOrWhiteSpace(domain) || string.IsNullOrWhiteSpace(schema) || string.IsNullOrWhiteSpace(tableName))
         {
@@ -206,7 +207,8 @@ public sealed class Mutation
             BusinessJustification = justification.Trim(),
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(durationDays),
             Status = isItsmEnabled ? "PENDING_EXTERNAL_APPROVAL" : "PENDING",
-            TenantId = tenantId
+            TenantId = tenantId,
+            RequesterIdentifiers = ExtractPrincipalIdentifiers(principal, userSid.Value)
         };
 
         var created = await approvalRepository.CreateConsentRequestAsync(request, ct);
@@ -381,8 +383,8 @@ public sealed class Mutation
         }
 
         // Four-Eyes Principle / Separation of Duties (Funktionstrennung)
-        // SEC M-3: Multi-IdP / Multi-claim self-approval detection (prevents OID vs Kerberos SID self-approval)
-        if (req.RequesterSid == approverSid || IsSameIdentity(req.RequesterSid.Value, principal))
+        // SEC M-3: Multi-IdP / Multi-claim self-approval detection (prevents OID vs Kerberos SID self-approval in both directions)
+        if (req.RequesterSid == approverSid || IsSameIdentity(req, principal))
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
@@ -748,29 +750,58 @@ public sealed class Mutation
         };
     }
 
-    private static bool IsSameIdentity(string requesterSid, ClaimsPrincipal? principal)
+    private static List<string> ExtractPrincipalIdentifiers(ClaimsPrincipal? principal, string? fallbackSid = null)
     {
-        if (string.IsNullOrWhiteSpace(requesterSid) || principal == null)
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(fallbackSid))
+        {
+            set.Add(fallbackSid.Trim());
+        }
+
+        if (principal != null)
+        {
+            foreach (var claim in principal.Claims)
+            {
+                if (claim.Type is ClaimTypes.PrimarySid
+                                or ClaimTypes.NameIdentifier
+                                or "objectSid"
+                                or "onprem_sid"
+                                or "oid"
+                                or "sub"
+                                or ClaimTypes.Upn
+                                or ClaimTypes.Email
+                                or ClaimTypes.Name)
+                {
+                    if (!string.IsNullOrWhiteSpace(claim.Value))
+                    {
+                        set.Add(claim.Value.Trim());
+                    }
+                }
+            }
+        }
+
+        return set.ToList();
+    }
+
+    private static bool IsSameIdentity(ConsentRequest req, ClaimsPrincipal? principal)
+    {
+        if (principal == null)
         {
             return false;
         }
 
-        var req = requesterSid.Trim();
-        foreach (var claim in principal.Claims)
+        var approverIds = ExtractPrincipalIdentifiers(principal);
+        var requesterIds = req.RequesterIdentifiers.ToList();
+        if (!string.IsNullOrWhiteSpace(req.RequesterSid.Value))
         {
-            if (claim.Type is ClaimTypes.PrimarySid
-                            or ClaimTypes.NameIdentifier
-                            or "objectSid"
-                            or "oid"
-                            or "sub"
-                            or ClaimTypes.Upn
-                            or ClaimTypes.Email
-                            or ClaimTypes.Name)
+            requesterIds.Add(req.RequesterSid.Value);
+        }
+
+        foreach (var reqId in requesterIds)
+        {
+            if (approverIds.Any(apprId => string.Equals(reqId, apprId, StringComparison.OrdinalIgnoreCase)))
             {
-                if (!string.IsNullOrWhiteSpace(claim.Value) && string.Equals(req, claim.Value.Trim(), StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
+                return true;
             }
         }
 
