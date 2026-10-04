@@ -13,7 +13,7 @@
 Der Markt für Enterprise GraphQL und API Gateways wird 2025/2026 durch fundamentale Marktbewegungen definiert:
 
 1. **Von Query-Aggregation zu "Agentic AI Orchestration" & Semantic Context Grounding:**
-   - Apollo hat mit dem *Apollo MCP Server* und *GraphOS Agent Tools* den Weg geebnet, um GraphQL Supergraphs als Tool-Provider für autonome KI-Agenten bereitzustellen.
+   - Apollo hat mit dem *Apollo MCP Server* und *GraphOS Agent Tools* den Weg geebnet, um GraphQL Supergraphs als Tool-Provider für autonome KI-Agenten bereitzustellen (Router v1.x End-of-Life im Februar 2026, Federation v2.15+ mit Rust-basierter Composition).
    - **Die kritische Marktlücke (The Semantic Gap):** Reine Schemas liefern Modellen (LLMs) nur technische Signaturen. Ohne Fachsemantik (Grain-Definitionen, Berechnungsformeln für Kennzahlen) halluzinieren Agenten.
    - **Unsere Marktposition:** Autheris schließt die Semantic Gap über den **Semantic MCP Compiler (`F-AI-02` [Done])**, **Pre-Flight Query Simulator (`F-AI-04` [Done])**, **Few-Shot Golden Queries (`F-AI-03` [Done])**, **Provenance Footnotes (`F-AI-06` [Done])**, **Human-in-the-Loop Step-Up Approval (`F-AI-05` [Done])**, **Dynamic Schema Pruning (`F-AI-07` [Done])** und **FOCUS FinOps Accounting (`F-AI-08` [Done])**.
 2. **Native Vector Database & RAG Egress Governance (`F-AI-09` [Done]) & Semantic Cache (`F-AI-10` [Done]):**
@@ -42,6 +42,16 @@ Der Markt für Enterprise GraphQL und API Gateways wird 2025/2026 durch fundamen
    - **Unsere Marktposition:** **Native MSSQL Change Tracking Ingestion (`F-CDC-02` [Done])** und **Zero-Kafka PostgreSQL Logical Replication (`F-CDC-03` [Done])** liefern Zero-Infrastructure CDC.
 10. **High-Throughput Benchmarking & Hasura-Vergleich (`graphql-bench`):**
     - **Multi-Tenant Isolated Query Plan Cache (`F-PERF-11` [Done])**, Kestrel/Runtime-Tuning und Zero-LOH Streaming (**`F-PERF-10` [Done]**) schlagen Hasura DDN bei strikter Mandanten-Isolation.
+11. **Konvergenz auf Apache Iceberg REST Catalog (IRC) & Arrow Flight Egress (`F-DATA-05` Roadmap):**
+    - 2025/2026 hat sich der Lakehouse-Markt herstellerübergreifend auf die **Apache Iceberg REST Catalog (IRC)**-Spezifikation geeinigt (Apache Polaris, Databricks Unity Catalog, AWS S3 Tables, DuckDB 2026 Native Attach).
+    - **Unsere Marktposition:** Föderierte Metadaten-Pruning-Kataloge und In-Memory Arrow-RecordBatch-Streams (`F-DATA-04` [Done]) transformieren Autheris in ein dezentrales "Agentic Lakehouse Gateway" mit integriertem Token-basiertem Credential Vending für S3/ADLS.
+12. **EU AI Act Vollzug 2026 & AI Gateway Compliance Control Plane (`F-AI-12` Roadmap):**
+    - Artikel 10 des EU AI Act verpflichtet Betreiber von Hochrisiko-KI-Systemen zu lückenloser Daten-Governance, Bias-Minimierung, lückenlosem Lifetime-Audit-Logging und mathematischen Garantien gegen Re-Identifikation.
+    - **Unsere Marktposition:** Autheris agiert als zentraler KI-Compliance-Kontrollpunkt mit In-Stream PII-Scrubbing, WORM-Audit-Logs und nativer **Dynamic Differential Privacy (DP)** für analytische Abfragen und RAG-Pipelines.
+13. **Wettbewerber-Paradigmenwechsel (Hasura NDC vs. Cosmo MCP vs. Apollo Router v2):**
+    - Hasura DDN v3 führte Native Data Connectors (NDC) in Rust ein, koppelte dies jedoch an ein kontroverses *Active Model-Based Pricing* (Abrechnung pro aktivem Schema-Objekt).
+    - WunderGraph Cosmo integrierte einen MCP Server mit kuratierten Persisted Operations gegen Prompt Injection sowie Graph Feature Flags für Traffic Splitting.
+    - **Unsere Marktposition:** Autheris verbindet offene TCO (0 € Lizenz), Deep AST SQL-Pushdown und Prompt-Injection-sichere Persisted MCP Operations (`F-AI-11`) mit flexibler Subgraph-Variantensteuerung (`F-OPS-03`).
 
 ---
 
@@ -94,7 +104,14 @@ Der Markt für Enterprise GraphQL und API Gateways wird 2025/2026 durch fundamen
 | **Embedded In-Memory OLAP via DuckDB.NET (`F-DATA-03`)** | **100% (GA)** | ✅ **[Done]** | [f-data-03-duckdb-olap.md](file:///root/lis-git/gql/gql/docs/features/f-data-03-duckdb-olap.md) |
 | **Native Vector Database & RAG Egress (`F-AI-09`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-09-native-vector-database-rag-egress.md](file:///root/lis-git/gql/gql/docs/features/f-ai-09-native-vector-database-rag-egress.md) |
 | **Semantic Query Cache & Policy Recommendation (`F-AI-10`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-10-semantic-cache-policy-recommendation.md](file:///root/lis-git/gql/gql/docs/features/f-ai-10-semantic-cache-policy-recommendation.md) |
+| **Consent Recertification & Extension Workflow (`F-GOV-09`)** | **100% (GA)** | ✅ **[Done]** | `ConsentRecertificationWorkflowService.cs` (ServiceNow/Jira Outbox, WORM-Audit, Deduplizierung) |
+| **Federated Dynamic Differential Privacy Engine (`P12`)** | **100% (GA)** | ✅ **[Done]** | `DifferentialPrivacyEngine.cs` (Laplace-Noise, k-Anonymity Guard, tägliches Epsilon-Budgeting, REST-APIs) |
+| **OpenTelemetry Trace-to-Audit Correlation (`F-OPS-02`)** | **75% (In Progress)** | 🟡 **Active** | `AuditLogEntry.TraceId` & HMAC-Hash fertig; `Activity.Current` W3C Traceparent Injection im Kernel in Arbeit. |
+| **Whitelisted MCP Operations & Curated Persisted Tools (`F-AI-11`)** | **50% (In Progress)** | 🟡 **Active** | Registry & Dispatch für `AllowedOperations` fertig; Persisted Query Document Hashing in Umsetzung. |
+| **EU AI Act Art. 10 Compliance Export Suite (`F-AI-12`)** | **50% (In Progress)** | 🟡 **Active** | DP-Engine (`P12`) 100% GA; automatisierter WORM Art.-10-Zertifikats-Exporteur auf Roadmap. |
 | **Management Studio & UI (`P6`)** | **0%** | 🔴 **Roadmap** | Visuelles Web-Dashboard für Data Stewards (Policy Simulator, Audit-Viewer, Schema Explorer). |
+| **Apache Iceberg REST Catalog (IRC) Federation & Credential Vending (`F-DATA-05`)** | **0%** | 🔴 **Roadmap** | Föderierter REST Catalog Server mit STS-Token Vending für S3/ADLS und zeilenbasiertem Partitions-Pruning. |
+| **Subgraph Dynamic Feature Flags & Canary Traffic Splitting (`F-OPS-03`)** | **0%** | 🔴 **Roadmap** | Header-/Attribut-gesteuertes Subgraph-Routing für Zero-Downtime Blue/Green Canary Deploys. |
 
 ---
 
@@ -102,10 +119,10 @@ Der Markt für Enterprise GraphQL und API Gateways wird 2025/2026 durch fundamen
 
 | Konkurrent | Stärken | Kritische Schwachstellen & Lücken | Autheris Moat (Unser Alleinstellungsmerkmal) |
 | :--- | :--- | :--- | :--- |
-| **Apollo GraphQL**<br/>*(Router / Federation v2 / GraphOS)* | • Marktführer Schema Federation<br/>• Großes Entwickler-Ökosystem<br/>• Hohe JS/Rust Router Performance | • Router unter restriktiver ELv2-Lizenz<br/>• RLS nur delegiert an Subgraphs<br/>• Keine native Unternehmenskatalog-Synchronisation<br/>• Fehlende DSGVO Art. 9 Automatisierung<br/>• Semantik-Blindheit bei KI-Agenten: Apollo MCP Server exponiert nur rohe Schemas. | **Integrierte Zero-Trust Governance & Semantic MCP**: Hot Chocolate Fusion, In-Memory-Masking auf aggregierten Daten, nativer Sync mit Purview/Collibra/OpenMetadata und semantisches MCP-Tool-Grounding für LLMs. |
-| **Hasura Enterprise**<br/>*(DDN / Data Delivery Network)* | • Instant GraphQL über SQL-DBs<br/>• Declarative Permissions<br/>• Schnelles Prototyping | • Starker Vendor-Lockin in proprietäre Metadaten<br/>• Sehr teure Enterprise-Lizenzmodelle<br/>• Föderierte Governance über mehrere Data Domains schwerfällig<br/>• Kein integrierter 4-Augen Justification-Workflow<br/>• Proprietäre Native Queries Syntax (`{{param}}` statt DB-nativem `@param`). | **Open Governance, Lower TCO & Declarative SQL-to-API**: Keine proprietäre Plattformbindung, automatisierte ITSM-Freigaben (ServiceNow/Jira), dbt-Manifest Ingestion, native `@param` SQL-Endpunkte mit Auto-OpenAPI 3.0 und On-Prem/Sovereign Cloud Eignung. |
-| **WunderGraph Cosmo**<br/>*(Open-Source Federation)* | • Open-Source Apollo Alternative<br/>• Hohe Go-Router Performance<br/>• Gute Analytics & Metrics | • Reiner Proxy/Router ohne deklarative Datenanbindung<br/>• Keine native PII-Maskierung oder DSGVO Art. 9 Workflows<br/>• Kein nativer Iceberg/Parquet Egress<br/>• Keine integrierte MCP/AI-Agent Schnittstelle. | **End-to-End Enterprise Data Federation**: Direkte Anbindung von Datenbanken, Data Catalogs und Lakehouses mit nativer Governance, Parquet-Egress und KI-Agent-Orchestrierung. |
-| **PostgREST / StepZen** | • Leichtgewichtige REST/GraphQL APIs<br/>• Gute DB-nahe Performance | • Bindung an PostgreSQL (PostgREST) bzw. Cloud-Abhängigkeit (StepZen)<br/>• Keine mandantenfähigen Cross-Source Joins<br/>• Keine automatisierten Rezertifizierungs-Workflows. | **Heterogene Multidomänen-Föderation**: Vereinheitlicht MSSQL, Postgres, SQLite, Lakehouses und Microservices unter einem Zero-Trust Dach. |
+| **Apollo GraphQL**<br/>*(Router v2.17+ / Federation v2.15+ / GraphOS)* | • Marktführer Schema Federation<br/>• Rust-basierte Composition (v2.15+)<br/>• Apollo MCP Server für AI Agents<br/>• Apollo Connectors für REST APIs | • Router v1 EOL (Februar 2026), Router v2 unter restriktiver ELv2-Lizenz<br/>• RLS nur delegiert an Subgraphs<br/>• Keine native Unternehmenskatalog-Synchronisation<br/>• Fehlende DSGVO Art. 9 Automatisierung & EU AI Act WORM Audits<br/>• Semantik-Blindheit: Exponiert rohe Schemas ohne Geschäftssemantik, Grain-Regeln oder FinOps Token Gating. | **Integrierte Zero-Trust Governance & Semantic MCP**: Hot Chocolate Fusion, In-Memory-Masking auf aggregierten Daten, nativer Sync mit Purview/Collibra/OpenMetadata, semantisches MCP-Tool-Grounding, FinOps Budget Caps (`F-AI-08`) und vollständige ELv2-Freiheit (0 € Lizenz). |
+| **Hasura Enterprise**<br/>*(DDN / Data Delivery Network v3)* | • Rust-basierte v3 Data Plane (NDC Engine)<br/>• Native Data Connectors Hub<br/>• Schnelles deklaratives Prototyping | • Starker Vendor-Lockin in OpenDD / proprietäre Metadaten<br/>• **Active Model-Based Pricing**: Kontroverses Lizenzmodell (Abrechnung pro aktivem Schema-Objekt $\ge$ 1k Hits/Monat)<br/>• Föderierte Governance über mehrere Data Domains schwerfällig<br/>• Kein integrierter 4-Augen Justification-Workflow<br/>• Keine native dbt Contract Enforcement / Circuit Breaker Integration. | **Open Governance, Lower TCO & Declarative SQL-to-API**: Keine proprietäre Plattformbindung, kalkulierbare Kosten (keine Model-Tax), automatisierte ITSM-Freigaben (ServiceNow/Jira), dbt-Manifest Ingestion, native `@param` SQL-Endpunkte mit Auto-OpenAPI 3.0 und On-Prem/Sovereign Cloud Eignung. |
+| **WunderGraph Cosmo**<br/>*(Open-Source Federation)* | • Open-Source Apollo Alternative (Go/Rust Router)<br/>• Cosmo MCP Gateway mit Curated Persisted Operations<br/>• Graph Feature Flags & Cosmo Streams | • Reiner Proxy/Router ohne deklarative relationale Datenbankanbindung<br/>• Kein SQL RLS Pushdown oder relationales Single-Query Optimization<br/>• Keine native PII-Maskierung oder DSGVO Art. 9 Workflows<br/>• Kein nativer Iceberg/Delta Lakehouse oder Parquet Egress<br/>• Keine revisionssicheren WORM HMAC-256 Audit Hash Chains. | **End-to-End Enterprise Data Federation & Vector RAG**: Direkte Anbindung von relationalen SQL DBs, Vektordatenbanken (pgvector/Qdrant/Milvus), Data Catalogs und Lakehouses mit nativer Governance, Parquet/Arrow-Egress und ganzheitlicher KI-Agent-Orchestrierung. |
+| **PostgREST / StepZen** | • Leichtgewichtige REST/GraphQL APIs<br/>• Gute DB-nahe Performance | • Bindung an PostgreSQL (PostgREST) bzw. IBM Cloud-Abhängigkeit (StepZen)<br/>• Keine mandantenfähigen Cross-Source Joins<br/>• Keine automatisierten Rezertifizierungs-Workflows. | **Heterogene Multidomänen-Föderation**: Vereinheitlicht MSSQL, Postgres, SQLite, Lakehouses und Microservices unter einem Zero-Trust Dach. |
 
 ---
 
@@ -282,9 +299,9 @@ Die nachfolgenden Schlüsselthemen wurden in den jüngsten Entwicklungszyklen (W
 
 ---
 
-### 4.2 Nächste strategische Roadmap-Prioritäten (Phase 4 & Phase 5: Enterprise UI & Lakehouse-Parität)
+### 4.2 Nächste strategische Roadmap-Prioritäten (Phase 4 & Phase 5: Enterprise UI, Lakehouse & AI Compliance)
 
-Nach der erfolgreichen Fertigstellung des **Governed Data Pipeline Kernels**, der **Unified Security Context (USC)**-Schicht, der **DuckDB-OLAP-** und **Apache-Arrow-Integration** sowie der **Native Vector RAG Suite (`F-AI-09` & `F-AI-10`)** konzentriert sich die strategische Produktentwicklung 2026/2027 auf die Schließung der Benutzeroberflächen-Lücke, Lakehouse-Parität und Event-Mesh-Architekturen:
+Nach der erfolgreichen Fertigstellung des **Governed Data Pipeline Kernels**, der **Unified Security Context (USC)**-Schicht, der **DuckDB-OLAP-** und **Apache-Arrow-Integration** sowie der **Native Vector RAG Suite (`F-AI-09` & `F-AI-10`)** konzentriert sich die strategische Produktentwicklung 2026/2027 auf fünf Kernsäulen:
 
 #### Säule 1: Enterprise Management Studio & Visual Governance UI (`P6` – Höchste Dringlichkeit)
 
@@ -297,7 +314,31 @@ Nach der erfolgreichen Fertigstellung des **Governed Data Pipeline Kernels**, de
     4. **FinOps & Performance Cockpit:** Visualisierung von Token-Verbräuchen (FOCUS v1.2), Query-Kosten nach Abteilungen und Budget-Gating.
   * **Business-Value:** Massiver Adoptionsschub bei Fachabteilungen, Compliance-Prüfern und Enterprise-Kunden; Beseitigung des „Headless-Only“-Nachteils gegenüber Apollo Studio und Hasura Console.
 
-#### Säule 2: Lakehouse-Parität & High-Speed Analytics (`P11`, `F-DATA-04-B`)
+#### Säule 2: Next-Gen Agentic Security & EU AI Act Compliance (`F-AI-11`, `F-AI-12`)
+
+* **`F-AI-11` Whitelisted MCP Operations & Curated Persisted Tools (OWASP LLM01 Shield)**
+  * **Schmerzpunkt:** Wenn LLMs beliebige Ad-hoc-GraphQL-Queries konstruieren, drohen Denial-of-Wallet-Angriffe, unvorhersehbare Mutationen und Prompt-Injection-Exploits. Cosmo hat mit Persisted Operations einen Anfang gemacht, bietet aber kein Semantik-Grounding oder FinOps-Gating.
+  * **Lösung:** Autheris exponiert vorab genehmigte, versionierte GraphQL Persisted Operations als deterministische, typisierte MCP Tools (`execute_persisted_tool`). Automatische Typprüfung von Parametern, serverseitiges RLS-Pushdown und Bindung an FOCUS FinOps Budget-Caps (`F-AI-08`).
+  * **Business-Value:** 100%ige Immunität gegen Prompt Injection bei Tool-Calls und vollständige Berechenbarkeit von Latenz und Kosten für Enterprise-Agenten.
+
+* **`F-AI-12` EU AI Act Art. 10 Compliance Suite & Dynamic Differential Privacy (DP-Engine)**
+  * **Schmerzpunkt:** Mit dem vollen Vollzug des EU AI Act (Ende 2026) haften Unternehmen für Datenverzerrungen (Bias) und Re-Identifikationsrisiken bei hochriskanten KI-Systemen. Klassische Gateways bieten keinerlei mathematische Datenschutzgarantien.
+  * **Lösung:** In-Gateway Differential Privacy: Automatische Injektion von kalibriertem Laplace- bzw. Gauß-Rauschen auf numerische Aggregationen (`COUNT`, `AVG`, `SUM`) mit konfigurierbarem $(\epsilon, \delta)$-Privacy-Budget. Verhindert Rekonstruktionsangriffe bei RAG und BI. Ergänzt um WORM-versiegelte Art.-10-Audit-Zertifikate.
+  * **Business-Value:** Unverzichtbare Compliance-Brücke für europäische Konzerne, Banken und Gesundheitsdienstleister.
+
+#### Säule 3: Lakehouse Catalog Federation & Advanced Traffic Operations (`F-DATA-05`, `F-OPS-03`)
+
+* **`F-DATA-05` Apache Iceberg REST Catalog (IRC) Federation & Dynamic STS Credential Vending**
+  * **Schmerzpunkt:** Lakehouses konvergieren 2026 auf die herstellerneutrale Iceberg REST Catalog (IRC) Spezifikation (Polaris, Unity Catalog, AWS S3 Tables, DuckDB 2026). Statische Cloud-IAM-Keys für Datenspeicher bergen enorme Sicherheitsrisiken.
+  * **Lösung:** Autheris fungiert als föderierter REST Catalog Server: Föderiert Namespaces über mehrere Catalogs hinweg mit Casbin-ABAC auf Tabellenebene und vendiert kurzlebige, temporäre Session-Credentials (AWS STS / Azure SAS) mit dynamisch eingebackenen Row-Level-Security Filtern.
+  * **Business-Value:** Vollständige Entkopplung von Query-Engines (DuckDB, Trino, Spark) und physischem Objektspeicher unter zentraler Zero-Trust Governance.
+
+* **`F-OPS-03` Subgraph Dynamic Feature Flags & Canary Traffic Splitting**
+  * **Schmerzpunkt:** Breaking Changes bei Subgraph-Deployments erfordern komplexe separate Staging-Umgebungen.
+  * **Lösung:** Dynamisches Umschalten von Subgraph-Zielen im Fusion Router basierend auf HTTP-Headern (`X-Feature-Variant`), Cookies, Benutzerrollen oder Tenant-Tiers. Ermöglicht progressive Canary-Rollouts (1% -> 10% -> 100%) direkt auf Feldebene.
+  * **Business-Value:** Zero-Downtime Releases und risikofreie Subgraph-Modernisierung in verteilten Entwicklungsteams (Parität zu WunderGraph Cosmo).
+
+#### Säule 4: Lakehouse-Parität & High-Speed Analytics (`P11`, `F-DATA-04-B`)
 
 * **`P11` Modern Lakehouse Connector: Delta Lake (UniForm) & Apache Hudi**
   * **Schmerzpunkt:** Während Apache Iceberg v2 (`P4`) bereits unterstützt wird, setzen Großunternehmen im Azure- und Databricks-Umfeld primär auf Delta Lake.
@@ -308,7 +349,7 @@ Nach der erfolgreichen Fertigstellung des **Governed Data Pipeline Kernels**, de
   * **Schmerzpunkt:** BI-Werkzeuge (Power BI, Tableau, DBeaver) und Python-Data-Science-Stacks benötigen Standard-ODBC/JDBC-Treiberverbindungen statt ad-hoc HTTP-Downloads.
   * **Lösung:** Vollwertiger gRPC Arrow Flight SQL Server im Gateway. Ermöglicht Multi-GB/s-Übertragungsraten direkt in Pandas/Polars unter kontinuierlicher RLS- und Consent-Durchsetzung.
 
-#### Säule 3: Enterprise Event Mesh & Continuous Compliance (`F-EVT-01`, `F-GOV-09`, `F-OPS-02`)
+#### Säule 5: Enterprise Event Mesh & Continuous Compliance (`F-EVT-01`, `F-GOV-09`, `F-OPS-02`)
 
 * **`F-EVT-01` CloudEvents v1.0 Outbound Webhook Subscriptions**
   * **Lösung:** CDC-Events (MSSQL Change Tracking / PostgreSQL Logical Replication) werden in standardisierte CloudEvents v1.0 transformiert, mandantenisoliert per Casbin ABAC gefiltert und mit HMAC-Signaturen an Drittsysteme (ERP, CRM, Microservices) gestreamt.
@@ -321,15 +362,22 @@ Nach der erfolgreichen Fertigstellung des **Governed Data Pipeline Kernels**, de
 
 ### 4.3 Aktualisierte Priorisierungsübersicht (RICE-C Matrix)
 
-| Feature | Primäre Zielgruppe | RICE-C Score | Rang | Strategischer Kernnutzen |
-| :--- | :--- | :---: | :---: | :--- |
-| **`F-OPS-02` OTel Trace-to-Audit** | SOC / Security Incident Response | **17.10** | ⚡ **Quick Win** | Lückenlose Kette vom APM-Trace zum kryptographischen WORM-Eintrag. |
-| **`P11` Delta Lake Connector (UniForm)** | Data Engineering / BI-Teams | **8.50** | 🥇 **Rang 1** | Schließt die Lücke zum Databricks-Ökosystem (Azure/AWS). |
-| **`P6` Management Studio & Visual UI** | Data Stewards, CISOs & API-Owner | **8.10** | 🥇 **Rang 1** | Visuelle Governance, What-if Sandbox, HitL-Triage & FinOps-Cockpit. |
-| **`F-EVT-01` CloudEvents Webhooks** | Integration Architects & Event Teams | **8.40** | 🥈 **Rang 2** | Standardisiertes Event-Streaming für CDC mit integriertem RLS. |
-| **`F-GOV-09` Rezertifizierungs-Kampagnen**| Compliance & Internal Audit | **8.40** | 🥈 **Rang 2** | Automatisierte SOX-/ISO-Rezertifizierung mit Fail-Closed Fristablauf. |
-| **`F-DATA-04-B` Arrow Flight SQL Server**| Data Scientists & BI Power Users | **6.38** | 🥉 **Rang 3** | Multi-GB/s ODBC/JDBC-Binärstreaming für DBeaver, Tableau & Power BI. |
-| **`F-ARCH-11` Envoy Wasm / Istio Adapter** | Cloud Platform / SRE | **2.80** | ⏳ **Später** | Exportiert PDP-Entscheidungen an Service-Mesh-Proxies. |
+$$\text{Score} = \frac{\text{Reach} \times \text{Impact} \times \text{Confidence} \times \text{ComplianceWeight}}{\text{Effort}}$$
+
+| Feature | Reach (1-10) | Impact (0.5-3) | Confidence (0.5-1.0) | Compliance (1.0-2.0) | Effort (Sprints) | RICE-C Score | Status & Rang | Strategischer Kernnutzen |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
+| **`F-GOV-09` Rezertifizierungs-Kampagnen** | 8 | 2.5 | 1.00 | 2.0 | - | - | ✅ **100% GA [Done]** | In `ConsentRecertificationWorkflowService.cs` umgesetzt (ServiceNow/Jira, WORM-Audit, Deduplizierung). |
+| **`P12` Dynamic Differential Privacy Engine**| 8 | 3.0 | 1.00 | 2.0 | - | - | ✅ **100% GA [Done]** | In `DifferentialPrivacyEngine.cs` umgesetzt (Laplace-Perturbation, k-Anonymity Guard, Budgeting). |
+| **`F-OPS-02` OTel Trace-to-Audit** | 9 | 1.9 | 1.00 | 1.0 | 0.5 | **34.20** | ⚡ **Quick Win** | Lückenlose Kette: `Activity.Current` W3C `traceparent` direkt in den HMAC-Audit-Hash eintragen. |
+| **`F-AI-11` Whitelisted MCP Persisted Tools** | 8 | 2.5 | 0.90 | 1.6 | 1.5 | **19.20** | 🥇 **Rang 1** | Prompt-Injection-Immunität (OWASP LLM01) durch typisierte Persisted Operations als MCP Tools. |
+| **`F-AI-12-B` EU AI Act Art. 10 Audit Exporter**| 7 | 2.5 | 0.85 | 2.0 | 1.5 | **19.83** | 🥇 **Rang 1** | WORM-versiegelter PDF/JSON-Audit-Zertifikatsexport für DP-Perturbationen und Trainings-/RAG-Nachweise. |
+| **`P11` Delta Lake Connector (UniForm)** | 8 | 2.5 | 0.85 | 1.0 | 2.0 | **8.50** | 🥈 **Rang 2** | Schließt die Lücke zum Databricks-Ökosystem (Azure/AWS). |
+| **`F-EVT-01` CloudEvents Webhooks** | 7 | 2.0 | 0.90 | 1.0 | 1.5 | **8.40** | 🥈 **Rang 2** | Standardisiertes Event-Streaming für CDC mit integriertem RLS. |
+| **`P6` Management Studio & Visual UI** | 9 | 3.0 | 0.90 | 1.0 | 3.0 | **8.10** | 🥈 **Rang 2** | Visuelle Governance, What-if Sandbox, HitL-Triage & FinOps-Cockpit. |
+| **`F-DATA-05` Iceberg REST Catalog Federation** | 7 | 2.5 | 0.85 | 1.5 | 3.0 | **7.44** | 🥉 **Rang 3** | Offene Catalog-Föderation mit dynamischem STS Credential Vending. |
+| **`F-DATA-04-B` Arrow Flight SQL Server**| 6 | 2.5 | 0.85 | 1.0 | 2.0 | **6.38** | 🥉 **Rang 3** | Multi-GB/s ODBC/JDBC-Binärstreaming für DBeaver, Tableau & Power BI. |
+| **`F-OPS-03` Subgraph Dynamic Feature Flags** | 6 | 1.5 | 0.90 | 1.1 | 1.5 | **5.94** | 🥉 **Rang 3** | Granulares Canary Traffic Splitting und A/B-Tests auf Feldebene. |
+| **`F-ARCH-11` Envoy Wasm / Istio Adapter** | 4 | 1.5 | 0.70 | 1.0 | 1.5 | **2.80** | ⏳ **Später** | Exportiert PDP-Entscheidungen an Service-Mesh-Proxies. |
 
 ---
 
@@ -337,7 +385,7 @@ Nach der erfolgreichen Fertigstellung des **Governed Data Pipeline Kernels**, de
 
 ```mermaid
 gantt
-    title Autheris Strategische Roadmap (Stand 2026-10-04)
+    title Autheris Strategische Roadmap (Stand Q4 2026 / 2027)
     dateFormat  YYYY-MM
     section Abgeschlossen (GA)
     Wave 1 GA (F-DOC-01, F-DBT-1..4, F-DBT-6, F-API-03/04, F-AI-02/04/06) :done, 2025-10, 2026-03
@@ -345,23 +393,30 @@ gantt
     Wave 3 GA (F-DATA-01, F-AI-05, F-PERF-09, F-GOV-06, F-PERF-10, F-PERF-11) :done, 2026-07, 2026-09
     Welle 1 & 2 GA (F-AI-07, F-CDC-03, F-OPS-01, F-AI-08, F-GOV-08) :done, 2026-09, 2026-10
     Welle 3 & 4 GA (F-PERF-12, F-SEC-04, F-DATA-04, F-DATA-03) :done, 2026-10, 2026-10
-    Next-Gen AI & RAG GA (F-AI-09, F-AI-10, Governed Kernel) :done, 2026-10, 2026-10
-    section Quick Win & Foundation
+    Next-Gen AI, RAG & Compliance GA (F-AI-09, F-AI-10, F-GOV-09, P12 DP Engine) :done, 2026-10, 2026-10
+    section Quick Win & Foundation (Q4 2026)
     F-OPS-02 OTel Trace-to-Audit Correlation :active, 2026-10, 2026-11
-    F-GOV-09 Automatisierte Rezertifizierungs-Kampagnen :2026-11, 2026-12
-    section Phase 4: Enterprise Data & Event Mesh
+    F-AI-11 Whitelisted MCP Persisted Tools :2026-10, 2026-11
+    section Phase 4: AI Compliance & Lakehouse (Q4 2026 - Q1 2027)
+    F-AI-12-B EU AI Act Art. 10 Audit Exporter :2026-11, 2026-12
     P11 Modern Lakehouse Connector: Delta Lake (UniForm) :2026-11, 2027-01
-    F-EVT-01 CloudEvents v1.0 Webhook Subscriptions :2026-12, 2027-02
-    section Phase 5: Management Studio & High-Speed Analytics
+    F-DATA-05 Iceberg REST Catalog Federation :2026-12, 2027-02
+    F-OPS-03 Subgraph Dynamic Feature Flags :2027-01, 2027-02
+    section Phase 5: Management Studio & Advanced Egress (Q1 - Q2 2027)
     P6 Management Studio & Visual Web UI (What-if, Triage, FinOps) :2027-01, 2027-04
+    F-EVT-01 CloudEvents v1.0 Webhook Subscriptions :2027-02, 2027-03
     F-DATA-04-B Standalone Arrow Flight SQL Server Endpoint :2027-03, 2027-05
 ```
 
 ### Konkrete Handlungsempfehlungen für das Produktmanagement:
 
 1. **Sofortiger Quick-Win (`F-OPS-02`):**
-   * Verknüpfung der W3C-`traceparent`-Header mit dem HMAC-Audit-Log zur nahtlosen Korrelation zwischen Distributed Tracing (APM) und WORM-Sicherheitsevents. Minimaler Aufwand (ca. 1–2 Tage) bei extrem hohem Nutzen für Enterprise-Security-Audits.
-2. **Databricks-Lakehouse-Parität (`P11`):**
-   * Bereitstellung des Delta-Lake-Konnektors zur Schließung der Marktlücke in Azure- und Databricks-Architekturen, analog zum existierenden Apache Iceberg v2 Connector.
-3. **Fokus der nächsten Haupt-Initiative (`P6` Management Studio):**
-   * Entwicklung des visuellen Management Studios (What-if Simulator, HitL Approval Triage, WORM Audit Explorer, FinOps Budget Monitor), um die führende technische Gateway-Engine auch für nicht-technische Stakeholder (Data Stewards, Compliance-Verantwortliche, CISOs) voll zugänglich zu machen.
+   * Verknüpfung der W3C-`traceparent`-Header (`Activity.Current?.TraceId`) mit dem HMAC-Audit-Log zur nahtlosen Korrelation zwischen Distributed Tracing (APM) und WORM-Sicherheitsevents. Minimaler Aufwand (< 1 Tag) bei extrem hohem Nutzen für Enterprise-Security-Audits.
+2. **Priorität 1: Prompt-Injection-Shield & Whitelisted Tools (`F-AI-11`):**
+   * Härtung der MCP-Tool-Exposition auf Basis der bestehenden `AllowedOperations` zu kryptographisch verifizierten Persisted Query Documents. Bietet 100%ige Immunität gegen Prompt Injection bei Tool-Calls.
+3. **Priorität 2: EU AI Act Art. 10 WORM-Zertifikatsexport (`F-AI-12-B`):**
+   * Aufbauend auf der bereits zu 100% umgesetzten `DifferentialPrivacyEngine` (`P12`) Bereitstellung automatisierter Compliance-Zertifikate für Aufsichtsbehörden.
+4. **Lakehouse-Standardisierung auf Iceberg REST Catalog (`F-DATA-05` & `P11`):**
+   * Unterstützung des herstellerneutralen Iceberg REST Catalog Standards inklusive dynamischem STS-Credential-Vending und Delta-Lake-Unterstützung zur vollständigen Parität mit Snowflake Polaris und Databricks Unity Catalog.
+5. **Haupt-Initiative Management Studio (`P6`):**
+   * Bereitstellung der visuellen Web-Oberfläche (What-if Sandbox, HitL Approval Triage, WORM Audit Explorer, FinOps Cockpit), um die marktführende Gateway-Engine für Business-Stakeholder und Compliance-Prüfer intuitiv bedienbar zu machen.

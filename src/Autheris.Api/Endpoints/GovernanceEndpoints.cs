@@ -276,6 +276,35 @@ public static class GovernanceEndpoints
             }
         }).RequireAuthorization();
 
+        // F-AI-12-B: EU AI Act Article 10 Compliance Certificate Endpoint
+        app.MapGet("/api/governance/eu-ai-act/article-10-certificate", async (
+            IEuAiActAuditExporter exporter,
+            HttpContext context) =>
+        {
+            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
+                               context.User.IsInRole("PrivacyAdmin") ||
+                               context.User.IsInRole("DataProtectionOfficer") ||
+                               context.User.IsInRole("Auditor") ||
+                               context.User.IsInRole("ClusterAdmin");
+
+            if (!isPrivileged)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var tenantId = context.Request.Query["tenantId"].ToString();
+            if (string.IsNullOrWhiteSpace(tenantId))
+            {
+                var reqTenant = EndpointSecurity.GetRequestTenant(context);
+                tenantId = !string.IsNullOrWhiteSpace(reqTenant.Value) ? reqTenant.Value : "default";
+            }
+
+            var cert = await exporter.GenerateCertificateAsync(tenantId, context.RequestAborted);
+            context.Response.Headers["X-Certificate-Id"] = cert.CertificateId;
+            context.Response.Headers["X-Integrity-Seal"] = cert.IntegritySealSha256;
+            return Results.Ok(cert);
+        }).RequireAuthorization();
+
         // GDPR Article 15 PDF Export for Data Protection Officers (DSB)
         app.MapGet("/api/governance/gdpr/export-pdf", async (
             string? domain,

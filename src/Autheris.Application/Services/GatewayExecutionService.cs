@@ -246,8 +246,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
             }
         }
 
-        // Audit evaluation
-        var traceId = Guid.NewGuid().ToString("N");
+        // Audit evaluation (F-OPS-02: W3C Trace Correlation)
+        var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
         await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
         {
             TenantId = tenantId,
@@ -812,7 +812,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
             }
         }
 
-        var traceId = Guid.NewGuid().ToString("N");
+        // F-OPS-02: W3C Trace Correlation
+        var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
         await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
         {
             TenantId = tenantId,

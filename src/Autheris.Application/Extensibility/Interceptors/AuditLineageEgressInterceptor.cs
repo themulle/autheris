@@ -38,19 +38,27 @@ public sealed class AuditLineageEgressInterceptor : IEgressInterceptor
             }
         }
 
-        // Compute SHA-256 hash for tamper-evident data lineage
+        // F-OPS-02: Resolve distributed W3C TraceId for correlating APM traces with WORM audit
+        var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
+        headers["X-Trace-Id"] = traceId;
+
+        // Compute SHA-256 hash for tamper-evident data lineage bound to TraceId
         byte[] payloadBytes;
         if (context.ResponseBytes.HasValue && !context.ResponseBytes.Value.IsEmpty)
         {
-            payloadBytes = context.ResponseBytes.Value.ToArray();
+            var raw = context.ResponseBytes.Value.ToArray();
+            var prefix = Encoding.UTF8.GetBytes($"{traceId}:");
+            payloadBytes = new byte[prefix.Length + raw.Length];
+            Buffer.BlockCopy(prefix, 0, payloadBytes, 0, prefix.Length);
+            Buffer.BlockCopy(raw, 0, payloadBytes, prefix.Length, raw.Length);
         }
         else if (!string.IsNullOrEmpty(context.ResponseBodyText))
         {
-            payloadBytes = Encoding.UTF8.GetBytes(context.ResponseBodyText);
+            payloadBytes = Encoding.UTF8.GetBytes($"{traceId}:{context.ResponseBodyText}");
         }
         else
         {
-            payloadBytes = Encoding.UTF8.GetBytes(context.IngressContext.Path + ":" + context.StatusCode);
+            payloadBytes = Encoding.UTF8.GetBytes($"{traceId}:{context.IngressContext.Path}:{context.StatusCode}");
         }
 
         var hash = SHA256.HashData(payloadBytes);
