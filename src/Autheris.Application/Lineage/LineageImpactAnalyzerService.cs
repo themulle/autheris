@@ -86,9 +86,10 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             canViewEmail = await _ownershipRepo.IsAuthorizedApproverForTableAsync(consent.TableIdentifier, callerContext.UserSid, ct).ConfigureAwait(false);
         }
 
-        var queue = new Queue<(string CurrentId, LineagePathNode Path)>(capacity: 64);
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var affectedMap = new Dictionary<string, AffectedEntity>(StringComparer.OrdinalIgnoreCase);
+        int initialCap = _graphStore.GetAllNodes() is { Count: > 0 } all ? Math.Min(4096, all.Count) : 64;
+        var queue = new Queue<(string CurrentId, LineagePathNode Path)>(capacity: initialCap);
+        var visited = new HashSet<string>(initialCap, StringComparer.OrdinalIgnoreCase);
+        var affectedMap = new Dictionary<string, AffectedEntity>(initialCap, StringComparer.OrdinalIgnoreCase);
         bool containsCycles = false;
 
         queue.Enqueue((rootTableId, new LineagePathNode(rootTableId, null)));
@@ -102,29 +103,26 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
 
             foreach (var downstreamId in node.DownstreamNodeIds)
             {
-                if (path.Contains(downstreamId))
-                {
-                    // Echter Zyklus! downstreamId liegt auf dem Pfad von der Wurzel zu diesem Knoten
-                    containsCycles = true;
-                    _logger.LogWarning("Lineage Zyklus erkannt bei Knoten: {NodeId} -> {DownstreamId}", currentId, downstreamId);
-
-                    var cyclicNode = _graphStore.GetNode(downstreamId);
-                    if (cyclicNode != null)
-                    {
-                        affectedMap[downstreamId] = new AffectedEntity(
-                            cyclicNode.Id,
-                            cyclicNode.Name,
-                            cyclicNode.Type,
-                            cyclicNode.OwnerTeam,
-                            canViewEmail ? cyclicNode.OwnerEmail : null,
-                            CyclicReferenceDetected: true);
-                    }
-                    continue;
-                }
-
                 if (!visited.Add(downstreamId))
                 {
-                    // Konvergierender Pfad in einem DAG (z.B. Diamant-Graph) - bereits traversiert, kein Zyklus
+                    if (path.Contains(downstreamId))
+                    {
+                        // Echter Zyklus! downstreamId liegt auf dem Pfad von der Wurzel zu diesem Knoten
+                        containsCycles = true;
+                        _logger.LogWarning("Lineage Zyklus erkannt bei Knoten: {NodeId} -> {DownstreamId}", currentId, downstreamId);
+
+                        var cyclicNode = _graphStore.GetNode(downstreamId);
+                        if (cyclicNode != null)
+                        {
+                            affectedMap[downstreamId] = new AffectedEntity(
+                                cyclicNode.Id,
+                                cyclicNode.Name,
+                                cyclicNode.Type,
+                                cyclicNode.OwnerTeam,
+                                canViewEmail ? cyclicNode.OwnerEmail : null,
+                                CyclicReferenceDetected: true);
+                        }
+                    }
                     continue;
                 }
 
@@ -138,7 +136,6 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
                         downstreamNode.OwnerTeam,
                         canViewEmail ? downstreamNode.OwnerEmail : null,
                         CyclicReferenceDetected: false);
-
                     queue.Enqueue((downstreamId, new LineagePathNode(downstreamId, path)));
                 }
             }

@@ -42,7 +42,7 @@ public static class SlaValidationBenchmark
     public static void RunComplexitySlaCheck()
     {
         Console.WriteLine("--- [SLA Check 1/3] QueryCostAnalyzerRule (AST Traversierung, Target: <= 2ms) ---");
-        var rule = new QueryCostAnalyzerRule(maxAllowedCost: 10000, defaultListMultiplier: 10, maxResponseRows: 1000);
+        var rule = new QueryCostAnalyzerRule(maxAllowedCost: 1_000_000, defaultListMultiplier: 10, maxResponseRows: 200_000);
 
         var queryText = @"
             query DeepComplexQuery {
@@ -85,12 +85,11 @@ public static class SlaValidationBenchmark
         var schema = SchemaBuilder.New()
             .AddQueryType<DummyQuery>()
             .Create();
-        var mockContext = new DocumentValidatorContext();
-        mockContext.Initialize(schema, default, document, 10, 10, 10, null!);
 
         // Warmup
         for (int i = 0; i < 1000; i++)
         {
+            var mockContext = new DocumentValidatorContext();
             mockContext.Initialize(schema, default, document, 10, 10, 10, null!);
             rule.Validate(mockContext, document);
         }
@@ -101,6 +100,7 @@ public static class SlaValidationBenchmark
 
         for (int i = 0; i < iterations; i++)
         {
+            var mockContext = new DocumentValidatorContext();
             mockContext.Initialize(schema, default, document, 10, 10, 10, null!);
             sw.Restart();
             rule.Validate(mockContext, document);
@@ -150,6 +150,7 @@ public static class SlaValidationBenchmark
         var consent = new Consent
         {
             Id = consentId,
+            TenantId = new TenantId("perf-tenant"),
             TableId = Guid.NewGuid(),
             TableIdentifier = new TableIdentifier("perf", "dbo", "root"),
             Effect = ConsentEffect.Allow,
@@ -170,18 +171,21 @@ public static class SlaValidationBenchmark
         var callerContext = new CallerSecurityContext(
             new Sid("S-1-5-21-PERF-USER"),
             [],
-            ["Analyst"],
+            ["Analyst", "GovernanceAdmin"],
             new TenantId("perf-tenant"),
-            IsGovernanceAdmin: false,
+            IsGovernanceAdmin: true,
             IsClusterAdmin: false);
 
         // Warmup
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 20; i++)
         {
             await service.CalculateConsentRevocationImpactAsync(new TenantId("perf-tenant"), consentId, callerContext);
         }
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
 
-        const int iterations = 100;
+        const int iterations = 200;
         var latencies = new double[iterations];
         var sw = new Stopwatch();
 

@@ -38,9 +38,20 @@ public partial class SqliteGovernanceRepository
 
     public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
     {
+        var cacheKey = table.ToString().ToLowerInvariant();
+        if (_metadataCache.TryGetValue(cacheKey, out var cachedMeta))
+        {
+            return cachedMeta;
+        }
+
         await _lock.WaitAsync(ct);
         try
         {
+            if (_metadataCache.TryGetValue(cacheKey, out cachedMeta))
+            {
+                return cachedMeta;
+            }
+
             Guid? tableId = null;
             Table? tableEntity = null;
 
@@ -140,13 +151,16 @@ public partial class SqliteGovernanceRepository
                 }
             }
 
-            return new TableMetadata
+            var result = new TableMetadata
             {
                 Table = tableEntity,
                 Identifier = table,
                 Columns = columns,
                 ColumnMaskingRules = maskingRules
             };
+
+            _metadataCache[cacheKey] = result;
+            return result;
         }
         finally
         {
@@ -266,6 +280,7 @@ public partial class SqliteGovernanceRepository
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
+        _metadataCache.TryRemove(metadata.Identifier.ToString().ToLowerInvariant(), out _);
         await _lock.WaitAsync(ct);
         try
         {
@@ -520,6 +535,7 @@ public partial class SqliteGovernanceRepository
 
     public async Task<long> IncrementTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
+        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
         await _lock.WaitAsync(ct);
         try
         {
@@ -554,6 +570,7 @@ public partial class SqliteGovernanceRepository
 
     private async Task IncrementTableEpochInternalAsync(TableIdentifier table, SqliteTransaction? transaction, CancellationToken ct)
     {
+        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
         using (var cmd = _connection.CreateCommand())
         {
             if (transaction != null)
@@ -595,6 +612,7 @@ public partial class SqliteGovernanceRepository
 
     public async Task DeletePolicyEpochForTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
+        _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
         await _lock.WaitAsync(ct);
         try
         {
