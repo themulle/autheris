@@ -36,6 +36,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     private readonly IPreFlightQuerySimulator? _querySimulator;
     private readonly IMcpProvenanceEnricher? _provenanceEnricher;
     private readonly IGovernedExecutionKernel? _governedKernel;
+    private readonly IPersistedToolValidator? _persistedToolValidator;
     private readonly ILogger<GatewayMcpQueryExecutor> _logger;
 
     public GatewayMcpQueryExecutor(
@@ -44,7 +45,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         ILogger<GatewayMcpQueryExecutor> logger,
         IPreFlightQuerySimulator? querySimulator = null,
         IMcpProvenanceEnricher? provenanceEnricher = null,
-        IGovernedExecutionKernel? governedKernel = null)
+        IGovernedExecutionKernel? governedKernel = null,
+        IPersistedToolValidator? persistedToolValidator = null)
     {
         _executorProvider = executorProvider ?? throw new ArgumentNullException(nameof(executorProvider));
         _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
@@ -52,6 +54,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         _querySimulator = querySimulator;
         _provenanceEnricher = provenanceEnricher;
         _governedKernel = governedKernel;
+        _persistedToolValidator = persistedToolValidator;
     }
 
     public async Task<string> ExecuteOperationAsync(
@@ -110,6 +113,13 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             try
             {
                 using var doc = JsonDocument.Parse(argumentsJson);
+                // F-AI-11: Validate tool parameters and prompt injection shield
+                if (_persistedToolValidator != null && !_persistedToolValidator.ValidateToolInvocation(tool, doc.RootElement, out var failureReason))
+                {
+                    _logger.LogWarning("MCP tool '{ToolName}' failed persisted tool validation: {Reason}", tool.Name, failureReason);
+                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, $"Invocation blocked by MCP Persisted Tool Guardrail: {failureReason}");
+                }
+
                 if (doc.RootElement.ValueKind == JsonValueKind.Object)
                 {
                     foreach (var prop in doc.RootElement.EnumerateObject())
@@ -118,9 +128,14 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                     }
                 }
             }
-            catch (Exception ex)
+            catch (JsonException ex)
             {
                 _logger.LogWarning(ex, "Failed to parse arguments JSON for tool '{ToolName}'.", tool.Name);
+                return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "Invalid arguments JSON payload.");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Unexpected error parsing arguments JSON for tool '{ToolName}'.", tool.Name);
             }
         }
 
@@ -458,6 +473,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 public static class McpErrorCodes
 {
     public const string Forbidden = "FORBIDDEN";
+    public const string InvalidParams = "INVALID_PARAMS";
     public const string ExecutionFailed = "EXECUTION_FAILED";
     public const string NotAvailable = "NOT_AVAILABLE";
 }

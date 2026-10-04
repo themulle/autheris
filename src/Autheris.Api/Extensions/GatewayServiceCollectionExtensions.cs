@@ -319,6 +319,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IPolicySimulationService, PolicySimulationService>();
         services.AddSingleton<ISchemaSunsettingService, SchemaSunsettingService>();
         services.AddSingleton<IDifferentialPrivacyEngine, DifferentialPrivacyEngine>();
+        services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
 
         // ITSM orchestration (dispatcher, recertification, outbox workers). The outbound REST clients (ServiceNow & Jira)
         // and the inbound webhook handler are registered by AddGatewayExtensions (Autheris.Extensions/Itsm).
@@ -401,6 +402,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IMcpSessionStore, McpSessionStore>();
         services.AddSingleton<IMcpToolRegistry, McpToolRegistry>();
         services.AddSingleton<Autheris.Application.Mcp.Pruning.ISemanticToolPruner, Autheris.Application.Mcp.Pruning.SemanticToolPruner>();
+        services.AddSingleton<IPersistedToolValidator, PersistedToolValidator>();
         services.AddScoped<IMcpQueryExecutor, Autheris.GraphQL.Mcp.GatewayMcpQueryExecutor>();
         services.AddScoped<IAiDataGuardrailService, AiDataGuardrailService>();
         services.AddScoped<IMcpProtocolHandler, McpProtocolHandler>();

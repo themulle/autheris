@@ -153,7 +153,6 @@ public class IngressEgressTests
 
         var responsePayload = "{\"data\":{\"user\":{\"name\":\"Alice\"}}}";
         var responseBytes = Encoding.UTF8.GetBytes(responsePayload);
-        var expectedHash = Convert.ToHexStringLower(SHA256.HashData(responseBytes));
 
         var ingressContext = new IngressContext();
         ingressContext.Items["IsBreakGlass"] = true;
@@ -168,6 +167,16 @@ public class IngressEgressTests
         };
 
         var result = await interceptor.OnEgressAsync(egressContext);
+
+        result.AdditionalHeaders.ShouldContainKey("X-Trace-Id");
+        var actualTraceId = result.AdditionalHeaders["X-Trace-Id"];
+        actualTraceId.Length.ShouldBe(32);
+
+        var prefix = Encoding.UTF8.GetBytes($"{actualTraceId}:");
+        var boundBytes = new byte[prefix.Length + responseBytes.Length];
+        Buffer.BlockCopy(prefix, 0, boundBytes, 0, prefix.Length);
+        Buffer.BlockCopy(responseBytes, 0, boundBytes, prefix.Length, responseBytes.Length);
+        var expectedHash = Convert.ToHexStringLower(SHA256.HashData(boundBytes));
 
         result.AdditionalHeaders.ShouldContainKey("X-Audit-Lineage-Hash");
         result.AdditionalHeaders["X-Audit-Lineage-Hash"].ShouldBe(expectedHash);
