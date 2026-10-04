@@ -37,7 +37,7 @@ builder.Host.UseSerilog((ctx, lc) => lc
 // 2. DI Container Validation
 builder.Host.UseDefaultServiceProvider(options =>
 {
-    options.ValidateScopes = true;
+    options.ValidateScopes = builder.Environment.IsDevelopment();
     options.ValidateOnBuild = true;
 });
 

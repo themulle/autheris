@@ -62,8 +62,8 @@ wait_for_url "http://localhost:4000" "Apollo Server"
 # 3. PostGraphile
 wait_for_url "http://localhost:5001/graphql" "PostGraphile"
 
-# 4. GqlGateway
-wait_for_url "http://localhost:5000/health" "GqlGateway"
+# 4. Autheris
+wait_for_url "http://localhost:5000/health" "Autheris"
 
 echo ""
 echo "================================================================================"
@@ -88,7 +88,7 @@ for i in {1..20}; do
          -d "$WARMUP_QUERY"
 done
 
-echo "Warming up GqlGateway..."
+echo "Warming up Autheris..."
 for i in {1..20}; do
     curl -s -o /dev/null -X POST http://localhost:5000/graphql \
          -H "Content-Type: application/json" \
@@ -102,4 +102,4 @@ echo "All GraphQL gateways are up, configured, and warmed up!"
 echo "  - Hasura:       http://localhost:8085/v1/graphql"
 echo "  - Apollo:       http://localhost:4000/"
 echo "  - PostGraphile: http://localhost:5001/graphql"
-echo "  - GqlGateway:   http://localhost:5000/graphql"
+echo "  - Autheris:     http://localhost:5000/graphql"

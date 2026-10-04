@@ -32,7 +32,7 @@ declare -A GATEWAYS=(
   ["hasura"]="http://${GATEWAY_HOST}:8085/v1/graphql"
   ["apollo"]="http://${GATEWAY_HOST}:4000/"
   ["postgraphile"]="http://${GATEWAY_HOST}:5001/graphql"
-  ["gqlgateway"]="http://${GATEWAY_HOST}:5000/graphql"
+  ["autheris"]="http://${GATEWAY_HOST}:5000/graphql"
 )
 
 # Custom headers per gateway
@@ -40,7 +40,7 @@ declare -A HEADERS=(
   ["hasura"]='{"X-Hasura-Admin-Secret":"my-secret"}'
   ["apollo"]='{}'
   ["postgraphile"]='{}'
-  ["gqlgateway"]='{"X-Test-User-Sid":"S-1-5-21-9999","GraphQL-Preflight":"1"}'
+  ["autheris"]='{"X-Test-User-Sid":"S-1-5-21-9999","GraphQL-Preflight":"1"}'
 )
 
 # Query types to test
@@ -73,10 +73,12 @@ for gw_name in "${!GATEWAYS[@]}"; do
     fi
 
     for q_type in "${QUERY_TYPES[@]}"; do
-        # For gqlgateway, adjust query if standard Chinook schema isn't natively bound
+        # For autheris, adjust query if standard Chinook schema isn't natively bound
         current_query_type="${q_type}"
-        if [ "$gw_name" == "gqlgateway" ] && [ "$q_type" == "pk" ]; then
-            current_query_type="gql_table"
+        if [ "$gw_name" == "autheris" ] || [ "$gw_name" == "gqlgateway" ]; then
+            if [ "$q_type" == "pk" ]; then
+                current_query_type="gql_table"
+            fi
         fi
 
         RESULT_FILE="${RESULTS_DIR}/${gw_name}_${q_type}_${TIMESTAMP}.json"
