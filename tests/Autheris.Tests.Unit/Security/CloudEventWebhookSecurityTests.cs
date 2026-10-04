@@ -153,7 +153,7 @@ public sealed class CloudEventWebhookSecurityTests
         var subscription = new CloudEventWebhookSubscription(
             Id: "sub-valid",
             TenantId: "tenant-A",
-            TargetUrl: "https://api.partner.com/events/v1",
+            TargetUrl: "https://example.com/events/v1",
             FilterTable: "customers",
             FilterOperations: [CdcOperation.Update],
             HmacSecret: hmacSecret

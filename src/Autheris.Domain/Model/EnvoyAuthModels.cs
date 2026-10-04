@@ -113,10 +113,8 @@ public sealed record EnvoyCheckResponse
             new("x-autheris-tenant", tenantId)
         };
 
-        if (!string.IsNullOrWhiteSpace(rlsFilter))
-        {
-            headers.Add(new("x-autheris-rls-filter", rlsFilter));
-        }
+        // SEC C-1: Do not leak raw RLS SQL filter to downstream mesh headers.
+        // Row-level security decisions remain strictly within gateway boundaries.
 
         if (additionalHeaders != null)
         {

@@ -740,12 +740,25 @@ public partial class SqliteGovernanceRepository
             using (var cmd = _connection.CreateCommand())
             {
                 cmd.Transaction = tx;
-                // SEC H-06: Only a pending request may be activated (replay/double activation yields no second consent).
+                // SEC H-06: Only a pending or newly approved request may be activated.
                 cmd.CommandText = @"UPDATE CONSENT_REQUESTS SET status = 'APPROVED'
-                                    WHERE id = @id AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL')";
+                                    WHERE id = @id AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL', 'APPROVED')";
                 cmd.Parameters.AddWithValue("@id", requestId.ToString());
                 var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
                 if (rowsAffected != 1)
+                {
+                    await tx.RollbackAsync(ct);
+                    return;
+                }
+            }
+
+            using (var checkExistingCmd = _connection.CreateCommand())
+            {
+                checkExistingCmd.Transaction = tx;
+                checkExistingCmd.CommandText = "SELECT COUNT(1) FROM CONSENTS WHERE consent_request_id = @reqId AND is_revoked = 0";
+                checkExistingCmd.Parameters.AddWithValue("@reqId", req.Id.ToString());
+                var existingCount = Convert.ToInt32(await checkExistingCmd.ExecuteScalarAsync(ct));
+                if (existingCount > 0)
                 {
                     await tx.RollbackAsync(ct);
                     return;
@@ -895,12 +908,13 @@ public partial class SqliteGovernanceRepository
         if (req == null) throw new InvalidOperationException($"Request {requestId} not found.");
 
         if (!string.Equals(req.Status, "PENDING", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase))
+            !string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(req.Status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"Request {requestId} is in status '{req.Status}' and cannot be approved.");
         }
 
-        if (req.RequesterSid == approverSid)
+        if (req.RequesterSid == approverSid || approverSid.Value.EndsWith(req.RequesterSid.Value, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Funktionstrennung verletzt: Antragsteller darf eigenen Antrag nicht genehmigen.");
         }
@@ -919,13 +933,14 @@ public partial class SqliteGovernanceRepository
             }
 
             if (!string.Equals(currentStatus, "PENDING", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(currentStatus, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase))
+                !string.Equals(currentStatus, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(currentStatus, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException($"Request {requestId} is in status '{currentStatus}' and cannot be approved.");
             }
 
             // Four-eyes principle / Separation of duties check at repository layer
-            if (req.RequesterSid == approverSid)
+            if (req.RequesterSid == approverSid || approverSid.Value.EndsWith(req.RequesterSid.Value, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Funktionstrennung verletzt: Der Antragsteller kann den eigenen Consent-Antrag nicht genehmigen.");
             }

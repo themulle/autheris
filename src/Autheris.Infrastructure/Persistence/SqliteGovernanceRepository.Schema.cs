@@ -283,9 +283,15 @@ public partial class SqliteGovernanceRepository
             var colName = colDef.Split(' ')[0];
             if (!existingCols.Contains(colName))
             {
-                using var alterCmd = _connection.CreateCommand();
-                alterCmd.CommandText = $"ALTER TABLE CONSENT_REQUESTS ADD COLUMN {colDef};";
-                alterCmd.ExecuteNonQuery();
+                try
+                {
+                    using var alterCmd = _connection.CreateCommand();
+                    alterCmd.CommandText = $"ALTER TABLE CONSENT_REQUESTS ADD COLUMN {colDef};";
+                    alterCmd.ExecuteNonQuery();
+                }
+                catch (SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+                {
+                }
             }
         }
     }
@@ -312,9 +318,15 @@ public partial class SqliteGovernanceRepository
             var colName = colDef.Split(' ')[0];
             if (!existingCols.Contains(colName))
             {
-                using var alterCmd = _connection.CreateCommand();
-                alterCmd.CommandText = $"ALTER TABLE CONSENTS ADD COLUMN {colDef};";
-                alterCmd.ExecuteNonQuery();
+                try
+                {
+                    using var alterCmd = _connection.CreateCommand();
+                    alterCmd.CommandText = $"ALTER TABLE CONSENTS ADD COLUMN {colDef};";
+                    alterCmd.ExecuteNonQuery();
+                }
+                catch (SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+                {
+                }
             }
         }
     }
@@ -346,9 +358,15 @@ public partial class SqliteGovernanceRepository
             var colName = colDef.Split(' ')[0];
             if (!existingCols.Contains(colName))
             {
-                using var alterCmd = _connection.CreateCommand();
-                alterCmd.CommandText = $"ALTER TABLE TABLES ADD COLUMN {colDef};";
-                alterCmd.ExecuteNonQuery();
+                try
+                {
+                    using var alterCmd = _connection.CreateCommand();
+                    alterCmd.CommandText = $"ALTER TABLE TABLES ADD COLUMN {colDef};";
+                    alterCmd.ExecuteNonQuery();
+                }
+                catch (SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+                {
+                }
             }
         }
     }
@@ -378,9 +396,15 @@ public partial class SqliteGovernanceRepository
             var colName = colDef.Split(' ')[0];
             if (!existingCols.Contains(colName))
             {
-                using var alterCmd = _connection.CreateCommand();
-                alterCmd.CommandText = $"ALTER TABLE TABLE_COLUMNS ADD COLUMN {colDef};";
-                alterCmd.ExecuteNonQuery();
+                try
+                {
+                    using var alterCmd = _connection.CreateCommand();
+                    alterCmd.CommandText = $"ALTER TABLE TABLE_COLUMNS ADD COLUMN {colDef};";
+                    alterCmd.ExecuteNonQuery();
+                }
+                catch (SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+                {
+                }
             }
         }
     }
@@ -417,9 +441,15 @@ public partial class SqliteGovernanceRepository
             var colName = colDef.Split(' ')[0];
             if (!existingCols.Contains(colName))
             {
-                using var alterCmd = _connection.CreateCommand();
-                alterCmd.CommandText = $"ALTER TABLE CONSENT_ROW_FILTERS ADD COLUMN {colDef};";
-                alterCmd.ExecuteNonQuery();
+                try
+                {
+                    using var alterCmd = _connection.CreateCommand();
+                    alterCmd.CommandText = $"ALTER TABLE CONSENT_ROW_FILTERS ADD COLUMN {colDef};";
+                    alterCmd.ExecuteNonQuery();
+                }
+                catch (SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+                {
+                }
             }
         }
     }
@@ -792,18 +822,30 @@ public partial class SqliteGovernanceRepository
 
         if (!existingCols.Contains("tenant_id"))
         {
-            using var alterCmd = _connection.CreateCommand();
-            alterCmd.CommandText = "ALTER TABLE AUDIT_LOG_ENTRIES ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant';";
-            alterCmd.ExecuteNonQuery();
+            try
+            {
+                using var alterCmd = _connection.CreateCommand();
+                alterCmd.CommandText = "ALTER TABLE AUDIT_LOG_ENTRIES ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'legacy-single-tenant';";
+                alterCmd.ExecuteNonQuery();
+            }
+            catch (SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+            {
+            }
         }
 
         // SEC H-17: gap-free sequence number (part of the v2 entry hash). Legacy rows keep NULL and are
         // verified with the v1 payload; their sequence is their ordinal position in rowid order.
         if (!existingCols.Contains("seq"))
         {
-            using var alterCmd = _connection.CreateCommand();
-            alterCmd.CommandText = "ALTER TABLE AUDIT_LOG_ENTRIES ADD COLUMN seq INTEGER;";
-            alterCmd.ExecuteNonQuery();
+            try
+            {
+                using var alterCmd = _connection.CreateCommand();
+                alterCmd.CommandText = "ALTER TABLE AUDIT_LOG_ENTRIES ADD COLUMN seq INTEGER;";
+                alterCmd.ExecuteNonQuery();
+            }
+            catch (SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+            {
+            }
         }
 
         using (var seqIdxCmd = _connection.CreateCommand())

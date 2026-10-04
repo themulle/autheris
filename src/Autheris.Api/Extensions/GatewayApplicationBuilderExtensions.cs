@@ -101,8 +101,11 @@ public static class GatewayApplicationBuilderExtensions
                 }
             }
 
+            bool isWebSocketUpgrade = context.WebSockets.IsWebSocketRequest ||
+                                      string.Equals(context.Request.Headers["Upgrade"], "websocket", StringComparison.OrdinalIgnoreCase);
+
             bool isGraphQLEndpoint = (HttpMethods.IsPost(context.Request.Method) ||
-                 (HttpMethods.IsGet(context.Request.Method) && context.Request.Query.ContainsKey("query")))
+                 (HttpMethods.IsGet(context.Request.Method) && (context.Request.Query.ContainsKey("query") || isWebSocketUpgrade)))
                 && context.Request.Path.StartsWithSegments(endpoint);
 
             bool isStateChangingRestEndpoint = (HttpMethods.IsPost(context.Request.Method) ||
@@ -125,7 +128,7 @@ public static class GatewayApplicationBuilderExtensions
                                             context.Request.Headers.ContainsKey("Referer") ||
                                             context.Request.Headers.ContainsKey("Sec-Fetch-Site");
 
-                bool requiresCsrfProtection = isGraphQLEndpoint || (!isLoginEndpoint && hasBrowserIndicators);
+                bool requiresCsrfProtection = (isGraphQLEndpoint && !isWebSocketUpgrade) || (!isLoginEndpoint && hasBrowserIndicators);
 
                 if (requiresCsrfProtection)
                 {

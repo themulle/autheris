@@ -283,8 +283,19 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
 
                     if (field.SelectionSet != null)
                     {
-                        cost = SafeAdd(cost, CalculateMaskingCost(field.SelectionSet, fragments, activeFragments, maskingCostCache));
-                        cost = SafeAdd(cost, CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions));
+                        // SEC M-9: Multiply nested list selection costs by effectiveRows using saturating arithmetic
+                        var maskingCost = CalculateMaskingCost(field.SelectionSet, fragments, activeFragments, maskingCostCache);
+                        var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions);
+                        var totalChild = SafeAdd(maskingCost, childCost);
+                        if (isList)
+                        {
+                            var nestedCost = (int)Math.Min((long)int.MaxValue, (long)totalChild * Math.Max(1, effectiveRows));
+                            cost = SafeAdd(cost, nestedCost);
+                        }
+                        else
+                        {
+                            cost = SafeAdd(cost, totalChild);
+                        }
                     }
                 }
                 else
@@ -293,7 +304,8 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     cost = SafeAdd(cost, isList ? 5 : 1);
                     if (field.SelectionSet != null)
                     {
-                        cost = SafeAdd(cost, CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions));
+                        var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions);
+                        cost = SafeAdd(cost, childCost);
                     }
                 }
             }

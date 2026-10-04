@@ -423,7 +423,13 @@ public sealed class ForwardAuthOptions
     /// </summary>
     public bool TrustUpstreamGroupSids { get; init; } = false;
 
-    /// <summary>RR-L2-02: Optional allowlist of tenant IDs accepted from the tenant header (empty = any).</summary>
+    /// <summary>
+    /// SEC H-1: When true, the proxy-asserted tenant header (X-Forwarded-Tenant) is honored, provided it is in AllowedTenantIds.
+    /// When false (default), the tenant header is ignored and DefaultTenantId is used.
+    /// </summary>
+    public bool TrustUpstreamTenant { get; init; } = false;
+
+    /// <summary>SEC H-1: Allowlist of tenant IDs accepted from the tenant header when TrustUpstreamTenant is true. Must not be empty when TrustUpstreamTenant is true.</summary>
     public List<string> AllowedTenantIds { get; init; } = [];
 }
 

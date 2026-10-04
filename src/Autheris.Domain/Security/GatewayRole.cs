@@ -11,8 +11,9 @@ public enum GatewayRole
 {
     // Global Platform & Administration
     ClusterAdmin = 1,
-    GovernanceAdmin = 2,
-    SecurityAuditor = 3,
+    TenantAdmin = 2,
+    GovernanceAdmin = 3,
+    SecurityAuditor = 4,
 
     // Data Domain & Stewardship (Can be tenant-scoped)
     DataOwner = 10,
@@ -26,10 +27,11 @@ public static class GatewayRoleExtensions
     private static readonly Dictionary<string, GatewayRole> NameToRole = new(StringComparer.OrdinalIgnoreCase)
     {
         ["ClusterAdmin"] = GatewayRole.ClusterAdmin,
-        ["PlatformAdmin"] = GatewayRole.ClusterAdmin,
-        ["GatewayAdmin"] = GatewayRole.ClusterAdmin,
+        ["PlatformAdmin"] = GatewayRole.TenantAdmin,
+        ["GatewayAdmin"] = GatewayRole.TenantAdmin,
+        ["TenantAdmin"] = GatewayRole.TenantAdmin,
         ["GovernanceAdmin"] = GatewayRole.GovernanceAdmin,
-        ["PrivacyAdmin"] = GatewayRole.GovernanceAdmin,
+        ["PrivacyAdmin"] = GatewayRole.TenantAdmin,
         ["DataProtectionOfficer"] = GatewayRole.SecurityAuditor,
         ["SecurityAuditor"] = GatewayRole.SecurityAuditor,
         ["Auditor"] = GatewayRole.SecurityAuditor,
@@ -71,6 +73,12 @@ public static class GatewayRoleExtensions
         if (granted == GatewayRole.ClusterAdmin)
         {
             return true;
+        }
+
+        // TenantAdmin implies GovernanceAdmin, stewardship, publishing, auditing, consumer (within tenant scope, never ClusterAdmin)
+        if (granted == GatewayRole.TenantAdmin)
+        {
+            return required is GatewayRole.GovernanceAdmin or GatewayRole.DataOwner or GatewayRole.DataSteward or GatewayRole.SchemaPublisher or GatewayRole.SecurityAuditor or GatewayRole.Consumer;
         }
 
         // GovernanceAdmin implies stewardship, publishing, auditing, consumer

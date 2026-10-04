@@ -46,10 +46,10 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
         var deliveryId = Guid.NewGuid().ToString("N");
         var sw = Stopwatch.StartNew();
 
-        // SEC-EVT-01: SSRF Validation
-        if (!IsValidTargetUrl(subscription.TargetUrl, out var ssrfError))
+        // SEC-EVT-01: SSRF Validation using central EgressUrlPolicy
+        if (!Uri.TryCreate(subscription.TargetUrl, UriKind.Absolute, out var targetUri))
         {
-            _logger.LogWarning("Webhook delivery {DeliveryId} aborted: {Error}", deliveryId, ssrfError);
+            _logger.LogWarning("Webhook delivery {DeliveryId} aborted: Invalid absolute URI.", deliveryId);
             return new CloudEventDeliveryResult(
                 deliveryId,
                 subscription.Id,
@@ -57,7 +57,24 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
                 false,
                 400,
                 sw.Elapsed,
-                $"Target URL rejected by SSRF guardrail: {ssrfError}");
+                "Target URL rejected by SSRF guardrail: Invalid absolute URI.");
+        }
+
+        try
+        {
+            await Autheris.Application.Security.EgressUrlPolicy.ValidateResolvedAsync(targetUri, isDev: false, ct: ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Webhook delivery {DeliveryId} aborted by EgressUrlPolicy: {Error}", deliveryId, ex.Message);
+            return new CloudEventDeliveryResult(
+                deliveryId,
+                subscription.Id,
+                envelope.Id,
+                false,
+                400,
+                sw.Elapsed,
+                $"Target URL rejected by SSRF guardrail: {ex.Message}");
         }
 
         try
@@ -128,68 +145,5 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
                 sw.Elapsed,
                 ex.Message);
         }
-    }
-
-    private static bool IsValidTargetUrl(string url, out string error)
-    {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-        {
-            error = "Invalid absolute URI.";
-            return false;
-        }
-
-        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-        {
-            error = $"Scheme '{uri.Scheme}' is not allowed.";
-            return false;
-        }
-
-        var host = uri.Host.Trim().ToLowerInvariant();
-        if (host == "localhost" || host.EndsWith(".localhost"))
-        {
-            error = "Localhost is blocked by SSRF guardrail.";
-            return false;
-        }
-
-        if (IPAddress.TryParse(host, out var ip))
-        {
-            if (IPAddress.IsLoopback(ip))
-            {
-                error = "Loopback addresses are blocked by SSRF guardrail.";
-                return false;
-            }
-
-            var bytes = ip.GetAddressBytes();
-            if (bytes.Length == 4)
-            {
-                // 10.0.0.0/8
-                if (bytes[0] == 10)
-                {
-                    error = "Private network address (10.0.0.0/8) is blocked by SSRF guardrail.";
-                    return false;
-                }
-                // 172.16.0.0/12
-                if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
-                {
-                    error = "Private network address (172.16.0.0/12) is blocked by SSRF guardrail.";
-                    return false;
-                }
-                // 192.168.0.0/16
-                if (bytes[0] == 192 && bytes[1] == 168)
-                {
-                    error = "Private network address (192.168.0.0/16) is blocked by SSRF guardrail.";
-                    return false;
-                }
-                // 169.254.0.0/16 (Link-local & AWS metadata)
-                if (bytes[0] == 169 && bytes[1] == 254)
-                {
-                    error = "Link-local cloud metadata address (169.254.0.0/16) is blocked by SSRF guardrail.";
-                    return false;
-                }
-            }
-        }
-
-        error = string.Empty;
-        return true;
     }
 }

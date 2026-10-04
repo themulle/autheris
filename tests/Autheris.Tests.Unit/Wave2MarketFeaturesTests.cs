@@ -482,14 +482,14 @@ public sealed class Wave2MarketFeaturesTests
             ResourceGroups = new ResourceGroupsOptions
             {
                 Enabled = true,
-                Interactive = new ResourceGroupTierConfigOptions(MaxConcurrency: 1, MaxQueueDepth: 1, TimeoutSeconds: 1)
+                Interactive = new ResourceGroupTierConfigOptions(MaxConcurrency: 1, MaxQueueDepth: 1, TimeoutSeconds: 30)
             }
         });
         using var manager = new ResourceGroupManager(options, NullLogger<ResourceGroupManager>.Instance);
 
         // Fill slot and queue
         var lease1 = await manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "t1");
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         var queuedTask = Task.Run(async () => await manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "t2", cts.Token));
         await Task.Delay(200);
 

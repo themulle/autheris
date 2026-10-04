@@ -38,11 +38,13 @@ public static class FinOpsEndpoints
             var callerTenant = user.FindFirst("tenant_id")?.Value
                                ?? user.FindFirst("tid")?.Value;
 
-            // Non-cluster admins can only query their own tenant
-            var isClusterAdmin = GatewayPolicies.HasAnyRole(user, ["ClusterAdmin", "GovernanceAdmin"]);
-            if (!isClusterAdmin && !string.IsNullOrWhiteSpace(callerTenant))
+            // SEC M-4: Non-canonical cluster admins can only query their own tenant
+            var isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(user);
+            if (!isClusterAdmin)
             {
-                tenantId = callerTenant;
+                tenantId = !string.IsNullOrWhiteSpace(callerTenant)
+                    ? callerTenant
+                    : EndpointSecurity.GetRequestTenant(request.HttpContext).Value;
             }
 
             var records = new List<FocusCostRecord>();

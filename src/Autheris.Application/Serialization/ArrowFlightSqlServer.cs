@@ -89,8 +89,10 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
             throw new SecurityException("Authentication required to list Flight SQL tables.");
         }
 
+        // SEC M-7: Enforce strict tenant isolation; never expose tables belonging to other tenants
         var tables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         var filtered = tables
+            .Where(t => string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase))
             .Where(t => string.IsNullOrWhiteSpace(schemaPattern) ||
                         string.Equals(t.Identifier.Schema, schemaPattern, StringComparison.OrdinalIgnoreCase))
             .Select(t => new FlightSqlTableInfo(

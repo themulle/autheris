@@ -164,10 +164,8 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             }
         }
 
-        // 4. Construct Claims Principal - Always namespace ForwardAuth user SIDs to prevent arbitrary AD/Windows SID spoofing
-        var userSid = username.StartsWith("S-1-5-21-FORWARD-", StringComparison.OrdinalIgnoreCase)
-            ? username
-            : $"S-1-5-21-FORWARD-{username.ToUpperInvariant()}";
+        // 4. Construct Claims Principal - SEC M-8: Always namespace ForwardAuth user SIDs as USR to prevent SID collision or group spoofing
+        var userSid = $"S-1-5-21-FORWARD-USR-{username.ToUpperInvariant()}";
 
         var claims = new List<Claim>
         {
@@ -240,29 +238,44 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
             }
         }
 
-        // Extract Tenant (strictly configured or default)
+        // Extract Tenant (SEC H-1: Only accept tenant header if TrustUpstreamTenant is explicitly enabled and in non-empty AllowedTenantIds)
         var tenantHeader = !string.IsNullOrWhiteSpace(forwardAuthOptions.TenantHeader)
             ? forwardAuthOptions.TenantHeader
             : "X-Forwarded-Tenant";
 
         string? tenant = null;
-        if (headers.TryGetValue(tenantHeader, out var customTenantVal) && !string.IsNullOrWhiteSpace(customTenantVal))
+        if (forwardAuthOptions.TrustUpstreamTenant)
         {
-            tenant = customTenantVal.ToString().Trim();
-            if (forwardAuthOptions.AllowedTenantIds is { Count: > 0 } allowedTenants &&
-                !allowedTenants.Contains(tenant, StringComparer.OrdinalIgnoreCase))
+            if (headers.TryGetValue(tenantHeader, out var customTenantVal) && !string.IsNullOrWhiteSpace(customTenantVal))
             {
-                Logger.LogWarning("ForwardAuth rejected: tenant '{Tenant}' is not in ForwardAuth.AllowedTenantIds.", tenant);
-                return Task.FromResult(AuthenticateResult.Fail("Tenant not permitted for ForwardAuth."));
+                var candidateTenant = customTenantVal.ToString().Trim();
+                if (forwardAuthOptions.AllowedTenantIds is { Count: > 0 } allowedTenants &&
+                    allowedTenants.Contains(candidateTenant, StringComparer.OrdinalIgnoreCase))
+                {
+                    tenant = candidateTenant;
+                }
+                else
+                {
+                    Logger.LogWarning("ForwardAuth rejected: TrustUpstreamTenant is enabled but tenant '{Tenant}' is not in non-empty ForwardAuth.AllowedTenantIds.", candidateTenant);
+                    return Task.FromResult(AuthenticateResult.Fail("Tenant not permitted for ForwardAuth."));
+                }
             }
-        }
-        else if (!string.IsNullOrWhiteSpace(forwardAuthOptions.DefaultTenantId))
-        {
-            tenant = forwardAuthOptions.DefaultTenantId;
+            else
+            {
+                Logger.LogWarning("ForwardAuth rejected: TrustUpstreamTenant is enabled but missing required tenant header '{TenantHeader}'.", tenantHeader);
+                return Task.FromResult(AuthenticateResult.Fail("Missing required tenant header for ForwardAuth."));
+            }
         }
         else
         {
-            tenant = TenantId.LegacySingleTenant.Value;
+            if (!string.IsNullOrWhiteSpace(forwardAuthOptions.DefaultTenantId))
+            {
+                tenant = forwardAuthOptions.DefaultTenantId;
+            }
+            else
+            {
+                tenant = TenantId.LegacySingleTenant.Value;
+            }
         }
 
         claims.Add(new Claim("tenant_id", tenant));

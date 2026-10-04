@@ -112,8 +112,14 @@ public static class SchemaRegistryEndpoints
         app.MapGet("/api/schema-registry/{service}/latest", async (
             string service,
             ISchemaRegistryService registry,
+            ClaimsPrincipal principal,
             CancellationToken ct) =>
         {
+            if (!GatewayPolicies.HasAnyRole(principal, GatewayPolicies.SchemaPublisherRoles))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var latest = await registry.GetLatestSchemaAsync(service, ct);
             return latest != null ? Results.Ok(latest) : Results.NotFound(new { error = $"No active schema found for service '{service}'." });
         }).RequireAuthorization();
@@ -121,16 +127,28 @@ public static class SchemaRegistryEndpoints
         app.MapGet("/api/schema-registry/{service}/history", async (
             string service,
             ISchemaRegistryService registry,
+            ClaimsPrincipal principal,
             CancellationToken ct) =>
         {
+            if (!GatewayPolicies.HasAnyRole(principal, GatewayPolicies.SchemaPublisherRoles))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var history = await registry.GetSchemaHistoryAsync(service, ct);
             return Results.Ok(history);
         }).RequireAuthorization();
 
         app.MapGet("/api/schema-registry/services", async (
             ISchemaRegistryService registry,
+            ClaimsPrincipal principal,
             CancellationToken ct) =>
         {
+            if (!GatewayPolicies.HasAnyRole(principal, GatewayPolicies.SchemaPublisherRoles))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             var services = await registry.GetAllServicesAsync(ct);
             return Results.Ok(services);
         }).RequireAuthorization();

@@ -39,8 +39,8 @@ public sealed class HttpEndpointDescriptor
     public string PathTemplate { get; init; } = string.Empty; // e.g. "/api/v1/customers/{id}"
     public string Method { get; init; } = "GET";
 
-    // Auth & Header Delegation
-    public HttpAuthMode AuthMode { get; init; } = HttpAuthMode.ForwardBearerToken;
+    // Auth & Header Delegation (SEC M-6: Default to None to prevent arbitrary token forwarding to external specs)
+    public HttpAuthMode AuthMode { get; init; } = HttpAuthMode.None;
     public string? ApiKeyHeaderName { get; init; }
     public string? ApiKeySecretName { get; init; }
     public IReadOnlyDictionary<string, string> ForwardHeaders { get; init; } = new Dictionary<string, string>();

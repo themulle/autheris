@@ -24,17 +24,20 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
     private readonly IConsentRepository _consentRepository;
     private readonly IConsentResolutionService _resolutionService;
     private readonly IPolicyEnforcementService? _policyEnforcementService;
+    private readonly IClientIpResolver? _clientIpResolver;
     private readonly GatewayOptions? _options;
 
     public DefaultCrossDomainAccessResolver(
         IConsentRepository consentRepository,
         IConsentResolutionService resolutionService,
         IPolicyEnforcementService? policyEnforcementService = null,
+        IClientIpResolver? clientIpResolver = null,
         IOptions<GatewayOptions>? options = null)
     {
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
         _policyEnforcementService = policyEnforcementService;
+        _clientIpResolver = clientIpResolver;
         _options = options?.Value;
     }
 
@@ -88,9 +91,9 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
                 attributes[claim.Type] = claim.Value;
             }
 
-            var clientIp = (principal.FindFirst("ip")?.Value is { Length: > 0 } ipStr && IPAddress.TryParse(ipStr, out var parsedIp))
-                ? parsedIp
-                : IPAddress.Loopback;
+            // SEC H-4: Client IP must be resolved from trusted socket / proxy via IClientIpResolver.
+            // Never trust client-controlled 'ip' token claims, and fail closed to IPAddress.None.
+            var clientIp = _clientIpResolver?.ResolveClientIp() ?? IPAddress.None;
 
             var purpose = principal.FindFirst("purpose")?.Value ?? principal.FindFirst("purpose_id")?.Value;
 

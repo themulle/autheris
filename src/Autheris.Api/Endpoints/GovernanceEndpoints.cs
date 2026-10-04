@@ -218,13 +218,32 @@ public static class GovernanceEndpoints
             IDifferentialPrivacyEngine dpEngine,
             HttpContext context) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
+            var isCanonicalClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
+            var isPrivileged = isCanonicalClusterAdmin ||
+                               context.User.IsInRole("GovernanceAdmin") ||
                                context.User.IsInRole("PrivacyAdmin") ||
-                               context.User.IsInRole("DataProtectionOfficer") ||
-                               context.User.IsInRole("ClusterAdmin");
+                               context.User.IsInRole("DataProtectionOfficer");
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            // SEC M-4: Non-canonical cluster admins may only reset clients within their tenant scope
+            if (!isCanonicalClusterAdmin)
+            {
+                var reqTenant = EndpointSecurity.GetRequestTenant(context).Value;
+                if (!string.IsNullOrWhiteSpace(reqTenant))
+                {
+                    var colonIdx = clientId.IndexOf(':');
+                    if (colonIdx > 0)
+                    {
+                        var targetTenant = clientId[..colonIdx];
+                        if (!string.Equals(targetTenant, reqTenant, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return Results.StatusCode(StatusCodes.Status403Forbidden);
+                        }
+                    }
+                }
             }
 
             await dpEngine.ResetBudgetAsync(clientId, context.RequestAborted);
@@ -292,8 +311,9 @@ public static class GovernanceEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
+            var isCanonicalClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
             var tenantId = context.Request.Query["tenantId"].ToString();
-            if (string.IsNullOrWhiteSpace(tenantId))
+            if (!isCanonicalClusterAdmin || string.IsNullOrWhiteSpace(tenantId))
             {
                 var reqTenant = EndpointSecurity.GetRequestTenant(context);
                 tenantId = !string.IsNullOrWhiteSpace(reqTenant.Value) ? reqTenant.Value : "default";

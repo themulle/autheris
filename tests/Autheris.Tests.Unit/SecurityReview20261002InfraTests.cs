@@ -775,7 +775,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("[{\"id\":1}]", Encoding.UTF8, "application/json") };
         });
 
-        var descriptor = new HttpEndpointDescriptor { BaseUrl = "https://api.example.com", PathTemplate = "/v1/customers" };
+        var descriptor = new HttpEndpointDescriptor { BaseUrl = "https://api.example.com", PathTemplate = "/v1/customers", AuthMode = HttpAuthMode.ForwardBearerToken };
         var headers = new Dictionary<string, string[]> { ["Authorization"] = ["Bearer user-token-123"] };
 
         var rows = await executor.ExecuteAsync(HttpContext(descriptor, User(), headers: headers));
