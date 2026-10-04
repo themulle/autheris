@@ -3,10 +3,10 @@
 set -euo pipefail
 
 SERVER_NAME="${SERVER_NAME:-gql-bench-runner}"
-SERVER_TYPE="${SERVER_TYPE:-cpx41}" # 8 AMD vCPUs, 16 GB RAM (~€27/mo or €0.04/hr)
+SERVER_TYPE="${SERVER_TYPE:-cpx42}" # 8 AMD vCPUs, 16 GB RAM
 LOCATION="${LOCATION:-fsn1}"        # Falkenstein
 IMAGE="${IMAGE:-ubuntu-24.04}"
-SSH_KEY_NAME="${SSH_KEY_NAME:-id_ed25519}"
+SSH_KEY_NAME="${SSH_KEY_NAME:-themu@DellLatitude}"
 CLOUD_INIT_FILE="$(dirname "$0")/cloud-init.yaml"
 
 echo "=== Hetzner Cloud Benchmark Server Provisioning ==="

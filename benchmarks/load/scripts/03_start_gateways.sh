@@ -8,13 +8,17 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCH_DIR="$(dirname "$SCRIPT_DIR")"
 DOCKER_COMPOSE_FILE="${BENCH_DIR}/docker/docker-compose.yml"
+if [ -n "${DATABASE_URL:-}" ] || [ -n "${DB_HOST:-}" ]; then
+    echo "Remote database specified. Using gateway-only compose definition..."
+    DOCKER_COMPOSE_FILE="${BENCH_DIR}/docker/docker-compose.gateway.yml"
+fi
 METADATA_DIR="${BENCH_DIR}/configs/hasura-metadata"
 
 echo "================================================================================"
 echo " [Step 3/5] Starting & Configuring GraphQL Gateway Targets"
 echo "================================================================================"
 
-echo "Building and launching containers..."
+echo "Building and launching containers using ${DOCKER_COMPOSE_FILE}..."
 docker compose -f "${DOCKER_COMPOSE_FILE}" up -d --build
 
 echo "Waiting for services to become available..."

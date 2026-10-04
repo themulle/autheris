@@ -7,16 +7,16 @@ set -euo pipefail
 
 LOCATION="${LOCATION:-fsn1}"            # Falkenstein datacenter
 NETWORK_NAME="${NETWORK_NAME:-bench-net}"
-SSH_KEY_NAME="${SSH_KEY_NAME:-id_ed25519}"
+SSH_KEY_NAME="${SSH_KEY_NAME:-themu@DellLatitude}"
 CLOUD_INIT_FILE="$(dirname "$0")/cloud-init.yaml"
 
 # Sizing according to official Hasura / TechEmpower benchmark standards:
-# - DB Server: CPX41 (8 vCPU, 16 GB RAM) or CCX33
+# - DB Server: CPX42 (8 vCPU, 16 GB RAM)
 # - Gateway SUT: CCX33 (8 Dedicated AMD vCPUs, 32 GB RAM) -> No CPU-Stealing!
-# - Client/k6: CPX31 (4 vCPU, 8 GB RAM)
-TYPE_DB="${TYPE_DB:-cpx41}"
+# - Client/k6: CPX32 (4 vCPU, 8 GB RAM)
+TYPE_DB="${TYPE_DB:-cpx42}"
 TYPE_GATEWAY="${TYPE_GATEWAY:-ccx33}"
-TYPE_CLIENT="${TYPE_CLIENT:-cpx31}"
+TYPE_CLIENT="${TYPE_CLIENT:-cpx32}"
 
 echo "================================================================================"
 echo " Hetzner Cloud 3-Tier Benchmark Infrastructure Provisioning"
