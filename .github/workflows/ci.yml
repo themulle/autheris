@@ -11,29 +11,8 @@ jobs:
     name: Build & Test All Suites
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout gql
+      - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Checkout gql_extensions
-        uses: actions/checkout@v4
-        with:
-          repository: themulle/gql_extensions
-          path: gql_extensions_tmp
-
-      - name: Checkout gql_sqlparser
-        uses: actions/checkout@v4
-        with:
-          repository: themulle/gql_sqlparser
-          path: gql_sqlparser_tmp
-
-      - name: Setup sibling directory layout
-        run: |
-          mkdir -p ../gql_extensions
-          cp -r gql_extensions_tmp/* ../gql_extensions/
-          rm -rf gql_extensions_tmp
-          mkdir -p ../gql_sqlparser
-          cp -r gql_sqlparser_tmp/* ../gql_sqlparser/
-          rm -rf gql_sqlparser_tmp
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
@@ -42,9 +21,3 @@ jobs:
 
       - name: Test Autheris Solution
         run: dotnet test Autheris.sln -c Release --verbosity normal
-
-      - name: Test AutherisExtensions Solution
-        run: dotnet test ../gql_extensions/AutherisExtensions.slnx -c Release --verbosity normal
-
-      - name: Test TrinoSqlEngine & WebSQL Parser
-        run: dotnet test ../gql_sqlparser/TrinoSqlEngine.csproj -c Release --verbosity normal

@@ -624,7 +624,7 @@ public sealed class Wave3MarketFeaturesTests
     private static async Task<Dictionary<string, object?[]>> ReadParquetColumnsAsync(byte[] data)
     {
         using var stream = new System.IO.MemoryStream(data);
-        using var reader = await Parquet.ParquetReader.CreateAsync(stream);
+        await using var reader = await Parquet.ParquetReader.CreateAsync(stream);
         var result = new Dictionary<string, object?[]>(StringComparer.Ordinal);
         var fields = reader.Schema.GetDataFields();
         foreach (var field in fields)
@@ -638,10 +638,33 @@ public sealed class Wave3MarketFeaturesTests
         }
 
         using var rowGroup = reader.OpenRowGroupReader(0);
+        var rowCount = (int)rowGroup.RowCount;
         foreach (var field in fields)
         {
-            var column = await rowGroup.ReadColumnAsync(field);
-            result[field.Name] = column.Data.Cast<object?>().ToArray();
+            if (field.ClrType == typeof(long) || field.ClrType == typeof(long?))
+            {
+                var mem = new long?[rowCount];
+                await rowGroup.ReadAsync(field, mem.AsMemory());
+                result[field.Name] = mem.Cast<object?>().ToArray();
+            }
+            else if (field.ClrType == typeof(bool) || field.ClrType == typeof(bool?))
+            {
+                var mem = new bool?[rowCount];
+                await rowGroup.ReadAsync(field, mem.AsMemory());
+                result[field.Name] = mem.Cast<object?>().ToArray();
+            }
+            else if (field.ClrType == typeof(double) || field.ClrType == typeof(double?))
+            {
+                var mem = new double?[rowCount];
+                await rowGroup.ReadAsync(field, mem.AsMemory());
+                result[field.Name] = mem.Cast<object?>().ToArray();
+            }
+            else
+            {
+                var mem = new string?[rowCount];
+                await rowGroup.ReadAsync(field, mem.AsMemory());
+                result[field.Name] = mem.Cast<object?>().ToArray();
+            }
         }
 
         return result;

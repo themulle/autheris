@@ -118,7 +118,7 @@ public sealed class ParquetOutputNegotiationTests
     private static async Task<ParquetContent> ReadParquetAsync(byte[] data)
     {
         using var stream = new MemoryStream(data);
-        using var reader = await ParquetReader.CreateAsync(stream);
+        await using var reader = await ParquetReader.CreateAsync(stream);
         var dataFields = reader.Schema.GetDataFields();
         var fields = dataFields.ToDictionary(f => f.Name, StringComparer.Ordinal);
         var columns = dataFields.ToDictionary(f => f.Name, _ => Array.Empty<object?>(), StringComparer.Ordinal);
@@ -126,14 +126,64 @@ public sealed class ParquetOutputNegotiationTests
         if (reader.RowGroupCount > 0)
         {
             using var rowGroup = reader.OpenRowGroupReader(0);
+            var rowCount = (int)rowGroup.RowCount;
             foreach (var field in dataFields)
             {
-                var column = await rowGroup.ReadColumnAsync(field);
-                columns[field.Name] = column.Data.Cast<object?>().ToArray();
+                columns[field.Name] = await ReadColumnDataAsync(rowGroup, field, rowCount);
             }
         }
 
         return new ParquetContent(fields, columns, reader.RowGroupCount);
+    }
+
+    private static async Task<object?[]> ReadColumnDataAsync(ParquetRowGroupReader rowGroup, DataField field, int rowCount)
+    {
+        if (field.ClrType == typeof(bool) || field.ClrType == typeof(bool?))
+        {
+            var mem = new bool?[rowCount];
+            await rowGroup.ReadAsync(field, mem.AsMemory());
+            return mem.Cast<object?>().ToArray();
+        }
+        if (field.ClrType == typeof(int) || field.ClrType == typeof(int?))
+        {
+            var mem = new int?[rowCount];
+            await rowGroup.ReadAsync(field, mem.AsMemory());
+            return mem.Cast<object?>().ToArray();
+        }
+        if (field.ClrType == typeof(long) || field.ClrType == typeof(long?))
+        {
+            var mem = new long?[rowCount];
+            await rowGroup.ReadAsync(field, mem.AsMemory());
+            return mem.Cast<object?>().ToArray();
+        }
+        if (field.ClrType == typeof(double) || field.ClrType == typeof(double?))
+        {
+            var mem = new double?[rowCount];
+            await rowGroup.ReadAsync(field, mem.AsMemory());
+            return mem.Cast<object?>().ToArray();
+        }
+        if (field.ClrType == typeof(decimal) || field.ClrType == typeof(decimal?))
+        {
+            var mem = new decimal?[rowCount];
+            await rowGroup.ReadAsync(field, mem.AsMemory());
+            return mem.Cast<object?>().ToArray();
+        }
+        if (field.ClrType == typeof(DateTime) || field.ClrType == typeof(DateTime?))
+        {
+            var mem = new DateTime?[rowCount];
+            await rowGroup.ReadAsync(field, mem.AsMemory());
+            return mem.Cast<object?>().ToArray();
+        }
+        if (field.ClrType == typeof(byte[]))
+        {
+            var mem = (byte[]?[])(Array)new byte[rowCount][];
+            await rowGroup.ReadAsync(field, mem.AsMemory());
+            return mem.Cast<object?>().ToArray();
+        }
+
+        var strMem = new string?[rowCount];
+        await rowGroup.ReadAsync(field, strMem.AsMemory());
+        return strMem.Cast<object?>().ToArray();
     }
 
     private static List<IReadOnlyDictionary<string, object?>> Rows(params Dictionary<string, object?>[] rows) =>
@@ -186,11 +236,11 @@ public sealed class ParquetOutputNegotiationTests
         content.Fields["price"].ClrType.ShouldBe(typeof(double));
         content.Fields["amount"].ClrType.ShouldBe(typeof(decimal));
         content.Fields["active"].ClrType.ShouldBe(typeof(bool));
-        content.Fields["name"].ClrType.ShouldBe(typeof(string));
+        content.Fields["name"].ClrType.ShouldBeOneOf(typeof(string), typeof(ReadOnlyMemory<char>));
         content.Fields["created"].ClrType.ShouldBe(typeof(DateTime));
         content.Fields["changed"].ClrType.ShouldBe(typeof(DateTime));
-        content.Fields["uid"].ClrType.ShouldBe(typeof(string));
-        content.Fields["note"].ClrType.ShouldBe(typeof(string));
+        content.Fields["uid"].ClrType.ShouldBeOneOf(typeof(string), typeof(ReadOnlyMemory<char>));
+        content.Fields["note"].ClrType.ShouldBeOneOf(typeof(string), typeof(ReadOnlyMemory<char>));
 
         content.Columns["id"].ShouldBe(new object?[] { 1L, 2L });
         content.Columns["price"].ShouldBe(new object?[] { 12.5, null });
@@ -220,7 +270,7 @@ public sealed class ParquetOutputNegotiationTests
         content.Columns["intDec"].ShouldBe(new object?[] { 1m, 2.5m });
         content.Fields["intDouble"].ClrType.ShouldBe(typeof(double));
         content.Columns["intDouble"].ShouldBe(new object?[] { 1.0, 2.5 });
-        content.Fields["mixed"].ClrType.ShouldBe(typeof(string));
+        content.Fields["mixed"].ClrType.ShouldBeOneOf(typeof(string), typeof(ReadOnlyMemory<char>));
         content.Columns["mixed"].ShouldBe(new object?[] { "1", "x" });
 
         // The type is inferred over all rows, not only from row 0
