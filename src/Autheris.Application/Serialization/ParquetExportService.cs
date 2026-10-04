@@ -133,32 +133,33 @@ public sealed partial class ParquetExportService : IParquetExportService
         // 3. Infer one Parquet type per column over all rows and materialize the column arrays
         var fields = new List<DataField>(columns.Count);
         var arrays = new List<Array>(columns.Count);
+        var kinds = new List<ColumnKind>(columns.Count);
         foreach (var column in columns)
         {
             var kind = InferKind(normalizedRows, column);
             var (field, data) = BuildColumn(column, kind, normalizedRows);
             fields.Add(field);
             arrays.Add(data);
+            kinds.Add(kind);
         }
 
         // DataFields must be attached to a schema before DataColumns can be created.
         var schema = new ParquetSchema(fields);
         var compression = ResolveCompression(egressOptions.Compression);
+        var parquetOptions = new ParquetOptions { CompressionMethod = compression };
 
         byte[] parquetData;
         using (var ms = new MemoryStream())
         {
-            using (var writer = await ParquetWriter.CreateAsync(schema, ms, cancellationToken: ct).ConfigureAwait(false))
+            await using (var writer = await ParquetWriter.CreateAsync(schema, ms, parquetOptions, cancellationToken: ct).ConfigureAwait(false))
             {
-                writer.CompressionMethod = compression;
-
                 // An empty result is a valid Parquet file with the schema and zero row groups.
                 if (rowCount > 0)
                 {
                     using var rowGroup = writer.CreateRowGroup();
                     for (var i = 0; i < fields.Count; i++)
                     {
-                        await rowGroup.WriteColumnAsync(new DataColumn(fields[i], arrays[i]), ct).ConfigureAwait(false);
+                        await WriteColumnAsync(rowGroup, fields[i], kinds[i], arrays[i], ct).ConfigureAwait(false);
                     }
                 }
             }
@@ -191,6 +192,43 @@ public sealed partial class ParquetExportService : IParquetExportService
         }
 
         return CompressionMethod.Snappy;
+    }
+
+    private static async Task WriteColumnAsync(
+        ParquetRowGroupWriter rowGroup,
+        DataField field,
+        ColumnKind kind,
+        Array data,
+        CancellationToken ct)
+    {
+        switch (kind)
+        {
+            case ColumnKind.Boolean:
+                await rowGroup.WriteAsync<bool>(field, ((bool?[])data).AsMemory(), cancellationToken: ct).ConfigureAwait(false);
+                break;
+            case ColumnKind.Int32:
+                await rowGroup.WriteAsync<int>(field, ((int?[])data).AsMemory(), cancellationToken: ct).ConfigureAwait(false);
+                break;
+            case ColumnKind.Int64:
+                await rowGroup.WriteAsync<long>(field, ((long?[])data).AsMemory(), cancellationToken: ct).ConfigureAwait(false);
+                break;
+            case ColumnKind.Double:
+                await rowGroup.WriteAsync<double>(field, ((double?[])data).AsMemory(), cancellationToken: ct).ConfigureAwait(false);
+                break;
+            case ColumnKind.Decimal:
+                await rowGroup.WriteAsync<decimal>(field, ((decimal?[])data).AsMemory(), cancellationToken: ct).ConfigureAwait(false);
+                break;
+            case ColumnKind.DateTime:
+                await rowGroup.WriteAsync<DateTime>(field, ((DateTime?[])data).AsMemory(), cancellationToken: ct).ConfigureAwait(false);
+                break;
+            case ColumnKind.Binary:
+                await rowGroup.WriteAsync(field, (byte[]?[])data).ConfigureAwait(false);
+                break;
+            case ColumnKind.String:
+            default:
+                await rowGroup.WriteAsync(field, (string?[])data).ConfigureAwait(false);
+                break;
+        }
     }
 
     private static List<string> ResolveColumns(
