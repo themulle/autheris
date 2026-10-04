@@ -428,8 +428,9 @@ public static class GatewayServiceCollectionExtensions
         // Hierarchical Parquet Egress (F-DATA-01)
         services.AddSingleton<IParquetExportService, ParquetExportService>();
 
-        // Native Apache Arrow Flight SQL & IPC Egress (F-DATA-04)
+        // Native Apache Arrow Flight SQL & IPC Egress (F-DATA-04 & F-DATA-04-B)
         services.AddSingleton<Autheris.Application.Serialization.IArrowExportService, Autheris.Application.Serialization.ArrowExportService>();
+        services.AddSingleton<Autheris.Application.Serialization.IArrowFlightSqlServer, Autheris.Application.Serialization.ArrowFlightSqlServer>();
 
         // Embedded In-Memory OLAP via DuckDB.NET (F-DATA-03)
         services.AddSingleton<Autheris.Application.Olap.IDuckDbOlapEngine>(sp =>
@@ -457,6 +458,14 @@ public static class GatewayServiceCollectionExtensions
         {
             services.AddHostedService(sp => sp.GetRequiredService<Autheris.Infrastructure.Streaming.PostgreSqlLogicalReplicationService>());
         }
+
+        // F-EVT-01: CloudEvents v1.0 Outbound Webhook Subscriptions
+        services.AddSingleton<Autheris.Application.Events.Interfaces.ICloudEventTransformer, Autheris.Application.Events.Services.CloudEventTransformer>();
+        services.AddSingleton<Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore, Autheris.Application.Events.Services.InMemoryCloudEventSubscriptionStore>();
+        services.AddHttpClient<Autheris.Application.Events.Interfaces.ICloudEventWebhookDispatcher, Autheris.Application.Events.Services.CloudEventWebhookDispatcher>();
+
+        // F-ARCH-11: Envoy External Authorization & Istio Service Mesh Adapter
+        services.AddSingleton<Autheris.Application.Mesh.Interfaces.IEnvoyExtAuthzService, Autheris.Application.Mesh.Services.EnvoyExtAuthzService>();
 
         // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01)
         services.AddHttpClient<Autheris.Application.Diagnostics.Shadowing.TrafficShadowingService>();

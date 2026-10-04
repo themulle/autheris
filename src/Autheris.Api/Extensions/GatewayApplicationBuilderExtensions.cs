@@ -332,7 +332,10 @@ public static class GatewayApplicationBuilderExtensions
         app.MapFinOpsEndpoints();
         app.MapRebacEndpoints();
         app.MapArrowExportEndpoints();
+        app.MapArrowFlightSqlEndpoints();
         app.MapDuckDbOlapEndpoints();
+        app.MapIcebergRestCatalogEndpoints();
+        app.MapEnvoyExtAuthzEndpoints();
         app.MapWebSqlEndpoints();
         app.MapSqlEndpoints(gatewayOptions);
         app.MapDevPortalEndpoints(gatewayOptions);

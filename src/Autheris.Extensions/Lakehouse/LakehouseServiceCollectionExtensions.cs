@@ -48,8 +48,12 @@ public static class LakehouseServiceCollectionExtensions
         services.AddSingleton<ILakehouseStorageProvider>(sp => sp.GetRequiredService<CompositeLakehouseStorageProvider>());
         services.AddSingleton<IIcebergMetadataReader, IcebergMetadataReader>();
         services.AddSingleton<IIcebergPartitionPruner, IcebergPartitionPruner>();
+        services.AddSingleton<IDeltaMetadataReader, DeltaMetadataReader>();
+        services.AddSingleton<IDeltaPartitionPruner, DeltaPartitionPruner>();
         services.AddScoped<ILakehouseDataSourceExecutor, LakehouseDataSourceExecutor>();
         services.AddScoped<IDataSourceExecutor, LakehouseDataSourceExecutor>();
+        services.AddScoped<IDataSourceExecutor, DeltaLakeDataSourceExecutor>();
+        services.AddScoped<IIcebergRestCatalogFederationService, IcebergRestCatalogFederationService>();
 
         return services;
     }

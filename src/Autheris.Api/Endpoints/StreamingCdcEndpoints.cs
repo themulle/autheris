@@ -85,6 +85,50 @@ public static class StreamingCdcEndpoints
         }).RequireAuthorization()
           .WithRequestBodyLimit(10 * 1024 * 1024); // SEC M-01: explicit large-body exception to the global Kestrel limit
 
+        // F-EVT-01: CloudEvents Outbound Webhook Subscriptions
+        app.MapGet("/api/v1/cdc/subscriptions", async (
+            HttpContext context,
+            Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
+        {
+            var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
+            if (string.IsNullOrWhiteSpace(tenantId))
+            {
+                tenantId = "default";
+            }
+            var subs = await store.ListSubscriptionsAsync(tenantId, context.RequestAborted);
+            return Results.Ok(subs);
+        }).RequireAuthorization();
+
+        app.MapPost("/api/v1/cdc/subscriptions", async (
+            HttpContext context,
+            Autheris.Domain.Model.CloudEventWebhookSubscription subscription,
+            Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
+        {
+            var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
+            if (string.IsNullOrWhiteSpace(tenantId))
+            {
+                tenantId = "default";
+            }
+
+            var securedSub = subscription with { TenantId = tenantId };
+            await store.RegisterSubscriptionAsync(securedSub, context.RequestAborted);
+            return Results.Created($"/api/v1/cdc/subscriptions/{securedSub.Id}", securedSub);
+        }).RequireAuthorization();
+
+        app.MapDelete("/api/v1/cdc/subscriptions/{id}", async (
+            string id,
+            HttpContext context,
+            Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore store) =>
+        {
+            var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
+            if (string.IsNullOrWhiteSpace(tenantId))
+            {
+                tenantId = "default";
+            }
+            var removed = await store.RemoveSubscriptionAsync(tenantId, id, context.RequestAborted);
+            return removed ? Results.NoContent() : Results.NotFound();
+        }).RequireAuthorization();
+
         return app;
     }
 

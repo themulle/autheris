@@ -30,6 +30,7 @@ public sealed class Table
     public bool IsActive { get; init; } = true;
 
     public DataSourceType DataSourceType { get; init; } = DataSourceType.Sql;
+    public string? Location { get; init; }
     public HttpEndpointDescriptor? HttpEndpoint { get; init; }
     public string? PluginName { get; init; }
 
