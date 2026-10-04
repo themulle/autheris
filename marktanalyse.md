@@ -2,9 +2,9 @@
 
 **Rolle:** Principal Enterprise Product Manager & Platform Strategist  
 **Marktumfeld:** 2025/2026 Enterprise API & GraphQL Federation (Apollo GraphOS / Router v2.17+, Hasura DDN v3, WunderGraph Cosmo, PostgREST, StepZen, Immuta, hasura/graphql-bench)  
-**Status:** Aktualisiert nach vollständiger Umsetzung aller Initiativen aus **Wave 1**, **Wave 2** und **Wave 3** sowie den Next-Gen AI/RAG- und Data-Governance-Features **`F-AI-09`**, **`F-AI-10`**, **`F-DATA-03`** und **`F-DATA-04`** (100% GA). Umgesetzte Features sind in dieser Marktanalyse als `[Done]` referenziert; ihre detaillierte Dokumentation befindet sich in [`docs/features/`](file:///root/lis-git/gql/gql/docs/features/).  
+**Status:** Aktualisiert nach vollständiger Umsetzung aller Initiativen aus **Wave 1**, **Wave 2** und **Wave 3** sowie den Next-Gen AI/RAG- und Data-Governance-Features **`F-AI-09`**, **`F-AI-10`**, **`F-DATA-03`** und **`F-DATA-04`** (100% GA). Umgesetzte Features sind in dieser Marktanalyse als `[Done]` referenziert; ihre detaillierte Dokumentation befindet sich in [`docs/features/`](docs/features/).  
 **Ziel:** Strategische Markt- und Wettbewerbsbewertung, Dokumentation von Differenzierungs-Moats und Priorisierung der verbleibenden Roadmap-Themen entlang des RICE-C-Modells.  
-**Feature-Dokumentation:** [`docs/features/README.md`](file:///root/lis-git/gql/gql/docs/features/README.md)  
+**Feature-Dokumentation:** [`docs/features/README.md`](docs/features/README.md)  
 
 ---
 
@@ -57,53 +57,53 @@ Der Markt für Enterprise GraphQL und API Gateways wird 2025/2026 durch fundamen
 
 ## 2. Reifegrad- & Vollständigkeitsprüfung vorhandener Features
 
-Übersicht aller Gateway-Module zur Dokumentation der Marktreife. Umgesetzte Features sind als `[Done]` markiert; die Detailbeschreibungen liegen unter [`docs/features/`](file:///root/lis-git/gql/gql/docs/features/).
+Übersicht aller Gateway-Module zur Dokumentation der Marktreife. Umgesetzte Features sind als `[Done]` markiert; die Detailbeschreibungen liegen unter [`docs/features/`](docs/features/).
 
 | Modul / Feature | Reifegrad | Status | Dokumentation |
 | :--- | :---: | :---: | :--- |
-| **Data Catalog Connectors (`P1`)** | **100% (GA)** | ✅ **[Done]** | [p01-data-catalog-connectors.md](file:///root/lis-git/gql/gql/docs/features/p01-data-catalog-connectors.md) |
-| **dbt Data Health Circuit Breaker (`F-DBT-1`)** | **100% (GA)** | ✅ **[Done]** | [f-dbt-01-health-circuit-breaker.md](file:///root/lis-git/gql/gql/docs/features/f-dbt-01-health-circuit-breaker.md) |
-| **dbt Model Contract Enforcement (`F-DBT-2`)** | **100% (GA)** | ✅ **[Done]** | [f-dbt-02-contract-enforcement.md](file:///root/lis-git/gql/gql/docs/features/f-dbt-02-contract-enforcement.md) |
-| **dbt Live-Telemetry Exposures (`F-DBT-3`)** | **100% (GA)** | ✅ **[Done]** | [f-dbt-03-telemetry-exposures.md](file:///root/lis-git/gql/gql/docs/features/f-dbt-03-telemetry-exposures.md) |
-| **dbt Orchestrator & Cloud Webhooks (`F-DBT-4`)** | **100% (GA)** | ✅ **[Done]** | [f-dbt-04-orchestrator-webhooks.md](file:///root/lis-git/gql/gql/docs/features/f-dbt-04-orchestrator-webhooks.md) |
-| **dbt Policy & RLS Auto-Sync (`F-DBT-6`)** | **100% (GA)** | ✅ **[Done]** | [f-dbt-06-policy-rls-sync.md](file:///root/lis-git/gql/gql/docs/features/f-dbt-06-policy-rls-sync.md) |
-| **Dual-Access Exposure: OData v4 & Dynamic OpenAPI 3.1 (`F-API-03`)** | **100% (GA)** | ✅ **[Done]** | [f-api-03-odata-openapi.md](file:///root/lis-git/gql/gql/docs/features/f-api-03-odata-openapi.md) |
-| **Upstream Web API Ingestion via OpenAPI (`F-API-04`)** | **100% (GA)** | ✅ **[Done]** | [f-api-04-openapi-ingestion.md](file:///root/lis-git/gql/gql/docs/features/f-api-04-openapi-ingestion.md) |
-| **Canonical System Metadaten & Monitoring (`F-API-07`)** | **100% (GA)** | ✅ **[Done]** | [f-api-07-system-metadata-monitoring.md](file:///root/lis-git/gql/gql/docs/features/f-api-07-system-metadata-monitoring.md) |
-| **Omnichannel Documentation Passthrough (`F-DOC-01`)** | **100% (GA)** | ✅ **[Done]** | [f-doc-01-omnichannel-documentation.md](file:///root/lis-git/gql/gql/docs/features/f-doc-01-omnichannel-documentation.md) |
-| **Declarative SQL-to-API Engine (`F-SQL-01`)** | **100% (GA)** | ✅ **[Done]** | [f-sql-01-declarative-sql-endpoints.md](file:///root/lis-git/gql/gql/docs/features/f-sql-01-declarative-sql-endpoints.md) |
-| **Governed WebSQL Engine (`F-DATA-02`)** | **100% (GA)** | ✅ **[Done]** | [f-data-02-governed-websql.md](file:///root/lis-git/gql/gql/docs/features/f-data-02-governed-websql.md) |
-| **Hierarchischer Parquet Egress (`F-DATA-01`)** | **100% (GA)** | ✅ **[Done]** | [f-data-01-parquet-egress.md](file:///root/lis-git/gql/gql/docs/features/f-data-01-parquet-egress.md) |
-| **Semantic MCP Compiler & Schema Grounding (`F-AI-02`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-02-semantic-mcp-compiler.md](file:///root/lis-git/gql/gql/docs/features/f-ai-02-semantic-mcp-compiler.md) |
-| **Dynamic Few-Shot Golden Query Injection (`F-AI-03`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-03-golden-queries.md](file:///root/lis-git/gql/gql/docs/features/f-ai-03-golden-queries.md) |
-| **Pre-Flight Query Simulator & Safety Limits (`F-AI-04`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-04-preflight-simulator.md](file:///root/lis-git/gql/gql/docs/features/f-ai-04-preflight-simulator.md) |
-| **Human-in-the-Loop Step-Up Approval (`F-AI-05`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-05-hitl-step-up-approval.md](file:///root/lis-git/gql/gql/docs/features/f-ai-05-hitl-step-up-approval.md) |
-| **Explainable AI & Provenance Footnoter (`F-AI-06`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-06-provenance-footnoting.md](file:///root/lis-git/gql/gql/docs/features/f-ai-06-provenance-footnoting.md) |
-| **Hierarchical Resource Groups (`F-PERF-08`)** | **100% (GA)** | ✅ **[Done]** | [f-perf-08-hierarchical-resource-groups.md](file:///root/lis-git/gql/gql/docs/features/f-perf-08-hierarchical-resource-groups.md) |
-| **GraphQL-to-SQL AST Single-Query Compiler (`F-PERF-09`)** | **100% (GA)** | ✅ **[Done]** | [f-perf-09-single-query-pushdown.md](file:///root/lis-git/gql/gql/docs/features/f-perf-09-single-query-pushdown.md) |
-| **Split-Engine & Zero-LOH Result Pipelining (`F-PERF-10`)** | **100% (GA)** | ✅ **[Done]** | [f-perf-10-streaming-pipelining.md](file:///root/lis-git/gql/gql/docs/features/f-perf-10-streaming-pipelining.md) |
-| **Multi-Tenant Isolated Query Plan Cache (`F-PERF-11`)** | **100% (GA)** | ✅ **[Done]** | [f-perf-11-query-plan-cache.md](file:///root/lis-git/gql/gql/docs/features/f-perf-11-query-plan-cache.md) |
-| **Native MSSQL Change Tracking Ingestion (`F-CDC-02`)** | **100% (GA)** | ✅ **[Done]** | [f-cdc-02-mssql-change-tracking.md](file:///root/lis-git/gql/gql/docs/features/f-cdc-02-mssql-change-tracking.md) |
-| **Mehrstufige Pushdown-Kaskaden & Cross-Domain Joins (`F-GOV-06`)** | **100% (GA)** | ✅ **[Done]** | [f-gov-06-cross-domain-joins.md](file:///root/lis-git/gql/gql/docs/features/f-gov-06-cross-domain-joins.md) |
-| **Standardisiertes Connector-SPI nach Trino-Muster (`F-ARCH-10`)** | **100% (GA)** | ✅ **[Done]** | [f-arch-10-connector-spi.md](file:///root/lis-git/gql/gql/docs/features/f-arch-10-connector-spi.md) |
-| **OpenSchema Mode & Catalog Slicing (`F-OPEN-01`)** | **100% (GA)** | ✅ **[Done]** | [f-open-01-openschema-catalog-slicing.md](file:///root/lis-git/gql/gql/docs/features/f-open-01-openschema-catalog-slicing.md) |
-| **Zero-Config Developer Quickstart (`F-DX-01`)** | **100% (GA)** | ✅ **[Done]** | [f-dx-01-developer-quickstart.md](file:///root/lis-git/gql/gql/docs/features/f-dx-01-developer-quickstart.md) |
-| **Modern Lakehouse Connector Apache Iceberg v2 (`P4`)** | **100% (GA)** | ✅ **[Done]** | [p04-lakehouse-connector.md](file:///root/lis-git/gql/gql/docs/features/p04-lakehouse-connector.md) |
-| **Subscriptions & Realtime Events via Debezium (`P5`)** | **100% (GA)** | ✅ **[Done]** | [p05-subscriptions-realtime.md](file:///root/lis-git/gql/gql/docs/features/p05-subscriptions-realtime.md) |
-| **Subgraph Federation Router via Fusion (`P7`)** | **100% (GA)** | ✅ **[Done]** | [p07-subgraph-federation.md](file:///root/lis-git/gql/gql/docs/features/p07-subgraph-federation.md) |
-| **WORM Audit Logging & Consent Sealing (`P8`)** | **100% (GA)** | ✅ **[Done]** | [p08-worm-audit-sealing.md](file:///root/lis-git/gql/gql/docs/features/p08-worm-audit-sealing.md) |
-| **Native C# Ingress/Egress Pipeline (`P9`)** | **100% (GA)** | ✅ **[Done]** | [p09-native-csharp-pipeline.md](file:///root/lis-git/gql/gql/docs/features/p09-native-csharp-pipeline.md) |
-| **Dynamic Semantic Schema Pruning (`F-AI-07`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-07-dynamic-semantic-schema-pruning.md](file:///root/lis-git/gql/gql/docs/features/f-ai-07-dynamic-semantic-schema-pruning.md) |
-| **Zero-Kafka PostgreSQL CDC (`F-CDC-03`)** | **100% (GA)** | ✅ **[Done]** | [f-cdc-03-zero-kafka-postgresql-cdc.md](file:///root/lis-git/gql/gql/docs/features/f-cdc-03-zero-kafka-postgresql-cdc.md) |
-| **AST-Aware Traffic Shadowing & Dark Replay (`F-OPS-01`)** | **100% (GA)** | ✅ **[Done]** | [f-ops-01-traffic-shadowing-dark-replay.md](file:///root/lis-git/gql/gql/docs/features/f-ops-01-traffic-shadowing-dark-replay.md) |
-| **FOCUS FinOps Accounting für Token & Compute (`F-AI-08`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-08-focus-finops-accounting.md](file:///root/lis-git/gql/gql/docs/features/f-ai-08-focus-finops-accounting.md) |
-| **Dynamic Schema Contracts & Tag-Projektion (`F-GOV-08`)** | **100% (GA)** | ✅ **[Done]** | [f-gov-08-schema-contracts-tag-projection.md](file:///root/lis-git/gql/gql/docs/features/f-gov-08-schema-contracts-tag-projection.md) |
-| **Incremental Delivery (@defer & @stream) (`F-PERF-12`)** | **100% (GA)** | ✅ **[Done]** | [f-perf-12-incremental-delivery.md](file:///root/lis-git/gql/gql/docs/features/f-perf-12-incremental-delivery.md) |
-| **Relationship-Based Access Control ReBAC (`F-SEC-04`)** | **100% (GA)** | ✅ **[Done]** | [f-sec-04-rebac-openfga.md](file:///root/lis-git/gql/gql/docs/features/f-sec-04-rebac-openfga.md) |
-| **Native Apache Arrow Flight SQL Egress (`F-DATA-04`)** | **100% (GA)** | ✅ **[Done]** | [f-data-04-arrow-flight-sql.md](file:///root/lis-git/gql/gql/docs/features/f-data-04-arrow-flight-sql.md) |
-| **Embedded In-Memory OLAP via DuckDB.NET (`F-DATA-03`)** | **100% (GA)** | ✅ **[Done]** | [f-data-03-duckdb-olap.md](file:///root/lis-git/gql/gql/docs/features/f-data-03-duckdb-olap.md) |
-| **Native Vector Database & RAG Egress (`F-AI-09`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-09-native-vector-database-rag-egress.md](file:///root/lis-git/gql/gql/docs/features/f-ai-09-native-vector-database-rag-egress.md) |
-| **Semantic Query Cache & Policy Recommendation (`F-AI-10`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-10-semantic-cache-policy-recommendation.md](file:///root/lis-git/gql/gql/docs/features/f-ai-10-semantic-cache-policy-recommendation.md) |
+| **Data Catalog Connectors (`P1`)** | **100% (GA)** | ✅ **[Done]** | [p01-data-catalog-connectors.md](docs/features/p01-data-catalog-connectors.md) |
+| **dbt Data Health Circuit Breaker (`F-DBT-1`)** | **100% (GA)** | ✅ **[Done]** | [f-dbt-01-health-circuit-breaker.md](docs/features/f-dbt-01-health-circuit-breaker.md) |
+| **dbt Model Contract Enforcement (`F-DBT-2`)** | **100% (GA)** | ✅ **[Done]** | [f-dbt-02-contract-enforcement.md](docs/features/f-dbt-02-contract-enforcement.md) |
+| **dbt Live-Telemetry Exposures (`F-DBT-3`)** | **100% (GA)** | ✅ **[Done]** | [f-dbt-03-telemetry-exposures.md](docs/features/f-dbt-03-telemetry-exposures.md) |
+| **dbt Orchestrator & Cloud Webhooks (`F-DBT-4`)** | **100% (GA)** | ✅ **[Done]** | [f-dbt-04-orchestrator-webhooks.md](docs/features/f-dbt-04-orchestrator-webhooks.md) |
+| **dbt Policy & RLS Auto-Sync (`F-DBT-6`)** | **100% (GA)** | ✅ **[Done]** | [f-dbt-06-policy-rls-sync.md](docs/features/f-dbt-06-policy-rls-sync.md) |
+| **Dual-Access Exposure: OData v4 & Dynamic OpenAPI 3.1 (`F-API-03`)** | **100% (GA)** | ✅ **[Done]** | [f-api-03-odata-openapi.md](docs/features/f-api-03-odata-openapi.md) |
+| **Upstream Web API Ingestion via OpenAPI (`F-API-04`)** | **100% (GA)** | ✅ **[Done]** | [f-api-04-openapi-ingestion.md](docs/features/f-api-04-openapi-ingestion.md) |
+| **Canonical System Metadaten & Monitoring (`F-API-07`)** | **100% (GA)** | ✅ **[Done]** | [f-api-07-system-metadata-monitoring.md](docs/features/f-api-07-system-metadata-monitoring.md) |
+| **Omnichannel Documentation Passthrough (`F-DOC-01`)** | **100% (GA)** | ✅ **[Done]** | [f-doc-01-omnichannel-documentation.md](docs/features/f-doc-01-omnichannel-documentation.md) |
+| **Declarative SQL-to-API Engine (`F-SQL-01`)** | **100% (GA)** | ✅ **[Done]** | [f-sql-01-declarative-sql-endpoints.md](docs/features/f-sql-01-declarative-sql-endpoints.md) |
+| **Governed WebSQL Engine (`F-DATA-02`)** | **100% (GA)** | ✅ **[Done]** | [f-data-02-governed-websql.md](docs/features/f-data-02-governed-websql.md) |
+| **Hierarchischer Parquet Egress (`F-DATA-01`)** | **100% (GA)** | ✅ **[Done]** | [f-data-01-parquet-egress.md](docs/features/f-data-01-parquet-egress.md) |
+| **Semantic MCP Compiler & Schema Grounding (`F-AI-02`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-02-semantic-mcp-compiler.md](docs/features/f-ai-02-semantic-mcp-compiler.md) |
+| **Dynamic Few-Shot Golden Query Injection (`F-AI-03`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-03-golden-queries.md](docs/features/f-ai-03-golden-queries.md) |
+| **Pre-Flight Query Simulator & Safety Limits (`F-AI-04`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-04-preflight-simulator.md](docs/features/f-ai-04-preflight-simulator.md) |
+| **Human-in-the-Loop Step-Up Approval (`F-AI-05`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-05-hitl-step-up-approval.md](docs/features/f-ai-05-hitl-step-up-approval.md) |
+| **Explainable AI & Provenance Footnoter (`F-AI-06`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-06-provenance-footnoting.md](docs/features/f-ai-06-provenance-footnoting.md) |
+| **Hierarchical Resource Groups (`F-PERF-08`)** | **100% (GA)** | ✅ **[Done]** | [f-perf-08-hierarchical-resource-groups.md](docs/features/f-perf-08-hierarchical-resource-groups.md) |
+| **GraphQL-to-SQL AST Single-Query Compiler (`F-PERF-09`)** | **100% (GA)** | ✅ **[Done]** | [f-perf-09-single-query-pushdown.md](docs/features/f-perf-09-single-query-pushdown.md) |
+| **Split-Engine & Zero-LOH Result Pipelining (`F-PERF-10`)** | **100% (GA)** | ✅ **[Done]** | [f-perf-10-streaming-pipelining.md](docs/features/f-perf-10-streaming-pipelining.md) |
+| **Multi-Tenant Isolated Query Plan Cache (`F-PERF-11`)** | **100% (GA)** | ✅ **[Done]** | [f-perf-11-query-plan-cache.md](docs/features/f-perf-11-query-plan-cache.md) |
+| **Native MSSQL Change Tracking Ingestion (`F-CDC-02`)** | **100% (GA)** | ✅ **[Done]** | [f-cdc-02-mssql-change-tracking.md](docs/features/f-cdc-02-mssql-change-tracking.md) |
+| **Mehrstufige Pushdown-Kaskaden & Cross-Domain Joins (`F-GOV-06`)** | **100% (GA)** | ✅ **[Done]** | [f-gov-06-cross-domain-joins.md](docs/features/f-gov-06-cross-domain-joins.md) |
+| **Standardisiertes Connector-SPI nach Trino-Muster (`F-ARCH-10`)** | **100% (GA)** | ✅ **[Done]** | [f-arch-10-connector-spi.md](docs/features/f-arch-10-connector-spi.md) |
+| **OpenSchema Mode & Catalog Slicing (`F-OPEN-01`)** | **100% (GA)** | ✅ **[Done]** | [f-open-01-openschema-catalog-slicing.md](docs/features/f-open-01-openschema-catalog-slicing.md) |
+| **Zero-Config Developer Quickstart (`F-DX-01`)** | **100% (GA)** | ✅ **[Done]** | [f-dx-01-developer-quickstart.md](docs/features/f-dx-01-developer-quickstart.md) |
+| **Modern Lakehouse Connector Apache Iceberg v2 (`P4`)** | **100% (GA)** | ✅ **[Done]** | [p04-lakehouse-connector.md](docs/features/p04-lakehouse-connector.md) |
+| **Subscriptions & Realtime Events via Debezium (`P5`)** | **100% (GA)** | ✅ **[Done]** | [p05-subscriptions-realtime.md](docs/features/p05-subscriptions-realtime.md) |
+| **Subgraph Federation Router via Fusion (`P7`)** | **100% (GA)** | ✅ **[Done]** | [p07-subgraph-federation.md](docs/features/p07-subgraph-federation.md) |
+| **WORM Audit Logging & Consent Sealing (`P8`)** | **100% (GA)** | ✅ **[Done]** | [p08-worm-audit-sealing.md](docs/features/p08-worm-audit-sealing.md) |
+| **Native C# Ingress/Egress Pipeline (`P9`)** | **100% (GA)** | ✅ **[Done]** | [p09-native-csharp-pipeline.md](docs/features/p09-native-csharp-pipeline.md) |
+| **Dynamic Semantic Schema Pruning (`F-AI-07`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-07-dynamic-semantic-schema-pruning.md](docs/features/f-ai-07-dynamic-semantic-schema-pruning.md) |
+| **Zero-Kafka PostgreSQL CDC (`F-CDC-03`)** | **100% (GA)** | ✅ **[Done]** | [f-cdc-03-zero-kafka-postgresql-cdc.md](docs/features/f-cdc-03-zero-kafka-postgresql-cdc.md) |
+| **AST-Aware Traffic Shadowing & Dark Replay (`F-OPS-01`)** | **100% (GA)** | ✅ **[Done]** | [f-ops-01-traffic-shadowing-dark-replay.md](docs/features/f-ops-01-traffic-shadowing-dark-replay.md) |
+| **FOCUS FinOps Accounting für Token & Compute (`F-AI-08`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-08-focus-finops-accounting.md](docs/features/f-ai-08-focus-finops-accounting.md) |
+| **Dynamic Schema Contracts & Tag-Projektion (`F-GOV-08`)** | **100% (GA)** | ✅ **[Done]** | [f-gov-08-schema-contracts-tag-projection.md](docs/features/f-gov-08-schema-contracts-tag-projection.md) |
+| **Incremental Delivery (@defer & @stream) (`F-PERF-12`)** | **100% (GA)** | ✅ **[Done]** | [f-perf-12-incremental-delivery.md](docs/features/f-perf-12-incremental-delivery.md) |
+| **Relationship-Based Access Control ReBAC (`F-SEC-04`)** | **100% (GA)** | ✅ **[Done]** | [f-sec-04-rebac-openfga.md](docs/features/f-sec-04-rebac-openfga.md) |
+| **Native Apache Arrow Flight SQL Egress (`F-DATA-04`)** | **100% (GA)** | ✅ **[Done]** | [f-data-04-arrow-flight-sql.md](docs/features/f-data-04-arrow-flight-sql.md) |
+| **Embedded In-Memory OLAP via DuckDB.NET (`F-DATA-03`)** | **100% (GA)** | ✅ **[Done]** | [f-data-03-duckdb-olap.md](docs/features/f-data-03-duckdb-olap.md) |
+| **Native Vector Database & RAG Egress (`F-AI-09`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-09-native-vector-database-rag-egress.md](docs/features/f-ai-09-native-vector-database-rag-egress.md) |
+| **Semantic Query Cache & Policy Recommendation (`F-AI-10`)** | **100% (GA)** | ✅ **[Done]** | [f-ai-10-semantic-cache-policy-recommendation.md](docs/features/f-ai-10-semantic-cache-policy-recommendation.md) |
 | **Consent Recertification & Extension Workflow (`F-GOV-09`)** | **100% (GA)** | ✅ **[Done]** | `ConsentRecertificationWorkflowService.cs` (ServiceNow/Jira Outbox, WORM-Audit, Deduplizierung) |
 | **Federated Dynamic Differential Privacy Engine (`P12`)** | **100% (GA)** | ✅ **[Done]** | `DifferentialPrivacyEngine.cs` (Laplace-Noise, k-Anonymity Guard, tägliches Epsilon-Budgeting, REST-APIs) |
 | **OpenTelemetry Trace-to-Audit Correlation (`F-OPS-02`)** | **75% (In Progress)** | 🟡 **Active** | `AuditLogEntry.TraceId` & HMAC-Hash fertig; `Activity.Current` W3C Traceparent Injection im Kernel in Arbeit. |
@@ -130,40 +130,40 @@ Der Markt für Enterprise GraphQL und API Gateways wird 2025/2026 durch fundamen
 
 Alle nachfolgenden Features sind **vollständig umgesetzt und produktionsreif**:
 
-- [x] **F-SQL-01 Declarative SQL-to-API Engine**: [Done] → Details siehe [`f-sql-01-declarative-sql-endpoints.md`](file:///root/lis-git/gql/gql/docs/features/f-sql-01-declarative-sql-endpoints.md)
-- [x] **F-DATA-02 Governed WebSQL Engine**: [Done] → Details siehe [`f-data-02-governed-websql.md`](file:///root/lis-git/gql/gql/docs/features/f-data-02-governed-websql.md)
-- [x] **F-DATA-01 Hierarchischer Parquet Egress**: [Done] → Details siehe [`f-data-01-parquet-egress.md`](file:///root/lis-git/gql/gql/docs/features/f-data-01-parquet-egress.md)
-- [x] **F-API-03 Dual-Access Exposure (OData v4 & OpenAPI 3.1)**: [Done] → Details siehe [`f-api-03-odata-openapi.md`](file:///root/lis-git/gql/gql/docs/features/f-api-03-odata-openapi.md)
-- [x] **F-API-04 Upstream OpenAPI Ingestion**: [Done] → Details siehe [`f-api-04-openapi-ingestion.md`](file:///root/lis-git/gql/gql/docs/features/f-api-04-openapi-ingestion.md)
-- [x] **F-API-07 Canonical System Metadaten ($system)**: [Done] → Details siehe [`f-api-07-system-metadata-monitoring.md`](file:///root/lis-git/gql/gql/docs/features/f-api-07-system-metadata-monitoring.md)
-- [x] **F-DOC-01 Omnichannel Documentation Passthrough**: [Done] → Details siehe [`f-doc-01-omnichannel-documentation.md`](file:///root/lis-git/gql/gql/docs/features/f-doc-01-omnichannel-documentation.md)
-- [x] **F-PERF-08 Hierarchical Resource Groups**: [Done] → Details siehe [`f-perf-08-hierarchical-resource-groups.md`](file:///root/lis-git/gql/gql/docs/features/f-perf-08-hierarchical-resource-groups.md)
-- [x] **F-PERF-09 GraphQL Single-Query Pushdown**: [Done] → Details siehe [`f-perf-09-single-query-pushdown.md`](file:///root/lis-git/gql/gql/docs/features/f-perf-09-single-query-pushdown.md)
-- [x] **F-PERF-10 Zero-LOH Streaming Result Pipelining**: [Done] → Details siehe [`f-perf-10-streaming-pipelining.md`](file:///root/lis-git/gql/gql/docs/features/f-perf-10-streaming-pipelining.md)
-- [x] **F-PERF-11 Multi-Tenant Isolated Plan Cache**: [Done] → Details siehe [`f-perf-11-query-plan-cache.md`](file:///root/lis-git/gql/gql/docs/features/f-perf-11-query-plan-cache.md)
-- [x] **F-CDC-02 Native MSSQL Change Tracking Ingestion**: [Done] → Details siehe [`f-cdc-02-mssql-change-tracking.md`](file:///root/lis-git/gql/gql/docs/features/f-cdc-02-mssql-change-tracking.md)
-- [x] **F-GOV-06 Mehrstufige Pushdown-Kaskaden & Cross-Domain Joins**: [Done] → Details siehe [`f-gov-06-cross-domain-joins.md`](file:///root/lis-git/gql/gql/docs/features/f-gov-06-cross-domain-joins.md)
-- [x] **F-ARCH-10 Standardisiertes Connector-SPI**: [Done] → Details siehe [`f-arch-10-connector-spi.md`](file:///root/lis-git/gql/gql/docs/features/f-arch-10-connector-spi.md)
-- [x] **F-OPEN-01 OpenSchema Mode & Catalog Slicing**: [Done] → Details siehe [`f-open-01-openschema-catalog-slicing.md`](file:///root/lis-git/gql/gql/docs/features/f-open-01-openschema-catalog-slicing.md)
-- [x] **F-DX-01 Zero-Config Developer Quickstart**: [Done] → Details siehe [`f-dx-01-developer-quickstart.md`](file:///root/lis-git/gql/gql/docs/features/f-dx-01-developer-quickstart.md)
-- [x] **P1 Enterprise Data Catalog Connectors**: [Done] → Details siehe [`p01-data-catalog-connectors.md`](file:///root/lis-git/gql/gql/docs/features/p01-data-catalog-connectors.md)
-- [x] **P4 Modern Lakehouse Connector (Iceberg v2)**: [Done] → Details siehe [`p04-lakehouse-connector.md`](file:///root/lis-git/gql/gql/docs/features/p04-lakehouse-connector.md)
-- [x] **P5 Subscriptions & Realtime Events via Debezium**: [Done] → Details siehe [`p05-subscriptions-realtime.md`](file:///root/lis-git/gql/gql/docs/features/p05-subscriptions-realtime.md)
-- [x] **P7 Subgraph Federation Router (Fusion)**: [Done] → Details siehe [`p07-subgraph-federation.md`](file:///root/lis-git/gql/gql/docs/features/p07-subgraph-federation.md)
-- [x] **P8 WORM Audit Logging & Consent Sealing**: [Done] → Details siehe [`p08-worm-audit-sealing.md`](file:///root/lis-git/gql/gql/docs/features/p08-worm-audit-sealing.md)
-- [x] **P9 Native C# Ingress/Egress Pipeline**: [Done] → Details siehe [`p09-native-csharp-pipeline.md`](file:///root/lis-git/gql/gql/docs/features/p09-native-csharp-pipeline.md)
-- [x] **P10 Enterprise Governance Mutations & 4-Eyes SoD**: [Done] → Details siehe [`p10-governance-mutations-sod.md`](file:///root/lis-git/gql/gql/docs/features/p10-governance-mutations-sod.md)
-- [x] **F-AI-07 Dynamic Semantic Schema Pruning & JIT MCP Tools**: [Done] → Details siehe [`f-ai-07-dynamic-semantic-schema-pruning.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-07-dynamic-semantic-schema-pruning.md)
-- [x] **F-CDC-03 Zero-Kafka PostgreSQL CDC via Logical Streaming Replication**: [Done] → Details siehe [`f-cdc-03-zero-kafka-postgresql-cdc.md`](file:///root/lis-git/gql/gql/docs/features/f-cdc-03-zero-kafka-postgresql-cdc.md)
-- [x] **F-OPS-01 AST-Aware Production Traffic Shadowing & Dark Replay**: [Done] → Details siehe [`f-ops-01-traffic-shadowing-dark-replay.md`](file:///root/lis-git/gql/gql/docs/features/f-ops-01-traffic-shadowing-dark-replay.md)
-- [x] **F-AI-08 FOCUS FinOps Accounting für Token & Compute**: [Done] → Details siehe [`f-ai-08-focus-finops-accounting.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-08-focus-finops-accounting.md)
-- [x] **F-GOV-08 Dynamic Schema Contracts & Tag-basierte Projektion (@tag)**: [Done] → Details siehe [`f-gov-08-schema-contracts-tag-projection.md`](file:///root/lis-git/gql/gql/docs/features/f-gov-08-schema-contracts-tag-projection.md)
-- [x] **F-PERF-12 Incremental Delivery via @defer & @stream**: [Done] → Details siehe [`f-perf-12-incremental-delivery.md`](file:///root/lis-git/gql/gql/docs/features/f-perf-12-incremental-delivery.md)
-- [x] **F-SEC-04 Relationship-Based Access Control (ReBAC via OpenFGA / Zanzibar)**: [Done] → Details siehe [`f-sec-04-rebac-openfga.md`](file:///root/lis-git/gql/gql/docs/features/f-sec-04-rebac-openfga.md)
-- [x] **F-DATA-04 Native Apache Arrow Flight SQL Egress**: [Done] → Details siehe [`f-data-04-arrow-flight-sql.md`](file:///root/lis-git/gql/gql/docs/features/f-data-04-arrow-flight-sql.md)
-- [x] **F-DATA-03 Embedded In-Memory OLAP via DuckDB.NET**: [Done] → Details siehe [`f-data-03-duckdb-olap.md`](file:///root/lis-git/gql/gql/docs/features/f-data-03-duckdb-olap.md)
-- [x] **F-AI-09 Native Vector Database & RAG Egress**: [Done] → Details siehe [`f-ai-09-native-vector-database-rag-egress.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-09-native-vector-database-rag-egress.md)
-- [x] **F-AI-10 Semantic Query Cache & Autonomous Policy Recommendation**: [Done] → Details siehe [`f-ai-10-semantic-cache-policy-recommendation.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-10-semantic-cache-policy-recommendation.md)
+- [x] **F-SQL-01 Declarative SQL-to-API Engine**: [Done] → Details siehe [`f-sql-01-declarative-sql-endpoints.md`](docs/features/f-sql-01-declarative-sql-endpoints.md)
+- [x] **F-DATA-02 Governed WebSQL Engine**: [Done] → Details siehe [`f-data-02-governed-websql.md`](docs/features/f-data-02-governed-websql.md)
+- [x] **F-DATA-01 Hierarchischer Parquet Egress**: [Done] → Details siehe [`f-data-01-parquet-egress.md`](docs/features/f-data-01-parquet-egress.md)
+- [x] **F-API-03 Dual-Access Exposure (OData v4 & OpenAPI 3.1)**: [Done] → Details siehe [`f-api-03-odata-openapi.md`](docs/features/f-api-03-odata-openapi.md)
+- [x] **F-API-04 Upstream OpenAPI Ingestion**: [Done] → Details siehe [`f-api-04-openapi-ingestion.md`](docs/features/f-api-04-openapi-ingestion.md)
+- [x] **F-API-07 Canonical System Metadaten ($system)**: [Done] → Details siehe [`f-api-07-system-metadata-monitoring.md`](docs/features/f-api-07-system-metadata-monitoring.md)
+- [x] **F-DOC-01 Omnichannel Documentation Passthrough**: [Done] → Details siehe [`f-doc-01-omnichannel-documentation.md`](docs/features/f-doc-01-omnichannel-documentation.md)
+- [x] **F-PERF-08 Hierarchical Resource Groups**: [Done] → Details siehe [`f-perf-08-hierarchical-resource-groups.md`](docs/features/f-perf-08-hierarchical-resource-groups.md)
+- [x] **F-PERF-09 GraphQL Single-Query Pushdown**: [Done] → Details siehe [`f-perf-09-single-query-pushdown.md`](docs/features/f-perf-09-single-query-pushdown.md)
+- [x] **F-PERF-10 Zero-LOH Streaming Result Pipelining**: [Done] → Details siehe [`f-perf-10-streaming-pipelining.md`](docs/features/f-perf-10-streaming-pipelining.md)
+- [x] **F-PERF-11 Multi-Tenant Isolated Plan Cache**: [Done] → Details siehe [`f-perf-11-query-plan-cache.md`](docs/features/f-perf-11-query-plan-cache.md)
+- [x] **F-CDC-02 Native MSSQL Change Tracking Ingestion**: [Done] → Details siehe [`f-cdc-02-mssql-change-tracking.md`](docs/features/f-cdc-02-mssql-change-tracking.md)
+- [x] **F-GOV-06 Mehrstufige Pushdown-Kaskaden & Cross-Domain Joins**: [Done] → Details siehe [`f-gov-06-cross-domain-joins.md`](docs/features/f-gov-06-cross-domain-joins.md)
+- [x] **F-ARCH-10 Standardisiertes Connector-SPI**: [Done] → Details siehe [`f-arch-10-connector-spi.md`](docs/features/f-arch-10-connector-spi.md)
+- [x] **F-OPEN-01 OpenSchema Mode & Catalog Slicing**: [Done] → Details siehe [`f-open-01-openschema-catalog-slicing.md`](docs/features/f-open-01-openschema-catalog-slicing.md)
+- [x] **F-DX-01 Zero-Config Developer Quickstart**: [Done] → Details siehe [`f-dx-01-developer-quickstart.md`](docs/features/f-dx-01-developer-quickstart.md)
+- [x] **P1 Enterprise Data Catalog Connectors**: [Done] → Details siehe [`p01-data-catalog-connectors.md`](docs/features/p01-data-catalog-connectors.md)
+- [x] **P4 Modern Lakehouse Connector (Iceberg v2)**: [Done] → Details siehe [`p04-lakehouse-connector.md`](docs/features/p04-lakehouse-connector.md)
+- [x] **P5 Subscriptions & Realtime Events via Debezium**: [Done] → Details siehe [`p05-subscriptions-realtime.md`](docs/features/p05-subscriptions-realtime.md)
+- [x] **P7 Subgraph Federation Router (Fusion)**: [Done] → Details siehe [`p07-subgraph-federation.md`](docs/features/p07-subgraph-federation.md)
+- [x] **P8 WORM Audit Logging & Consent Sealing**: [Done] → Details siehe [`p08-worm-audit-sealing.md`](docs/features/p08-worm-audit-sealing.md)
+- [x] **P9 Native C# Ingress/Egress Pipeline**: [Done] → Details siehe [`p09-native-csharp-pipeline.md`](docs/features/p09-native-csharp-pipeline.md)
+- [x] **P10 Enterprise Governance Mutations & 4-Eyes SoD**: [Done] → Details siehe [`p10-governance-mutations-sod.md`](docs/features/p10-governance-mutations-sod.md)
+- [x] **F-AI-07 Dynamic Semantic Schema Pruning & JIT MCP Tools**: [Done] → Details siehe [`f-ai-07-dynamic-semantic-schema-pruning.md`](docs/features/f-ai-07-dynamic-semantic-schema-pruning.md)
+- [x] **F-CDC-03 Zero-Kafka PostgreSQL CDC via Logical Streaming Replication**: [Done] → Details siehe [`f-cdc-03-zero-kafka-postgresql-cdc.md`](docs/features/f-cdc-03-zero-kafka-postgresql-cdc.md)
+- [x] **F-OPS-01 AST-Aware Production Traffic Shadowing & Dark Replay**: [Done] → Details siehe [`f-ops-01-traffic-shadowing-dark-replay.md`](docs/features/f-ops-01-traffic-shadowing-dark-replay.md)
+- [x] **F-AI-08 FOCUS FinOps Accounting für Token & Compute**: [Done] → Details siehe [`f-ai-08-focus-finops-accounting.md`](docs/features/f-ai-08-focus-finops-accounting.md)
+- [x] **F-GOV-08 Dynamic Schema Contracts & Tag-basierte Projektion (@tag)**: [Done] → Details siehe [`f-gov-08-schema-contracts-tag-projection.md`](docs/features/f-gov-08-schema-contracts-tag-projection.md)
+- [x] **F-PERF-12 Incremental Delivery via @defer & @stream**: [Done] → Details siehe [`f-perf-12-incremental-delivery.md`](docs/features/f-perf-12-incremental-delivery.md)
+- [x] **F-SEC-04 Relationship-Based Access Control (ReBAC via OpenFGA / Zanzibar)**: [Done] → Details siehe [`f-sec-04-rebac-openfga.md`](docs/features/f-sec-04-rebac-openfga.md)
+- [x] **F-DATA-04 Native Apache Arrow Flight SQL Egress**: [Done] → Details siehe [`f-data-04-arrow-flight-sql.md`](docs/features/f-data-04-arrow-flight-sql.md)
+- [x] **F-DATA-03 Embedded In-Memory OLAP via DuckDB.NET**: [Done] → Details siehe [`f-data-03-duckdb-olap.md`](docs/features/f-data-03-duckdb-olap.md)
+- [x] **F-AI-09 Native Vector Database & RAG Egress**: [Done] → Details siehe [`f-ai-09-native-vector-database-rag-egress.md`](docs/features/f-ai-09-native-vector-database-rag-egress.md)
+- [x] **F-AI-10 Semantic Query Cache & Autonomous Policy Recommendation**: [Done] → Details siehe [`f-ai-10-semantic-cache-policy-recommendation.md`](docs/features/f-ai-10-semantic-cache-policy-recommendation.md)
 
 ---
 
@@ -172,11 +172,11 @@ Alle nachfolgenden Features sind **vollständig umgesetzt und produktionsreif**:
 Autheris überbrückt den Bruch zwischen Data Engineering und Datenkonsumenten.
 
 #### Umgesetzte Features:
-- [x] **F-DBT-1 Data Health Circuit Breaker**: [Done] → Details siehe [`f-dbt-01-health-circuit-breaker.md`](file:///root/lis-git/gql/gql/docs/features/f-dbt-01-health-circuit-breaker.md)
-- [x] **F-DBT-2 Model Contract Enforcement & Breaking-Change Gate**: [Done] → Details siehe [`f-dbt-02-contract-enforcement.md`](file:///root/lis-git/gql/gql/docs/features/f-dbt-02-contract-enforcement.md)
-- [x] **F-DBT-3 Live-Telemetry Exposures**: [Done] → Details siehe [`f-dbt-03-telemetry-exposures.md`](file:///root/lis-git/gql/gql/docs/features/f-dbt-03-telemetry-exposures.md)
-- [x] **F-DBT-4 Orchestrator & dbt Cloud Webhooks**: [Done] → Details siehe [`f-dbt-04-orchestrator-webhooks.md`](file:///root/lis-git/gql/gql/docs/features/f-dbt-04-orchestrator-webhooks.md)
-- [x] **F-DBT-6 Policy & RLS Auto-Sync**: [Done] → Details siehe [`f-dbt-06-policy-rls-sync.md`](file:///root/lis-git/gql/gql/docs/features/f-dbt-06-policy-rls-sync.md)
+- [x] **F-DBT-1 Data Health Circuit Breaker**: [Done] → Details siehe [`f-dbt-01-health-circuit-breaker.md`](docs/features/f-dbt-01-health-circuit-breaker.md)
+- [x] **F-DBT-2 Model Contract Enforcement & Breaking-Change Gate**: [Done] → Details siehe [`f-dbt-02-contract-enforcement.md`](docs/features/f-dbt-02-contract-enforcement.md)
+- [x] **F-DBT-3 Live-Telemetry Exposures**: [Done] → Details siehe [`f-dbt-03-telemetry-exposures.md`](docs/features/f-dbt-03-telemetry-exposures.md)
+- [x] **F-DBT-4 Orchestrator & dbt Cloud Webhooks**: [Done] → Details siehe [`f-dbt-04-orchestrator-webhooks.md`](docs/features/f-dbt-04-orchestrator-webhooks.md)
+- [x] **F-DBT-6 Policy & RLS Auto-Sync**: [Done] → Details siehe [`f-dbt-06-policy-rls-sync.md`](docs/features/f-dbt-06-policy-rls-sync.md)
 
 ---
 
@@ -185,21 +185,21 @@ Autheris überbrückt den Bruch zwischen Data Engineering und Datenkonsumenten.
 Autheris etabliert das Gateway als autoritative semantische Schicht und sicheren RAG-Egress für autonome KI-Agenten.
 
 #### Umgesetzte Features:
-- [x] **F-AI-02 Semantic MCP Compiler & Schema Grounding**: [Done] → Details siehe [`f-ai-02-semantic-mcp-compiler.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-02-semantic-mcp-compiler.md)
-- [x] **F-AI-03 Dynamic Few-Shot Golden Query Injection**: [Done] → Details siehe [`f-ai-03-golden-queries.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-03-golden-queries.md)
-- [x] **F-AI-04 Pre-Flight Query Simulator & Safety Limits**: [Done] → Details siehe [`f-ai-04-preflight-simulator.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-04-preflight-simulator.md)
-- [x] **F-AI-05 Human-in-the-Loop Step-Up Approval**: [Done] → Details siehe [`f-ai-05-hitl-step-up-approval.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-05-hitl-step-up-approval.md)
-- [x] **F-AI-06 Explainable AI & Provenance Footnotes**: [Done] → Details siehe [`f-ai-06-provenance-footnoting.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-06-provenance-footnoting.md)
-- [x] **F-AI-07 Dynamic Semantic Schema Pruning & Just-in-Time MCP Tools**: [Done] → Details siehe [`f-ai-07-dynamic-semantic-schema-pruning.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-07-dynamic-semantic-schema-pruning.md)
-- [x] **F-AI-08 FOCUS FinOps Accounting für Token & Compute**: [Done] → Details siehe [`f-ai-08-focus-finops-accounting.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-08-focus-finops-accounting.md)
-- [x] **F-AI-09 Native Vector Database & RAG Egress (pgvector, Qdrant, Milvus)**: [Done] → Details siehe [`f-ai-09-native-vector-database-rag-egress.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-09-native-vector-database-rag-egress.md)
-- [x] **F-AI-10 Semantic Query Cache & Autonomous Policy Recommendation**: [Done] → Details siehe [`f-ai-10-semantic-cache-policy-recommendation.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-10-semantic-cache-policy-recommendation.md)
+- [x] **F-AI-02 Semantic MCP Compiler & Schema Grounding**: [Done] → Details siehe [`f-ai-02-semantic-mcp-compiler.md`](docs/features/f-ai-02-semantic-mcp-compiler.md)
+- [x] **F-AI-03 Dynamic Few-Shot Golden Query Injection**: [Done] → Details siehe [`f-ai-03-golden-queries.md`](docs/features/f-ai-03-golden-queries.md)
+- [x] **F-AI-04 Pre-Flight Query Simulator & Safety Limits**: [Done] → Details siehe [`f-ai-04-preflight-simulator.md`](docs/features/f-ai-04-preflight-simulator.md)
+- [x] **F-AI-05 Human-in-the-Loop Step-Up Approval**: [Done] → Details siehe [`f-ai-05-hitl-step-up-approval.md`](docs/features/f-ai-05-hitl-step-up-approval.md)
+- [x] **F-AI-06 Explainable AI & Provenance Footnotes**: [Done] → Details siehe [`f-ai-06-provenance-footnoting.md`](docs/features/f-ai-06-provenance-footnoting.md)
+- [x] **F-AI-07 Dynamic Semantic Schema Pruning & Just-in-Time MCP Tools**: [Done] → Details siehe [`f-ai-07-dynamic-semantic-schema-pruning.md`](docs/features/f-ai-07-dynamic-semantic-schema-pruning.md)
+- [x] **F-AI-08 FOCUS FinOps Accounting für Token & Compute**: [Done] → Details siehe [`f-ai-08-focus-finops-accounting.md`](docs/features/f-ai-08-focus-finops-accounting.md)
+- [x] **F-AI-09 Native Vector Database & RAG Egress (pgvector, Qdrant, Milvus)**: [Done] → Details siehe [`f-ai-09-native-vector-database-rag-egress.md`](docs/features/f-ai-09-native-vector-database-rag-egress.md)
+- [x] **F-AI-10 Semantic Query Cache & Autonomous Policy Recommendation**: [Done] → Details siehe [`f-ai-10-semantic-cache-policy-recommendation.md`](docs/features/f-ai-10-semantic-cache-policy-recommendation.md)
 
 ---
 
 ### 3.4 Deep Dive: Realtime CDC & "The Kafka Barrier" (`F-CDC-02`)
 
-- [x] **F-CDC-02 Native MSSQL Change Tracking Ingestion**: [Done] → Details siehe [`f-cdc-02-mssql-change-tracking.md`](file:///root/lis-git/gql/gql/docs/features/f-cdc-02-mssql-change-tracking.md)
+- [x] **F-CDC-02 Native MSSQL Change Tracking Ingestion**: [Done] → Details siehe [`f-cdc-02-mssql-change-tracking.md`](docs/features/f-cdc-02-mssql-change-tracking.md)
 
 #### Strategischer 3-Wege-Vergleich (Markt-Perspektive):
 
@@ -215,7 +215,7 @@ Autheris etabliert das Gateway als autoritative semantische Schicht und sicheren
 
 ### 3.5 Benchmark-Differenzierung gegen Hasura DDN (`hasura/graphql-bench`)
 
-- [x] **F-PERF-11 Multi-Tenant Isolated Query Plan Cache**: [Done] → Details siehe [`f-perf-11-query-plan-cache.md`](file:///root/lis-git/gql/gql/docs/features/f-perf-11-query-plan-cache.md)
+- [x] **F-PERF-11 Multi-Tenant Isolated Query Plan Cache**: [Done] → Details siehe [`f-perf-11-query-plan-cache.md`](docs/features/f-perf-11-query-plan-cache.md)
 
 #### Strategische Differenzierungs-Highlights:
 - **Lock-free Plan-Lookup**: `XxHash3` 64-Bit Composite Key in < 1 µs.
@@ -245,57 +245,57 @@ Die nachfolgenden Schlüsselthemen wurden in den jüngsten Entwicklungszyklen (W
 * [x] **`F-AI-07` Dynamic Semantic Schema Pruning & Just-in-Time MCP Tools** (`100% GA`)
   * **Umgesetzt:** JIT Tool-Injektion via `SemanticToolPruner`, Bounding auf max. 4.000 Tokens, Fail-Closed Fallback.
   * **Business-Value:** Bis zu 80 % Ersparnis bei System-Prompt-Tokens und signifikant höhere Erfolgsquote autonomer Agenten.
-  * **Dokumentation:** [`f-ai-07-dynamic-semantic-schema-pruning.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-07-dynamic-semantic-schema-pruning.md)
+  * **Dokumentation:** [`f-ai-07-dynamic-semantic-schema-pruning.md`](docs/features/f-ai-07-dynamic-semantic-schema-pruning.md)
 
 * [x] **`F-CDC-03` Zero-Kafka PostgreSQL CDC via Logical Streaming Replication** (`100% GA`)
   * **Umgesetzt:** Nativer Logical Streaming Replication Client via `pgoutput`, WAL Lag Guard (1 GB Limit), In-Stream RLS.
   * **Business-Value:** Schließt die Realtime-Streaming-Lücke für Cloud-native PostgreSQL- und Supabase-Umgebungen bei minimaler TCO.
-  * **Dokumentation:** [`f-cdc-03-zero-kafka-postgresql-cdc.md`](file:///root/lis-git/gql/gql/docs/features/f-cdc-03-zero-kafka-postgresql-cdc.md)
+  * **Dokumentation:** [`f-cdc-03-zero-kafka-postgresql-cdc.md`](docs/features/f-cdc-03-zero-kafka-postgresql-cdc.md)
 
 * [x] **`F-OPS-01` AST-Aware Production Traffic Shadowing & Dark Replay** (`100% GA`)
   * **Umgesetzt:** AST Mutation Guard (strikte Unterdrückung aller Mutationen/Writes), PII-Redactor, Bounded Payload Buffering (< 2 MB).
   * **Business-Value:** Risikofreie Zero-Downtime-Releases für geschäftskritische Core-Banking- und Enterprise-Systeme.
-  * **Dokumentation:** [`f-ops-01-traffic-shadowing-dark-replay.md`](file:///root/lis-git/gql/gql/docs/features/f-ops-01-traffic-shadowing-dark-replay.md)
+  * **Dokumentation:** [`f-ops-01-traffic-shadowing-dark-replay.md`](docs/features/f-ops-01-traffic-shadowing-dark-replay.md)
 
 * [x] **`F-AI-08` FOCUS-konformes FinOps Accounting für Token & Compute** (`100% GA`)
   * **Umgesetzt:** Standardisiertes Kostenmodell nach FOCUS v1.2, Soft- & Hard-Cap Gating (`FinOpsBudgetMiddleware`), Denial-of-Wallet Schutz, CSV-Formula-Injection-Schutz.
   * **Business-Value:** Präzise Unit Economics und automatisierte Budget-Caps für autonome KI-Workloads.
-  * **Dokumentation:** [`f-ai-08-focus-finops-accounting.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-08-focus-finops-accounting.md)
+  * **Dokumentation:** [`f-ai-08-focus-finops-accounting.md`](docs/features/f-ai-08-focus-finops-accounting.md)
 
 * [x] **`F-GOV-08` Dynamic Schema Contracts & Tag-basierte Projektion (`@tag`)** (`100% GA`)
   * **Umgesetzt:** Sub-Schema-Slicing via `@tag` und `@inaccessible`, Pruning von Orphan-Types, Zero-Leaking Introspektion, dynamisches Header-Routing.
   * **Business-Value:** Single Source of Truth bei vollständiger Schnittstellen-Isolation für B2B-Partner und Mobile-Clients ohne teure Apollo GraphOS Contracts-Lizenzen.
-  * **Dokumentation:** [`f-gov-08-schema-contracts-tag-projection.md`](file:///root/lis-git/gql/gql/docs/features/f-gov-08-schema-contracts-tag-projection.md)
+  * **Dokumentation:** [`f-gov-08-schema-contracts-tag-projection.md`](docs/features/f-gov-08-schema-contracts-tag-projection.md)
 
 * [x] **`F-PERF-12` Incremental Delivery via `@defer` & `@stream`** (`100% GA`)
   * **Umgesetzt:** Standardisiertes Multipart/Mixed Chunked Streaming, Time-to-First-Byte Optimierung, Concurrency- & Slowloris-Schutz (`IncrementalDeliveryManager`).
   * **Business-Value:** Sofortige First-Paint-Auslieferung für Web- & Mobile-Clients ohne Latenzblockaden durch langsame Subgraphs.
-  * **Dokumentation:** [`f-perf-12-incremental-delivery.md`](file:///root/lis-git/gql/gql/docs/features/f-perf-12-incremental-delivery.md)
+  * **Dokumentation:** [`f-perf-12-incremental-delivery.md`](docs/features/f-perf-12-incremental-delivery.md)
 
 * [x] **`F-SEC-04` Relationship-Based Access Control (ReBAC via OpenFGA / Zanzibar)** (`100% GA`)
   * **Umgesetzt:** Google Zanzibar Graph-Traversierung mit transitiver Vererbung (`owner -> editor -> viewer`), Zero-N+1 Batch DataLoader (`RebacBatchDataLoader`), Cyclic Recursion Guard und strikte Mandantentrennung.
   * **Business-Value:** Enterprise-Dokumentenfreigaben im Sub-Millisekundenbereich ohne $N+1$-Performance-Einbrüche bei geschützten Listenabfragen.
-  * **Dokumentation:** [`f-sec-04-rebac-openfga.md`](file:///root/lis-git/gql/gql/docs/features/f-sec-04-rebac-openfga.md)
+  * **Dokumentation:** [`f-sec-04-rebac-openfga.md`](docs/features/f-sec-04-rebac-openfga.md)
 
 * [x] **`F-DATA-03` Embedded In-Memory OLAP via DuckDB.NET** (`100% GA`)
   * **Umgesetzt:** Prozessinterne DuckDB-OLAP-Engine (`DuckDbOlapEngine`), flüchtige In-Memory-Sessions (`:memory:`), SIMD-Vektorisierung, Sandboxing (`SET enable_external_access = false;`), Memory- & Thread-Begrenzung und striktes Pre-Flight Governance Gate.
   * **Business-Value:** Sub-Millisekunden-Aggregationen und Ad-hoc-Analysen über heterogene Quellen ohne teure externe Trino-/Presto-Infrastruktur.
-  * **Dokumentation:** [`f-data-03-duckdb-olap.md`](file:///root/lis-git/gql/gql/docs/features/f-data-03-duckdb-olap.md)
+  * **Dokumentation:** [`f-data-03-duckdb-olap.md`](docs/features/f-data-03-duckdb-olap.md)
 
 * [x] **`F-DATA-04` Native Apache Arrow Flight SQL Egress & Analytics Pipeline** (`100% GA`)
   * **Umgesetzt:** Zero-Copy-Arrow-RecordBatch-Streaming (`/api/v1/arrow/export/{table}`), Schema-Mapping, In-Stream RLS und dynamische PII-Maskierung vor der Arrow-Serialisierung.
   * **Business-Value:** Direkte High-Speed-Pipeline für Pandas, Polars und Data-Science-Workloads ohne JSON-Serialisierungs-Overhead.
-  * **Dokumentation:** [`f-data-04-arrow-flight-sql.md`](file:///root/lis-git/gql/gql/docs/features/f-data-04-arrow-flight-sql.md)
+  * **Dokumentation:** [`f-data-04-arrow-flight-sql.md`](docs/features/f-data-04-arrow-flight-sql.md)
 
 * [x] **`F-AI-09` Native Vector Database & RAG Egress (pgvector, Qdrant, Milvus)** (`100% GA`)
   * **Umgesetzt:** Standardisiertes Vektor-Connector-SPI (`IVectorRecordSource`), parametrisierter HNSW/Cosine-Pushdown (`PgVectorConnector`, `QdrantVectorConnector`, `MilvusVectorConnector`), erzwungene Tenant-Isolation (`SEC-VEC-01`), In-Stream Chunk PII-Redaction (`ChunkPiiRedactor`) und MCP-Tool `search_rag_context`.
   * **Business-Value:** Einzigartiger Differenzierungs-Moat als erstes föderiertes Gateway mit nativer Vektor-Governance für Enterprise-RAG.
-  * **Dokumentation:** [`f-ai-09-native-vector-database-rag-egress.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-09-native-vector-database-rag-egress.md)
+  * **Dokumentation:** [`f-ai-09-native-vector-database-rag-egress.md`](docs/features/f-ai-09-native-vector-database-rag-egress.md)
 
 * [x] **`F-AI-10` Semantic Query Cache & Autonomous Policy Recommendation** (`100% GA`)
   * **Umgesetzt:** Partitionierter semantischer Cache (`SemanticQueryCacheService`) mit Composite Key `(TenantId, UserSid, SecurityContextHash, Collection)`, Cosine-Ähnlichkeits-Matching (`>= 0.85`), Epochen-Invalidierung und autonome Ableitung minimaler Least-Privilege Consent-Vorschläge (`PolicyRecommendationService`) aus 403 Forbidden-Mustern.
   * **Business-Value:** Bis zu 70 % Einsparung redundanter LLM-/Vektor-Kosten bei strikter ABAC-Isolation und automatisierte Schließung von Berechtigungslücken ohne Überprivilegierung.
-  * **Dokumentation:** [`f-ai-10-semantic-cache-policy-recommendation.md`](file:///root/lis-git/gql/gql/docs/features/f-ai-10-semantic-cache-policy-recommendation.md)
+  * **Dokumentation:** [`f-ai-10-semantic-cache-policy-recommendation.md`](docs/features/f-ai-10-semantic-cache-policy-recommendation.md)
 
 ---
 

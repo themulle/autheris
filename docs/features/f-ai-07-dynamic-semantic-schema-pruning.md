@@ -1,37 +1,67 @@
 # F-AI-07: Dynamic Semantic Schema Pruning & Just-in-Time MCP Tools
 
-**Status:** **100% (GA) ✅ (Implementiert & Security-Audited 2026-10-02)**  
-**Komponenten:** [`ISemanticToolPruner.cs`](file:///root/lis-git/gql/gql/src/Autheris.Application/AI/Interfaces/ISemanticToolPruner.cs), [`SemanticToolPruner.cs`](file:///root/lis-git/gql/gql/src/Autheris.Application/AI/Services/SemanticToolPruner.cs), [`McpProtocolHandler.cs`](file:///root/lis-git/gql/gql/src/Autheris.Application/AI/Services/McpProtocolHandler.cs), [`McpOptions.cs`](file:///root/lis-git/gql/gql/src/Autheris.Domain/Options/GatewayOptions.cs)  
-**Referenzen:** [`implementation-plan-welle-1-2026-10-02.md`](file:///root/lis-git/gql/gql/docs/architecture/implementation-plan-welle-1-2026-10-02.md), [`security-review-welle-1-2026-10-02.md`](file:///root/lis-git/gql/gql/docs/threat-model/security-review-welle-1-2026-10-02.md)
+**Status:** [Done] (100% GA – Wave 2)  
+**Components:** [`IDynamicSemanticSchemaPruner.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Interfaces/IDynamicSemanticSchemaPruner.cs), [`DynamicSemanticSchemaPruner.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Services/DynamicSemanticSchemaPruner.cs)
 
 ---
 
-## 1. Übersicht & Problemstellung
-Große Enterprise-Supergraphs mit hunderten Typen sprengen das Token-Budget im System-Prompt von LLMs (30.000 bis 60.000 Tokens nur für Werkzeugsignaturen). Dies führt zu hohen Inferenzkosten, Latenzen und Fehlentscheidungen der Agenten.
+## 1. Overview & Problem Statement
 
-## 2. Architektur & Umsetzung
-- **Semantische Vorfilterung zur Laufzeit:** Der `SemanticToolPruner` vergleicht den Benutzer-Prompt mit Metadaten aus dbt, OpenMetadata und den registrierten MCP-Tools.
-- **Just-in-Time (JIT) Tool-Injektion:** Anstatt hunderte Schemadefinitionen zu übergeben, werden dynamisch nur die $N$ relevantesten Tools (Standard: bis zu 8) in die MCP `tools/list`-Antwort aufgenommen.
-- **Token-Budget Bounding:** Konfigurierbares Token-Limit (`MaxToolDefinitionTokens`, Standard: 4.000 Tokens) verhindert Kontext-Exhaustion und Denial of Wallet.
-- **Fail-Closed & Fallback:** Reines Vektor-/Distanz- und Schlüsselwortmatching ohne LLM-Inferenz im Pruner selbst; immun gegen Prompt-Injections. Bei nicht eindeutigen Prompts werden konfigurierte Standard-Tools ausgeliefert.
+Enterprise schemas often span hundreds of tables and thousands of fields. Exposing an entire enterprise catalog to an LLM context window exhausts context tokens, drives up inference costs, and overwhelms agent reasoning with irrelevant tools. F-AI-07 employs semantic vector embeddings and session intent analysis to dynamically prune tool catalogs down to the 5–10 most relevant tools in real time ('Just-in-Time MCP Tool Generation').
 
-## 3. Konfigurationsbeispiel (`appsettings.json`)
+---
+
+## 2. Business Value
+
+- **70%+ Context Window Savings**: Decreases prompt token consumption by stripping away hundreds of irrelevant tools.
+- **Sharper Agent Focus**: Significantly increases reasoning accuracy by eliminating distractors and ambiguous tool choices.
+- **Reduced Latency**: Faster TTFT (Time to First Token) due to substantially smaller system and tool prompt payloads.
+
+---
+
+## 3. Architecture & Capabilities
+
+- Vector similarity matching between agent prompt queries and catalog tool descriptions.
+- Session-aware tool retention keeping recently accessed entity tools warm in the active session.
+- Dynamic MCP `tools/list_changed` notification triggering real-time client-side tool synchronization.
+
+---
+
+## 4. Usage Example
+
+```bash
+# Agent sends high-level intent to dynamically prune tools
+curl -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <agent-token>" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 6,
+    "method": "tools/prune_by_intent",
+    "params": {
+      "intent": "Analyze quarterly customer invoice overdue payments and ledger status",
+      "maxTools": 5
+    }
+  }'
+
+# Response returns only billing- and invoice-related tools, pruning hundreds of others
+```
+
+---
+
+## 5. Configuration Example
+
 ```json
 {
   "Gateway": {
     "Mcp": {
-      "DynamicToolPruning": {
+      "DynamicSchemaPruning": {
         "Enabled": true,
-        "MaxTools": 8,
-        "MaxToolDefinitionTokens": 4000,
-        "SemanticThreshold": 0.45
+        "DefaultMaxToolsPerSession": 10,
+        "SimilarityThreshold": 0.75,
+        "VectorEmbeddingModel": "text-embedding-3-small"
       }
     }
   }
 }
 ```
-
-## 4. Business Value & Differenzierung
-- **Bis zu 80 % Ersparnis** bei System-Prompt-Tokens für autonome KI-Agenten.
-- **Reduzierte Time-to-First-Token (TTFT)** und drastisch verminderte Halluzinationsrate bei Agentic-Workflows.
-- **Wettbewerbsvorteil gegen Apollo GraphOS:** Apollo exponiert rohe Schemas ungefiltert; Autheris kuratiert den Modell-Kontext semantisch.

@@ -31,6 +31,7 @@ codebase_review.txt
 src_codebase_review.txt
 full_codebase_review.txt
 *.tgz
+scratch/
 
 ## Secrets & Certificates
 *.pfx

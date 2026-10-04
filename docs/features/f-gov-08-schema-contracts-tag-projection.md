@@ -1,49 +1,62 @@
-# F-GOV-08: Dynamic Schema Contracts & Tag-basierte Projektion (`@tag` / `@inaccessible`)
+# F-GOV-08: Dynamic Schema Contracts & Tag-Based Projection (@tag)
 
-**Status:** **100% (GA) ✅ (Implementiert & Security-Audited 2026-10-02)**  
-**Komponenten:** [`ISchemaContractManager.cs`](file:///root/lis-git/gql/gql/src/Autheris.Application/Governance/Contracts/ISchemaContractManager.cs), [`SchemaContractManager.cs`](file:///root/lis-git/gql/gql/src/Autheris.Application/Governance/Contracts/SchemaContractManager.cs), [`SchemaContractFilter.cs`](file:///root/lis-git/gql/gql/src/Autheris.Application/Governance/Contracts/SchemaContractFilter.cs), [`SchemaContractMiddleware.cs`](file:///root/lis-git/gql/gql/src/Autheris.Api/Middleware/SchemaContractMiddleware.cs), [`SchemaContractsOptions.cs`](file:///root/lis-git/gql/gql/src/Autheris.Domain/Options/GatewayOptions.cs)  
-**Referenzen:** [`implementation-plan-welle-2-2026-10-02.md`](file:///root/lis-git/gql/gql/docs/architecture/implementation-plan-welle-2-2026-10-02.md), [`security-review-welle-2-2026-10-02.md`](file:///root/lis-git/gql/gql/docs/threat-model/security-review-welle-2-2026-10-02.md)
+**Status:** [Done] (100% GA – Wave 2)  
+**Components:** [`SchemaContractMiddleware.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Middleware/SchemaContractMiddleware.cs), [`DynamicTagProjectionService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Catalog/DynamicTagProjectionService.cs)
 
 ---
 
-## 1. Übersicht & Problemstellung
-Unternehmen müssen für unterschiedliche Konsumenten (Partner-APIs, B2B-Kunden, mobile Applikationen, interne Entwickler) separate GraphQL-Gateways oder Sub-Schemas pflegen. Dies verursacht Schema-Drift, Redundanz und Sicherheitsrisiken durch versehentliche Offenlegung interner Felder.
+## 1. Overview & Problem Statement
 
-## 2. Architektur & Umsetzung
-- **Zentrale Schemadefinition mit Standard-Direktiven:**
-  - `@tag(name: String!)`: Markiert Felder, Typen und Enums für bestimmte Zielgruppen (z. B. `partner`, `mobile`, `public`).
-  - `@inaccessible`: Schließt interne Schnittstellendetails global aus externen Projektionen aus.
-- **Contract Projection Engine (`SchemaContractFilter`):**
-  - Schneidet SDL-Slices präzise nach `IncludedTags`, `ExcludedTags` und `ExcludeInaccessible`.
-  - Pruned verwaiste Typen (Orphan Types), wenn alle ihre Felder gefiltert wurden (außer `Query`).
-  - Entfernt interne Direktiven aus dem Ergebnis-Schema, um kein Governance-Leaking zu verursachen.
-  - ReDoS-geschützt durch Regex-Timeouts.
-- **Dynamisches Routing & Kontextbindung (`SchemaContractMiddleware`):**
-  - Auflösung über HTTP-Header `X-Gateway-Contract`, Query-Parameter `?contract=...` oder Benutzer-Claims.
-  - Setzt `context.Items["GatewayContract"]` für nachgelagerte Validierungen; weist unbekannte Verträge mit `400 Bad Request` (`INVALID_SCHEMA_CONTRACT`) ab.
+Serving different consumer tiers (e.g. Public Mobile Apps, Internal Microservices, B2B Partners) from a single GraphQL schema often leads to accidental exposure of internal or unstable fields. F-GOV-08 introduces Dynamic Schema Contracts using `@tag` directives. Fields and types are annotated with contract tags (`@tag(name: "public")`, `@tag(name: "partner")`), allowing the gateway to dynamically prune the schema projection based on client API keys and authenticated tiers.
 
-## 3. Konfigurationsbeispiel (`appsettings.json`)
+---
+
+## 2. Business Value
+
+- **Single Schema, Multiple Contract Views**: Eliminate the need to maintain duplicate gateways or proxy layers for internal vs. external audiences.
+- **Safe API Evolution**: Mark new fields with `@tag(name: "beta")` and restrict exposure to early-access partners before general availability.
+- **Automated Client Isolation**: External partners cannot introspect or access internal operational fields.
+
+---
+
+## 3. Architecture & Capabilities
+
+- Apollo-compatible `@tag(name: "...")` schema directive support.
+- Dynamic AST filtering pruning unpermitted types, fields, and arguments from introspection.
+- Client tier resolution via JWT claims or API key metadata.
+
+---
+
+## 4. Usage Example
+
+```graphql
+# Schema definition with contract tags
+type Customer {
+  id: ID!
+  displayName: String! @tag(name: "public")
+  internalRiskRating: Int! @tag(name: "internal")
+  creditScore: Float! @tag(name: "finance")
+}
+
+# A public mobile client querying the schema will see only:
+# type Customer { id: ID! displayName: String! }
+```
+
+---
+
+## 5. Configuration Example
+
 ```json
 {
   "Gateway": {
     "SchemaContracts": {
       "Enabled": true,
-      "DefaultContract": "default",
-      "Contracts": {
-        "public": {
-          "IncludedTags": ["public"],
-          "ExcludeInaccessible": true
-        },
-        "partner": {
-          "IncludedTags": ["public", "partner"],
-          "ExcludeInaccessible": true
-        }
+      "DefaultTag": "public",
+      "TierTagMap": {
+        "PartnerTier": ["public", "partner"],
+        "InternalTier": ["public", "partner", "internal", "finance"]
       }
     }
   }
 }
 ```
-
-## 4. Business Value & TCO-Vorteil
-- **Single Source of Truth:** Ein einziger Supergraph bedient sicher beliebig viele Zielgruppen ohne Drift.
-- **Volle Unabhängigkeit von Apollo GraphOS Contracts:** Gleiche Funktionalität ohne teure Enterprise-Lizenzen.

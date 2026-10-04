@@ -19,10 +19,10 @@ Autheris is a high-performance, secure, centralized enterprise GraphQL gateway b
 
 Instead of traditional coarse-grained role-based access control (RBAC), access to tables, rows, and columns requires explicitly granted, time-bounded, and auditable consents governed directly by data owners.
 
-> 📚 **Produkt- & Strategie-Dokumente**:
-> - [📋 Vollständige Feature-Liste (featurelist.md)](featurelist.md) — Detailliertes Inventar aller Enterprise-Funktionen.
-> - [⚖️ Wettbewerbs- & Marktvergleich (featurecomparison.md)](featurecomparison.md) — Autheris vs. Apollo Federation v2, Hasura DDN, WunderGraph Cosmo, StepZen, Immuta und Tyk/Kong/Envoy.
-> - [📊 Marktanalyse & RICE-C Roadmap (marktanalyse.md)](marktanalyse.md) — Umfassende Markt- und Gap-Analyse.
+> 📚 **Product & Strategy Documentation**:
+> - [📋 Complete Enterprise Feature List (featurelist.md)](featurelist.md) — Detailed inventory of all enterprise capabilities.
+> - [⚖️ Market & Competitive Comparison (featurecomparison.md)](featurecomparison.md) — Autheris vs. Apollo Federation v2, Hasura DDN, WunderGraph Cosmo, StepZen, Immuta, and Tyk/Kong/Envoy.
+> - [📊 Market Analysis & Strategic Roadmap (marktanalyse.md)](marktanalyse.md) — In-depth market research, feature-gap analysis, and RICE-C prioritization.
 
 ---
 
@@ -67,7 +67,7 @@ Instead of traditional coarse-grained role-based access control (RBAC), access t
   - High-throughput streaming parser for dbt `manifest.json`, `catalog.json`, and `run_results.json`.
   - **Data Health Circuit Breaker**: Tables with failing upstream `dbt test` executions are quarantined (`CircuitBreaker: Open`) to prevent serving dirty data.
   - **Model Contract Breaking-Change CI Gate**: Validates dbt model contracts against active schemas before deployment.
-  - **Live-Telemetrie in dbt Exposures**: Spiegelt reale GraphQL-Abfrage-Frequenzen und Consumer-Metadaten zurück in dbt `exposure`-Deklarationen.
+  - **Live Telemetry in dbt Exposures**: Mirrors real GraphQL query frequencies and consumer metadata back into dbt `exposure` declarations.
   - **Omnichannel Documentation Passthrough (`F-DOC-01`)**: Lossless ingestion of dbt markdown doc-blocks and OpenMetadata business definitions into GraphQL Web UI (Banana Cake Pop), MCP AI tool signatures, Dynamic OpenAPI 3.1 Swagger, and OData CSDL `$metadata` tooltips.
 
 - **Declarative SQL-to-API Engine & Auto-Generated OpenAPI 3.0 / Swagger (`F-SQL-01`)**:
@@ -201,23 +201,23 @@ The solution adheres strictly to **Clean / Onion Architecture** principles with 
 └────────────────────────────────┘             └───────────────────────────────┘
 ```
 
-### Architektur: Kern vs. Extensions
+### Architecture: Core vs. Extensions
 
-Der Kern (`src/*`) enthält Schnittstellen, Orchestrierung und Governance-Logik (Consent, RLS, Masking, Ratchet, Outbox, Stream-Backbone). **Alle Anbindungen an Fremdsysteme** liegen in `gql_extensions/src/Autheris.Extensions` (ein Ordner je Anbindung) und werden genau einmal über `services.AddGatewayExtensions(gatewayOptions)` in `AddGatewayInfrastructure` eingebunden:
+The Core (`src/*`) contains interfaces, execution orchestration, and governance logic (Consent, RLS, Masking, Ratchet, Outbox, and Stream Backbone). **All external system connectors** reside in `src/Autheris.Extensions` (one folder per integration) and are registered cleanly via `services.AddGatewayExtensions(gatewayOptions)` in `AddGatewayInfrastructure`:
 
-| Anbindung | Extensions-Ordner | Im Kern verbleibend | Hintergrunddienst aktiv bei |
+| Integration | Extensions Folder | Remaining in Core | Background Worker Active When |
 |---|---|---|---|
-| Datenkataloge (Purview, Collibra, Alation, OpenMetadata) | `DataCatalog/` | Schnittstellen, `CatalogGovernanceRatchet`, OpenAPI-Ingestion | `Gateway:Catalog:Enabled` |
-| ITSM (ServiceNow, Jira, Webhooks) | `Itsm/` | `ItsmWorkflowDispatcher`, Rezertifizierung, Outbox-Worker | `Gateway:Itsm:Enabled` (Kern-Worker) |
-| OpenMetadata Policy-Sync | `OpenMetadata/` | Schnittstellen | `Gateway:OpenMetadata:Enabled` |
-| Lineage-Export (OpenLineage, OpenJEV) | `Lineage/` | `LineageGraphStore`, Impact-Analyse | – |
-| Backstage-Export | `Backstage/` | `IBackstageCatalogExportService`, Endpunkte | – (Endpunkte: `Gateway:Backstage:Enabled`) |
-| CDC-Quellen (MSSQL Change Tracking, Debezium) | `Cdc/` | `InMemoryCdcEventChannel`, Stream-RLS | `Gateway:MssqlChangeTracking:Enabled` |
-| dbt, OData, Iceberg-Lakehouse | `Dbt/`, `OData/`, `Lakehouse/` | Endpunkte/Executor-Pipeline | – |
+| Data Catalogs (Purview, Collibra, Alation, OpenMetadata) | `DataCatalog/` | Interfaces, `CatalogGovernanceRatchet`, OpenAPI Ingestion | `Gateway:Catalog:Enabled` |
+| ITSM (ServiceNow, Jira, Webhooks) | `Itsm/` | `ItsmWorkflowDispatcher`, Recertification, Outbox Worker | `Gateway:Itsm:Enabled` (Core Worker) |
+| OpenMetadata Policy Sync | `OpenMetadata/` | Interfaces | `Gateway:OpenMetadata:Enabled` |
+| Lineage Export (OpenLineage, OpenJEV) | `Lineage/` | `LineageGraphStore`, Impact Analysis | – |
+| Backstage Export | `Backstage/` | `IBackstageCatalogExportService`, Endpoints | – (Endpoints: `Gateway:Backstage:Enabled`) |
+| CDC Sources (MSSQL Change Tracking, Debezium) | `Cdc/` | `InMemoryCdcEventChannel`, Stream RLS | `Gateway:MssqlChangeTracking:Enabled` |
+| dbt, OData, Iceberg Lakehouse | `Dbt/`, `OData/`, `Lakehouse/` | Endpoints / Executor Pipeline | – |
 
-Abhängigkeitsrichtung: Extensions → Application/Domain; Api → Extensions. Domain/Application/Infrastructure/GraphQL referenzieren die Extensions nicht und enthalten keine Fremdsystem-Clients (Architekturtests `CoreLayers_ShouldNotHaveDependencyOnExtensions`, `CoreLayers_ShouldNotContainForeignSystemClients`). Der gemeinsame `SsrfProtectionHandler` liegt in `Autheris.Application.Security`.
+Dependency Direction: Extensions → Application/Domain; Api → Extensions. Domain/Application/Infrastructure/GraphQL do not reference Extensions and contain no foreign system client SDKs (enforced by architecture tests `CoreLayers_ShouldNotHaveDependencyOnExtensions` and `CoreLayers_ShouldNotContainForeignSystemClients`). The shared `SsrfProtectionHandler` resides in `Autheris.Application.Security`.
 
-**Interne Ziele (On-Premises-Anbindungen):** Alle HttpClients der Extensions laufen durch den `SsrfProtectionHandler`, der private, Loopback- und Metadaten-Adressen standardmäßig blockiert und außerhalb von Development HTTPS verlangt. Für Jira, ServiceNow, OpenMetadata, OpenLineage o. ä. im Firmennetz werden die Ziele explizit freigegeben:
+**Internal Targets (On-Premises Integrations):** All HTTP clients within Extensions run through `SsrfProtectionHandler`, which blocks private, loopback, and cloud metadata addresses by default and strictly enforces HTTPS outside of Development. For internal on-premises systems such as Jira, ServiceNow, OpenMetadata, or OpenLineage within the corporate network, target hosts and CIDRs must be explicitly allowlisted:
 
 ```json
 "Gateway": {
@@ -228,14 +228,13 @@ Abhängigkeitsrichtung: Extensions → Application/Domain; Api → Extensions. D
 }
 ```
 
-Freigegebene Ziele sind nur von der Prüfung auf private Adressen ausgenommen. Metadaten-Endpunkte sowie Loopback- und Link-Local-Adressen bleiben gesperrt, und HTTPS bleibt außerhalb von Development Pflicht.
+Allowlisted destinations are exempt solely from the private address restriction. Cloud metadata endpoints (169.254.169.254, etc.), loopback addresses, and link-local ranges remain permanently blocked, and HTTPS remains strictly required outside of Development.
 
-Ergänzungen (Nachprüfung E-01 bis E-04):
-
-- Die Allowlist gilt nur für die Integrationen in `Egress:TrustedIntegrations` (nicht gesetzt = `Itsm`, `Catalog`, `OpenMetadata`, `Lineage`; zusätzlich erlaubt: `AuditWorm`, `Cdn`). `Lakehouse` kann die Allowlist nie nutzen, weil seine Ziel-URLs aus Iceberg-Manifesten stammen.
-- Die Einträge werden beim Start in jeder Umgebung geprüft: ungültige CIDRs, IPv4-Netze größer als /8, IPv6-Netze größer als /32 und Netze, die 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 100.64.0.0/10, Multicast/Broadcast, `::`, `::1`, fe80::/10, `::ffff:0:0/96` oder fd00:ec2::/32 berühren, brechen den Start ab. ULA-Netze (fc00::/7) einzelner Standorte bleiben freigebbar. Eine aktive Allowlist erscheint als `WARN:` in der Bypass-Liste.
-- Auch für freigegebene Ziele gesperrt: 0.0.0.0/8 und `::`, 100.64.0.0/10, Multicast, Broadcast, IPv4-mapped-Adressen (werden auf IPv4 normalisiert) und die Metadaten-IPs 169.254.169.254, 169.254.170.2, 100.100.100.200, fd00:ec2::254 und 168.63.129.16. Löst ein freigegebener Hostname nicht auf, wird der Aufruf abgelehnt.
-- Alle Integrations-Clients folgen keinen Redirects mehr: eine 3xx-Antwort gilt als Fehler. Die Verbindung wird nur zu einer geprüften IP aufgebaut (Prüfung beim Verbindungsaufbau, Schutz gegen DNS-Rebinding). Verbindungen zum System-Proxy (`HTTPS_PROXY`) sind davon ausgenommen.
+Additional Security Invariants (Audit E-01 through E-04):
+- The allowlist applies only to integrations listed in `Egress:TrustedIntegrations` (default: `Itsm`, `Catalog`, `OpenMetadata`, `Lineage`; additionally permitted: `AuditWorm`, `Cdn`). `Lakehouse` can never use the allowlist because its target URLs originate from Iceberg metadata manifests.
+- Entries are strictly validated at startup across all environments: invalid CIDRs, IPv4 subnets broader than /8, IPv6 subnets broader than /32, or subnets intersecting 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 100.64.0.0/10, multicast/broadcast, `::`, `::1`, fe80::/10, `::ffff:0:0/96`, or fd00:ec2::/32 immediately abort startup. ULA networks (fc00::/7) for specific corporate sites remain permissible. An active allowlist is reported as a `WARN:` in the startup bypass inventory.
+- Permanently blocked even for allowlisted targets: 0.0.0.0/8, `::`, 100.64.0.0/10, multicast, broadcast, IPv4-mapped addresses (normalized to IPv4), and metadata IPs (169.254.169.254, 169.254.170.2, 100.100.100.200, fd00:ec2::254, 168.63.129.16). Unresolvable hostnames result in immediate request rejection.
+- All integration clients strictly disable HTTP redirects (`AllowAutoRedirect = false`): any 3xx response is treated as an error. Connections are established exclusively to validated IP addresses resolved at connect time (preventing DNS rebinding attacks). System proxy configurations (`HTTPS_PROXY`) remain exempt.
 
 ### Projects
 
@@ -246,13 +245,13 @@ Ergänzungen (Nachprüfung E-01 bis E-04):
 | [`Autheris.Infrastructure`](src/Autheris.Infrastructure) | `net10.0` | Persistence (`SqliteGovernanceRepository`, `SqlConnectionFactory`), Caching (`ConsentCacheService`), Multi-Instance Messaging (`RedisEventBus`), Rate Limiting (`RedisRateLimiterService`), Security Handlers (`ForwardAuthAuthenticationHandler`, `BasicAuthenticationHandler`) |
 | [`Autheris.GraphQL`](src/Autheris.GraphQL) | `net10.0` | Hot Chocolate 16.6.7 GraphQL engine, dynamic schemas, Subscriptions, Fusion Router (`FusionGatewayExtensions`), MCP Server, queries & mutations |
 | [`Autheris.Api`](src/Autheris.Api) | `net10.0` | ASP.NET Core Host, Basic Auth Login (`/api/auth/login`), ForwardAuth header security, rate limiting, anti-CSRF, health probes, ITSM webhooks, MCP endpoints |
-| [`Autheris.Extensions`](/root/gql_extensions/src/Autheris.Extensions) | `net10.0` | All connectors to foreign systems: Data Catalogs (Purview, Collibra, Alation, OpenMetadata), ITSM (ServiceNow, Jira, webhooks), OpenMetadata sync, dbt, OData, Iceberg Lakehouse, OpenLineage/OpenJEV, Backstage export, CDC sources (MSSQL Change Tracking, Debezium) |
-| [`TrinoSqlEngine`](/root/gql_sqlparser) | `net10.0` | High-performance ANTLR4 SQL Parser, AST Rewriter, WebSQL engine, and parameter extractor (857 parser tests) |
+| [`Autheris.Extensions`](src/Autheris.Extensions) | `net10.0` | All connectors to foreign systems: Data Catalogs (Purview, Collibra, Alation, OpenMetadata), ITSM (ServiceNow, Jira, webhooks), OpenMetadata sync, dbt, OData, Iceberg Lakehouse, OpenLineage/OpenJEV, Backstage export, CDC sources (MSSQL Change Tracking, Debezium) |
+| [`TrinoSqlEngine`](src/TrinoSqlEngine) | `net10.0` | High-performance ANTLR4 SQL Parser, AST Rewriter, WebSQL engine, and parameter extractor (857 parser tests) |
 | [`Autheris.Benchmarks`](benchmarks/Autheris.Benchmarks) | `net10.0` | BenchmarkDotNet suites for throughput, cache hit/miss, and masking allocations |
 | [`Autheris.Tests.Unit`](tests/Autheris.Tests.Unit) | `net10.0` | 1,180 Unit & Property-Based tests (xUnit, Shouldly, FsCheck, NSubstitute) |
 | [`Autheris.Tests.Architecture`](tests/Autheris.Tests.Architecture) | `net10.0` | 8 NetArchTest/reflection rules enforcing Clean Architecture dependency directions (incl. Kern vs. Extensions) |
 | [`Autheris.Tests.Integration`](tests/Autheris.Tests.Integration) | `net10.0` | 144 End-to-end integration tests using `WebApplicationFactory<Program>` |
-| [`Autheris.Extensions.Tests`](/root/gql_extensions/tests/Autheris.Extensions.Tests) | `net10.0` | 75 Unit & Integration tests for Iceberg Lakehouse, Data Catalogs, dbt, ITSM, and OData |
+| [`Autheris.Extensions.Tests`](tests/Autheris.Extensions.Tests) | `net10.0` | 75 Unit & Integration tests for Iceberg Lakehouse, Data Catalogs, dbt, ITSM, and OData |
 
 ---
 
@@ -267,7 +266,7 @@ Ergänzungen (Nachprüfung E-01 bis E-04):
 
 ```bash
 dotnet build Autheris.sln -c Release
-dotnet build /root/gql_extensions/AutherisExtensions.slnx -c Release
+dotnet build Autheris.sln -c Release
 ```
 *Note: Both solutions enforce `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>` (0 warnings, 0 errors).*
 
@@ -275,8 +274,8 @@ dotnet build /root/gql_extensions/AutherisExtensions.slnx -c Release
 
 ```bash
 dotnet test Autheris.sln -c Release
-dotnet test /root/gql_extensions/AutherisExtensions.slnx -c Release
-dotnet test /root/gql_sqlparser/TrinoSqlEngine.csproj -c Release
+dotnet test Autheris.sln -c Release
+dotnet test src/TrinoSqlEngine/TrinoSqlEngine.csproj -c Release
 ```
 Currently passes **2,261 / 2,261 tests (100% green)** across all test suites:
 - **857 TrinoSqlEngine & WebSQL Parser Tests** (ANTLR4 parsing, AST statement validation, parameter extraction, RLS AST-injection, type inference)
@@ -287,31 +286,31 @@ Currently passes **2,261 / 2,261 tests (100% green)** across all test suites:
 
 ### 3. Run Gateway via Docker Container (Fastest / Getting Started)
 
-Ein schlüsselfertiges Container-Image mit integriertem **Microsoft Garnet .NET Cache**, In-Memory Governance-DB (10 Domänen vorbefüllt) und aktivierter Web-UI steht in der GitHub Container Registry bereit:
+A turnkey container image featuring the integrated **Microsoft Garnet .NET Cache**, in-memory governance database (pre-seeded with 10 domains), and interactive web UI is available via GitHub Container Registry:
 
-> **Sicherheitshinweis:** Das Image startet standardmäßig in `Production`. Der unten gezeigte Getting-Started-Modus
-> setzt explizit `ASPNETCORE_ENVIRONMENT=Development` plus das Opt-in `AUTHERIS_ALLOW_DEV_IN_CONTAINER=true` und ist
-> ausschließlich für lokale Tests gedacht.
+> **Security Notice:** The container starts in `Production` by default. The getting-started mode below
+> explicitly sets `ASPNETCORE_ENVIRONMENT=Development` and the opt-in `AUTHERIS_ALLOW_DEV_IN_CONTAINER=true`,
+> and is strictly intended for local developer evaluation.
 
 ```bash
-# Direkt via Docker Run (Ports 8080 HTTP / 8081 HTTPS) – lokaler Getting-Started-Modus
+# Direct Docker run (Ports 8080 HTTP / 8081 HTTPS) – local getting-started mode
 docker run -d -p 8080:8080 -p 8081:8081 \
   -e ASPNETCORE_ENVIRONMENT=Development -e AUTHERIS_ALLOW_DEV_IN_CONTAINER=true \
   --name gql-gateway ghcr.io/themulle/gql:getting-started
 
-# Oder via Docker Compose (Basis = Production, Override = lokaler Dev-Modus)
+# Or via Docker Compose (Base = Production, Override = local Dev mode)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 ```
 
-#### Sofort verfügbare Endpunkte auf Port 8080:
+#### Out-of-the-Box Endpoints on Port 8080:
 - **Banana Cake Pop GraphQL IDE**: [`http://localhost:8080/graphql`](http://localhost:8080/graphql)
 - **Swagger UI (REST / OpenAPI Explorer)**: [`http://localhost:8080/docs`](http://localhost:8080/docs)
-- **Declarative SQL OpenAPI 3.0 Spezifikation**: [`http://localhost:8080/api/v1/queries/openapi.json`](http://localhost:8080/api/v1/queries/openapi.json)
+- **Declarative SQL OpenAPI 3.0 Specification**: [`http://localhost:8080/api/v1/queries/openapi.json`](http://localhost:8080/api/v1/queries/openapi.json)
 - **Declarative SQL-to-API Endpoints**: `GET` / `POST http://localhost:8080/api/v1/queries/{name}`
-- **Governed WebSQL Ausführung**: `POST http://localhost:8080/api/v1/sql`
-- **OData v4 Datenabruf (REST / Excel / Power BI)**: `GET http://localhost:8080/odata/v4/{domain}/{schema}/{table}`
-- **OpenAPI 3.1 Spezifikation (OData)**: [`http://localhost:8080/odata/v4/$openapi`](http://localhost:8080/odata/v4/$openapi)
-- **MCP (Model Context Protocol für KI-Agenten)**: `POST http://localhost:8080/mcp`
+- **Governed WebSQL Execution**: `POST http://localhost:8080/api/v1/sql`
+- **OData v4 Data Access (REST / Excel / Power BI)**: `GET http://localhost:8080/odata/v4/{domain}/{schema}/{table}`
+- **OpenAPI 3.1 Specification (OData)**: [`http://localhost:8080/odata/v4/$openapi`](http://localhost:8080/odata/v4/$openapi)
+- **MCP (Model Context Protocol for AI Agents)**: `POST http://localhost:8080/mcp`
 - **Health Checks**: [`http://localhost:8080/health/live`](http://localhost:8080/health/live) & [`/health/ready`](http://localhost:8080/health/ready)
 
 ### 4. Run Gateway Locally from Source
@@ -609,9 +608,9 @@ query GenerateGdprDisclosureReport {
 }
 ```
 
-## 📦 Parquet-Ausgabe
+## 📦 Parquet Egress Output
 
-Alle Daten-Ausgabekanäle liefern ihr Ergebnis auf Wunsch als echte Apache-Parquet-Datei (Parquet.Net, eine Row-Group, Snappy-komprimiert) statt JSON:
+All data egress channels can deliver results as authentic Apache Parquet binary files (Parquet.Net, single row group, Snappy-compressed) instead of JSON:
 
 ```bash
 curl -H "Accept: application/vnd.apache.parquet" -H "GraphQL-Preflight: 1" \
@@ -620,14 +619,14 @@ curl -H "Accept: application/vnd.apache.parquet" -H "GraphQL-Preflight: 1" \
      -o orders.parquet http://localhost:8080/graphql
 ```
 
-- **Header:** `Accept: application/vnd.apache.parquet` (Alias `application/x-parquet`). Parquet wird nur gewählt, wenn der Typ explizit mit q>0 angegeben ist und kein anderer Typ eine höhere q-Präferenz hat (`*/*` zählt nicht). Antwort: `Content-Type: application/vnd.apache.parquet`, `Content-Disposition: attachment`, `X-Row-Count`, `X-Export-Truncated`, `Vary: Accept`, `Cache-Control: no-store`.
-- **Kanäle:** GraphQL (`/graphql`), WebSQL (`POST /api/sql`, `/api/v1/sql`), SQL-Endpoints (`/api/v1/queries/{name}`), OData-Entity-Sets (`/odata/v4/{domain}/{schema}/{table}`). Andere Routen antworten auf einen reinen Parquet-Accept-Header mit `406 Not Acceptable`; enthält der Header zusätzlich `application/json` oder `*/*`, wird normal JSON geliefert.
-- **Governance:** Die Konvertierung ist eine reine Ausgabe-Transformation nach RLS, Masking, Consent und Egress-Interceptors – Parquet enthält exakt die Daten der JSON-Antwort (maskierte Werte bleiben maskiert).
-- **Grenzen:** `GatewayOptions:ParquetEgress:MaxRowsPerFile` (Default 100000, darüber `X-Export-Truncated: true`), `MaxBufferedSourceBytes` (Default 64 MB für die gepufferte GraphQL-JSON-Antwort, darüber `413`), `Compression` (`None`/`Snappy`/`Gzip`), `FlattenNestedStructures` (verschachtelte Objekte → Spalten `parent.child`, Listen → JSON-String).
-- **GraphQL:** genau ein Root-Feld pro Operation; Zeilenquelle ist `jsonRows`, eine Liste `rows`/`items`/`nodes`, `edges[].node` oder eine Liste von Objekten. Skalare Ergebnisse → `406`.
-- **Fehler bleiben JSON:** GraphQL-`errors` (Header `X-Parquet-Conversion: skipped-errors`), Policy-/Validierungsfehler und alle Status ≠ 200 werden unverändert als JSON geliefert.
-- **Ausgenommen:** MCP (`/mcp`, JSON-RPC-Protokoll), Subscriptions/SSE/WebSockets, Webhooks, Health und Metrics werden nie konvertiert.
-- `GET /api/export/parquet/{domain}/{table}` liefert weiterhin nur ein Schema-Gerüst ohne Zeilen.
+- **Headers:** `Accept: application/vnd.apache.parquet` (alias `application/x-parquet`). Parquet format is selected only when explicitly requested with quality factor q > 0 and no other media type has higher preference (`*/*` does not trigger Parquet). Responses include `Content-Type: application/vnd.apache.parquet`, `Content-Disposition: attachment`, `X-Row-Count`, `X-Export-Truncated`, `Vary: Accept`, and `Cache-Control: no-store`.
+- **Supported Channels:** GraphQL (`/graphql`), WebSQL (`POST /api/sql`, `/api/v1/sql`), SQL Endpoints (`/api/v1/queries/{name}`), and OData entity sets (`/odata/v4/{domain}/{schema}/{table}`). Other routes respond to pure Parquet accept headers with `406 Not Acceptable`; if the header includes `application/json` or `*/*`, JSON is returned normally.
+- **Governance Integrity:** Conversion is a pure egress transformation applied strictly post-RLS, post-masking, post-consent, and post-egress interceptors—Parquet files contain the exact sanitized data of the JSON response (masked values remain masked).
+- **Limits & Safeguards:** `GatewayOptions:ParquetEgress:MaxRowsPerFile` (default 100,000; exceeding results sets `X-Export-Truncated: true`), `MaxBufferedSourceBytes` (default 64 MB buffered JSON response; exceeding triggers HTTP `413`), `Compression` (`None`/`Snappy`/`Gzip`), `FlattenNestedStructures` (nested objects flattened to `parent.child` columns; arrays formatted as JSON strings).
+- **GraphQL Semantics:** Exactly one root field per operation; row source is `jsonRows`, a collection named `rows`/`items`/`nodes`, `edges[].node`, or a list of objects. Scalar responses return `406 Not Acceptable`.
+- **Errors Remain JSON:** GraphQL `errors` (header `X-Parquet-Conversion: skipped-errors`), policy/validation failures, and all non-200 HTTP statuses are delivered untouched as JSON.
+- **Exempt Endpoints:** MCP (`/mcp`, JSON-RPC protocol), Subscriptions/SSE/WebSockets, Webhooks, Health, and Metrics are never converted.
+- `GET /api/export/parquet/{domain}/{table}` continues to return schema-only scaffolding without rows.
 
 ## 📝 Code Review & Export Artifacts
 
@@ -635,11 +634,11 @@ For offline security audits, external architecture reviews, or LLM-assisted code
 
 | Artifact | Size | Description | Target Audience |
 | :--- | :--- | :--- | :--- |
-| [`review.txt`](file:///root/gql/review.txt) | ~436 KB | Consolidated bundle of all production C# source code (`src/**/*.cs`, 73 files) with a Table of Contents and standard file separators (`FILE: <path>`). | AI/LLM Reviewers, Single-File Ingestion |
-| [`src_codebase_review.txt`](file:///root/gql/src_codebase_review.txt) | ~436 KB | Exact mirror of `review.txt` for tooling expecting the `src_codebase_review` naming convention. | Automated CI/CD Review Pipelines |
-| [`full_codebase_review.txt`](file:///root/gql/full_codebase_review.txt) | ~812 KB | Extended bundle including all production (`src/`), test (`tests/`), and benchmark (`benchmarks/`) C# code (108 files total). | Comprehensive Test & Benchmark Audits |
-| [`review_diff.patch`](file:///root/gql/review_diff.patch) / [`codebase.diff`](file:///root/gql/codebase.diff) | ~928 KB | Complete unified Git diff across all commits relative to upstream `origin/main`. | Git / Patch Tools, PR Reviewers |
-| [`src_codebase.diff`](file:///root/gql/src_codebase.diff) | ~454 KB | Unified Git diff restricted strictly to production code under `src/`. | Production Code Reviewers |
+| [`review.txt`](file:///root/lis-git/autheris/review.txt) | ~436 KB | Consolidated bundle of all production C# source code (`src/**/*.cs`, 73 files) with a Table of Contents and standard file separators (`FILE: <path>`). | AI/LLM Reviewers, Single-File Ingestion |
+| [`src_codebase_review.txt`](file:///root/lis-git/autheris/src_codebase_review.txt) | ~436 KB | Exact mirror of `review.txt` for tooling expecting the `src_codebase_review` naming convention. | Automated CI/CD Review Pipelines |
+| [`full_codebase_review.txt`](file:///root/lis-git/autheris/full_codebase_review.txt) | ~812 KB | Extended bundle including all production (`src/`), test (`tests/`), and benchmark (`benchmarks/`) C# code (108 files total). | Comprehensive Test & Benchmark Audits |
+| [`review_diff.patch`](file:///root/lis-git/autheris/review_diff.patch) / [`codebase.diff`](file:///root/lis-git/autheris/codebase.diff) | ~928 KB | Complete unified Git diff across all commits relative to upstream `origin/main`. | Git / Patch Tools, PR Reviewers |
+| [`src_codebase.diff`](file:///root/lis-git/autheris/src_codebase.diff) | ~454 KB | Unified Git diff restricted strictly to production code under `src/`. | Production Code Reviewers |
 
 ### Re-generating Review Artifacts
 
@@ -705,8 +704,8 @@ For comprehensive engineering and operational guides, consult the `docs/` direct
 
 This repository follows a dual-licensing / Open-Core model:
 
-- **Autheris Core (`gql/` & `gql_sqlparser/`)**: Licensed under the **[Business Source License 1.1 (BSL 1.1)](LICENSE)**.
+- **Autheris Core (`src/` & `src/TrinoSqlEngine/`)**: Licensed under the **[Business Source License 1.1 (BSL 1.1)](LICENSE)**.
   - **Free for Internal Use**: Free to use in development, testing, and internal enterprise production environments.
   - **Cloud Hosting & Managed Services**: Offering Autheris as a hosted service, managed API gateway, or cloud service to third parties is strictly subject to a commercial license.
   - **Change License**: Transitions automatically to the **Apache License, Version 2.0** on **2029-10-01**.
-- **Enterprise Extensions (`gql_extensions/`)**: Proprietary enterprise modules (Apache Iceberg Lakehouse, Data Catalog Sync for Microsoft Purview/Collibra, ServiceNow/Jira ITSM, WORM S3 Compliance Export) are subject to a **[Commercial Enterprise License](../gql_extensions/LICENSE)**. Commercial distribution and reselling are reserved exclusively for the copyright holders.
+- **Enterprise Extensions (`src/Autheris.Extensions/`)**: Proprietary enterprise modules (Apache Iceberg Lakehouse, Data Catalog Sync for Microsoft Purview/Collibra, ServiceNow/Jira ITSM, WORM S3 Compliance Export) are subject to a **[Commercial Enterprise License](LICENSE)**. Commercial distribution and reselling are reserved exclusively for the copyright holders.
