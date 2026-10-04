@@ -371,13 +371,13 @@ $$\text{Score} = \frac{\text{Reach} \times \text{Impact} \times \text{Confidence
 | **`F-OPS-02` OTel Trace-to-Audit** | 9 | 1.9 | 1.00 | 1.0 | 0.5 | **34.20** | ⚡ **Quick Win** | Lückenlose Kette: `Activity.Current` W3C `traceparent` direkt in den HMAC-Audit-Hash eintragen. |
 | **`F-AI-11` Whitelisted MCP Persisted Tools** | 8 | 2.5 | 0.90 | 1.6 | 1.5 | **19.20** | 🥇 **Rang 1** | Prompt-Injection-Immunität (OWASP LLM01) durch typisierte Persisted Operations als MCP Tools. |
 | **`F-AI-12-B` EU AI Act Art. 10 Audit Exporter**| 7 | 2.5 | 0.85 | 2.0 | 1.5 | **19.83** | 🥇 **Rang 1** | WORM-versiegelter PDF/JSON-Audit-Zertifikatsexport für DP-Perturbationen und Trainings-/RAG-Nachweise. |
-| **`P11` Delta Lake Connector (UniForm)** | 8 | 2.5 | 0.85 | 1.0 | 2.0 | **8.50** | 🥈 **Rang 2** | Schließt die Lücke zum Databricks-Ökosystem (Azure/AWS). |
-| **`F-EVT-01` CloudEvents Webhooks** | 7 | 2.0 | 0.90 | 1.0 | 1.5 | **8.40** | 🥈 **Rang 2** | Standardisiertes Event-Streaming für CDC mit integriertem RLS. |
-| **`P6` Management Studio & Visual UI** | 9 | 3.0 | 0.90 | 1.0 | 3.0 | **8.10** | 🥈 **Rang 2** | Visuelle Governance, What-if Sandbox, HitL-Triage & FinOps-Cockpit. |
-| **`F-DATA-05` Iceberg REST Catalog Federation** | 7 | 2.5 | 0.85 | 1.5 | 3.0 | **7.44** | 🥉 **Rang 3** | Offene Catalog-Föderation mit dynamischem STS Credential Vending. |
-| **`F-DATA-04-B` Arrow Flight SQL Server**| 6 | 2.5 | 0.85 | 1.0 | 2.0 | **6.38** | 🥉 **Rang 3** | Multi-GB/s ODBC/JDBC-Binärstreaming für DBeaver, Tableau & Power BI. |
-| **`F-OPS-03` Subgraph Dynamic Feature Flags** | 6 | 1.5 | 0.90 | 1.1 | 1.5 | **5.94** | 🥉 **Rang 3** | Granulares Canary Traffic Splitting und A/B-Tests auf Feldebene. |
-| **`F-ARCH-11` Envoy Wasm / Istio Adapter** | 4 | 1.5 | 0.70 | 1.0 | 1.5 | **2.80** | ⏳ **Später** | Exportiert PDP-Entscheidungen an Service-Mesh-Proxies. |
+| **`P11` Delta Lake Connector (UniForm)** | 8 | 2.5 | 0.85 | 1.0 | 2.0 | **8.50** | ✅ **100% GA [Done]** | Schließt die Lücke zum Databricks-Ökosystem (Azure/AWS), UniForm-Kompatibilität & RLS. |
+| **`F-EVT-01` CloudEvents Webhooks** | 7 | 2.0 | 0.90 | 1.0 | 1.5 | **8.40** | ✅ **100% GA [Done]** | Standardisiertes Event-Streaming für CDC mit integriertem RLS & HMAC-Signaturen. |
+| **`P6` Management Studio & Visual UI** | 9 | 3.0 | 0.90 | 1.0 | 3.0 | **8.10** | ⏳ **UI Backlog** | Visuelle Governance, What-if Sandbox, HitL-Triage & FinOps-Cockpit (separates UI-Projekt). |
+| **`F-DATA-05` Iceberg REST Catalog Federation** | 7 | 2.5 | 0.85 | 1.5 | 3.0 | **7.44** | ✅ **100% GA [Done]** | Offene Catalog-Föderation mit dynamischem STS Credential Vending & RFC-Endpoints. |
+| **`F-DATA-04-B` Arrow Flight SQL Server**| 6 | 2.5 | 0.85 | 1.0 | 2.0 | **6.38** | ✅ **100% GA [Done]** | Multi-GB/s ODBC/JDBC-Binärstreaming für DBeaver, Tableau & Power BI mit HMAC-Tickets. |
+| **`F-OPS-03` Subgraph Dynamic Feature Flags** | 6 | 1.5 | 0.90 | 1.1 | 1.5 | **5.94** | ✅ **100% GA [Done]** | Granulares Canary Traffic Splitting und A/B-Tests auf Feldebene mit Zero-Trust SSRF-Guard. |
+| **`F-ARCH-11` Envoy Wasm / Istio Adapter** | 4 | 1.5 | 0.70 | 1.0 | 1.5 | **2.80** | ✅ **100% GA [Done]** | Envoy HTTP/JSON ext_authz Adapter & Istio EnvoyFilter/WasmPlugin Manifest-Exporter. |
 
 ---
 

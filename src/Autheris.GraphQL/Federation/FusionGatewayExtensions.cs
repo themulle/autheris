@@ -21,6 +21,7 @@ public static class FusionGatewayExtensions
     {
         services.AddSingleton<ISubgraphContextPropagationService, SubgraphContextPropagationService>();
         services.AddSingleton<ISubgraphResultMasker, SubgraphResultMasker>();
+        services.AddSingleton<Autheris.Application.Federation.Interfaces.ISubgraphCanaryRouter, Autheris.Application.Federation.Services.SubgraphCanaryRouter>();
 
         // Register HTTP Clients with Zero-Trust DelegatingHandler for each configured subgraph
         foreach (var subgraph in options.Federation.Subgraphs)
@@ -36,7 +37,8 @@ public static class FusionGatewayExtensions
                 sp.GetRequiredService<ISubgraphContextPropagationService>(),
                 sp.GetRequiredService<IHttpContextAccessor>(),
                 sp.GetRequiredService<ILogger<SubgraphSecurityDelegatingHandler>>(),
-                sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()
+                sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(),
+                sp.GetService<Autheris.Application.Federation.Interfaces.ISubgraphCanaryRouter>()
             ));
 
             services.AddHttpClient(subgraphName, client =>

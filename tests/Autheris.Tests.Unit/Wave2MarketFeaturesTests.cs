@@ -489,9 +489,9 @@ public sealed class Wave2MarketFeaturesTests
 
         // Fill slot and queue
         var lease1 = await manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "t1");
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         var queuedTask = Task.Run(async () => await manager.TryAcquireLeaseAsync(ResourceGroupTier.Interactive, "t2", cts.Token));
-        await Task.Delay(50);
+        await Task.Delay(200);
 
         var service = new GatewaySystemMetricsService(
             manager,

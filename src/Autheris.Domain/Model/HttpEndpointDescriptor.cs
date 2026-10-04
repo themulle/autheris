@@ -11,7 +11,8 @@ public enum DataSourceType
     LakehouseIceberg = 3,
     VectorPgVector = 4,
     VectorQdrant = 5,
-    VectorMilvus = 6
+    VectorMilvus = 6,
+    LakehouseDelta = 7
 }
 
 public enum HttpAuthMode
