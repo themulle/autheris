@@ -1,44 +1,69 @@
-# F-AI-08: FOCUS-konformes FinOps Accounting für Token & Compute
+# F-AI-08: FOCUS FinOps Accounting for Token & Compute
 
-**Status:** **100% (GA) ✅ (Implementiert & Security-Audited 2026-10-02)**  
-**Komponenten:** [`IFinOpsAccountingService.cs`](file:///root/lis-git/gql/gql/src/Autheris.Application/FinOps/Interfaces/IFinOpsAccountingService.cs), [`FocusCostAccountingService.cs`](file:///root/lis-git/gql/gql/src/Autheris.Application/FinOps/Services/FocusCostAccountingService.cs), [`FinOpsBudgetMiddleware.cs`](file:///root/lis-git/gql/gql/src/Autheris.Api/Middleware/FinOpsBudgetMiddleware.cs), [`FinOpsEndpoints.cs`](file:///root/lis-git/gql/gql/src/Autheris.Api/Endpoints/FinOpsEndpoints.cs), [`FinOpsModels.cs`](file:///root/lis-git/gql/gql/src/Autheris.Domain/Model/FinOpsModels.cs), [`FinOpsOptions.cs`](file:///root/lis-git/gql/gql/src/Autheris.Domain/Options/GatewayOptions.cs)  
-**Referenzen:** [`implementation-plan-welle-2-2026-10-02.md`](file:///root/lis-git/gql/gql/docs/architecture/implementation-plan-welle-2-2026-10-02.md), [`security-review-welle-2-2026-10-02.md`](file:///root/lis-git/gql/gql/docs/threat-model/security-review-welle-2-2026-10-02.md), [FinOps Foundation FOCUS Specification](https://focus.finops.org/)
+**Status:** [Done] (100% GA – Wave 2)  
+**Components:** [`IFocusCostAccountingService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/FinOps/Interfaces/IFocusCostAccountingService.cs), [`FocusCostAccountingService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/FinOps/Services/FocusCostAccountingService.cs)
 
 ---
 
-## 1. Übersicht & Problemstellung
-Autonome KI-Agenten (über Model Context Protocol / MCP) lösen durch mehrstufiges Reasoning unkontrollierte Kaskaden von Backend-Abfragen und LLM-Inferenz aus ("Denial of Wallet"). Plattform-Teams in Konzernen können diese Kosten weder transparent messen noch verursachergerecht auf Abteilungen oder Mandanten umlegen (Chargeback / Showback).
+## 1. Overview & Problem Statement
 
-## 2. Architektur & Umsetzung
-- **Standardisiertes FOCUS v1.2 Kostenmodell:** Kontinuierliche Aggregation von Verbrauchsdaten in standardisierte FOCUS Cost Records (`BilledCost`, `EffectiveCost`, `ConsumedQuantity`, `ConsumedUnit`, `SubAccountId`, `PricingCategory`).
-- **Mikro-Abrechnung für Token & Rechenzeit:** Exakte `decimal`-Berechnung für Prompt-Tokens, Completion-Tokens und Backend-CPU-Millisekunden.
-- **Budget-Governance & Denial-of-Wallet Schutz (`FinOpsBudgetMiddleware`):**
-  - **Soft Cap:** Sendet `X-FinOps-Budget-Warning: true` Header an Clients, wenn der definierte Schwellenwert (z. B. 80%) erreicht ist.
-  - **Hard Cap:** Blockiert weitere Anfragen des Mandanten sofort mit `429 Too Many Requests` (`FINOPS_BUDGET_EXCEEDED`).
-- **Sichere REST-Endpunkte:**
-  - `GET /api/v1/finops/focus`: Liefert FOCUS-Datensätze als JSON oder CSV (mit integriertem CSV-Formula-Injection-Schutz CWE-1236).
-  - `GET /api/v1/finops/budget/{tenantId}`: IDOR-geschützte Budgetabfrage mit strikter Mandanten-Isolation.
+Enterprise GenAI adoption creates uncontrolled compute costs across databases, lakehouse engines, and model inference providers. F-AI-08 implements continuous telemetry and cost allocation strictly compliant with the FinOps Open Cost and Usage Specification (FOCUS 1.0). Every query, execution plan, and MCP tool call tracks token consumption, bytes scanned, and execution duration, attributing costs to cost centers, teams, and projects.
 
-## 3. Konfigurationsbeispiel (`appsettings.json`)
+---
+
+## 2. Business Value
+
+- **Precise AI Chargeback & Showback**: Allocate AI compute and database query expenses accurately across business units.
+- **Budget Enforcement**: Hard and soft spending caps automatically throttle or reject queries when an agent or department exceeds its monthly FinOps budget.
+- **Standardized Reporting**: Native FOCUS 1.0 CSV/JSON export ready for ingestion into enterprise ERP and FinOps platforms (Apptio, CloudZero, Kubecost).
+
+---
+
+## 3. Architecture & Capabilities
+
+- Real-time aggregation of input/output tokens, DB execution milliseconds, and lakehouse scan volumes.
+- Budget quota checks with automatic HTTP 429 / MCP Resource Exhaustion enforcement.
+- FOCUS 1.0 schema compliance (`BilledCost`, `EffectiveCost`, `ChargeCategory`, `SubAccountId`).
+
+---
+
+## 4. Usage Example
+
+```bash
+# Query active department FinOps consumption
+curl -X GET "http://localhost:8080/api/v1/finops/consumption?costCenter=CC-FINANCE-01&period=2026-10" \
+  -H "Authorization: Bearer <finops-admin-token>"
+
+# Response:
+# {
+#   "costCenter": "CC-FINANCE-01",
+#   "period": "2026-10",
+#   "totalQueries": 14205,
+#   "inputTokensConsumed": 3820000,
+#   "outputTokensConsumed": 940000,
+#   "databaseBytesScanned": 104857600000,
+#   "allocatedCostUsd": 248.50,
+#   "budgetCapUsd": 500.00,
+#   "status": "WITHIN_BUDGET"
+# }
+```
+
+---
+
+## 5. Configuration Example
+
 ```json
 {
   "Gateway": {
     "FinOps": {
       "Enabled": true,
-      "DefaultMonthlyBudget": 100.0,
-      "SoftCapRatio": 0.8,
-      "PricePerThousandPromptTokens": 0.003,
-      "PricePerThousandCompletionTokens": 0.015,
-      "PricePerComputeSecond": 0.0001,
-      "TenantMonthlyBudgets": {
-        "tenant-finance": 500.0,
-        "tenant-marketing": 50.0
-      }
+      "AccountingStandard": "FOCUS_1_0",
+      "Currency": "USD",
+      "CostPerMillionInputTokens": 1.50,
+      "CostPerMillionOutputTokens": 6.00,
+      "CostPerGigabyteScanned": 0.02,
+      "EnforceHardBudgetLimits": true
     }
   }
 }
 ```
-
-## 4. Business Value
-- **Vollständige Kostenwahrheit:** Präzise Unit Economics und interne Weiterverrechnung (Showback / Chargeback) von KI- und Gateway-Workloads.
-- **Schutz vor Denial of Wallet:** Schützt das Budget vor Amok laufenden KI-Agenten und unkontrollierten Batch-Jobs.

@@ -1,39 +1,70 @@
-# F-PERF-12: Incremental Delivery via `@defer` & `@stream`
+# F-PERF-12: Incremental Delivery via @defer & @stream
 
-**Status:** **100% (GA) ✅ (Implementiert & Security-Audited 2026-10-02)**  
-**Komponenten:** [`IIncrementalDeliveryFormatter.cs`](file:///root/lis-git/gql/gql/src/Autheris.Application/Performance/IncrementalDelivery/IncrementalDeliveryFormatter.cs), [`IncrementalDeliveryManager.cs`](file:///root/lis-git/gql/gql/src/Autheris.Application/Performance/IncrementalDelivery/IncrementalDeliveryManager.cs), [`IncrementalDeliveryMiddleware.cs`](file:///root/lis-git/gql/gql/src/Autheris.Api/Middleware/IncrementalDeliveryMiddleware.cs), [`IncrementalDeliveryOptions.cs`](file:///root/lis-git/gql/gql/src/Autheris.Domain/Options/GatewayOptions.cs)  
-**Referenzen:** [`implementation-plan-welle-3-2026-10-02.md`](file:///root/lis-git/gql/gql/docs/architecture/implementation-plan-welle-3-2026-10-02.md), [`security-review-welle-3-2026-10-02.md`](file:///root/lis-git/gql/gql/docs/threat-model/security-review-welle-3-2026-10-02.md)
+**Status:** [Done] (100% GA – Wave 2)  
+**Components:** [`IncrementalDeliveryMiddleware.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Middleware/IncrementalDeliveryMiddleware.cs), [`IncrementalResponseFormatter.cs`](file:///root/lis-git/autheris/src/Autheris.GraphQL/Execution/IncrementalResponseFormatter.cs)
 
 ---
 
-## 1. Übersicht & Problemstellung
-Langsame Teilabfragen, aggregierte Finanzmetriken oder externe Subgraphs blockieren traditionell die gesamte GraphQL-HTTP-Antwort. Frontends (Web/Mobile) bleiben bis zur vollständigen Fertigstellung im Ladezustand ("White Screen").
+## 1. Overview & Problem Statement
 
-## 2. Architektur & Umsetzung
-- **Standardisiertes Multipart/Mixed Chunk Streaming:**
-  - `Content-Type: multipart/mixed; boundary="-"` nach der GraphQL Incremental Delivery Spezifikation.
-  - Initialer Chunk liefert Primärdaten sofort mit `hasNext: true`.
-  - Asynchrone Fragmente folgen in Streaming-Chunks mit Pfad-Zuordnung (`incremental: [...]`).
-  - Finaler Boundary-Marker schließt den Stream sauber ab (`-----`).
-- **Slowloris- & Concurrency-Schutz (`IncrementalDeliveryManager`):**
-  - Strikte Begrenzung gleichzeitiger Streaming-Verbindungen pro Client (`MaxConcurrentStreamsPerClient`, Standard: 10). Bei Überschreitung erfolgt HTTP 429 (`INCREMENTAL_STREAM_LIMIT_EXCEEDED`).
-  - Globales Gesamt-Timeout (`MaxDeferredExecutionTimeMs`, Standard: 30.000 ms) bricht verwaiste Streams ab.
-  - Sofortiger Abbruch aller Hintergrund-Tasks bei vorzeitigem Client-Verbindungsabbruch (`RequestAborted`).
+When a GraphQL query requests both fast critical data (e.g. user profile) and slow non-critical data (e.g. historical billing analytics or recommendations), the user is forced to wait for the slowest resolver before receiving anything. F-PERF-12 implements the GraphQL Incremental Delivery specification (`@defer` and `@stream`) over multipart HTTP/2 responses. Fast fields are delivered immediately, while deferred components stream in as background resolvers finish.
 
-## 3. Konfigurationsbeispiel (`appsettings.json`)
-```json
-{
-  "Gateway": {
-    "IncrementalDelivery": {
-      "Enabled": true,
-      "MaxDeferredExecutionTimeMs": 30000,
-      "MaxConcurrentStreamsPerClient": 10,
-      "MaxIncrementalChunks": 100
+---
+
+## 2. Business Value
+
+- **Instant User Interface Interactivity**: Critical UI components render in milliseconds without waiting for slow background queries.
+- **Reduced Perceived Latency**: Mobile and web users see immediate visual feedback, boosting customer engagement and conversion rates.
+- **Governed Incremental Chunks**: Deferred chunks pass through standard RLS and masking rules prior to streaming.
+
+---
+
+## 3. Architecture & Capabilities
+
+- Standards-compliant `@defer` and `@stream` execution engine.
+- Multipart HTTP response streaming (`multipart/mixed; boundary="-"`).
+- Transparent error isolation: failure of a deferred field does not break the initial critical payload.
+
+---
+
+## 4. Usage Example
+
+```graphql
+# Query with deferred heavy sub-tree
+query GetDashboard {
+  user {
+    id
+    name
+  }
+  ... @defer(label: "heavyAnalytics") {
+    annualAnalytics {
+      totalRevenue
+      quarterlyBreakdown
     }
   }
 }
 ```
 
-## 4. Business Value
-- **Radikal verbesserte Time-to-First-Byte (TTFB):** Schnelle Primärdaten werden in wenigen Millisekunden gerendert.
-- **Optimale Mobile-Experience:** Reduzierter Speicherbedarf und flüssige UI-Updates für Mobil-Apps.
+```bash
+# Client receives multipart stream:
+# Initial chunk delivered immediately:
+# {"data":{"user":{"id":"1","name":"Alice"}},"hasNext":true}
+# Subsequent chunk delivered when ready:
+# {"hasNext":false,"incremental":[{"data":{"annualAnalytics":{...}},"label":"heavyAnalytics"}]}
+```
+
+---
+
+## 5. Configuration Example
+
+```json
+{
+  "Gateway": {
+    "IncrementalDelivery": {
+      "Enabled": true,
+      "MaxDeferredFieldsPerQuery": 5,
+      "StreamChunkTimeoutSeconds": 30
+    }
+  }
+}
+```
