@@ -1,0 +1,44 @@
+## .NET / Visual Studio
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+TestResults/
+coverage/
+
+## OS Files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+## Temporary and scratch files
+*.tmp
+*.swp
+*~
+*.diff
+*.patch
+review_diff.patch
+review.txt
+codebase_review.txt
+src_codebase_review.txt
+full_codebase_review.txt
+*.tgz
+
+## Secrets & Certificates
+*.pfx
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+.env
+.env.*
+

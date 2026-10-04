@@ -1,0 +1,9 @@
+FROM mcr.microsoft.com/azure-sql-edge:latest
+
+USER root
+COPY containers/sqlserver/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY containers/sqlserver/init-db.sql /usr/local/bin/init-db.sql
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+USER mssql
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

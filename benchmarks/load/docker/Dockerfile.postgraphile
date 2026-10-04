@@ -1,0 +1,13 @@
+FROM node:20-alpine
+WORKDIR /app
+
+COPY gql_bench/configs/postgraphile/package*.json ./
+RUN npm install --omit=dev
+
+COPY gql_bench/configs/postgraphile/index.js ./
+
+ENV PORT=5001 \
+    NODE_ENV=production
+
+EXPOSE 5001
+CMD ["node", "index.js"]

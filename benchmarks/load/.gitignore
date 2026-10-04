@@ -1,0 +1,23 @@
+# Binaries and build artifacts
+bin/
+obj/
+node_modules/
+dist/
+publish/
+
+# Benchmark results (large JSON and CSV files)
+results/*.json
+results/*.csv
+results/*.log
+!results/.gitkeep
+
+# Environment and secrets
+.env
+*.local
+.DS_Store
+
+# Temporary files
+*.tmp
+*~
+__pycache__/
+*.pyc

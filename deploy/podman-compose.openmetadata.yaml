@@ -1,0 +1,111 @@
+# ==============================================================================
+# OpenMetadata Official Server Stack (Separate Overlay / Modular Compose File)
+# ==============================================================================
+# Usage with main stack:
+#   podman compose -f podman-compose.yaml -f podman-compose.openmetadata.yaml up -d
+#
+# Standalone usage:
+#   podman compose -f podman-compose.openmetadata.yaml up -d
+#
+# Hardware Footprint:
+#   - OpenSearch 2.11: ~1.0 GB RAM
+#   - OpenMetadata Server (Java 17): ~1.5 - 2.0 GB RAM
+#   - Total: ~2.5 - 3.0 GB additional RAM
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. OpenSearch 2.x (Mandatory Search & Entity Index for OpenMetadata)
+  # ----------------------------------------------------------------------------
+  opensearch:
+    image: opensearchproject/opensearch:2.11.0
+    container_name: gqlgateway-opensearch
+    networks:
+      - gateway-bench-net
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx1024m"
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data:Z
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1400M
+        reservations:
+          memory: 512M
+
+  # ----------------------------------------------------------------------------
+  # 2. OpenMetadata Server (Official Container Image)
+  # ----------------------------------------------------------------------------
+  openmetadata-server:
+    image: docker.getcollate.io/openmetadata/server:1.5.0
+    container_name: gqlgateway-openmetadata-server
+    networks:
+      - gateway-bench-net
+    ports:
+      - "8585:8585"
+    environment:
+      # Database connection (re-uses PostgreSQL container from main compose)
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: gqluser
+      DB_USER_PASSWORD: REDACTED_HISTORICAL_BENCHMARK_SECRET
+      DB_DRIVER_CLASS: org.postgresql.Driver
+      DB_SCHEME: postgresql
+      DB_DATABASE: openmetadata_db
+
+      
+      # Search engine backend
+      SEARCH_TYPE: opensearch
+      SEARCH_HOST: opensearch
+      SEARCH_PORT: 9200
+      SEARCH_SCHEME: http
+      
+      # Server runtime configuration
+      OPENMETADATA_JVM_OPTS: "-Xms1024m -Xmx1536m"
+      PIPELINE_SERVICE_CLIENT_ENABLED: "false"
+      AUTHENTICATION_PROVIDER: "basic"
+      AUTHENTICATION_PUBLIC_KEYS: "[]"
+      AUTHORIZER_ADMIN_PRINCIPALS: "[admin]"
+      AUTHORIZER_BOT_PRINCIPALS: "[ingestion-bot]"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8585/api/v1/system/version || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          memory: 2200M
+        reservations:
+          memory: 1024M
+
+volumes:
+  opensearch-data:
+
+networks:
+  gateway-bench-net:
+    driver: bridge
+

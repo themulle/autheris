@@ -1,0 +1,88 @@
+{
+  "metadata": {
+    "dbt_version": "1.8.0",
+    "project_name": "corp_analytics"
+  },
+  "nodes": {
+    "model.corp_analytics.stg_customers": {
+      "name": "stg_customers",
+      "database": "postgres",
+      "schema": "raw",
+      "description": "Staging table for customers",
+      "config": {
+        "materialized": "view"
+      },
+      "contract": {
+        "enforced": true
+      },
+      "tags": ["staging", "finance"],
+      "meta": {
+        "owner": "FinanceTeam",
+        "owner_email": "finance@corp.local"
+      },
+      "columns": {
+        "customer_id": {
+          "name": "customer_id",
+          "data_type": "integer",
+          "description": "Primary key",
+          "tags": [],
+          "meta": {}
+        },
+        "email_address": {
+          "name": "email_address",
+          "data_type": "varchar",
+          "description": "Customer contact email",
+          "tags": ["pii"],
+          "meta": {
+            "pii": "true"
+          }
+        },
+        "full_name": {
+          "name": "full_name",
+          "data_type": "varchar",
+          "description": "Full customer name",
+          "tags": [],
+          "meta": {}
+        }
+      }
+    },
+    "model.corp_analytics.fct_invoices": {
+      "name": "fct_invoices",
+      "database": "governancedb",
+      "schema": "public",
+      "description": "Enterprise invoices table",
+      "config": {
+        "materialized": "table"
+      },
+      "contract": {
+        "enforced": true
+      },
+      "tags": ["finance", "invoices"],
+      "meta": {
+        "owner": "FinanceTeam"
+      },
+      "columns": {
+        "id": {
+          "name": "id",
+          "data_type": "integer",
+          "tags": []
+        },
+        "email": {
+          "name": "email",
+          "data_type": "varchar",
+          "tags": ["pii", "email"]
+        },
+        "iban": {
+          "name": "iban",
+          "data_type": "varchar",
+          "tags": ["financial", "sensitive"]
+        },
+        "amount": {
+          "name": "amount",
+          "data_type": "numeric",
+          "tags": []
+        }
+      }
+    }
+  }
+}

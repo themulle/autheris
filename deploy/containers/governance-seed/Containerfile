@@ -1,0 +1,21 @@
+# ==============================================================================
+# Containerfile for governance-seed
+# Initializes and populates the SQLite governance DB on shared volume
+# ==============================================================================
+
+FROM python:3.12-alpine
+
+WORKDIR /app
+
+RUN apk add --no-cache sqlite bash
+
+COPY containers/governance-seed/seed_governance.py .
+
+RUN chmod +x seed_governance.py
+
+ENV GOVERNANCE_DB_PATH=/data/governance.db
+
+HEALTHCHECK --interval=2s --timeout=2s --start-period=1s --retries=15 \
+    CMD test -f /data/.seed_complete || exit 1
+
+CMD ["sh", "-c", "python3 seed_governance.py && chmod -R 777 /data && touch /data/.seed_complete && tail -f /dev/null"]

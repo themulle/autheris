@@ -1,0 +1,38 @@
+{
+  "format-version": 2,
+  "table-uuid": "a4d3f86e-92b1-4f9e-a89c-d083b4007812",
+  "location": "s3://analytics-lake/tables/orders",
+  "last-sequence-number": 42,
+  "last-updated-ms": 1774692000000,
+  "current-schema-id": 0,
+  "schemas": [
+    {
+      "schema-id": 0,
+      "fields": [
+        { "id": 1, "name": "orderId", "type": "string", "required": true },
+        { "id": 2, "name": "tenantId", "type": "string", "required": true },
+        { "id": 3, "name": "customerEmail", "type": "string", "required": false },
+        { "id": 4, "name": "amount", "type": "double", "required": false },
+        { "id": 5, "name": "orderDate", "type": "string", "required": true }
+      ]
+    }
+  ],
+  "default-spec-id": 0,
+  "partition-specs": [
+    {
+      "spec-id": 0,
+      "fields": [
+        { "source-id": 5, "field-id": 1000, "name": "orderDate", "transform": "identity" },
+        { "source-id": 2, "field-id": 1001, "name": "tenantId", "transform": "identity" }
+      ]
+    }
+  ],
+  "current-snapshot-id": 801122334455,
+  "snapshots": [
+    {
+      "snapshot-id": 801122334455,
+      "timestamp-ms": 1774692000000,
+      "manifest-list": "s3://analytics-lake/tables/orders/metadata/snap-801122334455-manifest-list.json"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Autheris.Api/Autheris.Api.csproj" />
+    <Project Path="src/Autheris.Application/Autheris.Application.csproj" />
+    <Project Path="src/Autheris.Domain/Autheris.Domain.csproj" />
+    <Project Path="src/Autheris.GraphQL/Autheris.GraphQL.csproj" />
+    <Project Path="src/Autheris.Infrastructure/Autheris.Infrastructure.csproj" />
+    <Project Path="src/Autheris.Extensions/Autheris.Extensions.csproj" />
+  </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Autheris.Benchmarks/Autheris.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj" />
+    <Project Path="tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj" />
+    <Project Path="tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj" />
+    <Project Path="tests/Autheris.Extensions.Tests/Autheris.Extensions.Tests.csproj" />
+  </Folder>
+
+  <Project Path="src/TrinoSqlEngine/TrinoSqlEngine.csproj" />
+</Solution>

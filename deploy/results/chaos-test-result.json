@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-09-27T07:36:03Z",
+  "baseline_healthy": true,
+  "redis_stopped": true,
+  "rate_limit_fail_open_verified": true,
+  "governance_fail_closed_verified": true,
+  "health_degraded_reported": true,
+  "redis_recovered": true,
+  "summary": "ALL ASSERTIONS PASSED: Redis fail-open for rate limiting and fail-closed for security confirmed.",
+  "all_passed": true
+}

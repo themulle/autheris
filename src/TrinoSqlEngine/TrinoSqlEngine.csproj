@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    
+    <PackageId>FastSqlEngine</PackageId>
+    <Product>FastSqlEngine (compatible with Trino SQL dialect)</Product>
+    <Description>High-performance Trino-compatible SQL Parser and RLS rewriter in C# / .NET 10 using ANTLR4.</Description>
+    <Authors>FastSqlEngine contributors</Authors>
+
+    <!-- Maximale JIT- & GC-Optimierung -->
+    <TieredPGO>true</TieredPGO>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode> <!-- DATAS GC -->
+    <NoWarn>$(NoWarn);CS0108;CA1711</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Antlr4.Runtime.Standard" Version="4.13.1" />
+    <PackageReference Include="Antlr4BuildTasks" Version="12.14.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.ObjectPool" Version="10.0.12" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" PrivateAssets="all" />
+    <PackageReference Include="xunit" Version="2.9.3" PrivateAssets="all" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Antlr4 Include="SqlBase.g4">
+      <Generator>MSBuild:Compile</Generator>
+      <CustomToolNamespace>TrinoSqlEngine</CustomToolNamespace>
+      <Visitor>false</Visitor>
+      <Listener>true</Listener>
+    </Antlr4>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="Fixtures\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Fixtures\RawJava\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>

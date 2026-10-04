@@ -1,0 +1,40 @@
+# Multi-stage Dockerfile for Autheris benchmark target
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+# Copy solution and project files first for efficient caching
+COPY gql/src/Autheris.Domain/Autheris.Domain.csproj src/Autheris.Domain/
+COPY gql/src/Autheris.Application/Autheris.Application.csproj src/Autheris.Application/
+COPY gql/src/Autheris.Infrastructure/Autheris.Infrastructure.csproj src/Autheris.Infrastructure/
+COPY gql/src/Autheris.GraphQL/Autheris.GraphQL.csproj src/Autheris.GraphQL/
+COPY gql/src/Autheris.Api/Autheris.Api.csproj src/Autheris.Api/
+COPY gql_sqlparser/TrinoSqlEngine/TrinoSqlEngine.csproj ../gql_sqlparser/TrinoSqlEngine/
+
+RUN dotnet restore src/Autheris.Api/Autheris.Api.csproj
+
+# Copy remaining source code
+COPY gql/src/ src/
+COPY gql_sqlparser/TrinoSqlEngine/ ../gql_sqlparser/TrinoSqlEngine/
+
+# Publish in Release mode with Server GC and ready-to-run optimizations
+RUN dotnet publish src/Autheris.Api/Autheris.Api.csproj -c Release -o /app/publish \
+    --no-restore \
+    -p:ServerGarbageCollection=true \
+    -p:TieredCompilation=true
+
+# Runtime image
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+
+ENV ASPNETCORE_URLS=http://+:5000 \
+    ASPNETCORE_ENVIRONMENT=Production \
+    DOTNET_gcServer=1 \
+    DOTNET_GCConcurrent=1 \
+    DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 \
+    DOTNET_USE_POLLING_FILE_WATCHER=true
+
+COPY --from=build /app/publish .
+COPY gql_bench/configs/gql-gateway/appsettings.bench.json appsettings.Production.json
+
+EXPOSE 5000
+ENTRYPOINT ["dotnet", "Autheris.Api.dll"]
