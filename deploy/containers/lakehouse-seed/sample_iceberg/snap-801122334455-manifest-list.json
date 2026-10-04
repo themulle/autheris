@@ -1,0 +1,36 @@
+{
+  "entries": [
+    {
+      "file_path": "s3://analytics-lake/tables/orders/data/orders-20260601-alpha.parquet",
+      "file_format": "PARQUET",
+      "record_count": 250,
+      "file_size_in_bytes": 1048576,
+      "partition": {
+        "orderDate": "2026-06-01",
+        "tenantId": "tenant-alpha"
+      },
+      "lower_bounds": {
+        "orderDate": "2026-06-01"
+      },
+      "upper_bounds": {
+        "orderDate": "2026-06-30"
+      }
+    },
+    {
+      "file_path": "s3://analytics-lake/tables/orders/data/orders-20260701-beta.parquet",
+      "file_format": "PARQUET",
+      "record_count": 300,
+      "file_size_in_bytes": 1048576,
+      "partition": {
+        "orderDate": "2026-07-01",
+        "tenantId": "tenant-beta"
+      },
+      "lower_bounds": {
+        "orderDate": "2026-07-01"
+      },
+      "upper_bounds": {
+        "orderDate": "2026-07-31"
+      }
+    }
+  ]
+}

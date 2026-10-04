@@ -1,0 +1,18 @@
+# ==============================================================================
+# Containerfile for mock-extensions
+# Lightweight Python mock service for OpenMetadata, ServiceNow, Jira, and dbt (< 20MB RAM)
+# ==============================================================================
+
+FROM python:3.12-alpine
+
+WORKDIR /app
+
+COPY containers/mock-extensions/mock_server.py .
+COPY containers/mock-extensions/sample_dbt_manifest.json .
+
+EXPOSE 8585
+
+HEALTHCHECK --interval=2s --timeout=2s --start-period=1s --retries=15 \
+    CMD wget -q -O- http://127.0.0.1:8585/health || exit 1
+
+ENTRYPOINT ["python3", "mock_server.py"]

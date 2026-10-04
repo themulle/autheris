@@ -1,0 +1,18 @@
+# ==============================================================================
+# Containerfile for lakehouse-seed
+# Initializes the MinIO bucket and seeds Apache Iceberg metadata and data chunks
+# ==============================================================================
+
+FROM python:3.12-alpine
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir boto3
+
+COPY containers/lakehouse-seed/seed_lakehouse.py .
+COPY containers/lakehouse-seed/sample_iceberg/ ./sample_iceberg/
+
+HEALTHCHECK --interval=2s --timeout=2s --start-period=1s --retries=20 \
+    CMD test -f /tmp/.lakehouse_seed_complete || exit 1
+
+CMD ["sh", "-c", "python3 seed_lakehouse.py && tail -f /dev/null"]

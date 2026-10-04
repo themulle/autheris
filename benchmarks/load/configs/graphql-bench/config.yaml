@@ -1,0 +1,86 @@
+# graphql-bench query configuration for Chinook benchmarks
+url: http://localhost:8085/v1/graphql
+headers:
+  X-Hasura-Admin-Secret: my-secret
+  X-Test-User-Sid: S-1-5-21-9999
+  GraphQL-Preflight: "1"
+
+queries:
+  # 1. Simple primary key lookup
+  - name: AlbumByPK
+    tools: [k6, autocannon]
+    execution_strategy: REQUESTS_PER_SECOND
+    rps: 1000
+    duration: 30s
+    connections: 50
+    query: |
+      query AlbumByPK {
+        albums_by_pk(id: 1) {
+          id
+          title
+        }
+      }
+
+  # 2. Filtered list query
+  - name: SearchAlbumsWithArtist
+    tools: [k6, autocannon]
+    execution_strategy: REQUESTS_PER_SECOND
+    rps: 500
+    duration: 30s
+    connections: 50
+    query: |
+      query SearchAlbumsWithArtist {
+        albums(where: {title: {_like: "%Rock%"}}) {
+          id
+          title
+          artist {
+            id
+            name
+          }
+        }
+      }
+
+  # 3. Nested 2-level relation
+  - name: AlbumWithTracksAndGenre
+    tools: [k6, autocannon]
+    execution_strategy: REQUESTS_PER_SECOND
+    rps: 300
+    duration: 30s
+    connections: 50
+    query: |
+      query AlbumWithTracksAndGenre {
+        albums_by_pk(id: 1) {
+          id
+          title
+          tracks {
+            id
+            name
+            genre {
+              id
+              name
+            }
+          }
+        }
+      }
+
+  # 4. Multi-stage load ramp (k6 only)
+  - name: ConcurrencyRamp
+    tools: [k6]
+    execution_strategy: MULTI_STAGE
+    initial_rps: 100
+    stages:
+      - duration: 10s
+        target: 500
+      - duration: 15s
+        target: 1500
+      - duration: 20s
+        target: 3000
+      - duration: 10s
+        target: 500
+    query: |
+      query ConcurrencyRamp {
+        albums_by_pk(id: 1) {
+          id
+          title
+        }
+      }

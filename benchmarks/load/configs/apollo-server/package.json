@@ -1,0 +1,14 @@
+{
+  "name": "chinook-apollo-server",
+  "version": "1.0.0",
+  "description": "Apollo Server 4 benchmark endpoint for Chinook database",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@apollo/server": "^4.10.0",
+    "graphql": "^16.8.1",
+    "pg": "^8.11.3"
+  }
+}

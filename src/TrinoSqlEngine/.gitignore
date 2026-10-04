@@ -1,0 +1,17 @@
+## .NET / C# build outputs
+bin/
+obj/
+
+## IDE and editor caches
+.vs/
+.vscode/
+.idea/
+*.user
+*.userosscache
+*.suo
+*.userprefs
+
+## Test results
+TestResults/
+*.trx
+*.coverage

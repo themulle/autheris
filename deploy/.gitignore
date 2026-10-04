@@ -1,0 +1,17 @@
+# Staged build sources (re-created dynamically by run-benchmark.ps1 / stage_sources.sh)
+src_build/
+
+# Temporary / Build artifacts
+**/bin/
+**/obj/
+.vs/
+*.user
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class

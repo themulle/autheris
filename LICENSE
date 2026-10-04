@@ -1,0 +1,52 @@
+Business Source License 1.1
+
+Parameters
+
+Licensor:               GqlGateway Authors & Contributors
+Change Date:            2029-10-01
+Change License:         Apache License, Version 2.0
+
+Additional Use Grant:
+You may make use of the Licensed Work (including running in production environments)
+for any internal business purposes, provided that:
+1. You do not offer the Licensed Work, or any software derived from the Licensed Work,
+   as a hosted, managed, or serverless service to third parties.
+2. You do not package, resell, or distribute the Licensed Work as part of a commercial
+   API Gateway or Data Gateway product.
+
+Use of the software for internal enterprise and production operations without offering
+it as a third-party cloud/managed service is free of charge.
+
+--------------------------------------------------------------------------------
+
+Text of the Business Source License 1.1:
+
+The Licensor hereby grants you the right to copy, modify, create derivative works,
+redistribute, and make non-production use of the Licensed Work. The Licensor also
+grants you an Additional Use Grant, defined above, to make specified production use
+of the Licensed Work.
+
+The Licensed Work will automatically transition to the Change License on the Change
+Date, or when the Licensor makes the Licensed Work available under the Change
+License, whichever comes first. On the Change Date, the Licensor hereby grants you
+the right to copy, modify, create derivative works, redistribute, and use the Licensed
+Work under the terms of the Change License.
+
+You may make non-production use of the Licensed Work in any manner that is not a
+production use, including for development, testing, research, and non-commercial
+educational purposes.
+
+You may make production use of the Licensed Work only in accordance with the
+Additional Use Grant.
+
+If you violate the terms of this License or the Additional Use Grant, you may not
+use the Licensed Work for any purpose, and all rights granted to you under this
+License are terminated.
+
+DISCLAIMER OF WARRANTIES AND LIMITATION OF LIABILITY:
+THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

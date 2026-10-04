@@ -1,0 +1,22 @@
+name: Casbin Policy Lint & CI Gate
+
+on:
+  pull_request:
+    paths:
+      - '**/*.conf'
+      - '**/*.csv'
+      - 'tools/casbin-policy-lint/**'
+  push:
+    branches: [ main ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Run Casbin Policy Linter
+        run: dotnet run --project tools/casbin-policy-lint/casbin-policy-lint.csproj -- .

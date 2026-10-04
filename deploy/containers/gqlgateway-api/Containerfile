@@ -1,0 +1,68 @@
+# ==============================================================================
+# Containerfile for GqlGateway.Api
+# Multi-stage build for production-ready, rootless container execution
+# ==============================================================================
+
+# --- Stage 1: Build & Publish ---
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /
+
+# Copy project files first for optimal docker layer caching
+COPY src_build/Autheris.sln src_build/Directory.Build.props /gql/
+COPY src_build/src/Autheris.Domain/Autheris.Domain.csproj /gql/src/Autheris.Domain/
+COPY src_build/src/Autheris.Application/Autheris.Application.csproj /gql/src/Autheris.Application/
+COPY src_build/src/Autheris.GraphQL/Autheris.GraphQL.csproj /gql/src/Autheris.GraphQL/
+COPY src_build/src/Autheris.Infrastructure/Autheris.Infrastructure.csproj /gql/src/Autheris.Infrastructure/
+COPY src_build/src/Autheris.Api/Autheris.Api.csproj /gql/src/Autheris.Api/
+
+COPY src_build/gql_extensions/Directory.Build.props /gql_extensions/
+COPY src_build/gql_extensions/src/Autheris.Extensions/Autheris.Extensions.csproj /gql_extensions/src/Autheris.Extensions/
+
+WORKDIR /gql
+RUN dotnet restore src/Autheris.Api/Autheris.Api.csproj
+
+# Copy remaining source code
+COPY src_build/src/ /gql/src/
+COPY src_build/gql_extensions/src/ /gql_extensions/src/
+
+# Build and publish
+WORKDIR /gql/src/Autheris.Api
+RUN dotnet publish -c Release -o /app/publish --no-restore /p:TreatWarningsAsErrors=false
+
+# --- Stage 2: Runtime Image ---
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+
+# Install curl for robust container health checks
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates sqlite3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create dedicated non-root user for rootless Podman execution
+RUN groupadd -g 10001 appgroup && \
+    useradd -u 10001 -g appgroup -m -s /bin/bash appuser
+
+# Create data directory for SQLite governance DB
+RUN mkdir -p /app/data && chown -R appuser:appgroup /app/data /app
+
+# Copy published application
+COPY --from=build --chown=appuser:appgroup /app/publish .
+COPY --chown=appuser:appgroup containers/gqlgateway-api/appsettings.Benchmark.json ./appsettings.Production.json
+COPY --chown=appuser:appgroup containers/gqlgateway-api/appsettings.Benchmark.json ./appsettings.Development.json
+COPY --chown=appuser:appgroup containers/gqlgateway-api/appsettings.Benchmark.json ./appsettings.json
+
+USER appuser:appgroup
+
+ENV ASPNETCORE_URLS=http://+:5050 \
+    ASPNETCORE_ENVIRONMENT=Production \
+    DOTNET_RUNNING_IN_CONTAINER=true \
+    HMAC_SECRET_KEY=bench-super-secret-hmac-master-key-2026 \
+    GQL_PROD_BENCHMARK_SECRET_KEY=bench-super-secret-hmac-master-key-2026 \
+    Gateway__DataMasking__HmacSecret=bench-super-secret-hmac-master-key-2026
+
+EXPOSE 5050
+
+HEALTHCHECK --interval=3s --timeout=3s --start-period=5s --retries=10 \
+    CMD curl -fsS http://127.0.0.1:5050/health/live || exit 1
+
+ENTRYPOINT ["dotnet", "GqlGateway.Api.dll"]

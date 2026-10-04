@@ -1,0 +1,24 @@
+# ==============================================================================
+# Autheris - Basis-Compose (PRODUCTION)
+#
+# SEC C-04: Diese Datei startet den Gateway in der Production-Umgebung. Dort sind
+# alle Sicherheitsprüfungen aktiv; der Start bricht ab, solange Pflicht-Konfiguration
+# fehlt (z.B. Gateway__DataMasking__HmacSecretKeyVaultRef, IdP/Audience, Origins).
+#
+# Lokales Ausprobieren ("Getting Started", unsichere Dev-Defaults, Demo-Daten):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# ==============================================================================
+services:
+  gql-gateway:
+    image: ghcr.io/themulle/gql:getting-started
+    container_name: gql-gateway
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_HTTP_PORTS=8080
+      - ASPNETCORE_HTTPS_PORTS=8081
+      # Integrierter Microsoft Garnet .NET L2-Cache
+      - Gateway__Caching__Garnet__EnableEmbeddedServer=true
+    restart: unless-stopped

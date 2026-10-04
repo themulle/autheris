@@ -1,0 +1,18 @@
+# ==============================================================================
+# Autheris - Getting-Started / Development Override
+#
+# !!! NUR FÜR LOKALE ENTWICKLUNG / DEMOS – NIEMALS PRODUKTIV EINSETZEN !!!
+# Development deaktiviert zentrale Schutzmechanismen (Test-Auth, Demo-Daten,
+# Entwickler-Secrets, ausführliche Fehler, kein HSTS/HTTPS-Redirect).
+#
+# Verwendung:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# SEC C-04: Development im Container erfordert das explizite Opt-in
+# AUTHERIS_ALLOW_DEV_IN_CONTAINER=true, sonst bricht der Gateway den Start ab.
+# ==============================================================================
+services:
+  gql-gateway:
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - AUTHERIS_ALLOW_DEV_IN_CONTAINER=true

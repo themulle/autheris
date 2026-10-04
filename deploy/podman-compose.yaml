@@ -1,0 +1,328 @@
+# ==============================================================================
+# Podman Compose Configuration for GqlGateway Benchmark & Simulation
+# Compliant with Podman conventions: Rootless, SELinux labels (:Z/:z), no privileged
+# ==============================================================================
+version: '3.8'
+
+networks:
+  gateway-bench-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  governance-data:
+  prometheus-data:
+  minio-data:
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. PostgreSQL (Real Enterprise Data Store for Invoices & Relational Data)
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    container_name: gqlgateway-postgres
+    networks:
+      - gateway-bench-net
+    environment:
+      POSTGRES_DB: governancedb
+      POSTGRES_USER: gqluser
+      POSTGRES_PASSWORD: gqlpass
+      SEED_ROW_COUNT: ${SEED_ROW_COUNT:-200000}
+      SEED_ITEMS_COUNT: ${SEED_ITEMS_COUNT:-50000}
+    volumes:
+      - ./sql/01-init-schema.sql:/docker-entrypoint-initdb.d/01-init-schema.sql:ro,Z
+      - ./sql/02-seed-data.sh:/docker-entrypoint-initdb.d/02-seed-data.sh:ro,Z
+      - postgres-data:/var/lib/postgresql/data:Z
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gqluser -d governancedb"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # ----------------------------------------------------------------------------
+  # 2. Redis (ConsentCache Invalidation, Rate Limiter Token Bucket, Idempotency)
+  # ----------------------------------------------------------------------------
+  redis:
+    image: docker.io/library/redis:7-alpine
+    container_name: gqlgateway-redis
+    networks:
+      - gateway-bench-net
+    command: redis-server --save "" --appendonly no --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+
+  # ----------------------------------------------------------------------------
+  # 3. Governance Seed (SQLite Governance Database Initializer)
+  # ----------------------------------------------------------------------------
+  governance-seed:
+    build:
+      context: .
+      dockerfile: containers/governance-seed/Containerfile
+    container_name: gqlgateway-governance-seed
+    networks:
+      - gateway-bench-net
+    volumes:
+      - governance-data:/data:z
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /data/.seed_complete || exit 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 1s
+
+  # ----------------------------------------------------------------------------
+  # 3b. Azure SQL Edge (Lightweight MS SQL Server Engine for T-SQL Dialect)
+  # ----------------------------------------------------------------------------
+  sqlserver:
+    build:
+      context: .
+      dockerfile: containers/sqlserver/Containerfile
+    container_name: gqlgateway-sqlserver
+    profiles:
+      - relational
+      - full
+    networks:
+      - gateway-bench-net
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "GqlPassw0rd!2026"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/.sqlserver_ready && /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P 'GqlPassw0rd!2026' -Q 'SELECT 1' || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 25
+      start_period: 5s
+
+  # ----------------------------------------------------------------------------
+  # 3c. MinIO (S3-Compatible Object Storage for Apache Iceberg Lakehouse Extension)
+  # ----------------------------------------------------------------------------
+  minio:
+    image: docker.io/minio/minio:latest
+    container_name: gqlgateway-minio
+    profiles:
+      - lakehouse
+      - full
+    networks:
+      - gateway-bench-net
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data:Z
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 2s
+
+  # ----------------------------------------------------------------------------
+  # 3d. Lakehouse Seed (MinIO Bucket Initializer & Iceberg Table Ingester)
+  # ----------------------------------------------------------------------------
+  lakehouse-seed:
+    build:
+      context: .
+      dockerfile: containers/lakehouse-seed/Containerfile
+    container_name: gqlgateway-lakehouse-seed
+    profiles:
+      - lakehouse
+      - full
+    networks:
+      - gateway-bench-net
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/.lakehouse_seed_complete || exit 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 2s
+
+  # ----------------------------------------------------------------------------
+  # 3e. Mock Extensions (OpenMetadata, ServiceNow, Jira, and dbt Provider)
+  # ----------------------------------------------------------------------------
+  mock-extensions:
+    build:
+      context: .
+      dockerfile: containers/mock-extensions/Containerfile
+    container_name: gqlgateway-mock-extensions
+    profiles:
+      - enterprise
+      - full
+    networks:
+      - gateway-bench-net
+    ports:
+      - "8585:8585"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8585/health || exit 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+      start_period: 2s
+
+  # ----------------------------------------------------------------------------
+  # 3f. Azurite (Azure Blob Storage / ADLS Gen2 Emulator for Lakehouse)
+  # ----------------------------------------------------------------------------
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.33.0
+    container_name: gqlgateway-azurite
+    profiles:
+      - azure
+    networks:
+      - gateway-bench-net
+    command: "azurite-blob --blobHost 0.0.0.0 --blobPort 10000 --skipApiVersionCheck"
+    ports:
+      - "10000:10000"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 10000 || exit 0"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  # ----------------------------------------------------------------------------
+  # 4. GqlGateway.Api (.NET 8/10 Microservice with Zero-Trust Governance Pipeline)
+  # ----------------------------------------------------------------------------
+  gqlgateway-api:
+    build:
+      context: .
+      dockerfile: containers/gqlgateway-api/Containerfile
+    container_name: gqlgateway-api
+    networks:
+      - gateway-bench-net
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:5050
+      HMAC_SECRET_KEY: bench-super-secret-hmac-master-key-2026
+      GQL_PROD_BENCHMARK_SECRET_KEY: bench-super-secret-hmac-master-key-2026
+      Gateway__DataMasking__HmacSecret: bench-super-secret-hmac-master-key-2026
+      DOTNET_RUNNING_IN_CONTAINER: "true"
+      # Overrides for Postgres and Redis connection
+      Gateway__DataSources__Connections__finance__ConnectionString: "Host=postgres;Port=5432;Database=governancedb;Username=gqluser;Password=gqlpass;Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100"
+      Gateway__DataSources__Connections__crm__ConnectionString: "Server=sqlserver,1433;Database=crmdb;User Id=sa;Password=GqlPassw0rd!2026;TrustServerCertificate=True;Connect Timeout=15;Pooling=true;Min Pool Size=3;Max Pool Size=50"
+      Gateway__Caching__Redis__Configuration: "redis:6379,abortConnect=false"
+      # Extension feature flags toggled per scenario
+      Gateway__Lakehouse__Enabled: "${ENABLE_LAKEHOUSE:-true}"
+      Gateway__OpenMetadata__Enabled: "${ENABLE_ENTERPRISE:-true}"
+      Gateway__Catalog__Enabled: "${ENABLE_ENTERPRISE:-true}"
+      Gateway__Itsm__Enabled: "${ENABLE_ENTERPRISE:-true}"
+    volumes:
+      - governance-data:/app/data:z
+    ports:
+      - "${GATEWAY_PORT:-5050}:5050"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      governance-seed:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:5050/health/live || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 25
+      start_period: 10s
+
+  # ----------------------------------------------------------------------------
+  # 5. Reverse Proxy (Nginx ForwardAuth Gateway with Shared Secret & Identity)
+  # ----------------------------------------------------------------------------
+  reverse-proxy:
+    build:
+      context: .
+      dockerfile: containers/reverse-proxy/Containerfile
+    container_name: gqlgateway-reverse-proxy
+    networks:
+      - gateway-bench-net
+    ports:
+      - "${REVERSE_PROXY_PORT:-8082}:8080"
+    depends_on:
+      gqlgateway-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/health/live || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+      start_period: 3s
+
+  # ----------------------------------------------------------------------------
+  # 6. Load Generator (k6 Realistic Query Mix: 60% Simple / 20% Complex / 10% Mutations / 10% Invalid)
+  # ----------------------------------------------------------------------------
+  load-generator:
+    build:
+      context: .
+      dockerfile: containers/load-generator/Containerfile
+    container_name: gqlgateway-load-generator
+    networks:
+      - gateway-bench-net
+    environment:
+      TARGET_URL: http://reverse-proxy:8080/graphql
+      VUS: ${VUS:-50}
+      DURATION_STEADY: ${DURATION_STEADY:-3m}
+      DURATION_RAMP: ${DURATION_RAMP:-20s}
+      PACING_SLEEP: ${PACING_SLEEP:-false}
+    volumes:
+      - ./results:/results:z
+    depends_on:
+      reverse-proxy:
+        condition: service_healthy
+
+  # ----------------------------------------------------------------------------
+  # 7. Prometheus (Metrics Scraping & Time-Series Storage)
+  # ----------------------------------------------------------------------------
+  prometheus:
+    image: docker.io/prom/prometheus:latest
+    container_name: gqlgateway-prometheus
+    profiles:
+      - monitoring
+      - full
+    networks:
+      - gateway-bench-net
+    volumes:
+      - ./containers/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro,Z
+      - prometheus-data:/prometheus:Z
+    ports:
+      - "9090:9090"
+    depends_on:
+      gqlgateway-api:
+        condition: service_healthy
+
+  # ----------------------------------------------------------------------------
+  # 8. Grafana (Dashboard Visualizations)
+  # ----------------------------------------------------------------------------
+  grafana:
+    image: docker.io/grafana/grafana:latest
+    container_name: gqlgateway-grafana
+    profiles:
+      - monitoring
+      - full
+    networks:
+      - gateway-bench-net
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./containers/monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro,Z
+      - ./containers/monitoring/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml:ro,Z
+      - ./containers/monitoring/dashboards:/var/lib/grafana/dashboards:ro,Z
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus

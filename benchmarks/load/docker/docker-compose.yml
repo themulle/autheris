@@ -1,0 +1,163 @@
+version: '3.8'
+
+networks:
+  bench-net:
+    driver: bridge
+
+services:
+  # ==========================================
+  # 1. Database: PostgreSQL with Chinook Seed
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: bench-postgres
+    restart: unless-stopped
+    networks:
+      - bench-net
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: postgres
+    volumes:
+      - ../configs/chinook.sql:/docker-entrypoint-initdb.d/01-chinook.sql:ro
+    command: >
+      postgres
+      -c max_connections=500
+      -c shared_buffers=2GB
+      -c effective_cache_size=6GB
+      -c maintenance_work_mem=512MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=16MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 6G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  # ==========================================
+  # 2. Target A: Hasura GraphQL Engine
+  # ==========================================
+  hasura:
+    image: hasura/graphql-engine:v2.44.0
+    container_name: bench-hasura
+    restart: unless-stopped
+    networks:
+      - bench-net
+    ports:
+      - "8085:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: postgres://postgres:postgrespassword@postgres:5432/postgres
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "false"
+      HASURA_GRAPHQL_DEV_MODE: "false"
+      HASURA_GRAPHQL_LOG_LEVEL: "warn"
+      HASURA_GRAPHQL_ADMIN_SECRET: "my-secret"
+      HASURA_GRAPHQL_PG_CONNECTIONS: 100
+      HASURA_GRAPHQL_PG_TIMEOUT: 15
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+
+  # ==========================================
+  # 3. Target B: Apollo Server 4 (Node.js)
+  # ==========================================
+  apollo-server:
+    build:
+      context: ../..
+      dockerfile: gql_bench/docker/Dockerfile.apollo
+    container_name: bench-apollo
+    restart: unless-stopped
+    networks:
+      - bench-net
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgrespassword@postgres:5432/postgres
+      PORT: 4000
+      PG_MAX_POOL: 100
+      NODE_ENV: production
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+
+  # ==========================================
+  # 4. Target C: PostGraphile (Node.js)
+  # ==========================================
+  postgraphile:
+    build:
+      context: ../..
+      dockerfile: gql_bench/docker/Dockerfile.postgraphile
+    container_name: bench-postgraphile
+    restart: unless-stopped
+    networks:
+      - bench-net
+    ports:
+      - "5001:5001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://postgres:postgrespassword@postgres:5432/postgres
+      PORT: 5001
+      PG_MAX_POOL: 100
+      NODE_ENV: production
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+
+  # ==========================================
+  # 5. Target D: GqlGateway (.NET 10)
+  # ==========================================
+  gql-gateway:
+    build:
+      context: ../..
+      dockerfile: gql_bench/docker/Dockerfile.gql
+    container_name: bench-gqlgateway
+    restart: unless-stopped
+    networks:
+      - bench-net
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_URLS: http://+:5000
+      ASPNETCORE_ENVIRONMENT: Production
+      DOTNET_gcServer: 1
+      DOTNET_GCConcurrent: 1
+      Gateway__Authentication__EnableTestAuthHandler: "true"
+      Gateway__GovernanceDb__Provider: "Sqlite"
+      Gateway__GovernanceDb__ConnectionString: "Data Source=:memory:;Mode=Memory;Cache=Shared"
+      Gateway__RateLimiting__PreAuthIpRateLimit__PermitLimit: "500000"
+      Gateway__RateLimiting__PostAuthSidRateLimit__TokenBucketCapacity: "500000"
+      Gateway__RateLimiting__PostAuthSidRateLimit__TokensPerSecond: "500000"
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G

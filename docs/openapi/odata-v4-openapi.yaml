@@ -1,0 +1,340 @@
+openapi: 3.0.3
+info:
+  title: Autheris OData v4 Enterprise API
+  description: |
+    # Autheris OData v4 API Specification
+    
+    The **Autheris OData v4 API** exposes zero-trust governed relational and federated data models
+    to BI tools (Power BI, Microsoft Excel, Tableau), SAP integration layers, and automated REST clients.
+    
+    ### Key Capabilities:
+    * **Zero-Trust & Pushdown ABAC**: All OData requests are subjected to the same Casbin Attribute-Based
+      Access Control (ABAC) and dynamic row-level security (RLS) filters as GraphQL operations.
+    * **Automated Column Masking & Redaction**: PII and sensitive columns (DSGVO / GDPR Art. 9) are
+      dynamically hashed, masked, or redacted according to the enterprise metadata catalog.
+    * **Standard Compliant OData v4**: Fully compatible with OASIS OData v4 specifications, supporting
+      `$metadata` (CSDL XML), Service Documents, and client-side or pushdown system query options
+      (`$select`, `$top`, `$skip`, `$count`, `$filter`).
+  version: 1.0.0
+  contact:
+    name: Autheris Platform Architecture Team
+    url: https://github.com/themulle/gql
+servers:
+  - url: /odata/v4
+    description: Gateway OData v4 Base Endpoint
+  - url: https://gateway.corp.local/odata/v4
+    description: Enterprise Production Endpoint
+
+security:
+  - BearerAuth: []
+  - BasicAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  /:
+    get:
+      summary: OData Service Document
+      operationId: getServiceDocument
+      description: |
+        Returns the root OData v4 Service Document enumerating all accessible entity sets
+        (tables and views across domains and schemas) for the authenticated tenant context.
+      responses:
+        '200':
+          description: OData Service Document successfully retrieved.
+          content:
+            application/json;odata.metadata=minimal;charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ODataServiceDocument'
+              example:
+                "@odata.context": "https://gateway.corp.local/odata/v4/$metadata"
+                value:
+                  - name: "sales_dbo_customers"
+                    kind: "EntitySet"
+                    url: "sales/dbo/customers"
+                  - name: "finance_dbo_invoices"
+                    kind: "EntitySet"
+                    url: "finance/dbo/invoices"
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  /$metadata:
+    get:
+      summary: OData Metadata Document (CSDL XML)
+      operationId: getMetadataCsdl
+      description: |
+        Returns the formal Common Schema Definition Language (CSDL) XML document specifying
+        all EntityTypes, ComplexTypes, Properties, Keys, and EntitySets registered in the Gateway.
+        Power BI and Excel use this endpoint for automated schema discovery and relational modeling.
+      responses:
+        '200':
+          description: CSDL XML Metadata Document.
+          content:
+            application/xml;charset=utf-8:
+              schema:
+                type: string
+                example: |
+                  <?xml version="1.0" encoding="utf-8"?>
+                  <edmx:Edmx Version="4.0" xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx">
+                    <edmx:DataServices>
+                      <Schema Namespace="Autheris.Model" xmlns="http://docs.oasis-open.org/odata/ns/edm">
+                        <EntityType Name="finance_dbo_invoices">
+                          <Key>
+                            <PropertyRef Name="id" />
+                          </Key>
+                          <Property Name="id" Type="Edm.Guid" Nullable="false" />
+                          <Property Name="amount" Type="Edm.Decimal" Nullable="false" />
+                          <Property Name="currency" Type="Edm.String" Nullable="true" />
+                        </EntityType>
+                        <EntityContainer Name="Container">
+                          <EntitySet Name="finance_dbo_invoices" EntityType="Autheris.Model.finance_dbo_invoices" />
+                        </EntityContainer>
+                      </Schema>
+                    </edmx:DataServices>
+                  </edmx:Edmx>
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /{domain}/{schema}/{tableName}:
+    get:
+      summary: Query Entity Set
+      operationId: queryEntitySet
+      description: |
+        Executes a zero-trust governed relational query against the specified table or view.
+        Supports standard OData v4 query options: projection (`$select`), pagination (`$top`, `$skip`),
+        inline count (`$count=true`), and filtering (`$filter`).
+      parameters:
+        - name: domain
+          in: path
+          required: true
+          description: Logical data domain (e.g. `sales`, `finance`, `marketing`).
+          schema:
+            type: string
+            example: finance
+        - name: schema
+          in: path
+          required: true
+          description: Database schema name (e.g. `dbo`, `public`, `analytics`).
+          schema:
+            type: string
+            example: dbo
+        - name: tableName
+          in: path
+          required: true
+          description: Name of the target table or view (e.g. `invoices`, `customers`).
+          schema:
+            type: string
+            example: invoices
+        - name: $select
+          in: query
+          required: false
+          description: Comma-separated list of properties/columns to include in the response.
+          schema:
+            type: string
+            example: "id,amount,currency,customer_id"
+        - name: $top
+          in: query
+          required: false
+          description: Number of records to return (page size limit).
+          schema:
+            type: integer
+            minimum: 0
+            default: 100
+            example: 50
+        - name: $skip
+          in: query
+          required: false
+          description: Number of records to bypass before collecting records.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+            example: 100
+        - name: $count
+          in: query
+          required: false
+          description: When set to `true`, returns the total number of items matching the query before pagination.
+          schema:
+            type: boolean
+            default: false
+            example: true
+        - name: $filter
+          in: query
+          required: false
+          description: OData filter expression (e.g. `status eq 'PAID' and amount gt 1000.00`).
+          schema:
+            type: string
+            example: "amount gt 1000"
+        - name: X-Tenant-ID
+          in: header
+          required: false
+          description: Optional explicit Tenant ID header (must match authenticated token tenant).
+          schema:
+            type: string
+            example: tenant-emea
+      responses:
+        '200':
+          description: Query executed successfully. Governed entities returned.
+          content:
+            application/json;odata.metadata=minimal;charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ODataCollectionResponse'
+              example:
+                "@odata.context": "https://gateway.corp.local/odata/v4/$metadata#finance/dbo/invoices"
+                "@odata.count": 1420
+                value:
+                  - id: "e9a03978-8bd3-4f9e-a89c-53e9a7e6c401"
+                    amount: 4500.50
+                    currency: "EUR"
+                    customer_id: "CUST-88192"
+                  - id: "1a84f329-37ef-4176-905b-810a97c4125b"
+                    amount: 1200.00
+                    currency: "EUR"
+                    customer_id: "CUST-99201"
+        '400':
+          description: Invalid OData query option or syntax error.
+          content:
+            application/json;odata.metadata=minimal;charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ODataErrorResponse'
+              example:
+                error:
+                  code: "InvalidQueryOption"
+                  message: "The query parameter '$top' must be a non-negative integer."
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: Target table or entity set was not found in the metadata catalog.
+          content:
+            application/json;odata.metadata=minimal;charset=utf-8:
+              schema:
+                $ref: '#/components/schemas/ODataErrorResponse'
+              example:
+                error:
+                  code: "ResourceNotFound"
+                  message: "Entity set 'finance/dbo/unknown_table' was not found in the catalog."
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Enterprise OIDC / Entra ID JSON Web Token (JWT).
+    BasicAuth:
+      type: http
+      scheme: basic
+      description: HTTP Basic Authentication for legacy BI connectors.
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API Key authentication for machine-to-machine integrations.
+
+  responses:
+    UnauthorizedError:
+      description: Authentication required or invalid token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ODataErrorResponse'
+          example:
+            error:
+              code: "Unauthorized"
+              message: "Authentication token missing, expired, or invalid."
+    ForbiddenError:
+      description: ABAC policy denied access or zero-trust consent approval required.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ODataErrorResponse'
+          example:
+            error:
+              code: "ConsentRequired"
+              message: "Access to 'finance.dbo.invoices' requires an active 4-eyes consent approval (ITSM Ticket #SEC-9921)."
+
+  schemas:
+    ODataServiceDocument:
+      type: object
+      required:
+        - "@odata.context"
+        - value
+      properties:
+        "@odata.context":
+          type: string
+          description: URL pointing to the CSDL metadata document.
+        value:
+          type: array
+          description: List of exposed entity sets.
+          items:
+            $ref: '#/components/schemas/ODataServiceDocumentEntitySet'
+
+    ODataServiceDocumentEntitySet:
+      type: object
+      required:
+        - name
+        - kind
+        - url
+      properties:
+        name:
+          type: string
+          description: Canonical entity set identifier.
+        kind:
+          type: string
+          enum: [EntitySet, Singleton]
+        url:
+          type: string
+          description: Relative path to the entity set endpoint.
+
+    ODataCollectionResponse:
+      type: object
+      required:
+        - "@odata.context"
+        - value
+      properties:
+        "@odata.context":
+          type: string
+          description: Context URI identifying the entity set metadata.
+        "@odata.count":
+          type: integer
+          description: Total record count matching criteria (present when $count=true).
+        "@odata.nextLink":
+          type: string
+          description: Pagination link to retrieve the next page of records.
+        value:
+          type: array
+          description: Array of entity instances.
+          items:
+            type: object
+            additionalProperties: true
+
+    ODataErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          $ref: '#/components/schemas/ODataErrorDetail'
+
+    ODataErrorDetail:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Canonical error classification code.
+        message:
+          type: string
+          description: Human-readable error description.
+        target:
+          type: string
+          description: Parameter or field triggering the error.
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/ODataErrorDetail'

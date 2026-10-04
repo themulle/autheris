@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release Tag (z. B. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout gql
+        uses: actions/checkout@v4
+
+      - name: Checkout gql_extensions
+        uses: actions/checkout@v4
+        with:
+          repository: themulle/gql_extensions
+          path: gql_extensions_tmp
+
+      - name: Checkout gql_sqlparser
+        uses: actions/checkout@v4
+        with:
+          repository: themulle/gql_sqlparser
+          path: gql_sqlparser_tmp
+
+      - name: Setup sibling directory layout
+        run: |
+          mkdir -p ../gql_extensions
+          cp -r gql_extensions_tmp/* ../gql_extensions/
+          rm -rf gql_extensions_tmp
+          mkdir -p ../gql_sqlparser
+          cp -r gql_sqlparser_tmp/* ../gql_sqlparser/
+          rm -rf gql_sqlparser_tmp
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build and Package Binaries
+        run: |
+          mkdir -p dist
+          mkdir -p artifacts
+
+          # Targets: RID:ArchiveType:BinaryName
+          TARGETS=(
+            "linux-x64:tar:Autheris.Api"
+            "linux-arm64:tar:Autheris.Api"
+            "win-x64:zip:Autheris.Api.exe"
+            "osx-arm64:tar:Autheris.Api"
+          )
+
+          for TARGET in "${TARGETS[@]}"; do
+            IFS=":" read -r RID ARCHIVE BINARY <<< "$TARGET"
+            echo "==> Building for $RID..."
+            OUT_DIR="dist/$RID"
+
+            dotnet publish src/Autheris.Api/Autheris.Api.csproj \
+              -c Release \
+              -r "$RID" \
+              --self-contained true \
+              -p:PublishSingleFile=true \
+              -o "$OUT_DIR"
+
+            ARCHIVE_NAME="Autheris-${RID}"
+            if [ "$ARCHIVE" = "zip" ]; then
+              (cd "$OUT_DIR" && zip -r "../../artifacts/${ARCHIVE_NAME}.zip" .)
+            else
+              tar -czvf "artifacts/${ARCHIVE_NAME}.tar.gz" -C "$OUT_DIR" .
+            fi
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: artifacts/*
+          generate_release_notes: true
