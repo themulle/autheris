@@ -29,7 +29,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
 ENV ASPNETCORE_URLS=http://+:5000 \
-    ASPNETCORE_ENVIRONMENT=Production \
+    ASPNETCORE_ENVIRONMENT=Development \
     DOTNET_gcServer=1 \
     DOTNET_GCConcurrent=1 \
     DOTNET_GCDynamicAdaptationMode=1 \
