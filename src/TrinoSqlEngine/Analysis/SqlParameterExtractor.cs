@@ -21,6 +21,15 @@ public sealed class SqlParameterExtractor : SqlBaseBaseListener
         RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(100));
 
+    /// <summary>
+    /// The grammar only accepts an integer or '?' as row count after OFFSET / FETCH NEXT|FIRST / LIMIT. A parameter in
+    /// one of these positions is therefore normalized to '?' instead of an identifier (otherwise: syntax error).
+    /// </summary>
+    private static readonly Regex RowCountContextRegex = new(
+        @"(?:\bOFFSET|\bFETCH\s+(?:NEXT|FIRST)|\bLIMIT)\s+$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase,
+        TimeSpan.FromMilliseconds(100));
+
     private static readonly Regex SqlCommentRegex = new(
         @"(?:--[^\r\n]*)|(?:\/\*[\s\S]*?\*\/)",
         RegexOptions.Compiled,
@@ -191,7 +200,7 @@ public sealed class SqlParameterExtractor : SqlBaseBaseListener
                 ? match.Groups[1].Value
                 : match.Groups[2].Value;
 
-            sb.Append($"__param_{name}");
+            sb.Append(IsRowCountPosition(trimmed, match.Index) ? "?" : $"__param_{name}");
             lastPos = match.Index + match.Length;
         }
 
@@ -201,6 +210,12 @@ public sealed class SqlParameterExtractor : SqlBaseBaseListener
         }
 
         return sb.ToString();
+    }
+
+    private static bool IsRowCountPosition(string sql, int parameterIndex)
+    {
+        int start = Math.Max(0, parameterIndex - 32);
+        return RowCountContextRegex.IsMatch(sql[start..parameterIndex]);
     }
 
     /// <summary>

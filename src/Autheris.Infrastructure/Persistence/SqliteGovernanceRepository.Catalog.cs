@@ -7,6 +7,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Autheris.Infrastructure.Persistence;
@@ -34,6 +35,42 @@ public partial class SqliteGovernanceRepository
         if (newRank < 0) newRank = int.MaxValue;
 
         return newRank <= existingRank;
+    }
+
+    internal static IReadOnlyDictionary<string, string> ParseColumnMetaJson(string? metaJson)
+    {
+        if (string.IsNullOrWhiteSpace(metaJson))
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(metaJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var prop in doc.RootElement.EnumerateObject())
+            {
+                dict[prop.Name] = prop.Value.ValueKind switch
+                {
+                    JsonValueKind.String => prop.Value.GetString() ?? string.Empty,
+                    JsonValueKind.True => "true",
+                    JsonValueKind.False => "false",
+                    JsonValueKind.Null or JsonValueKind.Undefined => string.Empty,
+                    JsonValueKind.Number => prop.Value.GetRawText(),
+                    _ => prop.Value.GetRawText()
+                };
+            }
+            return dict;
+        }
+        catch
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
@@ -119,9 +156,7 @@ public partial class SqliteGovernanceRepository
                     var colId = Guid.Parse(reader.GetString(0));
                     var colName = reader.GetString(1);
                     var metaJson = reader.IsDBNull(11) ? null : reader.GetString(11);
-                    var metaDict = !string.IsNullOrWhiteSpace(metaJson)
-                        ? JsonSerializer.Deserialize<Dictionary<string, string>>(metaJson) ?? new Dictionary<string, string>()
-                        : new Dictionary<string, string>();
+                    var metaDict = ParseColumnMetaJson(metaJson);
 
                     var col = new TableColumn
                     {
@@ -192,6 +227,8 @@ public partial class SqliteGovernanceRepository
                 using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
+                  try
+                  {
                     var id = Guid.Parse(reader.GetString(0));
                     var domain = reader.GetString(9);
                     var schema = reader.GetString(3);
@@ -222,6 +259,13 @@ public partial class SqliteGovernanceRepository
                         DocumentationSource = reader.IsDBNull(15) ? null : reader.GetString(15)
                     };
                     tableRows.Add((id, domain, name, table));
+                  }
+                  catch (Exception ex) when (ex is InvalidCastException or FormatException or JsonException or ArgumentException)
+                  {
+                    // One malformed catalog row must not make the whole catalog unavailable (fail-closed per row:
+                    // the table is simply not offered, so no consent or masking can be bypassed).
+                    _logger?.LogWarning(ex, "Catalog row {RowId} in TABLES is invalid and was skipped.", SafeValue(reader, 0));
+                  }
                 }
             }
 
@@ -232,6 +276,8 @@ public partial class SqliteGovernanceRepository
                 using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct))
                 {
+                  try
+                  {
                     var tid = Guid.Parse(reader.GetString(1));
                     if (!columnsByTable.TryGetValue(tid, out var list))
                     {
@@ -239,9 +285,7 @@ public partial class SqliteGovernanceRepository
                         columnsByTable[tid] = list;
                     }
                     var metaJson = reader.IsDBNull(7) ? null : reader.GetString(7);
-                    var metaDict = !string.IsNullOrWhiteSpace(metaJson)
-                        ? JsonSerializer.Deserialize<Dictionary<string, string>>(metaJson) ?? new Dictionary<string, string>()
-                        : new Dictionary<string, string>();
+                    var metaDict = ParseColumnMetaJson(metaJson);
 
                     list.Add(new TableColumn
                     {
@@ -255,12 +299,28 @@ public partial class SqliteGovernanceRepository
                         DocumentationSource = reader.IsDBNull(8) ? null : reader.GetString(8),
                         Meta = metaDict
                     });
+                  }
+                  catch (Exception ex) when (ex is InvalidCastException or FormatException or JsonException or ArgumentException)
+                  {
+                    _logger?.LogWarning(ex, "Catalog row {RowId} in TABLE_COLUMNS is invalid and was skipped.", SafeValue(reader, 0));
+                  }
                 }
             }
 
             foreach (var (id, domain, name, table) in tableRows)
             {
-                var identifier = new TableIdentifier(domain, table.SchemaName, name);
+                TableIdentifier identifier;
+                try
+                {
+                    identifier = new TableIdentifier(domain, table.SchemaName, name);
+                }
+                catch (ArgumentException ex)
+                {
+                    // e.g. a '.' in source_name/schema_name/table_name (TableIdentifier components must not contain dots)
+                    _logger?.LogWarning(ex, "Catalog table {Id} ({Domain}/{Schema}/{Table}) has an invalid identifier and was skipped.", id, domain, table.SchemaName, name);
+                    continue;
+                }
+
                 var columns = columnsByTable.TryGetValue(id, out var cols) ? cols : new List<TableColumn>();
 
                 results.Add(new TableMetadata
@@ -277,6 +337,18 @@ public partial class SqliteGovernanceRepository
         finally
         {
             _lock.Release();
+        }
+    }
+
+    private static string SafeValue(SqliteDataReader reader, int ordinal)
+    {
+        try
+        {
+            return reader.IsDBNull(ordinal) ? "<null>" : Convert.ToString(reader.GetValue(ordinal), System.Globalization.CultureInfo.InvariantCulture) ?? "<null>";
+        }
+        catch (Exception ex) when (ex is InvalidCastException or InvalidOperationException)
+        {
+            return "<unreadable>";
         }
     }
 

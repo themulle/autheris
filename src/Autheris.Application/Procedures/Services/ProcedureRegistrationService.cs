@@ -107,7 +107,14 @@ public sealed class ProcedureRegistrationService : BackgroundService
 
             string reason = string.Join(" | ", result.Errors);
             _registry.MarkDisabled(entry.Definition.Name, reason);
-            _logger?.LogWarning("Procedure endpoint '{Endpoint}' disabled: {Reason}", entry.Definition.Name, reason);
+            if (entry.State != ProcedureState.Disabled || entry.DisabledReason != reason)
+            {
+                _logger?.LogWarning("Procedure endpoint '{Endpoint}' disabled: {Reason}", entry.Definition.Name, reason);
+            }
+            else
+            {
+                _logger?.LogDebug("Procedure endpoint '{Endpoint}' still disabled: {Reason}", entry.Definition.Name, reason);
+            }
 
             if (audit != null && entry.State != ProcedureState.Disabled)
             {
