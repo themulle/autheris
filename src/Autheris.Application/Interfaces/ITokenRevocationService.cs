@@ -52,10 +52,36 @@ public static class TokenRevocationKeys
             return keys;
         }
 
-        AddKey(keys, principal.FindFirst("jti")?.Value);
-        AddKey(keys, principal.GetUserSid()?.Value);
-        AddKey(keys, principal.FindFirst("sub")?.Value);
+        string? jti = principal.FindFirst("jti")?.Value;
+        string? sid = principal.GetUserSid()?.Value;
+        string? sub = principal.FindFirst("sub")?.Value;
+        AddKey(keys, jti);
+        AddKey(keys, sid);
+        AddKey(keys, sub);
+
+        // Review E-8: tenant administrators revoke tenant-scoped keys. They only match tokens of their own tenant and
+        // never a canonical ClusterAdmin (only a ClusterAdmin can lock out a ClusterAdmin).
+        var tenant = principal.GetTenantId();
+        if (tenant != TenantId.LegacySingleTenant &&
+            !Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
+        {
+            foreach (var value in new[] { jti, sid, sub })
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    AddKey(keys, TenantScoped(tenant, value));
+                }
+            }
+        }
+
         return keys;
+    }
+
+    /// <summary>Review E-8: revocation key that only applies to tokens of <paramref name="tenant"/>.</summary>
+    public static string TenantScoped(TenantId tenant, string subjectOrJti)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectOrJti);
+        return Normalize($"TENANT:{tenant.Value}|{subjectOrJti.Trim()}");
     }
 
     /// <summary>

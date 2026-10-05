@@ -296,9 +296,13 @@ public sealed class IntegrationGapBTests
     {
         var revokedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
         var db = Substitute.For<IDatabase>();
-        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(Task.FromResult(RedisValue.Null));
-        db.StringGetAsync(Arg.Is<RedisKey>(k => k.ToString() == "Autheris:revoked:S-1-5-21-WS-REMOTE"), Arg.Any<CommandFlags>())
-            .Returns(Task.FromResult((RedisValue)revokedAt.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)));
+        // Lookup keys are read with one MGET (review E-8 adds tenant-scoped keys).
+        db.StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>()).Returns(ci => Task.FromResult(
+            ci.ArgAt<RedisKey[]>(0)
+                .Select(k => k.ToString() == "Autheris:revoked:S-1-5-21-WS-REMOTE"
+                    ? (RedisValue)revokedAt.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)
+                    : RedisValue.Null)
+                .ToArray()));
         var multiplexer = Substitute.For<IConnectionMultiplexer>();
         multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
 

@@ -1,6 +1,7 @@
 namespace Autheris.Api.Endpoints;
 
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
@@ -171,6 +172,13 @@ public static class RebacEndpoints
             }
 
             var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
+
+            // Review E-3: every item is evaluated in its own tenant, so each item must belong to the validated batch
+            // tenant (otherwise the outer tenant check is meaningless).
+            if (batchCheck.Checks.Any(c => c == null || !string.Equals(c.TenantId?.Trim(), batchCheck.TenantId?.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                return Results.BadRequest(new { error = "All checks must use the tenant of the batch." });
+            }
 
             if (!secContext.IsClusterAdmin)
             {

@@ -86,10 +86,18 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
         try
         {
             var db = _multiplexer.GetDatabase();
-            foreach (var key in keys)
+            ct.ThrowIfCancellationRequested();
+
+            // One round trip for all lookup keys (jti, SID, sub and their tenant-scoped variants, review E-8).
+            var redisKeys = new RedisKey[keys.Count];
+            for (int i = 0; i < keys.Count; i++)
             {
-                ct.ThrowIfCancellationRequested();
-                var value = await db.StringGetAsync((RedisKey)BuildKey(key)).ConfigureAwait(false);
+                redisKeys[i] = BuildKey(keys[i]);
+            }
+
+            var values = await db.StringGetAsync(redisKeys).ConfigureAwait(false);
+            foreach (var value in values)
+            {
                 if (value.IsNullOrEmpty)
                 {
                     continue;
