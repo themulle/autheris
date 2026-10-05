@@ -920,19 +920,24 @@ public partial class SqliteGovernanceRepository
     }
 
     public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default)
-        => ApproveConsentRequestStepAsync(requestId, approverSid, isExternalItsmApproval: false, ct);
+        => ApproveConsentRequestStepAsync(requestId, approverSid, isExternalItsmApproval: false, itsmApproverAccount: null, ct);
 
-    public async Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool isExternalItsmApproval, CancellationToken ct = default)
+    public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool isExternalItsmApproval, CancellationToken ct = default)
+        => ApproveConsentRequestStepAsync(requestId, approverSid, isExternalItsmApproval, itsmApproverAccount: null, ct);
+
+    /// <summary>
+    /// Approval step. Review E-9: a request waiting for the change board (<c>PENDING_EXTERNAL_APPROVAL</c>) can only be
+    /// approved by the verified ITSM webhook, and an ITSM approval only applies to such requests.
+    /// Review R3-1/R2-5: the approver reported by the ITSM system is passed typed (<paramref name="itsmApproverAccount"/>)
+    /// and checked against owners, delegates and admins by account or e-mail; on tables with configured owners an
+    /// ITSM approval without a named approver is rejected.
+    /// </summary>
+    public async Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool isExternalItsmApproval, string? itsmApproverAccount, CancellationToken ct = default)
     {
         var req = await GetConsentRequestAsync(requestId, ct);
         if (req == null) throw new InvalidOperationException($"Request {requestId} not found.");
 
-        if (!string.Equals(req.Status, "PENDING", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(req.Status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Request {requestId} is in status '{req.Status}' and cannot be approved.");
-        }
+        EnsureApprovableStatus(requestId, req.Status, isExternalItsmApproval);
 
         if (IsSelfApproval(req, approverSid))
         {
@@ -952,12 +957,7 @@ public partial class SqliteGovernanceRepository
                 currentStatus = statusObj.ToString()!;
             }
 
-            if (!string.Equals(currentStatus, "PENDING", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(currentStatus, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(currentStatus, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException($"Request {requestId} is in status '{currentStatus}' and cannot be approved.");
-            }
+            EnsureApprovableStatus(requestId, currentStatus, isExternalItsmApproval);
 
             // Four-eyes principle / Separation of duties check at repository layer
             if (IsSelfApproval(req, approverSid))
@@ -975,20 +975,21 @@ public partial class SqliteGovernanceRepository
             }
             else
             {
-                // SEC N-1: In ITSM external approval, verify table owner mapping if an individual human approver is specified and table has configured owners
-                var sidVal = approverSid.Value;
-                var colonCount = sidVal.Count(c => c == ':');
-                bool isSpecificApprover = colonCount >= 2;
-                if (isSpecificApprover)
+                // SEC N-1 / Review R3-1 + R2-5: tables with configured owners need a named ITSM approver who is an
+                // owner, delegate or admin (matched by account or e-mail, passed typed, never parsed from the SID).
+                bool hasConfiguredOwners = await HasConfiguredDataOwnersAsync(req.TableIdentifier, ct);
+                if (hasConfiguredOwners)
                 {
-                    bool hasConfiguredOwners = await HasConfiguredDataOwnersAsync(req.TableIdentifier, ct);
-                    if (hasConfiguredOwners)
+                    string? account = string.IsNullOrWhiteSpace(itsmApproverAccount) ? null : itsmApproverAccount.Trim();
+                    if (account == null)
                     {
-                        bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, ct);
-                        if (!isAuthorized)
-                        {
-                            throw new UnauthorizedAccessException($"ITSM-Genehmiger '{approverSid}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
-                        }
+                        throw new UnauthorizedAccessException($"ITSM-Freigabe ohne benannten Genehmiger ist für Tabelle '{req.TableIdentifier}' mit konfigurierten Data Ownern nicht zulässig.");
+                    }
+
+                    bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, account, ct);
+                    if (!isAuthorized)
+                    {
+                        throw new UnauthorizedAccessException($"ITSM-Genehmiger '{account}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
                     }
                 }
             }
@@ -1025,7 +1026,11 @@ public partial class SqliteGovernanceRepository
             }
 
             int nextStep = existingApprovers.Count + 1;
-            string newStatus = (requiresFourEyes && nextStep < 2) ? "PENDING_SECOND_APPROVAL" : "APPROVED";
+            // Review E-9: an ITSM-governed request stays with the change board for its second step as well, so the
+            // four-eyes decision cannot be assembled from one ITSM and one GraphQL approval.
+            string newStatus = (requiresFourEyes && nextStep < 2)
+                ? (isExternalItsmApproval ? "PENDING_EXTERNAL_APPROVAL" : "PENDING_SECOND_APPROVAL")
+                : "APPROVED";
 
             using var tx = _connection.BeginTransaction();
             // Insert approval step
@@ -1060,6 +1065,20 @@ public partial class SqliteGovernanceRepository
         finally
         {
             _lock.Release();
+        }
+    }
+
+    private static void EnsureApprovableStatus(Guid requestId, string? status, bool isExternalItsmApproval)
+    {
+        bool isExternal = string.Equals(status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase);
+        bool isInternal = string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase);
+
+        if (isExternalItsmApproval ? !isExternal : !isInternal)
+        {
+            throw new InvalidOperationException(isExternal
+                ? $"Request {requestId} waits for the external ITSM approval and can only be approved by the ITSM system."
+                : $"Request {requestId} is in status '{status}' and cannot be approved.");
         }
     }
 

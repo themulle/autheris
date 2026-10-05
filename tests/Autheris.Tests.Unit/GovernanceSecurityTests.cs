@@ -965,4 +965,80 @@ public class GovernanceSecurityTests : IDisposable
         retrieved.ShouldNotBeNull();
         retrieved.TenantId.ShouldBe(tenantAlpha);
     }
+
+    // ---------- security review 2026-10-05 (recheck 3): E-9, R3-1, R2-5 ----------
+
+    private async Task<ConsentRequest> CreateExternalRequestAsync(string requester)
+    {
+        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
+        var meta = await _repository.GetTableMetadataAsync(table);
+        meta.ShouldNotBeNull();
+
+        return await _repository.CreateConsentRequestAsync(new ConsentRequest
+        {
+            TableId = meta.Table.Id,
+            TableIdentifier = table,
+            RequesterSid = new Sid(requester),
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = requester,
+            BusinessJustification = "ITSM governed request",
+            Status = "PENDING_EXTERNAL_APPROVAL",
+            ItsmTicketId = $"T-{Guid.NewGuid():N}",
+            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
+        });
+    }
+
+    [Fact]
+    public async Task E9_PendingExternalApproval_CannotBeApprovedOutsideItsm()
+    {
+        var req = await CreateExternalRequestAsync("S-1-5-21-REQ-E9");
+
+        // The data owner may not bypass the change board via GraphQL / direct repository call.
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            _repository.ApproveConsentRequestStepAsync(req.Id, new Sid("S-1-5-21-DATAOWNER-1")));
+
+        (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
+    }
+
+    [Fact]
+    public async Task R2_5_ItsmApprovalWithoutNamedApprover_OnOwnedTable_IsRejected()
+    {
+        var req = await CreateExternalRequestAsync("S-1-5-21-REQ-R25");
+
+        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
+            _repository.ApproveConsentRequestStepAsync(req.Id, new Sid("ITSM_SERVICENOW:inst-a"), isExternalItsmApproval: true, itsmApproverAccount: null));
+    }
+
+    [Fact]
+    public async Task R3_1_ItsmApprovalWithOwnerAccount_IsAccepted_AndForeignApproverIsRejected()
+    {
+        var foreign = await CreateExternalRequestAsync("S-1-5-21-REQ-R31A");
+        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
+            _repository.ApproveConsentRequestStepAsync(foreign.Id, new Sid("ITSM_SERVICENOW:inst-a:someone@corp.local"), true, "someone@corp.local"));
+
+        var req = await CreateExternalRequestAsync("S-1-5-21-REQ-R31B");
+        var approved = await _repository.ApproveConsentRequestStepAsync(
+            req.Id, new Sid("ITSM_SERVICENOW:inst-a:dataowner@corp.local"), true, "dataowner@corp.local");
+        approved.Status.ShouldBe("APPROVED");
+    }
+
+    [Fact]
+    public async Task E9_ItsmApproval_OnInternalRequest_IsRejected()
+    {
+        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
+        var meta = await _repository.GetTableMetadataAsync(table);
+        var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
+        {
+            TableId = meta!.Table.Id,
+            TableIdentifier = table,
+            RequesterSid = new Sid("S-1-5-21-REQ-E9B"),
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = "S-1-5-21-REQ-E9B",
+            BusinessJustification = "internal request",
+            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
+        });
+
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            _repository.ApproveConsentRequestStepAsync(req.Id, new Sid("ITSM_SERVICENOW:inst-a:dataowner@corp.local"), true, "dataowner@corp.local"));
+    }
 }

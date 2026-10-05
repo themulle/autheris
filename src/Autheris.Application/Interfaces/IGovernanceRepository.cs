@@ -62,6 +62,13 @@ public interface IConsentApprovalRepository
     Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default);
     Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool isExternalItsmApproval, CancellationToken ct = default)
         => ApproveConsentRequestStepAsync(requestId, approverSid, ct);
+
+    /// <summary>
+    /// Review R3-1: ITSM approval with the approver (account or e-mail) reported by the ITSM system, passed typed.
+    /// Implementations must check it against owners/delegates; the default keeps the previous behaviour.
+    /// </summary>
+    Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool isExternalItsmApproval, string? itsmApproverAccount, CancellationToken ct = default)
+        => ApproveConsentRequestStepAsync(requestId, approverSid, isExternalItsmApproval, ct);
     Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default);
     Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, CancellationToken ct = default);
     Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default);
