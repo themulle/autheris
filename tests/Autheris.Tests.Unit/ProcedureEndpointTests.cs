@@ -396,4 +396,64 @@ public class ProcedureEndpointTests
         f.Registry.TryGet("get_orders", out var reg).ShouldBeTrue();
         reg!.State.ShouldBe(ProcedureState.Pending);
     }
+
+    [Fact]
+    public async Task RegistrationService_AlreadyDisabled_DoesNotLogWarningOnRevalidation()
+    {
+        var options = Options.Create(new GatewayOptions
+        {
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions
+                {
+                    Enabled = true,
+                    AllowedSchemas = ["api"]
+                }
+            }
+        });
+
+        var registry = new InMemoryProcedureRegistry();
+        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        registry.Register(def);
+
+        var connFactory = Substitute.For<ISqlConnectionFactory>();
+        var connProvider = new ProcedureConnectionProvider(connFactory, options);
+        var validator = new StoredProcedureCatalogValidator(connProvider, options);
+
+        var scopeFactory = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
+        var scope = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScope>();
+        var sp = Substitute.For<IServiceProvider>();
+        scopeFactory.CreateScope().Returns(scope);
+        scope.ServiceProvider.Returns(sp);
+        sp.GetService(typeof(StoredProcedureCatalogValidator)).Returns(validator);
+
+        var logger = Substitute.For<Microsoft.Extensions.Logging.ILogger<ProcedureRegistrationService>>();
+        logger.IsEnabled(Arg.Any<Microsoft.Extensions.Logging.LogLevel>()).Returns(true);
+
+        var loader = new ProcedureDefinitionLoader(registry, options);
+        var svc = new ProcedureRegistrationService(loader, registry, scopeFactory, options, logger);
+
+        // Round 1: Pending -> Disabled (should log Warning once on transition)
+        await svc.ValidateDueAsync(CancellationToken.None);
+
+        registry.TryGet("get_orders", out var reg1).ShouldBeTrue();
+        reg1!.State.ShouldBe(ProcedureState.Disabled);
+
+        logger.ReceivedCalls()
+            .Count(c => c.GetMethodInfo().Name == "Log" && (Microsoft.Extensions.Logging.LogLevel)c.GetArguments()[0]! == Microsoft.Extensions.Logging.LogLevel.Warning)
+            .ShouldBe(1);
+
+        // Round 2: Still Disabled (simulate retry interval passed)
+        var internalItems = typeof(InMemoryProcedureRegistry)
+            .GetField("_items", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .GetValue(registry) as System.Collections.Concurrent.ConcurrentDictionary<string, RegisteredProcedure>;
+        internalItems!["get_orders"] = reg1 with { ValidatedAt = DateTimeOffset.UtcNow.AddMinutes(-5) };
+
+        await svc.ValidateDueAsync(CancellationToken.None);
+
+        // Warning count must NOT increase on re-validation of already disabled procedure
+        logger.ReceivedCalls()
+            .Count(c => c.GetMethodInfo().Name == "Log" && (Microsoft.Extensions.Logging.LogLevel)c.GetArguments()[0]! == Microsoft.Extensions.Logging.LogLevel.Warning)
+            .ShouldBe(1);
+    }
 }

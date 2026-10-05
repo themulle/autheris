@@ -13,6 +13,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TrinoSqlEngine.Analysis;
 
 public sealed class SqlEndpointExecutionService : ISqlEndpointExecutionService
 {
@@ -75,7 +76,9 @@ public sealed class SqlEndpointExecutionService : ISqlEndpointExecutionService
         }
 
         var request = new GovernedSqlQueryRequest(
-            Sql: endpoint.RawSql,
+            // Governed execution parses a single statement and rejects comments (SQ-02): the endpoint file's
+            // annotation header (-- @name ...) and trailing ';' are only meaningful to the loader.
+            Sql: SqlParameterExtractor.StripComments(endpoint.RawSql).Trim().TrimEnd(';').Trim(),
             Parameters: validatedParams,
             DataSourceName: endpoint.DataSource);
 

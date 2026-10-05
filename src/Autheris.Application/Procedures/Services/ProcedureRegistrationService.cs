@@ -105,11 +105,18 @@ public sealed class ProcedureRegistrationService : BackgroundService
                 continue;
             }
 
-            string reason = string.Join(" | ", result.Errors);
+            string reason = string.Join(" | ", result.Errors.OrderBy(e => e, StringComparer.Ordinal));
+            bool wasAlreadyDisabled = entry.State == ProcedureState.Disabled;
+
             _registry.MarkDisabled(entry.Definition.Name, reason);
-            if (entry.State != ProcedureState.Disabled || entry.DisabledReason != reason)
+
+            if (!wasAlreadyDisabled)
             {
                 _logger?.LogWarning("Procedure endpoint '{Endpoint}' disabled: {Reason}", entry.Definition.Name, reason);
+            }
+            else if (!string.Equals(entry.DisabledReason, reason, StringComparison.Ordinal))
+            {
+                _logger?.LogDebug("Procedure endpoint '{Endpoint}' disabled reason changed: {Reason}", entry.Definition.Name, reason);
             }
             else
             {

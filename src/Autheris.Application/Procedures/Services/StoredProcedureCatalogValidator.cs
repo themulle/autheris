@@ -246,7 +246,8 @@ public sealed class StoredProcedureCatalogValidator
             "FROM sys.dm_sql_referenced_entities(@n, N'OBJECT') AS r " +
             "LEFT JOIN sys.objects AS o ON o.object_id = r.referenced_id " +
             "WHERE r.referenced_class = 1 " +
-            "GROUP BY r.referenced_schema_name, r.referenced_entity_name",
+            "GROUP BY r.referenced_schema_name, r.referenced_entity_name " +
+            "ORDER BY r.referenced_schema_name, r.referenced_entity_name",
             ("@n", quoted)))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {

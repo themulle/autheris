@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Prometheus;
 using System;
 using System.Linq;
+using ChilliCream.Nitro.App;
 
 namespace Autheris.Api.Extensions;
 
@@ -332,7 +333,11 @@ public static class GatewayApplicationBuilderExtensions
         });
 
         app.UseWebSockets();
-        var gqlEndpoint = app.MapGraphQL(endpoint);
+        // Nitro (Banana Cake Pop) is served from the embedded assets of ChilliCream.Nitro.App instead of the CDN
+        // (default ServeMode.Latest): in container/corporate networks without outbound internet access the CDN
+        // fetch fails and GET /graphql would answer 502 Bad Gateway.
+        var gqlEndpoint = app.MapGraphQL(endpoint)
+            .WithOptions((NitroAppOptions nitro) => nitro.ServeMode = ServeMode.Embedded);
         // SEC H-02: OpenSchema no longer opens /graphql; only the Development-only anonymous mode does.
         // (SEC M-03: with the authenticated-user FallbackPolicy the anonymous mode must opt out explicitly.)
         if (gatewayOptions.IsAnonymousAccessAllowed)
