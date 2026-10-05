@@ -204,7 +204,8 @@ public class ItsmIntegrationTests : IClassFixture<WebApplicationFactory<Program>
         {
             TicketId = ticketId,
             InstanceId = "inst-tenant-a", // Maps to tenant-a -> matches!
-            Action = "APPROVE"
+            Action = "APPROVE",
+            Approver = "dataowner@corp.local" // review R3-1/R2-5: owned tables need a named owner/delegate
         });
 
         var timestamp = DateTimeOffset.UtcNow;
@@ -352,7 +353,8 @@ public class ItsmIntegrationTests : IClassFixture<WebApplicationFactory<Program>
         {
             TicketId = ticketId,
             InstanceId = "inst-tenant-a",
-            Action = "APPROVE"
+            Action = "APPROVE",
+            Approver = "dataowner@corp.local" // review R3-1/R2-5: owned tables need a named owner/delegate
         });
 
         var timestamp = DateTimeOffset.UtcNow;
@@ -498,7 +500,8 @@ public class ItsmIntegrationTests : IClassFixture<WebApplicationFactory<Program>
             number = ticketId,
             approval = "approved",
             instance_name = "inst-tenant-a",
-            close_notes = "Approved by Risk & Compliance Officer in ServiceNow"
+            close_notes = "Approved by Risk & Compliance Officer in ServiceNow",
+            approved_by = "dataowner@corp.local"
         });
 
         var timestamp = DateTimeOffset.UtcNow;
@@ -611,6 +614,7 @@ public class ItsmIntegrationTests : IClassFixture<WebApplicationFactory<Program>
         {
             webhookEvent = "jira:issue_updated",
             baseUrl = "inst-tenant-a",
+            approver = "dataowner@corp.local",
             issue = new
             {
                 key = ticketId,
