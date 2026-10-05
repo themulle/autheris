@@ -5,6 +5,11 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
 using Serilog;
+if (args.Length > 0 && (args[0] == "hash-password" || args[0] == "--hash-password"))
+{
+    Environment.ExitCode = Autheris.Api.Security.PasswordHashCli.Run(args);
+    return;
+}
 
 var builder = WebApplication.CreateBuilder(args);
 

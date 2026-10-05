@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Caching.Distributed;
 
 namespace Autheris.Api.Security;
 
@@ -24,6 +25,7 @@ internal sealed class BasicAuthAttemptGuard
     private readonly TimeSpan _window;
     private readonly TimeSpan _successLifetime;
     private readonly TimeProvider _timeProvider;
+    private readonly Microsoft.Extensions.Caching.Distributed.IDistributedCache? _distributedCache;
 
     private sealed class FailureState
     {
@@ -34,22 +36,44 @@ internal sealed class BasicAuthAttemptGuard
 
     private sealed record SuccessEntry(string Username, DateTimeOffset ExpiresAt);
 
-    internal BasicAuthAttemptGuard(BasicAuthOptions options, TimeProvider? timeProvider = null)
+    internal BasicAuthAttemptGuard(
+        BasicAuthOptions options,
+        TimeProvider? timeProvider = null,
+        Microsoft.Extensions.Caching.Distributed.IDistributedCache? distributedCache = null)
     {
         _maxFailedAttempts = Math.Max(1, options.MaxFailedAttempts);
         _window = TimeSpan.FromSeconds(Math.Max(1, options.FailureWindowSeconds));
         _successLifetime = TimeSpan.FromSeconds(Math.Clamp(options.SuccessCacheSeconds, 0, 300));
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _distributedCache = distributedCache;
     }
 
-    public static BasicAuthAttemptGuard For(BasicAuthOptions options) =>
-        Guards.GetValue(options, static o => new BasicAuthAttemptGuard(o));
+    public static BasicAuthAttemptGuard For(
+        BasicAuthOptions options,
+        Microsoft.Extensions.Caching.Distributed.IDistributedCache? distributedCache = null) =>
+        Guards.GetValue(options, o => new BasicAuthAttemptGuard(o, null, distributedCache));
 
     public static string BuildAttemptKey(string username, string? clientIp) =>
         username.ToUpperInvariant() + "|" + (string.IsNullOrWhiteSpace(clientIp) ? "unknown" : clientIp);
 
     public bool IsLockedOut(string attemptKey)
     {
+        if (_distributedCache != null)
+        {
+            try
+            {
+                var val = _distributedCache.GetString("autheris:lockout:" + attemptKey);
+                if (!string.IsNullOrEmpty(val))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // Fall back to in-memory tracking on cache communication failure (resilient)
+            }
+        }
+
         if (!_failures.TryGetValue(attemptKey, out var state))
         {
             return false;
@@ -75,6 +99,33 @@ internal sealed class BasicAuthAttemptGuard
     public void RecordFailure(string attemptKey)
     {
         var now = _timeProvider.GetUtcNow();
+
+        if (_distributedCache != null)
+        {
+            try
+            {
+                string key = "autheris:fail:" + attemptKey;
+                string? current = _distributedCache.GetString(key);
+                int count = int.TryParse(current, out int c) ? c + 1 : 1;
+                _distributedCache.SetString(key, count.ToString(), new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = _window
+                });
+
+                if (count >= _maxFailedAttempts)
+                {
+                    _distributedCache.SetString("autheris:lockout:" + attemptKey, "1", new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
+                    {
+                        AbsoluteExpirationRelativeToNow = _window
+                    });
+                }
+            }
+            catch
+            {
+                // Fall back to in-memory tracking
+            }
+        }
+
         if (_failures.Count >= MaxTrackedEntries)
         {
             PurgeExpired(now);
@@ -97,7 +148,23 @@ internal sealed class BasicAuthAttemptGuard
         }
     }
 
-    public void RecordSuccess(string attemptKey) => _failures.TryRemove(attemptKey, out _);
+    public void RecordSuccess(string attemptKey)
+    {
+        if (_distributedCache != null)
+        {
+            try
+            {
+                _distributedCache.Remove("autheris:fail:" + attemptKey);
+                _distributedCache.Remove("autheris:lockout:" + attemptKey);
+            }
+            catch
+            {
+                // Ignore distributed cache removal failure
+            }
+        }
+
+        _failures.TryRemove(attemptKey, out _);
+    }
 
     public bool TryGetCachedSuccess(string authorizationHeader, out string username)
     {

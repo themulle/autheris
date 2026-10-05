@@ -47,13 +47,24 @@ public static class GatewayApplicationBuilderExtensions
         });
 
         // HTTP Security Response Headers (MED-01)
+        // The embedded Nitro (Banana Cake Pop) UI needs inline scripts/styles, blob: workers and data: assets, which the
+        // strict default policy blocks (blank page). Only in Development and only below the GraphQL endpoint path
+        // a relaxed policy is used; every other path keeps the strict one.
+        const string StrictCsp = "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
+        const string NitroToolCsp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; manifest-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
+        var nitroToolPath = gatewayOptions.GraphQL.EndpointPath.StartsWith('/')
+            ? gatewayOptions.GraphQL.EndpointPath
+            : "/" + gatewayOptions.GraphQL.EndpointPath;
+        var allowNitroToolCsp = app.Environment.IsDevelopment() && gatewayOptions.GraphQL.EnableBananaCakePop;
         app.Use(async (context, next) =>
         {
             context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
             context.Response.Headers.Append("X-Frame-Options", "DENY");
             context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
             context.Response.Headers.Append("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-            context.Response.Headers.Append("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';");
+            var isToolPath = allowNitroToolCsp
+                && context.Request.Path.StartsWithSegments(nitroToolPath, StringComparison.OrdinalIgnoreCase);
+            context.Response.Headers.Append("Content-Security-Policy", isToolPath ? NitroToolCsp : StrictCsp);
             await next();
         });
 
