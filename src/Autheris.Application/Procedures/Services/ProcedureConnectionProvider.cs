@@ -38,7 +38,7 @@ public sealed class ProcedureConnectionProvider
             throw new InvalidOperationException($"No connection string is configured for the procedure data source '{name}'.");
         }
 
-        if (!Autheris.Application.Sql.Services.GovernedSqlExecutionService.TryMapProviderToDialect(conn.Provider, out var dialect))
+        if (!TryResolveDialect(conn.Provider, out var dialect))
         {
             throw new InvalidOperationException($"SQL provider '{conn.Provider}' is not supported for procedure endpoints.");
         }
@@ -49,6 +49,31 @@ public sealed class ProcedureConnectionProvider
         }
 
         return conn;
+    }
+
+    public static bool TryResolveDialect(string? provider, out Autheris.Domain.Common.DatabaseDialect dialect)
+    {
+        switch (provider?.Trim().ToLowerInvariant())
+        {
+            case "sqlite" or "sqlite3":
+                dialect = Autheris.Domain.Common.DatabaseDialect.Sqlite;
+                return true;
+            case "sqlserver" or "mssql" or "microsoft sql server":
+                dialect = Autheris.Domain.Common.DatabaseDialect.SqlServer;
+                return true;
+            case "postgres" or "postgresql" or "npgsql" or "pgsql":
+                dialect = Autheris.Domain.Common.DatabaseDialect.PostgreSql;
+                return true;
+            case "oracle" or "oracledb" or "odp":
+                dialect = Autheris.Domain.Common.DatabaseDialect.Oracle;
+                return true;
+            case "databricks" or "spark" or "sparksql":
+                dialect = Autheris.Domain.Common.DatabaseDialect.Databricks;
+                return true;
+            default:
+                dialect = default;
+                return false;
+        }
     }
 
     public string ResolveName(ProcedureDefinition definition) =>

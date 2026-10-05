@@ -75,6 +75,7 @@ public static class ProcedureDefinitionParser
         var roles = new List<string>();
         var validationMode = ProcedureValidationMode.Catalog;
         var declaredOutputs = new List<string>();
+        var kind = ProcedureKind.Procedure;
 
         foreach (Match match in HeaderRegex.Matches(content))
         {
@@ -83,6 +84,14 @@ public static class ProcedureDefinitionParser
 
             switch (key)
             {
+                case "kind" or "type":
+                    kind = val.ToLowerInvariant() switch
+                    {
+                        "tvf" or "function" or "table-valued-function" => ProcedureKind.TableValuedFunction,
+                        "procedure" or "proc" or "sp" => ProcedureKind.Procedure,
+                        _ => throw new FormatException($"@kind must be 'procedure' or 'tvf', got '{val}'.")
+                    };
+                    break;
                 case "validation":
                     validationMode = val.ToLowerInvariant() switch
                     {
@@ -227,7 +236,8 @@ public static class ProcedureDefinitionParser
             AllowDynamicSql: allowDynamicSql,
             TimeoutSeconds: Math.Min(timeout, Math.Max(1, maxTimeoutSeconds)),
             ValidationMode: validationMode,
-            DeclaredOutputs: declaredOutputs);
+            DeclaredOutputs: declaredOutputs,
+            Kind: kind);
     }
 
     private static ProcedureParameter ParseParameter(string text)
@@ -348,6 +358,13 @@ public static class ProcedureDefinitionParser
             ? (allowRlsNone ? ProcedureRlsMode.None : throw new FormatException("rls: none is only permitted in Development."))
             : ProcedureRlsMode.SessionContext;
 
+        var kind = string.Equals(model.Kind, "tvf", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(model.Kind, "function", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(model.Kind, "table_valued_function", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(model.Kind, "table-valued-function", StringComparison.OrdinalIgnoreCase)
+            ? ProcedureKind.TableValuedFunction
+            : ProcedureKind.Procedure;
+
         int timeout = model.TimeoutSeconds ?? model.Timeout ?? 30;
 
         var parameters = new List<ProcedureParameter>();
@@ -441,7 +458,8 @@ public static class ProcedureDefinitionParser
             AllowDynamicSql: model.AllowDynamicSql,
             TimeoutSeconds: Math.Min(timeout, Math.Max(1, maxTimeoutSeconds)),
             ValidationMode: validationMode,
-            DeclaredOutputs: outputs);
+            DeclaredOutputs: outputs,
+            Kind: kind);
     }
 }
 
@@ -451,6 +469,7 @@ public sealed class ProcedureYamlModel
     public string? Summary { get; set; }
     public string? Description { get; set; }
     public string? Procedure { get; set; }
+    public string? Kind { get; set; }
     public string? Mode { get; set; }
     public string? DataSource { get; set; }
     public string? Validation { get; set; }
