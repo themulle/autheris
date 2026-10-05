@@ -278,34 +278,12 @@ public sealed class DevSwitchTests
     // ---------- Architecture guard ----------
 
     /// <summary>
-    /// warn_/danger_ switches belong in Insecure. These domain-local duplicates exist today (Phase 4 of the concept is
-    /// deferred); the list may only shrink. A new warn_/danger_ property outside Insecure fails this test.
+    /// warn_/danger_ switches belong in Insecure. Phase 4 removed the domain-local duplicates, so this list stays empty.
+    /// A new warn_/danger_ property outside Insecure fails this test.
     /// </summary>
     private static readonly HashSet<string> KnownDomainLocalSwitches =
     [
-        "AuthenticationOptions.danger_allow_anonymous_access",
-        "GovernanceDbOptions.danger_bypass_consent_checks",
-        "GovernanceDbOptions.warn_auto_approve_access_requests",
-        "RateLimitingOptions.warn_disable_rate_limiting",
-        "GraphQLOptions.warn_allow_all_cors_origins",
-        "GraphQLOptions.warn_relaxed_query_limits",
-        "GraphQLOptions.warn_enable_introspection",
-        "DataMaskingOptions.danger_disable_column_masking",
-        "OpenMetadataOptions.danger_bypass_webhook_signature_validation",
-        "OpenMetadataOptions.warn_ignore_webhook_timestamp_tolerance",
-        "OpenMetadataOptions.danger_allow_untrusted_certificates",
-        "ItsmOptions.danger_bypass_webhook_signature_validation",
-        "ItsmOptions.warn_ignore_webhook_timestamp_tolerance",
-        "ItsmOptions.warn_fallback_default_tenant_for_webhooks",
-        "ItsmOptions.warn_mock_external_systems_if_unreachable",
-        "ItsmOptions.danger_allow_untrusted_certificates",
-        "McpOptions.warn_allow_unmasked_ai_access",
-        "McpOptions.danger_bypass_mcp_auth",
-        "LakehouseOptions.warn_allow_unsigned_s3_requests",
-        "LakehouseOptions.danger_bypass_lakehouse_auth",
-        "DbtOptions.danger_bypass_webhook_signature_validation",
-        "WebSqlOptions.warn_allow_dml",
-        "WebSqlOptions.danger_bypass_sql_governance"
+
     ];
 
     [Fact]

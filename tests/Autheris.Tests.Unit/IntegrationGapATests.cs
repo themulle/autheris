@@ -203,7 +203,8 @@ public sealed class IntegrationGapATests
     {
         var options = new GatewayOptions
         {
-            WebSql = new WebSqlOptions { warn_allow_dml = true, DmlWriterRoles = ["WebSqlWriter"] },
+            WebSql = new WebSqlOptions { DmlWriterRoles = ["WebSqlWriter"] },
+            Insecure = new InsecureGettingStartedOptions { warn_allow_websql_dml = true },
             DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }
         };
 
@@ -236,7 +237,7 @@ public sealed class IntegrationGapATests
     [Fact]
     public void GAP04_WebSqlGovernanceBypass_IsDanger_AndDml_IsNotReported()
     {
-        var governanceBypass = new GatewayOptions { WebSql = new WebSqlOptions { danger_bypass_sql_governance = true } };
+        var governanceBypass = new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_websql_governance = true } };
         governanceBypass.HasAnyDangerBypassActive.ShouldBeTrue();
         governanceBypass.GetAllActiveBypasses().ShouldContain("DANGER:danger_bypass_websql_governance");
 

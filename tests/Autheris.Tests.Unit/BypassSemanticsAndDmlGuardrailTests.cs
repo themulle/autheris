@@ -51,11 +51,11 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
 
     private static GatewayOptions WithNewDangerSwitch(string name) => name switch
     {
-        "warn_allow_unmasked_ai_access" => new GatewayOptions { Mcp = new McpOptions { warn_allow_unmasked_ai_access = true }, DataMasking = ProdMasking() },
+        "warn_allow_unmasked_ai_access" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_allow_unmasked_ai_access = true }, DataMasking = ProdMasking() },
         "warn_mock_external_systems_if_unreachable" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_mock_external_systems_if_unreachable = true }, DataMasking = ProdMasking() },
         "warn_auto_approve_access_requests" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_auto_approve_access_requests = true }, DataMasking = ProdMasking() },
         "warn_disable_rate_limiting" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_disable_rate_limiting = true }, DataMasking = ProdMasking() },
-        "warn_allow_unsigned_s3_requests" => new GatewayOptions { Lakehouse = new LakehouseOptions { warn_allow_unsigned_s3_requests = true }, DataMasking = ProdMasking() },
+        "warn_allow_unsigned_s3_requests" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_allow_unsigned_s3_requests = true }, DataMasking = ProdMasking() },
         "warn_ignore_webhook_timestamp_tolerance" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_ignore_webhook_timestamp_tolerance = true }, DataMasking = ProdMasking() },
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, "unknown switch")
     };
@@ -69,7 +69,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         "catalog_legacy_payload_only_signature" => new GatewayOptions { Catalog = new DataCatalogOptions { AllowLegacyPayloadOnlySignature = true }, DataMasking = ProdMasking() },
         "itsm_legacy_global_webhook_secret" => new GatewayOptions { Itsm = new ItsmOptions { LegacyGlobalWebhookSecret = true }, DataMasking = ProdMasking() },
         "allow_development_in_container" => new GatewayOptions { AllowDevelopmentInContainer = true, DataMasking = ProdMasking() },
-        "warn_allow_websql_dml" => new GatewayOptions { WebSql = new WebSqlOptions { warn_allow_dml = true }, DataMasking = ProdMasking() },
+        "warn_allow_websql_dml" => new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_allow_websql_dml = true }, DataMasking = ProdMasking() },
         _ => throw new ArgumentOutOfRangeException(nameof(name), name, "unknown switch")
     };
 
@@ -123,7 +123,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             .GetActiveDangerBypasses().ShouldContain("DANGER:danger_bypass_consent_checks");
         new GatewayOptions { OpenSchema = true }
             .GetActiveDangerBypasses().ShouldContain(b => b.StartsWith("DANGER:open_schema", StringComparison.Ordinal));
-        new GatewayOptions { WebSql = new WebSqlOptions { danger_bypass_sql_governance = true } }
+        new GatewayOptions { Insecure = new InsecureGettingStartedOptions { danger_bypass_websql_governance = true } }
             .GetActiveDangerBypasses().ShouldContain("DANGER:danger_bypass_websql_governance");
     }
 
@@ -198,7 +198,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     {
         var options = new GatewayOptions
         {
-            Dbt = new DbtOptions { danger_bypass_webhook_signature_validation = true },
+            Insecure = new InsecureGettingStartedOptions { danger_bypass_webhook_signature_validation = true },
             DataMasking = ProdMasking()
         };
 

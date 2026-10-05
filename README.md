@@ -144,12 +144,12 @@ Instead of traditional coarse-grained role-based access control (RBAC), access t
 
   | Switch (configuration property) | Class |
   |---|---|
-  | `danger_allow_anonymous_access`, `danger_bypass_consent_checks`, `danger_disable_column_masking`, `danger_allow_insecure_transport`, `danger_bypass_webhook_signature_validation` / `danger_allow_anonymous_webhooks`, `danger_allow_untrusted_certificates`, `danger_bypass_mcp_auth`, `danger_bypass_lakehouse_auth`, `danger_bypass_websql_governance` / `WebSql.danger_bypass_sql_governance`, `OpenSchema` / `Catalog.OpenSchema` | DANGER |
+  | `danger_allow_anonymous_access`, `danger_bypass_consent_checks`, `danger_disable_column_masking`, `danger_allow_insecure_transport`, `danger_bypass_webhook_signature_validation` / `danger_allow_anonymous_webhooks`, `danger_allow_untrusted_certificates`, `danger_bypass_mcp_auth`, `danger_bypass_lakehouse_auth`, `danger_bypass_websql_governance`, `OpenSchema` / `Catalog.OpenSchema` | DANGER |
   | `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_ignore_webhook_timestamp_tolerance` | DANGER (historic `warn_` name) |
   | `warn_allow_all_cors_origins`, `warn_relaxed_query_limits`, `warn_enable_introspection`, `warn_fallback_default_tenant_for_webhooks` | WARN |
   | `Catalog.AllowLegacyPayloadOnlySignature`, `Itsm.LegacyGlobalWebhookSecret`, `OpenMetadata.AutoCreateConsents` | WARN |
   | `AllowDevelopmentInContainer` | WARN (additionally only effective together with `Development`, see container check) |
-  | `WebSql.warn_allow_dml`, `Insecure.warn_allow_websql_dml` (legacy aliases) | WARN – use `WebSql.AllowDml` |
+  | `Insecure.warn_allow_websql_dml` (legacy alias) | WARN – use `WebSql.AllowDml` |
   | `WebSql.AllowDml` (+ mandatory `WebSql.DmlWriterRoles`) | regular option, no message |
 
   - Independent hard checks stay in place in every non-Development environment: Quickstart profile, `EnableTestAuthHandler`, anonymous access, `SeedDemoData`, valid HMAC Key-Vault reference, Development-in-container opt-in; `WebSql.AllowDml` without `DmlWriterRoles` aborts startup in every environment.

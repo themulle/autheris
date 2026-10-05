@@ -1,6 +1,6 @@
 # Concept: Unified Development Switches (`Gateway:Dev`)
 
-Date: 2026-10-05 · Status: **Implemented (phases 0–3), phase 4 deferred** · Related: F-AUTH-DX, ADR-016 (security switch semantics of 2026-10-02)
+Date: 2026-10-05 · Status: **Implemented (phases 0–4)** · Related: F-AUTH-DX, ADR-016 (security switch semantics of 2026-10-02)
 
 ## 1. Findings
 
@@ -100,9 +100,9 @@ Precedence per switch: explicit `Gateway:Dev:*` value, then an explicitly set le
 | 1 | Feature-related `IsDevelopment()` checks use `DevFeatures` | none | done for the new DX features; pre-existing checks (HSTS, validations) intentionally remain |
 | 2 | `EnableTestAuthHandler`, `SeedDemoData`, `EnableBananaCakePop`, `EnableIntrospection` as aliases of `Gateway:Dev` with deprecation notes | notes only | done |
 | 3 | `Profile: Quickstart` becomes `Dev:Preset`; expansion into `Insecure.*`; `\|\| IsQuickstartProfile` removed from the four accessors | Quickstart now also lists `OpenSchema` as a DANGER entry (it was relaxed before, but not reported) | done |
-| 4 (optional, breaking) | Remove the domain-local `warn_` / `danger_` duplicates | yes: deployments and environment variables | **deferred** |
+| 4 (breaking) | Remove the domain-local `warn_` / `danger_` duplicates; `LegacySwitchGuard` fails startup when a removed key is still `true` and names the replacement | yes: deployments and environment variables | done |
 
-Phase 4 is replaced for now by an architecture test (see 6.5): the 23 domain-local duplicates that exist today are an allowlist that may only shrink. The risk of phase 4 lies in Helm charts and deployments that set the domain-local names today.
+Phase 4 removed the 23 domain-local duplicates. Every `warn_` / `danger_` switch now exists only in `Gateway:Insecure` (`WebSql:warn_allow_dml` became `WebSql:AllowDml`). `LegacySwitchGuard` (`src/Autheris.Api/Configuration`) rejects a removed key set to `true` at startup with the replacement key, because ignoring it would silently drop a relaxation. A value of `false` is tolerated. The architecture test (6.5) now has an empty allowlist. Deployments that set the old names (Helm values, `Gateway__<Section>__warn_*` environment variables) must switch to `Gateway__Insecure__*` before upgrading.
 
 **Operational rule for the base file.** `appsettings.json` must not set the legacy keys that `Gateway:Dev` owns (`EnableTestAuthHandler`, `EnableBananaCakePop`, `EnableIntrospection`, `SeedDemoData`). An explicit value counts as "explicitly configured" and would defeat the preset default in Development. Their C# defaults are `false` / unset, so nothing changes for other environments. A unit test guards this.
 
@@ -112,7 +112,7 @@ Phase 4 is replaced for now by an architecture test (see 6.5): the 23 domain-loc
 2. **Does it change authentication or exposure but is meant for development only?** Class B: `Gateway:Dev`, listed in `DevFeatures.DevSecurity`.
 3. **Otherwise** class A: `Gateway:Dev`, default `true` in Development.
 4. No switch reads `IsDevelopment()` directly. Every dev switch has a policy in `DevOptionsValidator` and appears in `/api/dev/info`.
-5. Architecture test (`DevSwitchTests`): `warn_` / `danger_` properties outside `InsecureGettingStartedOptions` are limited to today's allowlist. A second test fails when a `DevOptions` property has no explicit "outside Development" policy.
+5. Architecture test (`DevSwitchTests`): `warn_` / `danger_` properties outside `InsecureGettingStartedOptions` are not allowed (the allowlist is empty). A second test fails when a `DevOptions` property has no explicit "outside Development" policy.
 
 ## 7. Alternatives considered
 
@@ -127,7 +127,7 @@ Phase 4 is replaced for now by an architecture test (see 6.5): the 23 domain-loc
 
 1. `Profile: Quickstart` is replaced by `Dev:Preset` and kept as a deprecated alias.
 2. `TestAuthHandler` and introspection are class B (hard Development-only, reported separately), not bypasses.
-3. Phase 4 is deferred; the architecture test replaces it.
+3. Phase 4 is implemented as a breaking change with a fail-fast guard instead of silent aliases; the architecture allowlist is empty.
 4. The section is named `Gateway:Dev`, matching `/api/dev/*`.
 5. `AllowDevelopmentInContainer` stays a class C (`WARN`) entry; `Gateway:Dev` needs no additional consent in containers.
 

@@ -103,7 +103,8 @@ public sealed class McpServerTests
         var registry = new McpToolRegistry();
         var options = Options.Create(new GatewayOptions
         {
-            Mcp = new McpOptions { Enabled = true, warn_allow_unmasked_ai_access = true }
+            Mcp = new McpOptions { Enabled = true },
+            Insecure = new InsecureGettingStartedOptions { warn_allow_unmasked_ai_access = true }
         });
         var logger = NullLogger<AiDataGuardrailService>.Instance;
         var guardrail = new AiDataGuardrailService(registry, options, logger);

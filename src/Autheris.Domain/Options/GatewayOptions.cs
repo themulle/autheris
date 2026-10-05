@@ -85,34 +85,34 @@ public sealed class GatewayOptions
 
     // Convenience accessors combining global 'Insecure' section and domain-specific options
     public bool IsOpenSchemaAllowed => OpenSchema || Catalog.OpenSchema;
-    public bool IsAnonymousAccessAllowed => Insecure.danger_allow_anonymous_access || Authentication.danger_allow_anonymous_access;
-    public bool IsConsentBypassed => Insecure.danger_bypass_consent_checks || GovernanceDb.danger_bypass_consent_checks;
-    public bool IsColumnMaskingDisabled => Insecure.danger_disable_column_masking || DataMasking.danger_disable_column_masking;
+    public bool IsAnonymousAccessAllowed => Insecure.danger_allow_anonymous_access;
+    public bool IsConsentBypassed => Insecure.danger_bypass_consent_checks;
+    public bool IsColumnMaskingDisabled => Insecure.danger_disable_column_masking;
     public bool IsInsecureTransportAllowed => Insecure.danger_allow_insecure_transport;
     /// <summary>True when the CORS/Origin check is effectively off (warn flag, Quickstart or <c>TrustedOrigins: "*"</c>).</summary>
     public bool IsWildcardCors => IsAllCorsAllowed || GraphQL.TrustedOrigins.Contains("*");
-    public bool IsAllCorsAllowed => Insecure.warn_allow_all_cors_origins || GraphQL.warn_allow_all_cors_origins;
-    public bool IsRateLimitingDisabled => Insecure.warn_disable_rate_limiting || RateLimiting.warn_disable_rate_limiting;
-    public bool AreQueryLimitsRelaxed => Insecure.warn_relaxed_query_limits || GraphQL.warn_relaxed_query_limits;
-    public bool IsIntrospectionForced => Insecure.warn_enable_introspection || GraphQL.warn_enable_introspection;
-    public bool IsAutoApproveEnabled => Insecure.warn_auto_approve_access_requests || GovernanceDb.warn_auto_approve_access_requests;
-    public bool IsWebhookSignatureBypassed => Insecure.danger_bypass_webhook_signature_validation || Insecure.danger_allow_anonymous_webhooks || Itsm.danger_bypass_webhook_signature_validation || OpenMetadata.danger_bypass_webhook_signature_validation || Dbt.danger_bypass_webhook_signature_validation;
-    public bool AreUntrustedCertificatesAllowed => Insecure.danger_allow_untrusted_certificates || Insecure.danger_allow_insecure_transport || Itsm.danger_allow_untrusted_certificates || OpenMetadata.danger_allow_untrusted_certificates;
-    public bool IsWebhookTimestampToleranceIgnored => Insecure.warn_ignore_webhook_timestamp_tolerance || Itsm.warn_ignore_webhook_timestamp_tolerance || OpenMetadata.warn_ignore_webhook_timestamp_tolerance;
-    public bool IsWebhookTenantFallbackAllowed => Insecure.warn_fallback_default_tenant_for_webhooks || Itsm.warn_fallback_default_tenant_for_webhooks;
-    public bool AreExternalSystemsMockedIfUnreachable => Insecure.warn_mock_external_systems_if_unreachable || Itsm.warn_mock_external_systems_if_unreachable;
-    public bool IsMcpAuthBypassed => Insecure.danger_bypass_mcp_auth || Mcp.danger_bypass_mcp_auth;
-    public bool IsMcpUnmaskedAllowed => Insecure.warn_allow_unmasked_ai_access || Mcp.warn_allow_unmasked_ai_access;
-    public bool IsLakehouseAuthBypassed => Insecure.danger_bypass_lakehouse_auth || Lakehouse.danger_bypass_lakehouse_auth;
-    public bool AreUnsignedS3RequestsAllowed => Insecure.warn_allow_unsigned_s3_requests || Lakehouse.warn_allow_unsigned_s3_requests;
-    public bool IsWebSqlDmlAllowed => WebSql.AllowDml || WebSql.warn_allow_dml || Insecure.warn_allow_websql_dml;
+    public bool IsAllCorsAllowed => Insecure.warn_allow_all_cors_origins;
+    public bool IsRateLimitingDisabled => Insecure.warn_disable_rate_limiting;
+    public bool AreQueryLimitsRelaxed => Insecure.warn_relaxed_query_limits;
+    public bool IsIntrospectionForced => Insecure.warn_enable_introspection;
+    public bool IsAutoApproveEnabled => Insecure.warn_auto_approve_access_requests;
+    public bool IsWebhookSignatureBypassed => Insecure.danger_bypass_webhook_signature_validation || Insecure.danger_allow_anonymous_webhooks;
+    public bool AreUntrustedCertificatesAllowed => Insecure.danger_allow_untrusted_certificates || Insecure.danger_allow_insecure_transport;
+    public bool IsWebhookTimestampToleranceIgnored => Insecure.warn_ignore_webhook_timestamp_tolerance;
+    public bool IsWebhookTenantFallbackAllowed => Insecure.warn_fallback_default_tenant_for_webhooks;
+    public bool AreExternalSystemsMockedIfUnreachable => Insecure.warn_mock_external_systems_if_unreachable;
+    public bool IsMcpAuthBypassed => Insecure.danger_bypass_mcp_auth;
+    public bool IsMcpUnmaskedAllowed => Insecure.warn_allow_unmasked_ai_access;
+    public bool IsLakehouseAuthBypassed => Insecure.danger_bypass_lakehouse_auth;
+    public bool AreUnsignedS3RequestsAllowed => Insecure.warn_allow_unsigned_s3_requests;
+    public bool IsWebSqlDmlAllowed => WebSql.AllowDml || Insecure.warn_allow_websql_dml;
 
     /// <summary>
-    /// Legacy aliases (WebSql.warn_allow_dml / Insecure.warn_allow_websql_dml) for <see cref="WebSqlOptions.AllowDml"/>.
+    /// Legacy alias (Insecure.warn_allow_websql_dml) for <see cref="WebSqlOptions.AllowDml"/>.
     /// They unlock the same DML path and are reported as WARN with the hint to use WebSql.AllowDml instead.
     /// </summary>
-    public bool IsLegacyWebSqlDmlSwitchActive => WebSql.warn_allow_dml || Insecure.warn_allow_websql_dml;
-    public bool IsWebSqlGovernanceBypassed => WebSql.danger_bypass_sql_governance || Insecure.danger_bypass_websql_governance;
+    public bool IsLegacyWebSqlDmlSwitchActive => Insecure.warn_allow_websql_dml;
+    public bool IsWebSqlGovernanceBypassed => Insecure.danger_bypass_websql_governance;
 
     /// <summary>
     /// SEC H-02: OpenSchema (global or Catalog) opens catalog/OpenAPI documentation routes to anonymous callers
@@ -396,7 +396,6 @@ public sealed class AuthenticationOptions
     public bool RequireKerberosOnly { get; init; } = true;
     [Range(1, 60)] public int GroupCacheTtlMinutes { get; init; } = 5;
     public bool EnableTestAuthHandler { get; init; }
-    public bool danger_allow_anonymous_access { get; init; } = false;
 
     public BasicAuthOptions BasicAuth { get; init; } = new();
     public EntraIdAuthOptions EntraId { get; init; } = new();
@@ -545,8 +544,6 @@ public sealed class GovernanceDbOptions
     public bool EnableOutboxProcessor { get; init; } = true;
     public bool? SeedDemoData { get; init; } = null;
     public string? AuditHmacKeyVaultRef { get; init; }
-    public bool danger_bypass_consent_checks { get; init; } = false;
-    public bool warn_auto_approve_access_requests { get; init; } = false;
 }
 
 public sealed class CachingOptions
@@ -673,7 +670,6 @@ public sealed class EpochValidationOptions
 
 public sealed class RateLimitingOptions
 {
-    public bool warn_disable_rate_limiting { get; init; } = false;
     [Required] public PreAuthIpRateLimitOptions PreAuthIpRateLimit { get; init; } = new();
     [Required] public PostAuthSidRateLimitOptions PostAuthSidRateLimit { get; init; } = new();
 }
@@ -717,9 +713,6 @@ public sealed class GraphQLOptions
     /// </summary>
     [Range(5, 3600)] public int SubscriptionRevalidationSeconds { get; init; } = 60;
     public List<string> TrustedOrigins { get; init; } = [];
-    public bool warn_allow_all_cors_origins { get; init; } = false;
-    public bool warn_relaxed_query_limits { get; init; } = false;
-    public bool warn_enable_introspection { get; init; } = false;
 }
 
 public sealed class DataMaskingOptions
@@ -727,7 +720,6 @@ public sealed class DataMaskingOptions
     public string HmacKeyId { get; init; } = "key-2026-q1";
     public string HmacSecretKeyVaultRef { get; init; } = "DEV_INSECURE_TEST_KEY_ONLY";
     [Range(1, 168)] public int MaskingCacheTtlHours { get; init; } = 24;
-    public bool danger_disable_column_masking { get; init; } = false;
 
     /// <summary>
     /// RR-L6-02: When true, prevents binding derived HMAC keys as command parameters in WebSQL in-DB expressions
@@ -796,9 +788,6 @@ public sealed class OpenMetadataOptions
     /// ohne Condition) automatisch an. Standard: false – Vorschläge werden nur protokolliert.
     /// </summary>
     public bool AutoCreateConsents { get; init; } = false;
-    public bool danger_bypass_webhook_signature_validation { get; init; } = false;
-    public bool warn_ignore_webhook_timestamp_tolerance { get; init; } = false;
-    public bool danger_allow_untrusted_certificates { get; init; } = false;
 
     /// <summary>
     /// SEC E-09 / EX-06: Explizite Zuordnung "service.database" (OpenMetadata) → Gateway-Domain. Ist die Map gesetzt,
@@ -853,11 +842,6 @@ public sealed class ItsmOptions
     public string JiraIssueType { get; init; } = "Task";
     public int RecertificationWarningDays { get; init; } = 3;
     public Dictionary<string, string> InstanceToTenantMap { get; init; } = new(StringComparer.OrdinalIgnoreCase);
-    public bool danger_bypass_webhook_signature_validation { get; init; } = false;
-    public bool warn_ignore_webhook_timestamp_tolerance { get; init; } = false;
-    public bool warn_fallback_default_tenant_for_webhooks { get; init; } = false;
-    public bool warn_mock_external_systems_if_unreachable { get; init; } = false;
-    public bool danger_allow_untrusted_certificates { get; init; } = false;
 
     /// <summary>
     /// SEC H-06: Webhook signatures are verified with a per-instance secret (<c>itsm:webhook-secret:{instanceId}</c>).
@@ -999,9 +983,6 @@ public sealed class McpOptions
     public bool RequirePiiMasking { get; init; } = true;
     public List<string> AllowedOperations { get; init; } = [];
 
-    // Insecure flags
-    public bool warn_allow_unmasked_ai_access { get; init; } = false;
-    public bool danger_bypass_mcp_auth { get; init; } = false;
 }
 
 public sealed class LakehouseStorageOptions
@@ -1037,9 +1018,6 @@ public sealed class LakehouseOptions
     public LakehouseStorageOptions Storage { get; init; } = new();
     public Dictionary<string, LakehouseTableOptions> Tables { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
-    // Insecure flags
-    public bool warn_allow_unsigned_s3_requests { get; init; } = false;
-    public bool danger_bypass_lakehouse_auth { get; init; } = false;
 }
 
 public sealed class ExtensibilityOptions
@@ -1067,7 +1045,6 @@ public sealed class DbtOptions
 {
     public bool Enabled { get; init; } = true;
     public string WebhookSecret { get; init; } = string.Empty;
-    public bool danger_bypass_webhook_signature_validation { get; init; } = false;
 }
 
 public sealed class BackstageIntegrationOptions
@@ -1220,8 +1197,6 @@ public sealed class WebSqlOptions
     /// <summary>
     /// Legacy alias for <see cref="AllowDml"/> (reported as WARN with the hint to use WebSql.AllowDml).
     /// </summary>
-    public bool warn_allow_dml { get; init; } = false;
-    public bool danger_bypass_sql_governance { get; init; } = false;
 }
 
 public sealed class SqlEndpointsOptions

@@ -191,6 +191,6 @@ public sealed class BasicAuthDxTests
         new GatewayOptions().IsWildcardCors.ShouldBeFalse();
         new GatewayOptions { GraphQL = new GraphQLOptions { TrustedOrigins = ["https://a.example"] } }.IsWildcardCors.ShouldBeFalse();
         new GatewayOptions { GraphQL = new GraphQLOptions { TrustedOrigins = ["*"] } }.IsWildcardCors.ShouldBeTrue();
-        new GatewayOptions { GraphQL = new GraphQLOptions { warn_allow_all_cors_origins = true } }.IsWildcardCors.ShouldBeTrue();
+        new GatewayOptions { Insecure = new InsecureGettingStartedOptions { warn_allow_all_cors_origins = true } }.IsWildcardCors.ShouldBeTrue();
     }
 }

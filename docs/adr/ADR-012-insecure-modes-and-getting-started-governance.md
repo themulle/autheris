@@ -24,3 +24,6 @@ Wir führen ein explizites, semantisch präfixiertes Konfigurationsschema ein:
 
 ### Negativ / Risiken
 - Risiko versehentlicher Aktivierung in Staging oder Produktion. Gegenmaßnahme: Auffällige Logging-Warnungen, automatisierte CI-Audits und Runbook-Checklisten.
+
+## Nachtrag 2026-10-05: Vereinheitlichung (Phase 4)
+Alle `warn_`/`danger_`-Schalter existieren ausschließlich in `Gateway:Insecure`. Die domain-lokalen Duplikate (z. B. `Mcp:danger_bypass_mcp_auth`, `GraphQL:warn_allow_all_cors_origins`, `WebSql:warn_allow_dml`) wurden entfernt. Ein noch gesetzter alter Schlüssel mit Wert `true` führt zu einem Startfehler mit Hinweis auf den neuen Schlüssel (`LegacySwitchGuard`). Details und Migration: [concept-unified-dev-switches-2026-10-05.md](../architecture/concept-unified-dev-switches-2026-10-05.md).
