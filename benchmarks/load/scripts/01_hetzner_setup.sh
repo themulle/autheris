@@ -85,7 +85,7 @@ npm install -g autocannon yarn --quiet || true
 # 6. Install k6 (Official Grafana repo)
 if ! command -v k6 &> /dev/null; then
     echo "Installing k6 load generator..."
-    gpg --no-default-keyring --keyring /usr/share/keyrings/k6-archive-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys C5AD17C747E3415A3642D57D77C6C491D34EE24C || true
+    curl -fsSL https://dl.k6.io/key.gpg | gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg 2>/dev/null || true
     echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" | tee /etc/apt/sources.list.d/k6.list
     apt-get update -y
     apt-get install -y k6 || true

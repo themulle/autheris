@@ -6,49 +6,7 @@ networks:
 
 services:
   # ==========================================
-  # 1. Database: PostgreSQL with Chinook Seed
-  # ==========================================
-  postgres:
-    image: postgres:16-alpine
-    container_name: bench-postgres
-    restart: unless-stopped
-    networks:
-      - bench-net
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: REDACTED_HISTORICAL_BENCHMARK_SECRET
-      POSTGRES_DB: postgres
-    volumes:
-      - ../configs/chinook.sql:/docker-entrypoint-initdb.d/01-chinook.sql:ro
-    command: >
-      postgres
-      -c max_connections=500
-      -c shared_buffers=2GB
-      -c effective_cache_size=6GB
-      -c maintenance_work_mem=512MB
-      -c checkpoint_completion_target=0.9
-      -c wal_buffers=16MB
-      -c default_statistics_target=100
-      -c random_page_cost=1.1
-      -c effective_io_concurrency=200
-      -c work_mem=16MB
-      -c min_wal_size=1GB
-      -c max_wal_size=4GB
-    deploy:
-      resources:
-        limits:
-          cpus: '4.0'
-          memory: 6G
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
-
-  # ==========================================
-  # 2. Target A: Hasura GraphQL Engine
+  # Target A: Hasura GraphQL Engine
   # ==========================================
   hasura:
     image: hasura/graphql-engine:v2.44.0
@@ -58,11 +16,8 @@ services:
       - bench-net
     ports:
       - "8085:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      HASURA_GRAPHQL_DATABASE_URL: postgres://postgres:REDACTED_HISTORICAL_BENCHMARK_SECRET@postgres:5432/postgres
+      HASURA_GRAPHQL_DATABASE_URL: ${DATABASE_URL:-postgres://postgres:REDACTED_HISTORICAL_BENCHMARK_SECRET@10.0.1.10:5432/postgres}
       HASURA_GRAPHQL_ENABLE_CONSOLE: "false"
       HASURA_GRAPHQL_DEV_MODE: "false"
       HASURA_GRAPHQL_LOG_LEVEL: "warn"
@@ -76,7 +31,7 @@ services:
           memory: 4G
 
   # ==========================================
-  # 3. Target B: Apollo Server 4 (Node.js)
+  # Target B: Apollo Server 4 (Node.js)
   # ==========================================
   apollo-server:
     build:
@@ -88,11 +43,8 @@ services:
       - bench-net
     ports:
       - "4000:4000"
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      DATABASE_URL: postgres://postgres:REDACTED_HISTORICAL_BENCHMARK_SECRET@postgres:5432/postgres
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:REDACTED_HISTORICAL_BENCHMARK_SECRET@10.0.1.10:5432/postgres}
       PORT: 4000
       PG_MAX_POOL: 100
       NODE_ENV: production
@@ -103,7 +55,7 @@ services:
           memory: 4G
 
   # ==========================================
-  # 4. Target C: PostGraphile (Node.js)
+  # Target C: PostGraphile (Node.js)
   # ==========================================
   postgraphile:
     build:
@@ -115,11 +67,8 @@ services:
       - bench-net
     ports:
       - "5001:5001"
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      DATABASE_URL: postgres://postgres:REDACTED_HISTORICAL_BENCHMARK_SECRET@postgres:5432/postgres
+      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:REDACTED_HISTORICAL_BENCHMARK_SECRET@10.0.1.10:5432/postgres}
       PORT: 5001
       PG_MAX_POOL: 100
       NODE_ENV: production
@@ -130,7 +79,7 @@ services:
           memory: 4G
 
   # ==========================================
-  # 5. Target D: Autheris (.NET 10)
+  # Target D: Autheris (.NET 10)
   # ==========================================
   gql-gateway:
     build:
@@ -142,9 +91,6 @@ services:
       - bench-net
     ports:
       - "5000:5000"
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
       ASPNETCORE_URLS: http://+:5000
       ASPNETCORE_ENVIRONMENT: Development
@@ -161,11 +107,13 @@ services:
       Gateway__GovernanceDb__Provider: "Sqlite"
       Gateway__GovernanceDb__SeedDemoData: "true"
       Gateway__GovernanceDb__ConnectionString: "Data Source=:memory:;Mode=Memory;Cache=Shared"
+      Gateway__ResourceGroups__Enabled: "false"
+      Gateway__RateLimiting__warn_disable_rate_limiting: "true"
       Gateway__RateLimiting__PreAuthIpRateLimit__PermitLimit: "100000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokenBucketCapacity: "100000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokensPerSecond: "10000"
       Gateway__SingleQueryPushdown__Enabled: "true"
-      Gateway__DataSources__Connections__chinook__ConnectionString: "Host=postgres;Port=5432;Database=postgres;Username=postgres;Password=REDACTED_HISTORICAL_BENCHMARK_SECRET;Pooling=true;Maximum Pool Size=100;Minimum Pool Size=10"
+      Gateway__DataSources__Connections__chinook__ConnectionString: "Host=${DB_HOST:-10.0.1.10};Port=5432;Database=postgres;Username=postgres;Password=REDACTED_HISTORICAL_BENCHMARK_SECRET;Pooling=true;Maximum Pool Size=200;Minimum Pool Size=20"
       Gateway__DataSources__Connections__chinook__CommandTimeoutSeconds: "15"
       Gateway__DataSources__Connections__chinook__Dialect: "PostgreSql"
     deploy:

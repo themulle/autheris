@@ -46,10 +46,41 @@ const QUERIES = {
     body: JSON.stringify({
       query: 'query { table(domain: "finance", name: "finance_table_1", first: 5) { tableName totalCount jsonRows } }'
     })
+  },
+  pg_pk: {
+    name: 'PostGraphilePK',
+    body: JSON.stringify({
+      query: 'query { allAlbums(first: 1) { nodes { id title } } }'
+    })
+  },
+  pg_filter: {
+    name: 'PostGraphileFilter',
+    body: JSON.stringify({
+      query: 'query { allAlbums(first: 10, condition: { title: "Rock" }) { nodes { id title } } }'
+    })
+  },
+  pg_join: {
+    name: 'PostGraphileJoin',
+    body: JSON.stringify({
+      query: 'query { allAlbums(first: 1) { nodes { id title artistByArtistId { id name } } } }'
+    })
+  },
+  pg_deep: {
+    name: 'PostGraphileDeep',
+    body: JSON.stringify({
+      query: 'query { allAlbums(first: 1) { nodes { id title tracksByAlbumId { nodes { id name genreByGenreId { name } } } } } }'
+    })
   }
 };
 
-const selectedQuery = QUERIES[QUERY_TYPE] || QUERIES.pk;
+let effectiveQueryType = QUERY_TYPE;
+if (TARGET_URL.includes(':5001')) {
+  effectiveQueryType = 'pg_' + QUERY_TYPE;
+} else if (TARGET_URL.includes(':5000')) {
+  effectiveQueryType = 'gql_table';
+}
+
+const selectedQuery = QUERIES[effectiveQueryType] || QUERIES[QUERY_TYPE] || QUERIES.pk;
 
 // Headers
 const baseHeaders = {
@@ -58,6 +89,7 @@ const baseHeaders = {
   'GraphQL-Preflight': '1',
   'X-Hasura-Admin-Secret': 'my-secret',
   'X-Test-User-Sid': 'S-1-5-21-9999',
+  'X-Test-Tier': 'Internal',
 };
 
 if (__ENV.CUSTOM_HEADERS_JSON) {
@@ -89,18 +121,25 @@ if (SCENARIO_TYPE === 'rps') {
     maxVUs: Math.max(TARGET_RPS * 2, 500),
   };
 } else if (SCENARIO_TYPE === 'ramp') {
+  const peakRps = parseInt(__ENV.MAX_RAMP_RPS || '5000', 10);
+  const s1 = Math.round(peakRps * 0.1);
+  const s2 = Math.round(peakRps * 0.3);
+  const s3 = Math.round(peakRps * 0.6);
+  const s4 = peakRps;
+  const s5 = Math.round(peakRps * 0.1);
+
   options.scenarios.ramp = {
     executor: 'ramping-arrival-rate',
-    startRate: 100,
+    startRate: s1,
     timeUnit: '1s',
-    preAllocatedVUs: 100,
-    maxVUs: 2000,
+    preAllocatedVUs: Math.min(1000, Math.max(100, Math.round(peakRps / 10))),
+    maxVUs: Math.max(3000, Math.min(8000, peakRps)),
     stages: [
-      { target: 500, duration: '10s' },
-      { target: 1500, duration: '20s' },
-      { target: 3000, duration: '20s' },
-      { target: 5000, duration: '20s' },
-      { target: 500, duration: '10s' },
+      { target: s1, duration: '10s' },
+      { target: s2, duration: '20s' },
+      { target: s3, duration: '20s' },
+      { target: s4, duration: '20s' },
+      { target: s5, duration: '10s' },
     ],
   };
 } else {
