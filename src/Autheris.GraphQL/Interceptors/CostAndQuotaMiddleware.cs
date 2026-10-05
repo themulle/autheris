@@ -62,6 +62,13 @@ public sealed class CostAndQuotaMiddleware
             return;
         }
 
+        var gatewayOptions = httpContext.RequestServices.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>()?.Value;
+        if (gatewayOptions?.IsRateLimitingDisabled == true)
+        {
+            await _next(context).ConfigureAwait(false);
+            return;
+        }
+
         // 1. Resolve client tier & quota policy
         var tierResolver = httpContext.RequestServices.GetRequiredService<IClientTierResolver>();
         string? apiKey = httpContext.Request.Headers.TryGetValue("X-API-Key", out var ak) ? ak.ToString() : null;

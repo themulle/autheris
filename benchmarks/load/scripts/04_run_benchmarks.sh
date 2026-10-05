@@ -67,7 +67,12 @@ for gw_name in "${!GATEWAYS[@]}"; do
     echo "========================================================================"
 
     # Check if endpoint responds
-    if ! curl -s -f -o /dev/null -X POST "${gw_url}" -H "Content-Type: application/json" -d '{"query":"query { __typename }"}' 2>/dev/null; then
+    if ! curl -s -f -o /dev/null -X POST "${gw_url}" \
+        -H "Content-Type: application/json" \
+        -H "GraphQL-Preflight: 1" \
+        -H "X-Test-User-Sid: S-1-5-21-9999" \
+        -H "X-Hasura-Admin-Secret: my-secret" \
+        -d '{"query":"query { __typename }"}' 2>/dev/null; then
         echo " [WARN] Gateway ${gw_name} is not responding at ${gw_url}. Skipping."
         continue
     fi
