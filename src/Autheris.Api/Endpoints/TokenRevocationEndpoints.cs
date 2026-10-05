@@ -47,9 +47,14 @@ public static class TokenRevocationEndpoints
 
             // Review E-8: only a canonical ClusterAdmin revokes globally. Tenant administrators revoke a tenant-scoped
             // key that matches tokens of their own tenant only and never a canonical ClusterAdmin.
+            // In a single-tenant deployment the scope is the legacy tenant, i.e. all non-ClusterAdmin tokens.
             bool isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
-            var tenantId = context.User.GetTenantId();
-            if (!isClusterAdmin && tenantId == TenantId.LegacySingleTenant)
+            TenantId tenantId;
+            try
+            {
+                tenantId = context.User.GetTenantId();
+            }
+            catch (System.Security.SecurityException)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
