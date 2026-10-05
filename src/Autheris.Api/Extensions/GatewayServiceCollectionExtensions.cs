@@ -316,6 +316,18 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
         services.AddScoped<Autheris.Application.SqlEndpoints.Interfaces.ISqlEndpointExecutionService, Autheris.Application.SqlEndpoints.Services.SqlEndpointExecutionService>();
 
+        // F-SQL-02: governed stored procedure endpoints (SQL Server, read-only in phase 1)
+        services.AddSingleton<Autheris.Application.Procedures.Interfaces.IProcedureRegistry, Autheris.Application.Procedures.Services.InMemoryProcedureRegistry>();
+        services.AddSingleton<Autheris.Application.Procedures.Services.ProcedureDefinitionLoader>();
+        services.AddSingleton<Autheris.Application.Procedures.Services.ProcedureConnectionProvider>();
+        services.AddScoped<Autheris.Application.Procedures.Services.StoredProcedureCatalogValidator>();
+        services.AddSingleton<Autheris.Application.Procedures.Interfaces.IProcedureInvoker, Autheris.Application.Procedures.Services.MssqlProcedureInvoker>();
+        services.AddScoped<Autheris.Application.Procedures.Interfaces.IProcedureExecutionService, Autheris.Application.Procedures.Services.GovernedProcedureExecutionService>();
+        if (gatewayOptions.SqlEndpoints.Procedures.Enabled)
+        {
+            services.AddHostedService<Autheris.Application.Procedures.Services.ProcedureRegistrationService>();
+        }
+
         // Casbin ABAC Engine
         services.AddSingleton<IPolicyEnforcementService, CasbinEnforcementService>();
 

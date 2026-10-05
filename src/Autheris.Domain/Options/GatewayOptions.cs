@@ -1189,6 +1189,37 @@ public sealed class SqlEndpointsOptions
     /// </summary>
     public bool AutoSyncFromDbt { get; init; } = true;
     public int MaxQueryTimeoutSeconds { get; init; } = 60;
+
+    /// <summary>F-SQL-02: Governed stored procedure endpoints (disabled by default).</summary>
+    public ProcedureEndpointsOptions Procedures { get; init; } = new();
+}
+
+/// <summary>
+/// F-SQL-02: Options for governed stored procedure endpoints (SQL Server). The procedure connection must use a dedicated
+/// technical login with EXECUTE on the allowed schemas only (ADR-018).
+/// </summary>
+public sealed class ProcedureEndpointsOptions
+{
+    public bool Enabled { get; init; } = false;
+
+    /// <summary>Directory containing <c>*.proc.sql</c> declaration files.</summary>
+    public string Directory { get; init; } = "procedures";
+
+    /// <summary>Key in <c>DataSources.Connections</c> of the EXECUTE-only technical login.</summary>
+    public string ConnectionName { get; init; } = "procedures";
+
+    /// <summary>Additional data source names a declaration may use (the connection name is always allowed).</summary>
+    public List<string> AllowedDataSources { get; init; } = [];
+
+    /// <summary>Only procedures in these schemas can be exposed. Empty = nothing can be exposed (fail-closed).</summary>
+    public List<string> AllowedSchemas { get; init; } = [];
+
+    [Range(1, 1440)] public int RevalidationIntervalMinutes { get; init; } = 15;
+    [Range(0, 60000)] public int LockTimeoutMs { get; init; } = 5000;
+    [Range(1, 100000)] public int MaxRows { get; init; } = 5000;
+    [Range(1, 1000000)] public int MaxStringParameterLength { get; init; } = 4000;
+    [Range(1, 300)] public int MaxTimeoutSeconds { get; init; } = 60;
+    public bool EnableHotReload { get; init; } = true;
 }
 
 public sealed class MssqlChangeTrackingOptions

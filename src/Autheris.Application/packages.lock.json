@@ -399,13 +399,6 @@
           "Microsoft.Extensions.ObjectPool": "[10.0.12, )"
         }
       }
-    },
-    "net10.0/linux-x64": {
-      "DuckDB.NET.Bindings.Full": {
-        "type": "Transitive",
-        "resolved": "1.5.6",
-        "contentHash": "phg/EJHrcG+bqgD/EnDryWlcFtL6L09Wn9o1UVoERTp7OnAmU5AyCSKreZUkFHacNRlxlAfAIJ2IGqJ2R6O18Q=="
-      }
     }
   }
 }
