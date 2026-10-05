@@ -109,6 +109,22 @@ public static class GatewayPolicies
         AddRolePolicy(options, SchemaPublisher, SchemaPublisherRoles);
     }
 
+    /// <summary>Roles that satisfy a named role policy (used for diagnostics only).</summary>
+    public static bool TryGetPolicyRoles(string policyName, out string[] roles)
+    {
+        roles = policyName switch
+        {
+            GovernanceAdmin => GovernanceAdminRoles,
+            Approver => ApproverRoles,
+            ClusterAdmin => ClusterAdminRoles,
+            PrivacyAdmin => PrivacyAdminRoles,
+            SchemaAdmin => SchemaAdminRoles,
+            SchemaPublisher => SchemaPublisherRoles,
+            _ => []
+        };
+        return roles.Length > 0;
+    }
+
     private static void AddRolePolicy(AuthorizationOptions options, string name, string[] roles)
     {
         options.AddPolicy(name, policy => policy

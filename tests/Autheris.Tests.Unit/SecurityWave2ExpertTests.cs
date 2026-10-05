@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit;
 
+using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -79,13 +80,15 @@ public class SecurityWave2ExpertTests
     [Fact]
     public void QuickstartProfile_InDevelopment_IsPermitted()
     {
-        var options = new GatewayOptions
-        {
-            Profile = "Quickstart"
-        };
-
+        // The Quickstart relaxations are expanded into concrete Insecure.* values by DevConfiguration
+        // (legacy "Profile" is an alias for Dev:Preset), not implied by the accessors any more.
         var devEnv = Substitute.For<IHostEnvironment>();
         devEnv.EnvironmentName.Returns("Development");
+
+        var config = new Microsoft.Extensions.Configuration.ConfigurationManager();
+        config.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Profile"] = "Quickstart" });
+        Autheris.Api.Configuration.DevConfiguration.Apply(config, devEnv);
+        var options = config.GetSection("Gateway").Get<GatewayOptions>()!;
 
         Should.NotThrow(() =>
         {

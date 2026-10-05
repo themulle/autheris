@@ -43,3 +43,6 @@ scratch/
 .env
 .env.*
 
+
+# Dev persistence (Gateway:Dev:Persist)
+.data/

@@ -117,13 +117,12 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
 
                         var effectiveType = !string.IsNullOrWhiteSpace(formatStr) ? formatStr : typeStr;
 
-                        var metaDict = new Dictionary<string, string>();
+                        var metaDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                         if (colVal.TryGetProperty("x-dbt-meta", out var xMeta) && xMeta.ValueKind == JsonValueKind.Object)
                         {
                             foreach (var xm in xMeta.EnumerateObject())
                             {
-                                metaDict[xm.Name] = xm.Value.ToString();
-                            }
+                                metaDict[xm.Name] = JsonValueText.From(xm.Value);                            }
                         }
 
                         columns.Add(new TableColumn

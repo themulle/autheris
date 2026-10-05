@@ -41,6 +41,8 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
     private readonly TimeSpan _maxSessionLifetime;
     private readonly ITokenRevocationService? _revocationService;
     private readonly TimeSpan _revalidationInterval;
+    private readonly GatewayOptions? _gatewayOptions;
+
 
     public WebSocketAuthInterceptor(
         ILogger<WebSocketAuthInterceptor> logger,
@@ -55,6 +57,7 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
         _timeProvider = timeProvider ?? TimeProvider.System;
         _maxSessionLifetime = maxSessionLifetime is { } lifetime && lifetime > TimeSpan.Zero ? lifetime : DefaultMaxSessionLifetime;
         _revocationService = revocationService;
+        _gatewayOptions = options?.Value;
         var seconds = options?.Value?.GraphQL?.SubscriptionRevalidationSeconds ?? 0;
         _revalidationInterval = seconds > 0 ? TimeSpan.FromSeconds(seconds) : DefaultRevalidationInterval;
     }
@@ -120,7 +123,10 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
                 // SEC H-2: Cross-Site WebSocket Hijacking defense:
                 // If an Origin header is present on the HTTP upgrade handshake, ambient HTTP credentials
                 // (Cookie, Negotiate/Kerberos, Basic, ForwardAuth) cannot be used alone without an explicit token in connection_init.
-                if (httpContext.Request.Headers.ContainsKey("Origin"))
+                // F-AUTH-DX: exception for the SameSite=Strict session cookie when the Origin is the gateway itself or
+                // an explicitly trusted origin (never with wildcard CORS).
+                if (httpContext.Request.Headers.ContainsKey("Origin") &&
+                    !IsSessionCookieFromTrustedOrigin(httpContext, httpUser, _gatewayOptions))
                 {
                     _logger.LogWarning("WebSocket connection_init rejected: Origin header present on ambient credentials without connection_init token.");
                     return ConnectionStatus.Reject("Cross-site WebSocket protection: token required in connection_init when Origin is present.");
@@ -155,6 +161,44 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
             _logger.LogError(ex, "Error processing WebSocket connection_init");
             return ConnectionStatus.Reject("Internal server error during handshake");
         }
+    }
+
+    /// <summary>
+    /// F-AUTH-DX: True when the upgrade was authenticated by the Basic session cookie and the Origin is the gateway
+    /// host itself or listed in <c>GraphQL.TrustedOrigins</c> (scheme and authority must match; '*' is ignored).
+    /// </summary>
+    internal static bool IsSessionCookieFromTrustedOrigin(HttpContext httpContext, ClaimsPrincipal principal, GatewayOptions? options)
+    {
+        if (options == null || options.IsWildcardCors ||
+            !string.Equals(principal.Identity?.AuthenticationType, BasicAuthSessionOptions.SchemeName, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var origin = httpContext.Request.Headers.Origin.ToString();
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var originUri))
+        {
+            return false;
+        }
+
+        if (string.Equals(originUri.Scheme, httpContext.Request.Scheme, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(originUri.Authority, httpContext.Request.Host.Value, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (var trusted in options.GraphQL.TrustedOrigins)
+        {
+            if (!string.Equals(trusted, "*", StringComparison.Ordinal) &&
+                Uri.TryCreate(trusted, UriKind.Absolute, out var trustedUri) &&
+                string.Equals(trustedUri.Scheme, originUri.Scheme, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(trustedUri.Authority, originUri.Authority, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

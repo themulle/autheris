@@ -34,9 +34,10 @@ public sealed class PreAuthIpRateLimitingMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Skip health and metrics endpoints or when rate limiting is explicitly disabled (warn_disable_rate_limiting)
+        // Skip health probes or when rate limiting is explicitly disabled (warn_disable_rate_limiting).
+        // E-13: /metrics is authenticated and therefore rate limited like every other path (no PBKDF2 amplification);
+        // /health never runs Basic authentication (see BasicAuthenticationHandler).
         if (context.Request.Path.StartsWithSegments("/health") ||
-            context.Request.Path.StartsWithSegments("/metrics") ||
             _gatewayOptions.IsRateLimitingDisabled)
         {
             await _next(context);

@@ -41,6 +41,10 @@ builder.Host.UseDefaultServiceProvider(options =>
     options.ValidateOnBuild = true;
 });
 
+// 3a. F-AUTH-DX: resolve Gateway:Dev (preset defaults, legacy aliases, persistence) before the options are bound
+var devReport = Autheris.Api.Configuration.DevConfiguration.Apply(builder.Configuration, builder.Environment);
+builder.Services.AddSingleton(devReport);
+
 // 3. Modular Service Registrations
 var gatewayOptions = builder.Services.AddGatewayOptions(builder.Configuration, builder.Environment);
 builder.Services.AddGatewayInfrastructure(gatewayOptions);
@@ -53,7 +57,55 @@ var app = builder.Build();
 app.UseGatewayPipeline(gatewayOptions);
 app.MapGatewayEndpoints(gatewayOptions);
 
+LogAuthStartupConfiguration(app, gatewayOptions, devReport);
+
 app.Run();
+
+static void LogAuthStartupConfiguration(WebApplication app, GatewayOptions options, Autheris.Api.Configuration.DevConfigurationReport devReport)
+{
+    var logger = app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Program>>();
+    var auth = options.Authentication;
+    var gql = options.GraphQL;
+
+    logger.LogInformation(
+        "Autheris Gateway starting in {Environment} environment. Effective Auth Schemes: BasicAuth={BasicEnabled} (Users={UserCount}, Realm='{Realm}'), ForwardAuth={ForwardAuthEnabled}, EntraId={EntraIdEnabled}, Adfs={AdfsEnabled}, RequireKerberosOnly={KerberosOnly}. GraphQL Tooling: EnableBananaCakePop={EnableBananaCakePop}",
+        app.Environment.EnvironmentName,
+        auth.BasicAuth.Enabled,
+        auth.BasicAuth.Users.Count,
+        auth.BasicAuth.Realm,
+        auth.ForwardAuth.Enabled,
+        auth.EntraId.Enabled,
+        auth.Adfs.Enabled,
+        auth.RequireKerberosOnly,
+        gql.EnableBananaCakePop);
+
+    foreach (var note in devReport.Notes)
+    {
+        logger.LogWarning("Dev configuration: {Note}", note);
+    }
+
+    var devFeatures = DevFeatures.Resolve(options, app.Environment.IsDevelopment());
+    if (devFeatures.Banner)
+    {
+        app.Lifetime.ApplicationStarted.Register(() =>
+            logger.LogInformation("{Banner}", Autheris.Api.Extensions.DevStartupBanner.Build(app.Urls.ToList(), options, app.Environment, devReport)));
+    }
+
+    if (app.Configuration is IConfigurationRoot configRoot)
+    {
+        foreach (var provider in configRoot.Providers)
+        {
+            if (provider is Microsoft.Extensions.Configuration.FileConfigurationProvider fileProvider &&
+                fileProvider.Source.Path is { } path)
+            {
+                if (System.IO.Directory.Exists(path))
+                {
+                    logger.LogWarning("Mounted configuration source '{Path}' is a directory, expected a file! Check Docker Compose volume mount paths.", path);
+                }
+            }
+        }
+    }
+}
 
 // Make Program class accessible for WebApplicationFactory in integration tests
 public partial class Program { }

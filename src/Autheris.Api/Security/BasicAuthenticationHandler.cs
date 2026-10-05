@@ -5,6 +5,7 @@ using System.Text.Encodings.Web;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -62,6 +63,12 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
         if (!_gatewayOptions.Authentication.BasicAuth.Enabled)
+        {
+            return Task.FromResult(AuthenticateResult.NoResult());
+        }
+
+        // E-13: anonymous probes never pay for PBKDF2 (and cannot be used as a password oracle).
+        if (Request.Path.StartsWithSegments("/health"))
         {
             return Task.FromResult(AuthenticateResult.NoResult());
         }
@@ -136,34 +143,9 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         guard.RecordSuccess(attemptKey);
         guard.CacheSuccess(authHeader, configuredUser.Username);
 
-        var sid = !string.IsNullOrWhiteSpace(configuredUser.Sid)
-            ? configuredUser.Sid
-            : $"S-1-5-21-BASIC-{username.ToUpperInvariant()}";
-
-        var tenant = !string.IsNullOrWhiteSpace(configuredUser.TenantId)
-            ? configuredUser.TenantId
-            : TenantId.LegacySingleTenant.Value;
-
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.Name, username),
-            new(ClaimTypes.NameIdentifier, username),
-            new(ClaimTypes.PrimarySid, sid),
-            new("objectSid", sid),
-            new("tenant_id", tenant),
-            new("tenant", tenant),
-            new("tid", tenant)
-        };
-
-        foreach (var role in configuredUser.Roles)
-        {
-            claims.Add(new Claim(ClaimTypes.Role, role));
-        }
-
-        foreach (var group in configuredUser.GroupSids)
-        {
-            claims.Add(new Claim(ClaimTypes.GroupSid, group));
-        }
+        // F-AUTH-DX: claims come from the shared factory so header login and cookie session are identical.
+        var claims = BasicAuthPrincipalFactory.BuildClaims(configuredUser);
+        claims.Add(new Claim(BasicAuthSession.AuthMethodClaimType, BasicAuthSession.AuthMethodBasic));
 
         var identity = new ClaimsIdentity(claims, Scheme.Name);
         var principal = new ClaimsPrincipal(identity);
@@ -236,13 +218,87 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         return false;
     }
 
-    protected override Task HandleChallengeAsync(AuthenticationProperties properties)
+    protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
     {
+        // Headers and status code cannot be changed once the response has started.
+        if (Response.HasStarted)
+        {
+            return;
+        }
+
         var realm = string.IsNullOrWhiteSpace(_gatewayOptions.Authentication.BasicAuth.Realm)
             ? "Autheris"
             : _gatewayOptions.Authentication.BasicAuth.Realm;
-        Response.Headers.Append("WWW-Authenticate", $"Basic realm=\"{realm}\"");
+
+        // F-AUTH-DX: script requests (fetch/XHR from the DevPortal, Nitro, Swagger) get a plain 401 without the
+        // Basic challenge so the browser does not pop up its native login dialog in the middle of a page.
+        if (!Request.Headers.ContainsKey("X-Requested-With"))
+        {
+            Response.Headers["WWW-Authenticate"] = $"Basic realm=\"{realm}\"";
+        }
+
         Response.StatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status401Unauthorized;
-        return Task.CompletedTask;
+
+        if (Response.HasStarted)
+        {
+            return;
+        }
+
+        var acceptsHtml = Request.Headers.Accept.Any(a => a != null && a.Contains("text/html", StringComparison.OrdinalIgnoreCase));
+        if (acceptsHtml)
+        {
+            Response.ContentType = "text/html; charset=utf-8";
+            var encodedRealm = System.Net.WebUtility.HtmlEncode(realm);
+            var devTip = _isDevelopment
+                ? "<p><strong>Development Tip:</strong> Provide HTTP Basic credentials (e.g. <code>Authorization: Basic ...</code>). With <code>BasicAuth.Session</code> enabled, one login is enough: the gateway then issues a session cookie.</p>"
+                : string.Empty;
+
+            var html = $$"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="utf-8" />
+                <title>401 Unauthorized - Autheris Gateway</title>
+                <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; margin: 40px; line-height: 1.6; color: #333; }
+                    .box { max-width: 600px; margin: 0 auto; border: 1px solid #e1e4e8; border-radius: 6px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+                    h1 { color: #d73a49; font-size: 20px; margin-top: 0; }
+                    code { background-color: #f6f8fa; padding: 2px 6px; border-radius: 3px; font-size: 85%; }
+                </style>
+            </head>
+            <body>
+                <div class="box">
+                    <h1>401 Unauthorized</h1>
+                    <p>Authentication is required to access this endpoint.</p>
+                    <p>Realm: <code>{{encodedRealm}}</code></p>
+                    {{devTip}}
+                </div>
+            </body>
+            </html>
+            """;
+            await Response.WriteAsync(html);
+        }
+        else if (_isDevelopment)
+        {
+            Response.ContentType = "application/problem+json; charset=utf-8";
+            var activeSchemes = new List<string>();
+            if (_gatewayOptions.Authentication.BasicAuth.Enabled) activeSchemes.Add("Basic");
+            if (_gatewayOptions.Authentication.EntraId.Enabled) activeSchemes.Add("Bearer (EntraId)");
+            if (_gatewayOptions.Authentication.Adfs.Enabled) activeSchemes.Add("Bearer (ADFS)");
+            if (_gatewayOptions.Authentication.ForwardAuth.Enabled) activeSchemes.Add("ForwardAuth");
+            if (!_gatewayOptions.Authentication.RequireKerberosOnly) activeSchemes.Add("Negotiate");
+
+            var diagnosticObj = new
+            {
+                type = "https://tools.ietf.org/html/rfc7235#section-3.1",
+                title = "Unauthorized",
+                status = 401,
+                detail = "Authentication required. No valid credentials provided in Authorization header.",
+                realm,
+                active_schemes = activeSchemes,
+                hint = "Include an 'Authorization: Basic <base64(user:pass)>' or 'Authorization: Bearer <token>' header."
+            };
+            await Response.WriteAsJsonAsync(diagnosticObj, options: null, contentType: "application/problem+json; charset=utf-8");
+        }
     }
 }

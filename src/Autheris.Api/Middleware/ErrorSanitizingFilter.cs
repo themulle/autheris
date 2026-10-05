@@ -104,7 +104,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
             return error.SetExtension("dev_fix_hints", new[]
             {
                 "Header 'X-Test-User-Sid: S-1-5-21-ALICE-FINANCE' & 'X-Test-Roles: FinanceManager' setzen",
-                "Oder 'GettingStarted:Profile: Quickstart' in appsettings.Development.json aktivieren",
+                "Oder 'Gateway:Dev:Preset: Quickstart' in appsettings.Development.json aktivieren",
                 "Besuche das Developer Dashboard auf http://localhost:5000/ zum Kopieren vorgefertigter Test-Personas"
             });
         }

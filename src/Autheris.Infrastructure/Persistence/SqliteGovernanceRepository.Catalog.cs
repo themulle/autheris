@@ -55,16 +55,7 @@ public partial class SqliteGovernanceRepository
             var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
-                dict[prop.Name] = prop.Value.ValueKind switch
-                {
-                    JsonValueKind.String => prop.Value.GetString() ?? string.Empty,
-                    JsonValueKind.True => "true",
-                    JsonValueKind.False => "false",
-                    JsonValueKind.Null or JsonValueKind.Undefined => string.Empty,
-                    JsonValueKind.Number => prop.Value.GetRawText(),
-                    _ => prop.Value.GetRawText()
-                };
-            }
+                dict[prop.Name] = JsonValueText.From(prop.Value);            }
             return dict;
         }
         catch

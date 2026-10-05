@@ -71,7 +71,7 @@ public static class DuckDbOlapEndpoints
 
         var user = httpContext.User;
         if (user?.Identity?.IsAuthenticated != true &&
-            !string.Equals(gatewayOptions.Value.Profile, "Quickstart", StringComparison.OrdinalIgnoreCase))
+            !gatewayOptions.Value.IsQuickstartProfile)
         {
             httpContext.Response.StatusCode = StatusCodes.Status401Unauthorized;
             await httpContext.Response.WriteAsJsonAsync(new { error = "Authentication required for analytical OLAP execution." }, ct);
@@ -234,7 +234,7 @@ public static class DuckDbOlapEndpoints
         {
             logger.LogError(ex, "Error executing DuckDB OLAP query.");
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            if (isDev || string.Equals(gatewayOptions.Value.Profile, "Quickstart", StringComparison.OrdinalIgnoreCase))
+            if (isDev || gatewayOptions.Value.IsQuickstartProfile)
             {
                 await httpContext.Response.WriteAsJsonAsync(new { error = "Analytical query execution failed.", details = ex.Message }, ct);
             }
