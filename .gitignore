@@ -46,3 +46,5 @@ scratch/
 
 # Dev persistence (Gateway:Dev:Persist)
 .data/
+dist/
+libpod/

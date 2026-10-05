@@ -21,44 +21,97 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
     private static readonly byte[] DummyTargetHash = new byte[32];
 
     private readonly bool _isDevelopment;
-    private readonly int _dummyIterations;
+    private readonly bool _hasArgon2Users;
+    private readonly int _dummyArgon2MemoryKb;
+    private readonly int _dummyArgon2Iterations;
+    private readonly int _dummyArgon2Parallelism;
+    private readonly int _dummyPbkdf2Iterations;
+    private readonly Autheris.Application.Interfaces.IClientIpResolver? _clientIpResolver;
 
     public BasicAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
         UrlEncoder encoder,
         IOptions<GatewayOptions> gatewayOptions,
-        Microsoft.AspNetCore.Hosting.IWebHostEnvironment? environment = null)
+        Microsoft.AspNetCore.Hosting.IWebHostEnvironment? environment = null,
+        Autheris.Application.Interfaces.IClientIpResolver? clientIpResolver = null)
         : base(options, logger, encoder)
     {
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
         _isDevelopment = string.Equals(environment?.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase)
             || string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
+        _clientIpResolver = clientIpResolver;
 
-        _dummyIterations = DetermineDummyIterations(_gatewayOptions.Authentication.BasicAuth.Users);
+        ConfigureDummyCost(
+            _gatewayOptions.Authentication.BasicAuth.Users,
+            out _hasArgon2Users,
+            out _dummyArgon2MemoryKb,
+            out _dummyArgon2Iterations,
+            out _dummyArgon2Parallelism,
+            out _dummyPbkdf2Iterations);
     }
 
-    private static int DetermineDummyIterations(IEnumerable<BasicAuthUserConfig> users)
+    private static void ConfigureDummyCost(
+        IEnumerable<BasicAuthUserConfig> users,
+        out bool hasArgon2,
+        out int argon2Mem,
+        out int argon2Iters,
+        out int argon2Par,
+        out int pbkdf2Iters)
     {
-        // RR-L2-03: mirror the most expensive configured hash so unknown users are never faster than any known user.
-        var max = 0;
+        hasArgon2 = false;
+        argon2Mem = PasswordHasher.DefaultArgon2MemorySizeKb;
+        argon2Iters = PasswordHasher.DefaultArgon2Iterations;
+        argon2Par = PasswordHasher.DefaultArgon2Parallelism;
+        pbkdf2Iters = 10_000;
+
         foreach (var user in users)
         {
-            if (user.Password != null && user.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(user.Password))
+            {
+                continue;
+            }
+
+            if (user.Password.StartsWith("$argon2id$", StringComparison.OrdinalIgnoreCase))
+            {
+                hasArgon2 = true;
+                var parts = user.Password.Split('$');
+                if (parts.Length == 6)
+                {
+                    foreach (var pair in parts[3].Split(','))
+                    {
+                        var kv = pair.Split('=');
+                        if (kv.Length == 2)
+                        {
+                            if (kv[0] == "m" && int.TryParse(kv[1], out int m)) argon2Mem = Math.Max(argon2Mem, m);
+                            else if (kv[0] == "t" && int.TryParse(kv[1], out int t)) argon2Iters = Math.Max(argon2Iters, t);
+                            else if (kv[0] == "p" && int.TryParse(kv[1], out int p)) argon2Par = Math.Max(argon2Par, p);
+                        }
+                    }
+                }
+            }
+            else if (user.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase))
             {
                 var parts = user.Password.Split('$');
                 if (parts.Length == 5 && int.TryParse(parts[2], out var iters) && iters > 0)
                 {
-                    max = Math.Max(max, Math.Min(iters, MaxPbkdf2Iterations));
+                    pbkdf2Iters = Math.Max(pbkdf2Iters, Math.Min(iters, PasswordHasher.MaxPbkdf2Iterations));
                 }
             }
         }
-        return max > 0 ? max : 10_000;
     }
 
-    // RR-L2-03: hard bounds applied at verification time (startup validation enforces the configured minimum).
-    internal const int MinPbkdf2Iterations = 10_000;
-    internal const int MaxPbkdf2Iterations = 10_000_000;
+    private string ResolveClientIp()
+    {
+        var ipResolver = _clientIpResolver ?? Context.RequestServices?.GetService<Autheris.Application.Interfaces.IClientIpResolver>();
+        var ip = ipResolver?.ResolveClientIp();
+        if (ip != null && !ip.Equals(System.Net.IPAddress.None))
+        {
+            return ip.ToString();
+        }
+
+        return Context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    }
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -67,7 +120,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
             return Task.FromResult(AuthenticateResult.NoResult());
         }
 
-        // E-13: anonymous probes never pay for PBKDF2 (and cannot be used as a password oracle).
+        // E-13: anonymous probes never pay for cryptographic hashing (and cannot be used as a password oracle).
         if (Request.Path.StartsWithSegments("/health"))
         {
             return Task.FromResult(AuthenticateResult.NoResult());
@@ -80,31 +133,34 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
             return Task.FromResult(AuthenticateResult.NoResult());
         }
 
-        var encoded = authHeader["Basic ".Length..].Trim();
-        byte[] decodedBytes;
-        try
+        // Zero-allocation Base64 decoding directly from header span
+        var encodedSpan = authHeader.AsSpan("Basic ".Length).Trim();
+        if (encodedSpan.IsEmpty || encodedSpan.Length > 2048)
         {
-            decodedBytes = Convert.FromBase64String(encoded);
+            return Task.FromResult(AuthenticateResult.Fail("Invalid Basic authorization header length."));
         }
-        catch
+
+        Span<byte> decodedBytes = stackalloc byte[2048];
+        if (!Convert.TryFromBase64Chars(encodedSpan, decodedBytes, out int bytesWritten))
         {
             return Task.FromResult(AuthenticateResult.Fail("Invalid Base64 encoding in Basic authorization header."));
         }
 
-        var credentialString = Encoding.UTF8.GetString(decodedBytes);
-        var colonIndex = credentialString.IndexOf(':');
+        var credentials = decodedBytes[..bytesWritten];
+        int colonIndex = credentials.IndexOf((byte)':');
         if (colonIndex <= 0)
         {
             return Task.FromResult(AuthenticateResult.Fail("Invalid Basic authorization format. Expected 'username:password'."));
         }
 
-        var username = credentialString[..colonIndex];
-        var password = credentialString[(colonIndex + 1)..];
+        var username = Encoding.UTF8.GetString(credentials[..colonIndex]);
+        var password = Encoding.UTF8.GetString(credentials[(colonIndex + 1)..]);
 
-        var guard = BasicAuthAttemptGuard.For(_gatewayOptions.Authentication.BasicAuth);
-        var attemptKey = BasicAuthAttemptGuard.BuildAttemptKey(username, Context.Connection.RemoteIpAddress?.ToString());
+        var distCache = Context.RequestServices?.GetService(typeof(Microsoft.Extensions.Caching.Distributed.IDistributedCache)) as Microsoft.Extensions.Caching.Distributed.IDistributedCache;
+        var guard = BasicAuthAttemptGuard.For(_gatewayOptions.Authentication.BasicAuth, distCache);
+        var attemptKey = BasicAuthAttemptGuard.BuildAttemptKey(username, ResolveClientIp());
 
-        // RR-L2-03: locked-out (user, IP) pairs are rejected before any PBKDF2 work (no CPU amplification).
+        // RR-L2-03: locked-out (user, IP) pairs are rejected before any cryptographic work (no CPU amplification).
         if (guard.IsLockedOut(attemptKey))
         {
             return Task.FromResult(AuthenticateResult.Fail("Invalid username or password."));
@@ -115,24 +171,38 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
 
         if (configuredUser == null)
         {
-            // SEC-03: Mitigate user enumeration timing attacks by running equivalent cryptographic hash calculation with mirrored iterations
-            var dummyDerived = Rfc2898DeriveBytes.Pbkdf2(
-                password,
-                DummySalt,
-                iterations: _dummyIterations,
-                HashAlgorithmName.SHA256,
-                outputLength: 32);
-            CryptographicOperations.FixedTimeEquals(dummyDerived, DummyTargetHash);
+            // SEC-03: Mitigate user enumeration timing attacks by running equivalent cryptographic hash calculation with mirrored cost
+            if (_hasArgon2Users)
+            {
+                var dummyDerived = PasswordHasher.ComputeArgon2idHash(
+                    password,
+                    DummySalt,
+                    _dummyArgon2MemoryKb,
+                    _dummyArgon2Iterations,
+                    _dummyArgon2Parallelism,
+                    32);
+                CryptographicOperations.FixedTimeEquals(dummyDerived, DummyTargetHash);
+            }
+            else
+            {
+                var dummyDerived = Rfc2898DeriveBytes.Pbkdf2(
+                    password,
+                    DummySalt,
+                    iterations: _dummyPbkdf2Iterations,
+                    HashAlgorithmName.SHA256,
+                    outputLength: 32);
+                CryptographicOperations.FixedTimeEquals(dummyDerived, DummyTargetHash);
+            }
 
             guard.RecordFailure(attemptKey);
             return Task.FromResult(AuthenticateResult.Fail("Invalid username or password."));
         }
 
-        // RR-L2-03: recently verified identical credentials skip the PBKDF2 computation.
+        // RR-L2-03: recently verified identical credentials skip the cryptographic computation.
         bool passwordMatches =
             (guard.TryGetCachedSuccess(authHeader, out var cachedUser) &&
              string.Equals(cachedUser, configuredUser.Username, StringComparison.Ordinal)) ||
-            VerifyPassword(password, configuredUser.Password, username);
+            PasswordHasher.VerifyPassword(password, configuredUser.Password, username, _isDevelopment, msg => Logger.LogError("{Message}", msg));
 
         if (!passwordMatches)
         {
@@ -152,70 +222,6 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         var ticket = new AuthenticationTicket(principal, Scheme.Name);
 
         return Task.FromResult(AuthenticateResult.Success(ticket));
-    }
-
-    private bool VerifyPassword(string inputPassword, string storedPassword, string username)
-    {
-        // 1. Support modern Salted PBKDF2: $pbkdf2$iterations$salt$hash
-        if (storedPassword.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase))
-        {
-            var parts = storedPassword.Split('$');
-            // Format: empty, "pbkdf2", iterations, salt_b64, hash_b64
-            if (parts.Length == 5 && int.TryParse(parts[2], out var iterations))
-            {
-                if (iterations < MinPbkdf2Iterations || iterations > MaxPbkdf2Iterations)
-                {
-                    var userHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(username)))[..12];
-                    Logger.LogError("Basic authentication rejected user (hash: {UserHash}): PBKDF2 iteration count outside the permitted range.", userHash);
-                    return false;
-                }
-                try
-                {
-                    var salt = Convert.FromBase64String(parts[3]);
-                    var expectedHash = Convert.FromBase64String(parts[4]);
-
-                    var computedHash = Rfc2898DeriveBytes.Pbkdf2(
-                        inputPassword,
-                        salt,
-                        iterations,
-                        HashAlgorithmName.SHA256,
-                        expectedHash.Length);
-
-                    return CryptographicOperations.FixedTimeEquals(expectedHash, computedHash);
-                }
-                catch
-                {
-                    return false;
-                }
-            }
-        }
-
-        // 2. Plaintext or unsalted SHA-256 passwords are strictly prohibited outside of Development
-        if (!_isDevelopment)
-        {
-            var userHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(username)))[..12];
-            Logger.LogError("Basic authentication rejected user (hash: {UserHash}): Plaintext or unsalted SHA-256 passwords are strictly prohibited outside of Development.", userHash);
-            return false;
-        }
-
-        var userPasswordBytes = Encoding.UTF8.GetBytes(storedPassword);
-        var inputPasswordBytes = Encoding.UTF8.GetBytes(inputPassword);
-
-        // 2a. Exact match (Development / test plaintext only)
-        if (CryptographicOperations.FixedTimeEquals(userPasswordBytes, inputPasswordBytes))
-        {
-            return true;
-        }
-
-        // 2b. SHA-256 Hex Hash match (Development only)
-        var inputHash = Convert.ToHexString(SHA256.HashData(inputPasswordBytes));
-        var inputHashBytes = Encoding.UTF8.GetBytes(inputHash);
-        if (CryptographicOperations.FixedTimeEquals(userPasswordBytes, inputHashBytes))
-        {
-            return true;
-        }
-
-        return false;
     }
 
     protected override async Task HandleChallengeAsync(AuthenticationProperties properties)
