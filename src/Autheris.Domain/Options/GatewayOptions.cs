@@ -1243,6 +1243,14 @@ public sealed class ProcedureEndpointsOptions
     [Range(1, 1000000)] public int MaxStringParameterLength { get; init; } = 4000;
     [Range(1, 300)] public int MaxTimeoutSeconds { get; init; } = 60;
     public bool EnableHotReload { get; init; } = true;
+
+    /// <summary>
+    /// Review P-1: Declarations with <c>validation: declared</c> skip the catalog validation (no check of SECURITY POLICY,
+    /// permissions, dynamic SQL or write access). They are accepted outside the Development environment only when this
+    /// switch is set explicitly. Even then they need <c>result_table</c> and non-empty <c>outputs</c>, and the declared
+    /// outputs are governed with the consent column rules of the result table.
+    /// </summary>
+    public bool AllowDeclaredValidation { get; init; } = false;
 }
 
 public sealed class MssqlChangeTrackingOptions

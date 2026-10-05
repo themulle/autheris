@@ -46,7 +46,15 @@ public sealed class ProcedureRegistrationService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _loader.LoadFromDirectory();
+        try
+        {
+            _loader.LoadFromDirectory();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+        {
+            // Review P-3: a broken procedure directory must not stop the host; no endpoint is registered (fail-closed).
+            _logger?.LogError(ex, "Stored procedure declarations could not be loaded.");
+        }
 
         using var timer = new PeriodicTimer(PollInterval);
         do
@@ -99,7 +107,12 @@ public sealed class ProcedureRegistrationService : BackgroundService
                     ReferencedTables: entry.Definition.ResultTable != null ? [entry.Definition.ResultTable] : [],
                     ParameterSqlTypes: entry.Definition.Parameters.ToDictionary(p => p.Name, p => p.SqlType, StringComparer.OrdinalIgnoreCase));
 
-                _registry.MarkActive(entry.Definition.Name, declaredResult);
+                // Review P-7: only the exact definition that was snapshotted may be activated.
+                if (!_registry.TryMarkActive(entry.Definition, declaredResult))
+                {
+                    continue;
+                }
+
                 if (entry.State != ProcedureState.Active)
                 {
                     _logger?.LogInformation("Declared procedure endpoint '{Endpoint}' activated (contract-first).", entry.Definition.Name);
@@ -109,14 +122,15 @@ public sealed class ProcedureRegistrationService : BackgroundService
             }
 
             var result = await validator!.ValidateAsync(entry.Definition, ct).ConfigureAwait(false);
-            if (!_registry.TryGet(entry.Definition.Name, out var current) || current == null || !ReferenceEquals(current.Definition, entry.Definition))
-            {
-                continue; // replaced or removed (hot reload) while validating; the new entry is validated next round
-            }
 
             if (result.IsValid)
             {
-                _registry.MarkActive(entry.Definition.Name, result);
+                // Review P-7: compare-and-swap; a definition replaced or removed during validation is not touched.
+                if (!_registry.TryMarkActive(entry.Definition, result))
+                {
+                    continue;
+                }
+
                 if (entry.State != ProcedureState.Active)
                 {
                     _logger?.LogInformation("Procedure endpoint '{Endpoint}' activated.", entry.Definition.Name);
@@ -128,7 +142,10 @@ public sealed class ProcedureRegistrationService : BackgroundService
             string reason = string.Join(" | ", result.Errors.OrderBy(e => e, StringComparer.Ordinal));
             bool wasAlreadyDisabled = entry.State == ProcedureState.Disabled;
 
-            _registry.MarkDisabled(entry.Definition.Name, reason);
+            if (!_registry.TryMarkDisabled(entry.Definition, reason))
+            {
+                continue; // replaced or removed (hot reload) while validating; the new entry is validated next round
+            }
 
             if (!wasAlreadyDisabled)
             {

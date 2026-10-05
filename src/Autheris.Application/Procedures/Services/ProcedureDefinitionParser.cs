@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Model;
+using YamlDotNet.Core;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -76,6 +77,7 @@ public static class ProcedureDefinitionParser
         var validationMode = ProcedureValidationMode.Catalog;
         var declaredOutputs = new List<string>();
         var kind = ProcedureKind.Procedure;
+        var argumentOrder = new List<string>();
 
         foreach (Match match in HeaderRegex.Matches(content))
         {
@@ -101,7 +103,11 @@ public static class ProcedureDefinitionParser
                     };
                     break;
                 case "output" or "outputs":
-                    declaredOutputs.AddRange(val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                    foreach (string output in val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        declaredOutputs.Add(RequireIdentifier(output, "@output column"));
+                    }
+
                     break;
                 case "name":
                     name = val;
@@ -150,7 +156,9 @@ public static class ProcedureDefinitionParser
                     cleared.Add(rc.Groups[1].Value);
                     break;
                 case "param":
-                    parameters.Add(ParseParameter(val));
+                    var parsedParameter = ParseParameter(val);
+                    parameters.Add(parsedParameter);
+                    argumentOrder.Add(parsedParameter.Name);
                     break;
                 case "context":
                     var cm = ContextRegex.Match(val);
@@ -167,6 +175,7 @@ public static class ProcedureDefinitionParser
                             _ => ProcedureContextKey.Purpose
                         },
                         cm.Groups[2].Value));
+                    argumentOrder.Add(cm.Groups[2].Value);
                     break;
                 case "roles":
                     roles.AddRange(val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
@@ -237,7 +246,10 @@ public static class ProcedureDefinitionParser
             TimeoutSeconds: Math.Min(timeout, Math.Max(1, maxTimeoutSeconds)),
             ValidationMode: validationMode,
             DeclaredOutputs: declaredOutputs,
-            Kind: kind);
+            Kind: kind)
+        {
+            ArgumentOrder = argumentOrder
+        };
     }
 
     private static ProcedureParameter ParseParameter(string text)
@@ -318,7 +330,8 @@ public static class ProcedureDefinitionParser
     }
 
     /// <summary>
-    /// Contract-First: Parses a YAML declaration (*.proc.yaml / *.proc.yml).
+    /// Contract-First: Parses a YAML declaration (*.proc.yaml / *.proc.yml). Like the header format it is fail-closed:
+    /// unknown keys, unknown context values and invalid identifiers raise <see cref="FormatException"/> (review P-4/P-5).
     /// </summary>
     public static ProcedureDefinition ParseYaml(string yamlContent, string defaultName, bool allowRlsNone, int maxTimeoutSeconds)
     {
@@ -326,10 +339,19 @@ public static class ProcedureDefinitionParser
 
         var deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
-            .IgnoreUnmatchedProperties()
             .Build();
 
-        var model = deserializer.Deserialize<ProcedureYamlModel>(yamlContent);
+        ProcedureYamlModel? model;
+        try
+        {
+            model = deserializer.Deserialize<ProcedureYamlModel>(yamlContent);
+        }
+        catch (YamlException ex)
+        {
+            // Syntax errors, unknown keys and type errors (review P-3/P-5); never let them escape as YamlException.
+            throw new FormatException($"Invalid YAML procedure declaration: {ex.Message}", ex);
+        }
+
         if (model == null)
         {
             throw new FormatException("Empty YAML procedure declaration.");
@@ -348,47 +370,59 @@ public static class ProcedureDefinitionParser
 
         string procedure = model.Procedure.Trim();
         string summary = Sanitize(model.Summary ?? model.Description ?? string.Empty);
-        var mode = string.Equals(model.Mode, "write", StringComparison.OrdinalIgnoreCase) ? ProcedureMode.Write : ProcedureMode.Read;
 
-        var validationMode = string.Equals(model.Validation, "declared", StringComparison.OrdinalIgnoreCase)
-            ? ProcedureValidationMode.Declared
-            : ProcedureValidationMode.Catalog;
+        var mode = (model.Mode?.Trim().ToLowerInvariant() ?? "read") switch
+        {
+            "read" => ProcedureMode.Read,
+            "write" => ProcedureMode.Write,
+            var other => throw new FormatException($"mode must be 'read' or 'write', got '{other}'.")
+        };
 
-        var rls = string.Equals(model.Rls, "none", StringComparison.OrdinalIgnoreCase)
-            ? (allowRlsNone ? ProcedureRlsMode.None : throw new FormatException("rls: none is only permitted in Development."))
-            : ProcedureRlsMode.SessionContext;
+        var validationMode = (model.Validation?.Trim().ToLowerInvariant() ?? "catalog") switch
+        {
+            "catalog" => ProcedureValidationMode.Catalog,
+            "declared" => ProcedureValidationMode.Declared,
+            var other => throw new FormatException($"validation must be 'declared' or 'catalog', got '{other}'.")
+        };
 
-        var kind = string.Equals(model.Kind, "tvf", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(model.Kind, "function", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(model.Kind, "table_valued_function", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(model.Kind, "table-valued-function", StringComparison.OrdinalIgnoreCase)
-            ? ProcedureKind.TableValuedFunction
-            : ProcedureKind.Procedure;
+        var rls = (model.Rls?.Trim().ToLowerInvariant() ?? "session-context") switch
+        {
+            "session-context" or "session_context" => ProcedureRlsMode.SessionContext,
+            "none" when allowRlsNone => ProcedureRlsMode.None,
+            "none" => throw new FormatException("rls: none is only permitted in Development."),
+            var other => throw new FormatException($"rls must be 'session-context' or 'none', got '{other}'.")
+        };
+
+        var kind = (model.Kind?.Trim().ToLowerInvariant() ?? "procedure") switch
+        {
+            "tvf" or "function" or "table_valued_function" or "table-valued-function" => ProcedureKind.TableValuedFunction,
+            "procedure" or "proc" or "sp" => ProcedureKind.Procedure,
+            var other => throw new FormatException($"kind must be 'procedure' or 'tvf', got '{other}'.")
+        };
 
         int timeout = model.TimeoutSeconds ?? model.Timeout ?? 30;
+        if (timeout < 1)
+        {
+            throw new FormatException("timeout must be a positive integer (seconds).");
+        }
 
         var parameters = new List<ProcedureParameter>();
         var contexts = new List<ProcedureContextBinding>();
+        var argumentOrder = new List<string>();
 
         if (model.Parameters != null)
         {
             foreach (var p in model.Parameters)
             {
-                if (string.IsNullOrWhiteSpace(p.Name))
+                if (p == null || string.IsNullOrWhiteSpace(p.Name))
                 {
-                    continue;
+                    throw new FormatException("Every entry in 'parameters' needs a name.");
                 }
 
-                string pName = p.Name.Trim().TrimStart('@');
+                string pName = RequireIdentifier(p.Name.Trim().TrimStart('@'), "parameter name");
                 if (!string.IsNullOrWhiteSpace(p.Context))
                 {
-                    var contextKey = p.Context.Trim().ToLowerInvariant() switch
-                    {
-                        "tenant_id" or "tenant" => ProcedureContextKey.TenantId,
-                        "user_sid" or "sid" or "user" => ProcedureContextKey.UserSid,
-                        _ => ProcedureContextKey.Purpose
-                    };
-                    contexts.Add(new ProcedureContextBinding(contextKey, pName));
+                    contexts.Add(new ProcedureContextBinding(MapContextKey(p.Context), pName));
                 }
                 else
                 {
@@ -396,20 +430,30 @@ public static class ProcedureDefinitionParser
                     bool isReq = p.Required && (p.IsRequired ?? true);
                     parameters.Add(ParseParameter($"{pName} {typeStr} {(isReq ? "required" : "optional")} {p.Description}"));
                 }
+
+                argumentOrder.Add(pName);
             }
+        }
+
+        bool hasSeparateContext = model.Context is { Count: > 0 } || model.ContextBindings is { Count: > 0 };
+        if (kind == ProcedureKind.TableValuedFunction && hasSeparateContext)
+        {
+            // Review P-2: function arguments are positional; their order must be explicit.
+            throw new FormatException("For kind: tvf declare context values inline in 'parameters' (with 'context:'), in the order of the function signature.");
         }
 
         if (model.Context != null)
         {
             foreach (var kvp in model.Context)
             {
-                var contextKey = kvp.Key.Trim().ToLowerInvariant() switch
+                if (string.IsNullOrWhiteSpace(kvp.Value))
                 {
-                    "tenant_id" or "tenant" => ProcedureContextKey.TenantId,
-                    "user_sid" or "sid" or "user" => ProcedureContextKey.UserSid,
-                    _ => ProcedureContextKey.Purpose
-                };
-                contexts.Add(new ProcedureContextBinding(contextKey, kvp.Value.Trim().TrimStart('@')));
+                    throw new FormatException($"context '{kvp.Key}' needs a parameter name.");
+                }
+
+                string pName = RequireIdentifier(kvp.Value.Trim().TrimStart('@'), "context parameter name");
+                contexts.Add(new ProcedureContextBinding(MapContextKey(kvp.Key), pName));
+                argumentOrder.Add(pName);
             }
         }
 
@@ -417,19 +461,35 @@ public static class ProcedureDefinitionParser
         {
             foreach (var cb in model.ContextBindings)
             {
-                var contextKey = cb.Key.Trim().ToLowerInvariant() switch
+                if (cb == null || string.IsNullOrWhiteSpace(cb.Key) || string.IsNullOrWhiteSpace(cb.Parameter))
                 {
-                    "tenant_id" or "tenant" => ProcedureContextKey.TenantId,
-                    "user_sid" or "sid" or "user" => ProcedureContextKey.UserSid,
-                    _ => ProcedureContextKey.Purpose
-                };
-                contexts.Add(new ProcedureContextBinding(contextKey, cb.Parameter.Trim().TrimStart('@')));
+                    throw new FormatException("Every entry in 'context_bindings' needs 'key' and 'parameter'.");
+                }
+
+                string pName = RequireIdentifier(cb.Parameter.Trim().TrimStart('@'), "context parameter name");
+                contexts.Add(new ProcedureContextBinding(MapContextKey(cb.Key), pName));
+                argumentOrder.Add(pName);
             }
         }
 
-        var roles = model.RequiredRoles ?? model.Roles ?? [];
-        var outputs = model.Outputs ?? [];
-        var cleared = model.ClearedColumns ?? [];
+        var roles = (model.RequiredRoles ?? model.Roles ?? [])
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Select(r => r.Trim())
+            .ToList();
+        var outputs = (model.Outputs ?? []).Select(o => RequireIdentifier(o?.Trim(), "output column")).ToList();
+        var cleared = (model.ClearedColumns ?? []).Select(c => RequireIdentifier(c?.Trim(), "cleared column")).ToList();
+
+        string? resultTable = string.IsNullOrWhiteSpace(model.ResultTable) ? null : model.ResultTable.Trim();
+        if (resultTable != null && !ResultTableRegex.IsMatch(resultTable))
+        {
+            throw new FormatException("result_table must have the form schema.table.");
+        }
+
+        var duplicate = parameters.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
+        if (duplicate != null)
+        {
+            throw new FormatException($"Parameter '{duplicate.Key}' is declared more than once.");
+        }
 
         var bound = contexts.Select(c => c.ParameterName).ToList();
         if (bound.Distinct(StringComparer.OrdinalIgnoreCase).Count() != bound.Count ||
@@ -452,14 +512,37 @@ public static class ProcedureDefinitionParser
             Parameters: parameters,
             ContextBindings: contexts,
             RlsMode: rls,
-            ResultTable: model.ResultTable,
+            ResultTable: resultTable,
             ClearedResultColumns: cleared,
             RequiredRoles: roles,
             AllowDynamicSql: model.AllowDynamicSql,
             TimeoutSeconds: Math.Min(timeout, Math.Max(1, maxTimeoutSeconds)),
             ValidationMode: validationMode,
             DeclaredOutputs: outputs,
-            Kind: kind);
+            Kind: kind)
+        {
+            ArgumentOrder = argumentOrder
+        };
+    }
+
+    /// <summary>Review P-5: unknown context keys are rejected instead of silently binding the purpose value.</summary>
+    private static ProcedureContextKey MapContextKey(string? key) => key?.Trim().ToLowerInvariant() switch
+    {
+        "tenant_id" or "tenant" => ProcedureContextKey.TenantId,
+        "user_sid" or "sid" or "user" => ProcedureContextKey.UserSid,
+        "purpose" => ProcedureContextKey.Purpose,
+        _ => throw new FormatException($"Unknown context value '{key}'. Allowed: tenant_id, user_sid, purpose.")
+    };
+
+    /// <summary>Review P-4: identifiers end up in SQL text (TVF/CALL); only [A-Za-z_][A-Za-z0-9_]* is accepted.</summary>
+    private static string RequireIdentifier(string? value, string what)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !IdentifierRegex.IsMatch(value))
+        {
+            throw new FormatException($"Invalid {what} '{value}'. Only [A-Za-z_][A-Za-z0-9_]{{0,127}} is allowed.");
+        }
+
+        return value;
     }
 }
 

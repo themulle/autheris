@@ -2,6 +2,7 @@ namespace Autheris.Domain.Model;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 /// <summary>F-SQL-02: Execution mode of a governed stored procedure.</summary>
 public enum ProcedureMode
@@ -85,6 +86,19 @@ public sealed record ProcedureDefinition(
     ProcedureKind Kind = ProcedureKind.Procedure)
 {
     public IReadOnlyList<string> DeclaredOutputs { get; init; } = DeclaredOutputs ?? [];
+
+    /// <summary>
+    /// Review P-2: Order of all arguments (client parameters and context bindings) as declared. Table-valued functions
+    /// (and every other positional call) bind their arguments in exactly this order. When not set, client parameters
+    /// come first, followed by the context bindings.
+    /// </summary>
+    public IReadOnlyList<string> ArgumentOrder
+    {
+        get => _argumentOrder ?? [.. Parameters.Select(p => p.Name), .. ContextBindings.Select(c => c.ParameterName)];
+        init => _argumentOrder = value;
+    }
+
+    private readonly IReadOnlyList<string>? _argumentOrder;
 }
 
 /// <summary>Lifecycle state of a registered procedure.</summary>

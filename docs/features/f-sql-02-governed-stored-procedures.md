@@ -85,4 +85,4 @@ Jede von der Prozedur direkt gelesene Tabelle braucht eine aktive Policy mit FIL
 
 ## Grenzen Phase 1
 
-Nur SQL Server, nur das erste Result-Set, keine OUTPUT-/TVP-Parameter, keine Consent-Zeilenfilter, keine verschachtelten Prozeduren/Views, kein GraphQL/MCP, keine schreibenden Prozeduren.
+Katalogvalidierung nur für SQL Server; YAML, TVF, `validation: declared` und PostgreSQL unterliegen den Regeln im Nachtrag von ADR-018 (`AllowDeclaredValidation` ist außerhalb von Development nötig). Nur das erste Result-Set, keine OUTPUT-/TVP-Parameter, keine Consent-Zeilenfilter, keine verschachtelten Prozeduren/Views, kein GraphQL/MCP, keine schreibenden Prozeduren.

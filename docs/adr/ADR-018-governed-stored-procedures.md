@@ -36,6 +36,16 @@ Das Gateway kann den Rumpf einer Stored Procedure nicht umschreiben. Die RLS- un
 - (−) Feingranulare Consent-Zeilenfilter sind für Prozeduren nicht abbildbar (Phase 1).
 - (−) Prozeduren mit verschachtelten Aufrufen oder `EXECUTE AS` brauchen eine eigene Bewertung.
 
+## Nachtrag 2026-10-05: YAML, TVF, `validation: declared` und weitere Datenbanken
+
+Nach dem Security Review vom 2026-10-05 (Nachprüfung 3, P-1 … P-8) gelten für die späteren Erweiterungen diese Regeln:
+
+- **`validation: declared`** überspringt die Katalogprüfung (Security Policy, Berechtigungen, dynamisches SQL, Schreibzugriffe). Der Modus ist deshalb nur in Development oder mit `SqlEndpoints.Procedures.AllowDeclaredValidation=true` zulässig. Er verlangt immer `result_table` und eine nicht-leere `outputs`-Liste. Die deklarierten Spalten durchlaufen dieselbe Consent-Spaltenlogik (Deny/Mask) wie im Katalogmodus; ohne Consent auf die Result-Tabelle wird der Aufruf abgelehnt.
+- **Table-Valued Functions** werden positionell aufgerufen. Die Argumente werden in der deklarierten Reihenfolge gebunden (`@param`/`@context` in Dateireihenfolge, im YAML nur inline in `parameters`). Im Katalogmodus (SQL Server, Objekttyp `IF`/`TF`) prüft der Validator diese Reihenfolge gegen `sys.parameters`, die Ergebnisspalten über `sys.columns` und die SELECT-Berechtigung auf die Funktion.
+- **Datenbanken:** Mit `rls: session-context` sind nur SQL Server (read-only `SESSION_CONTEXT`) und PostgreSQL erlaubt. PostgreSQL setzt den Kontext transaktionslokal (`set_config(..., true)`) in derselben Transaktion wie den Aufruf; die Transaktion wird nie committet. PostgreSQL kennt keine read-only Einstellungen, die Funktion darf die Werte nicht überschreiben (DBA-Review). Oracle, Databricks und SQLite sind nur mit `rls: none` (nur Development) nutzbar.
+- **YAML** ist fail-closed wie das Header-Format: unbekannte Schlüssel, unbekannte Kontextwerte und ungültige Bezeichner führen zur Ablehnung der Datei. Fehlerhafte Dateien werden übersprungen, ohne den Dienst zu beenden.
+- **Hot Reload:** Umbenennen und Löschen entfernen den Endpoint, ein geänderter `@name` meldet den alten Namen ab, doppelte Endpoint-Namen werden abgelehnt, Verzeichnis-Symlinks werden nicht verfolgt. Aktivierung und Deaktivierung erfolgen nur für die validierte Definitionsinstanz (Compare-and-Swap).
+
 ## Phase 2 (noch nicht umgesetzt)
 
 Schreibende Prozeduren: Writer-Rolle, Consent-Aktion `execute`, `Idempotency-Key`, Vier-Augen/HitL. Voraussetzung sind die Fixes M-3/R2-6, R2-1 und E-9 aus den Security-Reviews. `@mode write` und `@approval` werden bis dahin abgelehnt.

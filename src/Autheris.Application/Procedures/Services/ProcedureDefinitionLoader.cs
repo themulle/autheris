@@ -94,8 +94,9 @@ public sealed class ProcedureDefinitionLoader : IDisposable
                 return false;
             }
 
-            // Symlinks / reparse points are never followed; the file must live below the configured directory.
-            if (info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.LinkTarget != null)
+            // Symlinks / reparse points are never followed (file or any directory below the root, review P-8);
+            // the file must live below the configured directory.
+            if (info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.LinkTarget != null || HasLinkedDirectory(info, rootDirectory))
             {
                 _logger?.LogWarning("Procedure declaration '{File}' skipped: symbolic links are not allowed.", filePath);
                 ForgetFile(filePath);
@@ -123,24 +124,76 @@ public sealed class ProcedureDefinitionLoader : IDisposable
                 ? ProcedureDefinitionParser.ParseYaml(content, defaultName, AllowRlsNone, Settings.MaxTimeoutSeconds)
                 : ProcedureDefinitionParser.Parse(content, defaultName, AllowRlsNone, Settings.MaxTimeoutSeconds);
 
+            string fullPath = Path.GetFullPath(filePath);
             string? rejection = CheckPolicy(definition);
+            if (rejection == null)
+            {
+                // Review P-8: two files must not declare the same endpoint (silent shadowing).
+                var owner = _fileToName.FirstOrDefault(kv =>
+                    string.Equals(kv.Value, definition.Name, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(kv.Key, fullPath, StringComparison.OrdinalIgnoreCase));
+                if (owner.Key != null)
+                {
+                    rejection = $"endpoint name '{definition.Name}' is already declared in '{Path.GetFileName(owner.Key)}'.";
+                }
+            }
+
             if (rejection != null)
             {
                 _logger?.LogWarning("Procedure declaration '{File}' rejected: {Reason}", filePath, rejection);
-                _registry.Unregister(definition.Name);
                 ForgetFile(filePath);
                 return false;
             }
 
+            // Review P-8: if the endpoint name inside this file changed, the old endpoint must disappear.
+            if (_fileToName.TryGetValue(fullPath, out var previousName) &&
+                !string.Equals(previousName, definition.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                _registry.Unregister(previousName);
+            }
+
             _registry.Register(definition);
-            _fileToName[Path.GetFullPath(filePath)] = definition.Name;
+            _fileToName[fullPath] = definition.Name;
             return true;
         }
-        catch (Exception ex) when (ex is FormatException or IOException or UnauthorizedAccessException or ArgumentException or OverflowException or RegexMatchTimeoutException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
+            // Review P-3: every parse error (incl. YamlException, NullReferenceException) only skips this file;
+            // it must never stop the host or crash the file watcher thread. The endpoint is removed (fail-closed).
             _logger?.LogWarning(ex, "Procedure declaration '{File}' is invalid and was skipped.", filePath);
-            ForgetFile(filePath);
+            SafeForget(filePath);
             return false;
+        }
+    }
+
+    private static bool HasLinkedDirectory(FileInfo file, string rootDirectory)
+    {
+        string root = Path.GetFullPath(rootDirectory).TrimEnd(Path.DirectorySeparatorChar);
+        for (var dir = file.Directory; dir != null; dir = dir.Parent)
+        {
+            if (string.Equals(dir.FullName.TrimEnd(Path.DirectorySeparatorChar), root, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (dir.Attributes.HasFlag(FileAttributes.ReparsePoint) || dir.LinkTarget != null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void SafeForget(string filePath)
+    {
+        try
+        {
+            ForgetFile(filePath);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            _logger?.LogDebug(ex, "Could not resolve '{File}' while unregistering it.", filePath);
         }
     }
 
@@ -150,6 +203,21 @@ public sealed class ProcedureDefinitionLoader : IDisposable
         if (definition.Mode == ProcedureMode.Write)
         {
             return "write procedures are not supported yet (phase 2).";
+        }
+
+        // Review P-1: declared mode skips the catalog validation; it is opt-in outside Development and always needs a
+        // result table plus explicit outputs so consent column rules can be applied.
+        if (definition.ValidationMode == ProcedureValidationMode.Declared)
+        {
+            if (_environment?.IsDevelopment() != true && !Settings.AllowDeclaredValidation)
+            {
+                return "'validation: declared' is only allowed in Development or with SqlEndpoints.Procedures.AllowDeclaredValidation=true.";
+            }
+
+            if (string.IsNullOrWhiteSpace(definition.ResultTable) || definition.DeclaredOutputs.Count == 0)
+            {
+                return "'validation: declared' requires result_table and a non-empty list of outputs.";
+            }
         }
 
         var match = definition.ProcedureName.Split('.');
@@ -199,13 +267,36 @@ public sealed class ProcedureDefinitionLoader : IDisposable
                 EnableRaisingEvents = true
             };
 
-            _watcher.Created += (_, e) => { if (IsSupportedProcedureFile(e.FullPath)) TryLoadFile(e.FullPath, directory); };
-            _watcher.Changed += (_, e) => { if (IsSupportedProcedureFile(e.FullPath)) TryLoadFile(e.FullPath, directory); };
-            _watcher.Deleted += (_, e) => { if (IsSupportedProcedureFile(e.FullPath)) ForgetFile(e.FullPath); };
+            // Review P-3/P-8: handlers run on thread-pool threads; an exception there would terminate the process.
+            _watcher.Created += (_, e) => OnWatcherEvent(() => { if (IsSupportedProcedureFile(e.FullPath)) TryLoadFile(e.FullPath, directory); });
+            _watcher.Changed += (_, e) => OnWatcherEvent(() => { if (IsSupportedProcedureFile(e.FullPath)) TryLoadFile(e.FullPath, directory); });
+            _watcher.Deleted += (_, e) => OnWatcherEvent(() => SafeForget(e.FullPath));
+            _watcher.Renamed += (_, e) => OnWatcherEvent(() =>
+            {
+                // Renaming x.proc.sql to x.proc.sql.disabled must switch the endpoint off; atomic saves (temp + rename)
+                // must load the new content.
+                SafeForget(e.OldFullPath);
+                if (IsSupportedProcedureFile(e.FullPath))
+                {
+                    TryLoadFile(e.FullPath, directory);
+                }
+            });
         }
         catch (Exception ex) when (ex is IOException or ArgumentException or PlatformNotSupportedException)
         {
             _logger?.LogWarning(ex, "Could not start the file watcher on '{Directory}'. Hot reload disabled.", directory);
+        }
+    }
+
+    private void OnWatcherEvent(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _logger?.LogError(ex, "Procedure hot reload failed.");
         }
     }
 
