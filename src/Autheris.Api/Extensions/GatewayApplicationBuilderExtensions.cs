@@ -354,6 +354,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapEnvoyExtAuthzEndpoints();
         app.MapWebSqlEndpoints();
         app.MapSqlEndpoints(gatewayOptions);
+        app.MapProcedureEndpoints(gatewayOptions);
         app.MapDevPortalEndpoints(gatewayOptions);
 
         if (gatewayOptions.SqlEndpoints.Enabled)

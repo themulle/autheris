@@ -1,0 +1,92 @@
+namespace Autheris.Domain.Model;
+
+using System;
+using System.Collections.Generic;
+
+/// <summary>F-SQL-02: Execution mode of a governed stored procedure.</summary>
+public enum ProcedureMode
+{
+    Read = 0,
+    Write = 1
+}
+
+/// <summary>F-SQL-02: How row-level security is enforced for the procedure.</summary>
+public enum ProcedureRlsMode
+{
+    /// <summary>Database-side RLS (SQL Server SECURITY POLICY) reading the read-only SESSION_CONTEXT. Default.</summary>
+    SessionContext = 0,
+
+    /// <summary>No database-side RLS. Only allowed in Development.</summary>
+    None = 1
+}
+
+/// <summary>Security context values the gateway may bind to a procedure parameter.</summary>
+public enum ProcedureContextKey
+{
+    TenantId = 0,
+    UserSid = 1,
+    Purpose = 2
+}
+
+/// <summary>Declared client-supplied input parameter of a stored procedure.</summary>
+public sealed record ProcedureParameter(
+    string Name,
+    string SqlType,
+    Type ClrType,
+    bool IsRequired,
+    int? MaxLength = null,
+    string? Description = null);
+
+/// <summary>Binds a gateway security context value to a procedure parameter (never client-controlled).</summary>
+public sealed record ProcedureContextBinding(ProcedureContextKey Key, string ParameterName);
+
+/// <summary>Maps a result-set column to a catalog column so column governance can be applied.</summary>
+public sealed record ProcedureResultColumn(string Name, bool IsCleared);
+
+/// <summary>
+/// Immutable declaration of a stored procedure exposed as governed REST endpoint (F-SQL-02).
+/// </summary>
+public sealed record ProcedureDefinition(
+    string Name,
+    string Summary,
+    string ProcedureName,
+    ProcedureMode Mode,
+    string? DataSource,
+    IReadOnlyList<ProcedureParameter> Parameters,
+    IReadOnlyList<ProcedureContextBinding> ContextBindings,
+    ProcedureRlsMode RlsMode,
+    string? ResultTable,
+    IReadOnlyList<string> ClearedResultColumns,
+    IReadOnlyList<string> RequiredRoles,
+    bool AllowDynamicSql,
+    int TimeoutSeconds);
+
+/// <summary>Lifecycle state of a registered procedure.</summary>
+public enum ProcedureState
+{
+    /// <summary>Declared but not (yet) validated against the database.</summary>
+    Pending = 0,
+    Active = 1,
+    /// <summary>Validation failed or drift detected; the endpoint answers 503.</summary>
+    Disabled = 2
+}
+
+/// <summary>Result of validating a declaration against the database catalog.</summary>
+public sealed record ProcedureValidationResult(
+    bool IsValid,
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<string> ResultColumns,
+    IReadOnlyList<string> ReferencedTables,
+    IReadOnlyDictionary<string, string> ParameterSqlTypes)
+{
+    public static ProcedureValidationResult Failed(params string[] errors) =>
+        new(false, errors, [], [], new Dictionary<string, string>());
+}
+
+/// <summary>A procedure together with its runtime validation state.</summary>
+public sealed record RegisteredProcedure(
+    ProcedureDefinition Definition,
+    ProcedureState State,
+    ProcedureValidationResult? Validation,
+    DateTimeOffset? ValidatedAt,
+    string? DisabledReason);
