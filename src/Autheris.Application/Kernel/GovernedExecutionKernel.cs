@@ -319,7 +319,7 @@ public sealed class GovernedExecutionKernel : IGovernedExecutionKernel
             if (cacheMatch.IsHit && cacheMatch.Result != null)
             {
                 stopwatch.Stop();
-                var redactedCached = cacheMatch.Result.Select(c => ChunkPiiRedactor.RedactChunk(c, metadata, _maskingProvider)).ToList();
+                var redactedCached = cacheMatch.Result.Select(c => ChunkPiiRedactor.RedactChunk(c, metadata, _maskingProvider, decision)).ToList();
                 return new GovernedVectorResult(
                     Collection: metadata.Identifier,
                     Chunks: redactedCached,
@@ -415,8 +415,8 @@ public sealed class GovernedExecutionKernel : IGovernedExecutionKernel
             await _semanticCache.SetAsync(entry, ct).ConfigureAwait(false);
         }
 
-        // 8. Universal PII Chunk Redaction (INV-SEC-01, INV-SEC-02)
-        var sanitizedChunks = permittedChunks.Select(c => ChunkPiiRedactor.RedactChunk(c, metadata, _maskingProvider)).ToList();
+        // 8. Universal PII Chunk Redaction (INV-SEC-01, INV-SEC-02, SEC E-1)
+        var sanitizedChunks = permittedChunks.Select(c => ChunkPiiRedactor.RedactChunk(c, metadata, _maskingProvider, decision)).ToList();
 
         stopwatch.Stop();
 

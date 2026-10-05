@@ -35,6 +35,12 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             return;
         }
 
+        if (_isAuditPipelineFaulted)
+        {
+            _logger?.LogError("Audit pipeline is faulted; failing closed on Tier-B audit event for table {Table}.", entry.TargetTable);
+            throw new InvalidOperationException("Audit pipeline is in a faulted state (fail-closed).");
+        }
+
         // Tier-B: High-volume query reads (TABLE_QUERY / WEBSQL_QUERY ALLOW) are enqueued to the bounded channel with timeout (fail-closed)
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(TimeSpan.FromSeconds(2));
@@ -129,18 +135,31 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
                 if (batch.Count > 0)
                 {
-                    await _lock.WaitAsync(_auditCts.Token).ConfigureAwait(false);
-                    try
+                    for (int attempt = 1; attempt <= 3; attempt++)
                     {
-                        await RecordAuditEventsBatchInternalAsync(batch, _auditCts.Token).ConfigureAwait(false);
-                    }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
-                    {
-                        _logger?.LogError(ex, "Error writing audit batch of {Count} entries to SQLite.", batch.Count);
-                    }
-                    finally
-                    {
-                        _lock.Release();
+                        await _lock.WaitAsync(_auditCts.Token).ConfigureAwait(false);
+                        try
+                        {
+                            await RecordAuditEventsBatchInternalAsync(batch, _auditCts.Token).ConfigureAwait(false);
+                            break;
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            _logger?.LogWarning(ex, "Attempt {Attempt} to write audit batch of {Count} entries failed.", attempt, batch.Count);
+                            if (attempt < 3)
+                            {
+                                await Task.Delay(50 * attempt, _auditCts.Token).ConfigureAwait(false);
+                            }
+                            else
+                            {
+                                _isAuditPipelineFaulted = true;
+                                _logger?.LogCritical(ex, "FATAL: Audit batch of {Count} entries failed permanently after 3 attempts. Setting audit pipeline to faulted (fail-closed).", batch.Count);
+                            }
+                        }
+                        finally
+                        {
+                            _lock.Release();
+                        }
                     }
                 }
             }

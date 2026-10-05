@@ -27,17 +27,23 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<IcebergRestCatalogFederationService> _logger;
+    private readonly IConsentResolutionService? _consentService;
+    private readonly IConsentRepository? _consentRepo;
 
     public IcebergRestCatalogFederationService(
         IIcebergMetadataReader metadataReader,
         ITableMetadataRepository metadataRepo,
         IOptions<GatewayOptions> options,
-        ILogger<IcebergRestCatalogFederationService> logger)
+        ILogger<IcebergRestCatalogFederationService> logger,
+        IConsentResolutionService? consentService = null,
+        IConsentRepository? consentRepo = null)
     {
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _consentService = consentService;
+        _consentRepo = consentRepo;
     }
 
     public async ValueTask<IReadOnlyList<string>> ListNamespacesAsync(string tenantId, CancellationToken ct = default)
@@ -99,6 +105,30 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         {
             // SEC H-3: Never fall back to tables from other tenants. Return 404.
             throw new KeyNotFoundException($"Table '{@namespace}.{table}' not found in tenant '{tenantId}'.");
+        }
+
+        // Restpunkt H-3: Enforce consent before vending table location
+        if (_consentService != null)
+        {
+            var userSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
+            var groupSids = principal.GetGroupSids();
+            var roles = principal.GetUserRoles();
+            var allSubjects = groupSids.Append(userSid).ToList();
+            var activeConsents = _consentRepo != null
+                ? await _consentRepo.GetActiveConsentsForSubjectsAsync(allSubjects, tableId, DateTimeOffset.UtcNow, new TenantId(tenantId), ct).ConfigureAwait(false)
+                : (IReadOnlyList<Consent>)Array.Empty<Consent>();
+
+            var decision = _consentService.ResolveAccess(userSid, groupSids, roles, tableId, activeConsents, tableMeta.Dialect);
+            if (!decision.IsAllowed)
+            {
+                _logger.LogWarning("Consent denied for user {User} accessing Iceberg table {TableId}", userSid, tableId);
+                throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
+            }
+            if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) ||
+                decision.ColumnAccess.Values.Any(v => v == ColumnAccessLevel.Mask || v == ColumnAccessLevel.Deny))
+            {
+                throw new SecurityException($"Direct Iceberg catalog access not permitted: Table '{@namespace}.{table}' requires row-level filtering or column masking which cannot be enforced via raw metadata vending.");
+            }
         }
 
         var location = tableMeta.Table.Location ?? $"lakehouse/{tenantId}/{@namespace}/{table}";

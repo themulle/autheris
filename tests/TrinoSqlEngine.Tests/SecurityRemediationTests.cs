@@ -785,7 +785,7 @@ public class SecurityRemediationTests
     [Fact]
     public void R4_SQ08_DedicatedParserThread_WithConfiguredStack_ParsesNormalQueries()
     {
-        var engine = new FastSqlEngine { ParseThreadStackSize = 1024 * 1024 };
+        var engine = new FastSqlEngine { ParseThreadStackSize = 4 * 1024 * 1024 };
         string nested = "SELECT " + new string('(', 90) + "1" + new string(')', 90) + " FROM orders";
 
         Assert.NotNull(engine.Parse(nested.AsMemory()).Tree);

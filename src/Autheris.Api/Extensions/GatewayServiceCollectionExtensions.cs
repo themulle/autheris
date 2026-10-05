@@ -131,6 +131,10 @@ public static class GatewayServiceCollectionExtensions
                 string.Equals(opts.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase),
                 "GovernanceDb Provider wird aktuell nur als 'Sqlite' unterstützt.")
             .Validate(opts =>
+                !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) ||
+                !string.Equals(opts.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase),
+                "Sicherheitsverletzung (E-2): Multi-Node Cluster Mode und mehr als 1 Replika sind mit SQLite nicht zulässig, da SQLite lokale Datenbankdateien pro Instanz verwendet und State/Consent-Widerrufe nicht clusterweit synchronisiert werden.")
+            .Validate(opts =>
                 environment.IsDevelopment() || !opts.OpenMetadata.Enabled ||
                 (Uri.TryCreate(opts.OpenMetadata.ServerUrl, UriKind.Absolute, out var uri) && string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)) ||
                 opts.IsInsecureTransportAllowed,
