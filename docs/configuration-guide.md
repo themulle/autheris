@@ -553,14 +553,14 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
 
 | Eigenschaft | Typ | Standard | Sicherheits-Level | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
-| `danger_allow_anonymous_queries` | `bool` | `false` | **CRITICAL** | Erlaubt GraphQL-Abfragen ohne jegliche Authentifizierung (anonymer Benutzer). |
-| `danger_bypass_authorization` | `bool` | `false` | **CRITICAL** | Umgeht die Zero-Trust Consent-Prüfung (`ALLOW` für alle Tabellen). |
+| `danger_allow_anonymous_access` | `bool` | `false` | **CRITICAL** | Erlaubt GraphQL-Abfragen ohne jegliche Authentifizierung (anonymer Benutzer). |
+| `danger_bypass_consent_checks` | `bool` | `false` | **CRITICAL** | Umgeht die Zero-Trust Consent-Prüfung (`ALLOW` für alle Tabellen). |
 | `danger_bypass_webhook_signature_validation` | `bool` | `false` | **CRITICAL** | Erlaubt ungesignete Webhook-Aufrufe (z. B. ServiceNow, Jira, OpenMetadata ohne HMAC-Prüfung). |
 | `danger_allow_untrusted_certificates` | `bool` | `false` | **CRITICAL** | Akzeptiert selbstsignierte oder abgelaufene SSL/TLS-Zertifikate bei ausgehenden HTTP-Aufrufen (Purview, Collibra, APIs). |
 | `danger_allow_anonymous_webhooks` | `bool` | `false` | **CRITICAL** | Akzeptiert eingehende Webhook-Payloads ohne Auth-Token oder Secret. |
 | `warn_allow_all_cors_origins` | `bool` | `false` | **WARN** | Setzt `Access-Control-Allow-Origin: *` und deaktiviert CSRF-Preflight. |
 | `warn_disable_rate_limiting` | `bool` | `false` | **WARN** | Deaktiviert IP- und SID-basiertes Rate-Limiting (keine `429 Too Many Requests`). |
-| `warn_bypass_query_cost_limits` | `bool` | `false` | **WARN** | Deaktiviert AST-Depth- und Complexity-Limits für tief verschachtelte Abfragen. |
+| `warn_relaxed_query_limits` | `bool` | `false` | **WARN** | Deaktiviert AST-Depth- und Complexity-Limits für tief verschachtelte Abfragen. |
 
 ```json
 "Insecure": {
@@ -570,6 +570,28 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
   "danger_allow_untrusted_certificates": false
 }
 ```
+
+---
+
+### 2.14a `Dev` (Development-only switches)
+
+`Gateway:Dev` groups the development conveniences (class A) and development security switches (class B). Security bypasses stay in `Insecure` (class C). Everything in `Dev` is **Development only**: outside Development a non-default value is a startup error. Concept and rationale: [concept-unified-dev-switches-2026-10-05.md](architecture/concept-unified-dev-switches-2026-10-05.md).
+
+| Property | Type | Default | Class | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `Preset` | `string` | `Standard` | A/B | `Standard`, `Quickstart` (adds `warn_allow_all_cors_origins`, `warn_enable_introspection`, `warn_auto_approve_access_requests`, `OpenSchema`) or `Strict` (no test auth, no introspection). Replaces the deprecated `Gateway:Profile`. |
+| `Banner` | `bool` | `true` | A | Startup banner with links and personas. |
+| `VerboseErrors` | `bool` | `true` | A | Diagnostic `problem+json` for 403 and unhandled exceptions. |
+| `PersonaLogin` | `bool` | `true` | A | `/api/dev/personas` and `/api/dev/login/{persona}`. |
+| `Info` | `bool` | `true` | A | `/api/dev/info` (effective configuration without secrets). |
+| `DemoData` | `bool?` | preset | A | Seed demo catalog data. Alias of `GovernanceDb.SeedDemoData`. |
+| `Persist:Enabled` | `bool` | `false` | A | Keep the governance database in `<Persist:Directory>/dev.db`. |
+| `Persist:Directory` | `string` | `.data` | A | Directory of the development database and its audit anchor. Reset with `scripts/dev-reset.sh`. |
+| `TestAuthHandler` | `bool?` | preset | B | Header-based test identities. Alias of `Authentication.EnableTestAuthHandler`. |
+| `Tooling:BananaCakePop` | `bool?` | preset | A | Alias of `GraphQL.EnableBananaCakePop` in Development. |
+| `Tooling:Introspection` | `bool?` | preset | B | Alias of `GraphQL.EnableIntrospection` in Development. |
+
+Precedence per switch: explicit `Dev` value, then an explicitly set legacy key (deprecated, logged at startup), then the preset default. A `Dev` value that contradicts its legacy key fails the start. Do not set the legacy keys in the base `appsettings.json`: an explicit value there defeats the preset default. `GraphQL.EnableIntrospection` and `GraphQL.EnableBananaCakePop` remain regular options in every environment; only the `Dev:Tooling:*` aliases are Development-only.
 
 ---
 

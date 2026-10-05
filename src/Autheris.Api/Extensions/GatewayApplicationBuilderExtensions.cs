@@ -1,5 +1,6 @@
 using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
+using Autheris.Api.Security;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -61,11 +62,14 @@ public static class GatewayApplicationBuilderExtensions
             app.UseHttpsRedirection();
         }
 
-        if (app.Environment.IsDevelopment() && gatewayOptions.HasAnySecurityBypassActive)
+        var devSecurity = DevFeatures.Resolve(gatewayOptions, app.Environment.IsDevelopment()).DevSecurity;
+        if (app.Environment.IsDevelopment() && (gatewayOptions.HasAnySecurityBypassActive || devSecurity.Count > 0))
         {
+            var insecureModeHeader = string.Join("; ",
+                gatewayOptions.GetAllActiveBypasses().Concat(devSecurity.Select(s => "DEV-SECURITY:" + s)));
             app.Use(async (context, next) =>
             {
-                context.Response.Headers.Append("X-Gateway-Insecure-Mode", string.Join("; ", gatewayOptions.GetAllActiveBypasses()));
+                context.Response.Headers.Append("X-Gateway-Insecure-Mode", insecureModeHeader);
                 await next();
             });
         }
@@ -242,9 +246,17 @@ public static class GatewayApplicationBuilderExtensions
         });
 
         app.UseHttpMetrics();
+        if (DevFeatures.Resolve(gatewayOptions, app.Environment.IsDevelopment()).VerboseErrors)
+        {
+            // F-AUTH-DX: bodyless 403s get a diagnostic problem+json (never outside Development)
+            app.UseMiddleware<DevForbiddenDiagnosticsMiddleware>();
+        }
+
         app.UseMiddleware<PreAuthIpRateLimitingMiddleware>();
         app.UseAuthentication();
         app.UseMiddleware<TokenRevocationMiddleware>();
+        // F-AUTH-DX: issue the session cookie after a Basic login (no-op unless BasicAuth.Session is allowed)
+        app.UseMiddleware<BasicAuthSessionMiddleware>();
         app.UseAuthorization();
         app.UseMiddleware<PostAuthSidRateLimitingMiddleware>();
         app.UseMiddleware<SecurityContextResolutionMiddleware>();
@@ -356,6 +368,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapSqlEndpoints(gatewayOptions);
         app.MapProcedureEndpoints(gatewayOptions);
         app.MapDevPortalEndpoints(gatewayOptions);
+        app.MapDevEndpoints(gatewayOptions); // F-AUTH-DX: Development only (no routes elsewhere)
 
         if (gatewayOptions.SqlEndpoints.Enabled)
         {

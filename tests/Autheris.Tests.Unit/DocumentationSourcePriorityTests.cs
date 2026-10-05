@@ -348,4 +348,94 @@ public sealed class DocumentationSourcePriorityTests
         result.Table.Description.ShouldBe("OpenApi description");
         result.Table.DocumentationSource.ShouldBe("OpenApi");
     }
+
+    [Fact]
+    public void ParseColumnMetaJson_HandlesBooleansAndMixedTypesGracefully()
+    {
+        var json = """
+        {
+            "pii": false,
+            "is_active": true,
+            "retention_days": 90,
+            "tag": "sensitive",
+            "nested": { "k": "v" },
+            "null_prop": null
+        }
+        """;
+
+        var meta = SqliteGovernanceRepository.ParseColumnMetaJson(json);
+        meta.ShouldNotBeNull();
+        meta["pii"].ShouldBe("false");
+        meta["is_active"].ShouldBe("true");
+        meta["retention_days"].ShouldBe("90");
+        meta["tag"].ShouldBe("sensitive");
+        meta["nested"].ShouldBe("{ \"k\": \"v\" }");
+        meta["null_prop"].ShouldBe(string.Empty);
+    }
+
+    [Fact]
+    public void ParseColumnMetaJson_InvalidOrEmptyJson_ReturnsEmptyDictionary()
+    {
+        SqliteGovernanceRepository.ParseColumnMetaJson(null).Count.ShouldBe(0);
+        SqliteGovernanceRepository.ParseColumnMetaJson("").Count.ShouldBe(0);
+        SqliteGovernanceRepository.ParseColumnMetaJson("not json").Count.ShouldBe(0);
+        SqliteGovernanceRepository.ParseColumnMetaJson("[]").Count.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task GetAllTablesAndGetTableMetadata_WithBooleanMetaJson_DoesNotThrow()
+    {
+        using var repository = CreateRepository();
+        var tableId = new TableIdentifier("crm", "dbo", "users");
+
+        var meta = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table
+            {
+                SourceType = "sql",
+                SourceName = "crm",
+                SchemaName = "dbo",
+                TableName = "users",
+                DisplayName = "CRM Users",
+                IsActive = true
+            },
+            PrimaryKeyColumns = ["id"],
+            Columns =
+            [
+                new TableColumn
+                {
+                    ColumnName = "email",
+                    DataType = "varchar",
+                    IsSensitive = false
+                }
+            ]
+        };
+
+        await repository.UpsertTableMetadataAsync(meta);
+
+        // Manually update TABLE_COLUMNS to inject a boolean meta_json (e.g. {"pii": false})
+        using (var cmd = repository.Connection.CreateCommand())
+        {
+            cmd.CommandText = "UPDATE TABLE_COLUMNS SET meta_json = '{\"pii\": false}' WHERE column_name = 'email'";
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        // Test GetTableMetadataAsync
+        var fetched = await repository.GetTableMetadataAsync(tableId);
+        fetched.ShouldNotBeNull();
+        var emailCol = fetched.Columns.FirstOrDefault(c => c.ColumnName == "email");
+        emailCol.ShouldNotBeNull();
+        emailCol.Meta.ShouldContainKey("pii");
+        emailCol.Meta["pii"].ShouldBe("false");
+
+        // Test GetAllTablesAsync
+        var allTables = await repository.GetAllTablesAsync();
+        var fetchedFromAll = allTables.FirstOrDefault(t => t.Identifier.TableName == "users");
+        fetchedFromAll.ShouldNotBeNull();
+        var emailColFromAll = fetchedFromAll.Columns.FirstOrDefault(c => c.ColumnName == "email");
+        emailColFromAll.ShouldNotBeNull();
+        emailColFromAll.Meta.ShouldContainKey("pii");
+        emailColFromAll.Meta["pii"].ShouldBe("false");
+    }
 }

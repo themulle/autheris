@@ -39,6 +39,7 @@ public sealed class GatewayOptions
     [Required] public WebSqlOptions WebSql { get; init; } = new();
     [Required] public SqlEndpointsOptions SqlEndpoints { get; init; } = new();
     [Required] public InsecureGettingStartedOptions Insecure { get; init; } = new();
+    [Required] public DevOptions Dev { get; init; } = new();
     [Required] public MssqlChangeTrackingOptions MssqlChangeTracking { get; init; } = new();
     [Required] public PostgreSqlCdcOptions PostgreSqlCdc { get; init; } = new();
     [Required] public TrafficShadowingOptions TrafficShadowing { get; init; } = new();
@@ -55,7 +56,14 @@ public sealed class GatewayOptions
     /// </summary>
     public string Profile { get; init; } = "Strict";
 
-    public bool IsQuickstartProfile => string.Equals(Profile, "Quickstart", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// True for <c>Dev:Preset = Quickstart</c> or the legacy <c>Profile = Quickstart</c> alias. The relaxations of the
+    /// preset are expanded into the concrete <c>Insecure.*</c> values at configuration time (DevConfiguration), so the
+    /// accessors below do not need to know about it.
+    /// </summary>
+    public bool IsQuickstartProfile =>
+        string.Equals(Profile, "Quickstart", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(Dev.Preset, DevOptions.PresetQuickstart, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Open Schema Mode: Allows anyone to view the entire data catalog, OpenAPI specs, and schema documentation.
@@ -76,16 +84,18 @@ public sealed class GatewayOptions
     [Required] public HostingLimitsOptions Hosting { get; init; } = new();
 
     // Convenience accessors combining global 'Insecure' section and domain-specific options
-    public bool IsOpenSchemaAllowed => OpenSchema || Catalog.OpenSchema || IsQuickstartProfile;
+    public bool IsOpenSchemaAllowed => OpenSchema || Catalog.OpenSchema;
     public bool IsAnonymousAccessAllowed => Insecure.danger_allow_anonymous_access || Authentication.danger_allow_anonymous_access;
     public bool IsConsentBypassed => Insecure.danger_bypass_consent_checks || GovernanceDb.danger_bypass_consent_checks;
     public bool IsColumnMaskingDisabled => Insecure.danger_disable_column_masking || DataMasking.danger_disable_column_masking;
     public bool IsInsecureTransportAllowed => Insecure.danger_allow_insecure_transport;
-    public bool IsAllCorsAllowed => Insecure.warn_allow_all_cors_origins || GraphQL.warn_allow_all_cors_origins || IsQuickstartProfile;
+    /// <summary>True when the CORS/Origin check is effectively off (warn flag, Quickstart or <c>TrustedOrigins: "*"</c>).</summary>
+    public bool IsWildcardCors => IsAllCorsAllowed || GraphQL.TrustedOrigins.Contains("*");
+    public bool IsAllCorsAllowed => Insecure.warn_allow_all_cors_origins || GraphQL.warn_allow_all_cors_origins;
     public bool IsRateLimitingDisabled => Insecure.warn_disable_rate_limiting || RateLimiting.warn_disable_rate_limiting;
     public bool AreQueryLimitsRelaxed => Insecure.warn_relaxed_query_limits || GraphQL.warn_relaxed_query_limits;
-    public bool IsIntrospectionForced => Insecure.warn_enable_introspection || GraphQL.warn_enable_introspection || IsQuickstartProfile;
-    public bool IsAutoApproveEnabled => Insecure.warn_auto_approve_access_requests || GovernanceDb.warn_auto_approve_access_requests || IsQuickstartProfile;
+    public bool IsIntrospectionForced => Insecure.warn_enable_introspection || GraphQL.warn_enable_introspection;
+    public bool IsAutoApproveEnabled => Insecure.warn_auto_approve_access_requests || GovernanceDb.warn_auto_approve_access_requests;
     public bool IsWebhookSignatureBypassed => Insecure.danger_bypass_webhook_signature_validation || Insecure.danger_allow_anonymous_webhooks || Itsm.danger_bypass_webhook_signature_validation || OpenMetadata.danger_bypass_webhook_signature_validation || Dbt.danger_bypass_webhook_signature_validation;
     public bool AreUntrustedCertificatesAllowed => Insecure.danger_allow_untrusted_certificates || Insecure.danger_allow_insecure_transport || Itsm.danger_allow_untrusted_certificates || OpenMetadata.danger_allow_untrusted_certificates;
     public bool IsWebhookTimestampToleranceIgnored => Insecure.warn_ignore_webhook_timestamp_tolerance || Itsm.warn_ignore_webhook_timestamp_tolerance || OpenMetadata.warn_ignore_webhook_timestamp_tolerance;
@@ -451,6 +461,44 @@ public sealed class BasicAuthOptions
 
     /// <summary>RR-L2-03: Lifetime of a verified-credential cache entry in seconds (0 disables the cache).</summary>
     public int SuccessCacheSeconds { get; init; } = 30;
+
+    /// <summary>
+    /// F-AUTH-DX: Optional cookie session issued after a successful Basic login (developer experience).
+    /// Only permitted in the environments listed in <see cref="BasicAuthSessionOptions.AllowedEnvironments"/>,
+    /// never in Production.
+    /// </summary>
+    public BasicAuthSessionOptions Session { get; init; } = new();
+}
+
+/// <summary>
+/// F-AUTH-DX: Cookie session for Basic authentication. After one successful Basic login the gateway issues an
+/// encrypted, HttpOnly, SameSite=Strict cookie so browsers, cookie jars (curl/Postman/PowerShell), WebSockets and
+/// EventSource keep the identity without re-sending (and re-verifying) the password.
+/// </summary>
+public sealed class BasicAuthSessionOptions
+{
+    /// <summary>Authentication scheme (and identity authentication type) of the session cookie.</summary>
+    public const string SchemeName = "BasicSession";
+
+    public bool Enabled { get; init; } = false;
+
+    /// <summary>Environments in which the session cookie may be enabled. "Production" is never accepted.</summary>
+    public List<string> AllowedEnvironments { get; init; } = ["Development"];
+
+    /// <summary>Cookie name; must use the <c>__Host-</c> prefix (Secure, Path=/, no Domain).</summary>
+    public string CookieName { get; init; } = "__Host-Autheris.Session";
+
+    /// <summary>Sliding idle timeout of the session in minutes.</summary>
+    [Range(5, 1440)] public int SlidingExpirationMinutes { get; init; } = 480;
+
+    /// <summary>Absolute session lifetime in minutes, independent of activity.</summary>
+    [Range(5, 10080)] public int AbsoluteExpirationMinutes { get; init; } = 1440;
+
+    /// <summary>
+    /// Directory for the ASP.NET Data Protection key ring. Required with multiple replicas (shared volume);
+    /// otherwise the framework default (user profile) is used so cookies survive restarts.
+    /// </summary>
+    public string? KeyDirectory { get; init; }
 }
 
 public sealed class BasicAuthUserConfig

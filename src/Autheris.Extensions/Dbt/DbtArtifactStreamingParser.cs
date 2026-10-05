@@ -1,3 +1,4 @@
+using Autheris.Domain.Common;
 namespace Autheris.Extensions.Dbt;
 
 using System;
@@ -84,7 +85,7 @@ public static class DbtArtifactStreamingParser
                 {
                     foreach (var m in metaProp.EnumerateObject())
                     {
-                        meta[m.Name] = m.Value.ToString();
+                        meta[m.Name] = JsonValueText.From(m.Value);
                     }
                 }
 
@@ -114,7 +115,7 @@ public static class DbtArtifactStreamingParser
                         {
                             foreach (var cm in cmProp.EnumerateObject())
                             {
-                                colMeta[cm.Name] = cm.Value.ToString();
+                                colMeta[cm.Name] = JsonValueText.From(cm.Value);
                             }
                         }
 

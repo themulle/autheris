@@ -177,6 +177,28 @@ query GetGdprDisclosure {
 
 ---
 
+## 7a. Developer Mode: Personas, Banner and Persistence
+
+In `Development` the gateway prints a banner on startup with the useful links and the configured personas (see [F-AUTH-DX](features/f-auth-dx-basic-auth-session.md)).
+
+```bash
+# Run with hot reload
+dotnet watch --project src/Autheris.Api run --launch-profile https
+
+# One-click login as a persona (sets the session cookie, then redirects to GraphQL)
+open "https://localhost:7214/api/dev/login/owner?redirect=/graphql"
+
+# What is relaxed in this instance? (preset, dev features, bypasses; no secrets)
+curl -s https://localhost:7214/api/dev/info | jq .dev
+```
+
+- **Switches:** all development-only switches live in `Gateway:Dev` (preset `Standard`, `Quickstart` or `Strict`); see [configuration guide, section 2.14a](configuration-guide.md).
+- **Persistent database:** `Gateway__Dev__Persist__Enabled=true` keeps approvals and audit data in `.data/dev.db` across restarts. Reset with `scripts/dev-reset.sh` (stop the gateway first; it removes the audit anchor together with the database).
+- **Verbose errors:** a 403 from a role policy names the required and the actual roles; unhandled exceptions return `problem+json` with a `traceId`.
+- **Integration tests under WSL:** if many tests fail with an inotify limit error, run them with `DOTNET_USE_POLLING_FILE_WATCHER=true`.
+
+---
+
 ## 8. Rapid Prototyping with Insecure Modes
 
 During early development or when onboarding complex third-party webhooks (e.g., ServiceNow/Jira local tunnels), you can temporarily loosen security checks via `appsettings.Development.json`:

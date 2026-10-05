@@ -70,6 +70,7 @@ using HotChocolate.Execution.Configuration;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authentication.Negotiate;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -594,6 +595,28 @@ public static class GatewayServiceCollectionExtensions
         authBuilder.AddScheme<AuthenticationSchemeOptions, BasicAuthenticationHandler>(
             GatewayAuthSchemes.Basic, _ => { });
 
+        // 1b. F-AUTH-DX: cookie session after a successful Basic login (allowlisted non-production environments only)
+        var isBasicSessionAllowed = BasicAuthSession.IsAllowed(gatewayOptions, environment);
+        var basicSessionCookieName = gatewayOptions.Authentication.BasicAuth.Session.CookieName;
+        if (isBasicSessionAllowed)
+        {
+            var dataProtection = services.AddDataProtection().SetApplicationName("Autheris.Gateway");
+            if (!string.IsNullOrWhiteSpace(gatewayOptions.Authentication.BasicAuth.Session.KeyDirectory))
+            {
+                dataProtection.PersistKeysToFileSystem(new System.IO.DirectoryInfo(gatewayOptions.Authentication.BasicAuth.Session.KeyDirectory));
+            }
+
+            services.AddSingleton<BasicAuthSessionCookieEvents>();
+            authBuilder.AddCookie(BasicAuthSession.SchemeName, cookie =>
+                BasicAuthSession.ConfigureCookie(cookie, gatewayOptions.Authentication.BasicAuth.Session));
+            Console.WriteLine(
+                "[Autheris] WARNING: BasicAuth.Session is active (developer login cookie). Never enable it in Production.");
+        }
+        else if (BasicAuthSession.GetInactiveReason(gatewayOptions, environment) is { } inactiveReason)
+        {
+            Console.WriteLine($"[Autheris] WARNING: BasicAuth.Session is configured but inactive: {inactiveReason}.");
+        }
+
         // 2. Traefik / Kubernetes Ingress ForwardAuth
         authBuilder.AddScheme<AuthenticationSchemeOptions, ForwardAuthAuthenticationHandler>(
             GatewayAuthSchemes.ForwardAuth, _ => { });
@@ -730,16 +753,28 @@ public static class GatewayServiceCollectionExtensions
                     }
                 }
 
+                // 2b. F-AUTH-DX: session cookie (explicit Authorization headers above always win)
+                if (isBasicSessionAllowed && context.Request.Cookies.ContainsKey(basicSessionCookieName))
+                {
+                    return BasicAuthSession.SchemeName;
+                }
+
                 // 3. Development Test Auth Simulation or Insecure Anonymous Access
                 if (isTestAuthAllowed)
                 {
                     if (context.Request.Headers.ContainsKey("X-Test-User-Sid") ||
                         context.Request.Headers.ContainsKey("X-Test-AppId") ||
-                        string.IsNullOrWhiteSpace(authHeader) ||
                         gatewayOptions.IsAnonymousAccessAllowed)
                     {
                         return TestAuthHandler.SchemeName;
                     }
+                }
+
+                var isHtml = context.Request.Headers.Accept.Any(a => a != null && a.Contains("text/html", StringComparison.OrdinalIgnoreCase));
+                if (isHtml && gatewayOptions.Authentication.BasicAuth.Enabled)
+                {
+                    // Browser request: Prefer Basic challenge when enabled so browser opens native dialog
+                    return GatewayAuthSchemes.Basic;
                 }
 
                 // 4. Fallback challenge when unauthenticated
@@ -756,6 +791,12 @@ public static class GatewayServiceCollectionExtensions
 
         // SEC M-03: Authenticated-user fallback policy and named role policies.
         services.AddAuthorization(GatewayPolicies.Configure);
+        if (DevFeatures.Resolve(gatewayOptions, environment.IsDevelopment()).VerboseErrors)
+        {
+            // F-AUTH-DX: explain policy 403s and give JSON clients structured exception details (traceId)
+            services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, DevAuthorizationResultHandler>();
+            services.AddProblemDetails();
+        }
         services.AddSingleton<Autheris.Application.Interfaces.IGatewayRoleEvaluator, Autheris.Application.Security.GatewayRoleEvaluator>();
         services.AddHttpContextAccessor();
 
@@ -961,6 +1002,29 @@ public static class GatewayServiceCollectionExtensions
         if (options.HighAvailability.TerminationGracePeriodSeconds < options.HighAvailability.DrainDelaySeconds + options.HighAvailability.ShutdownTimeoutSeconds + 10)
         {
             throw new ValidationException("NF-HA-01 Verletzung: TerminationGracePeriodSeconds muss größer als DrainDelay + ShutdownTimeout + 10s sein.");
+        }
+
+        var devErrors = DevOptionsValidator.Validate(options, environment.IsDevelopment());
+        if (devErrors.Count > 0)
+        {
+            throw new ValidationException(string.Join("\n", devErrors));
+        }
+
+        // F-AUTH-DX: session cookie guards (environment allowlist, never Production, no wildcard CORS, shared keys)
+        var basicSessionErrors = BasicAuthSession.Validate(options, environment);
+        if (basicSessionErrors.Count > 0)
+        {
+            throw new ValidationException(string.Join("\n", basicSessionErrors));
+        }
+
+        // R2-1 / N-1: Basic-auth users need a password; SIDs must not contain ':' or start with 'ITSM'
+        if (options.Authentication.BasicAuth.Enabled)
+        {
+            var sidErrors = BasicAuthSession.ValidateUsers(options.Authentication.BasicAuth);
+            if (sidErrors.Count > 0)
+            {
+                throw new ValidationException(string.Join("\n", sidErrors));
+            }
         }
 
         if (options.Authentication.RequireKerberosOnly && options.Authentication.BasicAuth.Enabled)
