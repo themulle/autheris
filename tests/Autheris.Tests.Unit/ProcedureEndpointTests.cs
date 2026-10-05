@@ -465,6 +465,7 @@ public class ProcedureEndpointTests
         data_source: telemetry_db
         mode: read
         validation: declared
+        result_table: api.telemetry
         timeout: 45
         summary: Retrieves device telemetry
         required_roles:
@@ -513,6 +514,7 @@ public class ProcedureEndpointTests
         def.ContextBindings.ShouldContain(b => b.Key == ProcedureContextKey.TenantId && b.ParameterName == "tenant_id");
         def.ContextBindings.ShouldContain(b => b.Key == ProcedureContextKey.UserSid && b.ParameterName == "actor_sid");
         def.DeclaredOutputs.ShouldBe(["timestamp", "device_id", "temperature", "battery_level"]);
+        def.ResultTable.ShouldBe("api.telemetry");
     }
 
     [Theory]
@@ -553,7 +555,8 @@ public class ProcedureEndpointTests
                     Directory = dir,
                     AllowedSchemas = ["api"],
                     AllowedDataSources = ["telemetry_db"],
-                    EnableHotReload = false
+                    EnableHotReload = false,
+                    AllowDeclaredValidation = true
                 }
             }
         });
@@ -611,12 +614,38 @@ public class ProcedureEndpointTests
     }
 
     [Fact]
-    public async Task Execute_DeclaredProcedure_ProjectsOnlyDeclaredOutputsAndStripsUndeclaredColumns()
+    public async Task Execute_DeclaredProcedure_ProjectsDeclaredOutputsAndAppliesConsentColumnRules()
     {
         var f = new Fixture();
         var def = ProcedureDefinitionParser.ParseYaml(ValidYamlDefinition, "telemetry", false, 60);
         f.Registry.Register(def);
-        f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], def.DeclaredOutputs, [], new Dictionary<string, string>()));
+        f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], def.DeclaredOutputs, ["api.telemetry"], new Dictionary<string, string>()));
+
+        f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "api", "telemetry"),
+            Columns =
+            [
+                new TableColumn { ColumnName = "timestamp" },
+                new TableColumn { ColumnName = "device_id" },
+                new TableColumn { ColumnName = "temperature" },
+                new TableColumn { ColumnName = "battery_level" },
+                new TableColumn { ColumnName = "secret_token" }
+            ]
+        });
+        f.Consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Consent>());
+        var columns = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["timestamp"] = ColumnAccessLevel.Clear,
+            ["device_id"] = ColumnAccessLevel.Clear,
+            ["temperature"] = ColumnAccessLevel.Mask,
+            ["battery_level"] = ColumnAccessLevel.Deny,
+            ["secret_token"] = ColumnAccessLevel.Clear
+        };
+        f.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
+            .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), columns, null));
+        f.Masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("***");
 
         f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
             .Returns(new RawProcedureResult(
@@ -631,12 +660,32 @@ public class ProcedureEndpointTests
             User("telemetry-reader"),
             Tenant);
 
-        result.Columns.ShouldBe(["timestamp", "device_id", "temperature", "battery_level"]);
-        result.RowCount.ShouldBe(1);
+        // Review P-1: declared outputs are governed like catalog columns (mask/deny), undeclared columns are removed.
+        result.Columns.ShouldBe(["timestamp", "device_id", "temperature"]);
         result.Rows[0]["device_id"].ShouldBe(42);
-        result.Rows[0]["temperature"].ShouldBe(23.5);
+        result.Rows[0]["temperature"].ShouldBe("***");
+        result.Rows[0].ContainsKey("battery_level").ShouldBeFalse();
         result.Rows[0].ContainsKey("secret_token").ShouldBeFalse();
         result.Rows[0].ContainsKey("internal_status").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Execute_DeclaredProcedureWithoutConsent_IsDenied()
+    {
+        var f = new Fixture();
+        var def = ProcedureDefinitionParser.ParseYaml(ValidYamlDefinition, "telemetry", false, 60);
+        f.Registry.Register(def);
+        f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], def.DeclaredOutputs, ["api.telemetry"], new Dictionary<string, string>()));
+        f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(OrdersTable());
+        f.Consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Consent>());
+        f.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
+            .Returns(ci => TableAccessDecision.Denied(ci.ArgAt<TableIdentifier>(3), "no consent"));
+
+        var svc = f.Create();
+        await Should.ThrowAsync<SecurityException>(() => svc.ExecuteAsync(
+            "get_telemetry", new Dictionary<string, object?> { ["device_id"] = 42 }, User("telemetry-reader"), Tenant));
+        await f.Invoker.DidNotReceiveWithAnyArgs().ExecuteReadAsync(default!, default!, default!, default);
     }
 
     [Fact]
@@ -723,8 +772,8 @@ public class ProcedureEndpointTests
               - name: optional_flag
                 type: bit
                 required: false
-            context:
-              tenant_id: tenant_id
+              - name: tenant_id
+                context: tenant_id
             outputs:
               - crane_id
               - speed
@@ -784,16 +833,17 @@ public class ProcedureEndpointTests
             kind: tvf
             data_source: oracle_ds
             validation: declared
+            rls: none
             parameters:
               - name: crane_id
                 type: int
                 required: true
-            context:
-              tenant_id: tenant_id
+              - name: tenant_id
+                context: tenant_id
             outputs:
               - crane_id
             """;
-        var def = ProcedureDefinitionParser.ParseYaml(yaml, "telemetry", false, 30);
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "telemetry", allowRlsNone: true, 30);
 
         await invoker.ExecuteReadAsync(
             def,
@@ -848,6 +898,7 @@ public class ProcedureEndpointTests
             kind: procedure
             data_source: spark_ds
             validation: declared
+            rls: none
             parameters:
               - name: crane_id
                 type: int
@@ -855,7 +906,7 @@ public class ProcedureEndpointTests
             outputs:
               - crane_id
             """;
-        var def = ProcedureDefinitionParser.ParseYaml(yaml, "telemetry", false, 30);
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "telemetry", allowRlsNone: true, 30);
 
         await invoker.ExecuteReadAsync(
             def,
@@ -865,5 +916,222 @@ public class ProcedureEndpointTests
 
         execCmd.CommandType.ShouldBe(System.Data.CommandType.Text);
         execCmd.CommandText.ShouldBe("CALL schema.usp_telemetry(@crane_id)");
+    }
+
+    // ---------- security review 2026-10-05 (recheck 3): P-1 … P-8 ----------
+
+    [Theory]
+    [InlineData("procedure: api.usp_X\ncontext:\n  tenantid: tenant_id")]                                   // P-5 unknown context key
+    [InlineData("procedure: api.usp_X\ncontext:\n  tenant_id: \"t) UNION SELECT * FROM dbo.Secrets --\"")]  // P-4 injection
+    [InlineData("procedure: api.usp_X\ncontext_bindings:\n  - key: tenant_id\n    parameter: \"a b\"")]  // P-4 invalid identifier
+    [InlineData("procedure: api.usp_X\napproval: four-eyes")]                                                // P-5 unknown top-level key
+    [InlineData("procedure: api.usp_X\nresult_table: \"x; DROP\"")]                                        // P-4 result table
+    [InlineData("procedure: api.usp_X\noutputs:\n  - \"a,b\"")]                                           // P-4 output column
+    [InlineData("procedure: api.usp_X\nmode: delete")]                                                       // unknown mode
+    [InlineData("procedure: api.usp_X\ntimeout: abc")]                                                       // P-3 type error
+    [InlineData("procedure: [api.usp_X")]                                                                     // P-3 syntax error
+    [InlineData("procedure: api.usp_X\ncontext:\n  tenant_id:")]                                            // P-3 null value
+    [InlineData("procedure: api.fn_X\nkind: tvf\ncontext:\n  tenant_id: tenant_id")]                       // P-2 positional context
+    [InlineData("procedure: api.usp_X\nparameters:\n  - name: a\n    type: int\n  - name: A\n    type: int")] // duplicate
+    public void ParseYaml_UnsafeOrUnknownInput_ThrowsFormatException(string yaml)
+    {
+        Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30));
+    }
+
+    [Fact]
+    public void Parse_ArgumentOrderFollowsDeclaration()
+    {
+        const string sql = """
+            -- @procedure api.fn_Telemetry
+            -- @kind tvf
+            -- @context tenant_id -> @tenant
+            -- @param region nvarchar(50) required
+            """;
+        var def = ProcedureDefinitionParser.Parse(sql, "telemetry", false, 30);
+        def.ArgumentOrder.ShouldBe(["tenant", "region"]);
+    }
+
+    [Fact]
+    public async Task Invoker_Tvf_BindsContextAtItsDeclaredPosition()
+    {
+        var (invoker, execCmd) = CreateSqlServerInvoker();
+        const string yaml = """
+            name: tvf_order
+            procedure: api.fn_Telemetry
+            kind: tvf
+            validation: declared
+            result_table: api.telemetry
+            parameters:
+              - name: tenant_id
+                context: tenant_id
+              - name: region
+                type: nvarchar(50)
+            outputs:
+              - region
+            """;
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30);
+
+        await invoker.ExecuteReadAsync(def, new Dictionary<string, object?> { ["region"] = "EU" }, new ProcedureSecurityContext("t-1", "s-1", null), CancellationToken.None);
+
+        // P-2: the client value must never land in the tenant argument.
+        execCmd.CommandText.ShouldBe("SELECT * FROM api.fn_Telemetry(@tenant_id, @region)");
+    }
+
+    private static (MssqlProcedureInvoker Invoker, System.Data.Common.DbCommand ExecCmd) CreateSqlServerInvoker()
+    {
+        var connFactory = Substitute.For<ISqlConnectionFactory>();
+        var conn = Substitute.For<System.Data.Common.DbConnection>();
+        var initCmd = Substitute.For<System.Data.Common.DbCommand>();
+        initCmd.Parameters.Returns(Substitute.For<System.Data.Common.DbParameterCollection>());
+        initCmd.CreateParameter().Returns(Substitute.For<System.Data.Common.DbParameter>());
+        initCmd.ExecuteNonQueryAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(0));
+        var execCmd = Substitute.For<System.Data.Common.DbCommand>();
+        execCmd.Parameters.Returns(Substitute.For<System.Data.Common.DbParameterCollection>());
+        execCmd.CreateParameter().Returns(_ => Substitute.For<System.Data.Common.DbParameter>());
+        var reader = Substitute.For<System.Data.Common.DbDataReader>();
+        reader.FieldCount.Returns(0);
+        reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
+        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+        conn.CreateCommand().Returns(initCmd, execCmd);
+        connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(conn));
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["default"] = new() { ConnectionString = "Server=localhost;", Provider = "SqlServer" }
+                }
+            },
+            SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { Enabled = true, ConnectionName = "default" } }
+        });
+
+        return (new MssqlProcedureInvoker(new ProcedureConnectionProvider(connFactory, options), options), execCmd);
+    }
+
+    [Theory]
+    [InlineData("Sqlite")]
+    [InlineData("Oracle")]
+    [InlineData("Databricks")]
+    public void ConnectionProvider_DialectWithoutSecurityContext_IsRejected(string provider)
+    {
+        var options = Options.Create(new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["ds"] = new() { ConnectionString = "x", Provider = provider }
+                }
+            },
+            SqlEndpoints = new SqlEndpointsOptions { Procedures = new ProcedureEndpointsOptions { Enabled = true, ConnectionName = "ds" } }
+        });
+        var provider2 = new ProcedureConnectionProvider(Substitute.For<ISqlConnectionFactory>(), options);
+        var def = ProcedureDefinitionParser.Parse("-- @procedure api.usp_X\n-- @validation declared\n-- @output a", "x", false, 30);
+
+        // P-6: no tenant context on these providers -> never run with rls: session-context.
+        Should.Throw<InvalidOperationException>(() => provider2.Resolve(def));
+    }
+
+    [Fact]
+    public void Loader_DeclaredModeOutsideDevelopmentWithoutOptIn_IsRejected()
+    {
+        var (loader, registry, dir) = CreateLoader("api");
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "get_telemetry.proc.yaml"), ValidYamlDefinition.Replace("data_source: telemetry_db\n", string.Empty, StringComparison.Ordinal));
+            loader.LoadFromDirectory().ShouldBe(0); // P-1
+            registry.GetAll().ShouldBeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Loader_DeclaredModeWithoutResultTable_IsRejectedEvenWithOptIn()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "autheris-proc-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var options = Options.Create(new GatewayOptions
+        {
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, Directory = dir, AllowedSchemas = ["api"], EnableHotReload = false, AllowDeclaredValidation = true }
+            }
+        });
+        var registry = new InMemoryProcedureRegistry();
+        var loader = new ProcedureDefinitionLoader(registry, options);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "custom.proc.sql"), "-- @procedure api.usp_Custom\n-- @validation declared\n-- @output col_a");
+            loader.LoadFromDirectory().ShouldBe(0); // P-1: no result table -> no consent -> rejected
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Loader_BrokenYaml_IsSkippedWithoutException()
+    {
+        var (loader, registry, dir) = CreateLoader("api");
+        try
+        {
+            string file = Path.Combine(dir, "broken.proc.yaml");
+            File.WriteAllText(file, "procedure: [api.usp_X\nparameters: x");
+            Should.NotThrow(() => loader.TryLoadFile(file, dir)).ShouldBeFalse(); // P-3
+            registry.GetAll().ShouldBeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Loader_DuplicateEndpointNameAndRenamedEndpoint_AreHandledFailClosed()
+    {
+        var (loader, registry, dir) = CreateLoader("api");
+        try
+        {
+            string first = Path.Combine(dir, "a.proc.sql");
+            string second = Path.Combine(dir, "b.proc.sql");
+            File.WriteAllText(first, ValidHeader);
+            File.WriteAllText(second, ValidHeader);
+
+            loader.TryLoadFile(first, dir).ShouldBeTrue();
+            loader.TryLoadFile(second, dir).ShouldBeFalse(); // P-8: same @name in a second file is rejected
+            registry.GetAll().Count.ShouldBe(1);
+
+            File.WriteAllText(first, ValidHeader.Replace("@name get_orders", "@name get_orders_v2", StringComparison.Ordinal));
+            loader.TryLoadFile(first, dir).ShouldBeTrue();
+            registry.TryGet("get_orders", out _).ShouldBeFalse(); // P-8: old name is removed
+            registry.TryGet("get_orders_v2", out _).ShouldBeTrue();
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void Registry_TryMarkActive_IgnoresReplacedDefinition()
+    {
+        var registry = new InMemoryProcedureRegistry();
+        var original = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        registry.Register(original);
+        var replacement = original with { Summary = "changed during validation" };
+        registry.Register(replacement);
+
+        var ok = new ProcedureValidationResult(true, [], [], [], new Dictionary<string, string>());
+        registry.TryMarkActive(original, ok).ShouldBeFalse(); // P-7
+        registry.TryGet(original.Name, out var reg).ShouldBeTrue();
+        reg!.State.ShouldBe(ProcedureState.Pending);
+
+        registry.TryMarkActive(replacement, ok).ShouldBeTrue();
     }
 }

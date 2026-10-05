@@ -119,6 +119,13 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             tableKeys.Add(definition.ResultTable);
         }
 
+        if (definition.ValidationMode == ProcedureValidationMode.Declared && tableKeys.Count == 0)
+        {
+            // Review P-1: without a result table no consent could be evaluated (fail-closed).
+            await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = "no-result-table" }, ct).ConfigureAwait(false);
+            throw new SecurityException(DeniedMessage);
+        }
+
         foreach (var key in tableKeys)
         {
             var evaluated = await EvaluateTableAsync(key, user, userSid, tenantId, consentBypassed, ct).ConfigureAwait(false);
@@ -382,13 +389,11 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 continue;
             }
 
-            if (definition.ValidationMode == ProcedureValidationMode.Declared)
+            // Review P-1: declared mode only narrows the result to the declared outputs; the columns are then governed
+            // exactly like in catalog mode (consent deny/mask of the result table, unknown columns removed).
+            if (definition.ValidationMode == ProcedureValidationMode.Declared &&
+                !definition.DeclaredOutputs.Contains(col, StringComparer.OrdinalIgnoreCase))
             {
-                if (definition.DeclaredOutputs.Count == 0 || definition.DeclaredOutputs.Contains(col, StringComparer.OrdinalIgnoreCase))
-                {
-                    plan.Add((i, col, ColumnAccessLevel.Clear, null));
-                }
-
                 continue;
             }
 

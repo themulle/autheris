@@ -99,19 +99,37 @@ public sealed class StoredProcedureCatalogValidator
         List<string> errors,
         CancellationToken ct)
     {
-        // 1. Existence and EXECUTE permission
-        object? idObj = await ScalarAsync(connection, "SELECT OBJECT_ID(@n, N'P')", ct, ("@n", quoted)).ConfigureAwait(false);
-        if (idObj == null || idObj is DBNull)
+        // 1. Existence, object type and EXECUTE (procedure) / SELECT (table-valued function) permission
+        bool isFunction = definition.Kind == ProcedureKind.TableValuedFunction;
+        int objectId;
+        string objectType;
+        await using (var cmd = CreateCommand(connection, "SELECT object_id, type FROM sys.objects WHERE object_id = OBJECT_ID(@n)", ("@n", quoted)))
+        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
-            return ProcedureValidationResult.Failed("The object does not exist or is not a stored procedure.");
+            if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                return ProcedureValidationResult.Failed("The object does not exist.");
+            }
+
+            objectId = Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture);
+            objectType = reader.GetString(1).Trim();
         }
 
-        int objectId = Convert.ToInt32(idObj, CultureInfo.InvariantCulture);
+        bool typeMatches = isFunction
+            ? objectType is "IF" or "TF"
+            : string.Equals(objectType, "P", StringComparison.Ordinal);
+        if (!typeMatches)
+        {
+            return ProcedureValidationResult.Failed(isFunction
+                ? "The object is not an inline or multi-statement table-valued function."
+                : "The object is not a stored procedure.");
+        }
 
-        object? execPerm = await ScalarAsync(connection, "SELECT HAS_PERMS_BY_NAME(@n, N'OBJECT', N'EXECUTE')", ct, ("@n", quoted)).ConfigureAwait(false);
+        string permission = isFunction ? "SELECT" : "EXECUTE";
+        object? execPerm = await ScalarAsync(connection, "SELECT HAS_PERMS_BY_NAME(@n, N'OBJECT', @perm)", ct, ("@n", quoted), ("@perm", permission)).ConfigureAwait(false);
         if (execPerm == null || execPerm is DBNull || Convert.ToInt32(execPerm, CultureInfo.InvariantCulture) != 1)
         {
-            errors.Add("The technical procedure login has no EXECUTE permission on the procedure.");
+            errors.Add($"The technical procedure login has no {permission} permission on '{definition.ProcedureName}'.");
         }
 
         // 2. Module properties: EXECUTE AS and dynamic SQL
@@ -144,15 +162,17 @@ public sealed class StoredProcedureCatalogValidator
 
         // 3. Parameters
         var dbParams = new Dictionary<string, (string Type, int MaxLength, bool HasDefault, bool IsOutput)>(StringComparer.OrdinalIgnoreCase);
+        var dbParamOrder = new List<string>();
         await using (var cmd = CreateCommand(
             connection,
-            "SELECT name, TYPE_NAME(user_type_id), max_length, has_default_value, is_output FROM sys.parameters WHERE object_id = @id AND parameter_id > 0",
+            "SELECT name, TYPE_NAME(user_type_id), max_length, has_default_value, is_output FROM sys.parameters WHERE object_id = @id AND parameter_id > 0 ORDER BY parameter_id",
             ("@id", objectId)))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
                 string pname = reader.GetString(0).TrimStart('@');
+                dbParamOrder.Add(pname);
                 dbParams[pname] = (
                     reader.GetString(1).ToLowerInvariant(),
                     Convert.ToInt32(reader.GetValue(2), CultureInfo.InvariantCulture),
@@ -216,24 +236,43 @@ public sealed class StoredProcedureCatalogValidator
             }
         }
 
+        // Review P-2: function arguments are positional. The declared order (client and context arguments) must match
+        // the signature exactly, otherwise a client value could land in the tenant argument.
+        if (isFunction && !definition.ArgumentOrder.SequenceEqual(dbParamOrder, StringComparer.OrdinalIgnoreCase))
+        {
+            errors.Add($"The declared argument order ({string.Join(", ", definition.ArgumentOrder)}) does not match the function signature ({string.Join(", ", dbParamOrder)}).");
+        }
+
         // 4. Result set structure
         var resultColumns = new List<string>();
-        await using (var cmd = CreateCommand(
-            connection,
-            "SELECT name, error_number FROM sys.dm_exec_describe_first_result_set_for_object(@id, 0) WHERE is_hidden = 0 ORDER BY column_ordinal",
-            ("@id", objectId)))
-        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        if (isFunction)
         {
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            await using var fnCmd = CreateCommand(connection, "SELECT name FROM sys.columns WHERE object_id = @id ORDER BY column_id", ("@id", objectId));
+            await using var fnReader = await fnCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await fnReader.ReadAsync(ct).ConfigureAwait(false))
             {
-                if (!reader.IsDBNull(1) || reader.IsDBNull(0))
+                resultColumns.Add(fnReader.GetString(0));
+            }
+        }
+        else
+        {
+            await using (var cmd = CreateCommand(
+                connection,
+                "SELECT name, error_number FROM sys.dm_exec_describe_first_result_set_for_object(@id, 0) WHERE is_hidden = 0 ORDER BY column_ordinal",
+                ("@id", objectId)))
+            await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
+            {
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    errors.Add("The result set structure cannot be determined (dynamic result, temp tables or unnamed columns).");
-                    resultColumns.Clear();
-                    break;
-                }
+                    if (!reader.IsDBNull(1) || reader.IsDBNull(0))
+                    {
+                        errors.Add("The result set structure cannot be determined (dynamic result, temp tables or unnamed columns).");
+                        resultColumns.Clear();
+                        break;
+                    }
 
-                resultColumns.Add(reader.GetString(0));
+                    resultColumns.Add(reader.GetString(0));
+                }
             }
         }
 

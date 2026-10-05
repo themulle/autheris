@@ -48,8 +48,20 @@ public sealed class ProcedureConnectionProvider
             throw new InvalidOperationException("Stored procedure endpoints with catalog validation currently support SQL Server only. Use 'validation: declared' for other database providers.");
         }
 
+        // Review P-6: only SQL Server (read-only SESSION_CONTEXT) and PostgreSQL (transaction-local set_config) can pass
+        // the security context to the database. Other providers would run without tenant isolation, which is only
+        // acceptable with an explicit 'rls: none' (Development only).
+        if (definition.RlsMode == ProcedureRlsMode.SessionContext && !SupportsSecurityContext(dialect))
+        {
+            throw new InvalidOperationException($"SQL provider '{conn.Provider}' cannot carry the security context (rls: session-context). Only SQL Server and PostgreSQL are supported.");
+        }
+
         return conn;
     }
+
+    /// <summary>Review P-6: dialects that receive tenant/user/purpose before the call.</summary>
+    public static bool SupportsSecurityContext(Autheris.Domain.Common.DatabaseDialect dialect) =>
+        dialect is Autheris.Domain.Common.DatabaseDialect.SqlServer or Autheris.Domain.Common.DatabaseDialect.PostgreSql;
 
     public static bool TryResolveDialect(string? provider, out Autheris.Domain.Common.DatabaseDialect dialect)
     {

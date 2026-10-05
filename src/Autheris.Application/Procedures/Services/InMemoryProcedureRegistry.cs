@@ -51,4 +51,46 @@ public sealed class InMemoryProcedureRegistry : IProcedureRegistry
                 DisabledReason = reason
             });
     }
+
+    public bool TryMarkActive(ProcedureDefinition expected, ProcedureValidationResult validation)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        ArgumentNullException.ThrowIfNull(validation);
+        return TryUpdate(expected, current => current with
+        {
+            State = ProcedureState.Active,
+            Validation = validation,
+            ValidatedAt = DateTimeOffset.UtcNow,
+            DisabledReason = null
+        });
+    }
+
+    public bool TryMarkDisabled(ProcedureDefinition expected, string reason)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        return TryUpdate(expected, current => current with
+        {
+            State = ProcedureState.Disabled,
+            ValidatedAt = DateTimeOffset.UtcNow,
+            DisabledReason = reason
+        });
+    }
+
+    private bool TryUpdate(ProcedureDefinition expected, Func<RegisteredProcedure, RegisteredProcedure> update)
+    {
+        while (_items.TryGetValue(expected.Name, out var current))
+        {
+            if (!ReferenceEquals(current.Definition, expected))
+            {
+                return false; // replaced (hot reload) or a different declaration with the same name
+            }
+
+            if (_items.TryUpdate(expected.Name, update(current), current))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
