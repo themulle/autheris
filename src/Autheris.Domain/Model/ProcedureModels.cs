@@ -53,6 +53,16 @@ public enum ProcedureValidationMode
     Declared = 1
 }
 
+/// <summary>The invocation style of the procedure endpoint.</summary>
+public enum ProcedureKind
+{
+    /// <summary>Stored Procedure invoked via CommandType.StoredProcedure or CALL.</summary>
+    Procedure = 0,
+
+    /// <summary>Table-Valued Function invoked via SELECT * FROM func(...).</summary>
+    TableValuedFunction = 1
+}
+
 /// <summary>
 /// Immutable declaration of a stored procedure exposed as governed REST endpoint (F-SQL-02).
 /// </summary>
@@ -71,7 +81,8 @@ public sealed record ProcedureDefinition(
     bool AllowDynamicSql,
     int TimeoutSeconds,
     ProcedureValidationMode ValidationMode = ProcedureValidationMode.Catalog,
-    IReadOnlyList<string>? DeclaredOutputs = null)
+    IReadOnlyList<string>? DeclaredOutputs = null,
+    ProcedureKind Kind = ProcedureKind.Procedure)
 {
     public IReadOnlyList<string> DeclaredOutputs { get; init; } = DeclaredOutputs ?? [];
 }

@@ -50,7 +50,7 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
         {
             // 1. Session settings + read-only security context on the very same connection (pool reuse safe:
             //    the context is set on every call and sp_reset_connection clears it on checkout).
-            Autheris.Application.Sql.Services.GovernedSqlExecutionService.TryMapProviderToDialect(connOptions.Provider, out var dialect);
+            ProcedureConnectionProvider.TryResolveDialect(connOptions.Provider, out var dialect);
 
             if (dialect == Autheris.Domain.Common.DatabaseDialect.SqlServer)
             {
@@ -80,21 +80,34 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                 await init.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            // 2. The procedure call itself.
+            // 2. The procedure or table-valued function call.
             await using var cmd = connection.CreateCommand();
-            cmd.CommandType = CommandType.StoredProcedure;
-            cmd.CommandText = definition.ProcedureName;
             cmd.CommandTimeout = Math.Max(1, Math.Min(definition.TimeoutSeconds, settings.MaxTimeoutSeconds));
+
+            string paramPrefix = dialect == Autheris.Domain.Common.DatabaseDialect.Oracle ? ":" : "@";
+            var paramPlaceholders = new List<string>();
 
             foreach (var p in definition.Parameters)
             {
-                if (!clientValues.TryGetValue(p.Name, out var value) || value == null)
+                if (clientValues.TryGetValue(p.Name, out var value) && value != null)
                 {
-                    continue; // optional parameter: the procedure default applies
+                    var dbParam = AddParameter(cmd, paramPrefix + p.Name, MapDbType(p.SqlType), value);
+                    ApplyShape(dbParam, p);
+                    paramPlaceholders.Add(paramPrefix + p.Name);
                 }
-
-                var dbParam = AddParameter(cmd, "@" + p.Name, MapDbType(p.SqlType), value);
-                ApplyShape(dbParam, p);
+                else if (definition.Kind == ProcedureKind.TableValuedFunction)
+                {
+                    if (dialect == Autheris.Domain.Common.DatabaseDialect.SqlServer)
+                    {
+                        paramPlaceholders.Add("DEFAULT");
+                    }
+                    else
+                    {
+                        var dbParam = AddParameter(cmd, paramPrefix + p.Name, MapDbType(p.SqlType), DBNull.Value);
+                        ApplyShape(dbParam, p);
+                        paramPlaceholders.Add(paramPrefix + p.Name);
+                    }
+                }
             }
 
             foreach (var binding in definition.ContextBindings)
@@ -105,7 +118,27 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                     ProcedureContextKey.UserSid => security.UserSid,
                     _ => security.Purpose
                 };
-                AddParameter(cmd, "@" + binding.ParameterName, DbType.String, v);
+                AddParameter(cmd, paramPrefix + binding.ParameterName, DbType.String, v);
+                paramPlaceholders.Add(paramPrefix + binding.ParameterName);
+            }
+
+            if (definition.Kind == ProcedureKind.TableValuedFunction)
+            {
+                cmd.CommandType = CommandType.Text;
+                string args = string.Join(", ", paramPlaceholders);
+                cmd.CommandText = dialect == Autheris.Domain.Common.DatabaseDialect.Oracle
+                    ? $"SELECT * FROM TABLE({definition.ProcedureName}({args}))"
+                    : $"SELECT * FROM {definition.ProcedureName}({args})";
+            }
+            else if (dialect is Autheris.Domain.Common.DatabaseDialect.Databricks)
+            {
+                cmd.CommandType = CommandType.Text;
+                cmd.CommandText = $"CALL {definition.ProcedureName}({string.Join(", ", paramPlaceholders)})";
+            }
+            else
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.CommandText = definition.ProcedureName;
             }
 
             try

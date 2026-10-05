@@ -638,4 +638,232 @@ public class ProcedureEndpointTests
         result.Rows[0].ContainsKey("secret_token").ShouldBeFalse();
         result.Rows[0].ContainsKey("internal_status").ShouldBeFalse();
     }
+
+    [Fact]
+    public void ParseYaml_WithTvfKind_MapsToTableValuedFunction()
+    {
+        const string yaml = """
+            name: get_crane_telemetry
+            procedure: api.ufn_GetCraneTelemetry
+            kind: tvf
+            validation: declared
+            outputs:
+              - crane_id
+              - speed
+            """;
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "telemetry", false, 30);
+        def.Kind.ShouldBe(ProcedureKind.TableValuedFunction);
+        def.ProcedureName.ShouldBe("api.ufn_GetCraneTelemetry");
+    }
+
+    [Fact]
+    public void ParseSql_WithTvfKind_MapsToTableValuedFunction()
+    {
+        const string sql = """
+            -- @procedure api.ufn_GetCraneTelemetry
+            -- @kind tvf
+            -- @validation declared
+            -- @output crane_id, speed
+            """;
+        var def = ProcedureDefinitionParser.Parse(sql, "telemetry", false, 30);
+        def.Kind.ShouldBe(ProcedureKind.TableValuedFunction);
+    }
+
+    [Fact]
+    public async Task Invoker_TvfKind_GeneratesSelectQuery_ForSqlServer()
+    {
+        var connFactory = Substitute.For<ISqlConnectionFactory>();
+        var conn = Substitute.For<System.Data.Common.DbConnection>();
+
+        var initCmd = Substitute.For<System.Data.Common.DbCommand>();
+        initCmd.Parameters.Returns(Substitute.For<System.Data.Common.DbParameterCollection>());
+        initCmd.CreateParameter().Returns(Substitute.For<System.Data.Common.DbParameter>());
+        initCmd.ExecuteNonQueryAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(0));
+
+        var execCmd = Substitute.For<System.Data.Common.DbCommand>();
+        execCmd.Parameters.Returns(Substitute.For<System.Data.Common.DbParameterCollection>());
+        execCmd.CreateParameter().Returns(Substitute.For<System.Data.Common.DbParameter>());
+        var reader = Substitute.For<System.Data.Common.DbDataReader>();
+        reader.FieldCount.Returns(0);
+        reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
+        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+
+        conn.CreateCommand().Returns(initCmd, execCmd);
+
+        connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(conn));
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["default"] = new() { ConnectionString = "Server=localhost;", Provider = "SqlServer" }
+                }
+            },
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, ConnectionName = "default" }
+            }
+        });
+
+        var provider = new ProcedureConnectionProvider(connFactory, options);
+        var invoker = new MssqlProcedureInvoker(provider, options);
+
+        const string yaml = """
+            name: get_crane_telemetry
+            procedure: api.ufn_GetCraneTelemetry
+            kind: tvf
+            validation: declared
+            parameters:
+              - name: crane_id
+                type: int
+                required: true
+              - name: optional_flag
+                type: bit
+                required: false
+            context:
+              tenant_id: tenant_id
+            outputs:
+              - crane_id
+              - speed
+            """;
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "telemetry", false, 30);
+
+        await invoker.ExecuteReadAsync(
+            def,
+            new Dictionary<string, object?> { ["crane_id"] = 123 },
+            new ProcedureSecurityContext("t-1", "s-1", "read"),
+            CancellationToken.None);
+
+        execCmd.CommandType.ShouldBe(System.Data.CommandType.Text);
+        execCmd.CommandText.ShouldBe("SELECT * FROM api.ufn_GetCraneTelemetry(@crane_id, DEFAULT, @tenant_id)");
+    }
+
+    [Fact]
+    public async Task Invoker_TvfKind_GeneratesTableSelect_ForOracle()
+    {
+        var connFactory = Substitute.For<ISqlConnectionFactory>();
+        var conn = Substitute.For<System.Data.Common.DbConnection>();
+
+        var execCmd = Substitute.For<System.Data.Common.DbCommand>();
+        execCmd.Parameters.Returns(Substitute.For<System.Data.Common.DbParameterCollection>());
+        execCmd.CreateParameter().Returns(Substitute.For<System.Data.Common.DbParameter>());
+        var reader = Substitute.For<System.Data.Common.DbDataReader>();
+        reader.FieldCount.Returns(0);
+        reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
+        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+
+        conn.CreateCommand().Returns(execCmd);
+
+        connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(conn));
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["oracle_ds"] = new() { ConnectionString = "Data Source=oracle;", Provider = "Oracle" }
+                }
+            },
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, ConnectionName = "oracle_ds" }
+            }
+        });
+
+        var provider = new ProcedureConnectionProvider(connFactory, options);
+        var invoker = new MssqlProcedureInvoker(provider, options);
+
+        const string yaml = """
+            name: get_crane_telemetry
+            procedure: api.ufn_GetCraneTelemetry
+            kind: tvf
+            data_source: oracle_ds
+            validation: declared
+            parameters:
+              - name: crane_id
+                type: int
+                required: true
+            context:
+              tenant_id: tenant_id
+            outputs:
+              - crane_id
+            """;
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "telemetry", false, 30);
+
+        await invoker.ExecuteReadAsync(
+            def,
+            new Dictionary<string, object?> { ["crane_id"] = 456 },
+            new ProcedureSecurityContext("t-1", "s-1", "read"),
+            CancellationToken.None);
+
+        execCmd.CommandType.ShouldBe(System.Data.CommandType.Text);
+        execCmd.CommandText.ShouldBe("SELECT * FROM TABLE(api.ufn_GetCraneTelemetry(:crane_id, :tenant_id))");
+    }
+
+    [Fact]
+    public async Task Invoker_ProcedureKind_GeneratesCall_ForDatabricks()
+    {
+        var connFactory = Substitute.For<ISqlConnectionFactory>();
+        var conn = Substitute.For<System.Data.Common.DbConnection>();
+
+        var execCmd = Substitute.For<System.Data.Common.DbCommand>();
+        execCmd.Parameters.Returns(Substitute.For<System.Data.Common.DbParameterCollection>());
+        execCmd.CreateParameter().Returns(Substitute.For<System.Data.Common.DbParameter>());
+        var reader = Substitute.For<System.Data.Common.DbDataReader>();
+        reader.FieldCount.Returns(0);
+        reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
+        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+
+        conn.CreateCommand().Returns(execCmd);
+
+        connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(conn));
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["spark_ds"] = new() { ConnectionString = "Server=databricks;", Provider = "Databricks" }
+                }
+            },
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, ConnectionName = "spark_ds" }
+            }
+        });
+
+        var provider = new ProcedureConnectionProvider(connFactory, options);
+        var invoker = new MssqlProcedureInvoker(provider, options);
+
+        const string yaml = """
+            name: proc_crane_telemetry
+            procedure: schema.usp_telemetry
+            kind: procedure
+            data_source: spark_ds
+            validation: declared
+            parameters:
+              - name: crane_id
+                type: int
+                required: true
+            outputs:
+              - crane_id
+            """;
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "telemetry", false, 30);
+
+        await invoker.ExecuteReadAsync(
+            def,
+            new Dictionary<string, object?> { ["crane_id"] = 789 },
+            new ProcedureSecurityContext("t-1", "s-1", "read"),
+            CancellationToken.None);
+
+        execCmd.CommandType.ShouldBe(System.Data.CommandType.Text);
+        execCmd.CommandText.ShouldBe("CALL schema.usp_telemetry(@crane_id)");
+    }
 }
