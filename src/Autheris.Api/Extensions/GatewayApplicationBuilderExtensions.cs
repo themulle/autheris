@@ -31,6 +31,19 @@ public static class GatewayApplicationBuilderExtensions
         }
         app.UseCors();
 
+        // SEC C-1 Edge Stripping: Strip any client-supplied x-autheris-* headers from untrusted clients
+        app.Use(async (context, next) =>
+        {
+            var headersToRemove = context.Request.Headers.Keys
+                .Where(k => k.StartsWith("x-autheris-", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var h in headersToRemove)
+            {
+                context.Request.Headers.Remove(h);
+            }
+            await next();
+        });
+
         // HTTP Security Response Headers (MED-01)
         app.Use(async (context, next) =>
         {

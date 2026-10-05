@@ -20,7 +20,27 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
     internal SqliteConnection Connection => _connection;
     private readonly IEpochValidationService _epochValidationService;
     private readonly SemaphoreSlim _lock = new(1, 1);
-    private readonly ConcurrentDictionary<string, TableMetadata?> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
+    private volatile bool _isAuditPipelineFaulted = false;
+    public bool IsAuditPipelineFaulted => _isAuditPipelineFaulted;
+
+    public async Task<bool> PingAsync(CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "SELECT 1;";
+            var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+            return res != null;
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     private readonly Channel<AuditLogEntry> _auditChannel;
     private readonly CancellationTokenSource _auditCts = new();
     private readonly Task _auditProcessorTask;
@@ -50,7 +70,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
 
         InitializeDatabase();
 
-        var channelOptions = new BoundedChannelOptions(100_000)
+        // SEC R2-3: Bounded channel with backpressure to limit in-flight audit entries
+        var channelOptions = new BoundedChannelOptions(5_000)
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,

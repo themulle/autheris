@@ -15,6 +15,7 @@
     <Project Path="tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj" />
     <Project Path="tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj" />
     <Project Path="tests/Autheris.Extensions.Tests/Autheris.Extensions.Tests.csproj" />
+    <Project Path="tests/TrinoSqlEngine.Tests/TrinoSqlEngine.Tests.csproj" />
   </Folder>
 
   <Project Path="src/TrinoSqlEngine/TrinoSqlEngine.csproj" />

@@ -569,8 +569,11 @@ public partial class SqliteGovernanceRepository
         try
         {
             using var cmd = _connection.CreateCommand();
-            cmd.CommandText = @"INSERT INTO CONSENT_REQUESTS (id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref, business_justification, status, requested_at, requested_valid_to, itsm_ticket_id, tenant_id)
-                                VALUES (@id, @tid, @req, @type, @ref, @just, @stat, @at, @to, @ticketId, @tenantId)";
+            var reqIdsJson = request.RequesterIdentifiers.Count > 0
+                ? JsonSerializer.Serialize(request.RequesterIdentifiers)
+                : null;
+            cmd.CommandText = @"INSERT INTO CONSENT_REQUESTS (id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref, business_justification, status, requested_at, requested_valid_to, itsm_ticket_id, tenant_id, requester_identifiers_json)
+                                VALUES (@id, @tid, @req, @type, @ref, @just, @stat, @at, @to, @ticketId, @tenantId, @reqIds)";
             cmd.Parameters.AddWithValue("@id", request.Id.ToString());
             cmd.Parameters.AddWithValue("@tid", request.TableId.ToString());
             cmd.Parameters.AddWithValue("@req", request.RequesterSid.Value);
@@ -582,6 +585,7 @@ public partial class SqliteGovernanceRepository
             cmd.Parameters.AddWithValue("@to", request.RequestedValidTo.ToString("O"));
             cmd.Parameters.AddWithValue("@ticketId", (object?)request.ItsmTicketId ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@tenantId", request.TenantId.Value);
+            cmd.Parameters.AddWithValue("@reqIds", (object?)reqIdsJson ?? DBNull.Value);
 
             await cmd.ExecuteNonQueryAsync(ct);
             return request;
@@ -601,7 +605,7 @@ public partial class SqliteGovernanceRepository
             cmd.CommandText = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name,
-                                       r.itsm_ticket_id, r.tenant_id
+                                       r.itsm_ticket_id, r.tenant_id, r.requester_identifiers_json
                                 FROM CONSENT_REQUESTS r
                                 JOIN TABLES t ON r.table_id = t.id
                                 LEFT JOIN POLICY_EPOCHS p ON t.id = p.table_id
@@ -611,6 +615,11 @@ public partial class SqliteGovernanceRepository
             using var reader = await cmd.ExecuteReaderAsync(ct);
             if (await reader.ReadAsync(ct))
             {
+                var reqIdsJson = reader.IsDBNull(14) ? null : reader.GetString(14);
+                var reqIds = !string.IsNullOrWhiteSpace(reqIdsJson)
+                    ? (JsonSerializer.Deserialize<List<string>>(reqIdsJson) ?? new List<string>())
+                    : new List<string>();
+
                 return new ConsentRequest
                 {
                     Id = Guid.Parse(reader.GetString(0)),
@@ -624,7 +633,8 @@ public partial class SqliteGovernanceRepository
                     RequestedValidTo = DateTimeOffset.Parse(reader.GetString(8)),
                     TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                     ItsmTicketId = reader.IsDBNull(12) ? null : reader.GetString(12),
-                    TenantId = reader.IsDBNull(13) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(13))
+                    TenantId = reader.IsDBNull(13) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(13)),
+                    RequesterIdentifiers = reqIds
                 };
             }
             return null;
@@ -653,7 +663,7 @@ public partial class SqliteGovernanceRepository
             cmd.CommandText = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name,
-                                       r.itsm_ticket_id, r.tenant_id
+                                       r.itsm_ticket_id, r.tenant_id, r.requester_identifiers_json
                                 FROM CONSENT_REQUESTS r
                                 JOIN TABLES t ON r.table_id = t.id
                                 LEFT JOIN POLICY_EPOCHS p ON t.id = p.table_id
@@ -668,6 +678,11 @@ public partial class SqliteGovernanceRepository
             using var reader = await cmd.ExecuteReaderAsync(ct);
             if (await reader.ReadAsync(ct))
             {
+                var reqIdsJson = reader.IsDBNull(14) ? null : reader.GetString(14);
+                var reqIds = !string.IsNullOrWhiteSpace(reqIdsJson)
+                    ? (JsonSerializer.Deserialize<List<string>>(reqIdsJson) ?? new List<string>())
+                    : new List<string>();
+
                 return new ConsentRequest
                 {
                     Id = Guid.Parse(reader.GetString(0)),
@@ -681,7 +696,8 @@ public partial class SqliteGovernanceRepository
                     RequestedValidTo = DateTimeOffset.Parse(reader.GetString(8)),
                     TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
                     ItsmTicketId = reader.IsDBNull(12) ? null : reader.GetString(12),
-                    TenantId = reader.IsDBNull(13) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(13))
+                    TenantId = reader.IsDBNull(13) ? TenantId.LegacySingleTenant : new TenantId(reader.GetString(13)),
+                    RequesterIdentifiers = reqIds
                 };
             }
             return null;

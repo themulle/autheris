@@ -42,11 +42,17 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         {
             if (_governanceRepository is SqliteGovernanceRepository sqliteRepo)
             {
-                using var cmd = sqliteRepo.Connection.CreateCommand();
-                cmd.CommandText = "SELECT 1;";
-                var res = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-                dbHealthy = res != null;
-                dbDesc = dbHealthy ? "SQLite Governance DB connection active." : "SQLite query returned null.";
+                // SEC E-12: Use thread-safe PingAsync behind _lock to avoid concurrency collisions with running transactions
+                dbHealthy = await sqliteRepo.PingAsync(ct).ConfigureAwait(false);
+                if (sqliteRepo.IsAuditPipelineFaulted)
+                {
+                    dbHealthy = false;
+                    dbDesc = "SQLite Governance DB: Audit pipeline is faulted.";
+                }
+                else
+                {
+                    dbDesc = dbHealthy ? "SQLite Governance DB connection active." : "SQLite query returned null.";
+                }
             }
             else if (_governanceRepository != null)
             {

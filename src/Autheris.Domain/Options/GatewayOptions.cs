@@ -372,6 +372,7 @@ public sealed class ReverseProxyOptions
 public sealed class HighAvailabilityOptions
 {
     public bool MultiNodeClusterMode { get; init; } = false;
+    public int Replicas { get; init; } = 1;
     [Range(1, 30)] public int DrainDelaySeconds { get; init; } = 5;
     [Range(5, 120)] public int QueryTimeoutSeconds { get; init; } = 30;
     [Range(10, 180)] public int ShutdownTimeoutSeconds { get; init; } = 40;

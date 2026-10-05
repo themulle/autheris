@@ -20,7 +20,7 @@ public partial class SqliteGovernanceRepository
             using var pragmaCmd = _connection.CreateCommand();
             pragmaCmd.CommandText = @"
                 PRAGMA journal_mode = WAL;
-                PRAGMA synchronous = NORMAL;
+                PRAGMA synchronous = FULL;
                 PRAGMA busy_timeout = 5000;
                 PRAGMA cache_size = -64000;
                 PRAGMA temp_store = MEMORY;
@@ -199,7 +199,8 @@ public partial class SqliteGovernanceRepository
                 requested_at TEXT NOT NULL,
                 requested_valid_to TEXT NOT NULL,
                 itsm_ticket_id TEXT,
-                tenant_id TEXT
+                tenant_id TEXT,
+                requester_identifiers_json TEXT
             );
 
             CREATE TABLE IF NOT EXISTS APPROVAL_STEPS (
@@ -292,7 +293,8 @@ public partial class SqliteGovernanceRepository
 
         string[] requiredCols = {
             "itsm_ticket_id TEXT",
-            "tenant_id TEXT"
+            "tenant_id TEXT",
+            "requester_identifiers_json TEXT"
         };
 
         foreach (var colDef in requiredCols)
