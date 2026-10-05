@@ -195,7 +195,8 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
             throw new InvalidOperationException($"The argument order of '{definition.Name}' does not cover exactly the declared parameters and context bindings.");
         }
 
-        var placeholders = new List<string>(order.Count);
+        // (placeholder, parameter or null for DEFAULT, missing optional value)
+        var arguments = new List<(string Placeholder, DbParameter? Parameter, bool Missing)>(order.Count);
         foreach (string argName in order)
         {
             EnsureIdentifier(argName, allowSchema: false);
@@ -209,8 +210,7 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                     ProcedureContextKey.Purpose => security.Purpose,
                     _ => throw new InvalidOperationException($"Unknown context key '{binding.Key}'.")
                 };
-                AddParameter(cmd, paramPrefix + argName, DbType.String, v);
-                placeholders.Add(paramPrefix + argName);
+                arguments.Add((paramPrefix + argName, AddParameter(cmd, paramPrefix + argName, DbType.String, v), false));
                 continue;
             }
 
@@ -219,27 +219,38 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
             {
                 var dbParam = AddParameter(cmd, paramPrefix + p.Name, MapDbType(p.SqlType), value);
                 ApplyShape(dbParam, p);
-                placeholders.Add(paramPrefix + p.Name);
+                arguments.Add((paramPrefix + p.Name, dbParam, false));
+            }
+            else if (definition.Kind == ProcedureKind.TableValuedFunction && dialect == Autheris.Domain.Common.DatabaseDialect.SqlServer)
+            {
+                // SQL Server functions need every argument; DEFAULT keeps the position and uses the declared default.
+                arguments.Add(("DEFAULT", null, true));
             }
             else if (definition.Kind == ProcedureKind.TableValuedFunction || dialect != Autheris.Domain.Common.DatabaseDialect.SqlServer)
             {
-                // Positional call: keep the position. SQL Server functions use DEFAULT, other dialects an explicit NULL.
-                if (definition.Kind == ProcedureKind.TableValuedFunction && dialect == Autheris.Domain.Common.DatabaseDialect.SqlServer)
-                {
-                    placeholders.Add("DEFAULT");
-                }
-                else
-                {
-                    var dbParam = AddParameter(cmd, paramPrefix + p.Name, MapDbType(p.SqlType), DBNull.Value);
-                    ApplyShape(dbParam, p);
-                    placeholders.Add(paramPrefix + p.Name);
-                }
+                // Positional call: keep the position with an explicit NULL (trailing omissions are removed below so the
+                // database defaults still apply).
+                var dbParam = AddParameter(cmd, paramPrefix + p.Name, MapDbType(p.SqlType), DBNull.Value);
+                ApplyShape(dbParam, p);
+                arguments.Add((paramPrefix + p.Name, dbParam, true));
             }
 
             // SQL Server stored procedure (named parameters): an omitted optional parameter uses its default.
         }
 
-        return placeholders;
+        // Trailing omitted optional arguments of positional calls are dropped, so the database default applies.
+        while (arguments.Count > 0 && arguments[^1].Missing &&
+               !(definition.Kind == ProcedureKind.TableValuedFunction && dialect == Autheris.Domain.Common.DatabaseDialect.SqlServer))
+        {
+            if (arguments[^1].Parameter is { } dropped)
+            {
+                cmd.Parameters.Remove(dropped);
+            }
+
+            arguments.RemoveAt(arguments.Count - 1);
+        }
+
+        return arguments.Select(a => a.Placeholder).ToList();
     }
 
     private static readonly Regex IdentifierRegex = new(

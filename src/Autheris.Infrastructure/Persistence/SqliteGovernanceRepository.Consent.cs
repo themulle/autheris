@@ -1022,6 +1022,12 @@ public partial class SqliteGovernanceRepository
 
             if (existingApprovers.Any(s => string.Equals(s, approverSid.Value, StringComparison.OrdinalIgnoreCase)))
             {
+                if (isExternalItsmApproval)
+                {
+                    // Redelivered ITSM webhook for a step that is already recorded: idempotent, nothing changes.
+                    return req;
+                }
+
                 throw new InvalidOperationException("Vier-Augen-Prinzip verletzt: Genehmiger hat diesen Antrag bereits genehmigt.");
             }
 

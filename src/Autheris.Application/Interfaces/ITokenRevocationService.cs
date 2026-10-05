@@ -61,15 +61,23 @@ public static class TokenRevocationKeys
 
         // Review E-8: tenant administrators revoke tenant-scoped keys. They only match tokens of their own tenant and
         // never a canonical ClusterAdmin (only a ClusterAdmin can lock out a ClusterAdmin).
-        var tenant = principal.GetTenantId();
-        if (tenant != TenantId.LegacySingleTenant &&
-            !Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
+        TenantId? tenant;
+        try
+        {
+            tenant = principal.GetTenantId();
+        }
+        catch (System.Security.SecurityException)
+        {
+            tenant = null; // malformed tenant claim: such tokens are rejected by the tenant resolution anyway
+        }
+
+        if (tenant != null && !Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
         {
             foreach (var value in new[] { jti, sid, sub })
             {
                 if (!string.IsNullOrWhiteSpace(value))
                 {
-                    AddKey(keys, TenantScoped(tenant, value));
+                    AddKey(keys, TenantScoped(tenant.Value, value));
                 }
             }
         }
