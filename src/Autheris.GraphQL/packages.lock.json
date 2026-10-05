@@ -577,6 +577,11 @@
         "resolved": "10.0.12",
         "contentHash": "jDix4bBMYnpZdSPcnY+KDV6ik3SRMzpMKby/bZl/XUwIiflwRNAFZ0oOl61R/pSaveIJ8t1gs2BUlrGsPs/bcg=="
       },
+      "YamlDotNet": {
+        "type": "Transitive",
+        "resolved": "18.1.0",
+        "contentHash": "5K+9KFg2TdTl7VXv88Qzi/0lqK6JFoNP3lRuImPYGRV7K/QYklDyTrj4+A+KAki1JsQi6qKY+hDyY7d6WRqjrw=="
+      },
       "Yarp.ReverseProxy": {
         "type": "Transitive",
         "resolved": "2.3.0",
@@ -602,7 +607,8 @@
           "HotChocolate.Language": "[16.6.7, )",
           "MemoryPack": "[1.21.4, )",
           "Parquet.Net": "[6.1.0, )",
-          "System.IO.Hashing": "[10.0.12, )"
+          "System.IO.Hashing": "[10.0.12, )",
+          "YamlDotNet": "[18.1.0, )"
         }
       },
       "autheris.domain": {
@@ -617,13 +623,6 @@
         "dependencies": {
           "Antlr4.Runtime.Standard": "[4.13.1, )"
         }
-      }
-    },
-    "net10.0/linux-x64": {
-      "DuckDB.NET.Bindings.Full": {
-        "type": "Transitive",
-        "resolved": "1.5.6",
-        "contentHash": "phg/EJHrcG+bqgD/EnDryWlcFtL6L09Wn9o1UVoERTp7OnAmU5AyCSKreZUkFHacNRlxlAfAIJ2IGqJ2R6O18Q=="
       }
     }
   }

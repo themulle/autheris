@@ -6,6 +6,8 @@ using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Model;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 /// <summary>
 /// F-SQL-02: Parses the header comments of a <c>*.proc.sql</c> declaration. Only the header is evaluated; the gateway
@@ -71,6 +73,8 @@ public static class ProcedureDefinitionParser
         var contexts = new List<ProcedureContextBinding>();
         var cleared = new List<string>();
         var roles = new List<string>();
+        var validationMode = ProcedureValidationMode.Catalog;
+        var declaredOutputs = new List<string>();
 
         foreach (Match match in HeaderRegex.Matches(content))
         {
@@ -79,6 +83,17 @@ public static class ProcedureDefinitionParser
 
             switch (key)
             {
+                case "validation":
+                    validationMode = val.ToLowerInvariant() switch
+                    {
+                        "declared" => ProcedureValidationMode.Declared,
+                        "catalog" => ProcedureValidationMode.Catalog,
+                        _ => throw new FormatException($"@validation must be 'declared' or 'catalog', got '{val}'.")
+                    };
+                    break;
+                case "output" or "outputs":
+                    declaredOutputs.AddRange(val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                    break;
                 case "name":
                     name = val;
                     break;
@@ -210,7 +225,9 @@ public static class ProcedureDefinitionParser
             ClearedResultColumns: cleared,
             RequiredRoles: roles,
             AllowDynamicSql: allowDynamicSql,
-            TimeoutSeconds: Math.Min(timeout, Math.Max(1, maxTimeoutSeconds)));
+            TimeoutSeconds: Math.Min(timeout, Math.Max(1, maxTimeoutSeconds)),
+            ValidationMode: validationMode,
+            DeclaredOutputs: declaredOutputs);
     }
 
     private static ProcedureParameter ParseParameter(string text)
@@ -289,4 +306,180 @@ public static class ProcedureDefinitionParser
 
         return sb.ToString().Trim();
     }
+
+    /// <summary>
+    /// Contract-First: Parses a YAML declaration (*.proc.yaml / *.proc.yml).
+    /// </summary>
+    public static ProcedureDefinition ParseYaml(string yamlContent, string defaultName, bool allowRlsNone, int maxTimeoutSeconds)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(yamlContent);
+
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(UnderscoredNamingConvention.Instance)
+            .IgnoreUnmatchedProperties()
+            .Build();
+
+        var model = deserializer.Deserialize<ProcedureYamlModel>(yamlContent);
+        if (model == null)
+        {
+            throw new FormatException("Empty YAML procedure declaration.");
+        }
+
+        string name = string.IsNullOrWhiteSpace(model.Name) ? defaultName : model.Name.Trim();
+        if (!EndpointNameRegex.IsMatch(name))
+        {
+            throw new FormatException("Endpoint name must match [A-Za-z][A-Za-z0-9_-]{0,63}.");
+        }
+
+        if (string.IsNullOrWhiteSpace(model.Procedure) || !ProcedureNameRegex.IsMatch(model.Procedure.Trim()))
+        {
+            throw new FormatException("Procedure name is required and must have the form schema.name.");
+        }
+
+        string procedure = model.Procedure.Trim();
+        string summary = Sanitize(model.Summary ?? model.Description ?? string.Empty);
+        var mode = string.Equals(model.Mode, "write", StringComparison.OrdinalIgnoreCase) ? ProcedureMode.Write : ProcedureMode.Read;
+
+        var validationMode = string.Equals(model.Validation, "declared", StringComparison.OrdinalIgnoreCase)
+            ? ProcedureValidationMode.Declared
+            : ProcedureValidationMode.Catalog;
+
+        var rls = string.Equals(model.Rls, "none", StringComparison.OrdinalIgnoreCase)
+            ? (allowRlsNone ? ProcedureRlsMode.None : throw new FormatException("rls: none is only permitted in Development."))
+            : ProcedureRlsMode.SessionContext;
+
+        int timeout = model.TimeoutSeconds ?? model.Timeout ?? 30;
+
+        var parameters = new List<ProcedureParameter>();
+        var contexts = new List<ProcedureContextBinding>();
+
+        if (model.Parameters != null)
+        {
+            foreach (var p in model.Parameters)
+            {
+                if (string.IsNullOrWhiteSpace(p.Name))
+                {
+                    continue;
+                }
+
+                string pName = p.Name.Trim().TrimStart('@');
+                if (!string.IsNullOrWhiteSpace(p.Context))
+                {
+                    var contextKey = p.Context.Trim().ToLowerInvariant() switch
+                    {
+                        "tenant_id" or "tenant" => ProcedureContextKey.TenantId,
+                        "user_sid" or "sid" or "user" => ProcedureContextKey.UserSid,
+                        _ => ProcedureContextKey.Purpose
+                    };
+                    contexts.Add(new ProcedureContextBinding(contextKey, pName));
+                }
+                else
+                {
+                    string typeStr = string.IsNullOrWhiteSpace(p.Type) ? "string" : p.Type.Trim();
+                    bool isReq = p.Required && (p.IsRequired ?? true);
+                    parameters.Add(ParseParameter($"{pName} {typeStr} {(isReq ? "required" : "optional")} {p.Description}"));
+                }
+            }
+        }
+
+        if (model.Context != null)
+        {
+            foreach (var kvp in model.Context)
+            {
+                var contextKey = kvp.Key.Trim().ToLowerInvariant() switch
+                {
+                    "tenant_id" or "tenant" => ProcedureContextKey.TenantId,
+                    "user_sid" or "sid" or "user" => ProcedureContextKey.UserSid,
+                    _ => ProcedureContextKey.Purpose
+                };
+                contexts.Add(new ProcedureContextBinding(contextKey, kvp.Value.Trim().TrimStart('@')));
+            }
+        }
+
+        if (model.ContextBindings != null)
+        {
+            foreach (var cb in model.ContextBindings)
+            {
+                var contextKey = cb.Key.Trim().ToLowerInvariant() switch
+                {
+                    "tenant_id" or "tenant" => ProcedureContextKey.TenantId,
+                    "user_sid" or "sid" or "user" => ProcedureContextKey.UserSid,
+                    _ => ProcedureContextKey.Purpose
+                };
+                contexts.Add(new ProcedureContextBinding(contextKey, cb.Parameter.Trim().TrimStart('@')));
+            }
+        }
+
+        var roles = model.RequiredRoles ?? model.Roles ?? [];
+        var outputs = model.Outputs ?? [];
+        var cleared = model.ClearedColumns ?? [];
+
+        var bound = contexts.Select(c => c.ParameterName).ToList();
+        if (bound.Distinct(StringComparer.OrdinalIgnoreCase).Count() != bound.Count ||
+            contexts.Select(c => c.Key).Distinct().Count() != contexts.Count)
+        {
+            throw new FormatException("Each context value and each procedure parameter can be bound only once.");
+        }
+
+        if (parameters.Any(p => bound.Contains(p.Name, StringComparer.OrdinalIgnoreCase)))
+        {
+            throw new FormatException("A parameter bound via context must not also be declared as client parameter.");
+        }
+
+        return new ProcedureDefinition(
+            Name: name,
+            Summary: summary,
+            ProcedureName: procedure,
+            Mode: mode,
+            DataSource: string.IsNullOrWhiteSpace(model.DataSource) ? null : model.DataSource.Trim(),
+            Parameters: parameters,
+            ContextBindings: contexts,
+            RlsMode: rls,
+            ResultTable: model.ResultTable,
+            ClearedResultColumns: cleared,
+            RequiredRoles: roles,
+            AllowDynamicSql: model.AllowDynamicSql,
+            TimeoutSeconds: Math.Min(timeout, Math.Max(1, maxTimeoutSeconds)),
+            ValidationMode: validationMode,
+            DeclaredOutputs: outputs);
+    }
+}
+
+public sealed class ProcedureYamlModel
+{
+    public string? Name { get; set; }
+    public string? Summary { get; set; }
+    public string? Description { get; set; }
+    public string? Procedure { get; set; }
+    public string? Mode { get; set; }
+    public string? DataSource { get; set; }
+    public string? Validation { get; set; }
+    public string? Rls { get; set; }
+    public string? ResultTable { get; set; }
+    public int? Timeout { get; set; }
+    public int? TimeoutSeconds { get; set; }
+    public bool AllowDynamicSql { get; set; }
+    public List<string>? Roles { get; set; }
+    public List<string>? RequiredRoles { get; set; }
+    public List<ProcedureParameterYamlModel>? Parameters { get; set; }
+    public Dictionary<string, string>? Context { get; set; }
+    public List<ProcedureContextYamlModel>? ContextBindings { get; set; }
+    public List<string>? Outputs { get; set; }
+    public List<string>? ClearedColumns { get; set; }
+}
+
+public sealed class ProcedureParameterYamlModel
+{
+    public string Name { get; set; } = string.Empty;
+    public string Type { get; set; } = "string";
+    public bool Required { get; set; } = true;
+    public bool? IsRequired { get; set; }
+    public string? Description { get; set; }
+    public string? Context { get; set; }
+}
+
+public sealed class ProcedureContextYamlModel
+{
+    public string Key { get; set; } = string.Empty;
+    public string Parameter { get; set; } = string.Empty;
 }

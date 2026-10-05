@@ -43,6 +43,16 @@ public sealed record ProcedureContextBinding(ProcedureContextKey Key, string Par
 /// <summary>Maps a result-set column to a catalog column so column governance can be applied.</summary>
 public sealed record ProcedureResultColumn(string Name, bool IsCleared);
 
+/// <summary>F-SQL-02: How a stored procedure endpoint is validated.</summary>
+public enum ProcedureValidationMode
+{
+    /// <summary>Validated against the database catalog metadata (MSSQL default, Whitebox).</summary>
+    Catalog = 0,
+
+    /// <summary>Contract-first: input and output columns are explicitly declared in YAML (Blackbox).</summary>
+    Declared = 1
+}
+
 /// <summary>
 /// Immutable declaration of a stored procedure exposed as governed REST endpoint (F-SQL-02).
 /// </summary>
@@ -59,7 +69,12 @@ public sealed record ProcedureDefinition(
     IReadOnlyList<string> ClearedResultColumns,
     IReadOnlyList<string> RequiredRoles,
     bool AllowDynamicSql,
-    int TimeoutSeconds);
+    int TimeoutSeconds,
+    ProcedureValidationMode ValidationMode = ProcedureValidationMode.Catalog,
+    IReadOnlyList<string>? DeclaredOutputs = null)
+{
+    public IReadOnlyList<string> DeclaredOutputs { get; init; } = DeclaredOutputs ?? [];
+}
 
 /// <summary>Lifecycle state of a registered procedure.</summary>
 public enum ProcedureState
