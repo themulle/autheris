@@ -382,6 +382,16 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 continue;
             }
 
+            if (definition.ValidationMode == ProcedureValidationMode.Declared)
+            {
+                if (definition.DeclaredOutputs.Count == 0 || definition.DeclaredOutputs.Contains(col, StringComparer.OrdinalIgnoreCase))
+                {
+                    plan.Add((i, col, ColumnAccessLevel.Clear, null));
+                }
+
+                continue;
+            }
+
             if (mapped == null || !mapped.Value.Meta.HasColumn(col))
             {
                 continue; // unknown column: removed (fail-closed)

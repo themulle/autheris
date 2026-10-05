@@ -456,4 +456,186 @@ public class ProcedureEndpointTests
             .Count(c => c.GetMethodInfo().Name == "Log" && (Microsoft.Extensions.Logging.LogLevel)c.GetArguments()[0]! == Microsoft.Extensions.Logging.LogLevel.Warning)
             .ShouldBe(1);
     }
+
+    // ---------- YAML parsing & declared mode tests ----------
+
+    private const string ValidYamlDefinition = """
+        name: get_telemetry
+        procedure: api.usp_GetTelemetry
+        data_source: telemetry_db
+        mode: read
+        validation: declared
+        timeout: 45
+        summary: Retrieves device telemetry
+        required_roles:
+          - telemetry-reader
+        parameters:
+          - name: device_id
+            type: int
+            required: true
+            description: Unique device identifier
+          - name: filter_type
+            type: nvarchar(50)
+            required: false
+            description: Optional filter
+        context:
+          tenant_id: tenant_id
+          user_sid: actor_sid
+        outputs:
+          - timestamp
+          - device_id
+          - temperature
+          - battery_level
+        """;
+
+    [Fact]
+    public void ParseYaml_ValidYaml_MapsAllFields()
+    {
+        var def = ProcedureDefinitionParser.ParseYaml(ValidYamlDefinition, "fallback", allowRlsNone: false, maxTimeoutSeconds: 60);
+
+        def.Name.ShouldBe("get_telemetry");
+        def.ProcedureName.ShouldBe("api.usp_GetTelemetry");
+        def.DataSource.ShouldBe("telemetry_db");
+        def.Mode.ShouldBe(ProcedureMode.Read);
+        def.ValidationMode.ShouldBe(ProcedureValidationMode.Declared);
+        def.TimeoutSeconds.ShouldBe(45);
+        def.Summary.ShouldBe("Retrieves device telemetry");
+        def.RequiredRoles.ShouldContain("telemetry-reader");
+        def.Parameters.Count.ShouldBe(2);
+        def.Parameters[0].Name.ShouldBe("device_id");
+        def.Parameters[0].ClrType.ShouldBe(typeof(int));
+        def.Parameters[0].IsRequired.ShouldBeTrue();
+        def.Parameters[1].Name.ShouldBe("filter_type");
+        def.Parameters[1].ClrType.ShouldBe(typeof(string));
+        def.Parameters[1].MaxLength.ShouldBe(50);
+        def.Parameters[1].IsRequired.ShouldBeFalse();
+        def.ContextBindings.Count.ShouldBe(2);
+        def.ContextBindings.ShouldContain(b => b.Key == ProcedureContextKey.TenantId && b.ParameterName == "tenant_id");
+        def.ContextBindings.ShouldContain(b => b.Key == ProcedureContextKey.UserSid && b.ParameterName == "actor_sid");
+        def.DeclaredOutputs.ShouldBe(["timestamp", "device_id", "temperature", "battery_level"]);
+    }
+
+    [Theory]
+    [InlineData("procedure: ''")]                                                                        // empty procedure
+    [InlineData("procedure: db.api.usp_X")]                                                              // 3-part name
+    [InlineData("procedure: api.usp_X\nparameters:\n  - name: p\n    type: unknown_type")]                // unsupported type
+    [InlineData("procedure: api.usp_X\nparameters:\n  - name: tenant_id\n    type: int\ncontext:\n  tenant_id: tenant_id")] // collision
+    public void ParseYaml_InvalidYaml_Throws(string yaml)
+    {
+        Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30));
+    }
+
+    [Fact]
+    public void Parse_SqlWithDeclaredValidationAndOutputs_MapsCorrectly()
+    {
+        const string sql = """
+            -- @procedure api.usp_Custom
+            -- @validation declared
+            -- @output col_a, col_b
+            """;
+        var def = ProcedureDefinitionParser.Parse(sql, "custom", false, 30);
+        def.ValidationMode.ShouldBe(ProcedureValidationMode.Declared);
+        def.DeclaredOutputs.ShouldBe(["col_a", "col_b"]);
+    }
+
+    [Fact]
+    public void Loader_LoadsProcYamlFile()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "autheris-proc-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var options = Options.Create(new GatewayOptions
+        {
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions
+                {
+                    Enabled = true,
+                    Directory = dir,
+                    AllowedSchemas = ["api"],
+                    AllowedDataSources = ["telemetry_db"],
+                    EnableHotReload = false
+                }
+            }
+        });
+        var registry = new InMemoryProcedureRegistry();
+        var loader = new ProcedureDefinitionLoader(registry, options);
+        try
+        {
+            string file = Path.Combine(dir, "get_telemetry.proc.yaml");
+            File.WriteAllText(file, ValidYamlDefinition);
+            loader.LoadFromDirectory().ShouldBe(1);
+
+            registry.TryGet("get_telemetry", out var reg).ShouldBeTrue();
+            reg!.Definition.ValidationMode.ShouldBe(ProcedureValidationMode.Declared);
+            reg.Definition.DeclaredOutputs.ShouldContain("temperature");
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task RegistrationService_DeclaredProcedure_ActivatesDirectlyWithoutCatalogValidation()
+    {
+        var options = Options.Create(new GatewayOptions
+        {
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions
+                {
+                    Enabled = true,
+                    AllowedSchemas = ["api"]
+                }
+            }
+        });
+
+        var registry = new InMemoryProcedureRegistry();
+        var def = ProcedureDefinitionParser.ParseYaml(ValidYamlDefinition, "telemetry", false, 60);
+        registry.Register(def);
+
+        var connFactory = Substitute.For<ISqlConnectionFactory>();
+        var scopeFactory = Substitute.For<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>();
+        var logger = Substitute.For<Microsoft.Extensions.Logging.ILogger<ProcedureRegistrationService>>();
+
+        var loader = new ProcedureDefinitionLoader(registry, options);
+        var svc = new ProcedureRegistrationService(loader, registry, scopeFactory, options, logger);
+
+        await svc.ValidateDueAsync(CancellationToken.None);
+
+        registry.TryGet("get_telemetry", out var reg).ShouldBeTrue();
+        reg!.State.ShouldBe(ProcedureState.Active);
+        reg.Validation!.IsValid.ShouldBeTrue();
+        reg.Validation.ResultColumns.ShouldBe(["timestamp", "device_id", "temperature", "battery_level"]);
+        await connFactory.DidNotReceiveWithAnyArgs().CreateOpenConnectionAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Execute_DeclaredProcedure_ProjectsOnlyDeclaredOutputsAndStripsUndeclaredColumns()
+    {
+        var f = new Fixture();
+        var def = ProcedureDefinitionParser.ParseYaml(ValidYamlDefinition, "telemetry", false, 60);
+        f.Registry.Register(def);
+        f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], def.DeclaredOutputs, [], new Dictionary<string, string>()));
+
+        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<CancellationToken>())
+            .Returns(new RawProcedureResult(
+                ["timestamp", "device_id", "temperature", "battery_level", "secret_token", "internal_status"],
+                [new object?[] { "2026-10-05T12:00:00Z", 42, 23.5, 95, "shh-secret", "leak" }],
+                false));
+
+        var svc = f.Create();
+        var result = await svc.ExecuteAsync(
+            "get_telemetry",
+            new Dictionary<string, object?> { ["device_id"] = 42 },
+            User("telemetry-reader"),
+            Tenant);
+
+        result.Columns.ShouldBe(["timestamp", "device_id", "temperature", "battery_level"]);
+        result.RowCount.ShouldBe(1);
+        result.Rows[0]["device_id"].ShouldBe(42);
+        result.Rows[0]["temperature"].ShouldBe(23.5);
+        result.Rows[0].ContainsKey("secret_token").ShouldBeFalse();
+        result.Rows[0].ContainsKey("internal_status").ShouldBeFalse();
+    }
 }

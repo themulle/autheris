@@ -44,14 +44,17 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
         ArgumentNullException.ThrowIfNull(security);
 
         var settings = _options.Value.SqlEndpoints.Procedures;
-        var (connection, _) = await _connections.OpenAsync(definition, ct).ConfigureAwait(false);
+        var (connection, connOptions) = await _connections.OpenAsync(definition, ct).ConfigureAwait(false);
 
         await using (connection.ConfigureAwait(false))
         {
             // 1. Session settings + read-only security context on the very same connection (pool reuse safe:
             //    the context is set on every call and sp_reset_connection clears it on checkout).
-            await using (var init = connection.CreateCommand())
+            Autheris.Application.Sql.Services.GovernedSqlExecutionService.TryMapProviderToDialect(connOptions.Provider, out var dialect);
+
+            if (dialect == Autheris.Domain.Common.DatabaseDialect.SqlServer)
             {
+                await using var init = connection.CreateCommand();
                 init.CommandType = CommandType.Text;
                 init.CommandTimeout = 30;
                 init.CommandText =
@@ -60,6 +63,17 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                     "EXEC sys.sp_set_session_context @key = N'autheris.tenant_id', @value = @tenant, @read_only = 1; " +
                     "EXEC sys.sp_set_session_context @key = N'autheris.user_sid', @value = @sid, @read_only = 1; " +
                     "EXEC sys.sp_set_session_context @key = N'autheris.purpose', @value = @purpose, @read_only = 1;";
+                AddParameter(init, "@tenant", DbType.String, security.TenantId);
+                AddParameter(init, "@sid", DbType.String, security.UserSid);
+                AddParameter(init, "@purpose", DbType.String, security.Purpose);
+                await init.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            else if (dialect == Autheris.Domain.Common.DatabaseDialect.PostgreSql)
+            {
+                await using var init = connection.CreateCommand();
+                init.CommandType = CommandType.Text;
+                init.CommandTimeout = 30;
+                init.CommandText = "SELECT set_config('autheris.tenant_id', @tenant, false), set_config('autheris.user_sid', @sid, false), set_config('autheris.purpose', @purpose, false);";
                 AddParameter(init, "@tenant", DbType.String, security.TenantId);
                 AddParameter(init, "@sid", DbType.String, security.UserSid);
                 AddParameter(init, "@purpose", DbType.String, security.Purpose);
@@ -133,12 +147,18 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
         }
     }
 
-    /// <summary>THROW 50000-59999 raised by the procedure is a business error; its message is returned (sanitized).</summary>
+    /// <summary>THROW 50000-59999 (MSSQL) or SQLSTATE P0001 (PostgreSQL) raised by the procedure is a business error; its message is returned (sanitized).</summary>
     internal static bool TryGetBusinessError(DbException ex, out string? message)
     {
         message = null;
         var number = ex.GetType().GetProperty("Number")?.GetValue(ex) as int?;
         if (number is >= 50000 and <= 59999)
+        {
+            message = SanitizeMessage(ex.Message);
+            return true;
+        }
+
+        if (ex.GetType().GetProperty("SqlState")?.GetValue(ex) is string sqlState && sqlState == "P0001")
         {
             message = SanitizeMessage(ex.Message);
             return true;

@@ -71,8 +71,8 @@ public sealed class ProcedureRegistrationService : BackgroundService
 
         var due = _registry.GetAll()
             .Where(r => r.State == ProcedureState.Pending
-                || r.ValidatedAt == null
-                || now - r.ValidatedAt >= (r.State == ProcedureState.Disabled ? DisabledRetryInterval : interval))
+                || (r.Definition.ValidationMode == ProcedureValidationMode.Catalog && (r.ValidatedAt == null
+                    || now - r.ValidatedAt >= (r.State == ProcedureState.Disabled ? DisabledRetryInterval : interval))))
             .ToList();
 
         if (due.Count == 0)
@@ -81,14 +81,34 @@ public sealed class ProcedureRegistrationService : BackgroundService
         }
 
         using var scope = _scopeFactory.CreateScope();
-        var validator = scope.ServiceProvider.GetRequiredService<StoredProcedureCatalogValidator>();
+        var validator = due.Any(r => r.Definition.ValidationMode == ProcedureValidationMode.Catalog)
+            ? scope.ServiceProvider.GetRequiredService<StoredProcedureCatalogValidator>()
+            : null;
         var audit = scope.ServiceProvider.GetService<IAuditLogRepository>();
 
         foreach (var entry in due)
         {
             ct.ThrowIfCancellationRequested();
 
-            var result = await validator.ValidateAsync(entry.Definition, ct).ConfigureAwait(false);
+            if (entry.Definition.ValidationMode == ProcedureValidationMode.Declared)
+            {
+                var declaredResult = new ProcedureValidationResult(
+                    IsValid: true,
+                    Errors: [],
+                    ResultColumns: entry.Definition.DeclaredOutputs,
+                    ReferencedTables: entry.Definition.ResultTable != null ? [entry.Definition.ResultTable] : [],
+                    ParameterSqlTypes: entry.Definition.Parameters.ToDictionary(p => p.Name, p => p.SqlType, StringComparer.OrdinalIgnoreCase));
+
+                _registry.MarkActive(entry.Definition.Name, declaredResult);
+                if (entry.State != ProcedureState.Active)
+                {
+                    _logger?.LogInformation("Declared procedure endpoint '{Endpoint}' activated (contract-first).", entry.Definition.Name);
+                }
+
+                continue;
+            }
+
+            var result = await validator!.ValidateAsync(entry.Definition, ct).ConfigureAwait(false);
             if (!_registry.TryGet(entry.Definition.Name, out var current) || current == null || !ReferenceEquals(current.Definition, entry.Definition))
             {
                 continue; // replaced or removed (hot reload) while validating; the new entry is validated next round

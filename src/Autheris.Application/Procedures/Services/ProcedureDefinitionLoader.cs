@@ -18,8 +18,13 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class ProcedureDefinitionLoader : IDisposable
 {
-    internal const string FilePattern = "*.proc.sql";
+    internal const string FilePattern = "*.proc.*";
     private const long MaxFileBytes = 64 * 1024;
+
+    internal static bool IsSupportedProcedureFile(string filePath) =>
+        filePath.EndsWith(".proc.sql", StringComparison.OrdinalIgnoreCase) ||
+        filePath.EndsWith(".proc.yaml", StringComparison.OrdinalIgnoreCase) ||
+        filePath.EndsWith(".proc.yml", StringComparison.OrdinalIgnoreCase);
 
     private readonly IProcedureRegistry _registry;
     private readonly IOptions<GatewayOptions> _options;
@@ -61,9 +66,9 @@ public sealed class ProcedureDefinitionLoader : IDisposable
         }
 
         int count = 0;
-        foreach (string file in Directory.GetFiles(directory, FilePattern, SearchOption.AllDirectories))
+        foreach (string file in Directory.GetFiles(directory, "*.*", SearchOption.AllDirectories))
         {
-            if (TryLoadFile(file, directory))
+            if (IsSupportedProcedureFile(file) && TryLoadFile(file, directory))
             {
                 count++;
             }
@@ -113,8 +118,10 @@ public sealed class ProcedureDefinitionLoader : IDisposable
             }
 
             string defaultName = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(filePath));
-            var definition = ProcedureDefinitionParser.Parse(
-                File.ReadAllText(filePath), defaultName, AllowRlsNone, Settings.MaxTimeoutSeconds);
+            string content = File.ReadAllText(filePath);
+            var definition = (filePath.EndsWith(".proc.yaml", StringComparison.OrdinalIgnoreCase) || filePath.EndsWith(".proc.yml", StringComparison.OrdinalIgnoreCase))
+                ? ProcedureDefinitionParser.ParseYaml(content, defaultName, AllowRlsNone, Settings.MaxTimeoutSeconds)
+                : ProcedureDefinitionParser.Parse(content, defaultName, AllowRlsNone, Settings.MaxTimeoutSeconds);
 
             string? rejection = CheckPolicy(definition);
             if (rejection != null)
@@ -185,16 +192,16 @@ public sealed class ProcedureDefinitionLoader : IDisposable
     {
         try
         {
-            _watcher = new FileSystemWatcher(directory, FilePattern)
+            _watcher = new FileSystemWatcher(directory)
             {
                 IncludeSubdirectories = true,
                 NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
                 EnableRaisingEvents = true
             };
 
-            _watcher.Created += (_, e) => TryLoadFile(e.FullPath, directory);
-            _watcher.Changed += (_, e) => TryLoadFile(e.FullPath, directory);
-            _watcher.Deleted += (_, e) => ForgetFile(e.FullPath);
+            _watcher.Created += (_, e) => { if (IsSupportedProcedureFile(e.FullPath)) TryLoadFile(e.FullPath, directory); };
+            _watcher.Changed += (_, e) => { if (IsSupportedProcedureFile(e.FullPath)) TryLoadFile(e.FullPath, directory); };
+            _watcher.Deleted += (_, e) => { if (IsSupportedProcedureFile(e.FullPath)) ForgetFile(e.FullPath); };
         }
         catch (Exception ex) when (ex is IOException or ArgumentException or PlatformNotSupportedException)
         {

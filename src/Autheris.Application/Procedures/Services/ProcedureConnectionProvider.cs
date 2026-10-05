@@ -38,10 +38,14 @@ public sealed class ProcedureConnectionProvider
             throw new InvalidOperationException($"No connection string is configured for the procedure data source '{name}'.");
         }
 
-        if (!Autheris.Application.Sql.Services.GovernedSqlExecutionService.TryMapProviderToDialect(conn.Provider, out var dialect) ||
-            dialect != Autheris.Domain.Common.DatabaseDialect.SqlServer)
+        if (!Autheris.Application.Sql.Services.GovernedSqlExecutionService.TryMapProviderToDialect(conn.Provider, out var dialect))
         {
-            throw new InvalidOperationException("Stored procedure endpoints currently support SQL Server only.");
+            throw new InvalidOperationException($"SQL provider '{conn.Provider}' is not supported for procedure endpoints.");
+        }
+
+        if (definition.ValidationMode == ProcedureValidationMode.Catalog && dialect != Autheris.Domain.Common.DatabaseDialect.SqlServer)
+        {
+            throw new InvalidOperationException("Stored procedure endpoints with catalog validation currently support SQL Server only. Use 'validation: declared' for other database providers.");
         }
 
         return conn;
