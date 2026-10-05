@@ -45,9 +45,21 @@ public static class TokenRevocationEndpoints
                 return Results.BadRequest(new { error = "until must be in the future." });
             }
 
-            await revocationService.RevokeAsync(request.SubjectOrJti, until, ct).ConfigureAwait(false);
+            // Review E-8: only a canonical ClusterAdmin revokes globally. Tenant administrators revoke a tenant-scoped
+            // key that matches tokens of their own tenant only and never a canonical ClusterAdmin.
+            bool isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
+            var tenantId = context.User.GetTenantId();
+            if (!isClusterAdmin && tenantId == TenantId.LegacySingleTenant)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
 
-            var tenantId = TenantId.TryParse(context.User.FindFirst("tenant_id")?.Value, out var tid) ? tid : TenantId.LegacySingleTenant;
+            string revocationKey = isClusterAdmin
+                ? request.SubjectOrJti
+                : TokenRevocationKeys.TenantScoped(tenantId, request.SubjectOrJti);
+
+            await revocationService.RevokeAsync(revocationKey, until, ct).ConfigureAwait(false);
+
             await auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
             {
                 TenantId = tenantId,
@@ -56,10 +68,10 @@ public static class TokenRevocationEndpoints
                 TargetTable = string.Empty,
                 Decision = "DENY",
                 TraceId = context.TraceIdentifier,
-                DetailsJson = JsonSerializer.Serialize(new { subjectOrJti = request.SubjectOrJti, until })
+                DetailsJson = JsonSerializer.Serialize(new { subjectOrJti = request.SubjectOrJti, until, scope = isClusterAdmin ? "global" : "tenant" })
             }, ct).ConfigureAwait(false);
 
-            return Results.Ok(new { revoked = request.SubjectOrJti, until });
+            return Results.Ok(new { revoked = request.SubjectOrJti, until, scope = isClusterAdmin ? "global" : "tenant" });
         }).RequireAuthorization(GatewayPolicies.GovernanceAdmin);
 
         return app;

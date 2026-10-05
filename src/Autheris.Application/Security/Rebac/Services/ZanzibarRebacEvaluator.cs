@@ -138,20 +138,65 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         // 3. Store in cache
         var ttl = _gatewayOptions.Value.Rebac.CacheTtlSeconds;
         var expiry = DateTimeOffset.UtcNow.AddSeconds(ttl);
-        var tc = _cache.GetOrAdd(tenant, _ => new ConcurrentDictionary<string, (bool, DateTimeOffset)>(StringComparer.OrdinalIgnoreCase));
-        tc[cacheKey] = (allowed, expiry);
+        StoreInCache(tenant, cacheKey, allowed, expiry);
 
         return allowed ? RebacCheckResult.Permitted : RebacCheckResult.Denied;
+    }
+
+    /// <summary>Review E-3: bounded decision cache (arbitrary user/object combinations must not grow memory unbounded).</summary>
+    internal const int MaxCachedTenants = 1_000;
+    internal const int MaxCachedDecisionsPerTenant = 10_000;
+
+    private void StoreInCache(string tenant, string cacheKey, bool allowed, DateTimeOffset expiry)
+    {
+        if (!_cache.TryGetValue(tenant, out var tc))
+        {
+            if (_cache.Count >= MaxCachedTenants)
+            {
+                return; // do not cache rather than grow without bound
+            }
+
+            tc = _cache.GetOrAdd(tenant, _ => new ConcurrentDictionary<string, (bool, DateTimeOffset)>(StringComparer.OrdinalIgnoreCase));
+        }
+
+        if (tc.Count >= MaxCachedDecisionsPerTenant)
+        {
+            var now = DateTimeOffset.UtcNow;
+            foreach (var kvp in tc)
+            {
+                if (kvp.Value.Expiry <= now)
+                {
+                    tc.TryRemove(kvp.Key, out _);
+                }
+            }
+
+            if (tc.Count >= MaxCachedDecisionsPerTenant)
+            {
+                tc.Clear();
+            }
+        }
+
+        tc[cacheKey] = (allowed, expiry);
     }
 
     public async ValueTask<RebacBatchCheckResult> BatchCheckAsync(RebacBatchCheckRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         var results = new Dictionary<RebacCheckRequest, bool>(request.Checks.Count);
+        var batchTenant = string.IsNullOrWhiteSpace(request.TenantId) ? "default" : request.TenantId.Trim();
 
         foreach (var check in request.Checks)
         {
             if (ct.IsCancellationRequested) break;
+
+            // Review E-3: defense in depth, an item from another tenant is denied instead of evaluated.
+            var itemTenant = string.IsNullOrWhiteSpace(check.TenantId) ? "default" : check.TenantId.Trim();
+            if (!string.Equals(itemTenant, batchTenant, StringComparison.OrdinalIgnoreCase))
+            {
+                results[check] = false;
+                continue;
+            }
+
             var res = await CheckAsync(check, ct).ConfigureAwait(false);
             results[check] = res.Allowed;
         }

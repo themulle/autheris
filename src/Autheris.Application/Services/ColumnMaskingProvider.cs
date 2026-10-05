@@ -209,7 +209,16 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
         {
             try
             {
-                return Regex.Replace(text, rule.PatternOrFormat, rule.Replacement, RegexOptions.None, TimeSpan.FromMilliseconds(250));
+                // Review E-4: Regex.Replace returns the input unchanged when the pattern does not match (other
+                // separators, lower case, ...). A value the rule does not transform is redacted completely (fail-closed).
+                var timeout = TimeSpan.FromMilliseconds(250);
+                if (!Regex.IsMatch(text, rule.PatternOrFormat, RegexOptions.None, timeout))
+                {
+                    return "REDACTED";
+                }
+
+                string masked = Regex.Replace(text, rule.PatternOrFormat, rule.Replacement, RegexOptions.None, timeout);
+                return string.Equals(masked, text, StringComparison.Ordinal) ? "REDACTED" : masked;
             }
             catch (Exception ex) when (ex is RegexMatchTimeoutException or ArgumentException)
             {
