@@ -538,7 +538,7 @@ public sealed class AdfsAuthOptions
 
 public sealed class GovernanceDbOptions
 {
-    public string Provider { get; init; } = "Sqlite"; // Sqlite (SqlServer & PostgreSql planned for future releases)
+    public string Provider { get; init; } = "Sqlite"; // "Sqlite" or "PostgreSql" ("Postgres", "PgSql")
     public string ConnectionString { get; init; } = "Data Source=governance.db;Cache=Shared";
     [Range(1, 60)] public int CommandTimeoutSeconds { get; init; } = 15;
     public bool EnableOutboxProcessor { get; init; } = true;

@@ -129,12 +129,15 @@ public static class GatewayServiceCollectionExtensions
                 ) || opts.IsInsecureTransportAllowed || opts.IsColumnMaskingDisabled,
                 "NF-SEC-03 Verletzung: HmacSecretKeyVaultRef muss außerhalb von Development eine gültige Key Vault Secret-Referenz sein!")
             .Validate(opts =>
-                string.Equals(opts.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase),
-                "GovernanceDb Provider wird aktuell nur als 'Sqlite' unterstützt.")
+                string.Equals(opts.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(opts.GovernanceDb.Provider, "PostgreSql", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(opts.GovernanceDb.Provider, "Postgres", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(opts.GovernanceDb.Provider, "PgSql", StringComparison.OrdinalIgnoreCase),
+                "GovernanceDb Provider wird aktuell nur als 'Sqlite' oder 'PostgreSql' unterstützt.")
             .Validate(opts =>
                 !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) ||
                 !string.Equals(opts.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase),
-                "Sicherheitsverletzung (E-2): Multi-Node Cluster Mode und mehr als 1 Replika sind mit SQLite nicht zulässig, da SQLite lokale Datenbankdateien pro Instanz verwendet und State/Consent-Widerrufe nicht clusterweit synchronisiert werden.")
+                "Sicherheitsverletzung (E-2): Multi-Node Cluster Mode und mehr als 1 Replika sind mit SQLite nicht zulässig, da SQLite lokale Datenbankdateien pro Instanz verwendet. Bitte konfigurieren Sie GovernanceDb.Provider = 'PostgreSql' für Cluster-Betrieb.")
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.OpenMetadata.Enabled ||
                 (Uri.TryCreate(opts.OpenMetadata.ServerUrl, UriKind.Absolute, out var uri) && string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)) ||
@@ -256,16 +259,37 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IEpochValidationService, EpochValidationService>();
         services.AddSingleton<IConsentCacheService, ConsentCacheService>();
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();
-        services.AddSingleton<SqliteGovernanceRepository>();
-        services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-        services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-        services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-        services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-        services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-        services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-        services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-        services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
-        services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+        var dbProvider = gatewayOptions.GovernanceDb.Provider?.Trim() ?? "Sqlite";
+        if (string.Equals(dbProvider, "PostgreSql", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(dbProvider, "Postgres", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(dbProvider, "PgSql", StringComparison.OrdinalIgnoreCase))
+        {
+            services.AddSingleton<PostgreSqlGovernanceRepository>();
+            services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+        }
+        else
+        {
+            services.AddSingleton<SqliteGovernanceRepository>();
+            services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+        }
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
         services.AddSingleton<IDbtHealthCircuitBreaker, DbtHealthCircuitBreaker>();
         services.AddSingleton<IOpenApiCacheManager, OpenApiCacheManager>();
@@ -1171,7 +1195,8 @@ public static class GatewayServiceCollectionExtensions
                 throw new ValidationException("Sicherheitsverletzung: Außerhalb von Development müssen für S3-WORM mit EnforceObjectLock zwingend S3AccessKey und S3SecretKey konfiguriert sein!");
             }
 
-            if (!string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString) &&
+            if (string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString) &&
                 (options.GovernanceDb.ConnectionString.Contains(":memory:", StringComparison.OrdinalIgnoreCase) ||
                  options.GovernanceDb.ConnectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase)))
             {
@@ -1179,9 +1204,18 @@ public static class GatewayServiceCollectionExtensions
             }
         }
 
-        if (!string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(options.GovernanceDb.Provider, "PostgreSql", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(options.GovernanceDb.Provider, "Postgres", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(options.GovernanceDb.Provider, "PgSql", StringComparison.OrdinalIgnoreCase))
         {
-            throw new ValidationException($"GovernanceDb Provider '{options.GovernanceDb.Provider}' wird aktuell nicht unterstützt. Die aktive Implementierung unterstützt derzeit 'Sqlite'.");
+            throw new ValidationException($"GovernanceDb Provider '{options.GovernanceDb.Provider}' wird aktuell nicht unterstützt. Erlaubt sind 'Sqlite' oder 'PostgreSql'.");
+        }
+
+        if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) &&
+            string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ValidationException("Sicherheitsverletzung (E-2): Multi-Node Cluster Mode und mehr als 1 Replika sind mit SQLite nicht zulässig, da SQLite lokale Datenbankdateien pro Instanz verwendet. Bitte konfigurieren Sie GovernanceDb.Provider = 'PostgreSql' für Cluster-Betrieb.");
         }
     }
 

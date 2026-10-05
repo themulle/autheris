@@ -54,6 +54,19 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
                     dbDesc = dbHealthy ? "SQLite Governance DB connection active." : "SQLite query returned null.";
                 }
             }
+            else if (_governanceRepository is PostgreSqlGovernanceRepository pgRepo)
+            {
+                dbHealthy = await pgRepo.PingAsync(ct).ConfigureAwait(false);
+                if (pgRepo.IsAuditPipelineFaulted)
+                {
+                    dbHealthy = false;
+                    dbDesc = "PostgreSQL Governance DB: Audit pipeline is faulted.";
+                }
+                else
+                {
+                    dbDesc = dbHealthy ? "PostgreSQL Governance DB connection active." : "PostgreSQL query returned null.";
+                }
+            }
             else if (_governanceRepository != null)
             {
                 // Fallback check: verify catalog is queryable
