@@ -575,7 +575,7 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
 
 ### 2.14a `Dev` (Development-only switches)
 
-`Gateway:Dev` groups the development conveniences (class A) and development security switches (class B). Security bypasses stay in `Insecure` (class C). Everything in `Dev` is **Development only**: outside Development a non-default value is a startup error. Concept and rationale: [concept-unified-dev-switches-2026-10-05.md](architecture/concept-unified-dev-switches-2026-10-05.md).
+`Gateway:Dev` groups the development conveniences (class A) and development security switches (class B). Security bypasses stay in `Insecure` (class C). Everything in `Dev` is **Development only**: outside Development a non-default value is a startup error. Detailed developer guide: [developer-guide.md#3-developer-options-gatewaydev](developer-guide.md#3-developer-options-gatewaydev).
 
 | Property | Type | Default | Class | Description |
 | :--- | :--- | :--- | :--- | :--- |

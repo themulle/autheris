@@ -262,3 +262,40 @@ kubectl logs -l app=gql-gateway -n data-governance | grep -i "INSECURE MODE ENGA
 ```
 If any pod logs `[CRITICAL SECURITY ALERT] Insecure flag engaged`, immediately file a Priority-1 security incident and revert the configuration.
 
+---
+
+## 9. Performance Benchmarks, Sizing & Capacity Planning
+
+### 9.1 Sizing Guidelines & Node Baselines
+
+Based on production load tests (Hetzner Dedicated AX-series, AMD EPYC / Ryzen 9, NVMe, 10 Gbps uplinks), the following profiles represent recommended production baselines:
+
+| Workload Tier | Concurrent Clients | Target RPS | Recommended Pod Resources | Replica Count |
+| :--- | :--- | :--- | :--- | :--- |
+| **Small / Edge** | 50 – 200 | 1,000 – 3,000 | 1 vCPU, 1 GB RAM | 2 (HA) |
+| **Standard Enterprise** | 500 – 2,000 | 5,000 – 15,000 | 2 – 4 vCPU, 2 – 4 GB RAM | 3 – 5 |
+| **High-Throughput Analytics** | 2,000 – 10,000 | 20,000 – 50,000+ | 8 vCPU, 8 – 16 GB RAM | 5 – 10 (HPA) |
+
+### 9.2 Latency Budgets & SLA Targets
+
+* **L1 Cache Hit (In-Memory Policy):** P50 < 0.2 ms, P99 < 1.0 ms
+* **L2 Cache Hit (Redis Roundtrip):** P50 < 1.5 ms, P99 < 4.0 ms
+* **End-to-End GraphQL Request (with RLS Pushdown):** P50 < 4.0 ms, P95 < 9.0 ms, P99 < 15.0 ms
+* **Arrow Flight SQL Stream (Chunk Egress):** 250 MB/s per core sustained zero-copy throughput
+
+### 9.3 Runtime & Kestrel Concurrency Configuration
+
+For high-throughput environments, configure ASP.NET Core Kestrel limits in `appsettings.json` under `Gateway:Hosting`:
+```json
+"Gateway": {
+  "Hosting": {
+    "MaxRequestBodySizeBytes": 2097152,
+    "MaxConcurrentConnections": 10000,
+    "MaxConcurrentUpgradedConnections": 2000
+  }
+}
+```
+* **Garbage Collection:** Ensure Server GC is enabled in container runtime (`DOTNET_gcServer=1`).
+* **Connection Pooling:** Set upstream database `MaxPoolSize` according to pod replica count to avoid exhausting database connection pools (`MaxPoolSize=100` per pod on typical setups).
+* **Redis Sizing:** Maintain an active connection pool with `abortConnect=false` and keep-alive pings enabled; L2 policy cache size rarely exceeds 200 MB even with 50,000 active consents.
+

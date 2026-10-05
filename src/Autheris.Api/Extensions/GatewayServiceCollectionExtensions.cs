@@ -878,6 +878,10 @@ public static class GatewayServiceCollectionExtensions
                     maxRootFields: gatewayOptions.AreQueryLimitsRelaxed
                         ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 200 : 25)
                         : gatewayOptions.GraphQL.MaxRootFieldsPerOperation))
+            // HotChocolate 16 adds the types __SchemaDefinition/__SearchResult (semantic introspection) to the schema.
+            // Their names start with "__", which GraphQL reserves for introspection; graphql-js based clients (GraphiQL,
+            // Apollo, codegen) reject the whole schema because of them. Autheris does not use the semantic search.
+            .ModifyOptions(opt => opt.EnableSemanticIntrospection = false)
             .ModifyRequestOptions(opt =>
             {
                 opt.ExecutionTimeout = TimeSpan.FromSeconds(gatewayOptions.HighAvailability.QueryTimeoutSeconds);

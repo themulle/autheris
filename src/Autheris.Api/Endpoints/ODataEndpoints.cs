@@ -119,8 +119,9 @@ public static class ODataEndpoints
             var authCheck = CheckOpenApiAuth(context);
             if (authCheck != null) return authCheck;
 
-            var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
-            var indexDoc = await generator.GetIndexDocumentAsync(serviceRoot, context.RequestAborted);
+            // The generator appends the configured OData server prefix ("/odata/v4") itself, so it must only get the origin.
+            var origin = $"{context.Request.Scheme}://{context.Request.Host}";
+            var indexDoc = await generator.GetIndexDocumentAsync(origin, context.RequestAborted);
             return Results.Json(indexDoc, contentType: "application/json;charset=utf-8");
         }));
 
@@ -131,8 +132,9 @@ public static class ODataEndpoints
             var authCheck = CheckOpenApiAuth(context);
             if (authCheck != null) return authCheck;
 
-            var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
-            var indexDoc = await generator.GetIndexDocumentAsync(serviceRoot, context.RequestAborted);
+            // The generator appends the configured OData server prefix ("/odata/v4") itself, so it must only get the origin.
+            var origin = $"{context.Request.Scheme}://{context.Request.Host}";
+            var indexDoc = await generator.GetIndexDocumentAsync(origin, context.RequestAborted);
             return Results.Json(indexDoc, contentType: "application/json;charset=utf-8");
         }));
 
