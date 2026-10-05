@@ -65,10 +65,17 @@ public sealed class StoredProcedureCatalogValidator
         {
             (connection, _) = await _connections.OpenAsync(definition, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is DbException or InvalidOperationException)
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException)
         {
-            _logger?.LogWarning(ex, "Procedure '{Procedure}' could not be validated: connection failed.", definition.Name);
-            return ProcedureValidationResult.Failed("The database is not reachable with the configured procedure connection.");
+            // Configuration problem (missing DataSources.Connections entry, empty connection string, unsupported provider).
+            _logger?.LogWarning("Procedure '{Procedure}' could not be validated: configuration error: {Message}", definition.Name, ex.Message);
+            return ProcedureValidationResult.Failed($"Procedure connection is not configured correctly: {ex.Message}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Network/login problem. Message only (no stack trace): this repeats every minute while the database is down.
+            _logger?.LogWarning("Procedure '{Procedure}' could not be validated: database not reachable ({ExceptionType}: {Message}).", definition.Name, ex.GetType().Name, ex.Message);
+            return ProcedureValidationResult.Failed("The database is not reachable with the configured procedure connection (check DNS/VPN and credentials).");
         }
 
         await using (connection.ConfigureAwait(false))
