@@ -114,7 +114,7 @@ Invoke-RestMethod https://localhost:7214/api/v1/queries/ -WebSession $s
 
 ## Developer helpers (Development only)
 
-These routes do not exist outside Development. Each can be switched off in `Gateway:Dev` (see [concept: unified dev switches](../architecture/concept-unified-dev-switches-2026-10-05.md)).
+These routes do not exist outside Development. Each can be switched off in `Gateway:Dev` (see [developer-guide: developer options](../developer-guide.md#3-developer-options-gatewaydev)).
 
 | Route / feature | Switch | Purpose |
 |---|---|---|

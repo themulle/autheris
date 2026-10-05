@@ -167,7 +167,7 @@ Do not set `EnableTestAuthHandler`, `EnableBananaCakePop`, `EnableIntrospection`
 3. Otherwise class A: `Gateway:Dev`, default `true` in Development.
 4. No switch reads `IsDevelopment()` directly. Every dev switch needs a policy in `DevOptionsValidator` and must show up in `/api/dev/info`.
 
-Background: [concept-unified-dev-switches-2026-10-05.md](architecture/concept-unified-dev-switches-2026-10-05.md), full option reference: [configuration guide, section 2.14a](configuration-guide.md).
+Full option reference: [configuration guide, section 2.14a](configuration-guide.md#214a-dev-development-only-switches).
 
 ---
 
@@ -216,15 +216,22 @@ Send `X-Autheris-No-Session: 1` to stay stateless. The session is refused in `Pr
 **Setting a password.**
 
 - In `Development`, `Password` may be plaintext (or an unsalted SHA-256 hex digest).
-- Everywhere else it must be salted PBKDF2: `$pbkdf2$<iterations>$<saltBase64>$<hashBase64>` (PBKDF2-HMAC-SHA256, at least 210 000 iterations at startup, 600 000 recommended).
+- In all other environments, passwords must be hashed using **Argon2id** (OWASP and BSI recommended) or salted **PBKDF2-HMAC-SHA256**.
+- Generate production hashes directly using the built-in CLI utility:
 
 ```bash
-python3 - <<'PY'
-import hashlib, os, base64
-pw, it, salt = b"secret", 600000, os.urandom(16)
-h = hashlib.pbkdf2_hmac('sha256', pw, salt, it, 32)
-print(f"$pbkdf2${it}${base64.b64encode(salt).decode()}${base64.b64encode(h).decode()}")
-PY
+dotnet run --project src/Autheris.Api -- hash-password MySecretPassword123!
+```
+
+Output:
+```text
+Autheris Password Hash Generator
+--------------------------------
+Algorithm: Argon2id (OWASP & BSI recommended)
+Hash:      $argon2id$v=19$m=65536,t=3,p=1$NAncgBIY007GM+3D+CCUEA==$ECyRmF3SsewbPefM6SfUo0EEWBTDydPzSOMOZ//6b8E=
+
+Algorithm: PBKDF2-HMAC-SHA256 (NIST compliant)
+Hash:      $pbkdf2$100000$W5/aW44Aq8D4BkSIvYCymA==$CVQyS8iYh0rWXBseQxp84+If0jattqHT6LHedNCDNsg=
 ```
 
 > [!TIP]
@@ -270,6 +277,16 @@ dotnet test tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj
 dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj                  # unit & property tests
 dotnet test tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj    # walking skeleton
 ```
+
+### 6.2 GraphQL Spec Compliance & Tooling Compatibility
+
+Hot Chocolate 16 introduces an experimental semantic introspection feature that automatically injects non-standard system types (`__SchemaDefinition`, `__SearchResult`, `__SearchDirective`) into the schema. Because the official GraphQL specification strictly reserves the `__` prefix for standard system introspection types (`__Schema`, `__Type`, `__Field`), strict `graphql-js`-based clients (Apollo Client, GraphiQL, GraphQL Code Generator) fail schema validation.
+
+Autheris explicitly disables this feature via:
+```csharp
+.ModifyOptions(opt => opt.EnableSemanticIntrospection = false)
+```
+Autheris provides its own decoupled semantic schema grounding for AI agents via the Semantic MCP Compiler (`F-AI-02`). Standard GraphQL schema introspection (`__schema`, `__type`) remains fully functional and is controlled separately via `Gateway:GraphQL:EnableIntrospection`.
 
 ---
 

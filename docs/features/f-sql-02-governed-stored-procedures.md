@@ -1,6 +1,6 @@
 # F-SQL-02: Governed Stored Procedures (Phase 1, lesend)
 
-Stored Procedures von SQL Server werden deklarativ als REST-Endpoint veröffentlicht. Architektur und Begründung: `docs/architecture/implementation-plan-f-sql-02-stored-procedures-2026-10-05.md` und ADR-018.
+Stored Procedures und Table-Valued Functions (TVFs) werden deklarativ als REST-Endpoint veröffentlicht. Architektur und Begründung: [ADR-018](../adr/ADR-018-governed-stored-procedures.md).
 
 ## Konfiguration
 
