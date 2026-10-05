@@ -42,6 +42,7 @@ builder.Host.UseDefaultServiceProvider(options =>
 });
 
 // 3a. F-AUTH-DX: resolve Gateway:Dev (preset defaults, legacy aliases, persistence) before the options are bound
+Autheris.Api.Configuration.LegacySwitchGuard.ThrowIfLegacyKeysSet(builder.Configuration);
 var devReport = Autheris.Api.Configuration.DevConfiguration.Apply(builder.Configuration, builder.Environment);
 builder.Services.AddSingleton(devReport);
 

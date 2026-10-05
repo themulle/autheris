@@ -617,8 +617,8 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 | `Mcp:MaxResultRows` | `int` | `1 .. 10000` | `100` | Maximale Ergebniszeilen pro Datenabfrage. |
 | `Mcp:RequirePiiMasking` | `bool` | `true \| false` | `true` | Automatisches Scrubbing von PII- (E-Mail, IBAN) und DSGVO-Art.-9-Daten vor Übermittlung an LLMs. |
 | `Mcp:AllowedOperations` | `string[]` | GraphQL Operationen | `[]` | Whitelist freigegebener Abfragen. |
-| `Mcp:warn_allow_unmasked_ai_access` | `bool` | `true \| false` | `false` | **WARN**: Deaktiviert PII-Maskierung für KI-Streams (nur Dev/Sandbox). |
-| `Mcp:danger_bypass_mcp_auth` | `bool` | `true \| false` | `false` | **DANGER**: Umgeht MCP-Authentifizierung (in Produktion verboten). |
+
+> `warn_allow_unmasked_ai_access` und `danger_bypass_mcp_auth` liegen ausschließlich unter `Insecure` (ADR-012, Phase 4).
 
 ```json
 "Mcp": {

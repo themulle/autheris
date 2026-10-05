@@ -31,8 +31,7 @@ public sealed class DbtWebhookReceiver : IDbtWebhookReceiver
 
     public bool ValidateSignature(string payload, string? signatureHeader, string secret)
     {
-        if (_options.Value.Dbt.danger_bypass_webhook_signature_validation ||
-            _options.Value.IsWebhookSignatureBypassed)
+        if (_options.Value.IsWebhookSignatureBypassed)
         {
             _logger.LogWarning("Dbt webhook signature validation is bypassed by dangerous configuration.");
             return true;

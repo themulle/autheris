@@ -89,10 +89,8 @@ public sealed class LakehouseStorageProviderTests
 
         var options = Options.Create(new GatewayOptions
         {
-            Lakehouse = new LakehouseOptions
-            {
-                warn_allow_unsigned_s3_requests = true
-            }
+            Insecure = new InsecureGettingStartedOptions { warn_allow_unsigned_s3_requests = true },
+            Lakehouse = new LakehouseOptions()
         });
         var httpClient = new HttpClient(handler);
         var provider = new S3LakehouseStorageProvider(httpClient, options, NullLogger<S3LakehouseStorageProvider>.Instance);
@@ -169,9 +167,9 @@ public sealed class LakehouseStorageProviderTests
 
             var options = Options.Create(new GatewayOptions
             {
+                Insecure = new InsecureGettingStartedOptions { warn_allow_unsigned_s3_requests = true },
                 Lakehouse = new LakehouseOptions
                 {
-                    warn_allow_unsigned_s3_requests = true,
                     Storage = new LakehouseStorageOptions
                     {
                         LocalBasePath = testDir,

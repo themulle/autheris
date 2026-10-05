@@ -154,7 +154,8 @@ public sealed class IntegrationGapBTests
     {
         var options = Options.Create(new GatewayOptions
         {
-            Mcp = new McpOptions { Enabled = true, danger_bypass_mcp_auth = true }
+            Mcp = new McpOptions { Enabled = true },
+            Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = true }
         });
         var policy = new DenyingPolicyService();
         var executor = Substitute.For<IMcpQueryExecutor>();

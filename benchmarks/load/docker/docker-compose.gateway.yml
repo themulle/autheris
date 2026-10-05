@@ -108,7 +108,7 @@ services:
       Gateway__GovernanceDb__SeedDemoData: "true"
       Gateway__GovernanceDb__ConnectionString: "Data Source=:memory:;Mode=Memory;Cache=Shared"
       Gateway__ResourceGroups__Enabled: "false"
-      Gateway__RateLimiting__warn_disable_rate_limiting: "true"
+      Gateway__Insecure__warn_disable_rate_limiting: "true"
       Gateway__RateLimiting__PreAuthIpRateLimit__PermitLimit: "100000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokenBucketCapacity: "100000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokensPerSecond: "10000"
