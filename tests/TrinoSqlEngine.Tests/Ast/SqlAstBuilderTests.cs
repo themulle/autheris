@@ -169,4 +169,26 @@ public sealed class SqlAstBuilderTests
         Assert.Throws<SecurityException>(() => ParseToAst("SELECT (obj).method() FROM t"));
         Assert.Throws<SecurityException>(() => ParseToAst("SELECT Type::staticMethod() FROM t"));
     }
+
+    [Fact]
+    public void BuildStatement_QuotedIdentifierWithDoubledQuotes_UnescapesCorrectly()
+    {
+        var stmt = (SelectStatement)ParseToAst("SELECT \"col\"\"name\" FROM tbl");
+        var spec = (QuerySpecification)stmt.Body;
+        var col = (ColumnSelectItem)spec.Projections[0];
+        var colRef = (ColumnReference)col.Expression;
+        Assert.Equal("col\"name", colRef.Name.Parts[0].Value);
+        Assert.True(colRef.Name.Parts[0].IsQuoted);
+    }
+
+    [Fact]
+    public void BuildStatement_SyntheticParamIdentifier_MapsToParameterReference()
+    {
+        var stmt = (SelectStatement)ParseToAst("SELECT id FROM tbl WHERE id = __param_user_id");
+        var spec = (QuerySpecification)stmt.Body;
+        var where = (BinaryExpression)spec.Where!;
+        var param = Assert.IsType<ParameterReference>(where.Right);
+        Assert.Equal("user_id", param.Name);
+        Assert.True(param.IsSynthetic);
+    }
 }

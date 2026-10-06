@@ -116,4 +116,90 @@ public sealed class SqlServerDialectTests
 
         Assert.Throws<DialectLimitExceededException>(() => _generator.GenerateSql(stmt));
     }
+
+    [Fact]
+    public void SqlServer_WithRecursive_OmitsRecursiveKeyword()
+    {
+        var cteQuery = new SelectStatement(
+            With: null,
+            Body: new QuerySpecification(
+                Distinct: false,
+                Projections: new[] { new ColumnSelectItem(new LiteralExpression(1L, LiteralType.Integer), new SqlIdentifier("n")) },
+                From: null,
+                Where: null,
+                GroupBy: null,
+                Having: null),
+            OrderBy: null,
+            Pagination: null);
+
+        var with = new WithClause(
+            IsRecursive: true,
+            Ctes: new[] { new CommonTableExpression(new SqlIdentifier("cte"), null, cteQuery) });
+
+        var stmt = new SelectStatement(
+            With: with,
+            Body: new QuerySpecification(
+                Distinct: false,
+                Projections: new[] { new WildcardSelectItem(null) },
+                From: new NamedTableSource(new SqlQualifiedName("cte"), null),
+                Where: null,
+                GroupBy: null,
+                Having: null),
+            OrderBy: null,
+            Pagination: null);
+
+        string sql = _generator.GenerateSql(stmt);
+        Assert.StartsWith("WITH [cte] AS (", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("RECURSIVE", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SqlServer_OrderBy_NullsOrderingEmulation()
+    {
+        var stmt = new SelectStatement(
+            With: null,
+            Body: new QuerySpecification(
+                Distinct: false,
+                Projections: new[] { new ColumnSelectItem(new ColumnReference(new SqlQualifiedName("id")), null) },
+                From: new NamedTableSource(new SqlQualifiedName("orders"), null),
+                Where: null,
+                GroupBy: null,
+                Having: null),
+            OrderBy: new OrderByClause(new[]
+            {
+                new OrderByElement(new ColumnReference(new SqlQualifiedName("id")), SortDirection.Ascending, NullOrdering.Last)
+            }),
+            Pagination: null);
+
+        string sql = _generator.GenerateSql(stmt);
+        Assert.DoesNotContain("NULLS LAST", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CASE WHEN [id] IS NULL THEN 1 ELSE 0 END, [id] ASC", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SqlServer_BooleanExpressionInProjection_WrapsInCaseWhen()
+    {
+        var stmt = new SelectStatement(
+            With: null,
+            Body: new QuerySpecification(
+                Distinct: false,
+                Projections: new[]
+                {
+                    new ColumnSelectItem(
+                        new BinaryExpression(
+                            new ColumnReference(new SqlQualifiedName("a")),
+                            BinaryOperator.Equal,
+                            new ColumnReference(new SqlQualifiedName("b"))),
+                        new SqlIdentifier("is_equal"))
+                },
+                From: new NamedTableSource(new SqlQualifiedName("tbl"), null),
+                Where: null,
+                GroupBy: null,
+                Having: null),
+            OrderBy: null,
+            Pagination: null);
+
+        string sql = _generator.GenerateSql(stmt);
+        Assert.Contains("CASE WHEN [a] = [b] THEN 1 ELSE 0 END AS [is_equal]", sql, StringComparison.Ordinal);
+    }
 }

@@ -71,4 +71,41 @@ public sealed class LegacyVsAstDifferentialTests
 
         Assert.Contains("\"tenant_id\" = 123", result, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void AstCompiler_ParameterizedEndpointQuery_EmitsDialectMarkers()
+    {
+        string rawSql = "SELECT id, name FROM users WHERE tenant_id = @tenant_id AND status = @status";
+        string normalizedSql = TrinoSqlEngine.Analysis.SqlParameterExtractor.NormalizeForAst(rawSql);
+
+        var pgOptions = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42"),
+            TargetDialect = TargetSqlDialect.PostgreSql
+        };
+        string pgSql = _engine.GenerateGovernedSql(normalizedSql.AsMemory(), pgOptions);
+        Assert.Contains("$1", pgSql, StringComparison.Ordinal);
+        Assert.Contains("$2", pgSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("__param_", pgSql, StringComparison.OrdinalIgnoreCase);
+
+        var msOptions = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42"),
+            TargetDialect = TargetSqlDialect.SqlServer
+        };
+        string msSql = _engine.GenerateGovernedSql(normalizedSql.AsMemory(), msOptions);
+        Assert.Contains("@p0", msSql, StringComparison.Ordinal);
+        Assert.Contains("@p1", msSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("__param_", msSql, StringComparison.OrdinalIgnoreCase);
+
+        var sqOptions = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42"),
+            TargetDialect = TargetSqlDialect.Sqlite
+        };
+        string sqSql = _engine.GenerateGovernedSql(normalizedSql.AsMemory(), sqOptions);
+        Assert.Contains("?1", sqSql, StringComparison.Ordinal);
+        Assert.Contains("?2", sqSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("__param_", sqSql, StringComparison.OrdinalIgnoreCase);
+    }
 }

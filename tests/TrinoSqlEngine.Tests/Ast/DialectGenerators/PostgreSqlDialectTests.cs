@@ -50,4 +50,29 @@ public sealed class PostgreSqlDialectTests
         Assert.Contains("$1", sql, StringComparison.Ordinal);
         Assert.Contains("LIMIT 50 OFFSET 10", sql, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void PostgreSql_CaseFolding_UnquotedFoldsToLowercase_QuotedPreservesCase()
+    {
+        var stmt = new SelectStatement(
+            With: null,
+            Body: new QuerySpecification(
+                Distinct: false,
+                Projections: new[]
+                {
+                    new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier("CustomerId", IsQuoted: false) })), null),
+                    new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier("ExactCase", IsQuoted: true) })), null)
+                },
+                From: new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("MyTable", IsQuoted: false) }), null),
+                Where: null,
+                GroupBy: null,
+                Having: null),
+            OrderBy: null,
+            Pagination: null);
+
+        string sql = _generator.GenerateSql(stmt);
+        Assert.Contains("\"customerid\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"ExactCase\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"mytable\"", sql, StringComparison.Ordinal);
+    }
 }
