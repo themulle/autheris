@@ -31,6 +31,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Swagger UI wird lokal ausgeliefert (offline-faehig, kein CDN) -->
+    <EmbeddedResource Include="Assets\swagger-ui\*.css;Assets\swagger-ui\*.js;Assets\swagger-ui\*.png" LogicalName="swagger-ui/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Autheris.Tests.Unit" />
     <InternalsVisibleTo Include="Autheris.Tests.Integration" />
   </ItemGroup>

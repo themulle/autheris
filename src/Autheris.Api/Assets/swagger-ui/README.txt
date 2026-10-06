@@ -1,0 +1,1 @@
+swagger-ui-dist 5.18.2 (Apache-2.0), vendored so /ui/swagger works offline. Update: npm pack swagger-ui-dist@<ver> and copy swagger-ui.css, swagger-ui-bundle.js, swagger-ui-standalone-preset.js here; bump SwaggerUiVersion in ODataEndpoints.cs.
