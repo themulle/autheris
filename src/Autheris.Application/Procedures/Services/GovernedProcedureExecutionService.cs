@@ -383,17 +383,18 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 throw new InvalidOperationException("The procedure returned duplicate column names; the result cannot be governed.");
             }
 
-            if (cleared.Contains(col))
-            {
-                plan.Add((i, col, ColumnAccessLevel.Clear, null));
-                continue;
-            }
-
+            // Review R4-6: the declared-output filter also applies to cleared columns.
             // Review P-1: declared mode only narrows the result to the declared outputs; the columns are then governed
             // exactly like in catalog mode (consent deny/mask of the result table, unknown columns removed).
             if (definition.ValidationMode == ProcedureValidationMode.Declared &&
                 !definition.DeclaredOutputs.Contains(col, StringComparer.OrdinalIgnoreCase))
             {
+                continue;
+            }
+
+            if (cleared.Contains(col))
+            {
+                plan.Add((i, col, ColumnAccessLevel.Clear, null));
                 continue;
             }
 
