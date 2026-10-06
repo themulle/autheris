@@ -48,3 +48,4 @@ scratch/
 .data/
 dist/
 libpod/
+.claude/
