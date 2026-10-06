@@ -46,4 +46,34 @@ public sealed class SqlEmitterContext
             _ => $"?{++ParameterCount}"
         };
     }
+
+    public void FormatNextParameterMarker(ref ValueStringBuilder builder)
+    {
+        CheckParameterBudget(1);
+        switch (Dialect)
+        {
+            case TargetSqlDialect.SqlServer:
+                builder.Append('@');
+                builder.Append('p');
+                builder.Append(ParameterCount++);
+                break;
+            case TargetSqlDialect.PostgreSql:
+            case TargetSqlDialect.DuckDb:
+                builder.Append('$');
+                builder.Append(++ParameterCount);
+                break;
+            case TargetSqlDialect.Sqlite:
+                builder.Append('?');
+                builder.Append(++ParameterCount);
+                break;
+            case TargetSqlDialect.Snowflake:
+                builder.Append(':');
+                builder.Append(++ParameterCount);
+                break;
+            default:
+                builder.Append('?');
+                builder.Append(++ParameterCount);
+                break;
+        }
+    }
 }

@@ -48,6 +48,92 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
         return base.GetBinaryOperatorString(op);
     }
 
+    public override void GenerateExpression(Expression expression, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        if (context.InProjectionContext && IsPredicateExpression(expression))
+        {
+            builder.Append("CASE WHEN ");
+            bool prevProj = context.InProjectionContext;
+            bool prevPred = context.InPredicateContext;
+            context.InProjectionContext = false;
+            context.InPredicateContext = true;
+            base.GenerateExpression(expression, ref builder, context);
+            context.InProjectionContext = prevProj;
+            context.InPredicateContext = prevPred;
+            builder.Append(" THEN 1 ELSE 0 END");
+            return;
+        }
+
+        base.GenerateExpression(expression, ref builder, context);
+    }
+
+    private static bool IsPredicateExpression(Expression expr) => expr switch
+    {
+        BinaryExpression b => b.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual or
+                                           BinaryOperator.LessThan or BinaryOperator.LessThanOrEqual or
+                                           BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual or
+                                           BinaryOperator.And or BinaryOperator.Or,
+        UnaryExpression u => u.Operator is UnaryOperator.Not or UnaryOperator.IsNull or UnaryOperator.IsNotNull,
+        LikeExpression => true,
+        InListExpression => true,
+        InSubqueryExpression => true,
+        BetweenExpression => true,
+        ExistsExpression => true,
+        IsDistinctFromExpression => true,
+        _ => false
+    };
+
+    protected override void GenerateWithClause(WithClause with, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        builder.Append("WITH ");
+        // T-SQL does not support the RECURSIVE keyword on CTE definitions
+        for (int i = 0; i < with.Ctes.Count; i++)
+        {
+            if (i > 0) builder.Append(", ");
+            var cte = with.Ctes[i];
+            FormatIdentifier(ref builder, cte.Name, context);
+            if (cte.ColumnAliases != null && cte.ColumnAliases.Count > 0)
+            {
+                builder.Append(" (");
+                for (int j = 0; j < cte.ColumnAliases.Count; j++)
+                {
+                    if (j > 0) builder.Append(", ");
+                    FormatIdentifier(ref builder, cte.ColumnAliases[j], context);
+                }
+                builder.Append(')');
+            }
+            builder.Append(" AS (");
+            GenerateSelect(cte.Query, ref builder, context);
+            builder.Append(')');
+        }
+    }
+
+    protected override void GenerateOrderBy(OrderByClause orderBy, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        builder.Append("ORDER BY ");
+        for (int i = 0; i < orderBy.Elements.Count; i++)
+        {
+            if (i > 0) builder.Append(", ");
+            var el = orderBy.Elements[i];
+
+            if (el.NullOrder == NullOrdering.First && el.Direction == SortDirection.Descending)
+            {
+                builder.Append("CASE WHEN ");
+                GenerateExpression(el.Expression, ref builder, context);
+                builder.Append(" IS NULL THEN 0 ELSE 1 END, ");
+            }
+            else if (el.NullOrder == NullOrdering.Last && el.Direction == SortDirection.Ascending)
+            {
+                builder.Append("CASE WHEN ");
+                GenerateExpression(el.Expression, ref builder, context);
+                builder.Append(" IS NULL THEN 1 ELSE 0 END, ");
+            }
+
+            GenerateExpression(el.Expression, ref builder, context);
+            builder.Append(el.Direction == SortDirection.Descending ? " DESC" : " ASC");
+        }
+    }
+
     protected override void GeneratePagination(PaginationClause pagination, OrderByClause? orderBy, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
         if (orderBy == null)

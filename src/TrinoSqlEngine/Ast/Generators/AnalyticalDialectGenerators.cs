@@ -60,7 +60,8 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
     {
         builder.Append('"');
-        builder.Append(identifier.Value.Replace("\"", "\"\"", StringComparison.Ordinal));
+        string val = identifier.IsQuoted ? identifier.Value : identifier.Value.ToLowerInvariant();
+        builder.Append(val.Replace("\"", "\"\"", StringComparison.Ordinal));
         builder.Append('"');
     }
 

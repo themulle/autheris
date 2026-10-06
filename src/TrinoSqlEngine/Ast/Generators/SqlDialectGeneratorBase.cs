@@ -20,9 +20,16 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         ArgumentNullException.ThrowIfNull(statement);
         Span<char> initialBuffer = stackalloc char[512];
         var builder = new ValueStringBuilder(initialBuffer);
-        var context = new SqlEmitterContext(TargetDialect, MaxParameterBudget);
-        GenerateSql(statement, ref builder, context);
-        return builder.ToString();
+        try
+        {
+            var context = new SqlEmitterContext(TargetDialect, MaxParameterBudget);
+            GenerateSql(statement, ref builder, context);
+            return builder.ToString();
+        }
+        finally
+        {
+            builder.Dispose();
+        }
     }
 
     public virtual void GenerateSql(SqlStatement statement, ref ValueStringBuilder builder, SqlEmitterContext context)
@@ -132,6 +139,8 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             builder.Append("DISTINCT ");
         }
 
+        bool prevPred = context.InPredicateContext;
+        context.InPredicateContext = false;
         context.InProjectionContext = true;
         for (int i = 0; i < spec.Projections.Count; i++)
         {
@@ -139,6 +148,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             GenerateSelectItem(spec.Projections[i], ref builder, context);
         }
         context.InProjectionContext = false;
+        context.InPredicateContext = prevPred;
 
         if (spec.From != null)
         {
@@ -149,9 +159,10 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         if (spec.Where != null)
         {
             builder.Append(" WHERE ");
+            bool prevWherePred = context.InPredicateContext;
             context.InPredicateContext = true;
             GenerateExpression(spec.Where, ref builder, context);
-            context.InPredicateContext = false;
+            context.InPredicateContext = prevWherePred;
         }
 
         if (spec.GroupBy != null && spec.GroupBy.GroupingExpressions.Count > 0)
@@ -167,9 +178,10 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         if (spec.Having != null)
         {
             builder.Append(" HAVING ");
+            bool prevHavingPred = context.InPredicateContext;
             context.InPredicateContext = true;
             GenerateExpression(spec.Having, ref builder, context);
-            context.InPredicateContext = false;
+            context.InPredicateContext = prevHavingPred;
         }
     }
 
@@ -385,7 +397,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 FormatQualifiedName(ref builder, col.Name, context);
                 break;
             case ParameterReference param:
-                builder.Append(context.NextParameterMarker());
+                context.FormatNextParameterMarker(ref builder);
                 break;
             case LiteralExpression lit:
                 FormatLiteral(ref builder, lit, context);
@@ -462,7 +474,10 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 foreach (var w in cs.WhenClauses)
                 {
                     builder.Append(" WHEN ");
+                    bool prevCasePred = context.InPredicateContext;
+                    context.InPredicateContext = true;
                     GenerateExpression(w.Condition, ref builder, context);
+                    context.InPredicateContext = prevCasePred;
                     builder.Append(" THEN ");
                     GenerateExpression(w.Result, ref builder, context);
                 }

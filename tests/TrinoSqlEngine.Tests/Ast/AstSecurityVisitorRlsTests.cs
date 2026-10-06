@@ -93,4 +93,36 @@ public sealed class AstSecurityVisitorRlsTests
         // T-SQL requires derived tables to have an alias, e.g. AS [orders]
         Assert.Contains("AS [orders]", result, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Rls_QuotedTableName_AppliesPolicyCorrectly()
+    {
+        var options = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 77", predicate: t => t == "orders"),
+            TargetDialect = TargetSqlDialect.PostgreSql
+        };
+
+        // Quoted table "orders" must match policy for 'orders'
+        string sql = "SELECT * FROM \"orders\"";
+        string result = SecureAndGenerate(sql, options);
+
+        Assert.Contains("\"tenant_id\" = 77", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Rls_QuotedQualifiedTableName_AppliesPolicyCorrectly()
+    {
+        var options = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 88", predicate: t => t == "public.orders"),
+            TargetDialect = TargetSqlDialect.PostgreSql
+        };
+
+        // Quoted qualified table "public"."orders" must match policy for 'public.orders'
+        string sql = "SELECT * FROM \"public\".\"orders\"";
+        string result = SecureAndGenerate(sql, options);
+
+        Assert.Contains("\"tenant_id\" = 88", result, StringComparison.OrdinalIgnoreCase);
+    }
 }

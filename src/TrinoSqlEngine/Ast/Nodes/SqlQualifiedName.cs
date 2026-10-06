@@ -18,6 +18,7 @@ public sealed record SqlQualifiedName(IReadOnlyList<SqlIdentifier> Parts) : SqlN
     public string? CatalogName => Parts.Count >= 3 ? Parts[0].Value : null;
     public string? SchemaName => Parts.Count >= 2 ? Parts[^2].Value : null;
     public string TableOrColumnName => SimpleName;
+    public string NormalizedName => string.Join(".", Parts.Select(p => p.Value));
 
     public override string ToString() => string.Join(".", Parts.Select(p => p.ToString()));
 }

@@ -74,4 +74,38 @@ public sealed class AstSecurityVisitorCteTests
         // No physical table access, so tenant_id = 42 should not appear
         Assert.DoesNotContain("tenant_id = 42", result, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Cte_SecC02_QuotedCteDoesNotShadowDifferentCasedPhysicalTable()
+    {
+        var options = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42", predicate: t => t == "mycte"),
+            TargetDialect = TargetSqlDialect.PostgreSql
+        };
+
+        // Quoted CTE "MyCte" must NOT shadow unquoted physical table 'mycte'
+        string sql = "WITH \"MyCte\" AS (SELECT 1 AS col) SELECT * FROM mycte";
+        string result = SecureAndGenerate(sql, options);
+
+        // Physical table 'mycte' MUST have RLS applied
+        Assert.Contains("\"tenant_id\" = 42", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Cte_SecC02_QuotedReferenceDoesNotShadowLowercaseCte()
+    {
+        var options = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42", predicate: t => t == "MYCTE"),
+            TargetDialect = TargetSqlDialect.PostgreSql
+        };
+
+        // Unquoted CTE 'mycte' folds to lowercase; quoted "MYCTE" is case-sensitive and must not match the CTE
+        string sql = "WITH mycte AS (SELECT 1 AS col) SELECT * FROM \"MYCTE\"";
+        string result = SecureAndGenerate(sql, options);
+
+        // Physical table "MYCTE" MUST have RLS applied
+        Assert.Contains("\"tenant_id\" = 42", result, StringComparison.OrdinalIgnoreCase);
+    }
 }

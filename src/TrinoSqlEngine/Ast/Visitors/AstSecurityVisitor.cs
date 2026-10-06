@@ -54,7 +54,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             {
                 // Visit CTE body BEFORE adding CTE name to current scope (Exit-timing, SEC-CTE & SEC C-02)
                 var cteQuery = (SelectStatement)Visit(cte.Query);
-                string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(cte.Name.Value);
+                string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(cte.Name);
                 _cteScopeStack.Peek().Add(cteKey);
                 ctes.Add(cte with { Query = cteQuery });
             }
@@ -106,9 +106,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitNamedTableSource(NamedTableSource node)
     {
-        string normalizedName = node.Name.ToString();
+        string normalizedName = node.Name.NormalizedName;
         string simpleName = node.Name.SimpleName;
-        string scopeKey = SqlIdentifierHelper.FoldIdentifierForScope(simpleName);
+        string scopeKey = SqlIdentifierHelper.FoldIdentifierForScope(node.Name.Parts[^1]);
 
         // SEC C-02: Only simple (unqualified) names in CTE scope are considered CTEs
         if (node.Name.IsSimple && _cteScopeStack.Peek().Contains(scopeKey))
@@ -201,14 +201,10 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         {
             subqueryAlias = node.Alias;
         }
-        else if (_options.AppendTableAlias || _options.TargetDialect == TargetSqlDialect.SqlServer)
-        {
-            string aliasStr = FastSqlEngine.FormatTableAlias(normalizedName, _options.TargetDialect);
-            subqueryAlias = new SqlIdentifier(SqlIdentifierHelper.NormalizeIdentifier(aliasStr), IsQuotedIdentifier(aliasStr));
-        }
         else
         {
-            subqueryAlias = new SqlIdentifier(node.Name.SimpleName);
+            bool isQuoted = node.Name.Parts[^1].IsQuoted || _options.TargetDialect == TargetSqlDialect.SqlServer;
+            subqueryAlias = new SqlIdentifier(node.Name.SimpleName, isQuoted);
         }
 
         return new SubqueryTableSource(subqueryStatement, subqueryAlias);
@@ -216,7 +212,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitDeleteStatement(DeleteStatement node)
     {
-        string normalizedName = node.TargetTable.Name.ToString();
+        string normalizedName = node.TargetTable.Name.NormalizedName;
 
         // SEC H-15 / SQ-03: Ensure no masked column or whole-row references in WHERE
         if (node.Where != null)
@@ -248,7 +244,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitUpdateStatement(UpdateStatement node)
     {
-        string normalizedName = node.TargetTable.Name.ToString();
+        string normalizedName = node.TargetTable.Name.NormalizedName;
 
         // SEC H-15 / SQ-03: Ensure no masked column or whole-row references in SET or WHERE
         foreach (var assignment in node.Assignments)
@@ -314,7 +310,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitInsertStatement(InsertStatement node)
     {
-        string normalizedName = node.TargetTable.Name.ToString();
+        string normalizedName = node.TargetTable.Name.NormalizedName;
         string simpleTableName = node.TargetTable.Name.SimpleName;
 
         // SQ-07: Reject INSERT on tables that have custom row-level consent filters beyond simple tenant partition
@@ -454,7 +450,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 }
                 if (b.Left is ColumnReference c1 && b.Right is ColumnReference c2)
                 {
-                    return c1.Name.ToString().Equals(c2.Name.ToString(), StringComparison.OrdinalIgnoreCase);
+                    return c1.Name.NormalizedName.Equals(c2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase);
                 }
                 return false;
             case BinaryExpression b when b.Operator == BinaryOperator.NotEqual:
@@ -540,7 +536,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
     private bool IsCte(SqlQualifiedName name)
     {
         if (!name.IsSimple) return false;
-        string key = SqlIdentifierHelper.FoldIdentifierForScope(name.SimpleName);
+        string key = SqlIdentifierHelper.FoldIdentifierForScope(name.Parts[0]);
         return _cteScopeStack.Peek().Contains(key);
     }
 

@@ -717,6 +717,11 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitColumnReference(SqlBaseParser.ColumnReferenceContext context)
     {
         var id = ToSqlIdentifier(context.identifier());
+        if (!id.IsQuoted && id.Value.StartsWith("__param_", StringComparison.OrdinalIgnoreCase))
+        {
+            string paramName = id.Value["__param_".Length..];
+            return new ParameterReference(paramName, PositionalIndex: null, IsSynthetic: true);
+        }
         return new ColumnReference(new SqlQualifiedName(new[] { id }));
     }
 
@@ -932,7 +937,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     {
         string text = context.GetText();
         bool isQuoted = IsQuotedIdentifier(text);
-        string normalized = SqlIdentifierHelper.NormalizeIdentifier(text);
+        string normalized = UnquoteIdentifier(text, isQuoted);
         return new SqlIdentifier(normalized, isQuoted);
     }
 
@@ -942,10 +947,26 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         if (ids == null || ids.Length == 0)
         {
             string t = context.GetText();
-            return new SqlQualifiedName(new[] { new SqlIdentifier(SqlIdentifierHelper.NormalizeIdentifier(t), IsQuotedIdentifier(t)) });
+            bool isQ = IsQuotedIdentifier(t);
+            return new SqlQualifiedName(new[] { new SqlIdentifier(UnquoteIdentifier(t, isQ), isQ) });
         }
         var parts = ids.Select(ToSqlIdentifier).ToList();
         return new SqlQualifiedName(parts);
+    }
+
+    private static string UnquoteIdentifier(string text, bool isQuoted)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+        text = text.Trim();
+        if (isQuoted && text.Length >= 2)
+        {
+            char first = text[0];
+            char last = text[^1];
+            if (first == '"' && last == '"') return text[1..^1].Replace("\"\"", "\"", StringComparison.Ordinal);
+            if (first == '`' && last == '`') return text[1..^1].Replace("``", "`", StringComparison.Ordinal);
+            if (first == '[' && last == ']') return text[1..^1].Replace("]]", "]", StringComparison.Ordinal);
+        }
+        return text;
     }
 
     private static bool IsQuotedIdentifier(string text)

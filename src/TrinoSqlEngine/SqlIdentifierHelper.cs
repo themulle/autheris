@@ -96,6 +96,15 @@ public static class SqlIdentifierHelper
     }
 
     /// <summary>
+    /// SEC C-02: Scope key for typed SqlIdentifier. If quoted, preserves exact case; if unquoted, folds to lower case.
+    /// </summary>
+    public static string FoldIdentifierForScope(Ast.Nodes.SqlIdentifier identifier)
+    {
+        ArgumentNullException.ThrowIfNull(identifier);
+        return identifier.IsQuoted ? identifier.Value : identifier.Value.ToLowerInvariant();
+    }
+
+    /// <summary>
     /// SEC M-24: Quotes a catalog-provided column name as a delimited SQL identifier ("..." with doubled quotes).
     /// </summary>
     public static string QuoteIdentifier(string name)

@@ -5,5 +5,5 @@ namespace TrinoSqlEngine.Ast.Nodes;
 /// </summary>
 public sealed record SqlIdentifier(string Value, bool IsQuoted = false) : SqlNode
 {
-    public override string ToString() => IsQuoted ? $"\"{Value}\"" : Value;
+    public override string ToString() => IsQuoted ? $"\"{Value.Replace("\"", "\"\"")}\"" : Value;
 }
