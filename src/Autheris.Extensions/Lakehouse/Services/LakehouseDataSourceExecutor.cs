@@ -2,6 +2,7 @@ namespace Autheris.Extensions.Lakehouse.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
@@ -162,7 +163,7 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
 
         return predicates;
     }
-    private const string TenantColumn = "tenantId";
+    private const string DefaultTenantColumn = "tenantId";
 
     private readonly IIcebergMetadataReader _metadataReader;
     private readonly IIcebergPartitionPruner _partitionPruner;
@@ -206,7 +207,7 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
             var masked = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvp in row)
             {
-                masked[kvp.Key] = kvp.Value != null && !string.Equals(kvp.Key, TenantColumn, StringComparison.OrdinalIgnoreCase)
+                masked[kvp.Key] = kvp.Value != null && !string.Equals(kvp.Key, LakehouseLocationGuard.ResolveTenantColumn(row.Keys, DefaultTenantColumn), StringComparison.OrdinalIgnoreCase)
                     ? _maskingProvider.MaskValue(kvp.Key, kvp.Value, redact)
                     : kvp.Value;
             }
@@ -245,6 +246,9 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
         // 1. Load Iceberg Table Metadata & Manifest Data Files
         var metadata = await _metadataReader.LoadTableMetadataAsync(tableConfig.Location, cancellationToken).ConfigureAwait(false);
         var allDataFiles = await _metadataReader.LoadDataFilesAsync(metadata, tableConfig.Location, cancellationToken).ConfigureAwait(false);
+
+        // SEC E-3 / E-5: honour the table's tenant column name (schema-derived).
+        var TenantColumn = LakehouseLocationGuard.ResolveTenantColumn(metadata.CurrentSchema.Fields.Select(f => f.Name), DefaultTenantColumn);
 
         // 2. Inject Tenant Isolation Filter into query predicates (SEC EX-09: check caller tenant predicate instead of silently overwriting)
         var mergedPredicates = new Dictionary<string, string>(request.FilterPredicates, StringComparer.OrdinalIgnoreCase);
@@ -296,23 +300,36 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
                         continue;
                     }
 
+                    // SEC E-3: the tenant value is only ever a stored one (resolved below), never a synthesized sample.
+                    if (string.Equals(field.Name, TenantColumn, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     // Populate mock / scanned data based on field name and type (masking is applied by the callers)
                     row[field.Name] = GenerateSampleValue(field.Name, field.Type, i);
                 }
 
-                // SEC E-15: the tenant value of a row is the stored one (partition value) - never overwritten with the session tenant,
-                // so a file that is not exclusively tenant-owned cannot leak foreign rows. Rows without stored value take the
-                // session tenant only because the mandatory file-level evidence above proved the file.
-                if (!row.ContainsKey(TenantColumn) && !string.IsNullOrWhiteSpace(request.TenantId))
+                // SEC E-3: the tenant value of a row is the stored one (partition value or single-valued statistics) and is never
+                // stamped with the session tenant. Rows without any stored tenant value are dropped.
+                if (!string.IsNullOrWhiteSpace(request.TenantId))
                 {
-                    row[TenantColumn] = request.TenantId;
-                }
+                    if (!row.ContainsKey(TenantColumn))
+                    {
+                        var stored = LakehouseLocationGuard.GetStoredTenantValue(file.PartitionValues, file.LowerBounds, file.UpperBounds, TenantColumn);
+                        if (stored == null)
+                        {
+                            continue;
+                        }
 
-                if (!string.IsNullOrWhiteSpace(request.TenantId) &&
-                    !LakehouseLocationGuard.RowBelongsToTenant(row, TenantColumn, request.TenantId))
-                {
-                    _logger.LogWarning("Lakehouse scan of '{TableName}' dropped a row of a foreign tenant (row-level isolation).", request.TableName);
-                    continue;
+                        row[TenantColumn] = stored;
+                    }
+
+                    if (!LakehouseLocationGuard.RowBelongsToTenant(row, TenantColumn, request.TenantId))
+                    {
+                        _logger.LogWarning("Lakehouse scan of '{TableName}' dropped a row of a foreign tenant (row-level isolation).", request.TableName);
+                        continue;
+                    }
                 }
 
                 rows.Add(row);

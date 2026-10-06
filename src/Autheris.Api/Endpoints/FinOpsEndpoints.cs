@@ -82,11 +82,11 @@ public static class FinOpsEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var callerTenant = user.FindFirst("tenant_id")?.Value
-                               ?? user.FindFirst("tid")?.Value;
+            var callerTenant = EndpointSecurity.GetRequestTenant(request.HttpContext).Value;
 
-            // Non-cluster admins can only query their own tenant budget (IDOR prevention)
-            var isClusterAdmin = GatewayPolicies.HasAnyRole(user, ["ClusterAdmin", "GovernanceAdmin"]);
+            // Only canonical cluster admins may read other tenants' budgets (IDOR prevention);
+            // GovernanceAdmin is tenant-scoped here.
+            var isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(user);
             if (!isClusterAdmin && (string.IsNullOrWhiteSpace(callerTenant) || !string.Equals(callerTenant, tenantId, StringComparison.OrdinalIgnoreCase)))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);

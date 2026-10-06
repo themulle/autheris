@@ -29,7 +29,7 @@ public class AdvancedRlsSubqueryTests
         var sql = AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, DatabaseDialect.SqlServer);
 
         // Assert
-        sql.ShouldBe("EXISTS (SELECT 1 FROM [dbo].[customers] AS [c] WHERE [c].[id] = [i].[customer_id] AND [c].[country] = 'CH')");
+        sql.ShouldBe("EXISTS (SELECT 1 FROM [dbo].[customers] AS [c] WHERE [c].[id] = [autheris_target].[customer_id] AND [c].[country] = 'CH')");
     }
 
     [Fact]
@@ -76,10 +76,10 @@ public class AdvancedRlsSubqueryTests
             "EXISTS (SELECT 1 FROM [dbo].[customers] AS [c] " +
             "INNER JOIN [dbo].[asset_ownership] AS [ao] ON [c].[id] = [ao].[customer_id] " +
             "INNER JOIN [dbo].[assets] AS [a] ON [ao].[asset_id] = [a].[id] " +
-            "WHERE [c].[id] = [i].[customer_id] " +
+            "WHERE [c].[id] = [autheris_target].[customer_id] " +
             "AND [c].[country] = 'CH' AND [a].[asset_type] = 'CRANE' " +
-            "AND [i].[invoice_date] >= [ao].[valid_from] " +
-            "AND ([ao].[valid_to] IS NULL OR [i].[invoice_date] < [ao].[valid_to]))");
+            "AND [autheris_target].[invoice_date] >= [ao].[valid_from] " +
+            "AND ([ao].[valid_to] IS NULL OR [autheris_target].[invoice_date] < [ao].[valid_to]))");
 
         // Act - PostgreSQL
         var sqlPostgres = AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, DatabaseDialect.PostgreSql);
@@ -89,10 +89,10 @@ public class AdvancedRlsSubqueryTests
             "EXISTS (SELECT 1 FROM \"dbo\".\"customers\" AS \"c\" " +
             "INNER JOIN \"dbo\".\"asset_ownership\" AS \"ao\" ON \"c\".\"id\" = \"ao\".\"customer_id\" " +
             "INNER JOIN \"dbo\".\"assets\" AS \"a\" ON \"ao\".\"asset_id\" = \"a\".\"id\" " +
-            "WHERE \"c\".\"id\" = \"i\".\"customer_id\" " +
+            "WHERE \"c\".\"id\" = \"autheris_target\".\"customer_id\" " +
             "AND \"c\".\"country\" = 'CH' AND \"a\".\"asset_type\" = 'CRANE' " +
-            "AND \"i\".\"invoice_date\" >= \"ao\".\"valid_from\" " +
-            "AND (\"ao\".\"valid_to\" IS NULL OR \"i\".\"invoice_date\" < \"ao\".\"valid_to\"))");
+            "AND \"autheris_target\".\"invoice_date\" >= \"ao\".\"valid_from\" " +
+            "AND (\"ao\".\"valid_to\" IS NULL OR \"autheris_target\".\"invoice_date\" < \"ao\".\"valid_to\"))");
     }
 
     [Theory]
@@ -125,7 +125,7 @@ public class AdvancedRlsSubqueryTests
         var sql = AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, DatabaseDialect.Oracle);
 
         // Oracle does not allow "AS" in FROM/JOIN table aliases and represents boolean true as 1
-        sql.ShouldBe("EXISTS (SELECT 1 FROM \"dbo\".\"customers\" \"c\" WHERE \"c\".\"id\" = \"i\".\"customer_id\" AND \"c\".\"active\" = 1)");
+        sql.ShouldBe("EXISTS (SELECT 1 FROM \"dbo\".\"customers\" \"c\" WHERE \"c\".\"id\" = \"autheris_target\".\"customer_id\" AND \"c\".\"active\" = 1)");
     }
 
     [Fact]
@@ -221,7 +221,7 @@ public class AdvancedRlsSubqueryTests
 
         decision.IsAllowed.ShouldBeTrue();
         decision.CombinedRowFilterSql.ShouldNotBeNull();
-        decision.CombinedRowFilterSql.ShouldContain("EXISTS (SELECT 1 FROM [dbo].[customers] AS [c] WHERE [c].[id] = [i].[customer_id] AND [c].[country] = 'CH')");
+        decision.CombinedRowFilterSql.ShouldContain("EXISTS (SELECT 1 FROM [dbo].[customers] AS [c] WHERE [c].[id] = [autheris_target].[customer_id] AND [c].[country] = 'CH')");
     }
 
     [Fact]

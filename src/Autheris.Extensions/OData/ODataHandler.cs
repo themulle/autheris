@@ -15,8 +15,14 @@ using Microsoft.Extensions.Logging;
 public sealed partial class ODataHandler(
     ITableMetadataRepository metadataRepo,
     IGatewayExecutionService executionService,
-    ILogger<ODataHandler> logger) : IODataHandler
+    ILogger<ODataHandler> logger,
+    Microsoft.Extensions.Hosting.IHostEnvironment? environment = null) : IODataHandler
 {
+    private const string GenericDenied = "Access denied.";
+
+    // G3 / RR-L3: detailed denial and not-found messages are only returned in Development (fail-closed when unknown).
+    private readonly bool _verboseErrors = string.Equals(environment?.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
+
     [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_]*$")]
     private static partial Regex SafeIdentifierRegex();
 
@@ -171,6 +177,18 @@ public sealed partial class ODataHandler(
         catch (Autheris.Domain.Exceptions.TableNotFoundException nfEx)
         {
             _logger.LogWarning("OData query for {Table} not found: {Message}", table, nfEx.Message);
+            if (!_verboseErrors)
+            {
+                // Same answer as for a denied table: no existence oracle.
+                return new ODataQueryResult(
+                    Success: false,
+                    StatusCode: 403,
+                    Payload: ODataResponseFormatter.FormatErrorResponse("ACCESS_DENIED", GenericDenied),
+                    ErrorCode: "ACCESS_DENIED",
+                    ErrorMessage: GenericDenied
+                );
+            }
+
             return new ODataQueryResult(
                 Success: false,
                 StatusCode: 404,
@@ -193,12 +211,13 @@ public sealed partial class ODataHandler(
         catch (Autheris.Domain.Exceptions.GatewaySecurityException secEx)
         {
             _logger.LogWarning("OData query for {Table} forbidden: {Message}", table, secEx.Message);
+            var secMessage = _verboseErrors ? secEx.Message : GenericDenied;
             return new ODataQueryResult(
                 Success: false,
                 StatusCode: 403,
-                Payload: ODataResponseFormatter.FormatErrorResponse("ACCESS_DENIED", secEx.Message),
+                Payload: ODataResponseFormatter.FormatErrorResponse("ACCESS_DENIED", secMessage),
                 ErrorCode: "ACCESS_DENIED",
-                ErrorMessage: secEx.Message
+                ErrorMessage: secMessage
             );
         }
 
@@ -207,12 +226,13 @@ public sealed partial class ODataHandler(
             var reasons = decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "Access denied by gateway governance policy.";
             _logger.LogWarning("OData query for {Table} denied: {Reasons}", table, reasons);
 
+            var clientReasons = _verboseErrors ? reasons : GenericDenied;
             return new ODataQueryResult(
                 Success: false,
                 StatusCode: 403,
-                Payload: ODataResponseFormatter.FormatErrorResponse("ACCESS_DENIED", reasons),
+                Payload: ODataResponseFormatter.FormatErrorResponse("ACCESS_DENIED", clientReasons),
                 ErrorCode: "ACCESS_DENIED",
-                ErrorMessage: reasons
+                ErrorMessage: clientReasons
             );
         }
 

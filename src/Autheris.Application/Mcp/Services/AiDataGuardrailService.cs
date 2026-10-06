@@ -171,11 +171,11 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         }
 
         // Resolve real TargetTable for ABAC policy and Four-Eyes checks
-        var resolvedTable = ParseTableIdentifierFromTool(tool, request.ArgumentsJson);
+        var resolvedTables = ParseTablesFromTool(tool, request.ArgumentsJson);
 
         // Security Hardening: For data access tools, target table must be resolvable.
         // If unresolvable, fail-closed to prevent bypassing Casbin ABAC and Four-Eyes gates.
-        if (resolvedTable == null && (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation)))
+        if (resolvedTables == null && (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation)))
         {
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
@@ -200,72 +200,81 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         }
 
         // 2. Pre-Execution Policy Check: Casbin ABAC Enforcement
-        var effectiveTable = resolvedTable ?? new TableIdentifier("mcp", "tool", tool.Name.ToLowerInvariant());
-        // SEC H-02: OpenSchema no longer exempts MCP schema tools from ABAC; only the explicit MCP auth bypass does.
-        bool isSchemaTool = _options.Value.IsMcpAuthBypassed &&
-            (string.Equals(tool.Name, "query_data_catalog", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(tool.Name, "get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(effectiveTable.Domain, "governance", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(effectiveTable.Domain, "catalog", StringComparison.OrdinalIgnoreCase));
-
-        if (_policyEnforcementService != null && !_options.Value.IsMcpAuthBypassed && !isSchemaTool)
+        // SEC A-4: ABAC and four-eyes run on every table derived from the executed GraphQL document.
+        IReadOnlyList<TableIdentifier> abacTables = resolvedTables ?? [new TableIdentifier("mcp", "tool", tool.Name.ToLowerInvariant())];
+        foreach (var effectiveTable in abacTables)
         {
+            // SEC H-02: OpenSchema no longer exempts MCP schema tools from ABAC; only the explicit MCP auth bypass does.
+            bool isSchemaTool = _options.Value.IsMcpAuthBypassed &&
+                (string.Equals(tool.Name, "query_data_catalog", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(tool.Name, "get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(effectiveTable.Domain, "governance", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(effectiveTable.Domain, "catalog", StringComparison.OrdinalIgnoreCase));
 
-            var userSidStr = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
-                ? sessionContext.UserSid
-                : sessionContext.ServicePrincipalId;
-            var groupSids = sessionContext.GroupSids != null && sessionContext.GroupSids.Count > 0
-                ? sessionContext.GroupSids.Select(s => new Sid(s)).ToArray()
-                : [];
-
-            // SEC H-4: Fail closed to IPAddress.None if unresolvable
-            var clientIp = System.Net.IPAddress.None;
-            if (!string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var parsedIp))
+            if (_policyEnforcementService != null && !_options.Value.IsMcpAuthBypassed && !isSchemaTool)
             {
-                clientIp = parsedIp;
-            }
 
-            var secContext = new SecurityEvaluationContext(
-                UserSid: new Sid(userSidStr),
-                GroupSids: groupSids,
-                Tenant: new TenantId(sessionContext.TenantId),
-                TargetTable: effectiveTable,
-                RequestedColumns: [],
-                ClientIp: clientIp,
-                Timestamp: DateTimeOffset.UtcNow,
-                PurposeId: "MCP_AI_AGENT_QUERY"
-            );
+                var userSidStr = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
+                    ? sessionContext.UserSid
+                    : sessionContext.ServicePrincipalId;
+                var groupSids = sessionContext.GroupSids != null && sessionContext.GroupSids.Count > 0
+                    ? sessionContext.GroupSids.Select(s => new Sid(s)).ToArray()
+                    : [];
 
-            var policyDecision = await _policyEnforcementService.EvaluatePolicyAsync(secContext, cancellationToken).ConfigureAwait(false);
-            if (!policyDecision.IsAllowed)
-            {
-                activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
-                McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+                // SEC H-4: Fail closed to IPAddress.None if unresolvable
+                var clientIp = System.Net.IPAddress.None;
+                if (!string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var parsedIp))
+                {
+                    clientIp = parsedIp;
+                }
 
-                _logger.LogWarning("Casbin ABAC policy denied AI Agent '{Principal}' tool call '{ToolName}' (target: '{TargetTable}') in tenant '{TenantId}'. Reasons: {Reasons}",
-                    sessionContext.ServicePrincipalId, tool.Name, effectiveTable, sessionContext.TenantId, string.Join("; ", policyDecision.DeniedReasons));
-
-                await RecordAuditEventAsync(
-                    tool.Name,
-                    sessionContext,
-                    decision: "DENY",
-                    details: $"Access denied by Casbin ABAC policy: {string.Join("; ", policyDecision.DeniedReasons)}",
-                    isMasked: false,
-                    truncated: false,
-                    estimatedTokens: 0,
-                    cancellationToken).ConfigureAwait(false);
-
-                return new McpToolCallResult(
-                    IsSuccess: false,
-                    ContentJson: "{}",
-                    ErrorMessage: $"Access denied to tool '{tool.Name}' by ABAC security policy."
+                var secContext = new SecurityEvaluationContext(
+                    UserSid: new Sid(userSidStr),
+                    GroupSids: groupSids,
+                    Tenant: new TenantId(sessionContext.TenantId),
+                    TargetTable: effectiveTable,
+                    RequestedColumns: [],
+                    ClientIp: clientIp,
+                    Timestamp: DateTimeOffset.UtcNow,
+                    PurposeId: "MCP_AI_AGENT_QUERY"
                 );
+
+                var policyDecision = await _policyEnforcementService.EvaluatePolicyAsync(secContext, cancellationToken).ConfigureAwait(false);
+                if (!policyDecision.IsAllowed)
+                {
+                    activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                    McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+
+                    _logger.LogWarning("Casbin ABAC policy denied AI Agent '{Principal}' tool call '{ToolName}' (target: '{TargetTable}') in tenant '{TenantId}'. Reasons: {Reasons}",
+                        sessionContext.ServicePrincipalId, tool.Name, effectiveTable, sessionContext.TenantId, string.Join("; ", policyDecision.DeniedReasons));
+
+                    await RecordAuditEventAsync(
+                        tool.Name,
+                        sessionContext,
+                        decision: "DENY",
+                        details: $"Access denied by Casbin ABAC policy: {string.Join("; ", policyDecision.DeniedReasons)}",
+                        isMasked: false,
+                        truncated: false,
+                        estimatedTokens: 0,
+                        cancellationToken).ConfigureAwait(false);
+
+                    return new McpToolCallResult(
+                        IsSuccess: false,
+                        ContentJson: "{}",
+                        ErrorMessage: $"Access denied to tool '{tool.Name}' by ABAC security policy."
+                    );
+                }
             }
         }
 
         // 3. Four-Eyes Justification Gate
-        if (resolvedTable != null && _tableMetadataRepository != null)
+        foreach (TableIdentifier? resolvedTable in resolvedTables ?? [])
         {
+            if (_tableMetadataRepository == null)
+            {
+                break;
+            }
+
             var meta = await _tableMetadataRepository.GetTableMetadataAsync(resolvedTable.Value, cancellationToken).ConfigureAwait(false);
             if (meta?.Table.RequiresFourEyes == true)
             {
@@ -550,6 +559,30 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         }
     }
 
+    /// <summary>
+    /// SEC A-4: Resolves every table a tool call touches. Returns null (fail-closed) when the table set cannot be
+    /// determined reliably. Curated operations are analysed via the GraphQL AST (root fields and literal
+    /// <c>table(domain, name)</c> arguments), never via a guessed first root field.
+    /// </summary>
+    internal static IReadOnlyList<TableIdentifier>? ParseTablesFromTool(McpToolDefinition tool, string? argumentsJson = null)
+    {
+        if (tool.TargetTable == null && !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation) &&
+            !IsBuiltInTableTool(tool.Name))
+        {
+            return McpGraphQlTableResolver.ResolveTables(tool.TargetGraphQLOperation);
+        }
+
+        var single = ParseTableIdentifierFromTool(tool, argumentsJson);
+        return single == null ? null : [single.Value];
+    }
+
+    private static bool IsBuiltInTableTool(string name) =>
+        name.Equals("query_customers", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("query_invoices", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
+        name.Equals("simulate_query", StringComparison.OrdinalIgnoreCase);
+
     private static TableIdentifier? ParseTableIdentifierFromTool(McpToolDefinition tool, string? argumentsJson = null)
     {
         if (tool.TargetTable != null)
@@ -578,16 +611,6 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                 }
             }
             return new TableIdentifier("governance", "simulator", "ast");
-        }
-
-        if (!string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation))
-        {
-            var match = Regex.Match(tool.TargetGraphQLOperation, @"\{\s*([a-zA-Z0-9_]+)", RegexOptions.None, DefaultRegexTimeout);
-            if (match.Success)
-            {
-                var fieldName = match.Groups[1].Value.ToLowerInvariant();
-                return new TableIdentifier("default", "dbo", fieldName);
-            }
         }
 
         if (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) && tool.Name.Length > 6)

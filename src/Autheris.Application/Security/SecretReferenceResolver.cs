@@ -27,7 +27,8 @@ public static class SecretReferenceResolver
             return null;
         }
 
-        var isDev = environment == null ||
+        // Review G5: a missing host environment is treated as production (fail closed), never as Development.
+        var isDev = environment != null &&
                     string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
 
         if (secretProvider != null)

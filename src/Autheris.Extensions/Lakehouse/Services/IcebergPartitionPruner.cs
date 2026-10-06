@@ -80,11 +80,10 @@ public sealed class IcebergPartitionPruner : IIcebergPartitionPruner
                 return false;
             }
 
-            var hasPartition = file.PartitionValues.ContainsKey(column);
-            var hasBounds = file.LowerBounds != null && file.UpperBounds != null &&
-                            file.LowerBounds.ContainsKey(column) && file.UpperBounds.ContainsKey(column);
-
-            if (!hasPartition && !hasBounds)
+            // SEC E-3: only partition equality or lower == upper == value counts as ownership proof; overlapping bounds do not.
+            if (!LakehouseLocationGuard.ProvesTenantOwnership(
+                    file.PartitionValues, file.LowerBounds, file.UpperBounds, column,
+                    LakehouseLocationGuard.NormalizeEqualityPredicate(predicates[column])))
             {
                 return false;
             }

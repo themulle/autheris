@@ -22,7 +22,7 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
 {
     public DataSourceType SupportedType => DataSourceType.LakehouseDelta;
 
-    private const string TenantColumn = "tenantId";
+    private const string DefaultTenantColumn = "tenantId";
 
     private readonly IDeltaMetadataReader _metadataReader;
     private readonly IDeltaPartitionPruner _partitionPruner;
@@ -65,6 +65,10 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
             return Array.Empty<IReadOnlyDictionary<string, object?>>();
         }
 
+        // SEC E-3 / E-5: honour the table's own tenant column name.
+        var TenantColumn = context.Metadata.TenantColumnName
+            ?? LakehouseLocationGuard.ResolveTenantColumn(context.Metadata.Columns.Select(c => c.ColumnName), DefaultTenantColumn);
+
         var predicates = ExtractPredicates(context.Arguments);
 
         // SEC-DL-02 / SEC M-35 / EX-17: Reject filter on uncataloged columns or non-clear columns to prevent inference side-channels
@@ -101,7 +105,9 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
         var snapshot = await _metadataReader.LoadSnapshotAsync(tableLocation, null, null, ct).ConfigureAwait(false);
 
         // Partition & bound pruning
-        var prunedFiles = _partitionPruner.PruneDataFiles(snapshot.ActiveFiles, snapshot.Metadata.PartitionColumns, predicates);
+        // SEC E-3: the tenant column is mandatory evidence - files without partition equality / min == max == tenant are dropped.
+        var mandatoryColumns = string.IsNullOrWhiteSpace(tenantId) ? Array.Empty<string>() : new[] { TenantColumn };
+        var prunedFiles = _partitionPruner.PruneDataFiles(snapshot.ActiveFiles, snapshot.Metadata.PartitionColumns, predicates, mandatoryColumns);
 
         // Generate synthetic row data for pruned files respecting schema & partition values
         var rawRows = new List<Dictionary<string, object?>>();
@@ -111,12 +117,16 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
 
         foreach (var file in prunedFiles)
         {
-            // SEC E-15: row-level tenant check - a file whose stored tenant differs from the session tenant contributes no rows.
-            if (!string.IsNullOrWhiteSpace(tenantId) &&
-                file.PartitionValues.TryGetValue(TenantColumn, out var storedTenant) &&
-                !string.Equals(storedTenant, tenantId, StringComparison.Ordinal))
+            // SEC E-3: the tenant value of a row is the stored one (partition value / single-valued statistics), never the session tenant.
+            string? storedTenant = null;
+            if (!string.IsNullOrWhiteSpace(tenantId))
             {
-                continue;
+                storedTenant = LakehouseLocationGuard.GetStoredTenantValue(file.PartitionValues, file.MinValues, file.MaxValues, TenantColumn);
+                if (storedTenant == null ||
+                    !LakehouseLocationGuard.ProvesTenantOwnership(file.PartitionValues, file.MinValues, file.MaxValues, TenantColumn, tenantId))
+                {
+                    continue;
+                }
             }
 
             var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
@@ -126,15 +136,31 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
                 {
                     row[col] = pv;
                 }
-                else if (string.Equals(col, "tenantId", StringComparison.OrdinalIgnoreCase))
+                else if (storedTenant != null && string.Equals(col, TenantColumn, StringComparison.OrdinalIgnoreCase))
                 {
-                    row[col] = tenantId;
+                    row[col] = storedTenant;
                 }
                 else
                 {
                     row[col] = $"val_{col}_{file.Path.GetHashCode():X8}";
                 }
             }
+            // SEC E-15 / E-3: row-level tenant check on the stored tenant value of every row.
+            if (!string.IsNullOrWhiteSpace(tenantId))
+            {
+                var check = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { [TenantColumn] = storedTenant };
+                if (row.TryGetValue(TenantColumn, out var rowTenant))
+                {
+                    check[TenantColumn] = rowTenant;
+                }
+
+                if (!LakehouseLocationGuard.RowBelongsToTenant(check, TenantColumn, tenantId))
+                {
+                    _logger.LogWarning("Delta Lake scan of '{Table}' dropped a row of a foreign tenant (row-level isolation).", context.Metadata.Identifier);
+                    continue;
+                }
+            }
+
             rawRows.Add(row);
 
             if (context.Limit > 0 && rawRows.Count >= context.Limit)

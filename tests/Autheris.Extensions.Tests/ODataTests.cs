@@ -145,7 +145,7 @@ public sealed class ODataTests
             Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>((Array.Empty<IReadOnlyDictionary<string, object?>>(), decision)));
 
-        var handler = new ODataHandler(metadataRepo, execService, logger);
+        var handler = new ODataHandler(metadataRepo, execService, logger, DevEnv());
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: null,
@@ -162,5 +162,47 @@ public sealed class ODataTests
         result.StatusCode.ShouldBe(403);
         result.ErrorCode.ShouldBe("ACCESS_DENIED");
         result.ErrorMessage.ShouldNotBeNull().ShouldContain("No active consent");
+    }
+
+    private static Microsoft.Extensions.Hosting.IHostEnvironment DevEnv(string name = "Development")
+    {
+        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        env.EnvironmentName.Returns(name);
+        return env;
+    }
+
+    [Fact]
+    public async Task ODataHandler_OutsideDevelopment_DeniedAndNotFoundAreGeneric403()
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var execService = Substitute.For<IGatewayExecutionService>();
+        var decision = TableAccessDecision.Denied(new TableIdentifier("sales", "dbo", "invoices"), "Casbin: sid S-1-5-21-1 tenant acme denied");
+        execService.ExecuteTableQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableIdentifier>(t => t.TableName == "invoices"), Arg.Any<int?>(), Arg.Any<int?>(),
+            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>((Array.Empty<IReadOnlyDictionary<string, object?>>(), decision)));
+        execService.ExecuteTableQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableIdentifier>(t => t.TableName == "missing"), Arg.Any<int?>(), Arg.Any<int?>(),
+            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
+            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(
+                _ => throw new Autheris.Domain.Exceptions.TableNotFoundException(new TableIdentifier("acme", "dbo", "missing")));
+
+        foreach (var handler in new[]
+        {
+            new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Production")),
+            new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance)
+        })
+        {
+            var denied = await handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("sales", "dbo", "invoices"), 10, 0, null, false, null);
+            var missing = await handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("sales", "dbo", "missing"), 10, 0, null, false, null);
+
+            denied.StatusCode.ShouldBe(403);
+            missing.StatusCode.ShouldBe(403);
+            denied.ErrorMessage.ShouldBe(missing.ErrorMessage);
+            denied.ErrorMessage.ShouldNotContain("Casbin");
+            missing.ErrorMessage.ShouldNotContain("acme");
+        }
     }
 }

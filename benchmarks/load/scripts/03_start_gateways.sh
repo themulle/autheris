@@ -12,6 +12,12 @@ if [ -n "${DATABASE_URL:-}" ] || [ -n "${DB_HOST:-}" ]; then
     echo "Remote database specified. Using gateway-only compose definition..."
     DOCKER_COMPOSE_FILE="${BENCH_DIR}/docker/docker-compose.gateway.yml"
 fi
+# Per-run random credentials (BENCH_DB_PASSWORD, BENCH_HASURA_ADMIN_SECRET).
+. "$(dirname "${BASH_SOURCE[0]}")/lib_secrets.sh"
+# Remote DB (multi-host): derive the connection URL from DB_HOST and the generated password.
+if [ -n "${DB_HOST:-}" ] && [ -z "${DATABASE_URL:-}" ]; then
+    export DATABASE_URL="postgres://postgres:${BENCH_DB_PASSWORD}@${DB_HOST}:5432/postgres"
+fi
 METADATA_DIR="${BENCH_DIR}/configs/hasura-metadata"
 
 echo "================================================================================"
@@ -51,13 +57,13 @@ wait_for_url "http://localhost:8085/healthz" "Hasura"
 echo "Tracking Chinook tables in Hasura..."
 curl -s -X POST "http://localhost:8085/v1/metadata" \
      -H "Content-Type: application/json" \
-     -H "X-Hasura-Admin-Secret: REDACTED_HISTORICAL_BENCHMARK_SECRET" \
+     -H "X-Hasura-Admin-Secret: ${BENCH_HASURA_ADMIN_SECRET}" \
      -d @"${METADATA_DIR}/psql_track_chinook_tables.json" > /dev/null || true
 
 echo "Tracking Chinook relationships in Hasura..."
 curl -s -X POST "http://localhost:8085/v1/metadata" \
      -H "Content-Type: application/json" \
-     -H "X-Hasura-Admin-Secret: REDACTED_HISTORICAL_BENCHMARK_SECRET" \
+     -H "X-Hasura-Admin-Secret: ${BENCH_HASURA_ADMIN_SECRET}" \
      -d @"${METADATA_DIR}/psql_track_chinook_relationships.json" > /dev/null || true
 
 # 2. Apollo Server
@@ -81,7 +87,7 @@ echo "Warming up Hasura..."
 for i in {1..20}; do
     curl -s -o /dev/null -X POST http://localhost:8085/v1/graphql \
          -H "Content-Type: application/json" \
-         -H "X-Hasura-Admin-Secret: REDACTED_HISTORICAL_BENCHMARK_SECRET" \
+         -H "X-Hasura-Admin-Secret: ${BENCH_HASURA_ADMIN_SECRET}" \
          -d "$WARMUP_QUERY"
 done
 

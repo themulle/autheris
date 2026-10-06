@@ -711,7 +711,14 @@ public partial class SqliteGovernanceRepository
     public Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default)
         => ActivateConsentAsync(requestId, null, ct);
 
-    public async Task ActivateConsentAsync(Guid requestId, Sid? approvedBy, CancellationToken ct = default)
+    public Task ActivateConsentAsync(Guid requestId, Sid? approvedBy, CancellationToken ct = default) =>
+        ActivateConsentCoreAsync(requestId, approvedBy, allowPendingAutoApprove: false, ct);
+
+    /// <summary>Insecure getting-started auto-approve path only: activates a request that is still pending.</summary>
+    public Task ActivateConsentForAutoApproveAsync(Guid requestId, CancellationToken ct = default) =>
+        ActivateConsentCoreAsync(requestId, null, allowPendingAutoApprove: true, ct);
+
+    private async Task ActivateConsentCoreAsync(Guid requestId, Sid? approvedBy, bool allowPendingAutoApprove, CancellationToken ct)
     {
         await _lock.WaitAsync(ct);
         try
@@ -757,8 +764,12 @@ public partial class SqliteGovernanceRepository
             {
                 cmd.Transaction = tx;
                 // SEC H-06: Only a pending or newly approved request may be activated.
-                cmd.CommandText = @"UPDATE CONSENT_REQUESTS SET status = 'APPROVED'
-                                    WHERE id = @id AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL', 'APPROVED')";
+                // Review G5: regular activation only from 'APPROVED' (i.e. after the approval steps); pending states only for dev auto-approve.
+                cmd.CommandText = allowPendingAutoApprove
+                    ? @"UPDATE CONSENT_REQUESTS SET status = 'APPROVED'
+                        WHERE id = @id AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL', 'APPROVED')"
+                    : @"UPDATE CONSENT_REQUESTS SET status = 'APPROVED'
+                        WHERE id = @id AND status = 'APPROVED'";
                 cmd.Parameters.AddWithValue("@id", requestId.ToString());
                 var rowsAffected = await cmd.ExecuteNonQueryAsync(ct);
                 if (rowsAffected != 1)
@@ -1088,7 +1099,10 @@ public partial class SqliteGovernanceRepository
         }
     }
 
-    public async Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default)
+    public Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default) =>
+        RejectConsentRequestAsync(requestId, approverSid, reason, isExternalItsm: false, ct);
+
+    public async Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, bool isExternalItsm, CancellationToken ct = default)
     {
         var req = await GetConsentRequestAsync(requestId, ct);
         if (req == null) throw new InvalidOperationException($"Request {requestId} not found.");
@@ -1120,8 +1134,7 @@ public partial class SqliteGovernanceRepository
                 throw new InvalidOperationException($"Request {requestId} is in status '{currentStatus}' and cannot be rejected.");
             }
 
-            bool isAuthorized = string.Equals(approverSid.Value, "ITSM_SYSTEM", StringComparison.OrdinalIgnoreCase) ||
-                                approverSid.Value.StartsWith("ITSM_", StringComparison.OrdinalIgnoreCase) ||
+            bool isAuthorized = isExternalItsm ||
                                 await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, ct);
             if (!isAuthorized)
             {

@@ -112,7 +112,7 @@ public sealed class MediumsGroupBTests
 
         // Pruner that does not prune: the row-level check must hold on its own.
         var pruner = Substitute.For<IDeltaPartitionPruner>();
-        pruner.PruneDataFiles(Arg.Any<IReadOnlyList<DeltaDataFile>>(), Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>())
+        pruner.PruneDataFiles(Arg.Any<IReadOnlyList<DeltaDataFile>>(), Arg.Any<IReadOnlyList<string>>(), Arg.Any<IReadOnlyDictionary<string, string>>(), Arg.Any<IReadOnlyCollection<string>>())
             .Returns(call => call.Arg<IReadOnlyList<DeltaDataFile>>());
 
         var executor = new DeltaLakeDataSourceExecutor(

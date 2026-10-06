@@ -107,6 +107,9 @@ fi
 mkdir -p "${RESULTS_DIR}"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
+# Per-run random credentials (written to the untracked .bench-secrets.env and shipped to the hosts).
+. "${BENCH_DIR}/scripts/lib_secrets.sh"
+
 echo "================================================================================"
 echo " 3-Tier Multi-Host GraphQL Benchmark (Hetzner Cloud)"
 echo " Duration:    ${DURATION}"
@@ -133,14 +136,16 @@ echo "    DB Host:       ${IP_DB} (Private: 10.0.1.10)"
 echo "    Gateway Host:  ${IP_GW} (Private: 10.0.1.20)"
 echo "    Client Host:   ${IP_CLIENT} (Private: 10.0.1.30)"
 
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+# Trust-on-first-use with a per-run known_hosts file (no blanket host key bypass).
+KNOWN_HOSTS="${RESULTS_DIR}/known_hosts_${TIMESTAMP}"
+SSH_OPTS="-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=${KNOWN_HOSTS} -o LogLevel=ERROR"
 
 # Step 2: Deploy & Initialize Database
 echo ""
 echo ">>> Step 2/5: Initializing Database on bench-db (${IP_DB})..."
 ssh ${SSH_OPTS} "root@${IP_DB}" "mkdir -p /root/autheris/benchmarks/load"
 rsync -avz -e "ssh ${SSH_OPTS}" --exclude '.git' --exclude 'results' "${BENCH_DIR}/" "root@${IP_DB}:/root/autheris/benchmarks/load/"
-ssh ${SSH_OPTS} "root@${IP_DB}" "cd /root/autheris/benchmarks/load && ./scripts/02_init_database.sh"
+ssh ${SSH_OPTS} "root@${IP_DB}" "cd /root/autheris/benchmarks/load && DB_BIND_IP=10.0.1.10 ./scripts/02_init_database.sh"
 
 # Step 3: Deploy & Start Gateways
 echo ""
@@ -150,7 +155,7 @@ rsync -avz -e "ssh ${SSH_OPTS}" --exclude '.git' --exclude 'bin' --exclude 'obj'
 # Configure Gateways to connect to Postgres over the 10G private network (10.0.1.10)
 ssh ${SSH_OPTS} "root@${IP_GW}" "
     cd /root/autheris/benchmarks/load
-    export DATABASE_URL='postgres://postgres:REDACTED_HISTORICAL_BENCHMARK_SECRET@10.0.1.10:5432/postgres'
+    export DB_HOST='10.0.1.10' GATEWAY_BIND_IP='10.0.1.20'
     ./scripts/03_start_gateways.sh
 "
 

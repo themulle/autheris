@@ -8,6 +8,10 @@
 # Verwendung:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 #
+# Ports sind in docker-compose.yml auf 127.0.0.1 gebunden. NICHT auf 0.0.0.0 / ein
+# oeffentliches Interface umbiegen: Development stellt Dev-Benutzer (z.B. dev-admin mit
+# ClusterAdmin) ohne echte Authentifizierung bereit.
+#
 # SEC C-04: Development im Container erfordert das explizite Opt-in
 # AUTHERIS_ALLOW_DEV_IN_CONTAINER=true, sonst bricht der Gateway den Start ab.
 # ==============================================================================

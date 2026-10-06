@@ -125,7 +125,7 @@ def seed_services_and_databases(token):
                     "scheme": "postgresql+psycopg2",
                     "hostPort": "postgres:5432",
                     "username": "gqluser",
-                    "authType": {"password": "REDACTED_HISTORICAL_BENCHMARK_SECRET"},
+                    "authType": {"password": os.environ["GQL_PG_PASSWORD"]},
                     "database": "governancedb"
                 }
             }

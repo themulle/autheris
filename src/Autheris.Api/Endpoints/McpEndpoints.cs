@@ -167,7 +167,7 @@ public static class McpEndpoints
             }
 
             // SEC H-16: Roles/groups are taken from the current principal for every request.
-            sessionStore.RefreshPrincipalContext(session.SessionId, caller.Roles, caller.GroupSids);
+            sessionStore.RefreshPrincipalContext(session.SessionId, caller.Roles, caller.GroupSids, caller.ClientIp);
 
             var responseJson = await mcpHandler.HandleMessageAsync(session.SessionId, payload, context.RequestAborted).ConfigureAwait(false);
 
@@ -222,7 +222,7 @@ public static class McpEndpoints
             {
                 try
                 {
-                    session = mcpHandler.CreateSession(caller.PrincipalId, caller.TenantId, caller.UserSid, caller.Roles, caller.GroupSids);
+                    session = mcpHandler.CreateSession(caller.PrincipalId, caller.TenantId, caller.UserSid, caller.Roles, caller.GroupSids, caller.ClientIp);
                 }
                 catch (McpSessionLimitExceededException)
                 {
@@ -231,7 +231,7 @@ public static class McpEndpoints
             }
             else
             {
-                sessionStore.RefreshPrincipalContext(session.SessionId, caller.Roles, caller.GroupSids);
+                sessionStore.RefreshPrincipalContext(session.SessionId, caller.Roles, caller.GroupSids, caller.ClientIp);
             }
 
             context.Response.Headers["X-MCP-Session-Id"] = session.SessionId;

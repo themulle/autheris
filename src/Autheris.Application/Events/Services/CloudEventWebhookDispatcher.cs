@@ -1,6 +1,7 @@
 namespace Autheris.Application.Events.Services;
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
@@ -74,7 +75,7 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
                 false,
                 400,
                 sw.Elapsed,
-                $"Target URL rejected by SSRF guardrail: {ex.Message}");
+                "Target URL rejected by SSRF guardrail.");
         }
 
         try
@@ -108,6 +109,13 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
             {
                 foreach (var (k, v) in subscription.CustomHeaders)
                 {
+                    // Review G5: hop-by-hop, routing and signature headers can never be set by a subscription.
+                    if (IsForbiddenCustomHeader(k))
+                    {
+                        _logger.LogWarning("Webhook delivery {DeliveryId}: custom header '{Header}' is not permitted and was dropped.", deliveryId, k);
+                        continue;
+                    }
+
                     request.Headers.TryAddWithoutValidation(k, v);
                 }
             }
@@ -143,7 +151,31 @@ public sealed class CloudEventWebhookDispatcher : ICloudEventWebhookDispatcher
                 false,
                 500,
                 sw.Elapsed,
-                ex.Message);
+                "Webhook delivery failed.");
         }
+    }
+
+    private static readonly HashSet<string> ForbiddenCustomHeaders = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "host", "forwarded", "via", "x-real-ip", "connection", "keep-alive", "te", "trailer", "transfer-encoding",
+        "upgrade", "expect", "content-length", "content-type", "content-encoding", "x-autheris-signature"
+    };
+
+    /// <summary>
+    /// Review G5: true for headers a subscription must not control (Host, Proxy-*, Forwarded, X-Forwarded-*, hop-by-hop,
+    /// framing, CloudEvents ce-* and the gateway signature header).
+    /// </summary>
+    internal static bool IsForbiddenCustomHeader(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return true;
+        }
+
+        var n = name.Trim();
+        return ForbiddenCustomHeaders.Contains(n) ||
+               n.StartsWith("proxy-", StringComparison.OrdinalIgnoreCase) ||
+               n.StartsWith("x-forwarded-", StringComparison.OrdinalIgnoreCase) ||
+               n.StartsWith("ce-", StringComparison.OrdinalIgnoreCase);
     }
 }

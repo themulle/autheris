@@ -135,7 +135,8 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
                 ClientIp: securityContext.ClientIp ?? IPAddress.None,
                 Timestamp: DateTimeOffset.UtcNow,
                 PurposeId: null,
-                Attributes: null
+                Attributes: null,
+                TargetDialect: metadata.Dialect
             );
 
             var casbinDecision = await _policyEnforcementService.EvaluatePolicyAsync(secEvaluationContext, ct).ConfigureAwait(false);

@@ -23,7 +23,7 @@ public static class BasicAuthSession
     public const string SchemeName = BasicAuthSessionOptions.SchemeName;
 
     /// <summary>Clients that want to stay stateless send this header with value "1" to suppress the cookie.</summary>
-    public const string NoSessionHeader = "X-Autheris-No-Session";
+    public const string NoSessionHeader = "X-No-Session";
 
     public const string AuthMethodClaimType = "auth_method";
     public const string AuthMethodBasic = "basic";
@@ -174,6 +174,11 @@ public static class BasicAuthSession
                 sid.StartsWith("S-1-5-21-ITSM-", StringComparison.OrdinalIgnoreCase))
             {
                 errors.Add($"Sicherheitsverletzung: BasicAuth-Benutzer '{user.Username}' hat eine unzulässige SID (kein ':' und kein Präfix 'ITSM' erlaubt).");
+            }
+
+            if (!string.IsNullOrWhiteSpace(user.TenantId) && !TenantId.TryParse(user.TenantId, out _))
+            {
+                errors.Add($"Sicherheitsverletzung: BasicAuth-Benutzer '{user.Username}' hat ein ungültiges TenantId-Format.");
             }
         }
 

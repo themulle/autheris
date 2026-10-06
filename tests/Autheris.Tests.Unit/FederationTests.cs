@@ -199,7 +199,7 @@ public sealed class FederationTests
         };
 
         using var client = new HttpClient(handler);
-        var request = new HttpRequestMessage(HttpMethod.Post, "https://inventory.corp.internal/graphql");
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://93.184.216.34/graphql"); // SEC I-1: unresolvable hosts fail closed, so use a public IP literal
 
         await client.SendAsync(request, CancellationToken.None);
 

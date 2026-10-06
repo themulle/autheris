@@ -22,8 +22,16 @@ public sealed class DeltaPartitionPruner : IDeltaPartitionPruner
         IReadOnlyList<DeltaDataFile> allFiles,
         IReadOnlyList<string> partitionColumns,
         IReadOnlyDictionary<string, string> predicates)
+        => PruneDataFiles(allFiles, partitionColumns, predicates, Array.Empty<string>());
+
+    public IReadOnlyList<DeltaDataFile> PruneDataFiles(
+        IReadOnlyList<DeltaDataFile> allFiles,
+        IReadOnlyList<string> partitionColumns,
+        IReadOnlyDictionary<string, string> predicates,
+        IReadOnlyCollection<string> mandatoryColumns)
     {
-        if (allFiles.Count == 0 || predicates.Count == 0)
+        ArgumentNullException.ThrowIfNull(mandatoryColumns);
+        if (allFiles.Count == 0 || (predicates.Count == 0 && mandatoryColumns.Count == 0))
         {
             return allFiles;
         }
@@ -32,6 +40,12 @@ public sealed class DeltaPartitionPruner : IDeltaPartitionPruner
 
         foreach (var file in allFiles)
         {
+            // SEC E-3: fail-closed for mandatory (tenant) columns - a file without ownership proof is dropped.
+            if (!HasMandatoryEvidence(file, predicates, mandatoryColumns))
+            {
+                continue;
+            }
+
             if (FileMatchesPredicates(file, partitionColumns, predicates))
             {
                 matchingFiles.Add(file);
@@ -40,6 +54,25 @@ public sealed class DeltaPartitionPruner : IDeltaPartitionPruner
 
         _logger.LogDebug("Pruned Delta files from {Total} down to {Matching} files.", allFiles.Count, matchingFiles.Count);
         return matchingFiles;
+    }
+
+    private static bool HasMandatoryEvidence(
+        DeltaDataFile file,
+        IReadOnlyDictionary<string, string> predicates,
+        IReadOnlyCollection<string> mandatoryColumns)
+    {
+        foreach (var column in mandatoryColumns)
+        {
+            if (!predicates.TryGetValue(column, out var expected) ||
+                !LakehouseLocationGuard.ProvesTenantOwnership(
+                    file.PartitionValues, file.MinValues, file.MaxValues, column,
+                    LakehouseLocationGuard.NormalizeEqualityPredicate(expected)))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool FileMatchesPredicates(

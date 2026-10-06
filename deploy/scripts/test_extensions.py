@@ -28,7 +28,20 @@ import urllib.error
 
 BASE_URL = os.environ.get("TARGET_PROXY", "http://localhost:8082").rstrip("/")
 MOCK_URL = os.environ.get("TARGET_MOCK", "http://localhost:8585").rstrip("/")
-SECRET_KEY = os.environ.get("HMAC_SECRET_KEY", "REDACTED_HISTORICAL_BENCHMARK_SECRET")
+def _load_secret():
+    """HMAC secret from the environment, else GATEWAY_HMAC_SECRET from the untracked deploy/.env."""
+    val = os.environ.get("HMAC_SECRET_KEY") or os.environ.get("GATEWAY_HMAC_SECRET")
+    if val:
+        return val
+    env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env")
+    if os.path.exists(env_file):
+        with open(env_file, encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("GATEWAY_HMAC_SECRET="):
+                    return line.split("=", 1)[1].strip()
+    sys.exit("HMAC_SECRET_KEY / GATEWAY_HMAC_SECRET not set and deploy/.env not found (run scripts/generate-env.sh)")
+
+SECRET_KEY = _load_secret()
 
 def log(msg):
     print(f"\033[1;36m[Extensions Test]\033[0m {msg}")

@@ -36,7 +36,7 @@ services:
         soft: 65536
         hard: 65536
     ports:
-      - "9200:9200"
+      - "${BIND_ADDR:-127.0.0.1}:9200:9200"
     volumes:
       - opensearch-data:/usr/share/opensearch/data:Z
     healthcheck:
@@ -61,13 +61,13 @@ services:
     networks:
       - gateway-bench-net
     ports:
-      - "8585:8585"
+      - "${BIND_ADDR:-127.0.0.1}:8585:8585"
     environment:
       # Database connection (re-uses PostgreSQL container from main compose)
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: gqluser
-      DB_USER_PASSWORD: REDACTED_HISTORICAL_BENCHMARK_SECRET
+      DB_USER_PASSWORD: "${GQL_PG_PASSWORD:?set GQL_PG_PASSWORD in .env (see .env.example)}"
       DB_DRIVER_CLASS: org.postgresql.Driver
       DB_SCHEME: postgresql
       DB_DATABASE: openmetadata_db

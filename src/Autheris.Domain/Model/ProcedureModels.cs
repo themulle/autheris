@@ -123,11 +123,18 @@ public sealed record ProcedureValidationResult(
     IReadOnlyList<string> Errors,
     IReadOnlyList<string> ResultColumns,
     IReadOnlyList<string> ReferencedTables,
-    IReadOnlyDictionary<string, string> ParameterSqlTypes)
+    IReadOnlyDictionary<string, string> ParameterSqlTypes,
+    IReadOnlyDictionary<string, ResultColumnSource>? ResultColumnSources = null)
 {
     public static ProcedureValidationResult Failed(params string[] errors) =>
         new(false, errors, [], [], new Dictionary<string, string>());
 }
+
+/// <summary>
+/// SEC D-2: source of a result column as reported by <c>sys.dm_exec_describe_first_result_set_for_object(@id, 1)</c> (browse mode).
+/// Table/Column are null for computed or ambiguous columns.
+/// </summary>
+public sealed record ResultColumnSource(string? Schema, string? Table, string? Column);
 
 /// <summary>A procedure together with its runtime validation state.</summary>
 public sealed record RegisteredProcedure(

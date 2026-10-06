@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "nuget"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "docker"
+    directory: "/deploy/containers/gqlgateway-api"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "npm"
+    directory: "/benchmarks/load/configs/apollo-server"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "npm"
+    directory: "/benchmarks/load/configs/postgraphile"
+    schedule:
+      interval: "weekly"

@@ -73,7 +73,7 @@ public sealed class DataCatalogConnectorTests
             }
         });
 
-        var omClient = new OpenMetadataClient(httpClient, options, NullLogger<OpenMetadataClient>.Instance);
+        var omClient = new OpenMetadataClient(httpClient, options, NullLogger<OpenMetadataClient>.Instance, null, DevEnv());
         var client = new OpenMetadataCatalogAdapter(omClient, NullLogger<OpenMetadataCatalogAdapter>.Instance);
 
         client.ProviderType.ShouldBe(DataCatalogProviderType.OpenMetadata);
@@ -211,5 +211,12 @@ public sealed class DataCatalogConnectorTests
                 Content = new StringContent(_responseContent, System.Text.Encoding.UTF8, "application/json")
             });
         }
+    }
+
+    private static Microsoft.Extensions.Hosting.IHostEnvironment DevEnv()
+    {
+        var env = NSubstitute.Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        return env;
     }
 }

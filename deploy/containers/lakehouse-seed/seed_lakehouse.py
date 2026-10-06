@@ -15,8 +15,8 @@ def get_env(key, default):
 
 def main():
     endpoint = get_env("MINIO_ENDPOINT", "http://minio:9000")
-    access_key = get_env("MINIO_ACCESS_KEY", "minioadmin")
-    secret_key = get_env("MINIO_SECRET_KEY", "minioadmin")
+    access_key = os.environ["MINIO_ACCESS_KEY"]
+    secret_key = os.environ["MINIO_SECRET_KEY"]
     bucket_name = get_env("LAKEHOUSE_BUCKET", "analytics-lake")
     ready_file = get_env("READY_FILE", "/tmp/.lakehouse_seed_complete")
 
@@ -27,11 +27,9 @@ def main():
         from botocore.client import Config
         from botocore.exceptions import ClientError
     except ImportError:
-        print("[lakehouse-seed] boto3 not found, installing via pip...")
-        os.system("pip install --no-cache-dir boto3")
-        import boto3
-        from botocore.client import Config
-        from botocore.exceptions import ClientError
+        # boto3 is pinned and installed at image build time; no runtime package installation.
+        print("[lakehouse-seed] ERROR: boto3 is not installed in this image. Rebuild the image.", file=sys.stderr)
+        sys.exit(1)
 
     s3 = boto3.client(
         "s3",

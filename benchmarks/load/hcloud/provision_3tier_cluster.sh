@@ -38,6 +38,32 @@ if ! hcloud network describe "${NETWORK_NAME}" &>/dev/null; then
     hcloud network add-subnet "${NETWORK_NAME}" --network-zone "eu-central" --type "cloud" --ip-range "10.0.1.0/24"
 fi
 
+# 1b. Create the Cloud Firewall (public interface): only SSH from the operator is allowed.
+# Hetzner firewalls do not filter the private network, so DB/Gateway/Client traffic over
+# 10.0.1.0/24 keeps working. Nothing else (Postgres, Hasura, gateway ports) is reachable publicly.
+FIREWALL_NAME="${FIREWALL_NAME:-bench-fw}"
+ALLOWED_SSH_CIDRS="${ALLOWED_SSH_CIDRS:-}"
+if [ -z "${ALLOWED_SSH_CIDRS}" ]; then
+    OPERATOR_IP="$(curl -fsS --max-time 10 https://api.ipify.org || true)"
+    if [ -z "${OPERATOR_IP}" ]; then
+        echo "ERROR: could not detect your public IP. Set ALLOWED_SSH_CIDRS (e.g. '203.0.113.7/32')."
+        exit 1
+    fi
+    ALLOWED_SSH_CIDRS="${OPERATOR_IP}/32"
+fi
+echo "1b. Ensuring firewall '${FIREWALL_NAME}' (SSH only from: ${ALLOWED_SSH_CIDRS})..."
+if ! hcloud firewall describe "${FIREWALL_NAME}" &>/dev/null; then
+    SOURCE_IPS_JSON="$(printf '"%s",' ${ALLOWED_SSH_CIDRS//,/ })"
+    RULES_FILE="$(mktemp)"
+    trap 'rm -f "${RULES_FILE}"' EXIT
+    cat > "${RULES_FILE}" <<JSON
+[
+  {"direction": "in", "protocol": "tcp", "port": "22", "source_ips": [${SOURCE_IPS_JSON%,}], "description": "SSH from operator"}
+]
+JSON
+    hcloud firewall create --name "${FIREWALL_NAME}" --rules-file "${RULES_FILE}"
+fi
+
 # 2. Create Database Server
 echo "2. Provisioning Database Host (bench-db: 10.0.1.10)..."
 hcloud server create \
@@ -47,6 +73,7 @@ hcloud server create \
     --location "${LOCATION}" \
     --network "${NETWORK_NAME}" \
     --ssh-key "${SSH_KEY_NAME}" \
+    --firewall "${FIREWALL_NAME}" \
     --user-data-from-file "${CLOUD_INIT_FILE}"
 
 # 3. Create Gateway Server Under Test
@@ -58,6 +85,7 @@ hcloud server create \
     --location "${LOCATION}" \
     --network "${NETWORK_NAME}" \
     --ssh-key "${SSH_KEY_NAME}" \
+    --firewall "${FIREWALL_NAME}" \
     --user-data-from-file "${CLOUD_INIT_FILE}"
 
 # 4. Create Client Load Generator Host
@@ -69,6 +97,7 @@ hcloud server create \
     --location "${LOCATION}" \
     --network "${NETWORK_NAME}" \
     --ssh-key "${SSH_KEY_NAME}" \
+    --firewall "${FIREWALL_NAME}" \
     --user-data-from-file "${CLOUD_INIT_FILE}"
 
 echo "Waiting for all servers to become active..."
@@ -92,6 +121,6 @@ echo " Load Gen (Client)  ${IP_CLIENT}   10.0.1.30"
 echo "================================================================================"
 echo ""
 echo "Next Steps:"
-echo " 1. Setup DB:      ssh root@${IP_DB} 'git clone ... && cd gql_bench && ./scripts/02_init_database.sh'"
-echo " 2. Start Gateway: DATABASE_URL=postgres://postgres:REDACTED_HISTORICAL_BENCHMARK_SECRET@10.0.1.10:5432/postgres ./scripts/03_start_gateways.sh"
+echo " 1. Setup DB:      ssh root@${IP_DB} 'git clone ... && cd gql_bench && DB_BIND_IP=10.0.1.10 ./scripts/02_init_database.sh'"
+echo " 2. Start Gateway: DB_HOST=10.0.1.10 GATEWAY_BIND_IP=10.0.1.20 ./scripts/03_start_gateways.sh"
 echo " 3. Run Load:      ssh root@${IP_CLIENT} 'TARGET_URL=http://10.0.1.20:5000/graphql ./scripts/04_run_benchmarks.sh'"

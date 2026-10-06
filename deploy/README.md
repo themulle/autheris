@@ -1,5 +1,20 @@
 # GqlGateway Simulations- und Benchmark-Umgebung
 
+> **BENCHMARK-ONLY STACK - do not deploy to production or to any shared / Internet-facing host.**
+> It runs a deliberately simplified topology (nginx ForwardAuth proxy that maps a client header to identities,
+> demo data, mock enterprise systems).
+>
+> **Security setup**
+> - Secrets are not committed. Run `./scripts/generate-env.sh` (also done by `make up` / `run-benchmark.sh`)
+>   to create an untracked `deploy/.env` with random values, or copy `.env.example` to `.env` and fill it in.
+> - All published ports bind to `127.0.0.1` (override with `BIND_ADDR` only if you understand the exposure).
+> - The `X-Benchmark-Role` header (which selects the ForwardAuth identity, including `GovernanceAdmin`) is only
+>   honoured by nginx for loopback and the pinned compose subnet `10.89.77.0/24`; other clients always get `FinanceUser`.
+> - Gateway trust lists (`TrustedNetworks`, `KnownNetworks`) are limited to the compose subnet.
+> - No secrets are baked into the container images; they are injected at runtime from `.env`.
+> - Remaining mock tokens in `appsettings.Benchmark.json` (OpenMetadata/Collibra/Alation/Purview) are dummy values
+>   for the local mock server only.
+
 Vollständige, reproduzierbare Last- und Latenz-Benchmark-Umgebung für das Projekt **GqlGateway** (.NET 8/10 GraphQL-Gateway mit Consent-, RLS- und Column-Masking-Governance-Schicht) auf Basis von **Podman Compose**.
 
 ---

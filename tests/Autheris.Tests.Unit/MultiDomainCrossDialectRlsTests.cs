@@ -15,11 +15,11 @@ public class MultiDomainCrossDialectRlsTests
     #region Correlated Subqueries Across All Five Dialects
 
     [Theory]
-    [InlineData(DatabaseDialect.SqlServer, "EXISTS (SELECT 1 FROM [dbo].[customers] AS [c] WHERE [c].[id] = [i].[customer_id])")]
-    [InlineData(DatabaseDialect.PostgreSql, "EXISTS (SELECT 1 FROM \"dbo\".\"customers\" AS \"c\" WHERE \"c\".\"id\" = \"i\".\"customer_id\")")]
-    [InlineData(DatabaseDialect.Databricks, "EXISTS (SELECT 1 FROM `dbo`.`customers` AS `c` WHERE `c`.`id` = `i`.`customer_id`)")]
-    [InlineData(DatabaseDialect.Sqlite, "EXISTS (SELECT 1 FROM \"customers\" AS \"c\" WHERE \"c\".\"id\" = \"i\".\"customer_id\")")]
-    [InlineData(DatabaseDialect.Oracle, "EXISTS (SELECT 1 FROM \"dbo\".\"customers\" \"c\" WHERE \"c\".\"id\" = \"i\".\"customer_id\")")]
+    [InlineData(DatabaseDialect.SqlServer, "EXISTS (SELECT 1 FROM [dbo].[customers] AS [c] WHERE [c].[id] = [autheris_target].[customer_id])")]
+    [InlineData(DatabaseDialect.PostgreSql, "EXISTS (SELECT 1 FROM \"dbo\".\"customers\" AS \"c\" WHERE \"c\".\"id\" = \"autheris_target\".\"customer_id\")")]
+    [InlineData(DatabaseDialect.Databricks, "EXISTS (SELECT 1 FROM `dbo`.`customers` AS `c` WHERE `c`.`id` = `autheris_target`.`customer_id`)")]
+    [InlineData(DatabaseDialect.Sqlite, "EXISTS (SELECT 1 FROM \"customers\" AS \"c\" WHERE \"c\".\"id\" = \"autheris_target\".\"customer_id\")")]
+    [InlineData(DatabaseDialect.Oracle, "EXISTS (SELECT 1 FROM \"dbo\".\"customers\" \"c\" WHERE \"c\".\"id\" = \"autheris_target\".\"customer_id\")")]
     public void CorrelatedSubquery_BasicExists_ProducesExactDialectSyntax(DatabaseDialect dialect, string expectedSql)
     {
         var filter = new ConsentRowFilter

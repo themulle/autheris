@@ -85,15 +85,11 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         }
 
         var definition = registered.Definition;
-        if (registered.State != ProcedureState.Active || registered.Validation == null)
-        {
-            throw new ProcedureUnavailableException($"Procedure endpoint '{name}' is currently unavailable.");
-        }
-
         var sw = Stopwatch.StartNew();
         bool consentBypassed = _options.Value.IsConsentBypassed;
 
-        // 1. Identity and role gate
+        // 1. Identity and role gate. SEC (Low): the role/visibility check comes BEFORE the health check, and a caller
+        // that may not see the endpoint gets the same 404 as for an unknown name (no existence/health oracle).
         var userSidNullable = user.GetUserSid();
         if (userSidNullable == null && !consentBypassed)
         {
@@ -105,7 +101,12 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         if (definition.RequiredRoles.Count > 0 && !HasAnyRole(user, definition.RequiredRoles))
         {
             await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = "role" }, ct).ConfigureAwait(false);
-            throw new SecurityException(DeniedMessage);
+            throw new KeyNotFoundException($"Procedure endpoint '{name}' is not registered.");
+        }
+
+        if (registered.State != ProcedureState.Active || registered.Validation == null)
+        {
+            throw new ProcedureUnavailableException($"Procedure endpoint '{name}' is currently unavailable.");
         }
 
         // 2. Input validation (unknown and context-bound parameters are rejected, never ignored)
@@ -162,7 +163,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         }
 
         // 5. Result-set governance (deny / mask / drop unknown columns)
-        var governed = GovernResult(definition, raw, decisions);
+        var governed = GovernResult(definition, raw, decisions, registered.Validation.ResultColumnSources, tenantId);
 
         // 6. Synchronous audit BEFORE data leaves the gateway (fail-closed: an audit failure aborts the response)
         await AuditAsync(
@@ -359,7 +360,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private (IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows) GovernResult(
         ProcedureDefinition definition,
         RawProcedureResult raw,
-        Dictionary<string, (TableAccessDecision Decision, TableMetadata Meta)> decisions)
+        Dictionary<string, (TableAccessDecision Decision, TableMetadata Meta)> decisions,
+        IReadOnlyDictionary<string, ResultColumnSource>? sources,
+        TenantId tenantId)
     {
         (TableAccessDecision Decision, TableMetadata Meta)? mapped =
             definition.ResultTable != null && decisions.TryGetValue(definition.ResultTable, out var m) ? m : null;
@@ -398,14 +401,40 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 continue;
             }
 
-            if (mapped == null || !mapped.Value.Meta.HasColumn(col))
+            // SEC D-2: with browse-mode source information every result column is governed by the decision of ITS source table.
+            // Computed / ambiguous columns (no source) are removed unless declared clear; columns of tables other than the
+            // result table survive only with an explicit column-level Clear.
+            var (decision, meta, sourceColumn, foreign) = (default(TableAccessDecision)!, default(TableMetadata)!, col, false);
+            if (sources != null)
             {
-                continue; // unknown column: removed (fail-closed)
+                if (!sources.TryGetValue(col, out var src) || string.IsNullOrWhiteSpace(src.Table) || string.IsNullOrWhiteSpace(src.Column))
+                {
+                    continue; // computed / ambiguous column: fail closed
+                }
+
+                var key = $"{(string.IsNullOrWhiteSpace(src.Schema) ? "dbo" : src.Schema)}.{src.Table}";
+                if (!decisions.TryGetValue(key, out var srcMapped) || !srcMapped.Meta.HasColumn(src.Column))
+                {
+                    continue; // source table not governed: fail closed
+                }
+
+                (decision, meta) = srcMapped;
+                sourceColumn = src.Column;
+                foreign = definition.ResultTable == null ||
+                          !string.Equals(key, definition.ResultTable, StringComparison.OrdinalIgnoreCase);
+            }
+            else
+            {
+                if (mapped == null || !mapped.Value.Meta.HasColumn(col))
+                {
+                    continue; // unknown column: removed (fail-closed)
+                }
+
+                (decision, meta) = mapped.Value;
             }
 
-            var (decision, meta) = mapped.Value;
-            var level = decision.GetEffectiveColumnAccess(col, meta);
-            if (level == ColumnAccessLevel.Deny)
+            var level = decision.GetEffectiveColumnAccess(sourceColumn, meta);
+            if (level == ColumnAccessLevel.Deny || (foreign && level != ColumnAccessLevel.Clear))
             {
                 continue;
             }
@@ -413,13 +442,17 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             MaskingRule? rule = null;
             if (level == ColumnAccessLevel.Mask)
             {
-                var catalogColumn = meta.GetColumn(col);
-                if (!meta.ColumnMaskingRules.TryGetValue(col, out rule) && catalogColumn != null)
+                var catalogColumn = meta.GetColumn(sourceColumn);
+                if (!meta.ColumnMaskingRules.TryGetValue(sourceColumn, out rule) && catalogColumn != null)
                 {
                     meta.ColumnMaskingRules.TryGetValue(catalogColumn.ColumnName, out rule);
                 }
 
                 rule ??= new MaskingRule { RuleType = "REDACT" };
+
+                // SEC D-3: HMAC pseudonyms are tenant-scoped.
+                rule = Autheris.Application.Services.GatewayExecutionService.ScopeRuleForTenant(
+                    rule, tenantId.Value, _options.Value.DataMasking?.HmacKeyId);
             }
 
             plan.Add((i, col, level, rule));
@@ -494,11 +527,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             ct).ConfigureAwait(false);
     }
 
+    // SEC (Low): no fallback to the caller-influenced token "ip" claim; unknown client -> IPAddress.None (fail closed).
     private System.Net.IPAddress ResolveClientIp(ClaimsPrincipal user)
     {
-        return _clientIpResolver?.ResolveClientIp() ??
-            (user.FindFirst("ip")?.Value is { Length: > 0 } ipStr && System.Net.IPAddress.TryParse(ipStr, out var parsed)
-                ? parsed
-                : System.Net.IPAddress.None);
+        return _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
     }
 }

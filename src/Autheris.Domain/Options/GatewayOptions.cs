@@ -1112,6 +1112,13 @@ public sealed class BackstageIntegrationOptions
     public string DefaultNamespace { get; init; } = "default";
     public bool IncludeTablesAsApis { get; init; } = true;
     public string BaseUrl { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Absolute URL of a GraphQL explorer hosted by the portal itself (e.g. the Backstage page that proxies the
+    /// gateway with credentials and the CSRF header). When set, it replaces the Banana Cake Pop link in the exported
+    /// catalog entity; empty keeps the link to the embedded Banana Cake Pop UI.
+    /// </summary>
+    public string GraphQlExplorerUrl { get; init; } = string.Empty;
 }
 
 public sealed class ResourceGroupsOptions
@@ -1401,6 +1408,14 @@ public sealed class OutboundEgressOptions
     /// </summary>
     public List<string>? TrustedIntegrations { get; init; }
 
+    /// <summary>
+    /// SEC I-1: when false (default) outbound integration clients never use the system/environment proxy
+    /// (HTTP_PROXY/HTTPS_PROXY), so every connection is made directly to an address that passed the SSRF rules.
+    /// Set to true only when the network forces egress through a proxy; connections to that proxy are then not
+    /// subject to the address rules (the target URL is still validated before the request is sent).
+    /// </summary>
+    public bool AllowSystemProxy { get; init; }
+
     private static readonly string[] DefaultTrustedIntegrations = ["Itsm", "Catalog", "OpenMetadata", "Lineage"];
 
     /// <summary>Configured <see cref="TrustedIntegrations"/> or the default list.</summary>
@@ -1443,6 +1458,12 @@ public sealed class ArrowExportOptions
     public int BatchSize { get; init; } = 64000;
     public int MaxExportRows { get; init; } = 1000000;
     public bool EnableFlightSql { get; init; } = true;
+
+    /// <summary>
+    /// SEC (Low): dedicated HMAC key (>= 32 characters) for signing Flight SQL tickets. When empty, a random per-process key
+    /// is used (tickets do not survive restarts or work across replicas) and a warning is logged.
+    /// </summary>
+    public string? FlightTicketSigningKey { get; init; }
 }
 
 /// <summary>

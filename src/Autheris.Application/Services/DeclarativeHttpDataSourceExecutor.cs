@@ -535,32 +535,15 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
 
     private string ResolveSecretValue(string secretRefOrValue)
     {
-        if (_secretProvider != null)
-        {
-            try
-            {
-                var secretBytes = _secretProvider.GetSecretBytes(secretRefOrValue);
-                if (secretBytes != null && secretBytes.Length > 0)
-                {
-                    return System.Text.Encoding.UTF8.GetString(secretBytes);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Secret reference '{SecretRef}' could not be resolved by provider.", secretRefOrValue);
-                if (_environment != null && !_environment.IsDevelopment())
-                {
-                    throw new System.Security.SecurityException($"Secret reference '{secretRefOrValue}' could not be resolved in non-development environment.");
-                }
-            }
-        }
-
-        if (_environment != null && !_environment.IsDevelopment())
-        {
-            throw new System.Security.SecurityException($"Literal fallback for secret reference '{secretRefOrValue}' is prohibited outside of Development environment.");
-        }
-
-        return secretRefOrValue;
+        // Review G5: the secret reference is never logged or embedded in exception messages (central resolver, description only).
+        return Autheris.Application.Security.SecretReferenceResolver.Resolve(
+                   _secretProvider,
+                   secretRefOrValue,
+                   _environment,
+                   allowPlaintextInDevelopment: true,
+                   _logger,
+                   "declarative HTTP API credential")
+               ?? throw new System.Security.SecurityException("The declarative HTTP API credential could not be resolved (fail-closed).");
     }
 
     public static IReadOnlyList<IReadOnlyDictionary<string, object?>> ExtractRowsFromJson(

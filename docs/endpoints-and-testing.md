@@ -13,13 +13,13 @@ CSRF: GraphQL immer, REST bei Browser-Indikatoren (Cookie/Origin/Referer) -> Hea
 | Dev | `/`, `/getting-started`, `/api/dev/info`, `/personas`, `/login/{persona}` | anonym | nur Development | InsecureGettingStarted |
 | System | `/api/governance/system/{metrics,health,resource-groups}` | Rollen | `SystemMetrics.Enabled` | -- |
 | WebSQL | `POST /api/v1/sql`, `/api/sql` | Auth | `WebSql.Enabled` | GovernedWebSql, **EndToEndSqlite** |
-| Deklarative SQL-Endpunkte | `/api/v1/queries/`, `/openapi.json`, `/{name}` GET/POST | Auth | `SqlEndpoints.Enabled` + `WebSql.Enabled` | **EndToEndSqlite** |
+| Deklarative SQL-Endpunkte | `/api/v1/queries/` (non-admins see name, summary, parameters only), `/openapi.json`, `/{name}` GET/POST | Auth | `SqlEndpoints.Enabled` + `WebSql.Enabled` | **EndToEndSqlite** |
 | Stored Procedures | `/api/v1/procedures/*` | Auth | `SqlEndpoints.Procedures.Enabled` (nur SQL Server) | nur Unit |
-| OData / OpenAPI | `/odata/v4`, `$metadata`, `$openapi[/index]`, `{domain}/openapi.json|yaml`, `/api/v1/openapi/index`, `/ui/swagger` (Swagger UI, lokal ausgeliefert, offline-faehig; `/docs` und `$swagger` sind Aliase) | Auth oder anonym bei `OpenSchema` | immer | ODataIntegration, OpenApiIntegration, **EndToEndSqlite**, **OpenApiDocsEndToEnd** (Index-Crawl, Spec-Validitaet, Docs-UI-Links) |
+| OData / OpenAPI | `/odata/v4`, `$metadata`, `$openapi[/index]`, `{domain}/openapi.json|yaml`, `/api/v1/openapi/index`, `/ui/swagger` (Swagger UI, lokal ausgeliefert, offline-faehig; `/docs` und `$swagger` sind Aliase) | Auth (GovernanceAdmin/ClusterAdmin for the spec routes) oder anonym bei `OpenSchema` | immer | ODataIntegration, OpenApiIntegration, **EndToEndSqlite**, **OpenApiDocsEndToEnd** (Index-Crawl, Spec-Validitaet, Docs-UI-Links) |
 | MCP | `/mcp`, `/mcp/sse`, `/mcp/message`, `DELETE /mcp/session/{id}` | Auth | `Mcp.Enabled` | McpIntegration, **EndToEndSqlite** |
 | Backstage | `/api/integrations/backstage/catalog-entities[/{name}]`, `catalog-info.yaml` | Auth | `Backstage.Enabled` | BackstageIntegration, **EndToEndSqlite** |
 | dbt | `/api/extensions/dbt/*` (sync, exposures, proposals, validate-contract, run-results, health, webhook) | Rollen (global dbt state: GovernanceAdmin/ClusterAdmin, DbtAdmin for sync/run-results; a plain DataOwner has no access, E-7) | immer | DbtIntegration |
-| Governance | `/api/governance/{catalog/ingest-openapi, policy-simulation/replay, sunsetting/*, differential-privacy/*, eu-ai-act/*, gdpr/export-pdf}`, `/api/lineage/openlineage/sync` | Rollen | immer | GovernanceAdvancedMoats |
+| Governance | `/api/governance/{catalog/ingest-openapi, policy-simulation/replay (GovernanceAdmin/ClusterAdmin/PrivacyAdmin/Auditor; DataOwner only for an owned `TargetTable`), sunsetting/*, differential-privacy/*, eu-ai-act/*, gdpr/export-pdf}`, `/api/lineage/openlineage/sync` | Rollen | immer | GovernanceAdvancedMoats |
 | Schema Registry | `/api/schema-registry/{publish,check,services,{svc}/latest,{svc}/history}` | Rollen | immer | SchemaRegistryEndpointSecurity |
 | Webhooks | `/api/webhooks/{openmetadata,itsm/status-change,servicenow,jira,catalog}`, `/api/v1/governance/catalog/webhook/{provider}` | HMAC-Signatur | immer | Itsm, OpenMetadata |
 | CDC-Streaming | `/api/v1/cdc/{events,subscriptions}` | Rollen | immer | RealtimeStreamingSubscription |

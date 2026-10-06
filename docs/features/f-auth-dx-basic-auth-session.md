@@ -71,7 +71,7 @@ Invoke-RestMethod https://localhost:7214/api/v1/queries/ -WebSession $s
 - **Browser:** open the gateway URL and log in through the Basic dialog. Nitro (Banana Cake Pop), OData, DevPortal and GraphQL subscriptions are then logged in. Alternatively use a persona login link (see below).
 - **Postman:** collection auth "Basic Auth". Postman keeps the cookie automatically.
 - **MCP clients:** set `Authorization: Basic …` as a static header. The existing credential cache (`SuccessCacheSeconds`) spares PBKDF2 on every request.
-- **Stay stateless:** send the header `X-Autheris-No-Session: 1`; no cookie is issued then.
+- **Stay stateless:** send the header `X-No-Session: 1`; no cookie is issued then.
 
 ## Endpoints
 

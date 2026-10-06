@@ -8,6 +8,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCH_DIR="$(dirname "$SCRIPT_DIR")"
 RESULTS_DIR="${BENCH_DIR}/results"
+# Per-run random credentials
+. "$(dirname "${BASH_SOURCE[0]}")/lib_secrets.sh"
+export HASURA_ADMIN_SECRET="${BENCH_HASURA_ADMIN_SECRET}"  # consumed by k6 (__ENV)
 K6_SCRIPT="${BENCH_DIR}/configs/k6/load_test.js"
 
 DURATION="${DURATION:-30s}"
@@ -37,7 +40,7 @@ declare -A GATEWAYS=(
 
 # Custom headers per gateway
 declare -A HEADERS=(
-  ["hasura"]='{"X-Hasura-Admin-Secret":"my-secret"}'
+  ["hasura"]='{"X-Hasura-Admin-Secret":"'"${BENCH_HASURA_ADMIN_SECRET}"'"}'
   ["apollo"]='{}'
   ["postgraphile"]='{}'
   ["autheris"]='{"X-Test-User-Sid":"S-1-5-21-9999","GraphQL-Preflight":"1"}'
@@ -71,7 +74,7 @@ for gw_name in "${!GATEWAYS[@]}"; do
         -H "Content-Type: application/json" \
         -H "GraphQL-Preflight: 1" \
         -H "X-Test-User-Sid: S-1-5-21-9999" \
-        -H "X-Hasura-Admin-Secret: REDACTED_HISTORICAL_BENCHMARK_SECRET" \
+        -H "X-Hasura-Admin-Secret: ${BENCH_HASURA_ADMIN_SECRET}" \
         -d '{"query":"query { __typename }"}' 2>/dev/null; then
         echo " [WARN] Gateway ${gw_name} is not responding at ${gw_url}. Skipping."
         continue

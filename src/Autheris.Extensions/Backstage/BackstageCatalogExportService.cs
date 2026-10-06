@@ -76,7 +76,18 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
             ["autheris.io/governance-mode"] = "strict-zero-trust"
         };
 
-        if (_options.GraphQL.EnableBananaCakePop)
+        var explorerUrl = backstageOpts.GraphQlExplorerUrl?.Trim();
+        if (!string.IsNullOrEmpty(explorerUrl))
+        {
+            federatedAnnotations["autheris.io/graphql-ide"] = explorerUrl;
+            federatedLinks.Add(new BackstageEntityLink
+            {
+                Url = explorerUrl,
+                Title = "GraphQL Explorer",
+                Icon = "code"
+            });
+        }
+        else if (_options.GraphQL.EnableBananaCakePop)
         {
             var bcpPath = _options.GraphQL.BananaCakePopPath.StartsWith('/')
                 ? _options.GraphQL.BananaCakePopPath

@@ -90,6 +90,104 @@ internal static class LakehouseLocationGuard
         return true;
     }
 
+    /// <summary>
+    /// SEC E-3: ownership proof for a data file. Only partition equality, or lower == upper == tenant statistics, count as proof
+    /// that every row of the file belongs to <paramref name="tenantId"/>. Overlapping min/max bounds are NOT evidence.
+    /// </summary>
+    internal static bool ProvesTenantOwnership(
+        IReadOnlyDictionary<string, string>? partitionValues,
+        IReadOnlyDictionary<string, string>? lowerBounds,
+        IReadOnlyDictionary<string, string>? upperBounds,
+        string tenantColumn,
+        string tenantId)
+    {
+        if (TryGetIgnoreCase(partitionValues, tenantColumn, out var partition))
+        {
+            return string.Equals(partition, tenantId, StringComparison.Ordinal);
+        }
+
+        return TryGetIgnoreCase(lowerBounds, tenantColumn, out var lower) &&
+               TryGetIgnoreCase(upperBounds, tenantColumn, out var upper) &&
+               string.Equals(lower, tenantId, StringComparison.Ordinal) &&
+               string.Equals(upper, tenantId, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// SEC E-3: the stored (never synthesized) tenant value of a file: the partition value or a single-valued statistic.
+    /// </summary>
+    internal static string? GetStoredTenantValue(
+        IReadOnlyDictionary<string, string>? partitionValues,
+        IReadOnlyDictionary<string, string>? lowerBounds,
+        IReadOnlyDictionary<string, string>? upperBounds,
+        string tenantColumn)
+    {
+        if (TryGetIgnoreCase(partitionValues, tenantColumn, out var partition))
+        {
+            return partition;
+        }
+
+        if (TryGetIgnoreCase(lowerBounds, tenantColumn, out var lower) &&
+            TryGetIgnoreCase(upperBounds, tenantColumn, out var upper) &&
+            string.Equals(lower, upper, StringComparison.Ordinal))
+        {
+            return lower;
+        }
+
+        return null;
+    }
+
+    /// <summary>Strips the optional '==' operator of a mandatory equality predicate.</summary>
+    internal static string NormalizeEqualityPredicate(string predicate)
+    {
+        var trimmed = predicate.Trim();
+        return trimmed.StartsWith("==", StringComparison.Ordinal) ? trimmed[2..].Trim() : trimmed;
+    }
+
+    /// <summary>
+    /// SEC E-3 / E-5: resolves the tenant column (tenant_id, TenantId, tenantId, TENANT-ID) among the given column names; falls back to tenantId.
+    /// </summary>
+    internal static string ResolveTenantColumn(IEnumerable<string> columnNames, string fallback = "tenantId")
+    {
+        string? normalized = null;
+        foreach (var name in columnNames)
+        {
+            if (string.Equals(name, "tenant_id", StringComparison.OrdinalIgnoreCase))
+            {
+                return name;
+            }
+
+            if (normalized == null &&
+                string.Equals(name.Replace("_", string.Empty).Replace("-", string.Empty), "tenantid", StringComparison.OrdinalIgnoreCase))
+            {
+                normalized = name;
+            }
+        }
+
+        return normalized ?? fallback;
+    }
+
+    private static bool TryGetIgnoreCase(IReadOnlyDictionary<string, string>? map, string key, out string value)
+    {
+        value = string.Empty;
+        if (map == null) return false;
+        if (map.TryGetValue(key, out var direct) && direct != null)
+        {
+            value = direct;
+            return true;
+        }
+
+        foreach (var kvp in map)
+        {
+            if (string.Equals(kvp.Key, key, StringComparison.OrdinalIgnoreCase) && kvp.Value != null)
+            {
+                value = kvp.Value;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal static long ResolveMaxReadBytes(GatewayOptions? options)
     {
         var configured = options?.Lakehouse?.Storage?.MaxReadBytes ?? DefaultMaxReadBytes;

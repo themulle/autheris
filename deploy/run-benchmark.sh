@@ -113,6 +113,18 @@ case "${SCENARIO}" in
         ;;
 esac
 
+# Secrets live in the untracked .env (generated on first run). See README.md "Security".
+if [[ ! -f .env ]]; then
+    log_warn_env() { echo -e "\033[1;33m[GqlGateway Bench]\033[0m $1"; }
+    log_warn_env "No .env found - generating random benchmark secrets via scripts/generate-env.sh"
+    ./scripts/generate-env.sh
+fi
+set -a
+# shellcheck disable=SC1091
+source ./.env
+set +a
+export HMAC_SECRET_KEY="${GATEWAY_HMAC_SECRET}"
+
 export BENCH_SCENARIO="${SCENARIO}"
 export ENABLE_LAKEHOUSE ENABLE_ENTERPRISE ENABLE_SQLSERVER
 export VUS DURATION_STEADY SEED_ROW_COUNT
@@ -221,7 +233,7 @@ if [[ -f results/benchmark-report.md ]]; then
     echo "Markdown Report:    results/benchmark-report.md"
     echo "Metrics JSON:       results/benchmark-summary.json"
     echo "Metrics CSV:        results/benchmark-summary.csv"
-    echo "Grafana Dashboard:  http://localhost:3000 (User: admin / Pass: admin)"
+    echo "Grafana Dashboard:  http://localhost:3000 (User: admin / Pass: see GRAFANA_ADMIN_PASSWORD in .env)"
     echo "Prometheus Metrics: http://localhost:9090"
     echo -e "\033[1;32m==========================================================================\033[0m"
 fi

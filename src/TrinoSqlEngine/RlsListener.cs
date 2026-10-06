@@ -288,6 +288,11 @@ public sealed class RlsListener : SqlBaseBaseListener
             return;
 
         string policyFilter = _options.PolicyProvider.GetPolicyFilter(normalizedName);
+        if (RowFilterAliases.ReferencesTarget(policyFilter))
+        {
+            // UPDATE/DELETE target aliases differ per dialect; a correlated row filter cannot be bound here (fail closed).
+            throw new SecurityException("Correlated row filters are not supported for UPDATE/DELETE statements.");
+        }
 
         if (context.booleanExpression() != null)
         {
@@ -351,6 +356,11 @@ public sealed class RlsListener : SqlBaseBaseListener
             return;
 
         string policyFilter = _options.PolicyProvider.GetPolicyFilter(normalizedName);
+        if (RowFilterAliases.ReferencesTarget(policyFilter))
+        {
+            // UPDATE/DELETE target aliases differ per dialect; a correlated row filter cannot be bound here (fail closed).
+            throw new SecurityException("Correlated row filters are not supported for UPDATE/DELETE statements.");
+        }
 
         if (context.where != null)
         {
@@ -922,7 +932,9 @@ public sealed class RlsListener : SqlBaseBaseListener
         string subquery;
         if (!string.IsNullOrWhiteSpace(policyFilter))
         {
-            subquery = $"(SELECT {selectColumns} FROM {rawTableName} WHERE {policyFilter})";
+            // Correlated row filters reference the filtered table through the reserved alias.
+            string targetAlias = RowFilterAliases.ReferencesTarget(policyFilter) ? $" AS {RowFilterAliases.Target}" : string.Empty;
+            subquery = $"(SELECT {selectColumns} FROM {rawTableName}{targetAlias} WHERE {policyFilter})";
         }
         else
         {

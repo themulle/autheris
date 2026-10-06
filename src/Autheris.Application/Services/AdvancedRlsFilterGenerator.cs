@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using TrinoSqlEngine;
 
 namespace Autheris.Application.Services;
 
@@ -25,15 +26,33 @@ public static partial class AdvancedRlsFilterGenerator
             throw new InvalidOperationException("DependentTable darf für SubqueryCorrelated nicht null sein.");
         }
 
-        var targetAlias = string.IsNullOrWhiteSpace(filter.TargetTableAlias) ? "target" : filter.TargetTableAlias;
+        // The query builders expose the filtered table under the reserved alias RowFilterAliases.Target. A configured
+        // TargetTableAlias (legacy, default "target") is only accepted as a qualifier and rebased onto that alias.
+        var configuredTargetAlias = string.IsNullOrWhiteSpace(filter.TargetTableAlias) ? "target" : filter.TargetTableAlias;
+        var targetAlias = RowFilterAliases.Target;
         var depAlias = string.IsNullOrWhiteSpace(filter.DependentTableAlias) ? "dep" : filter.DependentTableAlias;
         var targetFk = string.IsNullOrWhiteSpace(filter.ForeignKeyColumn) ? filter.ColumnName : filter.ForeignKeyColumn;
         var depPk = string.IsNullOrWhiteSpace(filter.PrimaryKeyColumn) ? "id" : filter.PrimaryKeyColumn;
 
-        ValidateIdentifier(targetAlias, "TargetTableAlias");
+        ValidateIdentifier(configuredTargetAlias, "TargetTableAlias");
         ValidateIdentifier(depAlias, "DependentTableAlias");
         ValidateIdentifier(targetFk, "ForeignKeyColumn");
         ValidateIdentifier(depPk, "PrimaryKeyColumn");
+
+        // A dependent or hop alias equal to the target alias would turn the correlation into a self-reference
+        // (dep.pk = dep.fk) and the EXISTS into a filter that is true for every target row.
+        var innerAliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        EnsureDistinctInnerAlias(depAlias, configuredTargetAlias, innerAliases);
+        if (filter.AdditionalHops != null)
+        {
+            foreach (var hop in filter.AdditionalHops)
+            {
+                ValidateIdentifier(hop.TableAlias, "SubqueryJoinHop.TableAlias");
+                EnsureDistinctInnerAlias(hop.TableAlias, configuredTargetAlias, innerAliases);
+            }
+        }
+
+        string Rebase(string qualifiedColumn) => RebaseTargetQualifier(qualifiedColumn, configuredTargetAlias);
 
         var quotedDepTable = FormatTableIdentifier(filter.DependentTable.Value, dialect);
         var quotedDepAlias = QuoteSingleIdentifier(depAlias, dialect);
@@ -52,8 +71,8 @@ public static partial class AdvancedRlsFilterGenerator
 
                 var quotedHopTable = FormatTableIdentifier(hop.Table, dialect);
                 var quotedHopAlias = QuoteSingleIdentifier(hop.TableAlias, dialect);
-                var quotedLeft = QuoteQualifiedColumn(hop.LeftJoinColumn, dialect);
-                var quotedRight = QuoteQualifiedColumn(hop.RightJoinColumn, dialect);
+                var quotedLeft = QuoteQualifiedColumn(Rebase(hop.LeftJoinColumn), dialect);
+                var quotedRight = QuoteQualifiedColumn(Rebase(hop.RightJoinColumn), dialect);
                 var asKeyword = dialect == DatabaseDialect.Oracle ? " " : " AS ";
 
                 joinClauses.Add($"INNER JOIN {quotedHopTable}{asKeyword}{quotedHopAlias} ON {quotedLeft} = {quotedRight}");
@@ -68,7 +87,7 @@ public static partial class AdvancedRlsFilterGenerator
         // Parse and append subquery predicates
         if (!string.IsNullOrWhiteSpace(filter.SubqueryFilterPredicateJson))
         {
-            var parsedConditions = ParseSubqueryPredicates(filter.SubqueryFilterPredicateJson, dialect);
+            var parsedConditions = ParseSubqueryPredicates(filter.SubqueryFilterPredicateJson, dialect, Rebase);
             whereConditions.AddRange(parsedConditions);
         }
 
@@ -79,11 +98,11 @@ public static partial class AdvancedRlsFilterGenerator
             ValidateQualifiedIdentifier(filter.DependentValidFromColumn, "DependentValidFromColumn");
 
             var quotedTargetTemporal = filter.TargetTemporalColumn.Contains('.')
-                ? QuoteQualifiedColumn(filter.TargetTemporalColumn, dialect)
+                ? QuoteQualifiedColumn(Rebase(filter.TargetTemporalColumn), dialect)
                 : $"{quotedTargetAlias}.{QuoteSingleIdentifier(filter.TargetTemporalColumn, dialect)}";
 
             var quotedValidFrom = filter.DependentValidFromColumn.Contains('.')
-                ? QuoteQualifiedColumn(filter.DependentValidFromColumn, dialect)
+                ? QuoteQualifiedColumn(Rebase(filter.DependentValidFromColumn), dialect)
                 : $"{quotedDepAlias}.{QuoteSingleIdentifier(filter.DependentValidFromColumn, dialect)}";
 
             whereConditions.Add($"{quotedTargetTemporal} >= {quotedValidFrom}");
@@ -92,7 +111,7 @@ public static partial class AdvancedRlsFilterGenerator
             {
                 ValidateQualifiedIdentifier(filter.DependentValidToColumn, "DependentValidToColumn");
                 var quotedValidTo = filter.DependentValidToColumn.Contains('.')
-                    ? QuoteQualifiedColumn(filter.DependentValidToColumn, dialect)
+                    ? QuoteQualifiedColumn(Rebase(filter.DependentValidToColumn), dialect)
                     : $"{quotedDepAlias}.{QuoteSingleIdentifier(filter.DependentValidToColumn, dialect)}";
 
                 whereConditions.Add($"({quotedValidTo} IS NULL OR {quotedTargetTemporal} < {quotedValidTo})");
@@ -167,7 +186,7 @@ public static partial class AdvancedRlsFilterGenerator
         return dialect.FormatSafeLiteral(elem);
     }
 
-    private static List<string> ParseSubqueryPredicates(string json, DatabaseDialect dialect)
+    private static List<string> ParseSubqueryPredicates(string json, DatabaseDialect dialect, Func<string, string> rebase)
     {
         var conditions = new List<string>();
         try
@@ -178,7 +197,7 @@ public static partial class AdvancedRlsFilterGenerator
                 foreach (var prop in doc.RootElement.EnumerateObject())
                 {
                     ValidateQualifiedIdentifier(prop.Name, "SubqueryPredicate.Column");
-                    var quotedCol = QuoteQualifiedColumn(prop.Name, dialect);
+                    var quotedCol = QuoteQualifiedColumn(rebase(prop.Name), dialect);
                     if (prop.Value.ValueKind == JsonValueKind.Null)
                     {
                         conditions.Add($"{quotedCol} IS NULL");
@@ -215,7 +234,7 @@ public static partial class AdvancedRlsFilterGenerator
                     {
                         throw new InvalidOperationException("Subquery-Prädikat muss ein 'value'-Property enthalten.");
                     }
-                    var quotedCol = QuoteQualifiedColumn(col, dialect);
+                    var quotedCol = QuoteQualifiedColumn(rebase(col), dialect);
 
                     if (rawVal.ValueKind == JsonValueKind.Null)
                     {
@@ -272,6 +291,28 @@ public static partial class AdvancedRlsFilterGenerator
             DatabaseDialect.Oracle => $"\"{table.Schema}\".\"{table.TableName}\"",
             _ => $"\"{table.Schema}\".\"{table.TableName}\""
         };
+    }
+
+    private static void EnsureDistinctInnerAlias(string alias, string configuredTargetAlias, HashSet<string> seen)
+    {
+        if (string.Equals(alias, configuredTargetAlias, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(alias, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase) ||
+            !seen.Add(alias))
+        {
+            throw new InvalidOperationException($"Alias '{alias}' im korrelierten RLS-Filter kollidiert mit dem Ziel-Alias oder einem anderen Alias.");
+        }
+    }
+
+    /// <summary>Rebases "configuredTargetAlias.column" onto the reserved target alias; other qualifiers stay.</summary>
+    private static string RebaseTargetQualifier(string qualifiedColumn, string configuredTargetAlias)
+    {
+        int dot = qualifiedColumn.IndexOf('.');
+        if (dot > 0 && string.Equals(qualifiedColumn[..dot], configuredTargetAlias, StringComparison.OrdinalIgnoreCase))
+        {
+            return RowFilterAliases.Target + qualifiedColumn[dot..];
+        }
+
+        return qualifiedColumn;
     }
 
     private static void ValidateIdentifier(string id, string context)

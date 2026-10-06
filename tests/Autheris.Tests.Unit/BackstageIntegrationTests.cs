@@ -90,6 +90,33 @@ public sealed class BackstageIntegrationTests
     }
 
     [Fact]
+    public async Task ExportCatalogEntitiesAsync_WithGraphQlExplorerUrl_ReplacesBcpLink()
+    {
+        var options = Options.Create(new GatewayOptions
+        {
+            GraphQL = new GraphQLOptions
+            {
+                EnableBananaCakePop = true,
+                BananaCakePopPath = "/ui/bcp"
+            },
+            Backstage = new BackstageIntegrationOptions
+            {
+                BaseUrl = "https://gateway.example.com",
+                GraphQlExplorerUrl = "https://portal.example.com/graphql-explorer"
+            }
+        });
+
+        var service = new BackstageCatalogExportService(options);
+        var entities = await service.ExportCatalogEntitiesAsync();
+
+        var federated = entities.First(e => e.Metadata.Name == "autheris-federated");
+        federated.Metadata.Annotations["autheris.io/graphql-ide"].ShouldBe("https://portal.example.com/graphql-explorer");
+        federated.Metadata.Links.ShouldNotContain(l => l.Title == "GraphQL IDE (Banana Cake Pop)");
+        var link = federated.Metadata.Links.First(l => l.Title == "GraphQL Explorer");
+        link.Url.ShouldBe("https://portal.example.com/graphql-explorer");
+    }
+
+    [Fact]
     public async Task ExportCatalogEntitiesAsync_WithSubgraphs_ExportsEachSubgraphAsApiEntity()
     {
         // Arrange
