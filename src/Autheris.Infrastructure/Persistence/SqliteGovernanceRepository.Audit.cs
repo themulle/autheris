@@ -21,7 +21,8 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                        (!string.Equals(entry.EventType, "TABLE_QUERY", StringComparison.OrdinalIgnoreCase) &&
                         !string.Equals(entry.EventType, "WEBSQL_QUERY", StringComparison.OrdinalIgnoreCase));
 
-        if (isTierA)
+        // SEC R2-3: Audit:SynchronousQueryAudit commits query events before the request is answered (no crash window).
+        if (isTierA || _options?.Audit?.SynchronousQueryAudit == true)
         {
             await _lock.WaitAsync(ct).ConfigureAwait(false);
             try
@@ -293,45 +294,27 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             lastEntryHash = entry.EntryHash;
         }
 
-        // SEC H-17: advance the external signed anchor while the write lock is still held. An anchor is never
-        // advanced while a violation is flagged (it would otherwise "launder" a truncated chain).
-        var anchorAdvanced = false;
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+
+        _lastAuditHash = lastEntryHash;
+        _lastAuditSeq = lastSequence;
+
+        // SEC H-17 / E-11: advance the external signed anchor only AFTER the commit while the write lock is still
+        // held. Append-only (WORM) anchor stores cannot take an anchor back, so an anchor that is ahead of the
+        // database must never exist; a crash between commit and anchor only leaves the anchor behind the tail,
+        // which is harmless. An anchor is never advanced while a violation is flagged (it would otherwise
+        // "launder" a truncated chain).
         if (Volatile.Read(ref _auditChainViolation) == null)
         {
             try
             {
                 _auditAnchorStore.Save(CreateSignedAnchor(lastSequence, lastEntryHash));
-                anchorAdvanced = true;
             }
             catch (Exception ex)
             {
                 _logger?.LogError(ex, "Failed to persist the external audit chain anchor (seq {Sequence}).", lastSequence);
             }
         }
-
-        try
-        {
-            await tx.CommitAsync(ct).ConfigureAwait(false);
-        }
-        catch
-        {
-            if (anchorAdvanced)
-            {
-                try
-                {
-                    // Roll the anchor back to the last committed state.
-                    _auditAnchorStore.Save(CreateSignedAnchor(_lastAuditSeq, _lastAuditHash));
-                }
-                catch (Exception restoreEx)
-                {
-                    _logger?.LogError(restoreEx, "Failed to restore the previous audit chain anchor after a failed commit.");
-                }
-            }
-            throw;
-        }
-
-        _lastAuditHash = lastEntryHash;
-        _lastAuditSeq = lastSequence;
     }
 
     public async Task<IReadOnlyList<AuditLogEntry>> GetAuditLogEntriesAsync(int limit = 100, TenantId? tenantId = null, CancellationToken ct = default)

@@ -21,7 +21,8 @@ public partial class PostgreSqlGovernanceRepository
                        (!string.Equals(entry.EventType, "TABLE_QUERY", StringComparison.OrdinalIgnoreCase) &&
                         !string.Equals(entry.EventType, "WEBSQL_QUERY", StringComparison.OrdinalIgnoreCase));
 
-        if (isTierA)
+        // SEC R2-3: Audit:SynchronousQueryAudit commits query events before the request is answered (no crash window).
+        if (isTierA || _options?.Audit?.SynchronousQueryAudit == true)
         {
             await _auditLock.WaitAsync(ct).ConfigureAwait(false);
             try

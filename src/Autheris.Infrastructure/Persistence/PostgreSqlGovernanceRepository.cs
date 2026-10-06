@@ -43,7 +43,8 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
         IKeyVaultSecretProvider? secretProvider = null,
         IAuditChainAnchorStore? auditAnchorStore = null,
-        ILogger<PostgreSqlGovernanceRepository>? logger = null)
+        ILogger<PostgreSqlGovernanceRepository>? logger = null,
+        IAuditAnchorSigner? auditAnchorSigner = null)
     {
         ArgumentNullException.ThrowIfNull(epochValidationService);
         ArgumentNullException.ThrowIfNull(options);
@@ -95,7 +96,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
         _dataSource = builder.Build();
 
         // Bounded channel with backpressure to limit in-flight audit entries
-        var channelOptions = new BoundedChannelOptions(5_000)
+        var channelOptions = new BoundedChannelOptions(Math.Max(1, options?.Value?.Audit?.QueryAuditChannelCapacity ?? 5_000))
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
@@ -173,9 +174,13 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
 
         // Review PG-2: anchor store from Audit:ChainAnchorPath (use a shared, separately protected location when running
         // several replicas); in-memory only in Development/Test or when nothing is configured (a warning is logged).
-        _auditAnchorStore = auditAnchorStore ?? (!string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorPath)
-            ? new FileAuditChainAnchorStore(options.Value.Audit.ChainAnchorPath)
-            : new InMemoryAuditChainAnchorStore());
+        _auditAnchorStore = auditAnchorStore ?? AuditChainAnchorStoreFactory.Create(
+            options?.Value?.Audit,
+            !string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorPath)
+                ? new FileAuditChainAnchorStore(options.Value.Audit.ChainAnchorPath)
+                : new InMemoryAuditChainAnchorStore(),
+            secretProvider,
+            auditAnchorSigner);
 
         bool shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? isDevOrTest;
         InitializeDatabaseSafely(shouldSeed);

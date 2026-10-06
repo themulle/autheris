@@ -59,7 +59,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
         IKeyVaultSecretProvider? secretProvider = null,
         IAuditChainAnchorStore? auditAnchorStore = null,
-        ILogger<SqliteGovernanceRepository>? logger = null)
+        ILogger<SqliteGovernanceRepository>? logger = null,
+        IAuditAnchorSigner? auditAnchorSigner = null)
     {
         _epochValidationService = epochValidationService;
         _logger = logger;
@@ -71,7 +72,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
         InitializeDatabase();
 
         // SEC R2-3: Bounded channel with backpressure to limit in-flight audit entries
-        var channelOptions = new BoundedChannelOptions(5_000)
+        var channelOptions = new BoundedChannelOptions(Math.Max(1, options?.Value?.Audit?.QueryAuditChannelCapacity ?? 5_000))
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = true,
@@ -164,7 +165,11 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
 
         // SEC H-17: dedicated sub-key for signing the external audit chain end anchor.
         _auditAnchorKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, _auditHmacKey, 32, info: "Autheris:AuditChainAnchor:v1"u8.ToArray());
-        _auditAnchorStore = auditAnchorStore ?? CreateDefaultAuditAnchorStore(connStr, isMemory, options?.Value?.Audit?.ChainAnchorPath);
+        _auditAnchorStore = auditAnchorStore ?? AuditChainAnchorStoreFactory.Create(
+            options?.Value?.Audit,
+            CreateDefaultAuditAnchorStore(connStr, isMemory, options?.Value?.Audit?.ChainAnchorPath),
+            secretProvider,
+            auditAnchorSigner);
         InitializeAuditChainAnchor(isDevOrTest);
 
         bool shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? (isMemory && isDevOrTest);

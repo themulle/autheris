@@ -774,6 +774,37 @@ public sealed class AuditOptions
     /// Audit-Hash-Kette. Leer = "&lt;DB-Datei&gt;.audit-anchor.json" (bei In-Memory-DB: nur im Prozess).
     /// </summary>
     public string ChainAnchorPath { get; init; } = string.Empty;
+
+    /// <summary>
+    /// SEC E-11: Directory on SEPARATE storage (ideally a WORM / object-lock backed mount) that receives every
+    /// anchor as an immutable, never overwritten file (<c>anchor-&lt;seq&gt;-&lt;ticks&gt;.json</c>). Empty = off.
+    /// </summary>
+    public string ChainAnchorWormDirectory { get; init; } = string.Empty;
+
+    /// <summary>SEC E-11: Additional mirror files that receive the same anchor as <see cref="ChainAnchorPath"/>.</summary>
+    public string[] ChainAnchorMirrorPaths { get; init; } = [];
+
+    /// <summary>
+    /// SEC E-11: Key Vault reference of the PEM encoded (PKCS#8) ECDSA/RSA PRIVATE key that signs every anchor
+    /// (use a KMS/HSM backed secret provider; a custom <c>IAuditAnchorSigner</c> registered in DI takes precedence).
+    /// Empty = anchors only carry the HMAC signature.
+    /// </summary>
+    public string ChainAnchorSignerKeyVaultRef { get; init; } = string.Empty;
+
+    /// <summary>
+    /// SEC E-11: Optional Key Vault reference of the PEM encoded PUBLIC key used to verify anchors (verify-only
+    /// replicas). Empty = the public key is derived from the signing key.
+    /// </summary>
+    public string ChainAnchorVerifyKeyVaultRef { get; init; } = string.Empty;
+
+    /// <summary>
+    /// SEC R2-3: When true, query audit events (TABLE_QUERY/WEBSQL_QUERY ALLOW) are committed synchronously before the
+    /// request is answered instead of through the in-memory channel, so a crash cannot lose them (lower throughput).
+    /// </summary>
+    public bool SynchronousQueryAudit { get; init; }
+
+    /// <summary>SEC R2-3: Capacity of the asynchronous query audit channel = upper bound of entries lost on a crash.</summary>
+    [Range(1, 100000)] public int QueryAuditChannelCapacity { get; init; } = 5000;
 }
 
 public sealed class OpenMetadataOptions

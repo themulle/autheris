@@ -198,13 +198,19 @@ FROM CONSENT_REQUESTS WHERE itsm_ticket_id IS NOT NULL
 GROUP BY 1, 2 HAVING COUNT(*) > 1;
 ```
 
-## 4.y FinOps budget in multi-replica deployments (review E-14)
+### 4.z FinOps budget in multi-replica deployments (review E-14)
 
 The monthly FinOps budget is enforced against a cluster-wide counter in the shared state store (Redis when `Caching.Redis.Enabled`, otherwise in-memory = per process). Run Redis in every multi-replica deployment; without it each replica enforces the budget on its own. `ResetSpendAsync` clears the shared counter for the current month. Redis outages degrade to local accounting and are logged as `shared FinOps counter unavailable`.
 
-## 4.z Health probe caching (review R3-4)
+### 4.aa Health probe caching (review R3-4)
 
 `/health/ready` is anonymous and answered from a 5 second cache shared by all callers. A state change (e.g. DB outage) is therefore visible after at most 5 seconds; size Kubernetes probe periods accordingly.
+
+### 4.ab Anchor hardening and durable query audit (reviews E-11, R2-3)
+- `Audit:ChainAnchorWormDirectory`: directory on **separate / WORM storage** (object-lock backed mount, WORM NAS). Every anchor is written as a new, never overwritten, read-only file `anchor-<seq>-<ticks>.json`. `Audit:ChainAnchorMirrorPaths` adds further mirror files. On startup the newest anchor of all copies is used, so deleting or rolling back a single copy cannot hide a truncation; two different anchors for one sequence are treated as a violation.
+- `Audit:ChainAnchorSignerKeyVaultRef`: Key Vault/KMS reference of a PEM (PKCS#8) ECDSA or RSA private key. Every anchor then also carries an asymmetric signature (`ExternalSignature`) and an anchor without a valid one is rejected (fail-closed). Verify-only replicas can use `Audit:ChainAnchorVerifyKeyVaultRef` (public key). Register a custom `IAuditAnchorSigner` in DI to sign through a remote KMS/HSM so the private key never leaves it.
+- Anchors are advanced only after the audit transaction commits, so an append-only anchor can never be ahead of the database.
+- `Audit:SynchronousQueryAudit=true` commits query audit events before the request is answered (no loss window on a crash, lower throughput). Otherwise they travel through an in-memory channel of `Audit:QueryAuditChannelCapacity` entries (default 5000), the maximum a hard crash can lose; a graceful shutdown drains it.
 
 ---
 
