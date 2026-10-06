@@ -527,24 +527,24 @@ public sealed class GovernedDataPathsG4Tests
 
         // owner can redeem
         var count = 0;
-        await foreach (var _ in server.DoGetStreamAsync(info.Ticket, owner, default, Tenant1)) count++;
+        await foreach (var _ in server.DoGetStreamAsync(info.Ticket, owner, Tenant1)) count++;
         count.ShouldBe(1);
 
         // another user of the same tenant and the same user in another tenant cannot
         await Should.ThrowAsync<SecurityException>(async () =>
         {
-            await foreach (var _ in server.DoGetStreamAsync(info.Ticket, FlightUser("S-1-5-21-2", "tenant-1"), default, Tenant1)) { }
+            await foreach (var _ in server.DoGetStreamAsync(info.Ticket, FlightUser("S-1-5-21-2", "tenant-1"), Tenant1)) { }
         });
         await Should.ThrowAsync<SecurityException>(async () =>
         {
-            await foreach (var _ in server.DoGetStreamAsync(info.Ticket, FlightUser("S-1-5-21-1", "tenant-2"), default, new TenantId("tenant-2"))) { }
+            await foreach (var _ in server.DoGetStreamAsync(info.Ticket, FlightUser("S-1-5-21-1", "tenant-2"), new TenantId("tenant-2"))) { }
         });
 
         // swapping the SID inside the ticket invalidates the signature
         var forged = info.Ticket with { UserSid = "S-1-5-21-2" };
         await Should.ThrowAsync<SecurityException>(async () =>
         {
-            await foreach (var _ in server.DoGetStreamAsync(forged, FlightUser("S-1-5-21-2", "tenant-1"), default, Tenant1)) { }
+            await foreach (var _ in server.DoGetStreamAsync(forged, FlightUser("S-1-5-21-2", "tenant-1"), Tenant1)) { }
         });
     }
 

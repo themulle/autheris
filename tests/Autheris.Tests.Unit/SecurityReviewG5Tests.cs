@@ -193,7 +193,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
         var refreshed = store.RefreshPrincipalContext(session.SessionId, ["Reader"], [], "10.0.0.2");
 
         refreshed!.ClientIp.ShouldBe("10.0.0.2");
-        store.RefreshPrincipalContext(session.SessionId, ["Reader"], []).ClientIp.ShouldBe("10.0.0.2");
+        store.RefreshPrincipalContext(session.SessionId, ["Reader"], []).ShouldNotBeNull().ClientIp.ShouldBe("10.0.0.2");
     }
 
     // ---------------------------------------------------------------- I-1
