@@ -296,13 +296,11 @@ public sealed class IntegrationGapBTests
     {
         var revokedAt = DateTimeOffset.UtcNow.AddMinutes(-1);
         var db = Substitute.For<IDatabase>();
-        // Lookup keys are read with one MGET (review E-8 adds tenant-scoped keys).
-        db.StringGetAsync(Arg.Any<RedisKey[]>(), Arg.Any<CommandFlags>()).Returns(ci => Task.FromResult(
-            ci.ArgAt<RedisKey[]>(0)
-                .Select(k => k.ToString() == "Autheris:revoked:S-1-5-21-WS-REMOTE"
-                    ? (RedisValue)revokedAt.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)
-                    : RedisValue.Null)
-                .ToArray()));
+        // Lookup keys are read with individual GETs (review R4-2: no multi-key command in Redis Cluster).
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(ci =>
+            Task.FromResult(ci.ArgAt<RedisKey>(0).ToString() == "Autheris:revoked:S-1-5-21-WS-REMOTE"
+                ? (RedisValue)revokedAt.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture)
+                : RedisValue.Null));
         var multiplexer = Substitute.For<IConnectionMultiplexer>();
         multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
 
@@ -312,6 +310,29 @@ public sealed class IntegrationGapBTests
         (await store.IsRevokedAsync(CreatePrincipal("S-1-5-21-WS-REMOTE", revokedAt.AddMinutes(10)))).ShouldBeFalse();
         (await store.IsRevokedAsync(CreatePrincipal("S-1-5-21-WS-OTHER", revokedAt.AddMinutes(-10)))).ShouldBeFalse();
     }
+
+    [Theory]
+    [InlineData("TENANT:tenant-a|S-1-5-21-VICTIM")]
+    [InlineData("jti-1")]
+    public void R41_RevocationEvent_KeyWithPipe_IsParsedFromTheRight(string key)
+    {
+        var from = DateTimeOffset.UtcNow;
+        var until = from.AddHours(1);
+
+        RedisTokenRevocationService.TryParseEvent($"{key}|{from.ToUnixTimeMilliseconds()}|{until.ToUnixTimeMilliseconds()}", out var parsed, out var f, out var u).ShouldBeTrue();
+
+        parsed.ShouldBe(key);
+        f.ToUnixTimeMilliseconds().ShouldBe(from.ToUnixTimeMilliseconds());
+        u.ToUnixTimeMilliseconds().ShouldBe(until.ToUnixTimeMilliseconds());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("only-key")]
+    [InlineData("key|1")]
+    [InlineData("key|x|y")]
+    public void R41_RevocationEvent_Malformed_IsRejected(string payload) =>
+        RedisTokenRevocationService.TryParseEvent(payload, out _, out _, out _).ShouldBeFalse();
 
     [Fact]
     public async Task PARTWS_Redis_Unavailable_LocalRevocationStillEnforced()
