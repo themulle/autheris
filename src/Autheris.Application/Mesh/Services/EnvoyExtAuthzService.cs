@@ -318,6 +318,38 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         sb.AppendLine("    labels:");
         sb.AppendLine("      istio: ingressgateway");
         sb.AppendLine("  configPatches:");
+        // Review C-1 (rest): the ingress gateway must never forward client-supplied x-autheris-* headers. This Lua filter is
+        // inserted FIRST (INSERT_BEFORE router, listed before the ext_authz patch) so that only values returned by the
+        // ext_authz service (allowed_upstream_headers) can reach the upstream.
+        sb.AppendLine("    - applyTo: HTTP_FILTER");
+        sb.AppendLine("      match:");
+        sb.AppendLine("        context: GATEWAY");
+        sb.AppendLine("        listener:");
+        sb.AppendLine("          filterChain:");
+        sb.AppendLine("            filter:");
+        sb.AppendLine("              name: envoy.filters.network.http_connection_manager");
+        sb.AppendLine("              subFilter:");
+        sb.AppendLine("                name: envoy.filters.http.router");
+        sb.AppendLine("      patch:");
+        sb.AppendLine("        operation: INSERT_BEFORE");
+        sb.AppendLine("        value:");
+        sb.AppendLine("          name: envoy.filters.http.lua");
+        sb.AppendLine("          typed_config:");
+        sb.AppendLine("            \"@type\": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua");
+        sb.AppendLine("            default_source_code:");
+        sb.AppendLine("              inline_string: |");
+        sb.AppendLine("                function envoy_on_request(request_handle)");
+        sb.AppendLine("                  local headers = request_handle:headers()");
+        sb.AppendLine("                  local doomed = {}");
+        sb.AppendLine("                  for key, _ in pairs(headers) do");
+        sb.AppendLine("                    if string.sub(string.lower(key), 1, 11) == \"x-autheris-\" then");
+        sb.AppendLine("                      doomed[#doomed + 1] = key");
+        sb.AppendLine("                    end");
+        sb.AppendLine("                  end");
+        sb.AppendLine("                  for _, key in ipairs(doomed) do");
+        sb.AppendLine("                    headers:remove(key)");
+        sb.AppendLine("                  end");
+        sb.AppendLine("                end");
         sb.AppendLine("    - applyTo: HTTP_FILTER");
         sb.AppendLine("      match:");
         sb.AppendLine("        context: GATEWAY");

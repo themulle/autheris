@@ -965,6 +965,13 @@ public partial class SqliteGovernanceRepository
                 throw new InvalidOperationException("Funktionstrennung verletzt: Der Antragsteller kann den eigenen Consent-Antrag nicht genehmigen.");
             }
 
+            // Review R4-4 (rest): compare by the stable data owner id as well, not only by spelling.
+            var approverOwnerIds = await ResolveDataOwnerIdsInternalAsync(ConsentApprovalPolicy.IdentifierCandidates(approverSid.Value, itsmApproverAccount), ct);
+            if (ConsentApprovalPolicy.ShareOwnerId(approverOwnerIds, await ResolveRequesterOwnerIdsInternalAsync(req, ct)))
+            {
+                throw new InvalidOperationException("Funktionstrennung verletzt: Der Antragsteller kann den eigenen Consent-Antrag nicht genehmigen.");
+            }
+
             if (!isExternalItsmApproval)
             {
                 bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, ct);
@@ -1020,7 +1027,14 @@ public partial class SqliteGovernanceRepository
                 }
             }
 
-            if (existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount)))
+            bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount));
+            for (int i = 0; !sameApprover && i < existingApprovers.Count; i++)
+            {
+                var storedOwnerIds = await ResolveDataOwnerIdsInternalAsync(ConsentApprovalPolicy.IdentifierCandidates(existingApprovers[i]), ct);
+                sameApprover = ConsentApprovalPolicy.ShareOwnerId(storedOwnerIds, approverOwnerIds);
+            }
+
+            if (sameApprover)
             {
                 if (isExternalItsmApproval)
                 {

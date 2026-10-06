@@ -115,6 +115,22 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 
+    [Theory]
+    [InlineData("/api/extensions/dbt/exposures")]
+    [InlineData("/api/extensions/dbt/proposals")]
+    [InlineData("/api/extensions/dbt/health")]
+    public async Task DbtGlobalReadEndpoints_DataOwnerWithoutAdminRole_ReturnsForbidden(string path)
+    {
+        // Review E-7 (rest): the read endpoints expose global dbt state and are not open to a plain DataOwner either.
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-OWNER-1");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "DataOwner");
+
+        var response = await client.GetAsync(path);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
     [Fact]
     public async Task DbtExposuresEndpoint_NonPrivilegedUser_ReturnsForbidden()
     {

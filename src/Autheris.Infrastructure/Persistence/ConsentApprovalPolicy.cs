@@ -25,6 +25,36 @@ internal static class ConsentApprovalPolicy
         return (idx >= 0 ? candidate[(idx + 1)..] : candidate).Trim();
     }
 
+    /// <summary>
+    /// Review R4-4 (rest): identifiers under which one person can appear (raw actor, account part, ITSM account) and that are
+    /// resolved to a stable DATA_OWNERS id by the repositories, so that four-eyes does not depend on string spelling alone.
+    /// </summary>
+    public static IReadOnlyList<string> IdentifierCandidates(string? value, string? itsmApproverAccount = null)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(string? v)
+        {
+            if (!string.IsNullOrWhiteSpace(v))
+            {
+                set.Add(v.Trim());
+            }
+        }
+
+        Add(value);
+        Add(NormalizeApprover(value));
+        Add(itsmApproverAccount);
+        if (!string.IsNullOrWhiteSpace(itsmApproverAccount))
+        {
+            Add(NormalizeApprover(value, itsmApproverAccount));
+        }
+
+        return set.ToList();
+    }
+
+    /// <summary>True when both identity sets resolve to at least one common data owner id (the same person).</summary>
+    public static bool ShareOwnerId(IReadOnlyCollection<string> left, IReadOnlyCollection<string> right) =>
+        left.Count > 0 && right.Count > 0 && left.Intersect(right, StringComparer.OrdinalIgnoreCase).Any();
+
     /// <summary>True when the approver is the requester (by SID, by account part or by any known identifier).</summary>
     public static bool IsSelfApproval(ConsentRequest req, Sid approverSid, string? itsmApproverAccount = null)
     {

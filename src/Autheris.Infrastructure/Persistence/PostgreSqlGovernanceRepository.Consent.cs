@@ -1069,6 +1069,13 @@ public partial class PostgreSqlGovernanceRepository
             throw new InvalidOperationException("Funktionstrennung verletzt: Antragsteller darf eigenen Antrag nicht genehmigen.");
         }
 
+        // Review R4-4 (rest): compare by the stable data owner id as well, not only by spelling.
+        var approverOwnerIds = await ResolveDataOwnerIdsInternalAsync(ConsentApprovalPolicy.IdentifierCandidates(approverSid.Value, itsmApproverAccount), ct).ConfigureAwait(false);
+        if (ConsentApprovalPolicy.ShareOwnerId(approverOwnerIds, await ResolveRequesterOwnerIdsInternalAsync(req, ct).ConfigureAwait(false)))
+        {
+            throw new InvalidOperationException("Funktionstrennung verletzt: Antragsteller darf eigenen Antrag nicht genehmigen.");
+        }
+
         // Authorization is checked before the row lock is taken: the checks use their own pooled connections.
         if (!isExternalItsmApproval)
         {
@@ -1146,7 +1153,14 @@ public partial class PostgreSqlGovernanceRepository
             }
 
             // Review R4-4: compare the approver identity (account part), not the raw actor string.
-            if (existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount)))
+            bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount));
+            for (int i = 0; !sameApprover && i < existingApprovers.Count; i++)
+            {
+                var storedOwnerIds = await ResolveDataOwnerIdsInternalAsync(ConsentApprovalPolicy.IdentifierCandidates(existingApprovers[i]), ct).ConfigureAwait(false);
+                sameApprover = ConsentApprovalPolicy.ShareOwnerId(storedOwnerIds, approverOwnerIds);
+            }
+
+            if (sameApprover)
             {
                 if (isExternalItsmApproval)
                 {
