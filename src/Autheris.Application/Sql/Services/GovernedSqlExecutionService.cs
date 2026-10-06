@@ -684,8 +684,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString) || _connectionFactory == null)
         {
             bool isDevOrTest = _environment == null ||
-                               string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
-                               string.Equals(_environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase);
+                               string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
             bool isExplicitlyAllowed = _options.Value.AreExternalSystemsMockedIfUnreachable;
 
             if (!isDevOrTest && !isExplicitlyAllowed)

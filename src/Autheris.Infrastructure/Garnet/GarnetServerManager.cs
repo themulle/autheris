@@ -165,9 +165,7 @@ public sealed class GarnetServerManager : IGarnetServerManager, IHostedService
     }
 
     private bool IsDevelopmentEnvironment() =>
-        string.Equals(_environmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(_environmentName, "Testing", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(_environmentName, "Test", StringComparison.OrdinalIgnoreCase);
+        string.Equals(_environmentName, "Development", StringComparison.OrdinalIgnoreCase);
 
     public void StartServer()
     {

@@ -42,9 +42,7 @@ public static class RedisConnectionSecurity
         }
 
         var isDevelopment = environment != null &&
-                            (environment.IsDevelopment() ||
-                             string.Equals(environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase) ||
-                             string.Equals(environment.EnvironmentName, "Test", StringComparison.OrdinalIgnoreCase));
+                            (environment.IsDevelopment());
 
         if (!isDevelopment && string.IsNullOrEmpty(configuration.Password))
         {

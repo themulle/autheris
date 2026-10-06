@@ -92,8 +92,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
             catch (Exception ex)
             {
                 var env = environment?.EnvironmentName ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-                bool isDev = string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase) ||
-                             string.Equals(env, "Testing", StringComparison.OrdinalIgnoreCase);
+                bool isDev = string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase);
                 if (!isDev)
                 {
                     throw new InvalidOperationException($"Security critical: Failed to load AuditHmacKeyVaultRef '{auditSecretRef}' from Key Vault in non-development environment.", ex);
@@ -137,9 +136,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
                       Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
                       Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
         bool isDevOrTest = string.IsNullOrEmpty(envName) ||
-                           string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
-                           string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase) ||
-                           string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
+                           string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase);
 
         if (!isDevOrTest)
         {
