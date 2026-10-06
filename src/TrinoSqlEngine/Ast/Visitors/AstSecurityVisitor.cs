@@ -21,12 +21,12 @@ using TrinoSqlEngine.Ast.Nodes;
 public sealed class AstSecurityVisitor : SqlAstRewriter
 {
     private readonly RlsOptions _options;
-    private readonly FastSqlEngine _engine;
+    private readonly ISqlEngine _engine;
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
     private int _subqueryDepth = 0;
     private bool _rootLimitHandled = false;
 
-    public AstSecurityVisitor(RlsOptions? options = null, FastSqlEngine? engine = null)
+    public AstSecurityVisitor(RlsOptions? options = null, ISqlEngine? engine = null)
     {
         _options = options ?? new RlsOptions();
         _engine = engine ?? new FastSqlEngine();
@@ -35,8 +35,10 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
     private Expression ParseFilterExpression(string filterSql)
     {
-        var (tree, _) = _engine.ParseExpression(filterSql.AsMemory(), SqlTokenSecurityOptions.None);
-        var builder = new SqlAstBuilder(new AstBuilderOptions { EnforceReadOnlyQueries = false });
+        var tokenOptions = SqlTokenSecurityOptions.FromRlsOptions(_options);
+        var (tree, _) = _engine.ParseExpression(filterSql.AsMemory(), tokenOptions);
+        var builderOptions = AstBuilderOptions.FromRlsOptions(_options) with { EnforceReadOnlyQueries = false };
+        var builder = new SqlAstBuilder(builderOptions);
         return builder.BuildStandaloneExpression(tree);
     }
 

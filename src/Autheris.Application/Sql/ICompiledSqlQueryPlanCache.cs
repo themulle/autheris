@@ -28,4 +28,6 @@ public interface ICompiledSqlQueryPlanCache
     ulong ComputeHash(ReadOnlySpan<char> queryText, string? operationName = null);
 
     ulong ComputeRlsHash(IReadOnlyDictionary<TableIdentifier, string?>? rlsPredicates);
+
+    ulong ComputeRlsFilterHash(IReadOnlyDictionary<string, string>? rlsPredicates);
 }

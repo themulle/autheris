@@ -125,4 +125,32 @@ public sealed class AstSecurityVisitorRlsTests
 
         Assert.Contains("\"tenant_id\" = 88", result, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void Rls_InjectedFilterWithComments_IsRejectedWhenRejectCommentsEnabled()
+    {
+        var options = new RlsOptions
+        {
+            RejectComments = true,
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42 -- comment"),
+            TargetDialect = TargetSqlDialect.PostgreSql
+        };
+
+        string sql = "SELECT id FROM orders";
+        Assert.Throws<Antlr4.Runtime.Misc.ParseCanceledException>(() => SecureAndGenerate(sql, options));
+    }
+
+    [Fact]
+    public void Rls_InjectedFilterWithDisallowedFunction_IsRejectedByFunctionPolicy()
+    {
+        var options = new RlsOptions
+        {
+            EnforceFunctionPolicy = true,
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42 AND dbms_pipe.receive_message('p', 1) = 0"),
+            TargetDialect = TargetSqlDialect.PostgreSql
+        };
+
+        string sql = "SELECT id FROM orders";
+        Assert.Throws<System.Security.SecurityException>(() => SecureAndGenerate(sql, options));
+    }
 }

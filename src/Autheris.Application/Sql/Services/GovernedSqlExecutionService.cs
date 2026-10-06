@@ -52,7 +52,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         RejectTimeTravelQueries = true
     };
 
-    private readonly FastSqlEngine _sqlEngine = new();
+    private readonly ISqlEngine _sqlEngine;
+    private readonly ICompiledSqlQueryPlanCache? _planCache;
     private readonly IOptions<GatewayOptions> _options;
     private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly IConsentResolutionService? _consentResolution;
@@ -79,7 +80,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         IHostEnvironment? environment = null,
         ILogger<GovernedSqlExecutionService>? logger = null,
         IConsentRepository? consentRepository = null,
-        IKeyVaultSecretProvider? secretProvider = null)
+        IKeyVaultSecretProvider? secretProvider = null,
+        ISqlEngine? sqlEngine = null,
+        ICompiledSqlQueryPlanCache? planCache = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement;
@@ -92,6 +95,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         _logger = logger;
         _consentRepository = consentRepository;
         _secretProvider = secretProvider;
+        _sqlEngine = sqlEngine ?? new FastSqlEngine();
+        _planCache = planCache;
     }
 
     public async Task<string> RewriteSqlAsync(
@@ -606,11 +611,29 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             RewriterEngine = _options.Value.WebSql.SqlRewriterEngine
         };
 
-        // 7. Rewrite SQL AST
+        // 7. Rewrite SQL AST (with plan cache fast-path if enabled)
         string securedSql;
+        ulong queryHash = 0;
+        ulong rlsHash = 0;
+        bool canUsePlanCache = _planCache != null;
+
+        if (canUsePlanCache)
+        {
+            queryHash = _planCache!.ComputeHash(rawSql.AsSpan());
+            rlsHash = _planCache.ComputeRlsFilterHash(tableRlsFilters);
+            if (_planCache.TryGetCompiledSql(queryHash, targetDatabaseDialect.Value, tenantId, rlsHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
+            {
+                return new GovernedRewrite(cachedSql, internalParameters);
+            }
+        }
+
         try
         {
             securedSql = _sqlEngine.RewriteRls(rawSql.AsMemory(), rlsOptions, ct);
+            if (canUsePlanCache && !string.IsNullOrEmpty(securedSql))
+            {
+                _planCache!.SetCompiledSql(queryHash, targetDatabaseDialect.Value, tenantId, rlsHash, securedSql);
+            }
         }
         catch (WebSqlPolicyException)
         {

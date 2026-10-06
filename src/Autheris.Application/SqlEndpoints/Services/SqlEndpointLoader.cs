@@ -30,17 +30,19 @@ public sealed class SqlEndpointLoader : IDisposable
         TimeSpan.FromMilliseconds(100));
 
     private readonly ISqlEndpointRegistry _registry;
-    private readonly FastSqlEngine _sqlEngine = new();
+    private readonly ISqlEngine _sqlEngine;
     private readonly ILogger<SqlEndpointLoader>? _logger;
     private FileSystemWatcher? _watcher;
     private bool _disposed;
 
     public SqlEndpointLoader(
         ISqlEndpointRegistry registry,
-        ILogger<SqlEndpointLoader>? logger = null)
+        ILogger<SqlEndpointLoader>? logger = null,
+        ISqlEngine? sqlEngine = null)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _logger = logger;
+        _sqlEngine = sqlEngine ?? new FastSqlEngine();
     }
 
     /// <summary>

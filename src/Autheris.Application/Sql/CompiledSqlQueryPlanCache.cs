@@ -119,4 +119,28 @@ public sealed class CompiledSqlQueryPlanCache : ICompiledSqlQueryPlanCache
 
         return hasher.GetCurrentHashAsUInt64();
     }
+
+    public ulong ComputeRlsFilterHash(IReadOnlyDictionary<string, string>? rlsPredicates)
+    {
+        if (rlsPredicates == null || rlsPredicates.Count == 0)
+        {
+            return 0UL;
+        }
+
+        var hasher = new XxHash3();
+        var sorted = rlsPredicates.OrderBy(kv => kv.Key, StringComparer.Ordinal);
+
+        foreach (var (table, pred) in sorted)
+        {
+            hasher.Append(MemoryMarshal.AsBytes(table.AsSpan()));
+            hasher.Append(MemoryMarshal.AsBytes("=".AsSpan()));
+            if (!string.IsNullOrEmpty(pred))
+            {
+                hasher.Append(MemoryMarshal.AsBytes(pred.AsSpan()));
+            }
+            hasher.Append(MemoryMarshal.AsBytes(";".AsSpan()));
+        }
+
+        return hasher.GetCurrentHashAsUInt64();
+    }
 }
