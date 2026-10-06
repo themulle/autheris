@@ -1257,6 +1257,11 @@ public sealed class WebSqlOptions
     /// denylist are never permitted, even if listed here.
     /// </summary>
     public List<string> AdditionalAllowedFunctions { get; init; } = [];
+    /// <summary>
+    /// Rewriter engine implementation: "AstCompiler" (AST target dialect generator),
+    /// "ShadowDualRun" (runs both engines with legacy authoritative for differential verification),
+    /// or null / "LegacyTokenStream" (defaults to engine's configuration).
+    /// </summary>
     public string? SqlRewriterEngine { get; init; }
 
     /// <summary>

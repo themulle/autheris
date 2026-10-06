@@ -41,8 +41,9 @@ public static class SqlFunctionPolicy
         "has_dbaccess", "suser_sname", "is_srvrolemember", "suser_name", "suser_id", "is_member",
         // MySQL / MariaDB / UDF-based command execution
         "load_file", "sys_exec", "sys_eval", "benchmark", "sleep",
-        // Oracle
+        // Oracle (SQ-06 / SEC P-02)
         "dbms_xmlgen", "dbms_sql", "utl_http", "utl_file", "utl_inaddr", "httpuritype",
+        "sys_context", "userenv", "dbms_lob", "ora_hash", "dbms_pipe", "dbms_lock", "dbms_random",
         // SEC P-02 PostgreSQL: SQL text execution (ts_stat), sequence side effects, privilege/catalog/server probing
         "ts_stat", "ts_debug", "setval", "nextval", "currval", "lastval",
         "has_table_privilege", "has_column_privilege", "has_any_column_privilege", "has_database_privilege",
@@ -92,8 +93,25 @@ public static class SqlFunctionPolicy
 
         foreach (var prefix in DefaultDeniedPrefixes)
         {
-            if (simple.StartsWith(prefix, StringComparison.Ordinal))
+            if (simple.StartsWith(prefix, StringComparison.Ordinal) || full.StartsWith(prefix, StringComparison.Ordinal))
                 return true;
+        }
+
+        // Check each dot-separated segment (e.g. package.function in Oracle, schema.function in SQL Server / PG)
+        if (full.Contains('.'))
+        {
+            var parts = full.Split('.');
+            foreach (var part in parts)
+            {
+                if (DefaultDeniedFunctions.Contains(part))
+                    return true;
+
+                foreach (var prefix in DefaultDeniedPrefixes)
+                {
+                    if (part.StartsWith(prefix, StringComparison.Ordinal))
+                        return true;
+                }
+            }
         }
 
         // SEC P-02: PostgreSQL privilege probing functions (has_*_privilege)

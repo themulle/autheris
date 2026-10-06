@@ -172,6 +172,12 @@ public class SecurityRemediationTests
     [InlineData("SELECT lo_import('/etc/passwd')")]
     [InlineData("SELECT pg_sleep(100)")]
     [InlineData("SELECT id FROM orders WHERE id IN (SELECT database_to_xml(true, false, ''))")]
+    [InlineData("SELECT sys_context('USERENV', 'SESSION_USER')")]
+    [InlineData("SELECT userenv('SCHEMA')")]
+    [InlineData("SELECT ora_hash('test')")]
+    [InlineData("SELECT dbms_pipe.receive_message('pipe', 5)")]
+    [InlineData("SELECT dbms_lock.sleep(5)")]
+    [InlineData("SELECT dbms_random.value(0, 100)")]
     public void C01_DangerousFunctions_AreRejected(string sql)
     {
         Assert.Throws<SecurityException>(() => _engine.RewriteRls(sql.AsMemory()));
@@ -207,6 +213,24 @@ public class SecurityRemediationTests
 
         _engine.RewriteRls("SELECT upper(name) FROM orders".AsMemory(), options);
         Assert.Throws<SecurityException>(() => _engine.RewriteRls("SELECT lower(name) FROM orders".AsMemory(), options));
+    }
+
+    [Fact]
+    public void C01_OracleAllowlist_AllowsStandardOracleFunctionsAndDeniesRest()
+    {
+        var options = new RlsOptions
+        {
+            TargetDialect = TargetSqlDialect.Oracle,
+            EnforceFunctionPolicy = true,
+            AllowedFunctions = SqlFunctionAllowlists.GetDefault(TargetSqlDialect.Oracle)
+        };
+
+        var secured = _engine.RewriteRls("SELECT nvl(name, 'default'), trunc(sysdate) FROM orders".AsMemory(), options);
+        Assert.NotNull(secured);
+
+        // Disallowed probing function must throw SecurityException
+        Assert.Throws<SecurityException>(() =>
+            _engine.RewriteRls("SELECT sys_context('USERENV', 'ISATT') FROM orders".AsMemory(), options));
     }
 
     [Fact]
