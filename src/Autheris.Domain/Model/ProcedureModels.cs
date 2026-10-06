@@ -88,6 +88,12 @@ public sealed record ProcedureDefinition(
     public IReadOnlyList<string> DeclaredOutputs { get; init; } = DeclaredOutputs ?? [];
 
     /// <summary>
+    /// Catalog domain of the tables the procedure reads. The catalog keys tables by their data source
+    /// (TABLES.source_name), so it is the procedure's data source; "default" only when none is declared.
+    /// </summary>
+    public string CatalogDomain => string.IsNullOrWhiteSpace(DataSource) ? "default" : DataSource;
+
+    /// <summary>
     /// Optional SQL types of the declared outputs (column name -> normalized type such as "float" or "varchar(255)").
     /// Documentation/contract only (OpenAPI schema); values are never converted at runtime.
     /// </summary>
