@@ -239,6 +239,13 @@ public sealed class RlsOptions
     public bool RejectDollarQuoting { get; set; } = true;
 
     /// <summary>
+    /// SQL-1: When true, '[' / ']' tokens and literals/quoted identifiers containing '[', ']', '--' or '/*' are rejected.
+    /// Always enforced for SQL Server and SQLite targets (they lex [...] as a quoted identifier). Default false so that
+    /// PostgreSQL / ANSI targets keep array constructors and subscripts.
+    /// </summary>
+    public bool RejectBracketLexerDifferentials { get; set; } = false;
+
+    /// <summary>
     /// SQ-07: When true (default), INSERT statements into tables that have custom row-level consent filters (beyond simple tenant isolation) are rejected.
     /// </summary>
     public bool RejectConsentFilteredInsert { get; set; } = true;

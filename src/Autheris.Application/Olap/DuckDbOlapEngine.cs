@@ -260,7 +260,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         for (int i = 0; i < trimmed.Length; i++)
         {
             char c = trimmed[i];
-            if ((c == '\'' || c == '"') && (i == 0 || trimmed[i - 1] != '\\'))
+            if (c == '\'' || c == '"') // DuckDB: backslash is no escape; doubled quotes toggle twice
             {
                 if (!inQuotes)
                 {
@@ -309,16 +309,19 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         // 4. Prohibit unbounded generator table functions if no sources were staged
         if (sources == null || sources.Count == 0)
         {
-            var disallowedGenerators = new[] { "range(", "generate_series(", "repeat(" };
-            foreach (var gen in disallowedGenerators)
+            var match = DisallowedGeneratorRegex.Match(trimmed);
+            if (match.Success)
             {
-                if (trimmed.Contains(gen, StringComparison.OrdinalIgnoreCase))
-                {
-                    throw new System.Security.SecurityException($"Table generator function '{gen.TrimEnd('(')}' is not permitted without staged tables.");
-                }
+                throw new System.Security.SecurityException($"Table generator function '{match.Groups[1].Value}' is not permitted without staged tables.");
             }
         }
     }
+
+    // Function name followed by optional whitespace and '(' (e.g. "range (1, 1000000000)").
+    private static readonly System.Text.RegularExpressions.Regex DisallowedGeneratorRegex = new(
+        @"\b(range|generate_series|repeat)\s*\(",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+        TimeSpan.FromMilliseconds(250));
 
     private static string GetFirstKeyword(string sql)
     {
@@ -339,7 +342,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         for (int i = 0; i < sql.Length; i++)
         {
             char c = sql[i];
-            if ((c == '\'' || c == '"') && (i == 0 || sql[i - 1] != '\\'))
+            if (c == '\'' || c == '"') // DuckDB: backslash is no escape; doubled quotes toggle twice
             {
                 if (!inQuotes)
                 {

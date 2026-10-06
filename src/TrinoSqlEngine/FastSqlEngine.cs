@@ -44,6 +44,7 @@ public sealed record SqlTokenSecurityOptions
         RejectBackslashInStrings = true,
         RejectEscapedStringLiterals = true,
         RejectDollarQuoting = true,
+        RejectBracketLexerDifferentials = true,
         RejectNonAsciiIdentifiers = true,
         RejectDotsInQuotedIdentifiers = true,
         RejectTimeTravelQueries = true
@@ -60,6 +61,13 @@ public sealed record SqlTokenSecurityOptions
 
     /// <summary>SQ-02: Reject dollar-quoted strings.</summary>
     public bool RejectDollarQuoting { get; init; }
+
+    /// <summary>
+    /// SQL-1: Reject '[' / ']' tokens and string literals / quoted identifiers containing '[', ']', '--' or '/*'.
+    /// SQL Server and SQLite lex [...] as a quoted identifier while the Trino grammar lexes it as array syntax, so
+    /// string content for the gateway could become executable SQL (and comment out appended filters) on the backend.
+    /// </summary>
+    public bool RejectBracketLexerDifferentials { get; init; }
 
     /// <summary>SQ-10: Reject unquoted identifiers containing non-ASCII characters.</summary>
     public bool RejectNonAsciiIdentifiers { get; init; }
@@ -82,6 +90,9 @@ public sealed record SqlTokenSecurityOptions
             RejectBackslashInStrings = options.RejectBackslashInStrings,
             RejectEscapedStringLiterals = options.RejectEscapedStringLiterals,
             RejectDollarQuoting = options.RejectDollarQuoting || options.TargetDialect == TargetSqlDialect.SqlServer,
+            RejectBracketLexerDifferentials = options.RejectBracketLexerDifferentials
+                || options.TargetDialect == TargetSqlDialect.SqlServer
+                || options.TargetDialect == TargetSqlDialect.Sqlite,
             RejectNonAsciiIdentifiers = options.RejectNonAsciiIdentifiers,
             RejectDotsInQuotedIdentifiers = options.RejectDotsInQuotedIdentifiers,
             RejectTimeTravelQueries = options.RejectTimeTravelQueries
@@ -228,6 +239,9 @@ public sealed partial class FastSqlEngine
     /// <summary>SQ-02: When true, dollar-quoted strings ($$...$$) are rejected (direct parsing only).</summary>
     public bool RejectDollarQuoting { get; set; } = false;
 
+    /// <summary>SQL-1: When true, brackets and bracket/comment sequences inside literals are rejected (direct parsing only).</summary>
+    public bool RejectBracketLexerDifferentials { get; set; } = false;
+
     /// <summary>SQ-10: When true, unquoted identifiers with non-ASCII characters are rejected (direct parsing only).</summary>
     public bool RejectNonAsciiIdentifiers { get; set; } = false;
 
@@ -246,6 +260,7 @@ public sealed partial class FastSqlEngine
         RejectBackslashInStrings = RejectBackslashInStrings,
         RejectEscapedStringLiterals = RejectEscapedStringLiterals,
         RejectDollarQuoting = RejectDollarQuoting,
+        RejectBracketLexerDifferentials = RejectBracketLexerDifferentials,
         RejectNonAsciiIdentifiers = RejectNonAsciiIdentifiers,
         RejectDotsInQuotedIdentifiers = RejectDotsInQuotedIdentifiers,
         RejectTimeTravelQueries = RejectTimeTravelQueries
@@ -524,6 +539,33 @@ public sealed partial class FastSqlEngine
                 {
                     throw new ParseCanceledException(
                         $"line {token.Line}:{token.Column}: Escaped string literal type constructors (E'...') are not permitted due to dialect lexer differentials.");
+                }
+            }
+
+            // SQL-1: UESCAPE changes literal decoding on PostgreSQL in a way the gateway does not model.
+            if (options.RejectEscapedStringLiterals && type == SqlBaseLexer.UESCAPE)
+            {
+                throw new ParseCanceledException(
+                    $"line {token.Line}:{token.Column}: UESCAPE is not permitted due to dialect lexer differentials.");
+            }
+
+            // SQL-1: Bracket lexer differentials (SQL Server / SQLite lex [...] as quoted identifier)
+            if (options.RejectBracketLexerDifferentials)
+            {
+                if (text == "[" || text == "]")
+                {
+                    throw new ParseCanceledException(
+                        $"line {token.Line}:{token.Column}: Square brackets are not permitted for this SQL dialect due to dialect lexer differentials.");
+                }
+
+                if (text != null &&
+                    (type == SqlBaseLexer.STRING || type == SqlBaseLexer.UNICODE_STRING ||
+                     type == SqlBaseLexer.QUOTED_IDENTIFIER || type == SqlBaseLexer.BACKQUOTED_IDENTIFIER) &&
+                    (text.Contains('[') || text.Contains(']') ||
+                     text.Contains("--", StringComparison.Ordinal) || text.Contains("/*", StringComparison.Ordinal)))
+                {
+                    throw new ParseCanceledException(
+                        $"line {token.Line}:{token.Column}: Literals containing '[', ']', '--' or '/*' are not permitted for this SQL dialect due to dialect lexer differentials.");
                 }
             }
 

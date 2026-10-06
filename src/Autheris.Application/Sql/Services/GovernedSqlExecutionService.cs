@@ -549,6 +549,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             RejectEscapedStringLiterals = true,
             // SQ-02: dollar quoting only matches the backend lexer on PostgreSQL (SQL Server/SQLite lex '$' differently).
             RejectDollarQuoting = targetSqlDialect != TargetSqlDialect.PostgreSql,
+            // SQL-1: SQL Server/SQLite lex [...] as quoted identifier; the Trino grammar treats it as array syntax.
+            RejectBracketLexerDifferentials = targetSqlDialect is TargetSqlDialect.SqlServer or TargetSqlDialect.Sqlite,
             // SQ-10/SQ-11/SQ-13 (SEC P-06): set explicitly, independent of library defaults
             RejectNonAsciiIdentifiers = true,
             RejectDotsInQuotedIdentifiers = true,
