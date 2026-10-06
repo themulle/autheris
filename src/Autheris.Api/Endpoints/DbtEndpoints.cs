@@ -21,9 +21,9 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtMetadataIngestionService dbtService) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("ClusterAdmin") ||
-                               context.User.IsInRole("DataOwner") ||
+            // Review E-7: this endpoint changes global state (metadata, quarantine); a DataOwner role is not enough because
+            // it carries no table ownership here. Only global governance administrators or the dedicated DbtAdmin role.
+            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
                                context.User.IsInRole("DbtAdmin");
             if (!isPrivileged)
             {
@@ -171,9 +171,10 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtHealthCircuitBreaker circuitBreaker) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("ClusterAdmin") ||
-                               context.User.IsInRole("DataOwner");
+            // Review E-7: this endpoint changes global state (metadata, quarantine); a DataOwner role is not enough because
+            // it carries no table ownership here. Only global governance administrators or the dedicated DbtAdmin role.
+            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
+                               context.User.IsInRole("DbtAdmin");
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -225,9 +226,10 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtHealthCircuitBreaker circuitBreaker) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("ClusterAdmin") ||
-                               context.User.IsInRole("DataOwner");
+            // Review E-7: this endpoint changes global state (metadata, quarantine); a DataOwner role is not enough because
+            // it carries no table ownership here. Only global governance administrators or the dedicated DbtAdmin role.
+            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
+                               context.User.IsInRole("DbtAdmin");
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);

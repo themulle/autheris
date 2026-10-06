@@ -99,6 +99,22 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
 
     }
 
+    [Theory]
+    [InlineData("/api/extensions/dbt/sync")]
+    [InlineData("/api/extensions/dbt/run-results")]
+    [InlineData("/api/extensions/dbt/health/reset")]
+    public async Task DbtGlobalMutationEndpoints_DataOwnerWithoutAdminRole_ReturnsForbidden(string path)
+    {
+        // Review E-7: a DataOwner must not change global dbt metadata or quarantine state.
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-OWNER-1");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "DataOwner");
+
+        var response = await client.PostAsync(path, new StringContent("{}", Encoding.UTF8, "application/json"));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
     [Fact]
     public async Task DbtExposuresEndpoint_NonPrivilegedUser_ReturnsForbidden()
     {
