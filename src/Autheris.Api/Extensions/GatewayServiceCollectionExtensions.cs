@@ -355,6 +355,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.Application.Procedures.Services.ProcedureConnectionProvider>();
         services.AddScoped<Autheris.Application.Procedures.Services.StoredProcedureCatalogValidator>();
         services.AddSingleton<Autheris.Application.Procedures.Interfaces.IProcedureInvoker, Autheris.Application.Procedures.Services.MssqlProcedureInvoker>();
+        services.AddSingleton<Autheris.Application.Procedures.Interfaces.IProcedureRowScopeResolver, Autheris.Application.Procedures.Services.SqlProcedureRowScopeResolver>();
         services.AddScoped<Autheris.Application.Procedures.Interfaces.IProcedureExecutionService, Autheris.Application.Procedures.Services.GovernedProcedureExecutionService>();
         if (gatewayOptions.SqlEndpoints.Procedures.Enabled)
         {

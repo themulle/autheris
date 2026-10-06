@@ -170,3 +170,12 @@ Autheris acts as an Enterprise Zero-Trust Data Gateway. It enforces Data-Owner-C
 * **OData errors:** outside Development, missing tables and denied access both answer a generic 403 `ACCESS_DENIED` (no existence oracle, no Casbin text with SID/tenant).
 * **OpenAPI:** the generated spec is not filtered per tenant, so `$openapi`, `{domain}/openapi.json|yaml`, the index routes and the per-table schema route require `GovernanceAdmin`/`ClusterAdmin` unless `OpenSchema` is enabled. Tenant-scoped roles (`DataOwner`, `SchemaAdmin`, `CatalogReader`) use the tenant-filtered `$metadata`. The cache keys on the exact domain; domains that are not `[A-Za-z0-9_-]{1,64}` are generated uncached.
 * **Envoy export:** the `EnvoyFilter` now sets `http_service.path_prefix: /api/v1/envoy/check` and the check route is a catch-all over all HTTP methods (the suffix is the original path). Namespace, filter name, host (DNS labels), port (1-65535), path and timeout of the export are validated; invalid values answer 400. Re-apply the exported filter after upgrading.
+
+### Procedure row scope (`row_scope_key`)
+
+A consent row filter on a procedure's result table is enforced after the call by a key lookup in the database
+(F-SQL-02, "Row scope"). The lookup runs on the governed read connection (not the EXECUTE-only procedure login), requires
+the key to be the primary key or a unique, unfiltered index (verified per dialect in the database catalog), and with
+catalog validation requires every key column to originate from the same result-table column. *Known limitation:* values
+aggregated over several rows of one key and, in `validation: declared`, the origin of key columns cannot be verified.
+
