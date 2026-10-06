@@ -193,34 +193,65 @@ public partial class PostgreSqlGovernanceRepository
     private Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct) =>
         RecordAuditEventsBatchInternalAsync([entry], ct);
 
+    /// <summary>Review PG-1: constant key of the transaction-scoped advisory lock that serialises audit chain writers across replicas.</summary>
+    private const long AuditChainAdvisoryLockKey = 0x41555448_41554454L; // "AUTH" "AUDT"
+
+    private const int AuditWriteMaxAttempts = 5;
+
     private async Task RecordAuditEventsBatchInternalAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct)
     {
         if (batch.Count == 0) return;
 
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.Serializable, ct).ConfigureAwait(false);
-
-        var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
-        var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
-        if (!FixedTimeEqualsString(effectiveDbHash, _lastAuditHash) || dbTailSeq != _lastAuditSeq)
+        // Review PG-1: concurrent writers (other replicas) are serialised by an advisory lock; serialization failures,
+        // deadlocks and unique violations on seq are retried instead of failing the mutation or faulting the pipeline.
+        for (int attempt = 1; ; attempt++)
         {
-            var anchor = TryLoadVerifiedAnchor(out _);
-            var explainedByAnchor = anchor != null
-                                    && dbTailSeq > _lastAuditSeq
-                                    && anchor.Sequence == dbTailSeq
-                                    && FixedTimeEqualsString(anchor.EntryHash, effectiveDbHash);
-            if (!explainedByAnchor)
+            try
             {
-                FlagAuditChainViolation(
-                    $"Audit chain tail in DB (seq {dbTailSeq}) diverges from the in-memory reference (seq {_lastAuditSeq}) without a matching signed anchor - possible truncation or rewrite.");
+                await WriteAuditBatchOnceAsync(batch, ct).ConfigureAwait(false);
+                return;
             }
+            catch (PostgresException ex) when (attempt < AuditWriteMaxAttempts &&
+                                               (ex.SqlState == PostgresErrorCodes.SerializationFailure ||
+                                                ex.SqlState == PostgresErrorCodes.DeadlockDetected ||
+                                                ex.SqlState == PostgresErrorCodes.UniqueViolation))
+            {
+                _logger?.LogWarning(ex, "Audit chain write conflict (attempt {Attempt}/{Max}); retrying.", attempt, AuditWriteMaxAttempts);
+                await Task.Delay(Random.Shared.Next(10, 40) * attempt, ct).ConfigureAwait(false);
+            }
+        }
+    }
 
-            _lastAuditHash = effectiveDbHash;
-            _lastAuditSeq = dbTailSeq;
+    private async Task WriteAuditBatchOnceAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        // READ COMMITTED + advisory lock: the tail is read only after the previous writer has committed. (Under
+        // SERIALIZABLE the snapshot would already be taken before the lock is acquired.)
+        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct).ConfigureAwait(false);
+
+        await using (var lockCmd = conn.CreateCommand())
+        {
+            lockCmd.Transaction = tx;
+            lockCmd.CommandText = "SELECT pg_advisory_xact_lock(@k)";
+            lockCmd.Parameters.AddWithValue("@k", AuditChainAdvisoryLockKey);
+            await lockCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
 
-        long lastSequence = _lastAuditSeq;
-        string lastEntryHash = _lastAuditHash;
+        // The DB is the single source of truth for the tail. Another replica having advanced the chain is normal; a tail
+        // that is BEHIND what this process has already seen (or the same sequence with another hash) means truncation or
+        // rewriting, unless a signed anchor explains it.
+        var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
+        var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
+        var knownSeq = Interlocked.Read(ref _lastAuditSeq);
+        var knownHash = _lastAuditHash;
+        if (dbTailSeq < knownSeq || (dbTailSeq == knownSeq && !FixedTimeEqualsString(effectiveDbHash, knownHash)))
+        {
+            FlagAuditChainViolation(
+                $"Audit chain tail in DB (seq {dbTailSeq}) is behind or differs from the last known tail (seq {knownSeq}) - possible truncation or rewrite.");
+        }
+
+        long lastSequence = dbTailSeq;
+        string lastEntryHash = effectiveDbHash;
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -287,14 +318,19 @@ public partial class PostgreSqlGovernanceRepository
         await tx.CommitAsync(ct).ConfigureAwait(false);
 
         _lastAuditHash = lastEntryHash;
-        _lastAuditSeq = lastSequence;
+        Interlocked.Exchange(ref _lastAuditSeq, lastSequence);
 
         if (_auditAnchorStore != null)
         {
-            var anchor = CreateSignedAnchor(_lastAuditSeq, _lastAuditHash);
+            var anchor = CreateSignedAnchor(lastSequence, lastEntryHash);
             try
             {
-                _auditAnchorStore.Save(anchor);
+                // Monotonic: replicas sharing one anchor store must never move the anchor backwards.
+                var current = _auditAnchorStore.Load();
+                if (current == null || current.Sequence < anchor.Sequence)
+                {
+                    _auditAnchorStore.Save(anchor);
+                }
             }
             catch (Exception ex)
             {
@@ -418,6 +454,21 @@ public partial class PostgreSqlGovernanceRepository
                             FROM AUDIT_LOG_ENTRIES
                             ORDER BY rowid ASC";
 
+        // Review PG-1: snapshot of what this process knows, taken under the writer lock so hash and seq belong together.
+        long knownSeq;
+        string knownHash;
+        await _auditLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            knownSeq = Interlocked.Read(ref _lastAuditSeq);
+            knownHash = _lastAuditHash;
+        }
+        finally
+        {
+            _auditLock.Release();
+        }
+
+        string? hashAtKnownSeq = null;
         var expectedPrevHash = AuditGenesisHash;
         long position = 0;
         AuditChainAnchor? anchor = TryLoadVerifiedAnchor(out bool anchorInvalid);
@@ -488,26 +539,43 @@ public partial class PostgreSqlGovernanceRepository
                 }
             }
 
+            if (position == knownSeq)
+            {
+                hashAtKnownSeq = entryHash;
+            }
+
             expectedPrevHash = entryHash;
         }
 
-        if (anchor != null && (!anchorEntryMatched || anchor.Sequence != position))
+        // The anchor may lag behind the chain (other replicas, anchor written after commit); it must never be ahead of it.
+        if (anchor != null && anchor.Sequence > 0 && (anchor.Sequence > position || !anchorEntryMatched))
         {
             FlagAuditChainViolation($"External signed anchor claims seq {anchor.Sequence}, but DB chain ended at position {position}.");
             return false;
         }
 
-        if (position > 0 &&
-            (!FixedTimeEqualsString(expectedPrevHash, _lastAuditHash) || position != _lastAuditSeq))
+        // Review PG-1: a longer chain than this process knew is normal (other replicas / concurrent writers); a shorter one,
+        // or a different hash at the known position, is a violation.
+        if (knownSeq > 0 && (position < knownSeq || !FixedTimeEqualsString(hashAtKnownSeq, knownHash)))
         {
-            var explained = anchor != null
-                            && position > _lastAuditSeq
-                            && anchor.Sequence == position
-                            && FixedTimeEqualsString(anchor.EntryHash, expectedPrevHash);
-            if (!explained)
+            FlagAuditChainViolation($"Tail divergence: last known (seq {knownSeq}, hash {knownHash}) vs scanned chain (seq {position}, hash at known seq {hashAtKnownSeq ?? "n/a"}).");
+            return false;
+        }
+
+        if (position > 0)
+        {
+            await _auditLock.WaitAsync(ct).ConfigureAwait(false);
+            try
             {
-                FlagAuditChainViolation($"In-memory reference tail divergence: ref (seq {_lastAuditSeq}, hash {_lastAuditHash}) vs scanned (seq {position}, hash {expectedPrevHash}).");
-                return false;
+                if (position > Interlocked.Read(ref _lastAuditSeq))
+                {
+                    _lastAuditHash = expectedPrevHash;
+                    Interlocked.Exchange(ref _lastAuditSeq, position);
+                }
+            }
+            finally
+            {
+                _auditLock.Release();
             }
         }
 
@@ -694,6 +762,10 @@ public partial class PostgreSqlGovernanceRepository
     private void InitializeAuditChainAnchor()
     {
         if (_auditAnchorStore == null) return;
+        if (!_isDevOrTest && _auditAnchorStore is InMemoryAuditChainAnchorStore)
+        {
+            _logger?.LogWarning("Audit chain anchor is only held in memory (no tamper protection across restarts); configure Audit:ChainAnchorPath on a separate, shared volume or WORM store.");
+        }
 
         var anchor = TryLoadVerifiedAnchor(out bool invalid);
         if (invalid)
@@ -702,10 +774,27 @@ public partial class PostgreSqlGovernanceRepository
             return;
         }
 
+        // Another replica may have written since the schema init read the tail; re-read it after the anchor was loaded.
+        var (freshHash, freshSeq) = ReadAuditTail(null);
+        if (freshHash != null && freshSeq > Interlocked.Read(ref _lastAuditSeq))
+        {
+            _lastAuditHash = freshHash;
+            Interlocked.Exchange(ref _lastAuditSeq, freshSeq);
+        }
+
         if (anchor == null)
         {
             if (_lastAuditSeq > 0)
             {
+                // Review PG-2 (as SQLite): entries without an anchor outside Development indicate deletion of the
+                // anchor, unless the store is only held in memory (then there is nothing that could have survived a restart).
+                if (!_isDevOrTest && _auditAnchorStore is not InMemoryAuditChainAnchorStore)
+                {
+                    FlagAuditChainViolation(
+                        $"Audit DB has {_lastAuditSeq} entries, but the external audit chain anchor is missing. Potential truncation or unauthorized deletion detected.");
+                    return;
+                }
+
                 var newAnchor = CreateSignedAnchor(_lastAuditSeq, _lastAuditHash);
                 try
                 {
@@ -733,7 +822,7 @@ public partial class PostgreSqlGovernanceRepository
 
     private void FlagAuditChainViolation(string reason)
     {
-        _auditChainViolation = reason;
+        _auditChainViolation ??= reason;
         _isAuditPipelineFaulted = true;
         _logger?.LogCritical("AUDIT CHAIN INTEGRITY VIOLATION: {Reason}", reason);
     }

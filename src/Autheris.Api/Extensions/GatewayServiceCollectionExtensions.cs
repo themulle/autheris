@@ -144,8 +144,8 @@ public static class GatewayServiceCollectionExtensions
                 opts.IsInsecureTransportAllowed,
                 "Sicherheitsverletzung: OpenMetadata.ServerUrl muss außerhalb von Development zwingend HTTPS verwenden.")
             .Validate(opts =>
-                environment.IsDevelopment() || !opts.HighAvailability.MultiNodeClusterMode || opts.Caching.Redis.Enabled,
-                "NF-HA-02 Verletzung: Im MultiNodeClusterMode erfordert die clusterweite Cache- und Epoch-Invalidierung zwingend Caching.Redis.Enabled = true!")
+                environment.IsDevelopment() || !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) || opts.Caching.Redis.Enabled,
+                "NF-HA-02 Verletzung: Im MultiNodeClusterMode bzw. bei mehr als einer Replika (PG-6) erfordert die clusterweite Cache- und Epoch-Invalidierung zwingend Caching.Redis.Enabled = true!")
             .Validate(opts =>
                 environment.IsDevelopment() ||
                 string.IsNullOrWhiteSpace(opts.Plugins.Directory) ||
@@ -1146,9 +1146,9 @@ public static class GatewayServiceCollectionExtensions
                 throw new ValidationException("Sicherheitsverletzung: ReBAC im MultiNodeClusterMode erfordert zwingend Caching.Redis.Enabled = true für clusterweite Invalidierung (RR-L4-04).");
             }
 
-            if (options.HighAvailability.MultiNodeClusterMode && !options.Caching.Redis.Enabled)
+            if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) && !options.Caching.Redis.Enabled)
             {
-                throw new ValidationException("NF-HA-02 Verletzung: Im MultiNodeClusterMode erfordert die clusterweite Cache- und Epoch-Invalidierung zwingend Caching.Redis.Enabled = true!");
+                throw new ValidationException("NF-HA-02 Verletzung: Im MultiNodeClusterMode bzw. bei mehr als einer Replika (PG-6) erfordert die clusterweite Cache- und Epoch-Invalidierung zwingend Caching.Redis.Enabled = true!");
             }
 
             if (!string.IsNullOrWhiteSpace(options.Plugins.Directory) &&

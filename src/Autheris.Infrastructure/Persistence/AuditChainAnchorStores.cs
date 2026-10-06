@@ -59,9 +59,18 @@ public sealed class FileAuditChainAnchorStore : IAuditChainAnchorStore
                 Directory.CreateDirectory(directory);
             }
 
-            var tempPath = _path + ".tmp";
-            File.WriteAllText(tempPath, JsonSerializer.Serialize(anchor));
-            File.Move(tempPath, _path, overwrite: true);
+            // Unique temp file: replicas sharing one anchor path must not write the same temp file.
+            var tempPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
+            {
+                File.WriteAllText(tempPath, JsonSerializer.Serialize(anchor));
+                File.Move(tempPath, _path, overwrite: true);
+            }
+            catch
+            {
+                try { File.Delete(tempPath); } catch (IOException) { }
+                throw;
+            }
         }
     }
 }

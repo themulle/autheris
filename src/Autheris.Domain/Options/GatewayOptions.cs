@@ -544,6 +544,13 @@ public sealed class GovernanceDbOptions
     public bool EnableOutboxProcessor { get; init; } = true;
     public bool? SeedDemoData { get; init; } = null;
     public string? AuditHmacKeyVaultRef { get; init; }
+
+    /// <summary>
+    /// Review PG-7: optional connection string of a separate role that applies the schema (DDL) at startup (PostgreSQL). When set,
+    /// the runtime connection string only needs DML rights (INSERT/SELECT on AUDIT_LOG_ENTRIES), so the runtime account cannot
+    /// alter or truncate the audit table.
+    /// </summary>
+    public string? MigrationConnectionString { get; init; }
 }
 
 public sealed class CachingOptions
