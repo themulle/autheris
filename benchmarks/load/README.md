@@ -246,3 +246,20 @@ python3 ./scripts/05_analyze_results.py
 2. **JIT & Cache Warmup:** Vor jeder Messung werden mindestens 20 Warmup-Requests gesendet, damit .NET Tiered Compilation und V8 TurboFan aktiv sind.
 3. **Logging minimiert:** Alle Gateways laufen mit `LogLevel: Warning`, da Festplatten-I/O bei tausenden RPS sonst zum künstlichen Flaschenhals wird.
 4. **Verbindungspools:** Alle Datenbank-Pools sind identisch auf `100` Verbindungen konfiguriert.
+
+## Security notes (benchmark-only environment)
+
+The benchmark stack intentionally runs the gateway in Development mode with the test auth
+handler and `danger_bypass_consent_checks`. It must never be reachable from the public Internet.
+
+* Credentials are not committed. `scripts/lib_secrets.sh` generates a random Postgres password
+  and Hasura admin secret per run (`openssl rand`) and stores them in the untracked
+  `benchmarks/load/.bench-secrets.env`. Override via `BENCH_DB_PASSWORD` / `BENCH_HASURA_ADMIN_SECRET`.
+* Published ports bind to `127.0.0.1` by default. The multi-host orchestrators set
+  `DB_BIND_IP` / `GATEWAY_BIND_IP` to the private network addresses (10.0.1.x).
+* `hcloud/provision_3tier_cluster.sh` creates an hcloud firewall (`bench-fw`) that allows only
+  SSH (tcp/22) from your IP (auto-detected, or set `ALLOWED_SSH_CIDRS`). The private network is not
+  filtered by hcloud firewalls, so inter-host traffic keeps working.
+* SSH uses `StrictHostKeyChecking=accept-new` with a per-run `known_hosts_<timestamp>` file in `results/`.
+* Host setup downloads the NodeSource and dotnet-install scripts to a file before executing them;
+  neither publishes a stable checksum, so review them if you need stronger supply-chain guarantees.

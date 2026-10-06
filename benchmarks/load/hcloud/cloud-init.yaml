@@ -71,7 +71,10 @@ runcmd:
   - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
   # Install Node.js 20 LTS
-  - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  # Installer is downloaded to a file first (no curl|bash). NodeSource publishes no stable checksum for it.
+  - curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh
+  - bash /tmp/nodesource_setup.sh
+  - rm -f /tmp/nodesource_setup.sh
   - apt-get install -y nodejs
   - npm install -g yarn autocannon
 
@@ -82,7 +85,10 @@ runcmd:
   - apt-get install -y k6
 
   # Install .NET 10 SDK
-  - curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 10.0 --install-dir /usr/share/dotnet
+  # dotnet-install.sh has no stable published checksum; the SDK archives it fetches are hash-verified by the script.
+  - curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+  - bash /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
+  - rm -f /tmp/dotnet-install.sh
   - ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet
 
   # Create benchmark working directory

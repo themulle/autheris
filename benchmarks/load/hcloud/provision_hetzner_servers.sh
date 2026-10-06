@@ -8,6 +8,9 @@ LOCATION="${LOCATION:-fsn1}"        # Falkenstein
 IMAGE="${IMAGE:-ubuntu-24.04}"
 SSH_KEY_NAME="${SSH_KEY_NAME:-themu@DellLatitude}"
 CLOUD_INIT_FILE="$(dirname "$0")/cloud-init.yaml"
+# A public server must not be exposed without a firewall. The firewall (SSH only from the
+# operator) is created by provision_3tier_cluster.sh, or create your own and pass its name.
+FIREWALL_NAME="${FIREWALL_NAME:-bench-fw}"
 
 echo "=== Hetzner Cloud Benchmark Server Provisioning ==="
 echo "Server Name: ${SERVER_NAME}"
@@ -22,6 +25,12 @@ if ! command -v hcloud &> /dev/null; then
     exit 1
 fi
 
+if ! hcloud firewall describe "${FIREWALL_NAME}" &>/dev/null; then
+    echo "ERROR: hcloud firewall '${FIREWALL_NAME}' does not exist. Create one that only allows SSH (tcp/22) from your IP, e.g.:"
+    echo "  hcloud firewall create --name ${FIREWALL_NAME} --rules-file <rules.json>"
+    exit 1
+fi
+
 echo "Creating server on Hetzner Cloud..."
 hcloud server create \
   --name "${SERVER_NAME}" \
@@ -29,6 +38,7 @@ hcloud server create \
   --image "${IMAGE}" \
   --location "${LOCATION}" \
   --ssh-key "${SSH_KEY_NAME}" \
+  --firewall "${FIREWALL_NAME}" \
   --user-data-from-file "${CLOUD_INIT_FILE}"
 
 echo "Waiting for server to become active..."

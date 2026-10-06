@@ -48,7 +48,17 @@ if (-not (Test-Path $ResultsDir)) {
     New-Item -ItemType Directory -Path $ResultsDir -Force | Out-Null
 }
 
-$SshOpts = @("-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=NUL", "-o", "LogLevel=ERROR")
+# Trust-on-first-use with a per-run known_hosts file (no blanket host key bypass).
+$KnownHosts = Join-Path $ResultsDir ("known_hosts_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
+$SshOpts = @("-o", "StrictHostKeyChecking=accept-new", "-o", "UserKnownHostsFile=$KnownHosts", "-o", "LogLevel=ERROR")
+
+# Per-run random credentials, shipped to the hosts inside the benchmark tarball (untracked file).
+$SecretsFile = Join-Path $BenchDir ".bench-secrets.env"
+if (-not (Test-Path $SecretsFile)) {
+    function New-RandomHex([int]$Bytes) { $b = New-Object byte[] $Bytes; [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); ($b | ForEach-Object { $_.ToString("x2") }) -join "" }
+    $content = "BENCH_DB_PASSWORD=" + (New-RandomHex 24) + "`nBENCH_HASURA_ADMIN_SECRET=" + (New-RandomHex 24) + "`n"
+    [System.IO.File]::WriteAllText($SecretsFile, $content)
+}
 
 Write-Host "================================================================================" -ForegroundColor Cyan
 Write-Host " Hetzner Cloud 3-Tier Multi-Host GraphQL Benchmark Orchestrator" -ForegroundColor Cyan
@@ -183,11 +193,11 @@ ssh @SshOpts "root@${IpClient}" "mkdir -p /root/autheris/benchmarks/load && tar 
 
 # Step 3: Initialize Database on bench-db
 Write-Host "`n>>> Step 2/5: Initializing Database on bench-db ($IpDb)..." -ForegroundColor Yellow
-ssh @SshOpts "root@${IpDb}" "cd /root/autheris/benchmarks/load && ./scripts/02_init_database.sh"
+ssh @SshOpts "root@${IpDb}" "cd /root/autheris/benchmarks/load && DB_BIND_IP='${PrivateIpDb}' ./scripts/02_init_database.sh"
 
 # Step 4: Deploy & Start Gateways on bench-gateway
 Write-Host "`n>>> Step 3/5: Deploying & Starting Gateways on bench-gateway ($IpGw)..." -ForegroundColor Yellow
-ssh @SshOpts "root@${IpGw}" "cd /root/autheris/benchmarks/load && export DATABASE_URL='postgres://postgres:postgrespassword@${PrivateIpDb}:5432/postgres' DB_HOST='${PrivateIpDb}' && ./scripts/03_start_gateways.sh"
+ssh @SshOpts "root@${IpGw}" "cd /root/autheris/benchmarks/load && export DB_HOST='${PrivateIpDb}' GATEWAY_BIND_IP='${PrivateIpGw}' && ./scripts/03_start_gateways.sh"
 
 # Step 5: Run Benchmark from Client Host
 Write-Host "`n>>> Step 4/5: Running Isolated Benchmark from bench-client ($IpClient)..." -ForegroundColor Yellow

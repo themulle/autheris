@@ -87,7 +87,7 @@ const baseHeaders = {
   'Content-Type': 'application/json',
   'Accept': 'application/json',
   'GraphQL-Preflight': '1',
-  'X-Hasura-Admin-Secret': 'my-secret',
+  'X-Hasura-Admin-Secret': __ENV.HASURA_ADMIN_SECRET || '',
   'X-Test-User-Sid': 'S-1-5-21-9999',
   'X-Test-Tier': 'Internal',
 };

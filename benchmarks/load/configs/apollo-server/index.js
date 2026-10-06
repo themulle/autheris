@@ -5,7 +5,7 @@ import pg from 'pg';
 const { Pool } = pg;
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgres://postgres:postgrespassword@localhost:5432/postgres',
+  connectionString: process.env.DATABASE_URL,
   max: parseInt(process.env.PG_MAX_POOL || '50', 10),
   idleTimeoutMillis: 30000,
 });

@@ -77,7 +77,10 @@ fi
 # 5. Install Node.js 20 LTS & Autocannon (if not present)
 if ! command -v node &> /dev/null; then
     echo "Installing Node.js 20 LTS..."
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    # Download first, then execute (no curl|bash). NodeSource publishes no stable checksum.
+    curl -fsSL https://deb.nodesource.com/setup_20.x -o /tmp/nodesource_setup.sh
+    bash /tmp/nodesource_setup.sh
+    rm -f /tmp/nodesource_setup.sh
     apt-get install -y nodejs
 fi
 npm install -g autocannon yarn --quiet || true
@@ -94,7 +97,10 @@ fi
 # 7. Install .NET 10 SDK (if not present)
 if ! command -v dotnet &> /dev/null; then
     echo "Installing .NET 10 SDK..."
-    curl -sSL https://dot.net/v1/dotnet-install.sh | bash /dev/stdin --channel 10.0 --install-dir /usr/share/dotnet
+    # Download first, then execute (no curl|bash). No stable checksum is published for the script itself.
+    curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+    bash /tmp/dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
+    rm -f /tmp/dotnet-install.sh
     ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
 fi
 
