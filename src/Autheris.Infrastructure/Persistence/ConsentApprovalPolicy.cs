@@ -93,4 +93,27 @@ internal static class ConsentApprovalPolicy
             : Approved;
 
     public static bool IsItsmActor(Sid sid) => sid.Value.StartsWith("ITSM_", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Review E-10: approval steps and rejections belong in the hash chain, not only in the mutable APPROVAL_STEPS table.</summary>
+    public static AuditLogEntry BuildStepAudit(ConsentRequest req, Sid approver, string eventType, string decision, string? newStatus, string? itsmAccount, string? reason)
+    {
+        string? trimmedReason = reason is { Length: > 500 } ? reason[..500] : reason;
+        return new AuditLogEntry
+        {
+            TenantId = req.TenantId,
+            EventType = eventType,
+            ActorSid = approver,
+            TargetTable = req.TableIdentifier.ToString(),
+            Decision = decision,
+            TraceId = Guid.NewGuid().ToString("N"),
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                RequestId = req.Id,
+                Requester = req.RequesterSid.Value,
+                NewStatus = newStatus,
+                ItsmApprover = itsmAccount,
+                Reason = trimmedReason
+            })
+        };
+    }
 }

@@ -757,6 +757,12 @@ public sealed class AuditOptions
     [Range(1, 3600)] public int TierBAggregationWindowSeconds { get; init; } = 60;
     [Range(1, 7300)] public int AuditLogRetentionDays { get; init; } = 3650;
     [Range(1, 168)] public int VerifyHashChainIntervalHours { get; init; } = 24;
+
+    /// <summary>Review E-11: verify the audit hash chain periodically at runtime (first run shortly after start).</summary>
+    public bool VerifyHashChainEnabled { get; init; } = true;
+
+    /// <summary>Review E-11: a broken audit hash chain turns the readiness probe unhealthy (set false to only log it).</summary>
+    public bool FailReadinessOnChainViolation { get; init; } = true;
     public string ElasticsearchSinkUrl { get; init; } = string.Empty;
     public WormAuditOptions Worm { get; init; } = new();
 

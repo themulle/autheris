@@ -3,8 +3,10 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -19,6 +21,32 @@ using Microsoft.AspNetCore.Routing;
 /// </summary>
 public static class RebacEndpoints
 {
+    /// <summary>Review E-10: relationship changes decide access and belong in the audit hash chain.</summary>
+    private static async Task AuditTupleChangeAsync(
+        IAuditLogRepository auditLog, HttpContext http, TenantId callerTenant, string eventType, string decision, RebacTuple tuple)
+    {
+        TenantId tenant;
+        try
+        {
+            tenant = new TenantId(tuple.TenantId);
+        }
+        catch (ArgumentException)
+        {
+            tenant = callerTenant;
+        }
+
+        await auditLog.RecordAuditEventAsync(new AuditLogEntry
+        {
+            TenantId = tenant,
+            EventType = eventType,
+            ActorSid = http.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = string.Empty,
+            Decision = decision,
+            TraceId = http.TraceIdentifier,
+            DetailsJson = JsonSerializer.Serialize(new { tuple.User, tuple.Relation, tuple.Object, tenant = tuple.TenantId })
+        }, http.RequestAborted).ConfigureAwait(false);
+    }
+
     public static IEndpointRouteBuilder MapRebacEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/rebac").RequireAuthorization();
@@ -28,7 +56,8 @@ public static class RebacEndpoints
             List<RebacTuple> tuples,
             HttpRequest request,
             IRebacStore store,
-            IRebacEvaluator evaluator) =>
+            IRebacEvaluator evaluator,
+            IAuditLogRepository auditLog) =>
         {
             var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
             if (!secContext.HasAnyRole("GovernanceAdmin", "SecurityAdmin", "ClusterAdmin"))
@@ -56,6 +85,7 @@ public static class RebacEndpoints
             {
                 await store.AddTupleAsync(t, request.HttpContext.RequestAborted).ConfigureAwait(false);
                 evaluator.InvalidateTenantCache(t.TenantId);
+                await AuditTupleChangeAsync(auditLog, request.HttpContext, secContext.TenantId, "REBAC_TUPLE_ADDED", "ALLOW", t).ConfigureAwait(false);
             }
 
             return Results.Ok(new { status = "Tuples added", count = tuples.Count });
@@ -66,7 +96,8 @@ public static class RebacEndpoints
             [FromBody] RebacTuple tuple,
             HttpRequest request,
             IRebacStore store,
-            IRebacEvaluator evaluator) =>
+            IRebacEvaluator evaluator,
+            IAuditLogRepository auditLog) =>
         {
             var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
             if (!secContext.HasAnyRole("GovernanceAdmin", "SecurityAdmin", "ClusterAdmin"))
@@ -85,6 +116,7 @@ public static class RebacEndpoints
 
             var removed = await store.DeleteTupleAsync(tuple, request.HttpContext.RequestAborted).ConfigureAwait(false);
             evaluator.InvalidateTenantCache(tuple.TenantId);
+            await AuditTupleChangeAsync(auditLog, request.HttpContext, secContext.TenantId, "REBAC_TUPLE_REMOVED", removed ? "REVOKED" : "NOOP", tuple).ConfigureAwait(false);
 
             return Results.Ok(new { removed });
         });
