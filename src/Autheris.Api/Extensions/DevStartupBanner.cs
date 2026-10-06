@@ -24,6 +24,10 @@ public static class DevStartupBanner
         sb.AppendLine().AppendLine("Autheris developer mode");
         sb.AppendLine($"  Hub          {baseUrl}/");
         sb.AppendLine($"  GraphQL      {baseUrl}{options.GraphQL.EndpointPath}");
+        if (options.GraphQL.EnableBananaCakePop)
+        {
+            sb.AppendLine($"  GraphQL IDE  {baseUrl}{options.GraphQL.BananaCakePopPath}");
+        }
         sb.AppendLine($"  Swagger      {baseUrl}/docs");
         sb.AppendLine($"  Identity     {baseUrl}/api/auth/session");
         sb.AppendLine($"  Config       {baseUrl}/api/dev/info");
@@ -61,7 +65,10 @@ public static class DevStartupBanner
             sb.Append($"    {user.Username,-12} pw {password,-8} {roles,-14} tenant {BasicAuthPrincipalFactory.ResolveTenant(user)}");
             if (sessionActive)
             {
-                sb.Append($"  {baseUrl}/api/dev/login/{Uri.EscapeDataString(user.Username)}?redirect=/graphql");
+                var redirectPath = options.GraphQL.EnableBananaCakePop
+                    ? options.GraphQL.BananaCakePopPath
+                    : options.GraphQL.EndpointPath;
+                sb.Append($"  {baseUrl}/api/dev/login/{Uri.EscapeDataString(user.Username)}?redirect={redirectPath}");
             }
 
             sb.AppendLine();

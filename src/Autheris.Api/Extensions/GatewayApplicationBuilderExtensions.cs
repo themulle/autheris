@@ -48,13 +48,13 @@ public static class GatewayApplicationBuilderExtensions
 
         // HTTP Security Response Headers (MED-01)
         // The embedded Nitro (Banana Cake Pop) UI needs inline scripts/styles, blob: workers and data: assets, which the
-        // strict default policy blocks (blank page). Only in Development and only below the GraphQL endpoint path
-        // a relaxed policy is used; every other path keeps the strict one.
+        // strict default policy blocks (blank page). Only in Development and only below the Banana Cake Pop endpoint path
+        // (/ui/bcp) a relaxed policy is used; every other path (including /graphql) keeps the strict one.
         const string StrictCsp = "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
         const string NitroToolCsp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; manifest-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
-        var nitroToolPath = gatewayOptions.GraphQL.EndpointPath.StartsWith('/')
-            ? gatewayOptions.GraphQL.EndpointPath
-            : "/" + gatewayOptions.GraphQL.EndpointPath;
+        var nitroToolPath = gatewayOptions.GraphQL.BananaCakePopPath.StartsWith('/')
+            ? gatewayOptions.GraphQL.BananaCakePopPath
+            : "/" + gatewayOptions.GraphQL.BananaCakePopPath;
         var allowNitroToolCsp = app.Environment.IsDevelopment() && gatewayOptions.GraphQL.EnableBananaCakePop;
         app.Use(async (context, next) =>
         {
@@ -344,11 +344,10 @@ public static class GatewayApplicationBuilderExtensions
         });
 
         app.UseWebSockets();
-        // Nitro (Banana Cake Pop) is served from the embedded assets of ChilliCream.Nitro.App instead of the CDN
-        // (default ServeMode.Latest): in container/corporate networks without outbound internet access the CDN
-        // fetch fails and GET /graphql would answer 502 Bad Gateway.
+        // GraphQL API endpoint: Nitro (Banana Cake Pop) UI is disabled on /graphql so it serves strictly as
+        // a headless, deterministic machine-to-machine API without HTML multiplexing.
         var gqlEndpoint = app.MapGraphQL(endpoint)
-            .WithOptions((NitroAppOptions nitro) => nitro.ServeMode = ServeMode.Embedded);
+            .WithOptions((NitroAppOptions nitro) => nitro.Enable = false);
         // SEC H-02: OpenSchema no longer opens /graphql; only the Development-only anonymous mode does.
         // (SEC M-03: with the authenticated-user FallbackPolicy the anonymous mode must opt out explicitly.)
         if (gatewayOptions.IsAnonymousAccessAllowed)
@@ -358,6 +357,31 @@ public static class GatewayApplicationBuilderExtensions
         else
         {
             gqlEndpoint.RequireAuthorization();
+        }
+
+        // Dedicated Banana Cake Pop endpoint for development and staging (/ui/bcp).
+        // In production, administrators and developers use the standalone Banana Cake Pop desktop app.
+        if (gatewayOptions.GraphQL.EnableBananaCakePop)
+        {
+            var bcpPath = gatewayOptions.GraphQL.BananaCakePopPath.StartsWith('/')
+                ? gatewayOptions.GraphQL.BananaCakePopPath
+                : "/" + gatewayOptions.GraphQL.BananaCakePopPath;
+
+            var bcpEndpoint = app.MapNitroApp(bcpPath, endpoint)
+                .WithOptions((NitroAppOptions nitro) =>
+                {
+                    nitro.ServeMode = ServeMode.Embedded;
+                    nitro.GraphQLEndpoint = endpoint;
+                });
+
+            if (gatewayOptions.IsAnonymousAccessAllowed)
+            {
+                bcpEndpoint.AllowAnonymous();
+            }
+            else
+            {
+                bcpEndpoint.RequireAuthorization();
+            }
         }
 
         // 3. Modular Feature Endpoints (Route Groups)
