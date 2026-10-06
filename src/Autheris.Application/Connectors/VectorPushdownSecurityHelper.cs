@@ -118,7 +118,7 @@ public static class VectorPushdownSecurityHelper
             throw new SecurityException("INV-VEC-01: Milvus vector filter rejected. Missing TenantId.");
         }
 
-        var expr = $"tenant_id == \"{tenantId.Value.Replace("\"", "\\\"")}\"";
+        var expr = $"tenant_id == \"{EscapeMilvusString(tenantId.Value)}\"";
 
         if (request.MetadataFilters != null)
         {
@@ -136,17 +136,21 @@ public static class VectorPushdownSecurityHelper
 
                 if (v is string s)
                 {
-                    expr += $" && {k} == \"{s.Replace("\"", "\\\"")}\"";
+                    expr += $" && {k} == \"{EscapeMilvusString(s)}\"";
                 }
                 else if (v is int or long or double or float or bool)
                 {
-                    expr += $" && {k} == {v.ToString()?.ToLowerInvariant()}";
+                    expr += $" && {k} == {Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture)?.ToLowerInvariant()}";
                 }
             }
         }
 
         return expr;
     }
+
+    // Review E-6: the backslash is escaped first; otherwise a value ending in '\\' escapes the closing quote of the literal.
+    private static string EscapeMilvusString(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
 
     public static IReadOnlyList<VectorDocumentChunk> FilterChunksByRls(
         IReadOnlyList<VectorDocumentChunk> rawChunks,

@@ -834,6 +834,15 @@ public sealed class OpenMetadataOptions
 
 public sealed class SqlDataSourceOptions
 {
+    /// <summary>
+    /// Review E-5: when true, a table without a tenant column is refused (fail-closed) unless it is listed in
+    /// <see cref="TenantColumnExemptTables"/>. Default false keeps tables that are shared across tenants readable.
+    /// </summary>
+    public bool RequireTenantColumn { get; init; }
+
+    /// <summary>Tables (<c>schema.table</c> or <c>table</c>, case-insensitive) that are deliberately shared across tenants.</summary>
+    public List<string> TenantColumnExemptTables { get; init; } = new();
+
     public Dictionary<string, DataSourceConnectionOptions> Connections { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
 

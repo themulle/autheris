@@ -301,14 +301,16 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                 else
                 {
                     // Non-paginated entity, scalar, or unpaginated relation list
-                    cost = SafeAdd(cost, isList ? 5 : 1);
+                    // SEC M-9: an unpaginated list is assumed to return UnpaginatedListAssumedRows rows (the default list multiplier);
+                    // the child cost is multiplied by that fan-out, so nested unpaginated lists grow multiplicatively.
+                    int assumedRows = Math.Min(Math.Max(1, _defaultListMultiplier), _maxResponseRows);
+                    cost = SafeAdd(cost, isList ? assumedRows : 1);
                     if (field.SelectionSet != null)
                     {
                         var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions);
                         if (isList)
                         {
-                            // SEC M-9: Unpaginated relation lists scale child selection costs by unpaginated list multiplier
-                            var nestedCost = (int)Math.Min((long)int.MaxValue, (long)childCost * 2);
+                            var nestedCost = (int)Math.Min((long)int.MaxValue, (long)childCost * assumedRows);
                             cost = SafeAdd(cost, nestedCost);
                         }
                         else
