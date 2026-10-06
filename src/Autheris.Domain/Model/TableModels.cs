@@ -104,6 +104,30 @@ public sealed class TableMetadata
         }
     }
 
+    /// <summary>
+    /// Review E-5: fail-closed guard for deployments that require every table to be tenant scoped. Returns normally when a tenant
+    /// column exists, when the requirement is off or when the table is exempt; throws otherwise.
+    /// </summary>
+    public static string? RequireTenantColumnOrThrow(TableMetadata metadata, bool required, IEnumerable<string>? exemptTables)
+    {
+        var column = metadata.TenantColumnName;
+        if (column != null || !required)
+        {
+            return column;
+        }
+
+        var full = $"{metadata.Identifier.Schema}.{metadata.Identifier.TableName}";
+        if (exemptTables != null && exemptTables.Any(e =>
+                string.Equals(e, full, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(e, metadata.Identifier.TableName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return null;
+        }
+
+        throw new System.Security.SecurityException(
+            $"Table '{full}' has no tenant column and is not listed in DataSources:TenantColumnExemptTables; access is refused (fail-closed).");
+    }
+
     public TableColumn? GetColumn(string columnName) =>
         Columns.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
 }

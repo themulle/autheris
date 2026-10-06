@@ -119,7 +119,7 @@ Autheris acts as an Enterprise Zero-Trust Data Gateway. It enforces Data-Owner-C
   * *Attack Vector:* Attackers submit nested cyclical queries (e.g. `user { orders { user { orders ... } } }`) to exhaust server memory and CPU.
   * *Mitigation:*
     1. *Execution Depth Limit:* Enforced via `AddMaxExecutionDepthRule(maxDepth)`.
-    2. *Query Cost Analysis:* Dynamic calculation via `QueryCostAnalyzerRule`. Queries exceeding `MaxAllowedCost` or `MaxRootFieldsPerOperation` are rejected during validation before execution.
+    2. *Query Cost Analysis:* Dynamic calculation via `QueryCostAnalyzerRule`. Queries exceeding `MaxAllowedCost` or `MaxRootFieldsPerOperation` are rejected during validation before execution. Unpaginated relation lists are assumed to return the default list multiplier (10) rows and multiply their child cost by it, so nested lists grow multiplicatively (M-9).
     3. *Persisted Queries Allowlist:* In high-security mode (`PersistedQueriesOnly=true`), ad-hoc queries are rejected; only pre-registered SHA-256 operation hashes are executed.
 
 * **Threat 5.2: In-Memory Token Revocation Explosion**
@@ -135,3 +135,5 @@ Autheris acts as an Enterprise Zero-Trust Data Gateway. It enforces Data-Owner-C
   * *Attack Vector:* A service account intended for background batch queries executes administrative governance mutations.
   * *Mitigation:* Fine-grained claim scopes and RBAC roles (`ClusterAdmin`, `DataOwner`, `Analyst`, `Auditor`). Mutating operations require explicit role assignments.
   * *Known limitation:* CSRF / same-origin checks apply to selected paths only and a missing `Origin` header is accepted (A-9); do not treat them as a general protection of all mutations.
+
+**Row-filter evaluators (E-5/E-6).** The in-memory evaluators (`GatewayExecutionService.FilterRows`, `StreamingRowFilterAstEvaluator`) do not coerce types: a quoted literal against a numeric column, an unquoted number against a text column and DataTable-only LIKE wildcards (`*`, `[`) make `FilterRows` return no rows; the streaming evaluator treats mixed-type comparisons as UNKNOWN, compares strings ordinally and never parses strings into numbers. Milvus filter values escape the backslash before the quote. `LIKE` patterns in policies are authored by administrators, so their `%`/`_` wildcards are intentional. Set `DataSources:RequireTenantColumn=true` to refuse tables without a tenant column.

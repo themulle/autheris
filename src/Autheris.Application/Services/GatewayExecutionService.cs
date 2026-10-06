@@ -499,6 +499,13 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
                 dt.Columns.Add(col.ColumnName, colType);
             }
 
+            // Review E-5/E-6: DataTable.Select coerces ('007' = 7 on an int column, 7 = '7' on a string column) and knows
+            // LIKE wildcards SQL does not. Filters that rely on either are refused (fail-closed).
+            if (!IsTypeStrictRowFilter(normalizedSql, dt))
+            {
+                return new List<IReadOnlyDictionary<string, object?>>();
+            }
+
             var rowMap = new Dictionary<System.Data.DataRow, IReadOnlyDictionary<string, object?>>();
             foreach (var r in rows)
             {
@@ -538,6 +545,55 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
             // Strict Fail-Closed if expression cannot be evaluated
             return new List<IReadOnlyDictionary<string, object?>>();
         }
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?<col>\[[^\]]+\]|""[^""]+""|\b[A-Za-z_][A-Za-z0-9_]*\b)\s*(?:NOT\s+)?(?<op>=|<>|!=|<=|>=|<|>|\bIN\b|\bLIKE\b)\s*(?<rhs>\((?:[^()']|'(?:[^']|'')*')*\)|'(?:[^']|'')*'|-?\d+(?:\.\d+)?)", System.Text.RegularExpressions.RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 1000)]
+    private static partial System.Text.RegularExpressions.Regex ColumnVsLiteralRegex();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"'(?:[^']|'')*'|-?\d+(?:\.\d+)?", System.Text.RegularExpressions.RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    private static partial System.Text.RegularExpressions.Regex LiteralTokenRegex();
+
+    /// <summary>
+    /// Review E-5/E-6: true when every comparison of a column with a literal uses a literal of the column's own type
+    /// (quoted for text columns, unquoted number for numeric columns) and no LIKE pattern uses DataTable-only wildcards.
+    /// </summary>
+    internal static bool IsTypeStrictRowFilter(string normalizedSql, System.Data.DataTable table)
+    {
+        foreach (System.Text.RegularExpressions.Match m in ColumnVsLiteralRegex().Matches(normalizedSql))
+        {
+            var colName = m.Groups["col"].Value.Trim('[', ']', '"');
+            if (!table.Columns.Contains(colName))
+            {
+                continue;
+            }
+
+            var colType = table.Columns[colName]!.DataType;
+            bool isLike = m.Groups["op"].Value.Equals("LIKE", StringComparison.OrdinalIgnoreCase);
+            bool numericColumn = colType == typeof(long) || colType == typeof(int) || colType == typeof(decimal) || colType == typeof(double);
+            bool textColumn = colType == typeof(string);
+
+            foreach (System.Text.RegularExpressions.Match lit in LiteralTokenRegex().Matches(m.Groups["rhs"].Value))
+            {
+                bool quoted = lit.Value[0] == '\'';
+                if (isLike)
+                {
+                    // DataTable treats '*' and '[' as wildcards/escapes; in SQL they are plain characters.
+                    if (!textColumn || !quoted || lit.Value.Contains('*') || lit.Value.Contains('['))
+                    {
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if ((numericColumn && quoted) || (textColumn && !quoted))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private static string? NormalizeRowFilterForInMemoryEvaluation(string rowFilterSql)

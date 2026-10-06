@@ -187,7 +187,10 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
         // Stufe 1: Applikationsseitiger erzwungener Tenant-Filter (Defense in Depth)
         // Review E-5: the tenant column is found under any of its usual spellings (tenant_id, TenantId, tenantId, ...).
-        var tenantColumn = metadata.TenantColumnName;
+        var tenantColumn = TableMetadata.RequireTenantColumnOrThrow(
+            metadata,
+            _options?.Value?.DataSources?.RequireTenantColumn == true,
+            _options?.Value?.DataSources?.TenantColumnExemptTables);
         if (tenantColumn != null)
         {
             var pTenant = $"@p_tenant_{paramIndex++}";

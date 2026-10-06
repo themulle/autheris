@@ -276,7 +276,7 @@ public static partial class StreamingRowFilterAstEvaluator
         var expressions = inList.expression();
         if (expressions == null || expressions.Length == 0) return null;
 
-        var strSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var strSet = new HashSet<string>(StringComparer.Ordinal);
         var numSet = new HashSet<decimal>();
         bool listContainsNull = false;
 
@@ -296,10 +296,18 @@ public static partial class StreamingRowFilterAstEvaluator
                 continue;
             }
 
-            strSet.Add(constant.ToString() ?? string.Empty);
-            if (TryConvertToDecimal(constant, out decimal d))
+            // Review E-6: typed membership - a string never matches a number ('007' IN (7) is not true).
+            if (constant is string constStr)
+            {
+                strSet.Add(constStr);
+            }
+            else if (TryConvertToDecimal(constant, out decimal d))
             {
                 numSet.Add(d);
+            }
+            else
+            {
+                return null;
             }
         }
 
@@ -310,8 +318,10 @@ public static partial class StreamingRowFilterAstEvaluator
                 return null;
             }
 
-            bool match = (TryConvertToDecimal(val, out decimal d) && numSet.Contains(d))
-                         || strSet.Contains(val.ToString() ?? string.Empty);
+            val = NormalizeValue(val);
+            bool match = val is string valStr
+                ? strSet.Contains(valStr)
+                : TryConvertToDecimal(val, out decimal d) && numSet.Contains(d);
 
             if (match)
             {
@@ -417,7 +427,7 @@ public static partial class StreamingRowFilterAstEvaluator
                 return null;
             }
 
-            if (TryConvertToDecimal(val, out decimal actual))
+            if (TryConvertToDecimal(NormalizeValue(val), out decimal actual))
             {
                 bool inRange = actual >= lowNum && actual <= upNum;
                 return isNot ? !inRange : inRange;
@@ -553,37 +563,58 @@ public static partial class StreamingRowFilterAstEvaluator
             return null;
         }
 
-        // Numeric comparison
-        if (TryConvertToDecimal(left, out decimal leftNum) && TryConvertToDecimal(right, out decimal rightNum))
+        left = NormalizeValue(left);
+        right = NormalizeValue(right);
+
+        // Review E-6: no implicit coercion between types. '007' = 7 and '007' = '7' are not true; a mixed-type
+        // comparison is UNKNOWN (fail-closed) and strings compare ordinally.
+        int cmp;
+        if (left is string sLeft && right is string sRight)
         {
-            int cmp = leftNum.CompareTo(rightNum);
-            return opText switch
+            cmp = string.CompareOrdinal(sLeft, sRight);
+        }
+        else if (left is bool bLeft && right is bool bRight)
+        {
+            if (opText is not ("=" or "==" or "!=" or "<>")) return null;
+            cmp = bLeft == bRight ? 0 : 1;
+        }
+        else if (TryConvertToDecimal(left, out decimal leftNum) && TryConvertToDecimal(right, out decimal rightNum))
+        {
+            cmp = leftNum.CompareTo(rightNum);
+        }
+        else
+        {
+            return null;
+        }
+
+        return opText switch
+        {
+            "=" or "==" => cmp == 0,
+            "!=" or "<>" => cmp != 0,
+            "<" => cmp < 0,
+            "<=" => cmp <= 0,
+            ">" => cmp > 0,
+            ">=" => cmp >= 0,
+            _ => null
+        };
+    }
+
+    /// <summary>Unwraps JSON elements to string / decimal / bool so typed comparison sees the real type.</summary>
+    private static object? NormalizeValue(object? val)
+    {
+        if (val is System.Text.Json.JsonElement je)
+        {
+            return je.ValueKind switch
             {
-                "=" or "==" => cmp == 0,
-                "!=" or "<>" => cmp != 0,
-                "<" => cmp < 0,
-                "<=" => cmp <= 0,
-                ">" => cmp > 0,
-                ">=" => cmp >= 0,
+                System.Text.Json.JsonValueKind.String => je.GetString(),
+                System.Text.Json.JsonValueKind.Number => je.TryGetDecimal(out var d) ? d : null,
+                System.Text.Json.JsonValueKind.True => true,
+                System.Text.Json.JsonValueKind.False => false,
                 _ => null
             };
         }
 
-        // String comparison
-        string sLeft = left.ToString() ?? string.Empty;
-        string sRight = right.ToString() ?? string.Empty;
-        int strCmp = string.Compare(sLeft, sRight, StringComparison.OrdinalIgnoreCase);
-
-        return opText switch
-        {
-            "=" or "==" => strCmp == 0,
-            "!=" or "<>" => strCmp != 0,
-            "<" => strCmp < 0,
-            "<=" => strCmp <= 0,
-            ">" => strCmp > 0,
-            ">=" => strCmp >= 0,
-            _ => null
-        };
+        return val;
     }
 
     private static bool TryConvertToDecimal(object? val, out decimal result)
@@ -602,6 +633,8 @@ public static partial class StreamingRowFilterAstEvaluator
         if (val is float f) { result = (decimal)f; return true; }
         if (val is double db) { result = (decimal)db; return true; }
 
-        return decimal.TryParse(val.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out result);
+        // Review E-6: strings are never parsed into numbers.
+        result = 0;
+        return false;
     }
 }
