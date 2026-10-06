@@ -6,7 +6,20 @@ namespace Autheris.Application.Interfaces;
 /// SEC H-17: Signed end anchor of the audit hash chain (last sequence number + last entry hash).
 /// <see cref="Signature"/> is an HMAC-SHA256 (hex) computed by the audit repository with a dedicated HKDF sub-key.
 /// </summary>
-public sealed record AuditChainAnchor(long Sequence, string EntryHash, DateTimeOffset UpdatedAt, string Signature);
+/// <see cref="ExternalSignature"/> (SEC E-11) is an optional asymmetric (KMS/HSM) signature over the whole anchor.
+public sealed record AuditChainAnchor(long Sequence, string EntryHash, DateTimeOffset UpdatedAt, string Signature, string? ExternalSignature = null);
+
+/// <summary>
+/// SEC E-11: Signs audit chain anchors with a key that never lives next to the audited database (KMS / HSM / Key Vault).
+/// </summary>
+public interface IAuditAnchorSigner
+{
+    /// <summary>Hex encoded signature over <paramref name="data"/>.</summary>
+    string Sign(ReadOnlySpan<byte> data);
+
+    /// <summary>Verifies a hex encoded signature; must not throw on malformed input.</summary>
+    bool Verify(ReadOnlySpan<byte> data, string signature);
+}
 
 /// <summary>
 /// SEC H-17: Persists the audit chain end anchor OUTSIDE of the audited database (file on a separate volume,
