@@ -122,6 +122,34 @@ public sealed class DynamicOpenApiGeneratorTests
     }
 
     [Fact]
+    public async Task GenerateOpenApiYamlAsync_IsParseableYamlWithSamePathsAsJson()
+    {
+        var repo = Substitute.For<ITableMetadataRepository>();
+        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(CreateSampleTables()));
+
+        var generator = new DynamicOpenApiGenerator(repo, NullLogger<DynamicOpenApiGenerator>.Instance);
+        var yaml = await generator.GenerateOpenApiYamlAsync(null);
+        var json = await generator.GenerateOpenApiJsonAsync(null);
+
+        // Keys starting with '@' must be quoted and empty collections need a blank after the colon.
+        yaml.ShouldContain("\"@odata.context\":");
+
+        // Throws a YamlException if the document is not valid YAML.
+        var root = new YamlDotNet.Serialization.DeserializerBuilder()
+            .Build()
+            .Deserialize<Dictionary<string, object>>(yaml);
+
+        root.ShouldContainKey("paths");
+        var yamlPaths = ((Dictionary<object, object>)root["paths"]).Keys.Select(k => k.ToString()!).OrderBy(k => k).ToList();
+
+        using var doc = JsonDocument.Parse(json);
+        var jsonPaths = doc.RootElement.GetProperty("paths").EnumerateObject().Select(p => p.Name).OrderBy(k => k).ToList();
+
+        yamlPaths.ShouldBe(jsonPaths);
+    }
+
+    [Fact]
     public async Task OpenApiCacheManager_CachesOutputAndInvalidatesCorrectly()
     {
         var cacheManager = new OpenApiCacheManager();

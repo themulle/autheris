@@ -536,6 +536,11 @@
           "xunit.extensibility.core": "[2.9.3]"
         }
       },
+      "YamlDotNet": {
+        "type": "Transitive",
+        "resolved": "18.1.0",
+        "contentHash": "5K+9KFg2TdTl7VXv88Qzi/0lqK6JFoNP3lRuImPYGRV7K/QYklDyTrj4+A+KAki1JsQi6qKY+hDyY7d6WRqjrw=="
+      },
       "ZstdSharp.Port": {
         "type": "Transitive",
         "resolved": "0.8.8",
@@ -559,7 +564,8 @@
           "Microsoft.Extensions.Logging.Abstractions": "[10.0.12, )",
           "Microsoft.Extensions.Options": "[10.0.12, )",
           "Parquet.Net": "[6.1.0, )",
-          "System.IO.Hashing": "[10.0.12, )"
+          "System.IO.Hashing": "[10.0.12, )",
+          "YamlDotNet": "[18.1.0, )"
         }
       },
       "autheris.domain": {

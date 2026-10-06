@@ -422,9 +422,11 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             sb.AppendLine();
             foreach (var kvp in obj)
             {
-                sb.Append(indent).Append(kvp.Key).Append(':');
-                if (kvp.Value is JsonValue)
+                sb.Append(indent).Append(FormatYamlKey(kvp.Key)).Append(':');
+                if (IsInlineYamlValue(kvp.Value))
                 {
+                    // Scalars, null and empty collections stay on the key's line and need a blank after the colon
+                    // ("key: {}"); "key:{}" or "key:null" is not valid YAML.
                     sb.Append(' ');
                     ConvertJsonNodeToYaml(kvp.Value, sb, 0);
                 }
@@ -446,7 +448,7 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             foreach (var item in arr)
             {
                 sb.Append(indent).Append("- ");
-                if (item is JsonValue)
+                if (IsInlineYamlValue(item))
                 {
                     ConvertJsonNodeToYaml(item, sb, 0);
                 }
@@ -458,8 +460,60 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
         }
         else if (node is JsonValue val)
         {
+            // JSON scalars (double-quoted, escaped strings, numbers, booleans) are valid YAML scalars.
             var raw = val.ToJsonString();
             sb.AppendLine(raw);
         }
+    }
+
+    /// <summary>True for nodes that are written on the same line as their key or list dash.</summary>
+    private static bool IsInlineYamlValue(JsonNode? node) =>
+        node is null
+        || node is JsonValue
+        || (node is JsonObject o && o.Count == 0)
+        || (node is JsonArray a && a.Count == 0);
+
+    /// <summary>
+    /// Writes a mapping key as a plain scalar where that is safe (paths like /finance/dbo/invoices, $ref, x-foo) and
+    /// as a double-quoted string otherwise. Keys such as "@odata.context" must be quoted: '@' is a reserved YAML
+    /// indicator and cannot start a plain scalar. Numeric and boolean-like keys (e.g. response code "200") are quoted
+    /// so that parsers keep them as strings.
+    /// </summary>
+    private static string FormatYamlKey(string key)
+    {
+        if (key.Length == 0 || !IsPlainYamlKey(key))
+        {
+            return JsonSerializer.Serialize(key);
+        }
+
+        return key;
+    }
+
+    private static bool IsPlainYamlKey(string key)
+    {
+        var first = key[0];
+        if (!(char.IsAsciiLetter(first) || first == '_' || first == '/' || first == '$'))
+        {
+            return false;
+        }
+
+        foreach (var c in key)
+        {
+            var allowed = char.IsAsciiLetterOrDigit(c)
+                || c is '_' or '/' or '$' or '.' or '-' or '{' or '}' or '(' or ')' or ',' or '=' or '~';
+            if (!allowed)
+            {
+                return false;
+            }
+        }
+
+        // Words YAML would turn into booleans or null
+        return !(key.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("false", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("null", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("yes", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("no", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("on", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("off", StringComparison.OrdinalIgnoreCase));
     }
 }
