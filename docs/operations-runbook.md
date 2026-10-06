@@ -186,6 +186,16 @@ A run that cannot complete (database unreachable) is logged as an error and is *
 
 Audit events written for the approval workflow: `CONSENT_APPROVAL_STEP`, `CONSENT_REQUEST_REJECTED`, `CONSENT_GRANTED` (actor = approver/creator), `CONSENT_REVOKED` (with tenant), `CONSENT_EXPIRY_EXTENDED`, `REBAC_TUPLE_ADDED`, `REBAC_TUPLE_REMOVED`, `SCHEMA_RELOAD`.
 
+### 4.y PostgreSQL schema: duplicate ITSM tickets (review PG-12)
+
+The schema creates `ux_consent_requests_ticket` (unique per tenant and `itsm_ticket_id`). If the DDL fails on an existing database, find the duplicates first and resolve them (keep one request, clear the ticket id on the others):
+
+```sql
+SELECT COALESCE(tenant_id, ''), itsm_ticket_id, COUNT(*)
+FROM CONSENT_REQUESTS WHERE itsm_ticket_id IS NOT NULL
+GROUP BY 1, 2 HAVING COUNT(*) > 1;
+```
+
 ## 5. Data Catalog Synchronization Operations
 
 ### 5.1 Monitoring Background Sync

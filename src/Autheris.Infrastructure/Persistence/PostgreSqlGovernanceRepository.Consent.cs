@@ -309,9 +309,10 @@ public partial class PostgreSqlGovernanceRepository
                         {
                             hops = JsonSerializer.Deserialize<List<SubqueryJoinHop>>(hopsJson);
                         }
-                        catch
+                        catch (JsonException ex)
                         {
-                            // Ignore invalid JSON
+                            // Review PG-11: a row filter that cannot be read must not silently lose its join hops (fail-closed, as in SQLite).
+                            throw new InvalidOperationException("Malformed additional hops JSON detected in consent row filter.", ex);
                         }
                     }
 
@@ -351,6 +352,8 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(consent);
+        consent.Validate(); // Review PG-11: same input validation as SQLite
         await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -558,6 +561,8 @@ public partial class PostgreSqlGovernanceRepository
     {
         TableIdentifier? tableId = null;
         TenantId tenantId = TenantId.LegacySingleTenant;
+        bool isGranteeSelf = false;
+        bool alreadyRevoked = false;
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
@@ -566,11 +571,11 @@ public partial class PostgreSqlGovernanceRepository
             await using (var getTableCmd = conn.CreateCommand())
             {
                 getTableCmd.Transaction = tx;
-                getTableCmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id
+                getTableCmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id, c.grantee_type, c.grantee_sid, c.is_revoked
                                             FROM CONSENTS c
                                             JOIN TABLES t ON c.table_id = t.id
                                             WHERE c.id = @id
-                                            FOR UPDATE";
+                                            FOR UPDATE OF c";
                 getTableCmd.Parameters.AddWithValue("@id", consentId.ToString());
                 await using var reader = await getTableCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 if (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -580,7 +585,32 @@ public partial class PostgreSqlGovernanceRepository
                     {
                         tenantId = tid;
                     }
+
+                    var gType = reader.GetString(4);
+                    var gSid = reader.IsDBNull(5) ? null : reader.GetString(5);
+                    isGranteeSelf = string.Equals(gType, "User", StringComparison.OrdinalIgnoreCase) &&
+                                    string.Equals(gSid, revokedBySid.Value, StringComparison.OrdinalIgnoreCase);
+                    alreadyRevoked = reader.GetInt32(6) == 1;
                 }
+            }
+
+            // Review PG-9: a missing consent is an error (as in SQLite), not a silent no-op.
+            if (!tableId.HasValue)
+            {
+                throw new KeyNotFoundException($"Consent mit ID '{consentId}' existiert nicht.");
+            }
+
+            // Review PG-9: authorization in the repository (as in SQLite): the grantee itself or an approver of the table.
+            if (!isGranteeSelf && !await IsAuthorizedApproverForTableInternalAsync(tableId.Value, revokedBySid, null, ct).ConfigureAwait(false))
+            {
+                throw new UnauthorizedAccessException($"Benutzer '{revokedBySid}' ist weder Data Owner oder delegierter Genehmiger für '{tableId.Value}', noch der Begünstigte selbst.");
+            }
+
+            // Review PG-9 / Low-13: an existing revocation (who, when, why) is never overwritten.
+            if (alreadyRevoked)
+            {
+                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                return;
             }
 
             await using (var cmd = conn.CreateCommand())
@@ -588,7 +618,7 @@ public partial class PostgreSqlGovernanceRepository
                 cmd.Transaction = tx;
                 cmd.CommandText = @"UPDATE CONSENTS
                                     SET is_revoked = 1, revoked_by_sid = @sid, revoked_at = @now, revoke_reason = @reason
-                                    WHERE id = @id";
+                                    WHERE id = @id AND is_revoked = 0";
                 cmd.Parameters.AddWithValue("@id", consentId.ToString());
                 cmd.Parameters.AddWithValue("@sid", revokedBySid.Value);
                 cmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
@@ -1282,7 +1312,7 @@ public partial class PostgreSqlGovernanceRepository
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id FROM CONSENT_REQUESTS WHERE itsm_ticket_id = @ticket LIMIT 1";
+        cmd.CommandText = "SELECT id FROM CONSENT_REQUESTS WHERE itsm_ticket_id = @ticket ORDER BY requested_at, id LIMIT 1";
         cmd.Parameters.AddWithValue("@ticket", ticketId);
         var idObj = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         if (idObj == null) return null;

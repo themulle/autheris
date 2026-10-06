@@ -264,6 +264,12 @@ public partial class PostgreSqlGovernanceRepository
                 ON CONSENTS (consent_request_id)
                 WHERE consent_request_id IS NOT NULL AND consent_request_id <> '0e3d5c1a-7b2f-4c8e-9a61-5f0d2b7c4e19';
 
+            -- Review PG-12: a ticket id identifies at most one consent request per tenant (webhooks look requests up by ticket).
+            -- Existing duplicates must be cleaned up before this index can be created (see operations runbook).
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_consent_requests_ticket
+                ON CONSENT_REQUESTS (COALESCE(tenant_id, ''), itsm_ticket_id)
+                WHERE itsm_ticket_id IS NOT NULL;
+
             CREATE INDEX IF NOT EXISTS idx_itsm_outbox_status_retry
                 ON ITSM_OUTBOX (status, next_retry_at);
         ";
