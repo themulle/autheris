@@ -22,26 +22,45 @@ mutation EmergencyRevokeConsent {
 ```
 
 ### 1.3 Direct Database Fallback (Break-Glass)
-If the GraphQL API is inaccessible, update the governance database directly:
+If the GraphQL API is inaccessible, update the governance database directly. Column names are those of the `CONSENTS` and `POLICY_EPOCHS` tables (timestamps are ISO-8601 text).
+
+SQLite:
 
 ```sql
 -- 1. Mark consent as revoked
 UPDATE CONSENTS
-SET STATUS = 'REVOKED',
-    REVOCATION_REASON = 'Emergency security incident',
-    REVOKED_AT = CURRENT_TIMESTAMP
-WHERE CONSENT_ID = 'b8a92e10-67c3-4d7a-8f81-54625b902da1';
+SET is_revoked = 1,
+    revoke_reason = 'Emergency security incident',
+    revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = 'b8a92e10-67c3-4d7a-8f81-54625b902da1';
 
--- 2. Increment table policy epoch to invalidate all distributed L1/L2 caches
+-- 2. Increment table policy epoch so that nodes drop cached authorizations
 UPDATE POLICY_EPOCHS
-SET EPOCH_VERSION = EPOCH_VERSION + 1,
-    LAST_UPDATED_AT = CURRENT_TIMESTAMP
-WHERE TABLE_ID = (
-    SELECT TABLE_ID FROM CONSENTS WHERE CONSENT_ID = 'b8a92e10-67c3-4d7a-8f81-54625b902da1'
-);
+SET epoch = epoch + 1,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE table_id = (SELECT table_id FROM CONSENTS WHERE id = 'b8a92e10-67c3-4d7a-8f81-54625b902da1');
 ```
 
-Within seconds, the L1/L2 cache validator detects the epoch version mismatch and evicts cached authorizations, reverting queries to Zero-Trust `FORBIDDEN`.
+PostgreSQL:
+
+```sql
+UPDATE CONSENTS
+SET is_revoked = 1,
+    revoke_reason = 'Emergency security incident',
+    revoked_at = to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+WHERE id = 'b8a92e10-67c3-4d7a-8f81-54625b902da1';
+
+UPDATE POLICY_EPOCHS
+SET epoch = epoch + 1,
+    updated_at = to_char(now() AT TIME ZONE 'utc', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+WHERE table_id = (SELECT table_id FROM CONSENTS WHERE id = 'b8a92e10-67c3-4d7a-8f81-54625b902da1');
+```
+
+Notes:
+- A direct database change **bypasses the audit chain**: no `CONSENT_REVOKED` event is written and nothing is published on the Redis channels. Document the intervention manually (ticket, who, when) and write the audit event as soon as the API is available again. Never edit `AUDIT_LOG_ENTRIES`; it is hash-chained and (PostgreSQL) append-only.
+- Nodes pick up the change through the epoch check. After the update, verify with a test query from an affected account that access is `FORBIDDEN`; if a node still serves the old decision, restart it.
+- Token revocations (compromised tokens) are not stored in the governance database; use `POST /api/admin/tokens/revoke`.
+- Revoking tokens across tenants requires a canonical `ClusterAdmin`; tenant administrators revoke only inside their own tenant.
 
 ---
 
@@ -91,6 +110,7 @@ If the Redis cluster becomes unavailable:
 - The gateway automatically falls back to L1 local `IMemoryCache`.
 - Epoch validation queries the database directly with brief local caching.
 - Queries continue executing without dropping client requests or returning 500 errors.
+- **Token revocations are only enforced locally on the node that received them while Redis is down** (revocations issued on other nodes are not visible). Treat a Redis outage as degraded security for token revocation and restore Redis quickly; with PostgreSQL and several replicas Redis is required (startup check), so an outage affects all nodes the same way.
 
 ### 3.2 Recovery
 Once Redis connectivity is restored:
@@ -102,50 +122,56 @@ Once Redis connectivity is restored:
 ## 4. Tamper-Evident Audit Hash Chain Verification
 
 ### 4.1 Verification Principle
-Every entry in `AUDIT_LOGS` contains:
-- `AUDIT_ID`: Unique UUID
-- `EVENT_TYPE`, `TARGET_TABLE`, `ACTOR_SID`, `DETAILS`, `TIMESTAMP`
-- `PREVIOUS_HASH`: SHA-256 hash of the preceding log entry
-- `HASH`: SHA-256 hash computed over `PREVIOUS_HASH:AUDIT_ID:EVENT_TYPE:TARGET_TABLE:ACTOR_SID:TIMESTAMP`
+Every row of `AUDIT_LOG_ENTRIES` carries:
+- `id`, `occurred_at` (ISO-8601 `O` format), `event_type`, `actor_sid`, `target_table`, `target_column`, `decision`, `trace_id`, `details_json`, `tenant_id`
+- `seq`: gap-free sequence number starting at 1
+- `prev_hash`: `entry_hash` of the preceding row (`GENESIS_` followed by 64 zeros for the first row)
+- `entry_hash`: **HMAC-SHA256** (upper-case hex) with the audit key from Key Vault (`GovernanceDb:AuditHmacKeyVaultRef`, or derived from `DataMasking:HmacSecretKeyVaultRef`) over the payload `v2|<seq>|<id>|<prev_hash>|<occurred_at>|<event_type>|<actor_sid>|<target_table>|<target_column>|<decision>|<trace_id>|<details_json>|<tenant_id>`; inside the text fields `\` and `|` are escaped with a backslash (PostgreSQL additionally escapes line breaks as `\n`/`\r`).
 
-If any row is modified, deleted, or inserted out of order, the SHA-256 chain breaks.
+The hash is keyed. It cannot be recomputed without the key, so a plain SHA-256 script can neither verify nor "repair" the chain. A modified, deleted or reordered row breaks `prev_hash`/`entry_hash`/`seq`. Removal of the **end** of the chain is detected through the signed anchor (`Audit:ChainAnchorPath`); configure it on a different volume/identity than the database.
 
-### 4.2 Verification CLI / Script
-Run the verification query using standard Python or C#:
+### 4.2 Verification
+Preferred: use the built-in verification (`VerifyAuditHashChainAsync`), which also checks the anchor; a violation sets the audit pipeline to faulted and `/health/ready` reports the governance database as unhealthy. The built-in check is not scheduled automatically; run it from your monitoring at least daily.
+
+Offline check of an export (needs the audit key as hex in `AUDIT_HMAC_KEY_HEX`; SQLite variant, for PostgreSQL also escape `\n`/`\r`):
 
 ```python
-import hashlib
-import sqlite3
+import hashlib, hmac, os, sqlite3
+
+KEY = bytes.fromhex(os.environ["AUDIT_HMAC_KEY_HEX"])
+GENESIS = "GENESIS_" + "0" * 64
+
+def esc(v):
+    return "" if not v else v.replace("\\", "\\\\").replace("|", "\\|")
 
 def verify_audit_chain(db_path):
     conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT AUDIT_ID, PREVIOUS_HASH, EVENT_TYPE, TARGET_TABLE, ACTOR_SID, TIMESTAMP, HASH
-        FROM AUDIT_LOGS
-        ORDER BY ROWID ASC
-    """)
-    rows = cursor.fetchall()
+    rows = conn.execute("""
+        SELECT id, occurred_at, event_type, actor_sid, target_table, target_column, decision,
+               trace_id, details_json, prev_hash, entry_hash, seq, tenant_id
+        FROM AUDIT_LOG_ENTRIES ORDER BY rowid ASC""").fetchall()
     print(f"Verifying {len(rows)} audit log records...")
 
-    expected_prev_hash = "GENESIS"
-    for idx, (audit_id, prev_hash, event_type, target_table, actor_sid, ts, stored_hash) in enumerate(rows):
-        if prev_hash != expected_prev_hash:
-            raise ValueError(f"Chain broken at record {idx} ({audit_id}): Expected previous hash {expected_prev_hash}, got {prev_hash}")
-
-        payload = f"{prev_hash}:{audit_id}:{event_type}:{target_table}:{actor_sid}:{ts}"
-        calculated_hash = hashlib.sha256(payload.encode('utf-8')).hexdigest()
-
-        if calculated_hash != stored_hash:
-            raise ValueError(f"Tamper detected at record {idx} ({audit_id})! Stored hash: {stored_hash}, Calculated: {calculated_hash}")
-
-        expected_prev_hash = stored_hash
-
-    print("Audit log integrity verified successfully. No tampering detected.")
+    expected_prev = GENESIS
+    for pos, (id_, ts, ev, actor, table, col, dec, trace, details, prev, stored, seq, tenant) in enumerate(rows, start=1):
+        if seq is not None and seq != pos:
+            raise ValueError(f"Sequence gap at position {pos}: seq {seq}")
+        if prev != expected_prev:
+            raise ValueError(f"Chain broken at record {pos} ({id_}): expected prev {expected_prev}, got {prev}")
+        payload = f"{id_}|{prev}|{ts}|{esc(ev)}|{esc(actor)}|{esc(table)}|{esc(col)}|{esc(dec)}|{esc(trace)}|{esc(details)}|{esc(tenant)}"
+        if seq is not None:
+            payload = f"v2|{seq}|{payload}"
+        calc = hmac.new(KEY, payload.encode("utf-8"), hashlib.sha256).hexdigest().upper()
+        if not hmac.compare_digest(calc, stored.upper()):
+            raise ValueError(f"Tamper detected at record {pos} ({id_})")
+        expected_prev = stored
+    print("Chain consistent. Compare the last seq/hash with the signed anchor to rule out truncation.")
 
 if __name__ == "__main__":
     verify_audit_chain("governance.db")
 ```
+
+The script cannot check the anchor signature or a truncated tail; compare the last `seq`/`entry_hash` with the anchor file.
 
 ---
 
@@ -258,9 +284,9 @@ In production environments, all `danger_*` and `warn_*` flags must be strictly `
 kubectl get configmap gql-gateway-config -n data-governance -o yaml | grep -E "(warn_|danger_)"
 
 # Ensure no pods log insecure mode warnings
-kubectl logs -l app=gql-gateway -n data-governance | grep -i "INSECURE MODE ENGAGED"
+kubectl logs -l app=gql-gateway -n data-governance | grep -i "INSECURE GETTING-STARTED CONFIGURATION DETECTED"
 ```
-If any pod logs `[CRITICAL SECURITY ALERT] Insecure flag engaged`, immediately file a Priority-1 security incident and revert the configuration.
+If any pod logs `INSECURE GETTING-STARTED CONFIGURATION DETECTED` (the banner also lists the active bypasses), immediately file a Priority-1 security incident and revert the configuration.
 
 ---
 
@@ -275,6 +301,8 @@ Based on production load tests (Hetzner Dedicated AX-series, AMD EPYC / Ryzen 9,
 | **Small / Edge** | 50 – 200 | 1,000 – 3,000 | 1 vCPU, 1 GB RAM | 2 (HA) |
 | **Standard Enterprise** | 500 – 2,000 | 5,000 – 15,000 | 2 – 4 vCPU, 2 – 4 GB RAM | 3 – 5 |
 | **High-Throughput Analytics** | 2,000 – 10,000 | 20,000 – 50,000+ | 8 vCPU, 8 – 16 GB RAM | 5 – 10 (HPA) |
+
+> **Replica count:** more than one replica requires `GovernanceDb:Provider = PostgreSql` (SQLite is rejected at startup) and, outside Development, `Caching:Redis:Enabled = true` for cluster-wide cache/epoch and token-revocation propagation. The PostgreSQL connection must use TLS (`SSL Mode=Require` or stronger) and a dedicated account; apply the schema with `GovernanceDb:MigrationConnectionString` and give the runtime role only the rights it needs (INSERT/SELECT on `AUDIT_LOG_ENTRIES` plus `USAGE` on its sequence; no UPDATE/DELETE/TRUNCATE).
 
 ### 9.2 Latency Budgets & SLA Targets
 
