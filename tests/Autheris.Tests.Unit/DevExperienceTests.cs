@@ -294,4 +294,85 @@ public sealed class DevExperienceTests
         ok.Response.StatusCode.ShouldBe(200);
         (await BodyAsync(ok)).ShouldBeEmpty();
     }
+
+    [Fact]
+    public void Banner_WithBananaCakePopEnabled_IncludesIdeLinkAndRedirectsToBcp()
+    {
+        var options = CreateOptions();
+        options = new GatewayOptions
+        {
+            GovernanceDb = options.GovernanceDb,
+            Authentication = options.Authentication,
+            GraphQL = new GraphQLOptions
+            {
+                EnableBananaCakePop = true,
+                BananaCakePopPath = "/ui/bcp"
+            }
+        };
+
+        var banner = DevStartupBanner.Build(["https://localhost:7214"], options, Env("Development"));
+
+        banner.ShouldContain("https://localhost:7214/ui/bcp");
+        banner.ShouldContain("https://localhost:7214/api/dev/login/owner?redirect=/ui/bcp");
+    }
+
+    [Fact]
+    public void GraphQLOptions_BananaCakePopPath_DefaultsToUiBcp()
+    {
+        var opt = new GraphQLOptions();
+        opt.BananaCakePopPath.ShouldBe("/ui/bcp");
+        opt.EnableBananaCakePop.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("Development", true, "/graphql", false)]
+    [InlineData("Development", true, "/ui/bcp", true)]
+    [InlineData("Development", false, "/ui/bcp", false)]
+    [InlineData("Production", true, "/ui/bcp", false)]
+    public async Task CspHeader_GraphQLIsStrict_WhileBananaCakePopIsRelaxedOnlyInDev(
+        string environment, bool enableBcp, string requestPath, bool expectRelaxedCsp)
+    {
+        const string strictCsp = "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
+        const string nitroToolCsp = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; manifest-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
+
+        var options = new GatewayOptions
+        {
+            GraphQL = new GraphQLOptions
+            {
+                EndpointPath = "/graphql",
+                EnableBananaCakePop = enableBcp,
+                BananaCakePopPath = "/ui/bcp"
+            }
+        };
+
+        var isDev = environment == "Development";
+        var nitroToolPath = options.GraphQL.BananaCakePopPath;
+        var allowNitroToolCsp = isDev && options.GraphQL.EnableBananaCakePop;
+
+        var context = new DefaultHttpContext();
+        context.Request.Path = requestPath;
+
+        RequestDelegate next = _ => Task.CompletedTask;
+        Func<HttpContext, RequestDelegate, Task> middleware = async (ctx, nxt) =>
+        {
+            var isToolPath = allowNitroToolCsp
+                && ctx.Request.Path.StartsWithSegments(nitroToolPath, StringComparison.OrdinalIgnoreCase);
+            ctx.Response.Headers.Append("Content-Security-Policy", isToolPath ? nitroToolCsp : strictCsp);
+            await nxt(ctx);
+        };
+
+        await middleware(context, next);
+
+        var csp = context.Response.Headers["Content-Security-Policy"].ToString();
+        if (expectRelaxedCsp)
+        {
+            csp.ShouldBe(nitroToolCsp);
+            csp.ShouldContain("unsafe-inline");
+        }
+        else
+        {
+            csp.ShouldBe(strictCsp);
+            csp.ShouldNotContain("unsafe-inline");
+        }
+    }
 }

@@ -702,6 +702,7 @@ public sealed class GraphQLOptions
     /// </summary>
     public string TrustedDocumentsDirectory { get; init; } = string.Empty;
     public bool EnableBananaCakePop { get; init; }
+    public string BananaCakePopPath { get; init; } = "/ui/bcp";
     [Range(100, 100000)] public int MaxResponseRows { get; init; } = 5000;
     [Range(1048576, 104857600)] public long MaxResponseBytes { get; init; } = 10485760;
     [Range(10, 10000)] public int MaxInClauseBatchSize { get; init; } = 500;
