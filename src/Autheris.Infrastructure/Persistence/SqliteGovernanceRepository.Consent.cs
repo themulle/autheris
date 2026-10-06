@@ -937,9 +937,9 @@ public partial class SqliteGovernanceRepository
         var req = await GetConsentRequestAsync(requestId, ct);
         if (req == null) throw new InvalidOperationException($"Request {requestId} not found.");
 
-        EnsureApprovableStatus(requestId, req.Status, isExternalItsmApproval);
+        ConsentApprovalPolicy.EnsureApprovableStatus(requestId, req.Status, isExternalItsmApproval);
 
-        if (IsSelfApproval(req, approverSid))
+        if (ConsentApprovalPolicy.IsSelfApproval(req, approverSid, itsmApproverAccount))
         {
             throw new InvalidOperationException("Funktionstrennung verletzt: Antragsteller darf eigenen Antrag nicht genehmigen.");
         }
@@ -957,10 +957,10 @@ public partial class SqliteGovernanceRepository
                 currentStatus = statusObj.ToString()!;
             }
 
-            EnsureApprovableStatus(requestId, currentStatus, isExternalItsmApproval);
+            ConsentApprovalPolicy.EnsureApprovableStatus(requestId, currentStatus, isExternalItsmApproval);
 
             // Four-eyes principle / Separation of duties check at repository layer
-            if (IsSelfApproval(req, approverSid))
+            if (ConsentApprovalPolicy.IsSelfApproval(req, approverSid, itsmApproverAccount))
             {
                 throw new InvalidOperationException("Funktionstrennung verletzt: Der Antragsteller kann den eigenen Consent-Antrag nicht genehmigen.");
             }
@@ -1020,7 +1020,7 @@ public partial class SqliteGovernanceRepository
                 }
             }
 
-            if (existingApprovers.Any(s => string.Equals(s, approverSid.Value, StringComparison.OrdinalIgnoreCase)))
+            if (existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount)))
             {
                 if (isExternalItsmApproval)
                 {
@@ -1034,9 +1034,7 @@ public partial class SqliteGovernanceRepository
             int nextStep = existingApprovers.Count + 1;
             // Review E-9: an ITSM-governed request stays with the change board for its second step as well, so the
             // four-eyes decision cannot be assembled from one ITSM and one GraphQL approval.
-            string newStatus = (requiresFourEyes && nextStep < 2)
-                ? (isExternalItsmApproval ? "PENDING_EXTERNAL_APPROVAL" : "PENDING_SECOND_APPROVAL")
-                : "APPROVED";
+            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, nextStep, isExternalItsmApproval);
 
             using var tx = _connection.BeginTransaction();
             // Insert approval step
@@ -1071,20 +1069,6 @@ public partial class SqliteGovernanceRepository
         finally
         {
             _lock.Release();
-        }
-    }
-
-    private static void EnsureApprovableStatus(Guid requestId, string? status, bool isExternalItsmApproval)
-    {
-        bool isExternal = string.Equals(status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase);
-        bool isInternal = string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase) ||
-                          string.Equals(status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase);
-
-        if (isExternalItsmApproval ? !isExternal : !isInternal)
-        {
-            throw new InvalidOperationException(isExternal
-                ? $"Request {requestId} waits for the external ITSM approval and can only be approved by the ITSM system."
-                : $"Request {requestId} is in status '{status}' and cannot be approved.");
         }
     }
 
@@ -1539,34 +1523,4 @@ public partial class SqliteGovernanceRepository
         var result = await cmd.ExecuteScalarAsync(ct);
         return result != null && result != DBNull.Value;
     }
-
-    private static bool IsSelfApproval(ConsentRequest req, Sid approverSid)
-    {
-        if (req.RequesterSid == approverSid)
-        {
-            return true;
-        }
-
-        var candidate = approverSid.Value;
-        var colonIdx = candidate.LastIndexOf(':');
-        if (colonIdx >= 0)
-        {
-            candidate = candidate[(colonIdx + 1)..];
-        }
-
-        if (string.Equals(req.RequesterSid.Value, candidate, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (req.RequesterIdentifiers.Any(id =>
-            string.Equals(id, approverSid.Value, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(id, candidate, StringComparison.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        return false;
-    }
 }
-

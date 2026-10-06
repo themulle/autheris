@@ -995,11 +995,41 @@ public partial class PostgreSqlGovernanceRepository
         var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false);
         if (req == null) throw new InvalidOperationException($"Request {requestId} not found.");
 
-        EnsureApprovableStatus(requestId, req.Status, isExternalItsmApproval);
+        ConsentApprovalPolicy.EnsureApprovableStatus(requestId, req.Status, isExternalItsmApproval);
 
-        if (IsSelfApproval(req, approverSid))
+        if (ConsentApprovalPolicy.IsSelfApproval(req, approverSid, itsmApproverAccount))
         {
             throw new InvalidOperationException("Funktionstrennung verletzt: Antragsteller darf eigenen Antrag nicht genehmigen.");
+        }
+
+        // Authorization is checked before the row lock is taken: the checks use their own pooled connections.
+        if (!isExternalItsmApproval)
+        {
+            bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, null, ct).ConfigureAwait(false);
+            if (!isAuthorized)
+            {
+                throw new UnauthorizedAccessException($"Benutzer '{approverSid}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
+            }
+        }
+        else
+        {
+            // SEC N-1 / Review R3-1 + R2-5 (same rule as SQLite): tables with configured owners need a named ITSM approver
+            // who is an owner, delegate or admin (matched by account or e-mail, passed typed, never parsed from the SID).
+            bool hasConfiguredOwners = await HasConfiguredDataOwnersAsync(req.TableIdentifier, ct).ConfigureAwait(false);
+            if (hasConfiguredOwners)
+            {
+                string? account = string.IsNullOrWhiteSpace(itsmApproverAccount) ? null : itsmApproverAccount.Trim();
+                if (account == null)
+                {
+                    throw new UnauthorizedAccessException($"ITSM-Freigabe ohne benannten Genehmiger ist für Tabelle '{req.TableIdentifier}' mit konfigurierten Data Ownern nicht zulässig.");
+                }
+
+                bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, account, ct).ConfigureAwait(false);
+                if (!isAuthorized)
+                {
+                    throw new UnauthorizedAccessException($"ITSM-Genehmiger '{account}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
+                }
+            }
         }
 
         await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
@@ -1017,29 +1047,7 @@ public partial class PostgreSqlGovernanceRepository
                 currentStatus = statusObj.ToString()!;
             }
 
-            EnsureApprovableStatus(requestId, currentStatus, isExternalItsmApproval);
-
-            if (!isExternalItsmApproval)
-            {
-                bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, null, ct).ConfigureAwait(false);
-                if (!isAuthorized)
-                {
-                    throw new UnauthorizedAccessException($"Benutzer '{approverSid}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
-                }
-            }
-            else
-            {
-                bool hasConfiguredOwners = await HasConfiguredDataOwnersAsync(conn, tx, req.TableIdentifier, ct).ConfigureAwait(false);
-                if (hasConfiguredOwners)
-                {
-                    bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, itsmApproverAccount, ct).ConfigureAwait(false);
-                    if (!isAuthorized)
-                    {
-                        var approverLabel = string.IsNullOrWhiteSpace(itsmApproverAccount) ? approverSid.Value : $"{approverSid.Value} ({itsmApproverAccount})";
-                        throw new UnauthorizedAccessException($"ITSM-Genehmiger '{approverLabel}' ist weder Data Owner, delegierter Genehmiger noch Administrator für Tabelle '{req.TableIdentifier}'.");
-                    }
-                }
-            }
+            ConsentApprovalPolicy.EnsureApprovableStatus(requestId, currentStatus, isExternalItsmApproval);
 
             bool requiresFourEyes = false;
             await using (var feCmd = conn.CreateCommand())
@@ -1057,34 +1065,46 @@ public partial class PostgreSqlGovernanceRepository
                 }
             }
 
-            int stepNumber = 1;
-            await using (var countCmd = conn.CreateCommand())
+            var existingApprovers = new List<string>();
+            await using (var approversCmd = conn.CreateCommand())
             {
-                countCmd.Transaction = tx;
-                countCmd.CommandText = "SELECT COUNT(*) FROM APPROVAL_STEPS WHERE consent_request_id = @id";
-                countCmd.Parameters.AddWithValue("@id", requestId.ToString());
-                stepNumber = Convert.ToInt32(await countCmd.ExecuteScalarAsync(ct).ConfigureAwait(false)) + 1;
+                approversCmd.Transaction = tx;
+                approversCmd.CommandText = "SELECT approver_sid FROM APPROVAL_STEPS WHERE consent_request_id = @id AND decision = 'APPROVED' ORDER BY step_number";
+                approversCmd.Parameters.AddWithValue("@id", requestId.ToString());
+                await using var reader = await approversCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    existingApprovers.Add(reader.GetString(0));
+                }
             }
 
-            if (stepNumber > 1)
+            // Review R4-4: compare the approver identity (account part), not the raw actor string.
+            if (existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid, itsmApproverAccount)))
             {
-                await using var firstApproverCmd = conn.CreateCommand();
-                firstApproverCmd.Transaction = tx;
-                firstApproverCmd.CommandText = "SELECT approver_sid FROM APPROVAL_STEPS WHERE consent_request_id = @id AND step_number = 1";
-                firstApproverCmd.Parameters.AddWithValue("@id", requestId.ToString());
-                var firstApprover = (await firstApproverCmd.ExecuteScalarAsync(ct).ConfigureAwait(false))?.ToString();
-                if (firstApprover != null && string.Equals(firstApprover, approverSid.Value, StringComparison.OrdinalIgnoreCase))
+                if (isExternalItsmApproval)
                 {
-                    throw new InvalidOperationException("Vier-Augen-Prinzip verletzt: Zweitgenehmiger muss sich vom Erstgenehmiger unterscheiden.");
+                    // Redelivered ITSM webhook for a step that is already recorded: idempotent, nothing changes.
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    return req;
                 }
+
+                throw new InvalidOperationException("Vier-Augen-Prinzip verletzt: Genehmiger hat diesen Antrag bereits genehmigt.");
+            }
+
+            int stepNumber;
+            await using (var maxCmd = conn.CreateCommand())
+            {
+                maxCmd.Transaction = tx;
+                maxCmd.CommandText = "SELECT COALESCE(MAX(step_number), 0) + 1 FROM APPROVAL_STEPS WHERE consent_request_id = @id";
+                maxCmd.Parameters.AddWithValue("@id", requestId.ToString());
+                stepNumber = Convert.ToInt32(await maxCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
             }
 
             await using (var stepInsert = conn.CreateCommand())
             {
                 stepInsert.Transaction = tx;
                 stepInsert.CommandText = @"INSERT INTO APPROVAL_STEPS (id, consent_request_id, step_number, approver_sid, decision, decided_at)
-                                           VALUES (@id, @reqId, @step, @sid, 'APPROVED', @now)
-                                           ON CONFLICT (consent_request_id, step_number) DO NOTHING";
+                                           VALUES (@id, @reqId, @step, @sid, 'APPROVED', @now)";
                 stepInsert.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
                 stepInsert.Parameters.AddWithValue("@reqId", requestId.ToString());
                 stepInsert.Parameters.AddWithValue("@step", stepNumber);
@@ -1093,15 +1113,9 @@ public partial class PostgreSqlGovernanceRepository
                 await stepInsert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            string newStatus;
-            if (requiresFourEyes && stepNumber == 1)
-            {
-                newStatus = "PENDING_SECOND_APPROVAL";
-            }
-            else
-            {
-                newStatus = "ACTIVE";
-            }
+            // Review PG-4 (same contract as SQLite): the final approval yields APPROVED; the caller creates the consent
+            // (GraphQL: with column snapshot) or calls ActivateConsentAsync (ITSM). Review E-9: ITSM keeps its second step.
+            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, stepNumber, isExternalItsmApproval);
 
             await using (var updateReq = conn.CreateCommand())
             {
@@ -1114,12 +1128,8 @@ public partial class PostgreSqlGovernanceRepository
 
             await tx.CommitAsync(ct).ConfigureAwait(false);
 
-            if (newStatus == "ACTIVE")
-            {
-                await ActivateConsentAsync(requestId, approverSid, ct).ConfigureAwait(false);
-            }
-
-            return await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false) ?? req;
+            req.Status = newStatus;
+            return req;
         }
         catch
         {
@@ -1128,65 +1138,16 @@ public partial class PostgreSqlGovernanceRepository
         }
     }
 
-    private static void EnsureApprovableStatus(Guid requestId, string status, bool isExternalItsmApproval)
+    private async Task<bool> HasConfiguredDataOwnersAsync(TableIdentifier table, CancellationToken ct)
     {
-        if (isExternalItsmApproval)
-        {
-            if (!string.Equals(status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    $"ITSM-Genehmigung für Antrag {requestId} abgelehnt: Antrag befindet sich im Status '{status}' (erwartet: PENDING_EXTERNAL_APPROVAL oder PENDING).");
-            }
-        }
-        else
-        {
-            if (string.Equals(status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    $"Antrag {requestId} wartet auf die Freigabe durch das externe ITSM-System (PENDING_EXTERNAL_APPROVAL) und kann nicht intern genehmigt werden.");
-            }
-
-            if (!string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException(
-                    $"Antrag {requestId} kann im Status '{status}' nicht genehmigt werden (nur PENDING oder PENDING_SECOND_APPROVAL).");
-            }
-        }
-    }
-
-    private static bool IsSelfApproval(ConsentRequest req, Sid approverSid)
-    {
-        if (string.Equals(req.RequesterSid.Value, approverSid.Value, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (req.RequesterIdentifiers != null)
-        {
-            foreach (var ident in req.RequesterIdentifiers)
-            {
-                if (string.Equals(ident, approverSid.Value, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    private async Task<bool> HasConfiguredDataOwnersAsync(NpgsqlConnection conn, NpgsqlTransaction tx, TableIdentifier table, CancellationToken ct)
-    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        // Review PG-3: any owner row counts (as in SQLite), also deactivated owners, so that deactivating all owners
+        // cannot switch the approver check off.
         await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
         cmd.CommandText = @"SELECT COUNT(*)
                             FROM TABLES t
                             JOIN TABLE_OWNERS tow ON t.id = tow.table_id
-                            JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
-                            WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                              AND o.is_active = 1";
+                            WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)";
         cmd.Parameters.AddWithValue("@domain", table.Domain);
         cmd.Parameters.AddWithValue("@schema", table.Schema);
         cmd.Parameters.AddWithValue("@table", table.TableName);
@@ -1195,16 +1156,47 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default)
     {
+        var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false);
+        if (req == null) throw new InvalidOperationException($"Request {requestId} not found.");
+
+        if (!ConsentApprovalPolicy.IsRejectableStatus(req.Status))
+        {
+            throw new InvalidOperationException($"Request {requestId} is in status '{req.Status}' and cannot be rejected.");
+        }
+
+        // Review PG-5: authorization at repository level (as in SQLite): ITSM actors, or owner/delegate/admin of the table.
+        bool isAuthorized = ConsentApprovalPolicy.IsItsmActor(approverSid) ||
+                            await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, null, ct).ConfigureAwait(false);
+        if (!isAuthorized)
+        {
+            throw new UnauthorizedAccessException($"Benutzer '{approverSid}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
+        }
+
         await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
+            string currentStatus;
+            await using (var checkCmd = conn.CreateCommand())
+            {
+                checkCmd.Transaction = tx;
+                checkCmd.CommandText = "SELECT status FROM CONSENT_REQUESTS WHERE id = @id FOR UPDATE";
+                checkCmd.Parameters.AddWithValue("@id", requestId.ToString());
+                var statusObj = await checkCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+                if (statusObj == null) throw new InvalidOperationException($"Request {requestId} not found.");
+                currentStatus = statusObj.ToString()!;
+            }
+
+            if (!ConsentApprovalPolicy.IsRejectableStatus(currentStatus))
+            {
+                throw new InvalidOperationException($"Request {requestId} is in status '{currentStatus}' and cannot be rejected.");
+            }
+
             await using (var stepInsert = conn.CreateCommand())
             {
                 stepInsert.Transaction = tx;
                 stepInsert.CommandText = @"INSERT INTO APPROVAL_STEPS (id, consent_request_id, step_number, approver_sid, decision, rejection_reason, decided_at)
-                                           VALUES (@id, @reqId, 1, @sid, 'REJECTED', @reason, @now)
-                                           ON CONFLICT (consent_request_id, step_number) DO NOTHING";
+                                           VALUES (@id, @reqId, (SELECT COALESCE(MAX(step_number), 0) + 1 FROM APPROVAL_STEPS WHERE consent_request_id = @reqId), @sid, 'REJECTED', @reason, @now)";
                 stepInsert.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
                 stepInsert.Parameters.AddWithValue("@reqId", requestId.ToString());
                 stepInsert.Parameters.AddWithValue("@sid", approverSid.Value);
@@ -1222,7 +1214,8 @@ public partial class PostgreSqlGovernanceRepository
             }
 
             await tx.CommitAsync(ct).ConfigureAwait(false);
-            return await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false) ?? throw new InvalidOperationException($"Request {requestId} not found.");
+            req.Status = "REJECTED";
+            return req;
         }
         catch
         {
@@ -1257,9 +1250,28 @@ public partial class PostgreSqlGovernanceRepository
             await using (var updateReq = conn.CreateCommand())
             {
                 updateReq.Transaction = tx;
-                updateReq.CommandText = "UPDATE CONSENT_REQUESTS SET status = 'ACTIVE' WHERE id = @id";
+                // SEC H-06 (as SQLite): only a pending or approved request may be activated; REJECTED/other states never.
+                updateReq.CommandText = @"UPDATE CONSENT_REQUESTS SET status = 'APPROVED'
+                                          WHERE id = @id AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL', 'APPROVED')";
                 updateReq.Parameters.AddWithValue("@id", requestId.ToString());
-                await updateReq.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                if (await updateReq.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1)
+                {
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    return;
+                }
+            }
+
+            await using (var existsCmd = conn.CreateCommand())
+            {
+                existsCmd.Transaction = tx;
+                // SEC N-2: never activate the same request twice (also backed by a unique index).
+                existsCmd.CommandText = "SELECT COUNT(1) FROM CONSENTS WHERE consent_request_id = @reqId";
+                existsCmd.Parameters.AddWithValue("@reqId", requestId.ToString());
+                if (Convert.ToInt64(await existsCmd.ExecuteScalarAsync(ct).ConfigureAwait(false)) > 0)
+                {
+                    await tx.RollbackAsync(ct).ConfigureAwait(false);
+                    return;
+                }
             }
 
             var consentId = Guid.NewGuid();
@@ -1277,7 +1289,7 @@ public partial class PostgreSqlGovernanceRepository
                 cmd.Parameters.AddWithValue("@granteeType", req.RequestedGranteeType.ToString());
                 cmd.Parameters.AddWithValue("@granteeSid", (object?)granteeSid?.Value ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@roleName", (object?)roleName ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@validFrom", req.RequestedAt.ToString("O"));
+                cmd.Parameters.AddWithValue("@validFrom", DateTimeOffset.UtcNow.ToString("O"));
                 cmd.Parameters.AddWithValue("@validTo", req.RequestedValidTo.ToString("O"));
                 cmd.Parameters.AddWithValue("@tenantId", req.TenantId.Value);
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -1345,7 +1357,7 @@ public partial class PostgreSqlGovernanceRepository
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "UPDATE CONSENT_REQUESTS SET itsm_ticket_id = @ticket, status = 'PENDING_EXTERNAL_APPROVAL' WHERE id = @id";
+        cmd.CommandText = "UPDATE CONSENT_REQUESTS SET itsm_ticket_id = @ticket WHERE id = @id";
         cmd.Parameters.AddWithValue("@id", requestId.ToString());
         cmd.Parameters.AddWithValue("@ticket", ticketId);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
