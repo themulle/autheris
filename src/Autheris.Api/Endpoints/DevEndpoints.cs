@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// F-AUTH-DX: Development-only helper endpoints (persona list, one-click persona login, effective configuration).
@@ -70,11 +71,54 @@ public static class DevEndpoints
                 detail: $"Available personas: {string.Join(", ", options.Authentication.BasicAuth.Users.Select(u => u.Username))}.");
         }
 
+        // Review A-1: login CSRF. A foreign web page must not be able to switch a developer's browser to another persona
+        // by linking or embedding this GET. Browsers announce the origin of the navigation in Sec-Fetch-Site; the clickable
+        // banner link and a typed URL arrive as "none" (or "same-origin"). Requests without the header are not browsers.
+        if (IsCrossSiteRequest(context.Request))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Cross-site persona login refused",
+                detail: "Open the login link directly (address bar or terminal link); it cannot be triggered from another site.");
+        }
+
         await BasicAuthSession.IssueAsync(context, user).ConfigureAwait(false);
+
+        // Review A-1: a persona login replaces the identity and is never silent.
+        var log = context.RequestServices.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()?.CreateLogger("Autheris.DevPersonaLogin");
+        log?.LogWarning("Development persona login: {Persona} ({Sid}) from {RemoteIp}", user.Username, BasicAuthPrincipalFactory.ResolveSid(user), context.Connection.RemoteIpAddress);
+        var audit = context.RequestServices.GetService<Autheris.Application.Interfaces.IAuditLogRepository>();
+        if (audit != null)
+        {
+            try
+            {
+                await audit.RecordAuditEventAsync(new Autheris.Domain.Model.AuditLogEntry
+                {
+                    EventType = "DEV_PERSONA_LOGIN",
+                    ActorSid = new Autheris.Domain.Common.Sid(BasicAuthPrincipalFactory.ResolveSid(user)),
+                    TargetTable = string.Empty,
+                    Decision = "ALLOW",
+                    TraceId = context.TraceIdentifier,
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { persona = user.Username })
+                }, context.RequestAborted).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                log?.LogWarning(ex, "The persona login could not be audited.");
+            }
+        }
 
         return IsLocalPath(redirect)
             ? Results.Redirect(redirect!)
             : Results.Ok(new { loggedIn = true, user = user.Username, sid = BasicAuthPrincipalFactory.ResolveSid(user) });
+    }
+
+    /// <summary>True when a browser marks the request as coming from another site (<c>cross-site</c> or <c>same-site</c>).</summary>
+    internal static bool IsCrossSiteRequest(HttpRequest request)
+    {
+        var site = request.Headers["Sec-Fetch-Site"].ToString();
+        return string.Equals(site, "cross-site", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(site, "same-site", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Only same-site absolute paths (<c>/x</c>) are valid redirect targets (no open redirect).</summary>
