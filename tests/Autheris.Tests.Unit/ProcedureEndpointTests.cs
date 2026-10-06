@@ -254,6 +254,30 @@ public class ProcedureEndpointTests
     private static readonly TenantId Tenant = new("tenant-a");
 
     [Fact]
+    public async Task Execute_ResolvesTablesInTheProcedureDataSourceDomain()
+    {
+        // The catalog keys tables by data source (TABLES.source_name); a procedure on "lwetem_prod" must not look in "default".
+        var f = Active(d => d with { DataSource = "lwetem_prod" });
+        f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.ArgAt<TableIdentifier>(0).Domain == "lwetem_prod" ? OrdersTable() : null);
+
+        var result = await f.Create().ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = "7" }, User(), Tenant);
+
+        result.RowCount.ShouldBe(2);
+        await f.Tables.Received().GetTableMetadataAsync(
+            Arg.Is<TableIdentifier>(t => t.Domain == "lwetem_prod" && t.Schema == "sales" && t.TableName == "orders"), Arg.Any<CancellationToken>());
+        await f.Tables.DidNotReceive().GetTableMetadataAsync(Arg.Is<TableIdentifier>(t => t.Domain == "default"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public void CatalogDomain_FallsBackToDefaultWithoutDataSource()
+    {
+        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        (def with { DataSource = null }).CatalogDomain.ShouldBe("default");
+        (def with { DataSource = "lwetem_prod" }).CatalogDomain.ShouldBe("lwetem_prod");
+    }
+
+    [Fact]
     public async Task Execute_UnknownEndpoint_Throws()
     {
         var svc = new Fixture().Create();

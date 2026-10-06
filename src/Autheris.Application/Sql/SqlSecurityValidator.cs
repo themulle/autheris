@@ -2,6 +2,7 @@ namespace Autheris.Application.Sql;
 
 using System;
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.RegularExpressions;
 using Antlr4.Runtime.Misc;
 using TrinoSqlEngine;
@@ -87,6 +88,13 @@ public static partial class SqlSecurityValidator
             ? ParameterTokenRegex().Replace(predicate, "__param_$1")
             : predicate;
 
+        // SQL Server bracket identifiers ([dbo].[customers], generated for correlated row filters) are not part of the
+        // Trino grammar. They name the same identifier as a double-quoted one, so they are validated as such.
+        if (normalized.Contains('['))
+        {
+            normalized = NormalizeBracketIdentifiers(normalized);
+        }
+
         try
         {
             var (tree, _) = Engine.ParseExpression(normalized.AsMemory(), FragmentTokenOptions);
@@ -114,5 +122,68 @@ public static partial class SqlSecurityValidator
         {
             throw new ArgumentException($"SQL predicate in '{fieldName}' could not be parsed: {ex.Message}", fieldName, ex);
         }
+    }
+
+    /// <summary>
+    /// Rewrites strict bracket identifiers ([name], name = letters, digits, underscore) outside string literals into
+    /// double-quoted identifiers. A bracket directly attached to an expression (identifier character, ')', ']' or '"'
+    /// right before it) is a subscript and is left alone, as is any other bracket form; the grammar check then rejects
+    /// or accepts it as before.
+    /// </summary>
+    internal static string NormalizeBracketIdentifiers(string predicate)
+    {
+        var sb = new StringBuilder(predicate.Length);
+        bool inString = false;
+        for (int i = 0; i < predicate.Length; i++)
+        {
+            char c = predicate[i];
+            if (inString)
+            {
+                sb.Append(c);
+                if (c == '\'')
+                {
+                    if (i + 1 < predicate.Length && predicate[i + 1] == '\'')
+                    {
+                        sb.Append(predicate[++i]);
+                    }
+                    else
+                    {
+                        inString = false;
+                    }
+                }
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                inString = true;
+                sb.Append(c);
+                continue;
+            }
+
+            char before = i > 0 ? predicate[i - 1] : ' ';
+            if (c == '[' && !(char.IsAsciiLetterOrDigit(before) || before is '_' or ')' or ']' or '"'))
+            {
+                int end = i + 1;
+                if (end < predicate.Length && (char.IsAsciiLetter(predicate[end]) || predicate[end] == '_'))
+                {
+                    while (end < predicate.Length && (char.IsAsciiLetterOrDigit(predicate[end]) || predicate[end] == '_'))
+                    {
+                        end++;
+                    }
+
+                    if (end < predicate.Length && predicate[end] == ']')
+                    {
+                        sb.Append('"').Append(predicate, i + 1, end - i - 1).Append('"');
+                        i = end;
+                        continue;
+                    }
+                }
+            }
+
+            sb.Append(c);
+        }
+
+        return sb.ToString();
     }
 }
