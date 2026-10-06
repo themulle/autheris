@@ -446,7 +446,8 @@ public static class ODataEndpoints
         let specUrls = [
           { url: '/odata/v4/$openapi', name: 'All Domains (Monolithic)' },
           { url: '/odata/v4/$openapi?mode=modular', name: 'All Domains (Modular $ref)' },
-          { url: '/api/v1/queries/openapi.json', name: 'Declarative SQL Queries' }
+          { url: '/api/v1/queries/openapi.json', name: 'Declarative SQL Queries' },
+          { url: '/api/v1/procedures/openapi.json', name: 'Stored Procedures' }
         ];
         let primaryName = 'All Domains (Monolithic)';
 

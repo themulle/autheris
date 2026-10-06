@@ -21,14 +21,14 @@ namespace Autheris.Tests.Unit;
 
 public class ConnectorSpiTests
 {
-    private static TableMetadata CreateSampleMetadata(string domain = "finance", string schema = "dbo", string table = "Invoices")
+    private static TableMetadata CreateSampleMetadata(string domain = "finance", string schema = "dbo", string table = "Invoices", string sourceName = "test-sql")
     {
         var identifier = new TableIdentifier(domain, schema, table);
         return new TableMetadata
         {
             Table = new Table
             {
-                SourceName = "test-sql",
+                SourceName = sourceName,
                 SchemaName = schema,
                 TableName = table,
                 DisplayName = "Customer Invoices",
@@ -242,6 +242,59 @@ public class ConnectorSpiTests
         results.Count.ShouldBe(1);
         results[0]["Id"].ShouldBe(101);
         results[0]["Amount"].ShouldBe(250.0m);
+    }
+
+    [Fact]
+    public async Task SqlConnector_ResolvesConnectionByTableSourceName_NotByConnectorId()
+    {
+        // Connection is configured under the table's data source ("lwetem_prod"), the connector is registered as "default-sql".
+        var meta = CreateSampleMetadata(sourceName: "lwetem_prod");
+        var decision = TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections =
+                {
+                    ["lwetem_prod"] = new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = "Server=db;Database=x;" }
+                }
+            }
+        });
+
+        var factory = new RecordingConnectionFactory();
+        var sqlConnector = new SqlConnector(
+            connectorId: "default-sql",
+            connectionFactory: factory,
+            metadataRepository: new FakeMetadataRepository([meta]),
+            options: options);
+
+        var session = new ConnectorSessionContext(
+            Principal: CreatePrincipal(),
+            Tenant: new TenantId("tenant-1"),
+            AccessDecision: decision,
+            ProjectedColumns: ["Id"],
+            Arguments: new Dictionary<string, object?>());
+        session.Items["TableMetadata"] = meta;
+
+        // The real connection path must be taken (and fail here); the synthetic demo-data fallback must not be used.
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await sqlConnector.RecordSource.ReadBatchAsync(ConnectorSplit.Default(), session);
+        });
+
+        factory.ConnectionString.ShouldBe("Server=db;Database=x;");
+    }
+
+    private sealed class RecordingConnectionFactory : ISqlConnectionFactory
+    {
+        public string? ConnectionString { get; private set; }
+
+        public Task<System.Data.Common.DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
+        {
+            ConnectionString = options.ConnectionString;
+            throw new InvalidOperationException("recorded");
+        }
     }
 
     private sealed class FakeSqlExecutor : IDataSourceExecutor

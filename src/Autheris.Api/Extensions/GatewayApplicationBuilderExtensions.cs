@@ -372,6 +372,12 @@ public static class GatewayApplicationBuilderExtensions
                 {
                     nitro.ServeMode = ServeMode.Embedded;
                     nitro.GraphQLEndpoint = endpoint;
+                    // /graphql enforces a CSRF preflight header (see the CSRF middleware above); Nitro sends none by default.
+                    nitro.HttpHeaders = new HeaderDictionary { ["GraphQL-Preflight"] = "1" };
+                    // The strict CSP (connect-src 'self') blocks the vendor telemetry calls anyway; do not attempt them.
+                    nitro.DisableTelemetry = true;
+                    nitro.Title = "Autheris GraphQL";
+                    nitro.Document = "{\n  catalog(first: 5) {\n    domain\n    schema\n    tableName\n    sensitivity\n  }\n}\n";
                 });
 
             if (gatewayOptions.IsAnonymousAccessAllowed)

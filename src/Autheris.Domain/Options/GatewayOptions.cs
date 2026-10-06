@@ -1112,6 +1112,13 @@ public sealed class BackstageIntegrationOptions
     public string DefaultNamespace { get; init; } = "default";
     public bool IncludeTablesAsApis { get; init; } = true;
     public string BaseUrl { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Absolute URL of a GraphQL explorer hosted by the portal itself (e.g. the Backstage page that proxies the
+    /// gateway with credentials and the CSRF header). When set, it replaces the Banana Cake Pop link in the exported
+    /// catalog entity; empty keeps the link to the embedded Banana Cake Pop UI.
+    /// </summary>
+    public string GraphQlExplorerUrl { get; init; } = string.Empty;
 }
 
 public sealed class ResourceGroupsOptions
