@@ -85,6 +85,25 @@ public sealed class TableMetadata
     public bool HasColumn(string columnName) =>
         Columns.Any(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>
+    /// Review E-5: the column that carries the tenant, whatever the source system calls it (<c>tenant_id</c>, <c>TenantId</c>,
+    /// <c>tenantId</c>, <c>TENANT-ID</c>). An exact <c>tenant_id</c> wins. Null when the table has no tenant column.
+    /// </summary>
+    public string? TenantColumnName
+    {
+        get
+        {
+            var exact = Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "tenant_id", StringComparison.OrdinalIgnoreCase));
+            if (exact != null)
+            {
+                return exact.ColumnName;
+            }
+
+            return Columns.FirstOrDefault(c =>
+                string.Equals(c.ColumnName.Replace("_", string.Empty).Replace("-", string.Empty), "tenantid", StringComparison.OrdinalIgnoreCase))?.ColumnName;
+        }
+    }
+
     public TableColumn? GetColumn(string columnName) =>
         Columns.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
 }

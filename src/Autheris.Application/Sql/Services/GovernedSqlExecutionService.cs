@@ -405,10 +405,16 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             // Row-level security: tenant isolation (defense in depth) AND consent/ABAC row filters
             var rlsParts = new List<string>(2);
-            bool hasTenantCol = tableMeta.HasColumn("tenant_id");
-            if (hasTenantCol)
+            // Review E-5: any usual spelling of the tenant column is honoured; unusual names are not written into SQL.
+            string? tenantColumn = tableMeta.TenantColumnName;
+            if (tenantColumn != null)
             {
-                rlsParts.Add($"tenant_id = '{tenantId.Value.Replace("'", "''")}'");
+                if (!System.Text.RegularExpressions.Regex.IsMatch(tenantColumn, "^[A-Za-z_][A-Za-z0-9_]{0,127}$"))
+                {
+                    throw new InvalidOperationException($"The tenant column '{tenantColumn}' of {target.FullName} is not a plain identifier; the query is refused (fail-closed).");
+                }
+
+                rlsParts.Add($"{tenantColumn} = '{tenantId.Value.Replace("'", "''")}'");
             }
 
             if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))

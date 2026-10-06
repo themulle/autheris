@@ -187,11 +187,12 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         var paramIndex = 0;
 
         // Stufe 1: Applikationsseitiger erzwungener Tenant-Filter (Defense in Depth)
-        var hasTenantCol = metadata.Columns.Any(c => string.Equals(c.ColumnName, "tenant_id", StringComparison.OrdinalIgnoreCase));
-        if (hasTenantCol)
+        // Review E-5: the tenant column is found under any of its usual spellings (tenant_id, TenantId, tenantId, ...).
+        var tenantColumn = metadata.TenantColumnName;
+        if (tenantColumn != null)
         {
             var pTenant = $"@p_tenant_{paramIndex++}";
-            whereParts.Add($"{dialect.QuoteIdentifier("tenant_id")} = {pTenant}");
+            whereParts.Add($"{dialect.QuoteIdentifier(tenantColumn)} = {pTenant}");
             var tp = command.CreateParameter();
             tp.ParameterName = pTenant;
             tp.Value = tenantVal;
