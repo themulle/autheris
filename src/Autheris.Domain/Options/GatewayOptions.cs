@@ -455,6 +455,9 @@ public sealed class BasicAuthOptions
     /// <summary>RR-L2-03: Failed attempts per (user, client IP) within <see cref="FailureWindowSeconds"/> before the pair is locked out.</summary>
     public int MaxFailedAttempts { get; init; } = 10;
 
+    /// <summary>Review E-13: Failed attempts from one client address (IPv6: /64) over all user names within <see cref="FailureWindowSeconds"/> before that address is locked out.</summary>
+    public int MaxFailedAttemptsPerIp { get; init; } = 50;
+
     /// <summary>RR-L2-03: Sliding failure window and lockout duration in seconds.</summary>
     public int FailureWindowSeconds { get; init; } = 300;
 

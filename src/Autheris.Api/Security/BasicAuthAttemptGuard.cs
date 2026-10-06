@@ -22,6 +22,7 @@ internal sealed class BasicAuthAttemptGuard
     private readonly ConcurrentDictionary<string, SuccessEntry> _successes = new(StringComparer.Ordinal);
     private readonly byte[] _cacheKey = RandomNumberGenerator.GetBytes(32);
     private readonly int _maxFailedAttempts;
+    private readonly int _maxFailedAttemptsPerIp;
     private readonly TimeSpan _window;
     private readonly TimeSpan _successLifetime;
     private readonly TimeProvider _timeProvider;
@@ -42,6 +43,7 @@ internal sealed class BasicAuthAttemptGuard
         Microsoft.Extensions.Caching.Distributed.IDistributedCache? distributedCache = null)
     {
         _maxFailedAttempts = Math.Max(1, options.MaxFailedAttempts);
+        _maxFailedAttemptsPerIp = Math.Max(_maxFailedAttempts, options.MaxFailedAttemptsPerIp);
         _window = TimeSpan.FromSeconds(Math.Max(1, options.FailureWindowSeconds));
         _successLifetime = TimeSpan.FromSeconds(Math.Clamp(options.SuccessCacheSeconds, 0, 300));
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -54,7 +56,46 @@ internal sealed class BasicAuthAttemptGuard
         Guards.GetValue(options, o => new BasicAuthAttemptGuard(o, null, distributedCache));
 
     public static string BuildAttemptKey(string username, string? clientIp) =>
-        username.ToUpperInvariant() + "|" + (string.IsNullOrWhiteSpace(clientIp) ? "unknown" : clientIp);
+        username.ToUpperInvariant() + "|" + NormalizeIp(clientIp);
+
+    /// <summary>
+    /// Review E-13/A-4: key for the failures of one client address over all user names. Spraying one password over many
+    /// accounts never trips the per-(user, IP) counter, but does trip this one.
+    /// </summary>
+    public static string BuildIpKey(string? clientIp) => "*IP*|" + NormalizeIp(clientIp);
+
+    /// <summary>The (higher) failure limit that applies to <see cref="BuildIpKey"/>.</summary>
+    public int MaxFailedAttemptsPerIp => _maxFailedAttemptsPerIp;
+
+    /// <summary>
+    /// Review A-4: IPv6 clients usually own a whole /64, so addresses are grouped by their /64 prefix; an attacker
+    /// cannot rotate through addresses to reset the counter. IPv4-mapped addresses count as IPv4.
+    /// </summary>
+    internal static string NormalizeIp(string? clientIp)
+    {
+        if (string.IsNullOrWhiteSpace(clientIp))
+        {
+            return "unknown";
+        }
+
+        if (!System.Net.IPAddress.TryParse(clientIp, out var ip))
+        {
+            return clientIp;
+        }
+
+        if (ip.IsIPv4MappedToIPv6)
+        {
+            return ip.MapToIPv4().ToString();
+        }
+
+        if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+        {
+            var bytes = ip.GetAddressBytes();
+            return Convert.ToHexString(bytes, 0, 8).ToLowerInvariant() + "::/64";
+        }
+
+        return ip.ToString();
+    }
 
     public bool IsLockedOut(string attemptKey)
     {
@@ -96,8 +137,9 @@ internal sealed class BasicAuthAttemptGuard
         }
     }
 
-    public void RecordFailure(string attemptKey)
+    public void RecordFailure(string attemptKey, int? maxAttempts = null)
     {
+        int limit = Math.Max(1, maxAttempts ?? _maxFailedAttempts);
         var now = _timeProvider.GetUtcNow();
 
         if (_distributedCache != null)
@@ -112,7 +154,7 @@ internal sealed class BasicAuthAttemptGuard
                     AbsoluteExpirationRelativeToNow = _window
                 });
 
-                if (count >= _maxFailedAttempts)
+                if (count >= limit)
                 {
                     _distributedCache.SetString("autheris:lockout:" + attemptKey, "1", new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
                     {
@@ -141,7 +183,7 @@ internal sealed class BasicAuthAttemptGuard
             }
 
             state.Count++;
-            if (state.Count >= _maxFailedAttempts)
+            if (state.Count >= limit)
             {
                 state.LockedUntil = now + _window;
             }
