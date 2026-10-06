@@ -25,7 +25,8 @@ public static class ChunkPiiRedactor
         VectorDocumentChunk chunk,
         TableMetadata? metadata = null,
         IColumnMaskingProvider? maskingProvider = null,
-        TableAccessDecision? decision = null)
+        TableAccessDecision? decision = null,
+        string? defaultHmacKeyId = null)
     {
         ArgumentNullException.ThrowIfNull(chunk);
 
@@ -48,7 +49,7 @@ public static class ChunkPiiRedactor
                     (metadata.ColumnMaskingRules.TryGetValue(colName, out var maskRule) ||
                      (contentCol != null && metadata.ColumnMaskingRules.TryGetValue(contentCol.ColumnName, out maskRule))))
                 {
-                    sanitizedText = maskingProvider.MaskValue(colName, sanitizedText, maskRule)?.ToString() ?? "[REDACTED]";
+                    sanitizedText = maskingProvider.MaskValue(colName, sanitizedText, Autheris.Application.Services.GatewayExecutionService.ScopeRuleForTenant(maskRule, chunk.TenantId.Value, defaultHmacKeyId))?.ToString() ?? "[REDACTED]";
                 }
                 else
                 {
@@ -95,7 +96,7 @@ public static class ChunkPiiRedactor
                         (metadata.ColumnMaskingRules.TryGetValue(k, out var mRule) ||
                          (metadata.GetColumn(k) != null && metadata.ColumnMaskingRules.TryGetValue(metadata.GetColumn(k)!.ColumnName, out mRule))))
                     {
-                        sanitizedMetadata[k] = maskingProvider.MaskValue(k, v, mRule);
+                        sanitizedMetadata[k] = maskingProvider.MaskValue(k, v, Autheris.Application.Services.GatewayExecutionService.ScopeRuleForTenant(mRule, chunk.TenantId.Value, defaultHmacKeyId));
                     }
                     else
                     {

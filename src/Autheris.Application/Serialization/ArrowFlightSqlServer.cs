@@ -38,10 +38,17 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        var configuredSecret = _options.Value?.Authentication?.ForwardAuth?.SharedSecret;
-        _signingSecret = !string.IsNullOrWhiteSpace(configuredSecret)
-            ? configuredSecret
-            : Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        // SEC (Low): dedicated signing key; the ForwardAuth shared secret is no longer reused for ticket signatures.
+        var configuredSecret = _options.Value?.Arrow?.FlightTicketSigningKey;
+        if (!string.IsNullOrWhiteSpace(configuredSecret))
+        {
+            _signingSecret = configuredSecret;
+        }
+        else
+        {
+            _logger.LogWarning("Arrow:FlightTicketSigningKey is not configured; using a random per-process key. Flight SQL tickets are only valid on this instance until restart.");
+            _signingSecret = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        }
     }
 
     public async ValueTask<FlightSqlInfo> GetFlightInfoAsync(
@@ -61,9 +68,11 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
 
         var ticketId = Guid.NewGuid().ToString("N");
         var now = DateTimeOffset.UtcNow;
-        var signature = ComputeSignature(ticketId, tenant.Value, query, now, _signingSecret);
+        // SEC (Low): the ticket is bound to the issuing SID and tenant.
+        var userSid = principal.GetUserSid()?.Value ?? string.Empty;
+        var signature = ComputeSignature(ticketId, tenant.Value, query, now, _signingSecret, userSid);
 
-        var ticket = new FlightSqlTicket(ticketId, tenant.Value, query, now, signature);
+        var ticket = new FlightSqlTicket(ticketId, tenant.Value, query, now, signature, userSid);
 
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         var columns = new List<string> { "id", "value" };
@@ -108,7 +117,8 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
     public async IAsyncEnumerable<RecordBatch> DoGetStreamAsync(
         FlightSqlTicket ticket,
         ClaimsPrincipal principal,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default,
+        TenantId? callerTenant = null)
     {
         ArgumentNullException.ThrowIfNull(ticket);
         ArgumentNullException.ThrowIfNull(principal);
@@ -119,13 +129,23 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         }
 
         // SEC-FLIGHT-01: Cryptographic signature verification
-        var expectedSignature = ComputeSignature(ticket.TicketId, ticket.TenantId, ticket.Query, ticket.CreatedAtUtc, _signingSecret);
+        var expectedSignature = ComputeSignature(ticket.TicketId, ticket.TenantId, ticket.Query, ticket.CreatedAtUtc, _signingSecret, ticket.UserSid ?? string.Empty);
         if (!CryptographicOperations.FixedTimeEquals(
             Encoding.UTF8.GetBytes(ticket.Signature),
             Encoding.UTF8.GetBytes(expectedSignature)))
         {
             _logger.LogWarning("Tampered Flight SQL ticket rejected: TicketId={TicketId}", ticket.TicketId);
             throw new SecurityException("Invalid or tampered Flight SQL ticket signature.");
+        }
+
+        // SEC (Low): a ticket can only be redeemed by the identity and tenant it was issued to.
+        var callerSid = principal.GetUserSid()?.Value ?? string.Empty;
+        var tenantOfCaller = callerTenant ?? principal.GetTenantId();
+        if (!string.Equals(ticket.UserSid ?? string.Empty, callerSid, StringComparison.Ordinal) ||
+            !string.Equals(ticket.TenantId, tenantOfCaller.Value, StringComparison.Ordinal))
+        {
+            _logger.LogWarning("Flight SQL ticket presented by a different subject/tenant rejected: TicketId={TicketId}", ticket.TicketId);
+            throw new SecurityException("The Flight SQL ticket was not issued to this caller.");
         }
 
         // Ticket Expiration Guard (30 minute TTL)
@@ -147,9 +167,9 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         await Task.CompletedTask;
     }
 
-    public static string ComputeSignature(string ticketId, string tenantId, string query, DateTimeOffset createdAt, string secret)
+    public static string ComputeSignature(string ticketId, string tenantId, string query, DateTimeOffset createdAt, string secret, string userSid = "")
     {
-        var raw = $"{ticketId}:{tenantId}:{query}:{createdAt.ToUnixTimeSeconds()}";
+        var raw = $"{ticketId}:{tenantId}:{userSid}:{query}:{createdAt.ToUnixTimeSeconds()}";
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
         var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexStringLower(hash);

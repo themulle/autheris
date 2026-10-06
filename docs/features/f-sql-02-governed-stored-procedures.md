@@ -86,3 +86,14 @@ Jede von der Prozedur direkt gelesene Tabelle braucht eine aktive Policy mit FIL
 ## Grenzen Phase 1
 
 Katalogvalidierung nur für SQL Server; YAML, TVF, `validation: declared` und PostgreSQL unterliegen den Regeln im Nachtrag von ADR-018 (`AllowDeclaredValidation` ist außerhalb von Development nötig). Nur das erste Result-Set, keine OUTPUT-/TVP-Parameter, keine Consent-Zeilenfilter, keine verschachtelten Prozeduren/Views, kein GraphQL/MCP, keine schreibenden Prozeduren.
+
+## Result column governance by source (review D-2)
+
+For catalog-validated procedures the validator now describes the result set with `sys.dm_exec_describe_first_result_set_for_object(@id, 1)` (browse mode) and stores the source schema, table and column of every result column. At execution every result column is governed by the decision of its **source** table and source column, not by its output name:
+
+* Columns of the `@result-table` are denied/masked according to the consent of that table.
+* Columns that originate from another referenced table are returned only with an explicit column-level `Clear`; `Mask` and `Deny` remove the column (fail closed).
+* Computed or ambiguous columns (no source) are removed unless declared with `@result-column <name> clear`.
+* Procedures in `declared` validation mode and table-valued functions have no source information; they keep the previous by-name governance against the `@result-table`.
+
+Additional behaviour: the role/visibility check precedes the health check, so a caller without the required role receives the same 404 as for an unknown endpoint; the client IP is never taken from a token `ip` claim (unknown client resolves to `IPAddress.None`); HMAC pseudonyms in the result are tenant-scoped.

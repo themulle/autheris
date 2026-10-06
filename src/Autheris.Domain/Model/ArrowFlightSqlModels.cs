@@ -11,7 +11,8 @@ public sealed record FlightSqlTicket(
     string TenantId,
     string Query,
     DateTimeOffset CreatedAtUtc,
-    string Signature
+    string Signature,
+    string UserSid = ""
 );
 
 public sealed record FlightSqlInfo(

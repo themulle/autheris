@@ -27,12 +27,7 @@ public sealed class HttpContextClientIpResolver : IClientIpResolver
             return context.Connection.RemoteIpAddress;
         }
 
-        if (context.User?.FindFirst("ip")?.Value is { Length: > 0 } ipClaim &&
-            IPAddress.TryParse(ipClaim, out var parsedClaim))
-        {
-            return parsedClaim;
-        }
-
+        // SEC (Low): a token "ip" claim is caller-influenced and never used as a fallback (fail closed to IPAddress.None).
         return IPAddress.None;
     }
 }

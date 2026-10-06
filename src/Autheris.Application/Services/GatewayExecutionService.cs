@@ -922,12 +922,37 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
                 foreach (var invId in chunkKeys)
                 {
                     var items = new List<InvoiceItemRecord>();
+                    // SEC (Low): effective column access (catalog sensitivity included), tenant-scoped HMAC, row filter on RAW values
+                    // (before masking) so a masked value can neither satisfy nor defeat the predicate.
+                    var effectiveMeta = metadata ?? new TableMetadata { Identifier = childTableId };
+                    var tenantValue = principal.GetTenantId().Value;
+                    var hmacDefault = _options?.DataMasking?.HmacKeyId;
+
                     for (int i = 1; i <= 2; i++)
                     {
                         var rawNote = $"Confidential spec for item {i} of invoice {invId}";
-                        object? maskedNote = rawNote;
+                        var rawProduct = $"Enterprise License Pack {i}";
+                        var rawPrice = 1250.00m * i;
 
-                        var noteAccess = decision.GetColumnAccess("sensitive_note");
+                        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+                        {
+                            var rawRow = (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                            {
+                                ["id"] = $"{invId}-ITEM-{i}",
+                                ["invoice_id"] = invId,
+                                ["product_name"] = rawProduct,
+                                ["price"] = rawPrice,
+                                ["sensitive_note"] = rawNote
+                            };
+
+                            if (FilterRows(new List<IReadOnlyDictionary<string, object?>> { rawRow }, decision.CombinedRowFilterSql, effectiveMeta).Count == 0)
+                            {
+                                continue;
+                            }
+                        }
+
+                        object? maskedNote = rawNote;
+                        var noteAccess = decision.GetEffectiveColumnAccess("sensitive_note", effectiveMeta);
 
                         if (noteAccess == ColumnAccessLevel.Deny)
                         {
@@ -938,21 +963,22 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
                             var rule = metadata != null && metadata.ColumnMaskingRules.TryGetValue("sensitive_note", out var r)
                                 ? r
                                 : new MaskingRule { RuleType = "REDACT" };
+                            rule = ScopeRuleForTenant(rule, tenantValue, hmacDefault);
                             maskedNote = _maskingProvider.MaskValue("sensitive_note", rawNote, rule);
                         }
 
-                        var prodAccess = decision.GetColumnAccess("product_name");
+                        var prodAccess = decision.GetEffectiveColumnAccess("product_name", effectiveMeta);
                         string? prodName = prodAccess switch
                         {
-                            ColumnAccessLevel.Clear => $"Enterprise License Pack {i}",
+                            ColumnAccessLevel.Clear => rawProduct,
                             ColumnAccessLevel.Mask => "***",
                             _ => null
                         };
 
-                        var priceAccess = decision.GetColumnAccess("price");
+                        var priceAccess = decision.GetEffectiveColumnAccess("price", effectiveMeta);
                         decimal price = priceAccess switch
                         {
-                            ColumnAccessLevel.Clear => 1250.00m * i,
+                            ColumnAccessLevel.Clear => rawPrice,
                             _ => 0m
                         };
 
@@ -964,22 +990,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
                             Price = price,
                             SensitiveNote = maskedNote?.ToString()
                         });
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
-                    {
-                        var rowDicts = items.Select(item => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                        {
-                            ["id"] = item.Id,
-                            ["invoice_id"] = item.InvoiceId,
-                            ["product_name"] = item.ProductName,
-                            ["price"] = item.Price,
-                            ["sensitive_note"] = item.SensitiveNote
-                        }).ToList();
-
-                        var filteredDicts = FilterRows(rowDicts, decision.CombinedRowFilterSql, metadata ?? new TableMetadata { Identifier = childTableId });
-                        var filteredIds = filteredDicts.Select(d => d.TryGetValue("id", out var v) ? v?.ToString() : null).ToHashSet();
-                        items = items.Where(item => filteredIds.Contains(item.Id)).ToList();
                     }
 
                     chunkResult[invId] = items;
@@ -997,8 +1007,20 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
     internal static bool IsHmacRule(MaskingRule rule) =>
         rule.RuleType?.ToUpperInvariant() is "HMAC" or "HMAC_SHA256" or "HASH";
 
+    /// <summary>
+    /// SEC D-3: returns a tenant-scoped copy of HMAC rules and the rule itself for every other rule type.
+    /// Idempotent: a rule that is already tenant-scoped is never scoped twice.
+    /// </summary>
+    internal static MaskingRule ScopeRuleForTenant(MaskingRule rule, string? tenant, string? defaultKeyId) =>
+        !string.IsNullOrWhiteSpace(tenant) && IsHmacRule(rule) ? CreateTenantScopedHmacRule(rule, tenant, defaultKeyId) : rule;
+
     internal static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId)
     {
+        if (rule.HmacKeyId != null && rule.HmacKeyId.Contains("|tenant:", StringComparison.Ordinal))
+        {
+            return rule;
+        }
+
         var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
         return new MaskingRule
         {

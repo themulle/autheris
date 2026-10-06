@@ -343,7 +343,8 @@ public class ProcedureEndpointTests
         var f = Active(d => d with { RequiredRoles = ["order-reader"] });
         var svc = f.Create();
 
-        await Should.ThrowAsync<SecurityException>(() =>
+        // SEC (Low): a caller without the role gets the same answer as for an unknown endpoint (no existence oracle).
+        await Should.ThrowAsync<KeyNotFoundException>(() =>
             svc.ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User("other"), Tenant));
         f.AuditEntries.ShouldContain(e => e.EventType == "PROCEDURE_DENIED" && e.Decision == "DENY");
 

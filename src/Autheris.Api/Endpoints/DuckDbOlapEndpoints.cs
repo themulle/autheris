@@ -107,6 +107,47 @@ public static class DuckDbOlapEndpoints
             return;
         }
 
+        // SEC D-4: every staged table and every query is audited BEFORE data is returned; an audit failure fails the request closed.
+        var auditRepo = httpContext.RequestServices?.GetService<IAuditLogRepository>();
+        var actorSid = secContext.UserSid;
+        var stagedCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var sqlHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(dto.Sql)));
+
+        async Task<bool> TryAuditAsync(string eventType, string targetTable, object details)
+        {
+            if (auditRepo == null)
+            {
+                logger.LogError("No audit repository available; OLAP request is rejected (fail-closed).");
+                return false;
+            }
+
+            try
+            {
+                await auditRepo.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    TenantId = tenantId,
+                    EventType = eventType,
+                    ActorSid = actorSid,
+                    TargetTable = targetTable,
+                    Decision = "ALLOW",
+                    TraceId = httpContext.TraceIdentifier,
+                    DetailsJson = JsonSerializer.Serialize(details)
+                }, ct).ConfigureAwait(false);
+                return true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "OLAP audit write failed; request is rejected (fail-closed).");
+                return false;
+            }
+        }
+
+        async Task WriteAuditFailureAsync()
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            await httpContext.Response.WriteAsJsonAsync(new { error = "Audit unavailable; the analytical request was rejected." }, ct);
+        }
+
         var sources = new List<OlapTableSource>();
 
         if (dto.TableNames != null && dto.TableNames.Count > 0)
@@ -204,7 +245,21 @@ public static class DuckDbOlapEndpoints
                 }
 
                 // Dynamic Column Masking preservation (SEC-OLAP-04)
-                var maskedRows = rawRows.Select(r => ConnectorRowMasker.MaskRow(r, meta, decision, maskingProvider)).ToList();
+                var maskedRows = rawRows.Select(r => ConnectorRowMasker.MaskRow(r, meta, decision, maskingProvider, tenantId.Value, gatewayOptions.Value.DataMasking?.HmacKeyId)).ToList();
+                if (!await TryAuditAsync("OLAP_TABLE_STAGED", meta.Identifier.ToQualifiedName(), new
+                {
+                    tenant = tenantId.Value,
+                    sid = actorSid.Value,
+                    table = meta.Identifier.ToQualifiedName(),
+                    rowCount = maskedRows.Count,
+                    sqlSha256 = sqlHash
+                }).ConfigureAwait(false))
+                {
+                    await WriteAuditFailureAsync();
+                    return;
+                }
+
+                stagedCounts[meta.Identifier.ToQualifiedName()] = maskedRows.Count;
                 sources.Add(new OlapTableSource(meta.Identifier, maskedRows, meta));
             }
         }
@@ -213,6 +268,21 @@ public static class DuckDbOlapEndpoints
         {
             var queryRequest = new OlapQueryRequest(dto.Sql, sources, dto.Limit);
             var result = await olapEngine.ExecuteOlapQueryAsync(queryRequest, ct).ConfigureAwait(false);
+
+            if (!await TryAuditAsync("OLAP_QUERY", string.Join(",", stagedCounts.Keys), new
+            {
+                tenant = tenantId.Value,
+                sid = actorSid.Value,
+                tables = stagedCounts,
+                stagedRowCount = stagedCounts.Values.Sum(),
+                resultRowCount = result.Rows.Count,
+                totalRows = result.TotalRowCount,
+                sqlSha256 = sqlHash
+            }).ConfigureAwait(false))
+            {
+                await WriteAuditFailureAsync();
+                return;
+            }
 
             httpContext.Response.StatusCode = StatusCodes.Status200OK;
             httpContext.Response.ContentType = "application/json; charset=utf-8";
