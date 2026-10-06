@@ -7,7 +7,7 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "express": "4.22.3",
+    "express": "5.2.1",
     "postgraphile": "4.14.1"
   }
 }
