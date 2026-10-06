@@ -187,6 +187,8 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
         }
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Regex> RegexCache = new(StringComparer.Ordinal);
+
     private static string ApplyRegexOrFormatMask(string columnName, string text, MaskingRule rule)
     {
         if (string.IsNullOrEmpty(text))
@@ -211,13 +213,11 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
             {
                 // Review E-4: Regex.Replace returns the input unchanged when the pattern does not match (other
                 // separators, lower case, ...). A value the rule does not transform is redacted completely (fail-closed).
-                var timeout = TimeSpan.FromMilliseconds(250);
-                if (!Regex.IsMatch(text, rule.PatternOrFormat, RegexOptions.None, timeout))
-                {
-                    return "REDACTED";
-                }
-
-                string masked = Regex.Replace(text, rule.PatternOrFormat, rule.Replacement, RegexOptions.None, timeout);
+                // Review R4-5: one pass only (the former IsMatch + Replace doubled the backtracking time); the compiled
+                // regex is cached. Parts of the value that the pattern does not match stay as they are - patterns must
+                // therefore cover everything that is sensitive (see docs).
+                var regex = RegexCache.GetOrAdd(rule.PatternOrFormat, static p => new Regex(p, RegexOptions.None, TimeSpan.FromMilliseconds(250)));
+                string masked = regex.Replace(text, rule.Replacement);
                 return string.Equals(masked, text, StringComparison.Ordinal) ? "REDACTED" : masked;
             }
             catch (Exception ex) when (ex is RegexMatchTimeoutException or ArgumentException)

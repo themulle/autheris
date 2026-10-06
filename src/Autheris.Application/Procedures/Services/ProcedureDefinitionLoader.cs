@@ -190,6 +190,14 @@ public sealed class ProcedureDefinitionLoader : IDisposable
         try
         {
             ForgetFile(filePath);
+
+            // Review P-8: a deleted or renamed directory raises no events for the files below it; all declarations
+            // loaded from that subtree are switched off (fail-closed).
+            string prefix = Path.GetFullPath(filePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            foreach (var key in _fileToName.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                ForgetFile(key);
+            }
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -263,12 +271,25 @@ public sealed class ProcedureDefinitionLoader : IDisposable
             _watcher = new FileSystemWatcher(directory)
             {
                 IncludeSubdirectories = true,
-                NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite,
                 EnableRaisingEvents = true
             };
 
             // Review P-3/P-8: handlers run on thread-pool threads; an exception there would terminate the process.
-            _watcher.Created += (_, e) => OnWatcherEvent(() => { if (IsSupportedProcedureFile(e.FullPath)) TryLoadFile(e.FullPath, directory); });
+            _watcher.Created += (_, e) => OnWatcherEvent(() =>
+            {
+                if (IsSupportedProcedureFile(e.FullPath))
+                {
+                    TryLoadFile(e.FullPath, directory);
+                }
+                else if (Directory.Exists(e.FullPath))
+                {
+                    foreach (var f in Directory.EnumerateFiles(e.FullPath, "*", SearchOption.AllDirectories).Where(IsSupportedProcedureFile))
+                    {
+                        TryLoadFile(f, directory);
+                    }
+                }
+            });
             _watcher.Changed += (_, e) => OnWatcherEvent(() => { if (IsSupportedProcedureFile(e.FullPath)) TryLoadFile(e.FullPath, directory); });
             _watcher.Deleted += (_, e) => OnWatcherEvent(() => SafeForget(e.FullPath));
             _watcher.Renamed += (_, e) => OnWatcherEvent(() =>
@@ -279,6 +300,14 @@ public sealed class ProcedureDefinitionLoader : IDisposable
                 if (IsSupportedProcedureFile(e.FullPath))
                 {
                     TryLoadFile(e.FullPath, directory);
+                }
+                else if (Directory.Exists(e.FullPath))
+                {
+                    // A directory moved into the watched tree: load its declarations.
+                    foreach (var f in Directory.EnumerateFiles(e.FullPath, "*", SearchOption.AllDirectories).Where(IsSupportedProcedureFile))
+                    {
+                        TryLoadFile(f, directory);
+                    }
                 }
             });
         }

@@ -195,6 +195,12 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
             throw new InvalidOperationException($"The argument order of '{definition.Name}' does not cover exactly the declared parameters and context bindings.");
         }
 
+        // Review R4-8/P-2: PostgreSQL functions are called with named notation (name => @value). Omitted optional
+        // arguments are simply left out (also in the middle), so the database default applies instead of an explicit
+        // NULL, and a signature that does not match the declaration fails in the database instead of binding by position.
+        bool pgNamed = definition.Kind == ProcedureKind.TableValuedFunction &&
+                       dialect == Autheris.Domain.Common.DatabaseDialect.PostgreSql;
+
         // (placeholder, parameter or null for DEFAULT, missing optional value)
         var arguments = new List<(string Placeholder, DbParameter? Parameter, bool Missing)>(order.Count);
         foreach (string argName in order)
@@ -210,7 +216,8 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                     ProcedureContextKey.Purpose => security.Purpose,
                     _ => throw new InvalidOperationException($"Unknown context key '{binding.Key}'.")
                 };
-                arguments.Add((paramPrefix + argName, AddParameter(cmd, paramPrefix + argName, DbType.String, v), false));
+                arguments.Add(((pgNamed ? argName + " => " : string.Empty) + paramPrefix + argName,
+                    AddParameter(cmd, paramPrefix + argName, DbType.String, v), false));
                 continue;
             }
 
@@ -219,7 +226,11 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
             {
                 var dbParam = AddParameter(cmd, paramPrefix + p.Name, MapDbType(p.SqlType), value);
                 ApplyShape(dbParam, p);
-                arguments.Add((paramPrefix + p.Name, dbParam, false));
+                arguments.Add(((pgNamed ? p.Name + " => " : string.Empty) + paramPrefix + p.Name, dbParam, false));
+            }
+            else if (pgNamed)
+            {
+                continue; // omitted optional argument: the function default applies
             }
             else if (definition.Kind == ProcedureKind.TableValuedFunction && dialect == Autheris.Domain.Common.DatabaseDialect.SqlServer)
             {

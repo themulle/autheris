@@ -178,7 +178,14 @@ public static class ProcedureDefinitionParser
                     argumentOrder.Add(cm.Groups[2].Value);
                     break;
                 case "roles":
-                    roles.AddRange(val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                    var headerRoles = val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (headerRoles.Length == 0)
+                    {
+                        // Review R4-7: an empty @roles directive must not open the endpoint.
+                        throw new FormatException("@roles needs at least one role.");
+                    }
+
+                    roles.AddRange(headerRoles);
                     break;
                 case "allow-dynamic-sql":
                     allowDynamicSql = true;
@@ -337,8 +344,10 @@ public static class ProcedureDefinitionParser
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(yamlContent);
 
+        // Review R4-7: duplicate mapping keys are rejected instead of "last one wins".
         var deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
+            .WithDuplicateKeyChecking()
             .Build();
 
         ProcedureYamlModel? model;
@@ -472,10 +481,18 @@ public static class ProcedureDefinitionParser
             }
         }
 
-        var roles = (model.RequiredRoles ?? model.Roles ?? [])
+        var rawRoles = model.RequiredRoles ?? model.Roles;
+        var roles = (rawRoles ?? [])
             .Where(r => !string.IsNullOrWhiteSpace(r))
             .Select(r => r.Trim())
             .ToList();
+        // Review R4-7: an explicitly given but empty/blank role list must not silently open the endpoint to every
+        // authenticated user (omit the key for "any authenticated user").
+        if (rawRoles != null && roles.Count == 0)
+        {
+            throw new FormatException("'required_roles' is present but contains no role; remove the key or list at least one role.");
+        }
+
         var outputs = (model.Outputs ?? []).Select(o => RequireIdentifier(o?.Trim(), "output column")).ToList();
         var cleared = (model.ClearedColumns ?? []).Select(c => RequireIdentifier(c?.Trim(), "cleared column")).ToList();
 
