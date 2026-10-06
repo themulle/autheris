@@ -82,7 +82,9 @@ public static class DevEndpoints
         !string.IsNullOrEmpty(target) &&
         target[0] == '/' &&
         (target.Length == 1 || (target[1] != '/' && target[1] != '\\')) &&
-        !target.Contains('\r') && !target.Contains('\n');
+        // Review A-2: browsers strip tab/CR/LF inside a URL, so "/\t/evil" would become "//evil". Control characters,
+        // whitespace and backslashes are therefore refused anywhere in the target.
+        !target.Any(c => char.IsControl(c) || char.IsWhiteSpace(c) || c == '\\');
 
     /// <summary>Effective, secret-free configuration summary. Connection strings and passwords are never included.</summary>
     internal static object BuildInfo(GatewayOptions options, IHostEnvironment env, DevConfigurationReport? report = null)

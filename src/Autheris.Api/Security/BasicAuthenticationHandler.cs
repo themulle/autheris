@@ -83,9 +83,11 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
                         var kv = pair.Split('=');
                         if (kv.Length == 2)
                         {
-                            if (kv[0] == "m" && int.TryParse(kv[1], out int m)) argon2Mem = Math.Max(argon2Mem, m);
-                            else if (kv[0] == "t" && int.TryParse(kv[1], out int t)) argon2Iters = Math.Max(argon2Iters, t);
-                            else if (kv[0] == "p" && int.TryParse(kv[1], out int p)) argon2Par = Math.Max(argon2Par, p);
+                            // Review A-6: the dummy hash for unknown users copies the configured cost, but never above the limits the
+                            // verifier itself accepts - a wrong value in the configuration must not let anonymous requests allocate gigabytes.
+                            if (kv[0] == "m" && int.TryParse(kv[1], out int m)) argon2Mem = Math.Max(argon2Mem, Math.Min(m, PasswordHasher.MaxArgon2MemorySizeKb));
+                            else if (kv[0] == "t" && int.TryParse(kv[1], out int t)) argon2Iters = Math.Max(argon2Iters, Math.Min(t, PasswordHasher.MaxArgon2Iterations));
+                            else if (kv[0] == "p" && int.TryParse(kv[1], out int p)) argon2Par = Math.Max(argon2Par, Math.Min(p, PasswordHasher.MaxArgon2Parallelism));
                         }
                     }
                 }
