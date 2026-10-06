@@ -1,5 +1,5 @@
 # ==============================================================================
-# Containerfile for GqlGateway.Api
+# Containerfile for Autheris.Api (BENCHMARK-ONLY image: do not deploy to production)
 # Multi-stage build for production-ready, rootless container execution
 # ==============================================================================
 
@@ -55,14 +55,13 @@ USER appuser:appgroup
 
 ENV ASPNETCORE_URLS=http://+:5050 \
     ASPNETCORE_ENVIRONMENT=Production \
-    DOTNET_RUNNING_IN_CONTAINER=true \
-    HMAC_SECRET_KEY=bench-super-secret-hmac-master-key-2026 \
-    GQL_PROD_BENCHMARK_SECRET_KEY=bench-super-secret-hmac-master-key-2026 \
-    Gateway__DataMasking__HmacSecret=bench-super-secret-hmac-master-key-2026
+    DOTNET_RUNNING_IN_CONTAINER=true
+# SECURITY: no secrets are baked into the image. HMAC_SECRET_KEY, the ForwardAuth shared secret etc.
+# are injected at runtime by podman-compose.yaml from the untracked .env file.
 
 EXPOSE 5050
 
 HEALTHCHECK --interval=3s --timeout=3s --start-period=5s --retries=10 \
     CMD curl -fsS http://127.0.0.1:5050/health/live || exit 1
 
-ENTRYPOINT ["dotnet", "GqlGateway.Api.dll"]
+ENTRYPOINT ["dotnet", "Autheris.Api.dll"]

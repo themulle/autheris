@@ -775,9 +775,9 @@ if __name__ == "__main__":
     db_file = get_db_path()
     init_governance_db(db_file)
     try:
-        os.chmod(db_file, 0o666)
+        os.chmod(db_file, 0o660)
         hr_file = os.environ.get("HR_DB_PATH", "/data/hr.db")
         if os.path.exists(hr_file):
-            os.chmod(hr_file, 0o666)
+            os.chmod(hr_file, 0o660)
     except Exception as e:
         print(f"[governance-seed] Warning chmod: {e}")

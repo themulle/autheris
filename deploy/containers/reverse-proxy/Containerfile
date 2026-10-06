@@ -6,7 +6,10 @@ FROM docker.io/library/nginx:alpine
 
 RUN apk add --no-cache wget curl
 
-COPY containers/reverse-proxy/nginx.conf /etc/nginx/nginx.conf
+# Rendered with envsubst at start (official image templates feature) so the ForwardAuth shared
+# secret is injected at runtime instead of being committed. Output replaces /etc/nginx/nginx.conf.
+ENV NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx
+COPY containers/reverse-proxy/nginx.conf /etc/nginx/templates/nginx.conf.template
 
 EXPOSE 8080
 

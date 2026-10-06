@@ -43,6 +43,7 @@ test-ext:
 
 # Start infrastructure containers and wait for healthchecks
 up:
+	@./scripts/generate-env.sh
 	@./scripts/stage_sources.sh
 	podman compose up -d --build postgres redis governance-seed gqlgateway-api reverse-proxy prometheus grafana || \
 	podman-compose up -d --build postgres redis governance-seed gqlgateway-api reverse-proxy prometheus grafana

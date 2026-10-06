@@ -291,10 +291,14 @@ A turnkey container image featuring the integrated **Microsoft Garnet .NET Cache
 > **Security Notice:** The container starts in `Production` by default. The getting-started mode below
 > explicitly sets `ASPNETCORE_ENVIRONMENT=Development` and the opt-in `AUTHERIS_ALLOW_DEV_IN_CONTAINER=true`,
 > and is strictly intended for local developer evaluation.
+>
+> **Warning:** Development mode exposes built-in development users (for example `dev-admin` with
+> ClusterAdmin rights) without real authentication. Always publish the ports on the loopback
+> interface only (`127.0.0.1`), as shown below. Never bind them to `0.0.0.0` or a public address.
 
 ```bash
 # Direct Docker run (Ports 8080 HTTP / 8081 HTTPS) – local getting-started mode
-docker run -d -p 8080:8080 -p 8081:8081 \
+docker run -d -p 127.0.0.1:8080:8080 -p 127.0.0.1:8081:8081 \
   -e ASPNETCORE_ENVIRONMENT=Development -e AUTHERIS_ALLOW_DEV_IN_CONTAINER=true \
   --name gql-gateway ghcr.io/themulle/gql:getting-started
 
