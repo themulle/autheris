@@ -51,14 +51,8 @@ internal static class EndpointSecurity
             return resolved;
         }
 
-        try
-        {
-            return context.User.GetTenantId();
-        }
-        catch (System.Security.SecurityException)
-        {
-            return TenantId.LegacySingleTenant;
-        }
+        // A malformed tenant claim throws SecurityException (fail closed) instead of becoming the legacy tenant.
+        return context.User.GetTenantId();
     }
 
     /// <summary>Cluster-wide administrator (may act across tenants).</summary>

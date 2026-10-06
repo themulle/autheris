@@ -7,7 +7,7 @@ Akzeptiert
 Das Gateway läuft in einem hochverfügbaren Cluster hinter einem Load Balancer. Windows-Authentifizierung (`Negotiate`) unterstützt standardmäßig Kerberos und NTLM. NTLM ist jedoch verbindungsbehaftet (Connection-Bound) und erfordert Sticky Sessions (Session-Affinity) am Load Balancer. Bei Reboots oder Ausfällen von Knoten brechen NTLM-Verbindungen ab und können nicht nahtlos von Nachbarknoten übernommen werden.
 
 ## Entscheidung
-1. **Kerberos-Only Betrieb:** Der Cluster erzwingt `RequireKerberosOnly = true`. NTLM-Fallbacks werden im Clusterbetrieb unterbunden.
+1. **Kerberos-Only Betrieb:** Der Cluster erzwingt `RequireKerberosOnly = true`. NTLM-Fallbacks werden im Clusterbetrieb unterbunden: `NTLM `-Header werden nicht an Negotiate geroutet, Negotiate-Identitäten ohne Authentifizierungstyp Kerberos werden in `OnAuthenticated` abgelehnt, und `PersistNtlmCredentials`/`PersistKerberosCredentials` sind deaktiviert (keine Credential-Übernahme auf geteilten Upstream-Verbindungen hinter einem Reverse Proxy).
 2. **Gemeinsamer SPN:** Alle Gateway-Instanzen teilen denselben Service Principal Name (SPN, z. B. `HTTP/gql-gateway.corp.local`) und denselben Dienst-Account bzw. dieselbe Keytab.
 3. **Stateless Execution:** Authentifizierung erfolgt pro Kerberos-Ticket; gelöste transitive Gruppen-SIDs werden in Redis gecacht (`GroupCacheTtlMinutes: 5`).
 4. **Pre-Auth IP-Rate-Limiter:** Ein In-Memory-Limiter vor der Negotiate-Middleware schützt den Domain Controller vor Ticket-Flooding / Kerberos-DoS.

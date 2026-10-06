@@ -661,7 +661,10 @@ public static class GatewayServiceCollectionExtensions
         }
         else
         {
-            authBuilder.AddNegotiate(NegotiateDefaults.AuthenticationScheme, _ => { });
+            // Review E-2: never persist credentials on the (possibly shared, reverse-proxied) upstream connection, and
+            // with RequireKerberosOnly reject every Negotiate identity that is not Kerberos (e.g. NTLM).
+            authBuilder.AddNegotiate(NegotiateDefaults.AuthenticationScheme, negotiate =>
+                NegotiateHardening.Configure(negotiate, gatewayOptions.Authentication.RequireKerberosOnly));
         }
 
         // 4. Microsoft Entra ID (Azure AD) and/or AD FS JWT Bearer
@@ -670,6 +673,8 @@ public static class GatewayServiceCollectionExtensions
 
         authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearer, options =>
         {
+            // Review E-1: JwtBearer keeps the default inbound claim mapping (sub -> NameIdentifier, oid -> objectidentifier
+            // URI); revocation lookups (GetLookupKeys) accept both spellings.
             options.RequireHttpsMetadata = (entraConfig.Enabled && entraConfig.RequireHttpsMetadata) ||
                                            (adfsConfig.Enabled && adfsConfig.RequireHttpsMetadata);
 
@@ -761,7 +766,8 @@ public static class GatewayServiceCollectionExtensions
                     return NegotiateDefaults.AuthenticationScheme;
                 }
 
-                if (authHeader.StartsWith("NTLM ", StringComparison.OrdinalIgnoreCase))
+                if (!gatewayOptions.Authentication.RequireKerberosOnly &&
+                    authHeader.StartsWith("NTLM ", StringComparison.OrdinalIgnoreCase))
                 {
                     return NegotiateDefaults.AuthenticationScheme;
                 }
@@ -1058,6 +1064,14 @@ public static class GatewayServiceCollectionExtensions
             {
                 throw new ValidationException(string.Join("\n", sidErrors));
             }
+        }
+
+        // Review (Low): a malformed default tenant must abort startup instead of degrading to the legacy tenant.
+        if (options.Authentication.ForwardAuth.Enabled &&
+            !string.IsNullOrWhiteSpace(options.Authentication.ForwardAuth.DefaultTenantId) &&
+            !Autheris.Domain.Common.TenantId.TryParse(options.Authentication.ForwardAuth.DefaultTenantId, out _))
+        {
+            throw new ValidationException("ForwardAuth.DefaultTenantId hat ein ungültiges Tenant-Format.");
         }
 
         if (options.Authentication.RequireKerberosOnly && options.Authentication.BasicAuth.Enabled)

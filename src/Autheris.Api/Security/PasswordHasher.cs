@@ -11,7 +11,7 @@ using Konscious.Security.Cryptography;
 /// </summary>
 public static class PasswordHasher
 {
-    public const int DefaultPbkdf2Iterations = 100_000;
+    public const int DefaultPbkdf2Iterations = 600_000; // OWASP 2023 for PBKDF2-HMAC-SHA256
     public const int MinPbkdf2Iterations = 10_000;
     public const int MaxPbkdf2Iterations = 10_000_000;
 
