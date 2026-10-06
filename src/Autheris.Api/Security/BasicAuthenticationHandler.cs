@@ -160,10 +160,13 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
 
         var distCache = Context.RequestServices?.GetService(typeof(Microsoft.Extensions.Caching.Distributed.IDistributedCache)) as Microsoft.Extensions.Caching.Distributed.IDistributedCache;
         var guard = BasicAuthAttemptGuard.For(_gatewayOptions.Authentication.BasicAuth, distCache);
-        var attemptKey = BasicAuthAttemptGuard.BuildAttemptKey(username, ResolveClientIp());
+        var clientIp = ResolveClientIp();
+        var attemptKey = BasicAuthAttemptGuard.BuildAttemptKey(username, clientIp);
+        var ipKey = BasicAuthAttemptGuard.BuildIpKey(clientIp);
 
         // RR-L2-03: locked-out (user, IP) pairs are rejected before any cryptographic work (no CPU amplification).
-        if (guard.IsLockedOut(attemptKey))
+        // Review E-13: so are addresses with too many failures over all user names (password spraying).
+        if (guard.IsLockedOut(attemptKey) || guard.IsLockedOut(ipKey))
         {
             return Task.FromResult(AuthenticateResult.Fail("Invalid username or password."));
         }
@@ -197,6 +200,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
             }
 
             guard.RecordFailure(attemptKey);
+            guard.RecordFailure(ipKey, guard.MaxFailedAttemptsPerIp);
             return Task.FromResult(AuthenticateResult.Fail("Invalid username or password."));
         }
 
@@ -209,6 +213,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         if (!passwordMatches)
         {
             guard.RecordFailure(attemptKey);
+            guard.RecordFailure(ipKey, guard.MaxFailedAttemptsPerIp);
             return Task.FromResult(AuthenticateResult.Fail("Invalid username or password."));
         }
 
