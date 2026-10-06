@@ -226,7 +226,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
                 ClientIp: clientIp,
                 Timestamp: DateTimeOffset.UtcNow,
                 PurposeId: purpose,
-                Attributes: attributes
+                Attributes: attributes,
+                TargetDialect: metadata.Dialect
             );
 
             var casbinDecision = await _policyEnforcementService.EvaluatePolicyAsync(secContext, ct);
@@ -861,7 +862,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
                 ClientIp: clientIp,
                 Timestamp: DateTimeOffset.UtcNow,
                 PurposeId: purpose,
-                Attributes: attributes
+                Attributes: attributes,
+                TargetDialect: metadata.Dialect
             );
 
             var casbinDecision = await _policyEnforcementService.EvaluatePolicyAsync(secContext, ct);

@@ -49,7 +49,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<WebApplicationFactory<Pr
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-EndToEndSqliteTests-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             b.UseSetting("Gateway:OpenSchema", "true");
 

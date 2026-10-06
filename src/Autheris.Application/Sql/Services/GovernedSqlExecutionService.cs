@@ -420,7 +420,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                     ClientIp: clientIp,
                     Timestamp: DateTimeOffset.UtcNow,
                     PurposeId: purpose,
-                    Attributes: attributes);
+                    Attributes: attributes,
+                    TargetDialect: tableMeta.Dialect);
 
                 var policyDecision = await _policyEnforcement.EvaluatePolicyAsync(secContext, ct).ConfigureAwait(false);
                 if (!policyDecision.IsAllowed)

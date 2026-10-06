@@ -249,7 +249,9 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         }
 
         var sqlBuilder = new StringBuilder();
-        sqlBuilder.Append($"SELECT {selectClause} FROM {fromTable}");
+        // The reserved alias lets correlated row filters (EXISTS ... = autheris_target.fk) bind to this table.
+        var aliasKeyword = dialect == DatabaseDialect.Oracle ? " " : " AS ";
+        sqlBuilder.Append($"SELECT {selectClause} FROM {fromTable}{aliasKeyword}{dialect.QuoteIdentifier(TrinoSqlEngine.RowFilterAliases.Target)}");
 
         if (whereParts.Count > 0)
         {
