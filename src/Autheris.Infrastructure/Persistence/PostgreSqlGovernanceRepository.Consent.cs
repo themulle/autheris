@@ -1250,7 +1250,10 @@ public partial class PostgreSqlGovernanceRepository
         return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false)) > 0;
     }
 
-    public async Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default)
+    public Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default) =>
+        RejectConsentRequestAsync(requestId, approverSid, reason, isExternalItsm: false, ct);
+
+    public async Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, bool isExternalItsm, CancellationToken ct = default)
     {
         var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false);
         if (req == null) throw new InvalidOperationException($"Request {requestId} not found.");
@@ -1261,7 +1264,7 @@ public partial class PostgreSqlGovernanceRepository
         }
 
         // Review PG-5: authorization at repository level (as in SQLite): ITSM actors, or owner/delegate/admin of the table.
-        bool isAuthorized = ConsentApprovalPolicy.IsItsmActor(approverSid) ||
+        bool isAuthorized = isExternalItsm ||
                             await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, null, ct).ConfigureAwait(false);
         if (!isAuthorized)
         {
@@ -1336,7 +1339,14 @@ public partial class PostgreSqlGovernanceRepository
     public Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default) =>
         ActivateConsentAsync(requestId, null, ct);
 
-    public async Task ActivateConsentAsync(Guid requestId, Sid? approvedBy, CancellationToken ct = default)
+    public Task ActivateConsentAsync(Guid requestId, Sid? approvedBy, CancellationToken ct = default) =>
+        ActivateConsentCoreAsync(requestId, approvedBy, allowPendingAutoApprove: false, ct);
+
+    /// <summary>Insecure getting-started auto-approve path only: activates a request that is still pending.</summary>
+    public Task ActivateConsentForAutoApproveAsync(Guid requestId, CancellationToken ct = default) =>
+        ActivateConsentCoreAsync(requestId, null, allowPendingAutoApprove: true, ct);
+
+    private async Task ActivateConsentCoreAsync(Guid requestId, Sid? approvedBy, bool allowPendingAutoApprove, CancellationToken ct)
     {
         var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false);
         if (req == null) throw new InvalidOperationException($"ConsentRequest {requestId} not found.");
@@ -1349,8 +1359,12 @@ public partial class PostgreSqlGovernanceRepository
             {
                 updateReq.Transaction = tx;
                 // SEC H-06 (as SQLite): only a pending or approved request may be activated; REJECTED/other states never.
-                updateReq.CommandText = @"UPDATE CONSENT_REQUESTS SET status = 'APPROVED'
-                                          WHERE id = @id AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL', 'APPROVED')";
+                // Review G5: regular activation only from 'APPROVED' (i.e. after the approval steps); pending states only for dev auto-approve.
+                updateReq.CommandText = allowPendingAutoApprove
+                    ? @"UPDATE CONSENT_REQUESTS SET status = 'APPROVED'
+                        WHERE id = @id AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL', 'APPROVED')"
+                    : @"UPDATE CONSENT_REQUESTS SET status = 'APPROVED'
+                        WHERE id = @id AND status = 'APPROVED'";
                 updateReq.Parameters.AddWithValue("@id", requestId.ToString());
                 if (await updateReq.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1)
                 {

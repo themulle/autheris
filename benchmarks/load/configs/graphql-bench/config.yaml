@@ -1,7 +1,7 @@
 # graphql-bench query configuration for Chinook benchmarks
 url: http://localhost:8085/v1/graphql
 headers:
-  X-Hasura-Admin-Secret: my-secret
+  X-Hasura-Admin-Secret: REPLACE_WITH_BENCH_HASURA_ADMIN_SECRET  # from benchmarks/load/.bench-secrets.env
   X-Test-User-Sid: S-1-5-21-9999
   GraphQL-Preflight: "1"
 

@@ -180,7 +180,8 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
                 ? new FileAuditChainAnchorStore(options.Value.Audit.ChainAnchorPath)
                 : new InMemoryAuditChainAnchorStore(),
             secretProvider,
-            auditAnchorSigner);
+            auditAnchorSigner,
+            _logger);
 
         bool shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? isDevOrTest;
         InitializeDatabaseSafely(shouldSeed);

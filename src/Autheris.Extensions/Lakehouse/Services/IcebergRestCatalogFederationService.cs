@@ -29,6 +29,8 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
     private readonly ILogger<IcebergRestCatalogFederationService> _logger;
     private readonly IConsentResolutionService? _consentService;
     private readonly IConsentRepository? _consentRepo;
+    private readonly IPolicyEnforcementService? _policyEnforcementService;
+    private readonly IClientIpResolver? _clientIpResolver;
 
     public IcebergRestCatalogFederationService(
         IIcebergMetadataReader metadataReader,
@@ -36,7 +38,9 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         IOptions<GatewayOptions> options,
         ILogger<IcebergRestCatalogFederationService> logger,
         IConsentResolutionService? consentService = null,
-        IConsentRepository? consentRepo = null)
+        IConsentRepository? consentRepo = null,
+        IPolicyEnforcementService? policyEnforcementService = null,
+        IClientIpResolver? clientIpResolver = null)
     {
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
@@ -44,6 +48,8 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _consentService = consentService;
         _consentRepo = consentRepo;
+        _policyEnforcementService = policyEnforcementService;
+        _clientIpResolver = clientIpResolver;
     }
 
     public async ValueTask<IReadOnlyList<string>> ListNamespacesAsync(string tenantId, CancellationToken ct = default)
@@ -161,6 +167,12 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             throw new KeyNotFoundException($"Table '{@namespace}.{table}' not found in tenant '{tenantId}'.");
         }
 
+        // Review G5: deactivated tables are not served (same as the governed query path).
+        if (!tableMeta.Table.IsActive)
+        {
+            throw new KeyNotFoundException($"Table '{@namespace}.{table}' not found in tenant '{tenantId}'.");
+        }
+
         if (_consentService == null || _consentRepo == null)
         {
             _logger.LogError("Iceberg table {TableId} requested but consent services are not configured; denying (fail-closed).", tableId);
@@ -187,7 +199,39 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
         }
 
-        bool restricted = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) ||
+        // Review G5: Casbin ABAC applies to raw access as well; an ABAC row filter cannot be enforced on raw metadata.
+        string? abacRowFilter = null;
+        if (_policyEnforcementService != null && _policyEnforcementService.HasPolicies(tenant))
+        {
+            var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var claim in principal.Claims)
+            {
+                attributes[claim.Type] = claim.Value;
+            }
+
+            var secContext = new SecurityEvaluationContext(
+                UserSid: userSid,
+                GroupSids: groupSids,
+                Tenant: tenant,
+                TargetTable: tableId,
+                RequestedColumns: tableMeta.Columns.Select(c => c.ColumnName).ToList(),
+                ClientIp: _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None,
+                Timestamp: now,
+                PurposeId: principal.FindFirst("purpose")?.Value ?? principal.FindFirst("purpose_id")?.Value,
+                Attributes: attributes);
+
+            var abac = await _policyEnforcementService.EvaluatePolicyAsync(secContext, ct).ConfigureAwait(false);
+            if (!abac.IsAllowed)
+            {
+                _logger.LogWarning("Casbin ABAC denied user {User} raw access to Iceberg table {TableId}", userSid, tableId);
+                throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
+            }
+
+            abacRowFilter = abac.CombinedRowFilterSql;
+        }
+
+        bool restricted = !string.IsNullOrWhiteSpace(abacRowFilter) ||
+                          !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) ||
                           decision.ColumnAccess.Values.Any(v => v != ColumnAccessLevel.Clear) ||
                           !decision.HasUnconstrainedColumnAllow ||
                           tableMeta.Columns.Any(c => decision.GetEffectiveColumnAccess(c.ColumnName, tableMeta) != ColumnAccessLevel.Clear) ||

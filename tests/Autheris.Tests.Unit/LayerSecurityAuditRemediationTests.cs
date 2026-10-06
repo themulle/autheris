@@ -319,6 +319,7 @@ public sealed class LayerSecurityAuditRemediationTests
             null,
             eventChannelMock,
             enforcerMock,
+            Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(new Microsoft.Extensions.DependencyInjection.ServiceCollection()),
             unauthenticatedPrincipal,
             CancellationToken.None).GetAsyncEnumerator();
 

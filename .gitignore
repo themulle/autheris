@@ -42,6 +42,8 @@ scratch/
 *.p12
 .env
 .env.*
+!.env.example
+.bench-secrets.env
 
 
 # Dev persistence (Gateway:Dev:Persist)

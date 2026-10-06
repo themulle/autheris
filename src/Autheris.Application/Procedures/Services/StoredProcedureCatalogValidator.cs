@@ -245,6 +245,7 @@ public sealed class StoredProcedureCatalogValidator
 
         // 4. Result set structure
         var resultColumns = new List<string>();
+        Dictionary<string, ResultColumnSource>? resultSources = null;
         if (isFunction)
         {
             await using var fnCmd = CreateCommand(connection, "SELECT name FROM sys.columns WHERE object_id = @id ORDER BY column_id", ("@id", objectId));
@@ -258,20 +259,28 @@ public sealed class StoredProcedureCatalogValidator
         {
             await using (var cmd = CreateCommand(
                 connection,
-                "SELECT name, error_number FROM sys.dm_exec_describe_first_result_set_for_object(@id, 0) WHERE is_hidden = 0 ORDER BY column_ordinal",
+                // SEC D-2: browse mode 1 reports the source table/column of every result column.
+                "SELECT name, error_number, source_schema, source_table, source_column FROM sys.dm_exec_describe_first_result_set_for_object(@id, 1) WHERE is_hidden = 0 ORDER BY column_ordinal",
                 ("@id", objectId)))
             await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
             {
+                resultSources = new Dictionary<string, ResultColumnSource>(StringComparer.OrdinalIgnoreCase);
                 while (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
                     if (!reader.IsDBNull(1) || reader.IsDBNull(0))
                     {
                         errors.Add("The result set structure cannot be determined (dynamic result, temp tables or unnamed columns).");
                         resultColumns.Clear();
+                        resultSources.Clear();
                         break;
                     }
 
-                    resultColumns.Add(reader.GetString(0));
+                    var columnName = reader.GetString(0);
+                    resultColumns.Add(columnName);
+                    resultSources[columnName] = new ResultColumnSource(
+                        reader.IsDBNull(2) ? null : reader.GetString(2),
+                        reader.IsDBNull(3) ? null : reader.GetString(3),
+                        reader.IsDBNull(4) ? null : reader.GetString(4));
                 }
             }
         }
@@ -331,7 +340,8 @@ public sealed class StoredProcedureCatalogValidator
             errors,
             resultColumns,
             tables.Select(t => $"{t.Schema}.{t.Name}").ToList(),
-            parameterTypes);
+            parameterTypes,
+            resultSources);
     }
 
     private async Task CheckTableAsync(

@@ -673,5 +673,33 @@ public class DataPathSecurityTests : IDisposable
         items[0].Id.ShouldBe("INV-100-ITEM-2");
         items[0].Price.ShouldBe(2500.00m);
     }
-}
 
+    [Fact]
+    public async Task LoadInvoiceItemsBatchAsync_RowFilterIsEvaluatedOnRawValues_BeforeMasking()
+    {
+        var childTableId = new TableIdentifier("finance", "dbo", "finance_items");
+        var userSid = new Sid("S-1-5-21-USER-CHILD-RLS-MASK");
+
+        // price is MASKED (shown as 0) but the row filter must still see the raw price: only item 2 (2500) matches > 2000.
+        var decision = TableAccessDecision.Allowed(
+            childTableId,
+            new Dictionary<string, ColumnAccessLevel>
+            {
+                ["sensitive_note"] = ColumnAccessLevel.Clear,
+                ["product_name"] = ColumnAccessLevel.Clear,
+                ["price"] = ColumnAccessLevel.Mask
+            },
+            rowFilterSql: "([price] > 2000)",
+            hasUnconstrainedColumnAllow: true);
+
+        await _cacheService.SetCachedDecisionAsync(userSid, childTableId, decision, TimeSpan.FromMinutes(5));
+
+        var accessor = CreateAccessor(userSid);
+        var result = await _executionService.LoadInvoiceItemsBatchAsync(accessor.HttpContext?.User, new[] { "INV-200" });
+
+        var items = result["INV-200"];
+        items.Count.ShouldBe(1);
+        items[0].Id.ShouldBe("INV-200-ITEM-2");
+        items[0].Price.ShouldBe(0m); // masked
+    }
+}

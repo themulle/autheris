@@ -262,6 +262,10 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
                         var rule = metadata.ColumnMaskingRules.TryGetValue(catalogColumn.ColumnName, out var r)
                             ? r
                             : DefaultRedactRule;
+
+                        // SEC D-3: HMAC pseudonyms are tenant-scoped.
+                        rule = Autheris.Application.Services.GatewayExecutionService.ScopeRuleForTenant(
+                            rule, tenantId.Value, _options?.DataMasking?.HmacKeyId);
                         maskedResult[columnName] = _maskingProvider.MaskValue(columnName, rawValue, rule);
                     }
                     else
@@ -340,11 +344,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             return resolved;
         }
 
-        if (subscriber.FindFirst("ip")?.Value is { Length: > 0 } ipStr && IPAddress.TryParse(ipStr, out var parsedIp))
-        {
-            return parsedIp;
-        }
-
+        // SEC (Low): the token "ip" claim is caller-influenced and is not used as a fallback.
         // SEC H-09: Never fall back to Loopback (which may satisfy "internal network" ABAC rules).
         // SecurityEvaluationContext.ClientIp is non-nullable, so the unroutable IPAddress.None is used as "unknown".
         return IPAddress.None;

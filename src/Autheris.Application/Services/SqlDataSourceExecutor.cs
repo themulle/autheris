@@ -249,7 +249,9 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         }
 
         var sqlBuilder = new StringBuilder();
-        sqlBuilder.Append($"SELECT {selectClause} FROM {fromTable}");
+        // The reserved alias lets correlated row filters (EXISTS ... = autheris_target.fk) bind to this table.
+        var aliasKeyword = dialect == DatabaseDialect.Oracle ? " " : " AS ";
+        sqlBuilder.Append($"SELECT {selectClause} FROM {fromTable}{aliasKeyword}{dialect.QuoteIdentifier(TrinoSqlEngine.RowFilterAliases.Target)}");
 
         if (whereParts.Count > 0)
         {
@@ -300,9 +302,10 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         DbTransaction? tx = null;
         try
         {
-            if (dialect == DatabaseDialect.PostgreSql ||
-                string.Equals(connOptions.Provider, "PostgreSql", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(connOptions.Provider, "postgres", StringComparison.OrdinalIgnoreCase))
+            // The configured connection provider decides, with the same rule as SqlConnectionFactory (no provider
+            // opens SQLite). The catalog dialect may differ (it defaults to PostgreSQL); set_config exists on PostgreSQL only.
+            var provider = connOptions.Provider?.Trim().ToLowerInvariant() ?? "sqlite";
+            if (provider is "postgres" or "postgresql" or "npgsql")
             {
                 tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
                 command.Transaction = tx;

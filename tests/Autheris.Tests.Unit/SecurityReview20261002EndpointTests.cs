@@ -459,8 +459,8 @@ public class SecurityReview20261002EndpointTests
         (await repo.GetConsentRequestByTicketIdAsync(ticketId, new TenantId("tenant-b"))).ShouldBeNull();
         (await repo.GetConsentRequestByTicketIdAsync(ticketId, new TenantId("tenant-a"))).ShouldNotBeNull();
 
-        await repo.ActivateConsentAsync(created.Id, new Sid("ITSM_SERVICENOW:inst-a"));
-        await repo.ActivateConsentAsync(created.Id, new Sid("ITSM_SERVICENOW:inst-a"));
+        await repo.ActivateConsentForAutoApproveAsync(created.Id);
+        await repo.ActivateConsentForAutoApproveAsync(created.Id);
 
         var active = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-H06")], tableId, DateTimeOffset.UtcNow);
         active.Count.ShouldBe(1);

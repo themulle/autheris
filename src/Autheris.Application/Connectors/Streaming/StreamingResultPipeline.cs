@@ -56,7 +56,7 @@ public sealed class StreamingResultPipeline : IStreamingResultPipeline
             await foreach (var rawRow in connector.RecordSource.ReadSplitAsync(split, session, ct).ConfigureAwait(false))
             {
                 // In-stream Zero-Trust Step: Column Masking & Deny Stripping (Zero-LOH individual record projection)
-                var maskedRow = ConnectorRowMasker.MaskRow(rawRow, metadata, session.AccessDecision, _maskingProvider);
+                var maskedRow = ConnectorRowMasker.MaskRow(rawRow, metadata, session.AccessDecision, _maskingProvider, session.Tenant?.Value);
                 yield return maskedRow;
             }
         }

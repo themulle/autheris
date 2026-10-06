@@ -14,7 +14,9 @@ public sealed record SecurityEvaluationContext(
     IPAddress ClientIp,
     DateTimeOffset Timestamp,
     string? PurposeId,
-    IReadOnlyDictionary<string, object?>? Attributes = null
+    IReadOnlyDictionary<string, object?>? Attributes = null,
+    // SQL dialect of the target table; correlated row filters are generated with its quoting rules.
+    DatabaseDialect? TargetDialect = null
 )
 {
     public string? Department => GetAttribute("department") ?? GetAttribute("dept");

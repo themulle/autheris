@@ -15,4 +15,14 @@ public interface IDeltaPartitionPruner
         IReadOnlyList<DeltaDataFile> allFiles,
         IReadOnlyList<string> partitionColumns,
         IReadOnlyDictionary<string, string> predicates);
+
+    /// <summary>
+    /// SEC E-3: prunes data files; files without ownership proof (partition equality or min == max == value) for any
+    /// <paramref name="mandatoryColumns"/> (e.g. the tenant column) are discarded (fail-closed).
+    /// </summary>
+    IReadOnlyList<DeltaDataFile> PruneDataFiles(
+        IReadOnlyList<DeltaDataFile> allFiles,
+        IReadOnlyList<string> partitionColumns,
+        IReadOnlyDictionary<string, string> predicates,
+        IReadOnlyCollection<string> mandatoryColumns);
 }

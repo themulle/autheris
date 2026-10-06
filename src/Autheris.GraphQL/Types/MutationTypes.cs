@@ -215,7 +215,7 @@ public sealed class Mutation
 
         if (gatewayOptions?.Value.IsAutoApproveEnabled == true)
         {
-            await approvalRepository.ActivateConsentAsync(created.Id, ct);
+            await approvalRepository.ActivateConsentForAutoApproveAsync(created.Id, ct);
             var payload = new ConsentRequestPayload
             {
                 RequestId = created.Id,

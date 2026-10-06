@@ -88,6 +88,11 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             new("Declarative SQL Endpoints", "/api/v1/queries/openapi.json")
         };
 
+        if (_options.IncludeStoredProcedureSpec)
+        {
+            apis.Add(new("Stored Procedures", "/api/v1/procedures/openapi.json"));
+        }
+
         foreach (var group in domainGroups)
         {
             var domain = group.Key;

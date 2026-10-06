@@ -15,10 +15,10 @@ services:
     networks:
       - bench-net
     ports:
-      - "5432:5432"
+      - "${DB_BIND_IP:-127.0.0.1}:5432:5432"
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_PASSWORD: ${BENCH_DB_PASSWORD:?run scripts via lib_secrets.sh}
       POSTGRES_DB: postgres
     volumes:
       - ../configs/chinook.sql:/docker-entrypoint-initdb.d/01-chinook.sql:ro
@@ -57,16 +57,16 @@ services:
     networks:
       - bench-net
     ports:
-      - "8085:8080"
+      - "${GATEWAY_BIND_IP:-127.0.0.1}:8085:8080"
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      HASURA_GRAPHQL_DATABASE_URL: postgres://postgres:postgrespassword@postgres:5432/postgres
+      HASURA_GRAPHQL_DATABASE_URL: postgres://postgres:${BENCH_DB_PASSWORD:?run scripts via lib_secrets.sh}@postgres:5432/postgres
       HASURA_GRAPHQL_ENABLE_CONSOLE: "false"
       HASURA_GRAPHQL_DEV_MODE: "false"
       HASURA_GRAPHQL_LOG_LEVEL: "warn"
-      HASURA_GRAPHQL_ADMIN_SECRET: "my-secret"
+      HASURA_GRAPHQL_ADMIN_SECRET: "${BENCH_HASURA_ADMIN_SECRET:?run scripts via lib_secrets.sh}"
       HASURA_GRAPHQL_PG_CONNECTIONS: 100
       HASURA_GRAPHQL_PG_TIMEOUT: 15
     deploy:
@@ -87,12 +87,12 @@ services:
     networks:
       - bench-net
     ports:
-      - "4000:4000"
+      - "${GATEWAY_BIND_IP:-127.0.0.1}:4000:4000"
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://postgres:postgrespassword@postgres:5432/postgres
+      DATABASE_URL: postgres://postgres:${BENCH_DB_PASSWORD:?run scripts via lib_secrets.sh}@postgres:5432/postgres
       PORT: 4000
       PG_MAX_POOL: 100
       NODE_ENV: production
@@ -114,12 +114,12 @@ services:
     networks:
       - bench-net
     ports:
-      - "5001:5001"
+      - "${GATEWAY_BIND_IP:-127.0.0.1}:5001:5001"
     depends_on:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://postgres:postgrespassword@postgres:5432/postgres
+      DATABASE_URL: postgres://postgres:${BENCH_DB_PASSWORD:?run scripts via lib_secrets.sh}@postgres:5432/postgres
       PORT: 5001
       PG_MAX_POOL: 100
       NODE_ENV: production
@@ -141,7 +141,7 @@ services:
     networks:
       - bench-net
     ports:
-      - "5000:5000"
+      - "${GATEWAY_BIND_IP:-127.0.0.1}:5000:5000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -165,7 +165,8 @@ services:
       Gateway__RateLimiting__PostAuthSidRateLimit__TokenBucketCapacity: "100000"
       Gateway__RateLimiting__PostAuthSidRateLimit__TokensPerSecond: "10000"
       Gateway__SingleQueryPushdown__Enabled: "true"
-      Gateway__DataSources__Connections__chinook__ConnectionString: "Host=postgres;Port=5432;Database=postgres;Username=postgres;Password=postgrespassword;Pooling=true;Maximum Pool Size=100;Minimum Pool Size=10"
+      Gateway__DataSources__Connections__chinook__ConnectionString: "Host=postgres;Port=5432;Database=postgres;Username=postgres;Password=${BENCH_DB_PASSWORD:?run scripts via lib_secrets.sh};Pooling=true;Maximum Pool Size=100;Minimum Pool Size=10"
+      Gateway__DataSources__Connections__finance__ConnectionString: "Host=postgres;Port=5432;Database=postgres;Username=postgres;Password=${BENCH_DB_PASSWORD:?run scripts via lib_secrets.sh};Pooling=true;Maximum Pool Size=100;Minimum Pool Size=10"
       Gateway__DataSources__Connections__chinook__CommandTimeoutSeconds: "15"
       Gateway__DataSources__Connections__chinook__Dialect: "PostgreSql"
     deploy:

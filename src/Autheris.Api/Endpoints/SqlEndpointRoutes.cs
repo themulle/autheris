@@ -3,6 +3,7 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security;
 using System.Text.Json;
 using System.Threading;
@@ -58,11 +59,34 @@ public static class SqlEndpointRoutes
         return app;
     }
 
-    private static IResult HandleListEndpoints(ISqlEndpointRegistry registry)
+    private static IResult HandleListEndpoints(ISqlEndpointRegistry registry, HttpContext context)
     {
         var endpoints = registry.GetAll();
-        return Results.Ok(endpoints);
+        if (IsListAdmin(context.User))
+        {
+            return Results.Ok(endpoints);
+        }
+
+        return Results.Ok(ToPublicListing(endpoints));
     }
+
+    // G3: RawSql, DataSource and ReferencedTables are internal schema details; only admins see them.
+    internal static bool IsListAdmin(System.Security.Claims.ClaimsPrincipal? user)
+        => EndpointSecurity.IsCanonicalClusterAdmin(user) || EndpointSecurity.IsGlobalGovernanceAdmin(user);
+
+    internal static IReadOnlyList<object> ToPublicListing(IEnumerable<Autheris.Domain.Model.SqlEndpointDefinition> endpoints)
+        => endpoints.Select(e => (object)new
+        {
+            name = e.Name,
+            summary = e.Summary,
+            parameters = e.Parameters.Select(p => new
+            {
+                name = p.Name,
+                type = p.ClrType.Name,
+                isRequired = p.IsRequired,
+                description = p.Description
+            }).ToList()
+        }).ToList();
 
     private static IResult HandleOpenApiSpec(ISqlEndpointRegistry registry)
     {

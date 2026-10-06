@@ -63,7 +63,7 @@ Das Gateway unterstützt ein flexibles, mehrgleisiges Authentifizierungskonzept 
 | :--- | :--- | :--- | :--- | :--- |
 | `Domain` | `string` | Gültiger FQDN | `"CORP.LOCAL"` | Active Directory Domäne. |
 | `ServicePrincipalName` | `string` | SPN-Format | `"HTTP/gql-gateway.corp.local"` | Kerberos Service Principal Name für SPNEGO/Negotiate. |
-| `RequireKerberosOnly` | `bool` | `true \| false` | `true` | Erzwingt Kerberos und lehnt unsichere NTLM-Downgrades ab. |
+| `RequireKerberosOnly` | `bool` | `true \| false` | `true` | Enforces Kerberos: `NTLM` Authorization headers are not routed to Negotiate, and identities authenticated by Negotiate with an authentication type other than Kerberos (e.g. NTLM) are rejected. `PersistNtlmCredentials`/`PersistKerberosCredentials` are always disabled so credentials never carry over on shared upstream connections. |
 | `GroupCacheTtlMinutes` | `int` | `1 .. 60` | `5` | TTL für den lokalen Cache aufgelöster Windows-Gruppen-SIDs. |
 | `EnableTestAuthHandler` | `bool` | `true \| false` | `false` | Ermöglicht `X-Test-User-Sid`-Header zur Simulation von Identitäten (**nur in Development erlaubt!**). |
 
@@ -101,7 +101,7 @@ Ermöglicht direkte Authentifizierung via `Authorization: Basic <base64>` für G
 > [!IMPORTANT]
 > **Sicherheits-Invariante für Produktion**:
 > - Außerhalb der `Development`-Umgebung werden ungesalzene SHA-256-Hashes (`PasswordHashSha256`) sowie Klartextpasswörter (`Password`) ausnahmslos abgelehnt (`401 Unauthorized`).
-> - Passwörter müssen das PBKDF2-Format aufweisen: `$pbkdf2$<iterations>$<salt>$<hash>` (z. B. `$pbkdf2$100000$c2FsdHNhbHQ=$...`).
+> - Passwörter müssen das PBKDF2-Format aufweisen: `$pbkdf2$<iterations>$<salt>$<hash>` (z. B. `$pbkdf2$600000$c2FsdHNhbHQ=$...`).
 > - **Timing-Angriffsschutz**: Existiert ein angefragter Benutzername nicht, führt das Gateway im Hintergrund eine Dummy-PBKDF2-Berechnung mit derselben Iterationszahl durch, sodass Angreifer über Zeitmessungen keine gültigen Benutzernamen enumerieren können. Alle Hashvergleiche erfolgen via `CryptographicOperations.FixedTimeEquals`.
 
 #### 2.2.4 `Authentication.EntraId` & `Authentication.Adfs` (JWT Bearer)
@@ -146,7 +146,7 @@ Unterstützt moderne OIDC/OAuth2-Bearer-Token aus Microsoft Entra ID (Azure AD) 
     "Users": [
       {
         "Username": "service-analyst",
-        "Password": "$pbkdf2$100000$ZXhhbXBsZXNhbHQxMjM0NQ==$dGVzdGhhc2hiYXNlNjQ=",
+        "Password": "$pbkdf2$600000$ZXhhbXBsZXNhbHQxMjM0NQ==$dGVzdGhhc2hiYXNlNjQ=",
         "Roles": ["DataConsumer"],
         "UserSid": "S-1-5-21-CONSUMER-1",
         "GroupSids": ["S-1-5-21-FINANCE-ANALYSTS"]

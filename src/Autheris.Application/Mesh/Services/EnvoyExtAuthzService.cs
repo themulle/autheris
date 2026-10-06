@@ -306,6 +306,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
     public string GenerateIstioEnvoyFilterYaml(EnvoyFilterExportOptions? options = null)
     {
         var opts = options ?? new EnvoyFilterExportOptions();
+        ValidateExportOptions(opts);
         var sb = new StringBuilder();
 
         sb.AppendLine("apiVersion: networking.istio.io/v1alpha3");
@@ -367,6 +368,9 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         sb.AppendLine("            \"@type\": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz");
         sb.AppendLine($"            failure_mode_allow: {(opts.FailOpen ? "true" : "false")}");
         sb.AppendLine("            http_service:");
+        // G3: Envoy appends the original request path to http_service.path_prefix; without it the check would be sent to
+        // the original path (e.g. /api/orders) instead of the PDP route.
+        sb.AppendLine($"              path_prefix: {opts.AuthzPath}");
         sb.AppendLine("              server_uri:");
         sb.AppendLine($"                uri: http://{opts.ServiceHost}:{opts.ServicePort}{opts.AuthzPath}");
         sb.AppendLine($"                cluster: outbound|{opts.ServicePort}||{opts.ServiceHost}");
@@ -388,6 +392,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
     public string GenerateIstioWasmPluginYaml(EnvoyFilterExportOptions? options = null)
     {
         var opts = options ?? new EnvoyFilterExportOptions();
+        ValidateExportOptions(opts);
         var sb = new StringBuilder();
 
         sb.AppendLine("apiVersion: extensions.istio.io/v1alpha1");
@@ -408,5 +413,44 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         sb.AppendLine("    cacheTtlSeconds: 15");
 
         return sb.ToString();
+    }
+
+    private static readonly Regex DnsLabelRegex = new("^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+    private static readonly Regex AuthzPathRegex = new("^/[A-Za-z0-9/_.-]{0,200}$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+
+    /// <summary>
+    /// G3: Export parameters are written into YAML unescaped, so they are restricted to DNS labels / numeric values.
+    /// </summary>
+    internal static void ValidateExportOptions(EnvoyFilterExportOptions opts)
+    {
+        if (opts.MeshNamespace is null || !DnsLabelRegex.IsMatch(opts.MeshNamespace))
+        {
+            throw new ArgumentException("Invalid namespace: must be a DNS label.", nameof(opts));
+        }
+
+        if (opts.FilterName is null || !DnsLabelRegex.IsMatch(opts.FilterName))
+        {
+            throw new ArgumentException("Invalid filter name: must be a DNS label.", nameof(opts));
+        }
+
+        if (opts.ServiceHost is null || opts.ServiceHost.Length > 253 || !opts.ServiceHost.Split('.').All(l => DnsLabelRegex.IsMatch(l)))
+        {
+            throw new ArgumentException("Invalid host: must be a DNS name.", nameof(opts));
+        }
+
+        if (opts.ServicePort is < 1 or > 65535)
+        {
+            throw new ArgumentException("Invalid port.", nameof(opts));
+        }
+
+        if (opts.AuthzPath is null || !AuthzPathRegex.IsMatch(opts.AuthzPath))
+        {
+            throw new ArgumentException("Invalid authorization path.", nameof(opts));
+        }
+
+        if (opts.TimeoutMs is < 1 or > 60000)
+        {
+            throw new ArgumentException("Invalid timeout.", nameof(opts));
+        }
     }
 }

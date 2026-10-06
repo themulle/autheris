@@ -47,7 +47,7 @@ INSERT INTO fin_cranes VALUES (1,'LTM-1100'),(2,'LR-1600');";
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-FinOpsEndToEndSqliteTests-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             b.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
             b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={dbPath}");
@@ -82,7 +82,7 @@ INSERT INTO fin_cranes VALUES (1,'LTM-1100'),(2,'LR-1600');";
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "fin_cranes", TableName = "fin_cranes" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "fin_cranes", TableName = "fin_cranes", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
             Identifier = new TableIdentifier("default", "main", "fin_cranes"),
             Columns = new List<TableColumn>
             {

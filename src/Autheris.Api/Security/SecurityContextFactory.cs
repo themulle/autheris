@@ -61,18 +61,13 @@ public static class SecurityContextFactory
         bool isClusterAdmin = clusterRoles.Contains("ClusterAdmin");
 
         // 4. Resolve Tenant with strict cross-tenant protection
+        // Review (Low): a malformed tenant claim must fail the request (SecurityException -> 403); it must never
+        // silently degrade to the legacy tenant.
         string? claimTenant = null;
-        try
+        var resolvedClaim = user.GetTenantId();
+        if (resolvedClaim != TenantId.LegacySingleTenant)
         {
-            var resolvedClaim = user.GetTenantId();
-            if (resolvedClaim != TenantId.LegacySingleTenant)
-            {
-                claimTenant = resolvedClaim.Value;
-            }
-        }
-        catch (SecurityException)
-        {
-            claimTenant = null;
+            claimTenant = resolvedClaim.Value;
         }
 
         string? headerTenant = null;

@@ -15,7 +15,9 @@ public static class ConnectorRowMasker
         IReadOnlyDictionary<string, object?> rawRow,
         TableMetadata metadata,
         TableAccessDecision decision,
-        IColumnMaskingProvider maskingProvider)
+        IColumnMaskingProvider maskingProvider,
+        string? tenantId = null,
+        string? defaultHmacKeyId = null)
     {
         ArgumentNullException.ThrowIfNull(rawRow);
         ArgumentNullException.ThrowIfNull(metadata);
@@ -45,6 +47,8 @@ public static class ConnectorRowMasker
                     var rule = metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
                         ? mRule
                         : new MaskingRule { RuleType = "REDACT" };
+                    // SEC D-3: HMAC pseudonyms are tenant-scoped (idempotent - values already scoped by the SQL path stay single-scoped).
+                    rule = Autheris.Application.Services.GatewayExecutionService.ScopeRuleForTenant(rule, tenantId, defaultHmacKeyId);
                     rawVal = maskingProvider.MaskValue(col.ColumnName, rawVal, rule);
                 }
                 dict[col.ColumnName] = rawVal;

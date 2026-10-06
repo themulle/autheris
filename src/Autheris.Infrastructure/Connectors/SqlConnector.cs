@@ -155,7 +155,9 @@ public sealed class SqlConnector : IAutherisConnector
             var clampedLimit = Math.Clamp(session.Limit ?? 1000, 1, 5000);
 
             var dsContext = new DataSourceExecutionContext(
-                SourceName: _connectorId,
+                // The connection is configured per data source (Gateway:DataSources:Connections:<source>), so the
+                // table's own source name must be used; the connector id ("default-sql") never matches a connection.
+                SourceName: string.IsNullOrWhiteSpace(meta.Table.SourceName) ? _connectorId : meta.Table.SourceName,
                 Metadata: meta,
                 Principal: session.Principal,
                 AccessDecision: session.AccessDecision,

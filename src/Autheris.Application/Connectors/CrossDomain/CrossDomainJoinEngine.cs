@@ -167,7 +167,7 @@ public sealed class CrossDomainJoinEngine : ICrossDomainJoinEngine
             // If primary has no rows or caller has no consent for joined table (SEC-CDJ-02), return masked primary rows with null relation
             var sanitizedPrimaryOnly = primaryRows.Select(r =>
             {
-                var maskedPrimary = ConnectorRowMasker.MaskRow(r, primaryMeta, primaryDecision, _maskingProvider);
+                var maskedPrimary = ConnectorRowMasker.MaskRow(r, primaryMeta, primaryDecision, _maskingProvider, request.Tenant?.Value);
                 var dict = new Dictionary<string, object?>(maskedPrimary, StringComparer.OrdinalIgnoreCase)
                 {
                     [request.TargetRelationPropertyName] = null
@@ -197,7 +197,7 @@ public sealed class CrossDomainJoinEngine : ICrossDomainJoinEngine
         {
             var noFkRows = primaryRows.Select(r =>
             {
-                var maskedPrimary = ConnectorRowMasker.MaskRow(r, primaryMeta, primaryDecision, _maskingProvider);
+                var maskedPrimary = ConnectorRowMasker.MaskRow(r, primaryMeta, primaryDecision, _maskingProvider, request.Tenant?.Value);
                 var dict = new Dictionary<string, object?>(maskedPrimary, StringComparer.OrdinalIgnoreCase)
                 {
                     [request.TargetRelationPropertyName] = null
@@ -291,7 +291,7 @@ public sealed class CrossDomainJoinEngine : ICrossDomainJoinEngine
                 }
 
                 // Apply column masking to joined row
-                var maskedJoined = ConnectorRowMasker.MaskRow(jRow, joinedMeta, joinedDecision, _maskingProvider);
+                var maskedJoined = ConnectorRowMasker.MaskRow(jRow, joinedMeta, joinedDecision, _maskingProvider, request.Tenant?.Value);
                 joinedIndex[pkVal.ToString()!] = maskedJoined;
             }
         }
@@ -303,7 +303,7 @@ public sealed class CrossDomainJoinEngine : ICrossDomainJoinEngine
         foreach (var pRow in primaryRows)
         {
             // SEC-CDJ-05: Enforce Zero-Trust column masking on primary driving entities
-            var maskedPrimary = ConnectorRowMasker.MaskRow(pRow, primaryMeta, primaryDecision, _maskingProvider);
+            var maskedPrimary = ConnectorRowMasker.MaskRow(pRow, primaryMeta, primaryDecision, _maskingProvider, request.Tenant?.Value);
             var dict = new Dictionary<string, object?>(maskedPrimary, StringComparer.OrdinalIgnoreCase);
 
             if (pRow.TryGetValue(request.ForeignKeyColumn, out var fkVal) &&

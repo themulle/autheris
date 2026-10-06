@@ -50,12 +50,10 @@ public static class ODataEndpoints
             {
                 return false;
             }
-            var roles = context.User.GetUserRoles();
-            return roles.Contains("GovernanceAdmin") ||
-                   roles.Contains("ClusterAdmin") ||
-                   roles.Contains("DataOwner") ||
-                   roles.Contains("SchemaAdmin") ||
-                   roles.Contains("CatalogReader");
+            // G3: the generated spec lists the schema of ALL tenants and is not filtered per caller, so it is
+            // restricted to global administrators. Tenant-scoped roles (DataOwner, SchemaAdmin, CatalogReader)
+            // use the tenant-filtered $metadata / service document instead.
+            return IsOpenApiAdmin(context.User);
         }
 
         IResult? CheckOpenApiAuth(HttpContext context)
@@ -248,6 +246,9 @@ public static class ODataEndpoints
     /// OData entity set query. F-DATA-01: with <c>Accept: application/vnd.apache.parquet</c> the governed rows of a
     /// successful result are returned as Apache Parquet; error results stay OData JSON.
     /// </summary>
+    internal static bool IsOpenApiAdmin(System.Security.Claims.ClaimsPrincipal? user)
+        => EndpointSecurity.IsCanonicalClusterAdmin(user) || EndpointSecurity.IsGlobalGovernanceAdmin(user);
+
     internal static async Task<IResult> HandleEntitySetRequestAsync(
         string domain,
         string schema,

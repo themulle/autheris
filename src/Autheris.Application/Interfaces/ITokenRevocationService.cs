@@ -41,6 +41,14 @@ public static class TokenRevocationKeys
         return subjectOrJti.Trim().ToUpperInvariant();
     }
 
+    private static readonly string[] SubjectClaimTypes =
+    {
+        "sub",
+        ClaimTypes.NameIdentifier,
+        "oid",
+        "http://schemas.microsoft.com/identity/claims/objectidentifier"
+    };
+
     /// <summary>
     /// Returns the normalized keys to look up for a principal: <c>jti</c>, the user SID and <c>sub</c> (distinct).
     /// </summary>
@@ -54,10 +62,26 @@ public static class TokenRevocationKeys
 
         string? jti = principal.FindFirst("jti")?.Value;
         string? sid = principal.GetUserSid()?.Value;
-        string? sub = principal.FindFirst("sub")?.Value;
+        // Review E-1: the JwtBearer handler maps inbound claims (sub -> NameIdentifier, oid -> objectidentifier URI),
+        // the WebSocket validator does not. Accept every spelling so revocation behaves identically on both paths.
+        var subjects = new List<string>(4);
+        foreach (var claimType in SubjectClaimTypes)
+        {
+            foreach (var claim in principal.FindAll(claimType))
+            {
+                if (!string.IsNullOrWhiteSpace(claim.Value))
+                {
+                    subjects.Add(claim.Value);
+                }
+            }
+        }
+
         AddKey(keys, jti);
         AddKey(keys, sid);
-        AddKey(keys, sub);
+        foreach (var subject in subjects)
+        {
+            AddKey(keys, subject);
+        }
 
         // Review E-8: tenant administrators revoke tenant-scoped keys. They only match tokens of their own tenant and
         // never a canonical ClusterAdmin (only a ClusterAdmin can lock out a ClusterAdmin).
@@ -73,7 +97,7 @@ public static class TokenRevocationKeys
 
         if (tenant != null && !Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
         {
-            foreach (var value in new[] { jti, sid, sub })
+            foreach (var value in new[] { jti, sid }.Concat(subjects))
             {
                 if (!string.IsNullOrWhiteSpace(value))
                 {

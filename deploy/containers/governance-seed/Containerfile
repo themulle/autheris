@@ -3,7 +3,7 @@
 # Initializes and populates the SQLite governance DB on shared volume
 # ==============================================================================
 
-FROM python:3.12-alpine
+FROM python:3.12-alpine@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4
 
 WORKDIR /app
 
@@ -13,9 +13,16 @@ COPY containers/governance-seed/seed_governance.py .
 
 RUN chmod +x seed_governance.py
 
+# Run as the same non-root UID/GID (10001) as the gateway container, which shares the /data volume.
+# /data is created and owned here so the named volume inherits ownership; mode 0750 (no world access).
+RUN addgroup -g 10001 -S appgroup && adduser -u 10001 -S -G appgroup appuser \
+    && mkdir -p /data && chown 10001:10001 /data && chmod 0750 /data
+
+USER 10001:10001
+
 ENV GOVERNANCE_DB_PATH=/data/governance.db
 
 HEALTHCHECK --interval=2s --timeout=2s --start-period=1s --retries=15 \
     CMD test -f /data/.seed_complete || exit 1
 
-CMD ["sh", "-c", "python3 seed_governance.py && chmod -R 777 /data && touch /data/.seed_complete && tail -f /dev/null"]
+CMD ["sh", "-c", "python3 seed_governance.py && chmod -R u=rwX,g=rX,o= /data && touch /data/.seed_complete && tail -f /dev/null"]

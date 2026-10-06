@@ -299,6 +299,34 @@ public sealed class GovernedExecutionKernel : IGovernedExecutionKernel
             securityContext.GroupSids,
             new HashSet<string>(securityContext.TenantRoles.Concat(securityContext.ClusterRoles)));
 
+        // SEC D-1: bind the effective row filter into the cache key so an outdated filter can never produce a hit.
+        contextHash += ":" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(decision.CombinedRowFilterSql ?? string.Empty)))[..16];
+
+        // SEC D-1: the row filter of the CURRENT decision is applied to fresh results and to cache hits alike.
+        IReadOnlyList<VectorDocumentChunk> FilterChunksForDecision(IReadOnlyList<VectorDocumentChunk> chunks) =>
+            VectorPushdownSecurityHelper.FilterChunksByRls(
+                chunks,
+                securityContext.TenantId,
+                chunk =>
+                {
+                    if (string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+                    {
+                        return true;
+                    }
+
+                    var payload = new Dictionary<string, object?>(chunk.Metadata, StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["tenant_id"] = chunk.TenantId.Value,
+                        ["document_id"] = chunk.DocumentId,
+                        ["chunk_id"] = chunk.ChunkId,
+                        ["chunk_index"] = chunk.ChunkIndex,
+                        ["content_text"] = chunk.ContentText
+                    };
+
+                    return StreamingRowFilterAstEvaluator.Matches(payload, decision.CombinedRowFilterSql);
+                });
+
         if (_semanticCache != null && request.QueryVector != null && !string.IsNullOrWhiteSpace(request.RawQueryText))
         {
             var cacheKey = new SemanticCacheKey(
@@ -319,7 +347,7 @@ public sealed class GovernedExecutionKernel : IGovernedExecutionKernel
             if (cacheMatch.IsHit && cacheMatch.Result != null)
             {
                 stopwatch.Stop();
-                var redactedCached = cacheMatch.Result.Select(c => ChunkPiiRedactor.RedactChunk(c, metadata, _maskingProvider, decision)).ToList();
+                var redactedCached = FilterChunksForDecision(cacheMatch.Result).Select(c => ChunkPiiRedactor.RedactChunk(c, metadata, _maskingProvider, decision)).ToList();
                 return new GovernedVectorResult(
                     Collection: metadata.Identifier,
                     Chunks: redactedCached,
@@ -371,27 +399,7 @@ public sealed class GovernedExecutionKernel : IGovernedExecutionKernel
         }
 
         // 6. Zero-Trust Post-Execution Chunk RLS Filter (INV-VEC-03)
-        var permittedChunks = VectorPushdownSecurityHelper.FilterChunksByRls(
-            rawChunks,
-            securityContext.TenantId,
-            chunk =>
-            {
-                if (string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
-                {
-                    return true;
-                }
-
-                var payload = new Dictionary<string, object?>(chunk.Metadata, StringComparer.OrdinalIgnoreCase)
-                {
-                    ["tenant_id"] = chunk.TenantId.Value,
-                    ["document_id"] = chunk.DocumentId,
-                    ["chunk_id"] = chunk.ChunkId,
-                    ["chunk_index"] = chunk.ChunkIndex,
-                    ["content_text"] = chunk.ContentText
-                };
-
-                return StreamingRowFilterAstEvaluator.Matches(payload, decision.CombinedRowFilterSql);
-            });
+        var permittedChunks = FilterChunksForDecision(rawChunks);
 
         // 7. Store in Semantic Cache
         if (_semanticCache != null && request.QueryVector != null && !string.IsNullOrWhiteSpace(request.RawQueryText))

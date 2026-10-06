@@ -150,7 +150,7 @@ public sealed class McpSessionStore : IMcpSessionStore
         return updated;
     }
 
-    public McpSessionContext? RefreshPrincipalContext(string sessionId, IReadOnlyList<string> roles, IReadOnlyList<string> groupSids)
+    public McpSessionContext? RefreshPrincipalContext(string sessionId, IReadOnlyList<string> roles, IReadOnlyList<string> groupSids, string? clientIp = null)
     {
         ArgumentNullException.ThrowIfNull(roles);
         ArgumentNullException.ThrowIfNull(groupSids);
@@ -159,7 +159,7 @@ public sealed class McpSessionStore : IMcpSessionStore
 
         while (_sessions.TryGetValue(sessionId, out var current))
         {
-            var updated = current with { Roles = roles, GroupSids = groupSids };
+            var updated = current with { Roles = roles, GroupSids = groupSids, ClientIp = string.IsNullOrWhiteSpace(clientIp) ? current.ClientIp : clientIp };
             if (_sessions.TryUpdate(sessionId, updated, current))
             {
                 if (_clusterState != null)

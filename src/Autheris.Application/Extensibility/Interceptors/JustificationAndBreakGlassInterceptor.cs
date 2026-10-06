@@ -124,9 +124,15 @@ public sealed partial class JustificationAndBreakGlassInterceptor : IIngressInte
 
             if (_governanceRepo != null)
             {
-                var userSid = context.User?.Identity?.Name ?? "Anonymous";
-                var tenantIdStr = context.User?.FindFirst("tenant_id")?.Value;
-                var tenantId = Autheris.Domain.Common.TenantId.TryParse(tenantIdStr, out var tid) ? tid : Autheris.Domain.Common.TenantId.LegacySingleTenant;
+                // Audit attribution uses the canonical SID/tenant (SecurityPrincipalContext, else SID/tenant claims), never Identity.Name.
+                Autheris.Domain.Security.SecurityPrincipalContext? secCtx =
+                    context.Items.TryGetValue(Autheris.Domain.Security.SecurityPrincipalContext.ItemKey, out var secObj)
+                        ? secObj as Autheris.Domain.Security.SecurityPrincipalContext
+                        : null;
+                var userSid = secCtx?.UserSid.Value
+                    ?? Autheris.Domain.Common.ClaimsPrincipalExtensions.GetUserSid(context.User)?.Value
+                    ?? "Anonymous";
+                var tenantId = secCtx?.TenantId ?? Autheris.Domain.Common.ClaimsPrincipalExtensions.GetTenantId(context.User);
                 // SEC M-06: IP comes from the connection (trusted-proxy aware), not from the raw X-Forwarded-For header.
                 var clientIp = context.Items.TryGetValue(ClientIpItemKey, out var ipObj) && ipObj is string ipStr && !string.IsNullOrWhiteSpace(ipStr)
                     ? ipStr

@@ -25,9 +25,10 @@ using Microsoft.Extensions.Options;
 /// <item>Its <c>ConnectCallback</c> resolves the host itself, applies the same decision as <see cref="SsrfProtectionHandler"/>
 /// (integration allowlist + never-allowed ranges + private-address rule outside Development) to EVERY candidate address and
 /// connects only to a checked address (IP pinning, no second DNS lookup, defeats DNS rebinding).</item>
-/// <item>Connections to the system proxy (<see cref="HttpClient.DefaultProxy"/>, e.g. HTTPS_PROXY) are not subject to the
-/// address rules, because the proxy endpoint is operator configuration; the target URL is still checked by the
-/// <see cref="SsrfProtectionHandler"/> before the request is sent.</item>
+/// <item>SEC I-1: the system proxy (HTTP_PROXY/HTTPS_PROXY) is NOT used by default (<c>UseProxy = false</c>), because a proxy
+/// connection bypasses the address rules and the proxy would resolve the target host itself. Only with
+/// <c>Egress.AllowSystemProxy = true</c> (operator decision) connections to the proxy skip the address rules; the target
+/// URL is still checked by the <see cref="SsrfProtectionHandler"/> before the request is sent.</item>
 /// </list>
 /// </summary>
 public static class SecureOutboundHttp
@@ -64,14 +65,16 @@ public static class SecureOutboundHttp
             isDev,
             EgressAllowlist.Create(options.Egress, integrationName),
             options.AreUntrustedCertificatesAllowed,
-            DefaultResolver);
+            DefaultResolver,
+            options.Egress.AllowSystemProxy);
     }
 
     internal static SocketsHttpHandler CreatePrimaryHandler(
         bool isDevelopment,
         EgressAllowlist allowlist,
         bool allowUntrustedCertificates,
-        Func<string, CancellationToken, Task<IPAddress[]>> resolver)
+        Func<string, CancellationToken, Task<IPAddress[]>> resolver,
+        bool allowSystemProxy = false)
     {
         ArgumentNullException.ThrowIfNull(allowlist);
         ArgumentNullException.ThrowIfNull(resolver);
@@ -80,6 +83,8 @@ public static class SecureOutboundHttp
         return new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
+            // SEC I-1: no system proxy by default; a proxy connection would bypass the ConnectCallback address rules.
+            UseProxy = allowSystemProxy,
             SslOptions = allowUntrustedCertificates
                 ? new System.Net.Security.SslClientAuthenticationOptions
                 {
@@ -87,7 +92,7 @@ public static class SecureOutboundHttp
                 }
                 : new System.Net.Security.SslClientAuthenticationOptions(),
             ConnectCallback = (context, cancellationToken) =>
-                ConnectAsync(context.DnsEndPoint, context.InitialRequestMessage.RequestUri, isDevelopment, allowlist, resolver, cancellationToken)
+                ConnectAsync(context.DnsEndPoint, context.InitialRequestMessage.RequestUri, isDevelopment, allowlist, resolver, allowSystemProxy, cancellationToken)
         };
 #pragma warning restore CA5359
     }
@@ -157,10 +162,11 @@ public static class SecureOutboundHttp
         bool isDevelopment,
         EgressAllowlist allowlist,
         Func<string, CancellationToken, Task<IPAddress[]>> resolver,
+        bool allowSystemProxy,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<IPAddress> addresses;
-        if (IsSystemProxyEndpoint(endPoint, requestUri))
+        if (allowSystemProxy && IsSystemProxyEndpoint(endPoint, requestUri))
         {
             var proxyHost = EgressAddressRules.NormalizeHost(endPoint.Host);
             var literal = EgressAddressRules.TryParseIpLiteral(proxyHost);

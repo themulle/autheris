@@ -27,7 +27,9 @@ public static class EnvoyExtAuthzEndpoints
         }).RequireAuthorization();
 
         // GET or POST /api/v1/envoy/check: Envoy HTTP ext_authz header mode
-        app.MapMethods("/api/v1/envoy/check", new[] { "GET", "POST" }, async (
+        // G3: Envoy http_service forwards the original method and appends the original path to path_prefix, so the route
+        // is a catch-all over every method; the suffix is the original request path.
+        app.MapMethods("/api/v1/envoy/check/{**originalPath}", new[] { "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS" }, async (
             HttpContext context,
             IEnvoyExtAuthzService authzService) =>
         {
@@ -37,7 +39,9 @@ public static class EnvoyExtAuthzEndpoints
 
             var path = context.Request.Headers.TryGetValue("X-Original-URI", out var ou) && ou.Count > 0
                 ? ou[0]!
-                : context.Request.Path.Value ?? "/";
+                : (context.Request.RouteValues.TryGetValue("originalPath", out var op) && op is string suffix && suffix.Length > 0
+                    ? "/" + suffix + context.Request.QueryString.Value
+                    : context.Request.Path.Value ?? "/");
 
             var headerMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (k, v) in context.Request.Headers)
@@ -91,8 +95,15 @@ public static class EnvoyExtAuthzEndpoints
                 ServicePort = port ?? 8080
             };
 
-            var yaml = authzService.GenerateIstioEnvoyFilterYaml(options);
-            return Results.Text(yaml, "text/yaml; charset=utf-8");
+            try
+            {
+                var yaml = authzService.GenerateIstioEnvoyFilterYaml(options);
+                return Results.Text(yaml, "text/yaml; charset=utf-8");
+            }
+            catch (ArgumentException)
+            {
+                return Results.BadRequest(new { error = "Invalid export parameters (namespace/host must be DNS names, port numeric)." });
+            }
         });
 
         // GET /api/v1/envoy/export/wasmplugin.yaml: Export Istio WasmPlugin CRD
@@ -109,8 +120,15 @@ public static class EnvoyExtAuthzEndpoints
                 ServicePort = port ?? 8080
             };
 
-            var yaml = authzService.GenerateIstioWasmPluginYaml(options);
-            return Results.Text(yaml, "text/yaml; charset=utf-8");
+            try
+            {
+                var yaml = authzService.GenerateIstioWasmPluginYaml(options);
+                return Results.Text(yaml, "text/yaml; charset=utf-8");
+            }
+            catch (ArgumentException)
+            {
+                return Results.BadRequest(new { error = "Invalid export parameters (namespace/host must be DNS names, port numeric)." });
+            }
         });
 
         return app;

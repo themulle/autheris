@@ -64,7 +64,7 @@ public sealed class OpenMetadataClientTests
         });
 
         var httpClient = new HttpClient(handler);
-        var client = new OpenMetadataClient(httpClient, options, NullLogger<OpenMetadataClient>.Instance);
+        var client = new OpenMetadataClient(httpClient, options, NullLogger<OpenMetadataClient>.Instance, null, new DevEnvironment());
 
         var result = await client.GetTablesAsync();
 
@@ -87,7 +87,7 @@ public sealed class OpenMetadataClientTests
         });
 
         var httpClient = new HttpClient(handler);
-        var client = new OpenMetadataClient(httpClient, options, NullLogger<OpenMetadataClient>.Instance);
+        var client = new OpenMetadataClient(httpClient, options, NullLogger<OpenMetadataClient>.Instance, null, new DevEnvironment());
 
         var result = await client.GetTableByFqnAsync("non_existent_table");
         Assert.Null(result);
@@ -118,7 +118,7 @@ public sealed class OpenMetadataClientTests
         });
 
         var httpClient = new HttpClient(handler);
-        var client = new OpenMetadataClient(httpClient, options, NullLogger<OpenMetadataClient>.Instance);
+        var client = new OpenMetadataClient(httpClient, options, NullLogger<OpenMetadataClient>.Instance, null, new DevEnvironment());
 
         var result = await client.GetTableByFqnAsync("postgres.sales.public.orders");
         Assert.NotNull(result);
@@ -198,7 +198,7 @@ public sealed class OpenMetadataClientTests
         });
 
         var httpClient = new HttpClient(handler);
-        var client = new OpenMetadataClient(httpClient, options, NullLogger<OpenMetadataClient>.Instance);
+        var client = new OpenMetadataClient(httpClient, options, NullLogger<OpenMetadataClient>.Instance, null, new DevEnvironment());
 
         var resPolicies = await client.GetPoliciesAsync();
         var resRoles = await client.GetRolesAsync();
@@ -214,4 +214,12 @@ public sealed class OpenMetadataClientTests
         Assert.Single(resUsers);
         Assert.Equal("alice", resUsers[0].Name);
     }
+}
+
+internal sealed class DevEnvironment : Microsoft.Extensions.Hosting.IHostEnvironment
+{
+    public string EnvironmentName { get; set; } = "Development";
+    public string ApplicationName { get; set; } = "tests";
+    public string ContentRootPath { get; set; } = ".";
+    public Microsoft.Extensions.FileProviders.IFileProvider ContentRootFileProvider { get; set; } = new Microsoft.Extensions.FileProviders.NullFileProvider();
 }

@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using Autheris.Application.State;
 using Autheris.Application.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -18,6 +19,9 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public sealed class ItsmOutboxDispatcherHostedService : BackgroundService
 {
+    internal const string DispatchLockKey = "itsm:outbox:dispatch";
+    internal static readonly TimeSpan DispatchLockExpiry = TimeSpan.FromMinutes(5);
+
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ItsmOutboxDispatcherHostedService> _logger;
     private readonly TimeSpan _pollingInterval;
@@ -79,6 +83,22 @@ public sealed class ItsmOutboxDispatcherHostedService : BackgroundService
         {
             return 0;
         }
+
+        // Review G5: the PostgreSQL outbox has no claim/lease, so concurrent gateway instances would create duplicate
+        // tickets. A cluster-wide lock around the dispatch loop makes a single instance dispatch at a time.
+        var clusterState = scope.ServiceProvider.GetService<IDistributedClusterStateProvider>();
+        IAsyncDisposable? dispatchLock = null;
+        if (clusterState != null)
+        {
+            dispatchLock = await clusterState.TryAcquireLockAsync(DispatchLockKey, DispatchLockExpiry, cancellationToken).ConfigureAwait(false);
+            if (dispatchLock == null)
+            {
+                _logger.LogDebug("ITSM outbox dispatch lock held by another instance; skipping this cycle.");
+                return 0;
+            }
+        }
+
+        await using var lockHandle = dispatchLock;
 
         var pending = await outboxRepo.GetPendingMessagesAsync(batchSize: 20, cancellationToken).ConfigureAwait(false);
         if (pending.Count == 0) return 0;

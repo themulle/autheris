@@ -8,6 +8,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCH_DIR="$(dirname "$SCRIPT_DIR")"
 DOCKER_COMPOSE_FILE="${BENCH_DIR}/docker/docker-compose.yml"
+# Per-run random credentials; DB_BIND_IP selects the interface Postgres is published on
+# (default 127.0.0.1; the multi-host orchestrator sets the private IP).
+. "$(dirname "${BASH_SOURCE[0]}")/lib_secrets.sh"
 
 echo "================================================================================"
 echo " [Step 2/5] Initializing Chinook Database on PostgreSQL"

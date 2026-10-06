@@ -211,27 +211,24 @@ curl -u owner:dev -c jar https://localhost:7214/api/auth/session # who am I, ses
 curl -b jar -c jar -X POST -H 'X-Requested-With: curl' https://localhost:7214/api/auth/logout
 ```
 
-Send `X-Autheris-No-Session: 1` to stay stateless. The session is refused in `Production`. Full behaviour, security properties and limitations: [F-AUTH-DX](features/f-auth-dx-basic-auth-session.md).
+Send `X-No-Session: 1` to stay stateless. The session is refused in `Production`. Full behaviour, security properties and limitations: [F-AUTH-DX](features/f-auth-dx-basic-auth-session.md).
 
 **Setting a password.**
 
 - In `Development`, `Password` may be plaintext (or an unsalted SHA-256 hex digest).
-- In all other environments, passwords must be hashed using **Argon2id** (OWASP and BSI recommended) or salted **PBKDF2-HMAC-SHA256**.
-- Generate production hashes directly using the built-in CLI utility:
+- In all other environments, passwords must be hashed (salted **PBKDF2-HMAC-SHA256**; Argon2id is refused in Production).
+- Generate production hashes directly using the built-in CLI utility. It outputs **PBKDF2-HMAC-SHA256 with 600 000 iterations** by default (Production refuses Argon2id; `--type argon2id` is only for Development). The password is read from **stdin**; passing it as an argument still works but prints a warning because arguments leak into the process list and shell history.
 
 ```bash
-dotnet run --project src/Autheris.Api -- hash-password MySecretPassword123!
+read -rs PW && printf '%s\n' "$PW" | dotnet run --project src/Autheris.Api -- hash-password
 ```
 
 Output:
 ```text
 Autheris Password Hash Generator
 --------------------------------
-Algorithm: Argon2id (OWASP & BSI recommended)
-Hash:      $argon2id$v=19$m=65536,t=3,p=1$NAncgBIY007GM+3D+CCUEA==$ECyRmF3SsewbPefM6SfUo0EEWBTDydPzSOMOZ//6b8E=
-
 Algorithm: PBKDF2-HMAC-SHA256 (NIST compliant)
-Hash:      $pbkdf2$100000$W5/aW44Aq8D4BkSIvYCymA==$CVQyS8iYh0rWXBseQxp84+If0jattqHT6LHedNCDNsg=
+Hash:      $pbkdf2$600000$W5/aW44Aq8D4BkSIvYCymA==$CVQyS8iYh0rWXBseQxp84+If0jattqHT6LHedNCDNsg=
 ```
 
 > [!TIP]

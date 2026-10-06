@@ -46,7 +46,8 @@ public interface IMcpSessionStore
     McpSessionContext? RefreshPrincipalContext(
         string sessionId,
         System.Collections.Generic.IReadOnlyList<string> roles,
-        System.Collections.Generic.IReadOnlyList<string> groupSids);
+        System.Collections.Generic.IReadOnlyList<string> groupSids,
+        string? clientIp = null);
 }
 
 /// <summary>

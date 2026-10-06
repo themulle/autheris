@@ -3,7 +3,7 @@ const { postgraphile } = require('postgraphile');
 
 const app = express();
 const port = parseInt(process.env.PORT || '5001', 10);
-const dbUrl = process.env.DATABASE_URL || 'postgres://postgres:postgrespassword@localhost:5432/postgres';
+const dbUrl = process.env.DATABASE_URL;
 
 app.use(
   postgraphile(dbUrl, 'public', {
