@@ -70,6 +70,26 @@ internal static class LakehouseLocationGuard
         EnsureNoTraversal(key, location);
     }
 
+    /// <summary>
+    /// SEC E-15: row-level tenant check applied to every returned row, independent of file pruning.
+    /// A row whose tenant value is present and differs (ordinal, case-sensitive) from the session tenant is not returned.
+    /// </summary>
+    internal static bool RowBelongsToTenant(IReadOnlyDictionary<string, object?> row, string tenantColumn, string tenantId)
+    {
+        foreach (var kvp in row)
+        {
+            if (string.Equals(kvp.Key, tenantColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                return kvp.Value is string s
+                    ? string.Equals(s, tenantId, StringComparison.Ordinal)
+                    : string.Equals(kvp.Value?.ToString(), tenantId, StringComparison.Ordinal);
+            }
+        }
+
+        // No tenant value on the row: the file-level proof (mandatory partition/statistics evidence) is the only evidence.
+        return true;
+    }
+
     internal static long ResolveMaxReadBytes(GatewayOptions? options)
     {
         var configured = options?.Lakehouse?.Storage?.MaxReadBytes ?? DefaultMaxReadBytes;

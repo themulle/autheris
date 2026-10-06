@@ -96,6 +96,29 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
         }
     }
 
+    public async ValueTask<long?> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        try
+        {
+            var db = _multiplexer.GetDatabase();
+            var redisKey = (RedisKey)BuildKey(key);
+            var value = await db.StringIncrementAsync(redisKey, delta).ConfigureAwait(false);
+            if (value == delta)
+            {
+                // Counter was just created: bound its lifetime.
+                await db.KeyExpireAsync(redisKey, ttl).ConfigureAwait(false);
+            }
+
+            return value;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to increment counter {Key} in Redis state store.", key);
+            return null;
+        }
+    }
+
     public async ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(channel);

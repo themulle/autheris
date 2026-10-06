@@ -22,6 +22,8 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
 {
     public DataSourceType SupportedType => DataSourceType.LakehouseDelta;
 
+    private const string TenantColumn = "tenantId";
+
     private readonly IDeltaMetadataReader _metadataReader;
     private readonly IDeltaPartitionPruner _partitionPruner;
     private readonly IColumnMaskingProvider _maskingProvider;
@@ -82,6 +84,19 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
             }
         }
 
+        // SEC E-15: tenant isolation is a mandatory predicate (not only a file-level hint) and is re-checked per row below.
+        if (!string.IsNullOrWhiteSpace(tenantId))
+        {
+            if (predicates.TryGetValue(TenantColumn, out var callerTenant) &&
+                !string.Equals(callerTenant.Trim(), tenantId, StringComparison.Ordinal))
+            {
+                throw new Autheris.Domain.Exceptions.GatewaySecurityException(
+                    $"Tenant isolation violation: Supplied tenant predicate '{callerTenant}' does not match session tenant.");
+            }
+
+            predicates[TenantColumn] = tenantId;
+        }
+
         var tableLocation = context.Metadata.Table.TableName;
         var snapshot = await _metadataReader.LoadSnapshotAsync(tableLocation, null, null, ct).ConfigureAwait(false);
 
@@ -96,6 +111,14 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
 
         foreach (var file in prunedFiles)
         {
+            // SEC E-15: row-level tenant check - a file whose stored tenant differs from the session tenant contributes no rows.
+            if (!string.IsNullOrWhiteSpace(tenantId) &&
+                file.PartitionValues.TryGetValue(TenantColumn, out var storedTenant) &&
+                !string.Equals(storedTenant, tenantId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var col in selectedCols)
             {

@@ -18,6 +18,12 @@ public interface IDistributedClusterStateProvider
     ValueTask<bool> RemoveAsync(string key, CancellationToken ct = default);
 
     /// <summary>
+    /// Atomically adds <paramref name="delta"/> to a cluster-wide counter and returns the new value, or null when the
+    /// shared store is unreachable (callers must then fall back to local accounting). The TTL is set when the counter is created.
+    /// </summary>
+    ValueTask<long?> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken ct = default);
+
+    /// <summary>
     /// Publishes a broadcast event across all cluster nodes (e.g. token revocation, HitL step-up approval).
     /// </summary>
     ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default);

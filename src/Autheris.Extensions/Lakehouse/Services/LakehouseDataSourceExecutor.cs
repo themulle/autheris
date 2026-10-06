@@ -300,8 +300,21 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
                     row[field.Name] = GenerateSampleValue(field.Name, field.Type, i);
                 }
 
-                // Ensure tenant matches request
-                row[TenantColumn] = request.TenantId;
+                // SEC E-15: the tenant value of a row is the stored one (partition value) - never overwritten with the session tenant,
+                // so a file that is not exclusively tenant-owned cannot leak foreign rows. Rows without stored value take the
+                // session tenant only because the mandatory file-level evidence above proved the file.
+                if (!row.ContainsKey(TenantColumn) && !string.IsNullOrWhiteSpace(request.TenantId))
+                {
+                    row[TenantColumn] = request.TenantId;
+                }
+
+                if (!string.IsNullOrWhiteSpace(request.TenantId) &&
+                    !LakehouseLocationGuard.RowBelongsToTenant(row, TenantColumn, request.TenantId))
+                {
+                    _logger.LogWarning("Lakehouse scan of '{TableName}' dropped a row of a foreign tenant (row-level isolation).", request.TableName);
+                    continue;
+                }
+
                 rows.Add(row);
 
                 if (rows.Count >= limit) break;
