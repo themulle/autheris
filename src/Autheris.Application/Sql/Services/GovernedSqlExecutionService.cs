@@ -1146,10 +1146,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     private System.Net.IPAddress ResolveClientIp(ClaimsPrincipal user)
     {
         // Unknown client IP must never satisfy "internal network" ABAC rules (no Loopback fallback).
-        return _clientIpResolver?.ResolveClientIp() ??
-            (user.FindFirst("ip")?.Value is { Length: > 0 } ipStr && System.Net.IPAddress.TryParse(ipStr, out var parsedIp)
-                ? parsedIp
-                : System.Net.IPAddress.None);
+        // H-4: a token "ip" claim is client-controlled at the IdP level and is never used as the client address.
+        return _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
     }
 
     private static TableIdentifier ResolveTableIdentifier(TableAccessTarget target)
