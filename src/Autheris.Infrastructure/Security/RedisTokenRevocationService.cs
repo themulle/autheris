@@ -50,12 +50,9 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
             sub.Subscribe(RedisChannel.Literal(_prefix + "events:revoked"), (ch, msg) =>
             {
                 if (msg.IsNullOrEmpty) return;
-                var parts = msg.ToString().Split('|');
-                if (parts.Length >= 3 &&
-                    long.TryParse(parts[1], out var revokedAtMs) &&
-                    long.TryParse(parts[2], out var untilMs))
+                if (TryParseEvent(msg.ToString(), out var evKey, out var revokedAt, out var until))
                 {
-                    _local.Revoke(parts[0], DateTimeOffset.FromUnixTimeMilliseconds(revokedAtMs), DateTimeOffset.FromUnixTimeMilliseconds(untilMs));
+                    _local.Revoke(evKey, revokedAt, until);
                 }
             });
         }
@@ -63,6 +60,46 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
         {
             _logger.LogWarning(ex, "Failed to subscribe to Redis token revocation channel.");
         }
+    }
+
+    /// <summary>
+    /// Review R4-1: the key may contain '|' (tenant-scoped keys), so the two numeric fields are split from the right.
+    /// </summary>
+    internal static bool TryParseEvent(string payload, out string key, out DateTimeOffset revokedAt, out DateTimeOffset until)
+    {
+        key = string.Empty;
+        revokedAt = default;
+        until = default;
+        int last = payload.LastIndexOf('|');
+        if (last <= 0)
+        {
+            return false;
+        }
+
+        int prev = payload.LastIndexOf('|', last - 1);
+        if (prev <= 0)
+        {
+            return false;
+        }
+
+        if (!long.TryParse(payload.AsSpan(prev + 1, last - prev - 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out var revokedAtMs) ||
+            !long.TryParse(payload.AsSpan(last + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out var untilMs))
+        {
+            return false;
+        }
+
+        try
+        {
+            revokedAt = DateTimeOffset.FromUnixTimeMilliseconds(revokedAtMs);
+            until = DateTimeOffset.FromUnixTimeMilliseconds(untilMs);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return false;
+        }
+
+        key = payload[..prev];
+        return true;
     }
 
     internal string BuildKey(string normalizedKey) => _prefix + normalizedKey;
@@ -88,16 +125,28 @@ public sealed class RedisTokenRevocationService : ITokenRevocationService
             var db = _multiplexer.GetDatabase();
             ct.ThrowIfCancellationRequested();
 
-            // One round trip for all lookup keys (jti, SID, sub and their tenant-scoped variants, review E-8).
-            var redisKeys = new RedisKey[keys.Count];
+            // Review R4-2: individual GETs (pipelined) instead of one MGET, because the keys may live in different
+            // hash slots of a Redis Cluster, where a multi-key command fails with CROSSSLOT.
+            var lookups = new Task<RedisValue>[keys.Count];
             for (int i = 0; i < keys.Count; i++)
             {
-                redisKeys[i] = BuildKey(keys[i]);
+                lookups[i] = db.StringGetAsync((RedisKey)BuildKey(keys[i]));
             }
 
-            var values = await db.StringGetAsync(redisKeys).ConfigureAwait(false);
-            foreach (var value in values)
+            foreach (var lookup in lookups)
             {
+                RedisValue value;
+                try
+                {
+                    value = await lookup.ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // One failing key must not hide a revocation that another lookup already returned.
+                    _logger.LogWarning(ex, "Token revocation lookup of a single key in Redis failed.");
+                    continue;
+                }
+
                 if (value.IsNullOrEmpty)
                 {
                     continue;
