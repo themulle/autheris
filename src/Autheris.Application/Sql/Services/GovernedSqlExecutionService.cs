@@ -288,6 +288,35 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             if (_tableRepository != null)
             {
                 tableMeta = await _tableRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+
+                // An unqualified name is catalogued under "public" by convention, or under the schema the backend
+                // itself resolves it to (SQLite "main", SQL Server "dbo"). Both entries for one physical table would
+                // make the applicable policy ambiguous -> reject.
+                string? backendDefaultSchema = targetDatabaseDialect switch
+                {
+                    DatabaseDialect.Sqlite => "main",
+                    DatabaseDialect.SqlServer => "dbo",
+                    _ => null
+                };
+                if (string.IsNullOrWhiteSpace(target.Schema) && backendDefaultSchema != null &&
+                    !TableIdentifier.TryParse(target.FullName, out _))
+                {
+                    var backendId = new TableIdentifier(tableId.Domain, backendDefaultSchema, tableId.TableName);
+                    var backendMeta = await _tableRepository.GetTableMetadataAsync(backendId, ct).ConfigureAwait(false);
+                    if (backendMeta != null && tableMeta != null)
+                    {
+                        _logger?.LogWarning("WebSQL rejected table {Table}: catalogued under both '{PublicId}' and '{BackendId}'.", target.FullName, tableId, backendId);
+                        throw TableDenied(target);
+                    }
+
+                    if (backendMeta != null)
+                    {
+                        tableMeta = backendMeta;
+                        tableId = backendId;
+                        resolvedId = backendId;
+                    }
+                }
+
                 if (tableMeta == null && !string.Equals(tableId.Domain, "default", StringComparison.OrdinalIgnoreCase))
                 {
                     resolvedId = new TableIdentifier("default", tableId.Schema, tableId.TableName);
@@ -644,11 +673,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
         }
 
+        // Client parameters (@name) are not part of the Trino grammar: they are parsed as placeholder identifiers and
+        // turned back into bound parameters after the rewrite.
+        string sqlForRewrite = NormalizeClientParameters(request.Sql, request.Parameters, out var clientParameterNames);
+
         var dmlContext = new DmlAuditContext();
         GovernedRewrite rewrite;
         try
         {
-            rewrite = await RewriteCoreAsync(request.Sql, user, tenantId, dsName, dmlContext, ct).ConfigureAwait(false);
+            rewrite = await RewriteCoreAsync(sqlForRewrite, user, tenantId, dsName, dmlContext, ct).ConfigureAwait(false);
         }
         catch (SecurityException policyEx) when (dmlContext.IsDml)
         {
@@ -657,7 +690,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             throw;
         }
 
-        string securedSql = rewrite.Sql;
+        string securedSql = RestoreClientParameters(rewrite.Sql, clientParameterNames);
 
         // Audit Log Entry (secured SQL only contains parameter placeholders, never masking keys).
         // DML statements are audited separately (WEBSQL_DML_*), without SQL text that may carry literal data values.
@@ -739,10 +772,18 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
         if (request.Parameters != null)
         {
+            // "name" and "@name" denote the same parameter; bind it once.
+            var boundNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (paramName, paramVal) in request.Parameters)
             {
+                string normalizedName = paramName.StartsWith('@') ? paramName : "@" + paramName;
+                if (!boundNames.Add(normalizedName))
+                {
+                    continue;
+                }
+
                 var p = command.CreateParameter();
-                p.ParameterName = paramName.StartsWith('@') ? paramName : "@" + paramName;
+                p.ParameterName = normalizedName;
                 p.Value = paramVal ?? DBNull.Value;
                 command.Parameters.Add(p);
             }
@@ -1148,6 +1189,103 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         // Unknown client IP must never satisfy "internal network" ABAC rules (no Loopback fallback).
         // H-4: a token "ip" claim is client-controlled at the IdP level and is never used as the client address.
         return _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
+    }
+
+    private const string ClientParameterPlaceholderPrefix = "__param_";
+
+    /// <summary>
+    /// Replaces client parameters (@name) outside string literals and quoted identifiers with placeholder identifiers
+    /// (__param_name) so the statement can be parsed. Only names that are actually supplied are replaced; the
+    /// placeholder prefix itself is reserved.
+    /// </summary>
+    internal static string NormalizeClientParameters(
+        string sql,
+        IReadOnlyDictionary<string, object?>? parameters,
+        out IReadOnlyCollection<string> replacedNames)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        replacedNames = names;
+        if (parameters == null || parameters.Count == 0 || sql.IndexOf('@') < 0)
+        {
+            return sql;
+        }
+
+        if (sql.Contains(ClientParameterPlaceholderPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new WebSqlPolicyException("The SQL statement uses a reserved identifier prefix.");
+        }
+
+        var supplied = new HashSet<string>(parameters.Keys.Select(k => k.TrimStart('@')), StringComparer.OrdinalIgnoreCase);
+        var sb = new StringBuilder(sql.Length + 16);
+        char quote = '\0';
+        for (int i = 0; i < sql.Length; i++)
+        {
+            char c = sql[i];
+            if (quote != '\0')
+            {
+                sb.Append(c);
+                if (c == quote)
+                {
+                    // Doubled quote inside a literal/identifier is an escaped quote, not the end.
+                    if (i + 1 < sql.Length && sql[i + 1] == quote)
+                    {
+                        sb.Append(sql[++i]);
+                    }
+                    else
+                    {
+                        quote = '\0';
+                    }
+                }
+                continue;
+            }
+
+            if (c is '\'' or '"' or '`')
+            {
+                quote = c;
+                sb.Append(c);
+                continue;
+            }
+
+            bool startsParameter = c == '@'
+                && i + 1 < sql.Length && (char.IsAsciiLetter(sql[i + 1]) || sql[i + 1] == '_')
+                && (i == 0 || !(char.IsAsciiLetterOrDigit(sql[i - 1]) || sql[i - 1] is '_' or '@'));
+            if (startsParameter)
+            {
+                int end = i + 1;
+                while (end < sql.Length && (char.IsAsciiLetterOrDigit(sql[end]) || sql[end] == '_'))
+                {
+                    end++;
+                }
+
+                string name = sql[(i + 1)..end];
+                if (supplied.Contains(name))
+                {
+                    sb.Append(ClientParameterPlaceholderPrefix).Append(name);
+                    names.Add(name);
+                    i = end - 1;
+                    continue;
+                }
+            }
+
+            sb.Append(c);
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>Turns the placeholder identifiers of the rewritten statement back into bound parameters (@name).</summary>
+    internal static string RestoreClientParameters(string securedSql, IReadOnlyCollection<string> names)
+    {
+        if (names.Count == 0)
+        {
+            return securedSql;
+        }
+
+        return System.Text.RegularExpressions.Regex.Replace(
+            securedSql,
+            "[\"`\\[]?" + ClientParameterPlaceholderPrefix + "([A-Za-z_][A-Za-z0-9_]*)[\"`\\]]?",
+            m => names.Contains(m.Groups[1].Value) ? "@" + m.Groups[1].Value : m.Value,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     }
 
     private static TableIdentifier ResolveTableIdentifier(TableAccessTarget target)

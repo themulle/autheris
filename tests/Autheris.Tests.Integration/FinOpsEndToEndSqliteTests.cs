@@ -82,7 +82,7 @@ INSERT INTO fin_cranes VALUES (1,'LTM-1100'),(2,'LR-1600');";
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "fin_cranes", TableName = "fin_cranes" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "fin_cranes", TableName = "fin_cranes", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
             Identifier = new TableIdentifier("default", "main", "fin_cranes"),
             Columns = new List<TableColumn>
             {

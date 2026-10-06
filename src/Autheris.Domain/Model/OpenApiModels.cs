@@ -14,6 +14,12 @@ public sealed record OpenApiDocumentOptions
     public string ServerUrl { get; init; } = "/odata/v4";
     public bool IncludeGovernanceMetadata { get; init; } = true;
     public bool OpenSchema { get; init; } = false;
+
+    /// <summary>
+    /// Lists the stored procedure spec (/api/v1/procedures/openapi.json) in the index. The route only exists when
+    /// SqlEndpoints:Procedures:Enabled is set, so the link must follow that switch.
+    /// </summary>
+    public bool IncludeStoredProcedureSpec { get; init; } = false;
 }
 
 /// <summary>

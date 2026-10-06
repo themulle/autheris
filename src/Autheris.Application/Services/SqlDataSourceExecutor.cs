@@ -300,9 +300,10 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         DbTransaction? tx = null;
         try
         {
-            if (dialect == DatabaseDialect.PostgreSql ||
-                string.Equals(connOptions.Provider, "PostgreSql", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(connOptions.Provider, "postgres", StringComparison.OrdinalIgnoreCase))
+            // The configured connection provider decides, with the same rule as SqlConnectionFactory (no provider
+            // opens SQLite). The catalog dialect may differ (it defaults to PostgreSQL); set_config exists on PostgreSQL only.
+            var provider = connOptions.Provider?.Trim().ToLowerInvariant() ?? "sqlite";
+            if (provider is "postgres" or "postgresql" or "npgsql")
             {
                 tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
                 command.Transaction = tx;

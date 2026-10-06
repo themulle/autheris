@@ -85,9 +85,13 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
         {
             new("All Domains (Monolithic)", $"{root}/$openapi"),
             new("All Domains (Modular $ref)", $"{root}/$openapi?mode=modular"),
-            new("Declarative SQL Endpoints", "/api/v1/queries/openapi.json"),
-            new("Stored Procedures", "/api/v1/procedures/openapi.json")
+            new("Declarative SQL Endpoints", "/api/v1/queries/openapi.json")
         };
+
+        if (_options.IncludeStoredProcedureSpec)
+        {
+            apis.Add(new("Stored Procedures", "/api/v1/procedures/openapi.json"));
+        }
 
         foreach (var group in domainGroups)
         {

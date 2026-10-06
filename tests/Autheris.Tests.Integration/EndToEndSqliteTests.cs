@@ -94,7 +94,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran',100),(2,'LTM-1230','Mobi
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
             Identifier = new TableIdentifier("default", "main", "e2e_cranes"),
             Columns = new List<TableColumn>
             {

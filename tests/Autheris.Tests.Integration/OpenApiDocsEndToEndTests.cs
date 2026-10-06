@@ -89,7 +89,7 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
         var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes" },
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "e2e_cranes", TableName = "e2e_cranes", SchemaName = "main", SourceType = "Sqlite", SourceName = "default" },
             Identifier = new TableIdentifier("default", "main", "e2e_cranes"),
             Columns = new List<TableColumn>
             {
@@ -362,14 +362,20 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
     public async Task OpenApiIndex_BehindTrustedReverseProxy_UsesExternalHostAndScheme()
     {
         await RegisterCatalogAsync();
-        using var proxied = _factory.WithWebHostBuilder(b => b.UseSetting("Gateway:ReverseProxy:Enabled", "true"));
+        // The in-process TestServer has no remote address; the request must come from a known proxy (loopback).
+        using var proxied = _factory.WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Gateway:ReverseProxy:Enabled", "true");
+            b.ConfigureServices(s => s.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter, LoopbackPeerStartupFilter>());
+        });
         var client = AdminOf(proxied);
         client.DefaultRequestHeaders.Add("X-Forwarded-Host", "docs.corp.local");
         client.DefaultRequestHeaders.Add("X-Forwarded-Proto", "https");
 
         var urls = await IndexUrlsAsync(client);
         urls.ShouldNotBeEmpty();
-        foreach (var url in urls.Where(u => Uri.TryCreate(u, UriKind.Absolute, out _)))
+        // On Linux "/api/..." also parses as an absolute (file) URI, so only http(s) links count as absolute.
+        foreach (var url in urls.Where(u => Uri.TryCreate(u, UriKind.Absolute, out var abs) && (abs.Scheme == Uri.UriSchemeHttp || abs.Scheme == Uri.UriSchemeHttps)))
         {
             url.ShouldStartWith("https://docs.corp.local/odata/v4/", customMessage: $"Link passt nicht zur externen Adresse: {url}");
         }
@@ -422,5 +428,19 @@ INSERT INTO e2e_cranes VALUES (1,'LTM-1100','Mobilkran'),(2,'LR-1600','Raupenkra
         doc.RootElement.TryGetProperty("errors", out _).ShouldBeFalse($"Introspection liefert Fehler: {body}");
         doc.RootElement.GetProperty("data").GetProperty("__schema").GetProperty("queryType").GetProperty("name").GetString().ShouldBe("Query");
         doc.RootElement.GetProperty("data").GetProperty("__schema").GetProperty("types").GetArrayLength().ShouldBeGreaterThan(5);
+    }
+
+    /// <summary>Gives in-process requests the loopback address of a known reverse proxy.</summary>
+    private sealed class LoopbackPeerStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    {
+        public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) => app =>
+        {
+            Microsoft.AspNetCore.Builder.UseExtensions.Use(app, async (context, nextMiddleware) =>
+            {
+                context.Connection.RemoteIpAddress ??= IPAddress.Loopback;
+                await nextMiddleware();
+            });
+            next(app);
+        };
     }
 }

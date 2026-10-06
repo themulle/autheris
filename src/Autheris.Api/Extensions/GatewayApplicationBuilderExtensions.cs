@@ -29,6 +29,19 @@ public static class GatewayApplicationBuilderExtensions
 
         if (gatewayOptions.ReverseProxy.Enabled)
         {
+            // A connection without a remote address (Unix domain socket, in-process host) cannot be matched against
+            // KnownProxies/KnownNetworks, and ForwardedHeadersMiddleware would accept its X-Forwarded-* headers.
+            // Such a peer is not a known proxy: drop the headers so they cannot spoof host, scheme or client IP.
+            app.Use(async (context, next) =>
+            {
+                if (context.Connection.RemoteIpAddress == null)
+                {
+                    context.Request.Headers.Remove("X-Forwarded-For");
+                    context.Request.Headers.Remove("X-Forwarded-Proto");
+                    context.Request.Headers.Remove("X-Forwarded-Host");
+                }
+                await next();
+            });
             app.UseForwardedHeaders();
         }
         app.UseCors();
