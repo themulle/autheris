@@ -493,7 +493,7 @@ public static class ProcedureDefinitionParser
             throw new FormatException("'required_roles' is present but contains no role; remove the key or list at least one role.");
         }
 
-        var outputs = (model.Outputs ?? []).Select(o => RequireIdentifier(o?.Trim(), "output column")).ToList();
+        var outputs = ParseYamlOutputs(model.Outputs, out var outputTypes);
         var cleared = (model.ClearedColumns ?? []).Select(c => RequireIdentifier(c?.Trim(), "cleared column")).ToList();
 
         string? resultTable = string.IsNullOrWhiteSpace(model.ResultTable) ? null : model.ResultTable.Trim();
@@ -538,8 +538,82 @@ public static class ProcedureDefinitionParser
             DeclaredOutputs: outputs,
             Kind: kind)
         {
-            ArgumentOrder = argumentOrder
+            ArgumentOrder = argumentOrder,
+            DeclaredOutputTypes = outputTypes
         };
+    }
+
+    /// <summary>
+    /// Outputs may be plain column names or typed: <c>- name</c>, <c>- {name: gps_latitude, type: float}</c> or the short
+    /// form <c>- gps_latitude: float</c>. Types only document the contract (OpenAPI); they are not enforced at runtime.
+    /// </summary>
+    private static List<string> ParseYamlOutputs(List<object>? raw, out Dictionary<string, string> types)
+    {
+        types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var names = new List<string>();
+        foreach (var item in raw ?? [])
+        {
+            string? name;
+            string? type = null;
+            switch (item)
+            {
+                case string s:
+                    name = s;
+                    break;
+                case IDictionary<object, object> map when map.TryGetValue("name", out var n):
+                    name = n?.ToString();
+                    type = map.TryGetValue("type", out var t) ? t?.ToString() : null;
+                    foreach (var key in map.Keys)
+                    {
+                        if (key?.ToString() is not ("name" or "type"))
+                        {
+                            throw new FormatException($"Unknown key '{key}' in output declaration (allowed: name, type).");
+                        }
+                    }
+
+                    break;
+                case IDictionary<object, object> map when map.Count == 1:
+                    var only = map.First();
+                    name = only.Key?.ToString();
+                    type = only.Value?.ToString();
+                    break;
+                default:
+                    throw new FormatException("Every entry in 'outputs' must be a column name, '{name, type}' or '<name>: <type>'.");
+            }
+
+            string column = RequireIdentifier(name?.Trim(), "output column");
+            names.Add(column);
+            if (type != null)
+            {
+                types[column] = NormalizeOutputSqlType(type);
+            }
+        }
+
+        return names;
+    }
+
+    private static readonly HashSet<string> OutputSqlBaseTypes = new(StringComparer.Ordinal)
+    {
+        "int", "bigint", "smallint", "tinyint", "bit", "decimal", "numeric", "float", "real", "money", "smallmoney",
+        "nvarchar", "varchar", "nchar", "char", "uniqueidentifier", "date", "datetime", "datetime2", "smalldatetime",
+        "datetimeoffset", "time"
+    };
+
+    private static string NormalizeOutputSqlType(string text)
+    {
+        string t = Regex.Replace(text.Trim().ToLowerInvariant(), @"\s+", string.Empty, RegexOptions.None, TimeSpan.FromMilliseconds(100));
+        if (!Regex.IsMatch(t, @"^[a-z0-9]+(\((\d+|max)(,\d+)?\))?$", RegexOptions.None, TimeSpan.FromMilliseconds(100)))
+        {
+            throw new FormatException($"Invalid output type '{text}'.");
+        }
+
+        string baseType = t.Contains('(') ? t[..t.IndexOf('(')] : t;
+        if (!OutputSqlBaseTypes.Contains(baseType))
+        {
+            throw new FormatException($"SQL type '{baseType}' is not supported for procedure outputs.");
+        }
+
+        return t;
     }
 
     /// <summary>Review P-5: unknown context keys are rejected instead of silently binding the purpose value.</summary>
@@ -583,7 +657,7 @@ public sealed class ProcedureYamlModel
     public List<ProcedureParameterYamlModel>? Parameters { get; set; }
     public Dictionary<string, string>? Context { get; set; }
     public List<ProcedureContextYamlModel>? ContextBindings { get; set; }
-    public List<string>? Outputs { get; set; }
+    public List<object>? Outputs { get; set; }
     public List<string>? ClearedColumns { get; set; }
 }
 

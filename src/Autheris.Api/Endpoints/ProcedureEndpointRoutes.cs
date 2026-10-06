@@ -89,7 +89,19 @@ public static class ProcedureEndpointRoutes
             var columns = reg.Validation?.ResultColumns ?? [];
             var properties = columns
                 .Where(c => def.ResultTable != null || def.ClearedResultColumns.Contains(c, StringComparer.OrdinalIgnoreCase))
-                .ToDictionary(c => c, _ => (object)new Dictionary<string, object> { ["description"] = "Governed column (may be masked or removed per consent)" });
+                .ToDictionary(c => c, c =>
+                {
+                    var column = new Dictionary<string, object> { ["description"] = "Governed column (may be masked or removed per consent)" };
+                    if (def.DeclaredOutputTypes.TryGetValue(c, out var sqlType))
+                    {
+                        foreach (var (key, value) in SchemaForSqlType(sqlType))
+                        {
+                            column[key] = value;
+                        }
+                    }
+
+                    return (object)column;
+                });
 
             var operation = new Dictionary<string, object>
             {
@@ -143,6 +155,42 @@ public static class ProcedureEndpointRoutes
             },
             ["paths"] = paths
         });
+    }
+
+    /// <summary>JSON schema fragment for a declared result column type (documentation only).</summary>
+    private static Dictionary<string, object> SchemaForSqlType(string sqlType)
+    {
+        string baseType = sqlType.Contains('(') ? sqlType[..sqlType.IndexOf('(')] : sqlType;
+        var schema = new Dictionary<string, object> { ["x-sql-type"] = sqlType };
+        switch (baseType)
+        {
+            case "int" or "bigint" or "smallint" or "tinyint":
+                schema["type"] = "integer";
+                break;
+            case "decimal" or "numeric" or "float" or "real" or "money" or "smallmoney":
+                schema["type"] = "number";
+                break;
+            case "bit":
+                schema["type"] = "boolean";
+                break;
+            case "date":
+                schema["type"] = "string";
+                schema["format"] = "date";
+                break;
+            case "datetime" or "datetime2" or "smalldatetime" or "datetimeoffset":
+                schema["type"] = "string";
+                schema["format"] = "date-time";
+                break;
+            case "uniqueidentifier":
+                schema["type"] = "string";
+                schema["format"] = "uuid";
+                break;
+            default:
+                schema["type"] = "string";
+                break;
+        }
+
+        return schema;
     }
 
     private static Dictionary<string, object> SchemaFor(ProcedureParameter p)

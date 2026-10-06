@@ -220,6 +220,7 @@ public static class ODataEndpoints
         app.MapGet("/ui/swagger", ServeSwaggerUi).AllowAnonymous();
         app.MapGet("/odata/v4/$swagger", ServeSwaggerUi).AllowAnonymous();
         app.MapGet("/docs", ServeSwaggerUi).AllowAnonymous();
+        app.MapGet("/swagger", ServeSwaggerUi).AllowAnonymous();
 
         // Statische, oeffentliche Bibliotheksdateien (nur Allowlist, keine Pfadauflosung vom Client)
         app.MapGet("/ui/swagger/assets/{file}", (string file) =>
