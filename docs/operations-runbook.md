@@ -64,6 +64,8 @@ Notes:
 
 ---
 
+> **Scope of an emergency revocation (review R4-3):** a `GovernanceAdmin` revokes only within their own tenant scope, and the response names it (`scope: tenant`, `tenant`). Tokens of the same subject that carry a different tenant claim (for example Entra `tid` versus the legacy single tenant) stay valid. For a compromised identity that may appear under several tenants, have a **ClusterAdmin** revoke globally.
+
 ## 2. Rolling Updates & Zero-Downtime Drain
 
 ### 2.1 Drain Protocol Lifecycle

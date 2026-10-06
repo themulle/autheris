@@ -655,11 +655,11 @@ public sealed class ItsmWebhookHandler(
             }
 
             var eventId = TryGetStringProperty(root, "EventId", "eventId", "event_id", "DeliveryId", "deliveryId", "delivery_id");
-            var approver = TryGetStringProperty(root, "Approver", "approver", "ApprovedBy", "approvedBy", "approved_by", "sys_updated_by");
-            if (approver == null && root.TryGetProperty("user", out var userProp))
-            {
-                approver = TryGetStringProperty(userProp, "accountId", "name", "emailAddress", "displayName");
-            }
+            // Review R4-4: only an explicit approver field counts. "sys_updated_by" (ServiceNow: last editor) and the Jira
+            // "user" object (the event trigger) identify whoever touched the ticket last, not who approved it, and must
+            // never turn a later editor into a second approver. Without an explicit approver, tables with configured
+            // owners refuse the approval (fail-closed).
+            var approver = TryGetStringProperty(root, "Approver", "approver", "ApprovedBy", "approvedBy", "approved_by");
 
             return new ItsmStatusChangeDto
             {
