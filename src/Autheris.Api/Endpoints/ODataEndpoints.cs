@@ -203,27 +203,38 @@ public static class ODataEndpoints
             return Results.Bytes(bytes, contentType: "application/yaml;charset=utf-8");
         }));
 
-        app.MapGet("/odata/v4/$swagger", (HttpContext context, IWebHostEnvironment env) =>
+        // Swagger UI: Seite unter /ui/swagger (analog /graphql fuer Nitro); /docs und /odata/v4/$swagger bleiben als Aliase.
+        // Die UI-Assets werden aus dem Assembly ausgeliefert (kein CDN, offline-faehig).
+        IResult ServeSwaggerUi(HttpContext context, IWebHostEnvironment env)
         {
             if (!gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true)
             {
                 return Results.Unauthorized();
             }
             var nonce = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
-            context.Response.Headers.ContentSecurityPolicy = $"default-src 'self'; script-src 'self' 'nonce-{nonce}' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://unpkg.com; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
+            context.Response.Headers.ContentSecurityPolicy = $"default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
             return Results.Content(GetSwaggerUiHtml(nonce), "text/html;charset=utf-8");
-        }).AllowAnonymous(); // SEC M-03: handler performs its own (OpenSchema/Dev/authenticated) check
+        }
 
-        app.MapGet("/docs", (HttpContext context, IWebHostEnvironment env) =>
+        // SEC M-03: handlers perform their own (OpenSchema/Dev/authenticated) check
+        app.MapGet("/ui/swagger", ServeSwaggerUi).AllowAnonymous();
+        app.MapGet("/odata/v4/$swagger", ServeSwaggerUi).AllowAnonymous();
+        app.MapGet("/docs", ServeSwaggerUi).AllowAnonymous();
+
+        // Statische, oeffentliche Bibliotheksdateien (nur Allowlist, keine Pfadauflosung vom Client)
+        app.MapGet("/ui/swagger/assets/{file}", (string file) =>
         {
-            if (!gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true)
+            if (!SwaggerUiAssets.TryGetValue(file, out var contentType))
             {
-                return Results.Unauthorized();
+                return Results.NotFound();
             }
-            var nonce = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
-            context.Response.Headers.ContentSecurityPolicy = $"default-src 'self'; script-src 'self' 'nonce-{nonce}' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: https://unpkg.com; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
-            return Results.Content(GetSwaggerUiHtml(nonce), "text/html;charset=utf-8");
-        }).AllowAnonymous(); // SEC M-03: handler performs its own (OpenSchema/Dev/authenticated) check
+            var stream = typeof(ODataEndpoints).Assembly.GetManifestResourceStream("swagger-ui/" + file);
+            if (stream is null)
+            {
+                return Results.NotFound();
+            }
+            return Results.Stream(stream, contentType, enableRangeProcessing: false);
+        }).AllowAnonymous();
 
         app.MapGet("/odata/v4/{domain}/{schema}/{tableName}", HandleEntitySetRequestAsync)
            .WithMetadata(new ParquetOutputSupportedMetadata())
@@ -395,6 +406,16 @@ public static class ODataEndpoints
 
     private static bool IsODataAnnotation(string key) => key.Contains("@odata.", StringComparison.Ordinal);
 
+    private const string SwaggerUiVersion = "5.18.2";
+
+    private static readonly Dictionary<string, string> SwaggerUiAssets = new(StringComparer.Ordinal)
+    {
+        ["swagger-ui.css"] = "text/css; charset=utf-8",
+        ["swagger-ui-bundle.js"] = "text/javascript; charset=utf-8",
+        ["swagger-ui-standalone-preset.js"] = "text/javascript; charset=utf-8",
+        ["favicon-32x32.png"] = "image/png",
+    };
+
     private static string GetSwaggerUiHtml(string nonce) => $$"""
     <!DOCTYPE html>
     <html lang="en">
@@ -402,7 +423,8 @@ public static class ODataEndpoints
       <meta charset="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <title>Autheris - OpenAPI 3.1 & OData Explorer</title>
-      <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui.css" crossorigin="anonymous" />
+      <link rel="icon" type="image/png" href="/ui/swagger/assets/favicon-32x32.png" />
+      <link rel="stylesheet" href="/ui/swagger/assets/swagger-ui.css?v={{SwaggerUiVersion}}" />
       <style>
         .swagger-ui .topbar { background-color: #1e293b; padding: 10px 0; }
         .swagger-ui .topbar .download-url-wrapper { display: flex; align-items: center; gap: 8px; }
@@ -411,8 +433,8 @@ public static class ODataEndpoints
     </head>
     <body>
     <div id="swagger-ui"></div>
-    <script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-bundle.js" crossorigin="anonymous"></script>
-    <script src="https://unpkg.com/swagger-ui-dist@5.18.2/swagger-ui-standalone-preset.js" crossorigin="anonymous"></script>
+    <script src="/ui/swagger/assets/swagger-ui-bundle.js?v={{SwaggerUiVersion}}"></script>
+    <script src="/ui/swagger/assets/swagger-ui-standalone-preset.js?v={{SwaggerUiVersion}}"></script>
     <script nonce="{{nonce}}">
       window.onload = async () => {
         const params = new URLSearchParams(window.location.search);
