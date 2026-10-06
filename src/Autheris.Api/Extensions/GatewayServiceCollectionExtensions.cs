@@ -314,6 +314,8 @@ public static class GatewayServiceCollectionExtensions
 
         // SQL Connection Factory & Health Checks
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
+        services.AddSingleton<Autheris.Infrastructure.Health.AuditChainIntegrityMonitor>();
+        services.AddHostedService(sp => sp.GetRequiredService<Autheris.Infrastructure.Health.AuditChainIntegrityMonitor>());
         services.AddSingleton<IGatewayHealthCheckService, GatewayHealthCheckService>();
 
         // HTTP & Plugin Data Sources

@@ -1064,6 +1064,8 @@ public partial class SqliteGovernanceRepository
             tx.Commit();
 
             req.Status = newStatus;
+            await RecordAuditEventInternalAsync(
+                ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null), ct);
             return req;
         }
         finally
@@ -1137,6 +1139,8 @@ public partial class SqliteGovernanceRepository
             tx.Commit();
 
             req.Status = "REJECTED";
+            await RecordAuditEventInternalAsync(
+                ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason), ct);
             return req;
         }
         finally
@@ -1233,7 +1237,7 @@ public partial class SqliteGovernanceRepository
             {
                 TenantId = consent.TenantId,
                 EventType = "CONSENT_GRANTED",
-                ActorSid = consent.GranteeSid ?? new Sid("SYSTEM"),
+                ActorSid = consent.CreatedBySid ?? new Sid("SYSTEM"),
                 TargetTable = consent.TableIdentifier.ToString(),
                 Decision = "GRANTED",
                 TraceId = Guid.NewGuid().ToString("N"),
@@ -1329,10 +1333,11 @@ public partial class SqliteGovernanceRepository
         {
             TableIdentifier? tableId = null;
             bool isGranteeSelf = false;
+            TenantId revokeTenant = TenantId.LegacySingleTenant;
 
             using (var cmd = _connection.CreateCommand())
             {
-                cmd.CommandText = @"SELECT COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name, c.grantee_type, c.grantee_sid
+                cmd.CommandText = @"SELECT COALESCE(t.source_name, p.domain, 'default'), t.schema_name, t.table_name, c.grantee_type, c.grantee_sid, c.tenant_id
                                     FROM CONSENTS c
                                     JOIN TABLES t ON c.table_id = t.id
                                     LEFT JOIN POLICY_EPOCHS p ON t.id = p.table_id
@@ -1344,6 +1349,11 @@ public partial class SqliteGovernanceRepository
                     tableId = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
                     var gType = reader.GetString(3);
                     var gSid = reader.IsDBNull(4) ? null : reader.GetString(4);
+                    if (!reader.IsDBNull(5))
+                    {
+                        revokeTenant = new TenantId(reader.GetString(5));
+                    }
+
                     if (string.Equals(gType, "User", StringComparison.OrdinalIgnoreCase) &&
                         string.Equals(gSid, revokedBySid.Value, StringComparison.OrdinalIgnoreCase))
                     {
@@ -1385,6 +1395,7 @@ public partial class SqliteGovernanceRepository
 
             var auditEntry = new AuditLogEntry
             {
+                TenantId = revokeTenant,
                 EventType = "CONSENT_REVOKED",
                 ActorSid = revokedBySid,
                 TargetTable = tableId?.ToString() ?? "UNKNOWN",
@@ -1473,9 +1484,10 @@ public partial class SqliteGovernanceRepository
         try
         {
             TableIdentifier? tableId = null;
+            TenantId extendTenant = TenantId.LegacySingleTenant;
             using (var cmd = _connection.CreateCommand())
             {
-                cmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name
+                cmd.CommandText = @"SELECT t.source_name, t.schema_name, t.table_name, c.tenant_id
                                     FROM CONSENTS c
                                     JOIN TABLES t ON c.table_id = t.id
                                     WHERE c.id = @id";
@@ -1484,6 +1496,10 @@ public partial class SqliteGovernanceRepository
                 if (await reader.ReadAsync(ct))
                 {
                     tableId = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
+                    if (!reader.IsDBNull(3))
+                    {
+                        extendTenant = new TenantId(reader.GetString(3));
+                    }
                 }
             }
 
@@ -1501,6 +1517,18 @@ public partial class SqliteGovernanceRepository
             {
                 await IncrementTableEpochInternalAsync(tableId.Value, ct);
             }
+
+            // Review E-10: a longer validity is a policy change and belongs in the hash chain.
+            await RecordAuditEventInternalAsync(new AuditLogEntry
+            {
+                TenantId = extendTenant,
+                EventType = "CONSENT_EXPIRY_EXTENDED",
+                ActorSid = new Sid("SYSTEM"),
+                TargetTable = tableId?.ToString() ?? "UNKNOWN",
+                Decision = "EXTENDED",
+                TraceId = Guid.NewGuid().ToString("N"),
+                DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, NewValidTo = newValidTo })
+            }, ct);
         }
         finally
         {

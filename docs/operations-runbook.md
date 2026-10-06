@@ -175,6 +175,17 @@ The script cannot check the anchor signature or a truncated tail; compare the la
 
 ---
 
+### 4.x Periodic runtime verification (review E-11)
+
+`AuditChainIntegrityMonitor` verifies the chain in the background: first run about two minutes after start, then every `Audit:VerifyHashChainIntervalHours` (default 24). A broken chain is logged as **critical** ("AUDIT HASH CHAIN VIOLATION") and the readiness probe reports the component `AuditChain` as unhealthy, so the instance leaves the load balancer. Settings:
+
+- `Audit:VerifyHashChainEnabled` (default `true`)
+- `Audit:FailReadinessOnChainViolation` (default `true`; set `false` to only log)
+
+A run that cannot complete (database unreachable) is logged as an error and is **not** reported as a violation. The monitor does not replace an external anchor on separate WORM storage; an attacker who can restore database and anchor together is still not detected (see threat model, known limitations).
+
+Audit events written for the approval workflow: `CONSENT_APPROVAL_STEP`, `CONSENT_REQUEST_REJECTED`, `CONSENT_GRANTED` (actor = approver/creator), `CONSENT_REVOKED` (with tenant), `CONSENT_EXPIRY_EXTENDED`, `REBAC_TUPLE_ADDED`, `REBAC_TUPLE_REMOVED`, `SCHEMA_RELOAD`.
+
 ## 5. Data Catalog Synchronization Operations
 
 ### 5.1 Monitoring Background Sync

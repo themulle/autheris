@@ -15,14 +15,17 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<GatewayHealthCheckService> _logger;
     private readonly IHostEnvironment? _environment;
+    private readonly AuditChainIntegrityMonitor? _auditChainMonitor;
 
     public GatewayHealthCheckService(
         IOptions<GatewayOptions> options,
         ILogger<GatewayHealthCheckService> logger,
         IGovernanceRepository? governanceRepository = null,
         IConnectionMultiplexer? redisMultiplexer = null,
-        IHostEnvironment? environment = null)
+        IHostEnvironment? environment = null,
+        AuditChainIntegrityMonitor? auditChainMonitor = null)
     {
+        _auditChainMonitor = auditChainMonitor;
         _options = options;
         _logger = logger;
         _governanceRepository = governanceRepository;
@@ -88,6 +91,22 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         }
         components.Add(new HealthCheckComponentResult("GovernanceDb", dbHealthy, dbDesc));
         if (!dbHealthy) overallHealthy = false;
+
+        // Review E-11: result of the periodic audit hash chain verification.
+        if (_auditChainMonitor != null)
+        {
+            bool failReadiness = _options.Value.Audit.FailReadinessOnChainViolation;
+            bool chainHealthy = !_auditChainMonitor.IsViolated;
+            string chainDesc = _auditChainMonitor.IsViolated
+                ? "Audit hash chain verification FAILED."
+                : _auditChainMonitor.LastCheckedAt == null
+                    ? "Audit hash chain not verified yet."
+                    : _auditChainMonitor.LastRunFailed
+                        ? "Last audit hash chain verification could not complete."
+                        : "Audit hash chain verified.";
+            components.Add(new HealthCheckComponentResult("AuditChain", chainHealthy, chainDesc));
+            if (!chainHealthy && failReadiness) overallHealthy = false;
+        }
 
         // 2. Redis Check (if enabled)
         if (_options.Value.Caching.Redis.Enabled)

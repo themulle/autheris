@@ -61,6 +61,9 @@ public sealed class Consent
     public TenantId TenantId { get; set; } = TenantId.LegacySingleTenant;
     public GranteeType GranteeType { get; init; } = GranteeType.User;
     public Sid? GranteeSid { get; init; }
+
+    /// <summary>Review E-10: who created the consent (approver); used as audit actor only, not persisted.</summary>
+    public Sid? CreatedBySid { get; init; }
     public Guid? RoleId { get; init; }
     public string? RoleName { get; init; }
     public DateTimeOffset ValidFrom { get; init; }
