@@ -284,6 +284,20 @@ public sealed class EnvoyExtAuthzSecurityTests
     }
 
     [Fact]
+    public void GenerateIstioEnvoyFilterYaml_StripsClientSuppliedAutherisHeadersBeforeExtAuthz()
+    {
+        var yaml = _service.GenerateIstioEnvoyFilterYaml();
+
+        // Review C-1 (rest): the strip filter must exist and be ordered before the ext_authz patch.
+        var luaIndex = yaml.IndexOf("envoy.filters.http.lua", StringComparison.Ordinal);
+        var authzIndex = yaml.IndexOf("envoy.filters.http.ext_authz", StringComparison.Ordinal);
+        Assert.True(luaIndex >= 0, "Lua header-strip filter missing");
+        Assert.True(luaIndex < authzIndex, "Header-strip filter must be applied before ext_authz");
+        Assert.Contains("x-autheris-", yaml[luaIndex..authzIndex]);
+        Assert.Contains("headers:remove(key)", yaml);
+    }
+
+    [Fact]
     public void GenerateIstioWasmPluginYaml_EnforcesFailClosedAndValidStructure()
     {
         // Act

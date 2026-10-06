@@ -53,9 +53,8 @@ public static class DbtEndpoints
             IDbtExposurePublisher exposurePublisher,
             HttpContext context) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("ClusterAdmin") ||
-                               context.User.IsInRole("DataOwner");
+            // Review E-7: dbt state is global and carries no table ownership; a plain DataOwner role may not read it.
+            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User);
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -69,9 +68,8 @@ public static class DbtEndpoints
             IDbtMetadataIngestionService dbtService,
             HttpContext context) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("ClusterAdmin") ||
-                               context.User.IsInRole("DataOwner");
+            // Review E-7: dbt state is global and carries no table ownership; a plain DataOwner role may not read it.
+            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User);
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -141,9 +139,8 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtContractValidator validator) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("ClusterAdmin") ||
-                               context.User.IsInRole("DataOwner") ||
+            // Review E-7: dbt state is global and carries no table ownership; a plain DataOwner role may not read it.
+            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
                                context.User.IsInRole("Developer");
             if (!isPrivileged)
             {
@@ -200,9 +197,8 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtHealthCircuitBreaker circuitBreaker) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("ClusterAdmin") ||
-                               context.User.IsInRole("DataOwner") ||
+            // Review E-7: dbt state is global and carries no table ownership; a plain DataOwner role may not read it.
+            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
                                context.User.IsInRole("Developer");
             if (!isPrivileged)
             {

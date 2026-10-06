@@ -519,6 +519,38 @@ public partial class PostgreSqlGovernanceRepository
     public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct = default) =>
         IsAuthorizedApproverForTableInternalAsync(table, approverSid, itsmApproverAccount, ct);
 
+    /// <summary>Review R4-4 (rest): resolves SID, account or e-mail spellings to stable DATA_OWNERS ids.</summary>
+    private async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(IEnumerable<string> identifiers, CancellationToken ct)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        foreach (var identifier in identifiers.Where(i => !string.IsNullOrWhiteSpace(i)))
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"SELECT id FROM DATA_OWNERS
+                                WHERE LOWER(ad_sid) = LOWER(@p) OR LOWER(ad_account) = LOWER(@p) OR LOWER(email) = LOWER(@p)";
+            cmd.Parameters.AddWithValue("@p", identifier);
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                ids.Add(reader.GetString(0));
+            }
+        }
+
+        return ids;
+    }
+
+    private async Task<IReadOnlyCollection<string>> ResolveRequesterOwnerIdsInternalAsync(ConsentRequest req, CancellationToken ct)
+    {
+        var identifiers = ConsentApprovalPolicy.IdentifierCandidates(req.RequesterSid.Value).ToList();
+        if (req.RequesterIdentifiers != null)
+        {
+            identifiers.AddRange(req.RequesterIdentifiers);
+        }
+
+        return await ResolveDataOwnerIdsInternalAsync(identifiers, ct).ConfigureAwait(false);
+    }
+
     private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);

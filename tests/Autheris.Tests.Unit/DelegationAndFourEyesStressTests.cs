@@ -199,6 +199,35 @@ public class DelegationAndFourEyesStressTests : IDisposable
     }
 
     [Fact]
+    public async Task FourEyes_RequesterIdentifiedByOwnerAccount_CannotApproveViaSid_ByOwnerId()
+    {
+        // Review R4-4 (rest): the same data owner appears once by e-mail (requester) and once by SID (approver);
+        // the string comparison alone would not match, the resolved owner id does.
+        var table = new TableIdentifier("finance", "dbo", "finance_table_5");
+        var meta = await _repository.GetTableMetadataAsync(table);
+        meta.ShouldNotBeNull();
+        var owner = (await _repository.GetDataOwnersForTableAsync(table)).First();
+        owner.Email.ShouldNotBeNullOrWhiteSpace();
+        owner.Email.ShouldNotBe(owner.AdSid.Value);
+
+        var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
+        {
+            TableId = meta.Table.Id,
+            TableIdentifier = table,
+            RequesterSid = new Sid(owner.Email),
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = owner.Email,
+            BusinessJustification = "Owner id based separation of duties",
+            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
+        });
+
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+        {
+            await _repository.ApproveConsentRequestStepAsync(req.Id, owner.AdSid);
+        });
+    }
+
+    [Fact]
     public async Task FourEyes_SeparationOfDuties_RequesterWhoIsDataOwner_CannotApproveOwnRequest()
     {
         var table = new TableIdentifier("finance", "dbo", "finance_table_5");

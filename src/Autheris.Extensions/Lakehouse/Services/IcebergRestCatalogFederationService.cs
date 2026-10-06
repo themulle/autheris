@@ -99,37 +99,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             throw new SecurityException($"Unauthorized access to table '{@namespace}.{table}'.");
         }
 
-        var tableId = new TableIdentifier(tenantId, @namespace, table);
-        var tableMeta = await _metadataRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
-        if (tableMeta == null)
-        {
-            // SEC H-3: Never fall back to tables from other tenants. Return 404.
-            throw new KeyNotFoundException($"Table '{@namespace}.{table}' not found in tenant '{tenantId}'.");
-        }
-
-        // Restpunkt H-3: Enforce consent before vending table location
-        if (_consentService != null)
-        {
-            var userSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
-            var groupSids = principal.GetGroupSids();
-            var roles = principal.GetUserRoles();
-            var allSubjects = groupSids.Append(userSid).ToList();
-            var activeConsents = _consentRepo != null
-                ? await _consentRepo.GetActiveConsentsForSubjectsAsync(allSubjects, tableId, DateTimeOffset.UtcNow, new TenantId(tenantId), ct).ConfigureAwait(false)
-                : (IReadOnlyList<Consent>)Array.Empty<Consent>();
-
-            var decision = _consentService.ResolveAccess(userSid, groupSids, roles, tableId, activeConsents, tableMeta.Dialect);
-            if (!decision.IsAllowed)
-            {
-                _logger.LogWarning("Consent denied for user {User} accessing Iceberg table {TableId}", userSid, tableId);
-                throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
-            }
-            if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) ||
-                decision.ColumnAccess.Values.Any(v => v == ColumnAccessLevel.Mask || v == ColumnAccessLevel.Deny))
-            {
-                throw new SecurityException($"Direct Iceberg catalog access not permitted: Table '{@namespace}.{table}' requires row-level filtering or column masking which cannot be enforced via raw metadata vending.");
-            }
-        }
+        var tableMeta = await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, ct).ConfigureAwait(false);
 
         var location = tableMeta.Table.Location ?? $"lakehouse/{tenantId}/{@namespace}/{table}";
 
@@ -145,7 +115,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             config);
     }
 
-    public ValueTask<VendedStorageCredential> VendCredentialAsync(
+    public async ValueTask<VendedStorageCredential> VendCredentialAsync(
         string tenantId,
         string @namespace,
         string table,
@@ -157,7 +127,76 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
         ArgumentNullException.ThrowIfNull(principal);
 
+        // Review R3-2: the same full consent check as LoadTable runs before anything is vended (or even before a
+        // caller can learn that vending is unsupported for a table it may not access).
+        if (principal.Identity?.IsAuthenticated != true)
+        {
+            throw new SecurityException($"Unauthorized access to table '{@namespace}.{table}'.");
+        }
+
+        await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, ct).ConfigureAwait(false);
+
         // SEC H-3: Return 501 Not Implemented instead of vending forgeable random/unsigned fake keys.
         throw new NotSupportedException("Direct storage STS/SAS credential vending is not supported; access lakehouse datasets via governed SQL endpoints.");
+    }
+
+    /// <summary>
+    /// Review R3-2: raw metadata or storage credentials bypass the SQL engine (row filters, masking, column rules), so they
+    /// are only released when the caller holds an active, tenant-scoped ALLOW consent that covers the whole table:
+    /// no row filter, every catalog column readable in clear (including columns the consents never mention and catalog-sensitive
+    /// or masked columns). Missing consent infrastructure fails closed.
+    /// </summary>
+    private async ValueTask<TableMetadata> EnsureConsentedRawAccessAsync(
+        string tenantId,
+        string @namespace,
+        string table,
+        ClaimsPrincipal principal,
+        CancellationToken ct)
+    {
+        var tableId = new TableIdentifier(tenantId, @namespace, table);
+        var tableMeta = await _metadataRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+        if (tableMeta == null)
+        {
+            // SEC H-3: Never fall back to tables from other tenants. Return 404.
+            throw new KeyNotFoundException($"Table '{@namespace}.{table}' not found in tenant '{tenantId}'.");
+        }
+
+        if (_consentService == null || _consentRepo == null)
+        {
+            _logger.LogError("Iceberg table {TableId} requested but consent services are not configured; denying (fail-closed).", tableId);
+            throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
+        }
+
+        var userSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
+        var groupSids = principal.GetGroupSids();
+        var roles = principal.GetUserRoles();
+        var allSubjects = groupSids.Append(userSid).ToList();
+        var now = DateTimeOffset.UtcNow;
+        var tenant = new TenantId(tenantId);
+        var loaded = await _consentRepo.GetActiveConsentsForSubjectsAsync(allSubjects, tableId, now, tenant, ct).ConfigureAwait(false);
+
+        // Defence in depth: only consents of this tenant, for exactly this table, that are active right now.
+        var activeConsents = loaded
+            .Where(c => c.TenantId == tenant && c.TableIdentifier == tableId && c.IsActive(now))
+            .ToList();
+
+        var decision = _consentService.ResolveAccess(userSid, groupSids, roles, tableId, activeConsents, tableMeta.Dialect);
+        if (!decision.IsAllowed)
+        {
+            _logger.LogWarning("Consent denied for user {User} accessing Iceberg table {TableId}", userSid, tableId);
+            throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
+        }
+
+        bool restricted = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql) ||
+                          decision.ColumnAccess.Values.Any(v => v != ColumnAccessLevel.Clear) ||
+                          !decision.HasUnconstrainedColumnAllow ||
+                          tableMeta.Columns.Any(c => decision.GetEffectiveColumnAccess(c.ColumnName, tableMeta) != ColumnAccessLevel.Clear) ||
+                          tableMeta.ColumnMaskingRules.Keys.Any(c => decision.GetEffectiveColumnAccess(c, tableMeta) != ColumnAccessLevel.Clear);
+        if (restricted)
+        {
+            throw new SecurityException($"Direct Iceberg catalog access not permitted: Table '{@namespace}.{table}' requires row-level filtering, column masking or column restrictions which cannot be enforced via raw metadata vending.");
+        }
+
+        return tableMeta;
     }
 }

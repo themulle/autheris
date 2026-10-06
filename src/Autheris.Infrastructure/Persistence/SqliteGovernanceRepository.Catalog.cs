@@ -771,6 +771,37 @@ public partial class SqliteGovernanceRepository
     private Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, CancellationToken ct)
         => IsAuthorizedApproverForTableInternalAsync(table, approverSid, null, ct);
 
+    /// <summary>Review R4-4 (rest): resolves SID, account or e-mail spellings to stable DATA_OWNERS ids (caller holds the lock).</summary>
+    private async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(IEnumerable<string> identifiers, CancellationToken ct)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var identifier in identifiers.Where(i => !string.IsNullOrWhiteSpace(i)))
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = @"SELECT id FROM DATA_OWNERS
+                                WHERE ad_sid = @p COLLATE NOCASE OR ad_account = @p COLLATE NOCASE OR email = @p COLLATE NOCASE";
+            cmd.Parameters.AddWithValue("@p", identifier);
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                ids.Add(reader.GetString(0));
+            }
+        }
+
+        return ids;
+    }
+
+    private async Task<IReadOnlyCollection<string>> ResolveRequesterOwnerIdsInternalAsync(ConsentRequest req, CancellationToken ct)
+    {
+        var identifiers = ConsentApprovalPolicy.IdentifierCandidates(req.RequesterSid.Value).ToList();
+        if (req.RequesterIdentifiers != null)
+        {
+            identifiers.AddRange(req.RequesterIdentifiers);
+        }
+
+        return await ResolveDataOwnerIdsInternalAsync(identifiers, ct);
+    }
+
     private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
     {
         using var cmd = _connection.CreateCommand();
