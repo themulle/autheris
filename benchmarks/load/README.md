@@ -1,6 +1,6 @@
 # GraphQL Gateway Benchmark Suite auf Hetzner (gql_bench)
 
-Dieses Verzeichnis enthält alle Skripte, Konfigurationen, Dockerfiles und Anleitungen, um **GqlGateway** (`lis-git/gql`) objektiv und reproduzierbar gegen führende GraphQL-Engines (**Hasura**, **Apollo Server 4**, **PostGraphile**) auf **Hetzner Cloud oder Dedicated Servern** zu benchmarken.
+Dieses Verzeichnis enthält alle Skripte, Konfigurationen, Dockerfiles und Anleitungen, um **GqlGateway** (`lis-git/gql`) objektiv und reproduzierbar gegen führende GraphQL-Engines (**Hasura**, **Apollo Server 5**, **PostGraphile**) auf **Hetzner Cloud oder Dedicated Servern** zu benchmarken.
 
 Als Referenzbasis dient der bewährte Standard-Benchmark [`hasura/graphql-bench`](https://github.com/hasura/graphql-bench) mit der relationalen **Chinook-Datenbank** (PostgreSQL) und dem Lasttest-Tool **k6**.
 
@@ -10,7 +10,7 @@ Als Referenzbasis dient der bewährte Standard-Benchmark [`hasura/graphql-bench`
 
 | Komponente | Details |
 |---|---|
-| **Gateways im Test** | • **GqlGateway** (.NET 10 / HotChocolate / FastSqlEngine)<br>• **Hasura GraphQL Engine v2** (Haskell / C++)<br>• **Apollo Server 4** (Node.js 20)<br>• **PostGraphile** (Node.js 20 / Graphile Engine) |
+| **Gateways im Test** | • **GqlGateway** (.NET 10 / HotChocolate / FastSqlEngine)<br>• **Hasura GraphQL Engine v2** (Haskell / C++)<br>• **Apollo Server 5** (Node.js 20)<br>• **PostGraphile** (Node.js 20 / Graphile Engine) |
 | **Datenbank** | PostgreSQL 16 mit **Chinook-Datensatz** (Artists, Albums, Tracks, Genres, Customers) |
 | **Lastgenerator** | **k6** (High-Performance C++/Go Load Generator) & **graphql-bench** / **autocannon** |
 | **Ziel-Infrastruktur** | Hetzner Cloud (z.B. CPX41 / CCX33) oder Hetzner Dedicated Server (AX42 / AX52) |
@@ -40,7 +40,7 @@ gql_bench/
 ├── README.md                      # Diese Dokumentation
 ├── configs/
 │   ├── chinook.sql                # Vollständiges Chinook DB-Schema & Daten
-│   ├── apollo-server/             # Apollo Server 4 Implementierung mit PostgreSQL-Pool
+│   ├── apollo-server/             # Apollo Server 5 Implementierung mit PostgreSQL-Pool
 │   │   ├── package.json
 │   │   └── index.js
 │   ├── postgraphile/              # PostGraphile Node.js Benchmark-Runner
@@ -58,7 +58,7 @@ gql_bench/
 ├── docker/
 │   ├── docker-compose.yml         # Startet Postgres, Hasura, Apollo, PostGraphile, GqlGateway
 │   ├── Dockerfile.gql             # Multi-Stage Build für GqlGateway (.NET 10)
-│   ├── Dockerfile.apollo          # Dockerfile für Apollo Server 4
+│   ├── Dockerfile.apollo          # Dockerfile für Apollo Server 5
 │   └── Dockerfile.postgraphile    # Dockerfile für PostGraphile
 ├── hcloud/
 │   ├── cloud-init.yaml            # Automatisches Hetzner Cloud-Init Provisioning
@@ -159,7 +159,7 @@ Baut und startet alle vier GraphQL Gateways, konfiguriert die Relationen in Hasu
 
 Endpoints nach dem Start:
 * **Hasura GraphQL Engine:** `http://localhost:8085/v1/graphql`
-* **Apollo Server 4:** `http://localhost:4000/`
+* **Apollo Server 5:** `http://localhost:4000/`
 * **PostGraphile:** `http://localhost:5001/graphql`
 * **GqlGateway:** `http://localhost:5000/graphql`
 
