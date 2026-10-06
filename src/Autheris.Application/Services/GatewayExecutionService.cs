@@ -473,7 +473,17 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
 
         try
         {
-            using var dt = new System.Data.DataTable();
+            // Review E-6: SQL compares ordinally on the governed sources; DataTable defaults to case-insensitive.
+            using var dt = new System.Data.DataTable { CaseSensitive = true };
+
+            // Review E-6: a row that lacks a column the filter refers to must not count as NULL (IS NULL would match).
+            var referencedColumns = metadata.Columns
+                .Select(c => c.ColumnName)
+                .Where(n => System.Text.RegularExpressions.Regex.IsMatch(
+                    normalizedSql, @"(?<![A-Za-z0-9_])\[?" + System.Text.RegularExpressions.Regex.Escape(n) + @"\]?(?![A-Za-z0-9_])",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100)))
+                .ToList();
+
             foreach (var col in metadata.Columns)
             {
                 Type colType = col.DataType.ToLowerInvariant() switch
@@ -492,6 +502,11 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
             var rowMap = new Dictionary<System.Data.DataRow, IReadOnlyDictionary<string, object?>>();
             foreach (var r in rows)
             {
+                if (referencedColumns.Any(n => !r.ContainsKey(n)))
+                {
+                    continue; // fail-closed: the filter cannot be evaluated for this row
+                }
+
                 var dr = dt.NewRow();
                 foreach (var col in metadata.Columns)
                 {
