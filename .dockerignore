@@ -1,0 +1,39 @@
+# Build context hygiene. The root Dockerfile only needs dist/publish; the benchmark
+# Dockerfile.gql (context = repo root) additionally needs src/, Directory.Build.props
+# and benchmarks/load/configs.
+.git
+.gitignore
+.github
+.claude
+.vs
+.vscode
+.idea
+
+# Never ship local secrets or state
+.env
+.env.*
+**/.bench-secrets.env
+.data
+*.db
+*.db-shm
+*.db-wal
+*.pfx
+*.pem
+*.key
+
+# Build output (everything but dist/publish is rebuilt)
+**/bin
+**/obj
+dist/*
+!dist/publish
+**/node_modules
+benchmarks/load/results
+deploy/results
+deploy/src_build
+
+# Not needed inside images
+tests
+docs
+tools
+deploy
+**/*.md
