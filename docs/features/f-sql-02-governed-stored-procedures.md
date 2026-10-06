@@ -97,3 +97,50 @@ For catalog-validated procedures the validator now describes the result set with
 * Procedures in `declared` validation mode and table-valued functions have no source information; they keep the previous by-name governance against the `@result-table`.
 
 Additional behaviour: the role/visibility check precedes the health check, so a caller without the required role receives the same 404 as for an unknown endpoint; the client IP is never taken from a token `ip` claim (unknown client resolves to `IPAddress.None`); HMAC pseudonyms in the result are tenant-scoped.
+
+## Row scope for consent row filters (`row_scope_key`)
+
+A consent (or Casbin rule) with a row filter on the **result table** normally denies the call, because the filter cannot
+be pushed into the procedure. With `row_scope_key` the call is allowed and the result is filtered afterwards:
+
+```yaml
+result_table: md.crane
+row_scope_key: serial_number        # or a list for a composite key: [client_id, code]
+```
+
+```sql
+-- @result-table md.crane
+-- @row-scope-key serial_number
+```
+
+How it works: after the call the gateway collects the key values of the result rows and runs
+`SELECT key FROM <result_table> AS autheris_target WHERE <tenant> AND (<row filter>) AND (<key tuples>)` in the database.
+Result rows whose key is not returned are removed. The filter therefore keeps its exact SQL semantics.
+
+Rules (all fail closed: the call is denied):
+
+- **Connection:** the lookup uses the governed read connection of the table's data source
+  (`Gateway:DataSources:Connections:<source>`), never the EXECUTE-only procedure login (ADR-018). Supported: SQL Server,
+  PostgreSQL, SQLite. The connection dialect must match the catalog dialect of the table.
+- **Unique key:** the key columns must be exactly the primary key or a unique, unfiltered (non-partial), enabled index of
+  the result table. This is verified in the database (`sys.indexes`, `pg_index`, `pragma_index_list` /
+  `pragma_table_info`) and cached for 5 minutes. A non-unique key would let one allowed row admit every result row with
+  the same key value.
+- **Key columns** must be in the result set and effectively `Clear` for the caller (otherwise the match would be a side
+  channel). With catalog validation the database-reported source of each key column must be the same column of the
+  result table (D-2).
+- **Security context:** the lookup carries the same caller context as the call: read-only `SESSION_CONTEXT` on SQL
+  Server, transaction-local settings in a read-only transaction on PostgreSQL. The tenant column is filtered as on every
+  governed read.
+- Rows with a NULL key part are removed. Keys are compared in a canonical text form; values that differ only by case,
+  padding, scale or type are not matched (removed, not admitted).
+- Row filters on any **other** referenced table still deny the call.
+
+Limits (residual risks, decide per procedure):
+
+- **Aggregates:** if the procedure combines several table rows per key (SUM, COUNT, string aggregation), rows the filter
+  denies still contribute to the value of an allowed key. Computed result columns are dropped (D-2) unless they are
+  declared `clear`; do not declare such columns `clear` on a procedure with `row_scope_key`. Use row scope only for
+  procedures that return rows of the result table.
+- **`validation: declared`:** there is no source information for result columns, so a key column could come from another
+  table under the same name. The declaration is trusted; review it like the procedure body.

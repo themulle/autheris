@@ -88,6 +88,20 @@ public sealed record ProcedureDefinition(
     public IReadOnlyList<string> DeclaredOutputs { get; init; } = DeclaredOutputs ?? [];
 
     /// <summary>
+    /// Optional (composite) key that identifies a row of <see cref="ResultTable"/> in the result set. When set, a consent
+    /// row filter on the result table is not a denial: the result rows are matched against the rows the filter allows
+    /// (semi-join on these columns, evaluated by the database) and all other rows are removed. Without it a row filter
+    /// denies the call (fail-closed).
+    /// </summary>
+    public IReadOnlyList<string> RowScopeKey { get; init; } = [];
+
+    /// <summary>
+    /// Column of <see cref="ResultTable"/> for each <see cref="RowScopeKey"/> column (same index). Equal to the result
+    /// column unless declared as <c>result_column=table_column</c>. Empty means "same name".
+    /// </summary>
+    public IReadOnlyList<string> RowScopeKeyTable { get; init; } = [];
+
+    /// <summary>
     /// Catalog domain of the tables the procedure reads. The catalog keys tables by their data source
     /// (TABLES.source_name), so it is the procedure's data source; "default" only when none is declared.
     /// </summary>

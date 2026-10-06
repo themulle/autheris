@@ -78,6 +78,7 @@ public static class ProcedureDefinitionParser
         var declaredOutputs = new List<string>();
         var kind = ProcedureKind.Procedure;
         var argumentOrder = new List<string>();
+        var rowScopeKey = new List<string>();
 
         foreach (Match match in HeaderRegex.Matches(content))
         {
@@ -145,6 +146,13 @@ public static class ProcedureDefinitionParser
                     }
 
                     resultTable = val;
+                    break;
+                case "row-scope-key":
+                    foreach (string keyColumn in val.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        rowScopeKey.Add(keyColumn);
+                    }
+
                     break;
                 case "result-column":
                     var rc = ResultColumnRegex.Match(val);
@@ -255,7 +263,9 @@ public static class ProcedureDefinitionParser
             DeclaredOutputs: declaredOutputs,
             Kind: kind)
         {
-            ArgumentOrder = argumentOrder
+            ArgumentOrder = argumentOrder,
+            RowScopeKey = ValidateRowScopeKey(SplitRowScopeKey(rowScopeKey, out var scopeTableColumns), resultTable, validationMode, declaredOutputs),
+            RowScopeKeyTable = scopeTableColumns
         };
     }
 
@@ -539,8 +549,95 @@ public static class ProcedureDefinitionParser
             Kind: kind)
         {
             ArgumentOrder = argumentOrder,
-            DeclaredOutputTypes = outputTypes
+            DeclaredOutputTypes = outputTypes,
+            RowScopeKey = ValidateRowScopeKey(SplitRowScopeKey(ParseYamlRowScopeKey(model.RowScopeKey), out var scopeTableColumns), resultTable, validationMode, outputs),
+            RowScopeKeyTable = scopeTableColumns
         };
+    }
+
+    /// <summary>
+    /// Entries are <c>column</c> or <c>result_column=table_column</c> (the procedure names the key differently than the
+    /// result table). Returns the result columns; the table columns come back in <paramref name="tableColumns"/>.
+    /// </summary>
+    private static List<string> SplitRowScopeKey(List<string> entries, out List<string> tableColumns)
+    {
+        var result = new List<string>(entries.Count);
+        tableColumns = new List<string>(entries.Count);
+        foreach (string entry in entries)
+        {
+            var parts = entry.Split('=', StringSplitOptions.TrimEntries);
+            if (parts.Length > 2)
+            {
+                throw new FormatException($"Invalid row_scope_key entry '{entry}'. Use 'column' or 'result_column=table_column'.");
+            }
+
+            result.Add(RequireIdentifier(parts[0], "row_scope_key column"));
+            tableColumns.Add(RequireIdentifier(parts.Length == 2 ? parts[1] : parts[0], "row_scope_key table column"));
+        }
+
+        return result;
+    }
+
+    /// <summary><c>row_scope_key</c> is a column name or a list of column names (composite key).</summary>
+    private static List<string> ParseYamlRowScopeKey(object? raw)
+    {
+        var keys = new List<string>();
+        switch (raw)
+        {
+            case null:
+                break;
+            case string s:
+                keys.Add(s.Trim());
+                break;
+            case IEnumerable<object> list:
+                foreach (var item in list)
+                {
+                    keys.Add(item?.ToString()?.Trim() ?? string.Empty);
+                }
+
+                break;
+            default:
+                throw new FormatException("row_scope_key must be a column name or a list of column names.");
+        }
+
+        return keys;
+    }
+
+    /// <summary>
+    /// The scope key identifies rows of the result table: it needs a result table, no duplicates, and in declared mode the
+    /// key columns must be part of the declared outputs (they are read from the result set).
+    /// </summary>
+    private static List<string> ValidateRowScopeKey(
+        List<string> keys,
+        string? resultTable,
+        ProcedureValidationMode validationMode,
+        IReadOnlyList<string> declaredOutputs)
+    {
+        if (keys.Count == 0)
+        {
+            return keys;
+        }
+
+        if (resultTable == null)
+        {
+            throw new FormatException("row_scope_key requires a result_table.");
+        }
+
+        if (keys.Distinct(StringComparer.OrdinalIgnoreCase).Count() != keys.Count)
+        {
+            throw new FormatException("row_scope_key must not list a column more than once.");
+        }
+
+        if (validationMode == ProcedureValidationMode.Declared)
+        {
+            var missing = keys.FirstOrDefault(k => !declaredOutputs.Contains(k, StringComparer.OrdinalIgnoreCase));
+            if (missing != null)
+            {
+                throw new FormatException($"row_scope_key column '{missing}' must be one of the declared outputs.");
+            }
+        }
+
+        return keys;
     }
 
     /// <summary>
@@ -659,6 +756,9 @@ public sealed class ProcedureYamlModel
     public List<ProcedureContextYamlModel>? ContextBindings { get; set; }
     public List<object>? Outputs { get; set; }
     public List<string>? ClearedColumns { get; set; }
+
+    /// <summary>A column name or a list of column names.</summary>
+    public object? RowScopeKey { get; set; }
 }
 
 public sealed class ProcedureParameterYamlModel

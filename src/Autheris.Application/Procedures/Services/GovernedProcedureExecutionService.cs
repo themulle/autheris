@@ -41,6 +41,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly IAuditLogRepository? _audit;
     private readonly IClientIpResolver? _clientIpResolver;
+    private readonly IProcedureRowScopeResolver? _rowScope;
     private readonly ILogger<GovernedProcedureExecutionService>? _logger;
 
     public GovernedProcedureExecutionService(
@@ -54,7 +55,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IPolicyEnforcementService? policyEnforcement = null,
         IAuditLogRepository? audit = null,
         IClientIpResolver? clientIpResolver = null,
-        ILogger<GovernedProcedureExecutionService>? logger = null)
+        ILogger<GovernedProcedureExecutionService>? logger = null,
+        IProcedureRowScopeResolver? rowScope = null)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
@@ -67,6 +69,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         _audit = audit;
         _clientIpResolver = clientIpResolver;
         _logger = logger;
+        _rowScope = rowScope;
     }
 
     public async Task<GovernedProcedureResult> ExecuteAsync(
@@ -129,7 +132,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
 
         foreach (var key in tableKeys)
         {
-            var evaluated = await EvaluateTableAsync(definition.CatalogDomain, key, user, userSid, tenantId, consentBypassed, ct).ConfigureAwait(false);
+            // A consent row filter on the result table is enforced after the call by a key match (RowScopeKey);
+            // on every other table it cannot be enforced and denies the call.
+            bool allowRowFilter = definition.RowScopeKey.Count > 0 && _rowScope != null && IsResultTable(definition, key);
+            var evaluated = await EvaluateTableAsync(definition.CatalogDomain, key, user, userSid, tenantId, consentBypassed, allowRowFilter, ct).ConfigureAwait(false);
             if (evaluated == null)
             {
                 await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = "consent" }, ct).ConfigureAwait(false);
@@ -162,6 +168,17 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             throw;
         }
 
+        // 4b. Row scope: keep only the rows the consent row filter of the result table allows
+        int rowsRemovedByScope = 0;
+        if (definition.ResultTable != null &&
+            decisions.TryGetValue(definition.ResultTable, out var resultDecision) &&
+            !string.IsNullOrWhiteSpace(resultDecision.Decision.CombinedRowFilterSql))
+        {
+            var scoped = await ApplyRowScopeAsync(definition, raw, resultDecision.Decision, resultDecision.Meta, registered.Validation.ResultColumnSources, context, tenantId, userSid, ct).ConfigureAwait(false);
+            rowsRemovedByScope = raw.Rows.Count - scoped.Rows.Count;
+            raw = scoped;
+        }
+
         // 5. Result-set governance (deny / mask / drop unknown columns)
         var governed = GovernResult(definition, raw, decisions, registered.Validation.ResultColumnSources, tenantId);
 
@@ -177,6 +194,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 mode = definition.Mode.ToString(),
                 rowCount = governed.Rows.Count,
                 truncated = raw.Truncated,
+                rowsRemovedByScope,
                 returnedColumns = governed.Columns.Count,
                 droppedColumns = raw.Columns.Count - governed.Columns.Count,
                 parameterHashes = HashParameters(values)
@@ -265,7 +283,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
 
     /// <summary>
     /// Returns null if access is denied. Consent row filters cannot be pushed into a procedure and are not applied
-    /// in memory (differs from SQL semantics, review E-6); such a consent therefore denies the call (fail-closed).
+    /// in memory (differs from SQL semantics, review E-6); such a consent therefore denies the call (fail-closed),
+    /// unless <paramref name="allowRowFilter"/> is set: the result table's filter is then enforced by a database key
+    /// match after the call (<see cref="ApplyRowScopeAsync"/>).
     /// </summary>
     private async Task<(TableAccessDecision Decision, TableMetadata Meta)?> EvaluateTableAsync(
         string catalogDomain,
@@ -274,6 +294,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         Sid userSid,
         TenantId tenantId,
         bool consentBypassed,
+        bool allowRowFilter,
         CancellationToken ct)
     {
         if (_tableRepository == null || !TableIdentifier.TryParse(catalogDomain + "." + tableKey, out var tableId))
@@ -311,7 +332,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 meta.Dialect);
         }
 
-        if (!decision.IsAllowed || !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+        if (!decision.IsAllowed || (!allowRowFilter && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)))
         {
             return null;
         }
@@ -356,6 +377,97 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         }
 
         return (decision, meta);
+    }
+
+    /// <summary>
+    /// With catalog validation the database reports the source of every result column (D-2): a key column must come from
+    /// the same column of the result table, otherwise the match would select unrelated rows. Declared mode has no source
+    /// information; there the declaration is trusted (documented residual risk).
+    /// </summary>
+    private static bool IsKeyFromResultTable(
+        string resultColumn,
+        string tableColumn,
+        TableMetadata meta,
+        IReadOnlyDictionary<string, ResultColumnSource>? resultColumnSources)
+    {
+        if (resultColumnSources == null)
+        {
+            return true;
+        }
+
+        var source = resultColumnSources
+            .FirstOrDefault(kv => string.Equals(kv.Key, resultColumn, StringComparison.OrdinalIgnoreCase)).Value;
+        return source?.Table != null && source.Column != null &&
+               string.Equals(source.Schema, meta.Identifier.Schema, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(source.Table, meta.Identifier.TableName, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(source.Column, tableColumn, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsResultTable(ProcedureDefinition definition, string key) =>
+        definition.ResultTable != null && string.Equals(key, definition.ResultTable, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Removes the rows of the procedure result whose key (<see cref="ProcedureDefinition.RowScopeKey"/>) the consent row
+    /// filter of the result table does not allow. Fail-closed: a missing key column, a key column the caller may not use
+    /// in a filter, or a failing lookup denies the call; rows with a NULL key part are removed.
+    /// </summary>
+    private async Task<RawProcedureResult> ApplyRowScopeAsync(
+        ProcedureDefinition definition,
+        RawProcedureResult raw,
+        TableAccessDecision decision,
+        TableMetadata meta,
+        IReadOnlyDictionary<string, ResultColumnSource>? resultColumnSources,
+        ProcedureSecurityContext security,
+        TenantId tenantId,
+        Sid userSid,
+        CancellationToken ct)
+    {
+        var keyColumns = definition.RowScopeKey;
+        var tableColumnNames = definition.RowScopeKeyTable.Count == keyColumns.Count ? definition.RowScopeKeyTable : keyColumns;
+        var indexes = new int[keyColumns.Count];
+        bool usable = _rowScope != null && keyColumns.Count > 0;
+        for (int k = 0; usable && k < keyColumns.Count; k++)
+        {
+            indexes[k] = raw.Columns.ToList().FindIndex(c => string.Equals(c, keyColumns[k], StringComparison.OrdinalIgnoreCase));
+            var column = meta.GetColumn(tableColumnNames[k]);
+            // Filtering on a column that is not effectively Clear would leak it through the match (side channel).
+            usable = indexes[k] >= 0 && column != null &&
+                     decision.GetEffectiveColumnAccess(column.ColumnName, meta) == ColumnAccessLevel.Clear &&
+                     IsKeyFromResultTable(keyColumns[k], column.ColumnName, meta, resultColumnSources);
+        }
+
+        if (!usable)
+        {
+            await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = "row-scope-key" }, ct).ConfigureAwait(false);
+            throw new SecurityException(DeniedMessage);
+        }
+
+        var tableKeyColumns = tableColumnNames.Select(k => meta.GetColumn(k)!.ColumnName).ToList();
+        var candidates = raw.Rows.Select(r => indexes.Select(i => r[i]).ToArray()).ToList();
+
+        IReadOnlySet<string> allowed;
+        try
+        {
+            allowed = await _rowScope!.GetAllowedKeysAsync(definition, meta, decision, tableKeyColumns, candidates, security, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex, "Row scope lookup for procedure endpoint '{Endpoint}' failed.", definition.Name);
+            await AuditAsync("PROCEDURE_FAILED", "DENY", definition, tenantId, userSid, new { reason = "row-scope-" + ex.GetType().Name }, ct).ConfigureAwait(false);
+            throw new SecurityException(DeniedMessage);
+        }
+
+        var kept = new List<object?[]>(raw.Rows.Count);
+        for (int r = 0; r < raw.Rows.Count; r++)
+        {
+            string? key = RowScopeKeys.Normalize(candidates[r]);
+            if (key != null && allowed.Contains(key))
+            {
+                kept.Add(raw.Rows[r]);
+            }
+        }
+
+        return new RawProcedureResult(raw.Columns, kept, raw.Truncated);
     }
 
     private (IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows) GovernResult(
