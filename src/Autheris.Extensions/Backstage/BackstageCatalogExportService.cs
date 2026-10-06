@@ -52,6 +52,44 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
             ? _options.GraphQL.EndpointPath
             : "/" + _options.GraphQL.EndpointPath;
 
+        var federatedLinks = new List<BackstageEntityLink>
+        {
+            new()
+            {
+                Url = string.IsNullOrEmpty(baseUrl) ? endpointPath : $"{baseUrl}{endpointPath}",
+                Title = "GraphQL Query Endpoint",
+                Icon = "web"
+            },
+            new()
+            {
+                Url = string.IsNullOrEmpty(baseUrl) ? "/health/ready" : $"{baseUrl}/health/ready",
+                Title = "Gateway Health",
+                Icon = "help"
+            }
+        };
+
+        var federatedAnnotations = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["backstage.io/managed-by-location"] = "url:/api/integrations/backstage/catalog-entities/autheris-federated",
+            ["autheris.io/type"] = "federated-gateway",
+            ["autheris.io/endpoint"] = endpointPath,
+            ["autheris.io/governance-mode"] = "strict-zero-trust"
+        };
+
+        if (_options.GraphQL.EnableBananaCakePop)
+        {
+            var bcpPath = _options.GraphQL.BananaCakePopPath.StartsWith('/')
+                ? _options.GraphQL.BananaCakePopPath
+                : "/" + _options.GraphQL.BananaCakePopPath;
+            federatedAnnotations["autheris.io/graphql-ide"] = bcpPath;
+            federatedLinks.Add(new BackstageEntityLink
+            {
+                Url = string.IsNullOrEmpty(baseUrl) ? bcpPath : $"{baseUrl}{bcpPath}",
+                Title = "GraphQL IDE (Banana Cake Pop)",
+                Icon = "code"
+            });
+        }
+
         // 1. Core Federated GraphQL Gateway Entity
         var federatedEntity = new BackstageEntity
         {
@@ -64,28 +102,8 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
                 Title = "Enterprise Federated GraphQL Gateway",
                 Description = "Unified zero-trust GraphQL federation gateway with real-time Casbin ABAC, column masking, and row-level security.",
                 Tags = ["graphql", "federated", "zero-trust", "gateway"],
-                Annotations = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["backstage.io/managed-by-location"] = "url:/api/integrations/backstage/catalog-entities/autheris-federated",
-                    ["autheris.io/type"] = "federated-gateway",
-                    ["autheris.io/endpoint"] = endpointPath,
-                    ["autheris.io/governance-mode"] = "strict-zero-trust"
-                },
-                Links =
-                [
-                    new BackstageEntityLink
-                    {
-                        Url = string.IsNullOrEmpty(baseUrl) ? endpointPath : $"{baseUrl}{endpointPath}",
-                        Title = "GraphQL Query Endpoint",
-                        Icon = "web"
-                    },
-                    new BackstageEntityLink
-                    {
-                        Url = string.IsNullOrEmpty(baseUrl) ? "/health/ready" : $"{baseUrl}/health/ready",
-                        Title = "Gateway Health",
-                        Icon = "help"
-                    }
-                ]
+                Annotations = federatedAnnotations,
+                Links = federatedLinks
             },
             Spec = new BackstageSpec
             {
@@ -99,6 +117,7 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
         entities.Add(federatedEntity);
 
         // 2. Core Dynamic OpenAPI 3.1 REST API Entity
+        const string swaggerUiPath = "/ui/swagger";
         var openApiEntity = new BackstageEntity
         {
             ApiVersion = "backstage.io/v1alpha1",
@@ -114,13 +133,13 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
                 {
                     ["backstage.io/managed-by-location"] = "url:/api/integrations/backstage/catalog-entities/autheris-openapi",
                     ["autheris.io/endpoint"] = "/api/openapi/v3.json",
-                    ["autheris.io/swagger-ui"] = "/swagger"
+                    ["autheris.io/swagger-ui"] = swaggerUiPath
                 },
                 Links =
                 [
                     new BackstageEntityLink
                     {
-                        Url = string.IsNullOrEmpty(baseUrl) ? "/swagger" : $"{baseUrl}/swagger",
+                        Url = string.IsNullOrEmpty(baseUrl) ? swaggerUiPath : $"{baseUrl}{swaggerUiPath}",
                         Title = "Swagger UI",
                         Icon = "web"
                     },

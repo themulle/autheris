@@ -88,6 +88,12 @@ public sealed record ProcedureDefinition(
     public IReadOnlyList<string> DeclaredOutputs { get; init; } = DeclaredOutputs ?? [];
 
     /// <summary>
+    /// Optional SQL types of the declared outputs (column name -> normalized type such as "float" or "varchar(255)").
+    /// Documentation/contract only (OpenAPI schema); values are never converted at runtime.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> DeclaredOutputTypes { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Review P-2: Order of all arguments (client parameters and context bindings) as declared. Table-valued functions
     /// (and every other positional call) bind their arguments in exactly this order. When not set, client parameters
     /// come first, followed by the context bindings.

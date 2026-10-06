@@ -1134,4 +1134,41 @@ public class ProcedureEndpointTests
 
         registry.TryMarkActive(replacement, ok).ShouldBeTrue();
     }
+
+    // ---------- typed outputs (documentation only) ----------
+
+    [Fact]
+    public void ParseYaml_TypedOutputs_AreParsedInAllForms()
+    {
+        const string yaml = """
+            name: typed
+            procedure: tem.typed_proc
+            validation: declared
+            result_table: md.crane
+            outputs:
+              - plain_column
+              - name: gps_latitude
+                type: float
+              - fill_level: VARCHAR( 20 )
+              - akku_ts: datetimeoffset
+            """;
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30);
+
+        def.DeclaredOutputs.ShouldBe(["plain_column", "gps_latitude", "fill_level", "akku_ts"]);
+        def.DeclaredOutputTypes.ShouldNotContainKey("plain_column");
+        def.DeclaredOutputTypes["gps_latitude"].ShouldBe("float");
+        def.DeclaredOutputTypes["fill_level"].ShouldBe("varchar(20)");
+        def.DeclaredOutputTypes["akku_ts"].ShouldBe("datetimeoffset");
+    }
+
+    [Theory]
+    [InlineData("- name: a\n    type: geography")]      // unsupported type
+    [InlineData("- name: a\n    type: 'int; DROP'")]    // invalid characters
+    [InlineData("- name: a\n    colour: red")]          // unknown key
+    [InlineData("- {name: 'a b', type: int}")]          // invalid identifier
+    public void ParseYaml_InvalidTypedOutput_Throws(string output)
+    {
+        string yaml = "name: x\nprocedure: tem.p\nvalidation: declared\nresult_table: md.crane\noutputs:\n  " + output + "\n";
+        Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30));
+    }
 }

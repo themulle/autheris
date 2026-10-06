@@ -52,7 +52,41 @@ public sealed class BackstageIntegrationTests
         openApi.ShouldNotBeNull();
         openApi.Kind.ShouldBe("API");
         openApi.Spec.Type.ShouldBe("openapi");
-        openApi.Metadata.Links.ShouldContain(l => l.Title == "Swagger UI");
+        var swaggerLink = openApi.Metadata.Links.FirstOrDefault(l => l.Title == "Swagger UI");
+        swaggerLink.ShouldNotBeNull();
+        swaggerLink.Url.ShouldBe("/ui/swagger");
+        openApi.Metadata.Annotations["autheris.io/swagger-ui"].ShouldBe("/ui/swagger");
+    }
+
+    [Fact]
+    public async Task ExportCatalogEntitiesAsync_WithBananaCakePopEnabled_IncludesBcpLinkAndAnnotation()
+    {
+        var options = Options.Create(new GatewayOptions
+        {
+            GraphQL = new GraphQLOptions
+            {
+                EnableBananaCakePop = true,
+                BananaCakePopPath = "/ui/bcp"
+            },
+            Backstage = new BackstageIntegrationOptions
+            {
+                BaseUrl = "https://gateway.example.com",
+                DefaultOwner = "group:team-core",
+                DefaultSystem = "system-gateway"
+            }
+        });
+
+        var service = new BackstageCatalogExportService(options);
+        var entities = await service.ExportCatalogEntitiesAsync();
+
+        var federated = entities.FirstOrDefault(e => e.Metadata.Name == "autheris-federated");
+        federated.ShouldNotBeNull();
+        federated.Metadata.Annotations.ShouldContainKey("autheris.io/graphql-ide");
+        federated.Metadata.Annotations["autheris.io/graphql-ide"].ShouldBe("/ui/bcp");
+
+        var ideLink = federated.Metadata.Links.FirstOrDefault(l => l.Title == "GraphQL IDE (Banana Cake Pop)");
+        ideLink.ShouldNotBeNull();
+        ideLink.Url.ShouldBe("https://gateway.example.com/ui/bcp");
     }
 
     [Fact]
