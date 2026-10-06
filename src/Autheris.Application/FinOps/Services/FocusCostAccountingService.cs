@@ -26,6 +26,13 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
     private readonly ConcurrentDictionary<string, decimal> _localSpend = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<FocusCostRecord> _records = new();
     private const int MaxInMemoryRecords = 10000;
+    private const decimal MicroUnits = 1_000_000m;
+    private static readonly TimeSpan SharedCounterTtl = TimeSpan.FromDays(40);
+
+    // E-14: the budget is a cluster-wide monthly counter (micro-EUR) in the shared state store.
+    // _localSpend only holds what could not be written to the shared store (store unreachable), or everything when none is configured.
+    private static string PeriodKey(string tenantId) =>
+        $"finops:spend:{DateTimeOffset.UtcNow:yyyyMM}:{tenantId.ToLowerInvariant()}";
 
     public FocusCostAccountingService(
         IOptions<GatewayOptions> gatewayOptions,
@@ -61,8 +68,13 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
         var computeCost = (computeMs / 1000.0m) * options.PricePerComputeSecond;
         var totalBilled = Math.Round(promptCost + completionCost + computeCost, 6);
 
-        // Update local and distributed spend
-        _localSpend.AddOrUpdate(tenantId, totalBilled, (_, current) => current + totalBilled);
+        var shared = _clusterState != null
+            ? await TryIncrementSharedAsync(tenantId, totalBilled, ct).ConfigureAwait(false)
+            : null;
+        if (shared == null)
+        {
+            _localSpend.AddOrUpdate(tenantId, totalBilled, (_, current) => current + totalBilled);
+        }
 
         var now = DateTimeOffset.UtcNow;
         var periodStart = now.AddMilliseconds(-Math.Max(1, computeMs)).ToString("O");
@@ -112,6 +124,20 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
         await ValueTask.CompletedTask;
     }
 
+    private async ValueTask<long?> TryIncrementSharedAsync(string tenantId, decimal amount, CancellationToken ct)
+    {
+        var micro = (long)Math.Round(amount * MicroUnits, MidpointRounding.AwayFromZero);
+        try
+        {
+            return await _clusterState!.IncrementAsync(PeriodKey(tenantId), micro, SharedCounterTtl, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "F-AI-08 shared FinOps counter unavailable for tenant {Tenant}; accounting locally.", tenantId);
+            return null;
+        }
+    }
+
     public async ValueTask<BudgetStatus> CheckBudgetAsync(string tenantId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(tenantId))
@@ -125,6 +151,18 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
             : options.DefaultMonthlyBudget;
 
         var currentSpend = _localSpend.TryGetValue(tenantId, out var spend) ? spend : 0m;
+        if (_clusterState != null)
+        {
+            try
+            {
+                var shared = await _clusterState.GetAsync<long>(PeriodKey(tenantId), ct).ConfigureAwait(false);
+                currentSpend += shared / MicroUnits;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "F-AI-08 shared FinOps counter unreadable for tenant {Tenant}; using local spend only.", tenantId);
+            }
+        }
 
         var isExceeded = budgetLimit > 0 && currentSpend >= budgetLimit;
         var isWarning = budgetLimit > 0 && currentSpend >= budgetLimit * (decimal)options.SoftCapRatio;
@@ -175,7 +213,7 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
         await Task.CompletedTask;
     }
 
-    public ValueTask ResetSpendAsync(string tenantId, CancellationToken ct = default)
+    public async ValueTask ResetSpendAsync(string tenantId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(tenantId))
         {
@@ -183,6 +221,9 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
         }
 
         _localSpend[tenantId] = 0m;
-        return ValueTask.CompletedTask;
+        if (_clusterState != null)
+        {
+            await _clusterState.RemoveAsync(PeriodKey(tenantId), ct).ConfigureAwait(false);
+        }
     }
 }

@@ -55,6 +55,31 @@ public sealed class InMemoryClusterStateProvider : IDistributedClusterStateProvi
         return ValueTask.FromResult(_store.TryRemove(key, out _));
     }
 
+    public ValueTask<long?> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+
+        long result = 0;
+        _store.AddOrUpdate(
+            key,
+            _ =>
+            {
+                result = delta;
+                return new Entry(delta.ToString(System.Globalization.CultureInfo.InvariantCulture), DateTimeOffset.UtcNow.Add(ttl));
+            },
+            (_, existing) =>
+            {
+                var live = existing.ExpiresAt > DateTimeOffset.UtcNow;
+                var current = live ? long.Parse(existing.Serialized, System.Globalization.CultureInfo.InvariantCulture) : 0;
+                result = current + delta;
+                return new Entry(
+                    result.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    live ? existing.ExpiresAt : DateTimeOffset.UtcNow.Add(ttl));
+            });
+
+        return ValueTask.FromResult<long?>(result);
+    }
+
     public async ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(channel);

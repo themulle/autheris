@@ -198,6 +198,16 @@ FROM CONSENT_REQUESTS WHERE itsm_ticket_id IS NOT NULL
 GROUP BY 1, 2 HAVING COUNT(*) > 1;
 ```
 
+## 4.y FinOps budget in multi-replica deployments (review E-14)
+
+The monthly FinOps budget is enforced against a cluster-wide counter in the shared state store (Redis when `Caching.Redis.Enabled`, otherwise in-memory = per process). Run Redis in every multi-replica deployment; without it each replica enforces the budget on its own. `ResetSpendAsync` clears the shared counter for the current month. Redis outages degrade to local accounting and are logged as `shared FinOps counter unavailable`.
+
+## 4.z Health probe caching (review R3-4)
+
+`/health/ready` is anonymous and answered from a 5 second cache shared by all callers. A state change (e.g. DB outage) is therefore visible after at most 5 seconds; size Kubernetes probe periods accordingly.
+
+---
+
 ## 5. Data Catalog Synchronization Operations
 
 ### 5.1 Monitoring Background Sync

@@ -84,6 +84,12 @@ Autheris acts as an Enterprise Zero-Trust Data Gateway. It enforces Data-Owner-C
   * *Attack Vector:* Dynamic Casbin ABAC rule injection via untrusted inputs leading to expression evaluation execution.
   * *Mitigation:* Dynamic rule tokens are sanitized before evaluation; Casbin evaluators enforce strict token allowlists, preventing arbitrary reflection or process execution.
 
+* **Threat 2.5: Per-replica budgets, file-level-only lakehouse isolation, anonymous health probe (E-14, E-15, R3-4)**
+  * *Mitigation E-14:* The FinOps monthly spend is a cluster-wide counter (atomic `INCRBY` in the shared state store, key per tenant and month, 40-day TTL), so N replicas no longer grant N times the budget. If the shared store is unreachable, spend is accounted locally and added on top of the last shared value (fail-safe towards enforcement, not towards a reset).
+  * *Mitigation E-15:* Lakehouse scans enforce the tenant on every row, not only on files: the Delta executor adds a mandatory tenant predicate (a conflicting caller-supplied predicate is rejected) and drops rows/files whose stored tenant differs; the Iceberg executor no longer overwrites the stored tenant value with the session tenant and drops foreign rows. Comparison is ordinal and case-sensitive.
+  * *Mitigation R3-4:* `/health/ready` (anonymous) is served from a 5 s single-flight cache, so the governance DB probe (SQLite: taken behind the repository lock) runs at most once per interval regardless of request volume.
+  * *Known limitation:* lakehouse row data is still produced by the sample reader; a real Parquet reader must keep the per-row tenant check (`LakehouseLocationGuard.RowBelongsToTenant`).
+
 ---
 
 ### 2.3 Repudiation (Audit Integrity)

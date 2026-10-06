@@ -316,7 +316,10 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
         services.AddSingleton<Autheris.Infrastructure.Health.AuditChainIntegrityMonitor>();
         services.AddHostedService(sp => sp.GetRequiredService<Autheris.Infrastructure.Health.AuditChainIntegrityMonitor>());
-        services.AddSingleton<IGatewayHealthCheckService, GatewayHealthCheckService>();
+        // SEC R3-4: anonymous /health/ready must not drive the DB probe per request -> cached, single-flight decorator.
+        services.AddSingleton<GatewayHealthCheckService>();
+        services.AddSingleton<IGatewayHealthCheckService>(sp =>
+            new Autheris.Infrastructure.Health.CachedGatewayHealthCheckService(sp.GetRequiredService<GatewayHealthCheckService>()));
 
         // HTTP & Plugin Data Sources
 #pragma warning disable CA5359 // Intentionally allowed via danger_allow_untrusted_certificates for Getting Started / Dev
