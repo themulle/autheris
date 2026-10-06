@@ -48,14 +48,14 @@ public sealed class AuthSessionHardeningTests
     }
 
     [Fact]
-    public void E2_NegotiateOptions_DisablePersistence_AndRejectNtlmWhenKerberosOnly()
+    public async Task E2_NegotiateOptions_DisablePersistence_AndRejectNtlmWhenKerberosOnly()
     {
         var options = new NegotiateOptions();
         NegotiateHardening.Configure(options, requireKerberosOnly: true);
 
         options.PersistNtlmCredentials.ShouldBeFalse();
         options.PersistKerberosCredentials.ShouldBeFalse();
-        options.Events.OnAuthenticated.ShouldNotBeNull();
+        var onAuthenticated = options.Events.ShouldNotBeNull().OnAuthenticated.ShouldNotBeNull();
 
         AuthenticatedContext Ctx(string authType) =>
             new(new DefaultHttpContext(), new AuthenticationScheme("Negotiate", null, typeof(NegotiateHandler)), options)
@@ -64,12 +64,12 @@ public sealed class AuthSessionHardeningTests
             };
 
         var ntlm = Ctx("NTLM");
-        options.Events.OnAuthenticated(ntlm).GetAwaiter().GetResult();
+        await onAuthenticated(ntlm);
         ntlm.Result?.Succeeded.ShouldNotBe(true);
         ntlm.Result?.Failure.ShouldNotBeNull();
 
         var kerberos = Ctx("Kerberos");
-        options.Events.OnAuthenticated(kerberos).GetAwaiter().GetResult();
+        await onAuthenticated(kerberos);
         kerberos.Result.ShouldBeNull();
     }
 

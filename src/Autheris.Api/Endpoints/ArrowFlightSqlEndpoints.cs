@@ -65,7 +65,7 @@ public static class ArrowFlightSqlEndpoints
                 await using var stream = context.Response.BodyWriter.AsStream();
 
                 ArrowStreamWriter? writer = null;
-                await foreach (var batch in server.DoGetStreamAsync(ticket, context.User, context.RequestAborted, EndpointSecurity.GetRequestTenant(context)))
+                await foreach (var batch in server.DoGetStreamAsync(ticket, context.User, EndpointSecurity.GetRequestTenant(context), context.RequestAborted))
                 {
                     writer ??= new ArrowStreamWriter(stream, batch.Schema, leaveOpen: true);
                     await writer.WriteRecordBatchAsync(batch, context.RequestAborted);

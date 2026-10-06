@@ -201,8 +201,8 @@ public sealed class ODataTests
             denied.StatusCode.ShouldBe(403);
             missing.StatusCode.ShouldBe(403);
             denied.ErrorMessage.ShouldBe(missing.ErrorMessage);
-            denied.ErrorMessage.ShouldNotContain("Casbin");
-            missing.ErrorMessage.ShouldNotContain("acme");
+            denied.ErrorMessage.ShouldNotBeNull().ShouldNotContain("Casbin");
+            missing.ErrorMessage.ShouldNotBeNull().ShouldNotContain("acme");
         }
     }
 }

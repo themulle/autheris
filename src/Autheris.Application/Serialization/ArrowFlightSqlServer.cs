@@ -117,8 +117,8 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
     public async IAsyncEnumerable<RecordBatch> DoGetStreamAsync(
         FlightSqlTicket ticket,
         ClaimsPrincipal principal,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default,
-        TenantId? callerTenant = null)
+        TenantId? callerTenant = null,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(ticket);
         ArgumentNullException.ThrowIfNull(principal);

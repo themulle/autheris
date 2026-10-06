@@ -28,6 +28,6 @@ public interface IArrowFlightSqlServer
     IAsyncEnumerable<RecordBatch> DoGetStreamAsync(
         FlightSqlTicket ticket,
         ClaimsPrincipal principal,
-        CancellationToken ct = default,
-        TenantId? callerTenant = null);
+        TenantId? callerTenant = null,
+        CancellationToken ct = default);
 }
