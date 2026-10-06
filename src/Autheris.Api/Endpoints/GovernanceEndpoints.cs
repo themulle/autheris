@@ -20,6 +20,32 @@ using Microsoft.AspNetCore.Routing;
 
 public static class GovernanceEndpoints
 {
+    internal static async Task<bool> IsAuthorizedForSimulationAsync(HttpContext context, string? targetTable)
+    {
+        var user = context.User;
+        if (user.IsInRole("GovernanceAdmin") || user.IsInRole("ClusterAdmin") ||
+            user.IsInRole("PrivacyAdmin") || user.IsInRole("Auditor"))
+        {
+            return true;
+        }
+
+        if (!user.IsInRole("DataOwner") ||
+            string.IsNullOrWhiteSpace(targetTable) ||
+            !TableIdentifier.TryParse(targetTable, out var table))
+        {
+            return false;
+        }
+
+        var sid = EndpointSecurity.GetSecurityContext(context)?.UserSid.Value ?? user.GetUserSid()?.Value;
+        var ownershipRepository = context.RequestServices.GetService(typeof(IDataOwnershipRepository)) as IDataOwnershipRepository;
+        if (string.IsNullOrWhiteSpace(sid) || ownershipRepository == null)
+        {
+            return false;
+        }
+
+        return await ownershipRepository.IsAuthorizedApproverForTableAsync(table, new Sid(sid), context.RequestAborted).ConfigureAwait(false);
+    }
+
     public static IEndpointRouteBuilder MapGovernanceEndpoints(this IEndpointRouteBuilder app)
     {
         // F-API-04: Declarative Web API OpenAPI/Swagger Schema & Doc Ingestion
@@ -69,10 +95,9 @@ public static class GovernanceEndpoints
             IPolicySimulationService simulationService,
             HttpContext context) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("ClusterAdmin") ||
-                               context.User.IsInRole("DataOwner");
-            if (!isPrivileged)
+            // A-2: the replay exposes the tenant audit trail (ActorSid, TargetTable, ...). Only audit/governance roles
+            // may replay tenant-wide; a DataOwner only for one concrete table they own or are delegate of.
+            if (!await IsAuthorizedForSimulationAsync(context, request.TargetTable).ConfigureAwait(false))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }

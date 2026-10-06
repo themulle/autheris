@@ -2,6 +2,7 @@ namespace Autheris.Application.OData.Services;
 
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,6 +33,13 @@ public sealed class OpenApiCacheManager : IOpenApiCacheManager
         CancellationToken ct = default)
     {
         var key = BuildKey(domainScope, isYaml, isModular);
+        if (key is null)
+        {
+            // G3: non-identifier / oversized domain names are never cached (no key collisions, no unbounded keys).
+            var uncached = await factory(ct).ConfigureAwait(false);
+            return Encoding.UTF8.GetBytes(uncached);
+        }
+
         if (_cache.TryGetValue(key, out var cachedBytes))
         {
             return cachedBytes;
@@ -53,7 +61,7 @@ public sealed class OpenApiCacheManager : IOpenApiCacheManager
         _cache.Clear();
     }
 
-    private static string BuildKey(string? domainScope, bool isYaml, bool isModular)
+    internal static string? BuildKey(string? domainScope, bool isYaml, bool isModular)
     {
         var format = isYaml ? "yaml" : "json";
         var mod = isModular ? "_modular" : "";
@@ -62,7 +70,12 @@ public sealed class OpenApiCacheManager : IOpenApiCacheManager
             return $"global_{format}{mod}";
         }
 
-        var sanitized = new string(domainScope.Where(c => char.IsLetterOrDigit(c) || c == '_' || c == '-').Take(64).ToArray());
-        return $"{sanitized.ToLowerInvariant()}_{format}{mod}";
+        // G3: key on the exact domain. Dropping characters (previous behaviour) mapped e.g. "a.b" and "ab" to one entry.
+        if (domainScope.Length > 64 || !domainScope.All(c => char.IsAsciiLetterOrDigit(c) || c == '_' || c == '-'))
+        {
+            return null;
+        }
+
+        return $"domain:{domainScope.ToLowerInvariant()}_{format}{mod}";
     }
 }

@@ -46,7 +46,7 @@ public static class GatewayPolicies
         => Evaluator.HasAnyRole(principal, roles, tenantId);
 
     /// <summary>
-    /// True when the principal carries any of the given roles, checking hierarchy,
+    /// True when the principal carries any of the given roles, by exact name via
     /// <see cref="ClaimsPrincipal.IsInRole"/>, or raw "role"/"roles" claims.
     /// </summary>
     public static bool HasAnyRole(ClaimsPrincipal? principal, IReadOnlyList<string> roles)
@@ -74,18 +74,9 @@ public static class GatewayPolicies
             return true;
         }
 
-        // 2. K-K10: Hierarchy evaluation for typed role names
-        foreach (var roleName in roles)
-        {
-            if (GatewayRoleExtensions.TryParseRole(roleName, out var targetRole))
-            {
-                if (Evaluator.HasRole(principal, targetRole))
-                {
-                    return true;
-                }
-            }
-        }
-
+        // G3: The name-list overload matches exact role names only. Mapping names to GatewayRole levels
+        // made hierarchy-implied roles pass (e.g. Analyst satisfying SchemaPublisherRoles). Use the typed
+        // GatewayRole overload when hierarchy semantics are wanted.
         return false;
     }
 

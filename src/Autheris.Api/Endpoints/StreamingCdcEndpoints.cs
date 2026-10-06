@@ -47,11 +47,16 @@ public static class StreamingCdcEndpoints
 
             try
             {
-                var callerTenant = user.FindFirst("tenant_id")?.Value
-                                  ?? user.FindFirst("tid")?.Value
-                                  ?? user.FindFirst("tenant")?.Value;
+                // A-1: caller tenant comes from the resolved request context (same source as the rest of the pipeline).
+                var callerTenant = EndpointSecurity.GetRequestTenant(request.HttpContext).Value;
 
                 var cdcEvent = DebeziumCdcParser.Parse(body);
+
+                // A-1: even canonical cluster admins must name the target tenant explicitly (no implicit/null tenant).
+                if (isClusterAdmin && string.IsNullOrWhiteSpace(cdcEvent.TenantId))
+                {
+                    return Results.BadRequest(new { error = "CDC event must carry an explicit tenant" });
+                }
 
                 // SEC-4: Enforce strict fail-closed tenant isolation on ingested CDC events
                 if (!isClusterAdmin)
@@ -184,10 +189,12 @@ public static class StreamingCdcEndpoints
     /// user name) promoted accounts such as "CORP\badminton" to cluster admin and has been removed.
     /// </summary>
     internal static bool IsCdcClusterAdmin(ClaimsPrincipal user)
-        => user.IsInRole("ClusterAdmin") || user.IsInRole("PlatformAdmin");
+        => EndpointSecurity.IsCanonicalClusterAdmin(user);
 
+    // A-1: PlatformAdmin is a tenant-scoped administrator: authorized to ingest, but only into its own tenant.
     internal static bool IsAuthorizedCdcIngestion(ClaimsPrincipal user)
         => IsCdcClusterAdmin(user) ||
+           user.IsInRole("PlatformAdmin") ||
            user.IsInRole("CdcIngestionService") ||
            user.IsInRole("StreamingAdmin") ||
            user.IsInRole("GovernanceAdmin");
