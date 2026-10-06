@@ -43,6 +43,7 @@ public sealed class SqlEmitterContext
             TargetSqlDialect.Sqlite => $"?{++ParameterCount}",
             TargetSqlDialect.DuckDb => $"${++ParameterCount}",
             TargetSqlDialect.Snowflake => $":{++ParameterCount}",
+            TargetSqlDialect.Oracle => $":p{++ParameterCount}",
             _ => $"?{++ParameterCount}"
         };
     }
@@ -68,6 +69,11 @@ public sealed class SqlEmitterContext
                 break;
             case TargetSqlDialect.Snowflake:
                 builder.Append(':');
+                builder.Append(++ParameterCount);
+                break;
+            case TargetSqlDialect.Oracle:
+                builder.Append(':');
+                builder.Append('p');
                 builder.Append(++ParameterCount);
                 break;
             default:

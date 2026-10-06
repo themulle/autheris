@@ -211,6 +211,8 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
     }
 
+    protected virtual string TableAliasKeyword => " AS ";
+
     protected virtual void GenerateTableSource(TableSource source, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
         switch (source)
@@ -219,14 +221,15 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 FormatQualifiedName(ref builder, named.Name, context);
                 if (named.Alias != null)
                 {
-                    builder.Append(" AS ");
+                    builder.Append(TableAliasKeyword);
                     FormatIdentifier(ref builder, named.Alias, context);
                 }
                 break;
             case SubqueryTableSource subquery:
                 builder.Append('(');
                 GenerateSelect(subquery.Subquery, ref builder, context);
-                builder.Append(") AS ");
+                builder.Append(')');
+                builder.Append(TableAliasKeyword);
                 FormatIdentifier(ref builder, subquery.Alias, context);
                 if (subquery.ColumnAliases != null && subquery.ColumnAliases.Count > 0)
                 {
@@ -266,7 +269,8 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             case LateralTableSource lateral:
                 builder.Append("LATERAL (");
                 GenerateSelect(lateral.Subquery, ref builder, context);
-                builder.Append(") AS ");
+                builder.Append(')');
+                builder.Append(TableAliasKeyword);
                 FormatIdentifier(ref builder, lateral.Alias, context);
                 break;
         }
