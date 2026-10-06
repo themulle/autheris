@@ -9,11 +9,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
+using Autheris.Api.Security;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -23,13 +25,12 @@ public static class GovernanceEndpoints
     internal static async Task<bool> IsAuthorizedForSimulationAsync(HttpContext context, string? targetTable)
     {
         var user = context.User;
-        if (user.IsInRole("GovernanceAdmin") || user.IsInRole("ClusterAdmin") ||
-            user.IsInRole("PrivacyAdmin") || user.IsInRole("Auditor"))
+        if (GatewayPolicies.HasAnyRole(user, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]))
         {
             return true;
         }
 
-        if (!user.IsInRole("DataOwner") ||
+        if (!GatewayPolicies.HasRole(user, GatewayRole.DataOwner) ||
             string.IsNullOrWhiteSpace(targetTable) ||
             !TableIdentifier.TryParse(targetTable, out var table))
         {
@@ -53,9 +54,7 @@ public static class GovernanceEndpoints
             HttpContext context,
             IOpenApiIngestionService ingestionService) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("SchemaAdmin") ||
-                               context.User.IsInRole("ClusterAdmin");
+            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher]);
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -109,7 +108,7 @@ public static class GovernanceEndpoints
                 : TenantId.LegacySingleTenant;
             if (request.Tenant is { } requestedTenant && requestedTenant != effectiveTenant)
             {
-                if (!context.User.IsInRole("ClusterAdmin"))
+                if (!GatewayPolicies.HasRole(context.User, GatewayRole.ClusterAdmin))
                 {
                     return Results.StatusCode(StatusCodes.Status403Forbidden);
                 }
@@ -125,10 +124,7 @@ public static class GovernanceEndpoints
             ISchemaSunsettingService sunsettingService,
             HttpContext context) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("SchemaAdmin") ||
-                               context.User.IsInRole("ClusterAdmin") ||
-                               context.User.IsInRole("DataOwner");
+            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.DataOwner]);
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -158,11 +154,7 @@ public static class GovernanceEndpoints
             ISchemaSunsettingService sunsettingService,
             HttpContext context) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("SchemaAdmin") ||
-                               context.User.IsInRole("ClusterAdmin") ||
-                               context.User.IsInRole("DataOwner") ||
-                               context.User.IsInRole("Developer");
+            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.DataOwner, GatewayRole.Consumer]);
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -224,10 +216,7 @@ public static class GovernanceEndpoints
                                         ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                                         ?? context.User.Identity?.Name;
 
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("PrivacyAdmin") ||
-                               context.User.IsInRole("DataProtectionOfficer") ||
-                               context.User.IsInRole("ClusterAdmin");
+            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
 
             var targetKey = ResolveTenantBoundClientId(context, clientId, out var isForbidden);
             if (isForbidden)
@@ -251,9 +240,7 @@ public static class GovernanceEndpoints
         {
             var isCanonicalClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
             var isPrivileged = isCanonicalClusterAdmin ||
-                               context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("PrivacyAdmin") ||
-                               context.User.IsInRole("DataProtectionOfficer");
+                               GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -283,10 +270,7 @@ public static class GovernanceEndpoints
                                             ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                                             ?? context.User.Identity?.Name;
 
-                var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                                   context.User.IsInRole("PrivacyAdmin") ||
-                                   context.User.IsInRole("DataProtectionOfficer") ||
-                                   context.User.IsInRole("ClusterAdmin");
+                var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
 
                 if (!isPrivileged || string.IsNullOrWhiteSpace(request.ClientId))
                 {
@@ -327,11 +311,7 @@ public static class GovernanceEndpoints
             IEuAiActAuditExporter exporter,
             HttpContext context) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("PrivacyAdmin") ||
-                               context.User.IsInRole("DataProtectionOfficer") ||
-                               context.User.IsInRole("Auditor") ||
-                               context.User.IsInRole("ClusterAdmin");
+            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
 
             if (!isPrivileged)
             {
@@ -414,9 +394,7 @@ public static class GovernanceEndpoints
             HttpContext context,
             CancellationToken ct) =>
         {
-            var isPrivileged = context.User.IsInRole("GovernanceAdmin") ||
-                               context.User.IsInRole("ClusterAdmin") ||
-                               context.User.IsInRole("DataOwner");
+            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.DataOwner]);
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);

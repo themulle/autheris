@@ -5,9 +5,11 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Security;
 using Autheris.Application.Observability;
 using Autheris.Application.ResourceGroups;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -95,9 +97,9 @@ public static class SystemEndpoints
     {
         if (allowedRoles == null || allowedRoles.Count == 0)
         {
-            return user.IsInRole("GovernanceAdmin") || user.IsInRole("ClusterAdmin") || user.IsInRole("SecurityAdmin");
+            return GatewayPolicies.HasRole(user, GatewayRole.GovernanceAdmin);
         }
 
-        return allowedRoles.Any(user.IsInRole);
+        return GatewayPolicies.HasAnyRole(user, allowedRoles);
     }
 }

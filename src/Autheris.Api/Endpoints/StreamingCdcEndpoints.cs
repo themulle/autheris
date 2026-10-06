@@ -4,7 +4,9 @@ using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Streaming.Interfaces;
+using Autheris.Domain.Security;
 using Autheris.Extensions.Cdc;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -180,9 +182,7 @@ public static class StreamingCdcEndpoints
     }
 
     private static bool IsAuthorizedSubscriptionAdmin(ClaimsPrincipal user)
-        => user.IsInRole("GovernanceAdmin") ||
-           user.IsInRole("StreamingAdmin") ||
-           user.IsInRole("ClusterAdmin");
+        => GatewayPolicies.HasAnyRole(user, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin]);
 
     /// <summary>
     /// SEC H-04: Cross-tenant CDC ingestion is decided by roles only. The former substring check ("ADMIN" in SID or
@@ -194,8 +194,6 @@ public static class StreamingCdcEndpoints
     // A-1: PlatformAdmin is a tenant-scoped administrator: authorized to ingest, but only into its own tenant.
     internal static bool IsAuthorizedCdcIngestion(ClaimsPrincipal user)
         => IsCdcClusterAdmin(user) ||
-           user.IsInRole("PlatformAdmin") ||
            user.IsInRole("CdcIngestionService") ||
-           user.IsInRole("StreamingAdmin") ||
-           user.IsInRole("GovernanceAdmin");
+           GatewayPolicies.HasAnyRole(user, [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin]);
 }

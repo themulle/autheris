@@ -47,6 +47,37 @@ public sealed record SecurityPrincipalContext
         return TenantRoles.Contains(role) || ClusterRoles.Contains(role);
     }
 
+    /// <summary>K-K10: Checks whether the principal satisfies the required GatewayRole with hierarchy semantics.</summary>
+    public bool HasRole(GatewayRole role)
+    {
+        if (IsClusterAdmin) return true;
+        foreach (var r in TenantRoles.Concat(ClusterRoles))
+        {
+            if (GatewayRoleExtensions.TryParseRole(r, out var parsed) && parsed.Implies(role))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>K-K10: Checks whether the principal satisfies any of the required GatewayRoles.</summary>
+    public bool HasAnyRole(params GatewayRole[] roles) => HasAnyRole((IEnumerable<GatewayRole>)roles);
+
+    /// <summary>K-K10: Checks whether the principal satisfies any of the required GatewayRoles.</summary>
+    public bool HasAnyRole(IEnumerable<GatewayRole> roles)
+    {
+        ArgumentNullException.ThrowIfNull(roles);
+        foreach (var required in roles)
+        {
+            if (HasRole(required))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// <summary>Creates an anonymous security context with LegacySingleTenant and empty permissions.</summary>
     public static SecurityPrincipalContext Anonymous(TenantId? tenantId = null) => new()
     {
