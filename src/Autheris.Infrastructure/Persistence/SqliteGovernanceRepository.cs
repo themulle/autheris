@@ -169,7 +169,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
             options?.Value?.Audit,
             CreateDefaultAuditAnchorStore(connStr, isMemory, options?.Value?.Audit?.ChainAnchorPath),
             secretProvider,
-            auditAnchorSigner);
+            auditAnchorSigner,
+            _logger);
         InitializeAuditChainAnchor(isDevOrTest);
 
         bool shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? (isMemory && isDevOrTest);

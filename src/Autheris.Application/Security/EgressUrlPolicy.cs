@@ -69,8 +69,14 @@ public static class EgressUrlPolicy
             }
             catch (SocketException)
             {
-                addresses = [];
+                // SEC I-1: fail closed; an unresolvable host must not pass validation.
+                throw new SecurityException($"SSRF protection: host '{host}' could not be resolved (fail-closed).");
             }
+        }
+
+        if (addresses.Length == 0)
+        {
+            throw new SecurityException($"SSRF protection: host '{host}' did not resolve to any address (fail-closed).");
         }
 
         foreach (var ip in addresses)

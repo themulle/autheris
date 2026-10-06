@@ -4,6 +4,7 @@ using System.Text;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Options;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace Autheris.Infrastructure.Persistence;
 
@@ -107,11 +108,21 @@ public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
 {
     private static readonly AuditChainAnchor Invalid = new(-1, string.Empty, DateTimeOffset.MinValue, string.Empty);
     private readonly string _directory;
+    private readonly Func<AuditChainAnchor, bool>? _isValidlySigned;
+    private readonly ILogger? _logger;
 
-    public WormDirectoryAuditChainAnchorStore(string directory)
+    /// <param name="directory">Append-only anchor directory.</param>
+    /// <param name="isValidlySigned">
+    /// Optional signature check (e.g. the asymmetric KMS signature). Files that fail it are skipped like unparsable files,
+    /// so a planted newest file cannot permanently disable anchor verification.
+    /// </param>
+    /// <param name="logger">Receives a critical alert for every skipped (poisoned) file.</param>
+    public WormDirectoryAuditChainAnchorStore(string directory, Func<AuditChainAnchor, bool>? isValidlySigned = null, ILogger? logger = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         _directory = Path.GetFullPath(directory);
+        _isValidlySigned = isValidlySigned;
+        _logger = logger;
     }
 
     public string DirectoryPath => _directory;
@@ -132,21 +143,29 @@ public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
 
         Array.Sort(files, StringComparer.Ordinal);
         AuditChainAnchor? best = null;
+        var skipped = 0;
         foreach (var file in files.Reverse().Take(8))
         {
+            // Review G5: an invalid newest file (planted or corrupted) is skipped with a critical alert; the newest
+            // valid anchor is used instead of failing permanently.
             AuditChainAnchor? anchor;
             try
             {
                 anchor = JsonSerializer.Deserialize<AuditChainAnchor>(File.ReadAllText(file));
             }
-            catch (JsonException)
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
             {
-                return Invalid;
+                anchor = null;
             }
 
-            if (anchor == null || anchor.Sequence < 0)
+            if (anchor == null || anchor.Sequence < 0 || string.IsNullOrEmpty(anchor.EntryHash) ||
+                (_isValidlySigned != null && !_isValidlySigned(anchor)))
             {
-                return Invalid;
+                skipped++;
+                _logger?.LogCritical(
+                    "CRITICAL: WORM audit anchor file '{File}' is invalid or not validly signed and was skipped; falling back to the newest valid anchor. Investigate possible tampering of the anchor directory.",
+                    Path.GetFileName(file));
+                continue;
             }
 
             if (best == null)
@@ -155,9 +174,14 @@ public sealed class WormDirectoryAuditChainAnchorStore : IAuditChainAnchorStore
             }
             else if (anchor.Sequence == best.Sequence && !string.Equals(anchor.EntryHash, best.EntryHash, StringComparison.Ordinal))
             {
-                // Two different anchors for one sequence: history was rewritten or the chain forked.
+                // Two different valid anchors for one sequence: history was rewritten or the chain forked.
                 return Invalid;
             }
+        }
+
+        if (best == null && skipped > 0)
+        {
+            return Invalid;
         }
 
         return best;
@@ -396,8 +420,13 @@ public static class AuditChainAnchorStoreFactory
         AuditOptions? options,
         IAuditChainAnchorStore primary,
         IKeyVaultSecretProvider? secrets,
-        IAuditAnchorSigner? signer = null)
+        IAuditAnchorSigner? signer = null,
+        ILogger? logger = null)
     {
+        signer ??= CreateSigner(options, secrets);
+        Func<AuditChainAnchor, bool>? verify = signer == null
+            ? null
+            : a => !string.IsNullOrEmpty(a.ExternalSignature) && signer.Verify(SigningAuditChainAnchorStore.Payload(a), a.ExternalSignature);
         var stores = new List<IAuditChainAnchorStore> { primary };
         if (options != null)
         {
@@ -408,13 +437,12 @@ public static class AuditChainAnchorStoreFactory
 
             if (!string.IsNullOrWhiteSpace(options.ChainAnchorWormDirectory))
             {
-                stores.Add(new WormDirectoryAuditChainAnchorStore(options.ChainAnchorWormDirectory));
+                stores.Add(new WormDirectoryAuditChainAnchorStore(options.ChainAnchorWormDirectory, verify, logger));
             }
         }
 
         IAuditChainAnchorStore result = stores.Count == 1 ? primary : new CompositeAuditChainAnchorStore(stores);
 
-        signer ??= CreateSigner(options, secrets);
         return signer == null ? result : new SigningAuditChainAnchorStore(result, signer);
     }
 

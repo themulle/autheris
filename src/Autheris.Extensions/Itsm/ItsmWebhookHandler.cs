@@ -340,6 +340,7 @@ public sealed class ItsmWebhookHandler(
                 request.Id,
                 actor,
                 payload.Reason ?? $"Rejected via {payload.System} webhook",
+                isExternalItsm: true,
                 ct).ConfigureAwait(false);
             return true;
         }
@@ -368,6 +369,12 @@ public sealed class ItsmWebhookHandler(
                 }
             }
 
+            return true;
+        }
+
+        if (string.Equals(payload.Action, "IGNORE", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogInformation("Webhook ignoriert: Ticket-Status ergibt weder Genehmigung noch Ablehnung (Ticket {TicketId}).", payload.TicketId);
             return true;
         }
 
@@ -494,7 +501,7 @@ public sealed class ItsmWebhookHandler(
 
             string ticketId = string.Empty;
             string instanceId = string.Empty;
-            string action = "REJECT";
+            string action = "IGNORE"; // Review G5: unknown states are ignored, never treated as rejection
             string? reason = null;
             string detectedSystem = "ITSM";
 
@@ -514,7 +521,7 @@ public sealed class ItsmWebhookHandler(
 
             if (root.TryGetProperty("Action", out var aProp) || root.TryGetProperty("action", out aProp))
             {
-                action = aProp.GetString() ?? "REJECT";
+                action = aProp.GetString() ?? "IGNORE";
             }
 
             if (root.TryGetProperty("Reason", out var rProp) || root.TryGetProperty("reason", out rProp))

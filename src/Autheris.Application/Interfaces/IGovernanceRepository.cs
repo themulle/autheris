@@ -70,6 +70,20 @@ public interface IConsentApprovalRepository
     Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool isExternalItsmApproval, string? itsmApproverAccount, CancellationToken ct = default)
         => ApproveConsentRequestStepAsync(requestId, approverSid, isExternalItsmApproval, ct);
     Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default);
+
+    /// <summary>
+    /// Review G5: rejection with an explicit flag for callers that act on behalf of the verified external ITSM system
+    /// (signed webhook). Authorization never infers this from the SID prefix. The default ignores the flag.
+    /// </summary>
+    Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, bool isExternalItsm, CancellationToken ct = default)
+        => RejectConsentRequestAsync(requestId, approverSid, reason, ct);
+
+    /// <summary>
+    /// Review G5: activation for the insecure getting-started auto-approve path (request still pending).
+    /// Regular activation (<see cref="ActivateConsentAsync(Guid, Sid?, CancellationToken)"/>) only accepts 'APPROVED'.
+    /// </summary>
+    Task ActivateConsentForAutoApproveAsync(Guid requestId, CancellationToken ct = default)
+        => ActivateConsentAsync(requestId, ct);
     Task<ConsentRequest?> GetConsentRequestByTicketIdAsync(string ticketId, CancellationToken ct = default);
     Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default);
     Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default);

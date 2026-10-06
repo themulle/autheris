@@ -1401,6 +1401,14 @@ public sealed class OutboundEgressOptions
     /// </summary>
     public List<string>? TrustedIntegrations { get; init; }
 
+    /// <summary>
+    /// SEC I-1: when false (default) outbound integration clients never use the system/environment proxy
+    /// (HTTP_PROXY/HTTPS_PROXY), so every connection is made directly to an address that passed the SSRF rules.
+    /// Set to true only when the network forces egress through a proxy; connections to that proxy are then not
+    /// subject to the address rules (the target URL is still validated before the request is sent).
+    /// </summary>
+    public bool AllowSystemProxy { get; init; }
+
     private static readonly string[] DefaultTrustedIntegrations = ["Itsm", "Catalog", "OpenMetadata", "Lineage"];
 
     /// <summary>Configured <see cref="TrustedIntegrations"/> or the default list.</summary>

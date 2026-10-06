@@ -7,10 +7,16 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Domain.Model;
 using HotChocolate;
 using HotChocolate.Types;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 public sealed class Subscription
 {
@@ -23,6 +29,7 @@ public sealed class Subscription
         string? tenantId,
         [Service] ICdcEventChannel eventChannel,
         [Service] IStreamRlsPolicyEnforcer enforcer,
+        [Service] IServiceProvider services,
         ClaimsPrincipal? principal,
         [EnumeratorCancellation] CancellationToken ct)
     {
@@ -51,11 +58,67 @@ public sealed class Subscription
             ? cleanTable
             : $"cdc_{cleanTable}";
 
-        var sourceStream = eventChannel.SubscribeAsync(topic, ct);
+        // SEC A-3: Subscriptions over HTTP SSE / multipart bypass the WebSocket interceptor, so the stream itself
+        // enforces token expiry / max session lifetime (M-14) and periodic revocation checks.
+        var httpContext = services.GetService<IHttpContextAccessor>()?.HttpContext;
+        var timeProvider = services.GetService<TimeProvider>() ?? TimeProvider.System;
+        var authExpiresUtc = httpContext?.Features.Get<IAuthenticateResultFeature>()?.AuthenticateResult?.Properties?.ExpiresUtc;
+        var expiry = WebSocketAuthInterceptor.ResolveSessionExpiry(
+            principal, authExpiresUtc, timeProvider.GetUtcNow(), WebSocketAuthInterceptor.DefaultMaxSessionLifetime);
+        var remaining = expiry - timeProvider.GetUtcNow();
+        if (remaining <= TimeSpan.Zero)
+        {
+            throw new GraphQLException(
+                ErrorBuilder.New()
+                    .SetMessage("Unauthorized: Authentication token expired.")
+                    .SetCode("AUTH_TOKEN_EXPIRED")
+                    .Build());
+        }
+
+        var revocation = services.GetService<ITokenRevocationService>();
+        if (revocation != null && await revocation.IsRevokedAsync(principal, ct).ConfigureAwait(false))
+        {
+            throw new GraphQLException(
+                ErrorBuilder.New()
+                    .SetMessage("Unauthorized: Authentication token revoked.")
+                    .SetCode("AUTH_TOKEN_REVOKED")
+                    .Build());
+        }
+
+        var seconds = services.GetService<IOptions<GatewayOptions>>()?.Value?.GraphQL?.SubscriptionRevalidationSeconds ?? 0;
+        var interval = seconds > 0 ? TimeSpan.FromSeconds(seconds) : WebSocketAuthInterceptor.DefaultRevalidationInterval;
+
+        using var guardCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        using var expiryCts = new CancellationTokenSource(remaining, timeProvider);
+        using var expiryReg = expiryCts.Token.Register(static s => ((CancellationTokenSource)s!).Cancel(), guardCts);
+        using var revocationTimer = revocation == null ? null : timeProvider.CreateTimer(static state =>
+        {
+            var (cts, svc, p) = ((CancellationTokenSource, ITokenRevocationService, ClaimsPrincipal))state!;
+            _ = CheckRevocationAsync(cts, svc, p);
+        }, (guardCts, revocation, principal), interval, interval);
+
+        var sourceStream = eventChannel.SubscribeAsync(topic, guardCts.Token);
         var subscriber = principal;
 
-        await foreach (var cdcEvent in sourceStream.WithCancellation(ct))
+        await using var enumerator = sourceStream.GetAsyncEnumerator(guardCts.Token);
+        while (true)
         {
+            bool hasNext;
+            try
+            {
+                hasNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (guardCts.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                break; // session expired or token revoked: end the stream
+            }
+
+            if (!hasNext || guardCts.IsCancellationRequested)
+            {
+                break;
+            }
+
+            var cdcEvent = enumerator.Current;
             var decision = await enforcer.EvaluateAndMaskAsync(cdcEvent, subscriber, ct);
             if (!decision.IsAllowed || decision.MaskedPayload == null)
             {
@@ -70,6 +133,25 @@ public sealed class Subscription
                 PayloadJson: JsonSerializer.Serialize(decision.MaskedPayload),
                 Timestamp: cdcEvent.Timestamp
             );
+        }
+    }
+
+    private static async Task CheckRevocationAsync(CancellationTokenSource cts, ITokenRevocationService svc, ClaimsPrincipal principal)
+    {
+        try
+        {
+            if (!cts.IsCancellationRequested && await svc.IsRevokedAsync(principal, CancellationToken.None).ConfigureAwait(false))
+            {
+                cts.Cancel();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Stream already ended.
+        }
+        catch (Exception)
+        {
+            // Fail open on transient check errors; the next tick retries (same as the WebSocket watch).
         }
     }
 }

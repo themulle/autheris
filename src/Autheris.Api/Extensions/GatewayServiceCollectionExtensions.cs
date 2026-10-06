@@ -335,7 +335,9 @@ public static class GatewayServiceCollectionExtensions
         }
 
         services.AddHttpClient(DeclarativeHttpDataSourceExecutor.HttpClientName)
-            .ConfigurePrimaryHttpMessageHandler(sp => SecureOutboundHttp.CreatePrimaryHandler(sp, "DeclarativeHttp"));
+            .ConfigurePrimaryHttpMessageHandler(sp => SecureOutboundHttp.CreatePrimaryHandler(sp, "DeclarativeHttp"))
+            // SEC I-1: same URL/address decision as every other integration client (also used by plugins).
+            .AddHttpMessageHandler(sp => SsrfProtectionHandler.Create(sp, "DeclarativeHttp"));
 #pragma warning restore CA5359
         services.AddSingleton<IPluginManager, PluginManager>();
         services.AddSingleton<IDataSourceExecutor, SqlDataSourceExecutor>();
