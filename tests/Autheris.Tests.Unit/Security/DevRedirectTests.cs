@@ -31,4 +31,21 @@ public sealed class DevRedirectTests
     {
         DevEndpoints.IsLocalPath(target).ShouldBeFalse();
     }
+
+    [Theory]
+    [InlineData("cross-site", true)]
+    [InlineData("same-site", true)]
+    [InlineData("none", false)]          // typed URL, bookmark, terminal link
+    [InlineData("same-origin", false)]
+    [InlineData("", false)]              // not a browser (curl, tests)
+    public void IsCrossSiteRequest_UsesSecFetchSite(string header, bool expected)
+    {
+        var ctx = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        if (header.Length > 0)
+        {
+            ctx.Request.Headers["Sec-Fetch-Site"] = header;
+        }
+
+        DevEndpoints.IsCrossSiteRequest(ctx.Request).ShouldBe(expected);
+    }
 }
