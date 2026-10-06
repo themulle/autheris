@@ -31,6 +31,8 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
     private readonly byte[] _auditHmacKey;
     private readonly byte[] _auditAnchorKey;
     private readonly IAuditChainAnchorStore? _auditAnchorStore;
+    private readonly bool _isDevOrTest;
+    private readonly string? _migrationConnectionString;
     private readonly ILogger<PostgreSqlGovernanceRepository>? _logger;
     private string? _auditChainViolation;
     private readonly GatewayOptions? _options;
@@ -49,13 +51,41 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
         _epochValidationService = epochValidationService;
         _logger = logger;
         _options = options.Value;
-        _auditAnchorStore = auditAnchorStore;
 
         var connStr = options?.Value?.GovernanceDb?.ConnectionString;
+        var transportEnv = environment?.EnvironmentName ??
+                           Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
+                           Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        bool isDevTransport = string.IsNullOrEmpty(transportEnv) ||
+                              string.Equals(transportEnv, "Development", StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(transportEnv, "Testing", StringComparison.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(connStr))
         {
+            // Review PG-7: no default credentials outside Development/Test.
+            if (!isDevTransport)
+            {
+                throw new InvalidOperationException("Security critical: GovernanceDb:ConnectionString is not configured for the PostgreSQL provider.");
+            }
+
             connStr = "Host=localhost;Database=autheris_governance;Username=postgres;Password=postgres";
         }
+
+        // Review PG-7: the governance database carries consent, audit and secrets metadata; require TLS outside Development/Test.
+        if (!isDevTransport && options?.Value?.IsInsecureTransportAllowed != true)
+        {
+            foreach (var (name, candidate) in new[] { ("ConnectionString", connStr), ("MigrationConnectionString", options?.Value?.GovernanceDb?.MigrationConnectionString) })
+            {
+                if (string.IsNullOrWhiteSpace(candidate)) continue;
+                var csb = new NpgsqlConnectionStringBuilder(candidate);
+                if (csb.SslMode is not (SslMode.Require or SslMode.VerifyCA or SslMode.VerifyFull))
+                {
+                    throw new InvalidOperationException(
+                        $"Security critical: GovernanceDb:{name} must use 'SSL Mode=Require', 'VerifyCA' or 'VerifyFull' outside Development.");
+                }
+            }
+        }
+
+        _migrationConnectionString = options?.Value?.GovernanceDb?.MigrationConnectionString;
 
         var builder = new NpgsqlDataSourceBuilder(connStr);
         if (options?.Value?.GovernanceDb?.CommandTimeoutSeconds > 0)
@@ -141,6 +171,14 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
             _auditHmacKey,
             32,
             info: "Autheris:AuditAnchor:v1"u8.ToArray());
+
+        _isDevOrTest = isDevOrTest;
+
+        // Review PG-2: anchor store from Audit:ChainAnchorPath (use a shared, separately protected location when running
+        // several replicas); in-memory only in Development/Test or when nothing is configured (a warning is logged).
+        _auditAnchorStore = auditAnchorStore ?? (!string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorPath)
+            ? new FileAuditChainAnchorStore(options.Value.Audit.ChainAnchorPath)
+            : new InMemoryAuditChainAnchorStore());
 
         bool shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? isDevOrTest;
         InitializeDatabaseSafely(shouldSeed);

@@ -10,11 +10,25 @@ public partial class PostgreSqlGovernanceRepository
 {
     private int _isInitialized;
 
+    /// <summary>Session-level advisory lock that serialises the schema DDL of concurrently starting replicas ("AUTH" "SCHE").</summary>
+    private const long SchemaAdvisoryLockKey = 0x41555448_53434845L;
+
+    private static void ExecuteSchemaCommand(NpgsqlConnection conn, string sql)
+    {
+        using var command = conn.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
+    }
+
     private void InitializeDatabase()
     {
         if (Interlocked.Exchange(ref _isInitialized, 1) == 1) return;
 
-        using var conn = _dataSource.OpenConnection();
+        // Review PG-7: DDL with a separate migration role when configured (the runtime role then needs no DDL rights).
+        using NpgsqlDataSource? migrationDataSource = string.IsNullOrWhiteSpace(_migrationConnectionString)
+            ? null
+            : NpgsqlDataSource.Create(_migrationConnectionString);
+        using var conn = (migrationDataSource ?? _dataSource).OpenConnection();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS TABLES (
@@ -173,6 +187,9 @@ public partial class PostgreSqlGovernanceRepository
             CREATE INDEX IF NOT EXISTS idx_audit_target_table ON AUDIT_LOG_ENTRIES (target_table, occurred_at);
             CREATE INDEX IF NOT EXISTS idx_audit_actor_sid ON AUDIT_LOG_ENTRIES (actor_sid, occurred_at);
 
+            -- Review PG-1: second line of defence against forks / duplicate sequence numbers.
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON AUDIT_LOG_ENTRIES (seq);
+
             CREATE TABLE IF NOT EXISTS CONSENT_REQUESTS (
                 id TEXT PRIMARY KEY,
                 table_id TEXT NOT NULL,
@@ -241,10 +258,38 @@ public partial class PostgreSqlGovernanceRepository
                 last_error TEXT
             );
 
+            -- Review PG-4 (SEC N-2): a consent request is activated at most once.
+            -- (The OpenMetadata sync marker is shared by many sync consents and is therefore excluded.)
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_consents_request
+                ON CONSENTS (consent_request_id)
+                WHERE consent_request_id IS NOT NULL AND consent_request_id <> '0e3d5c1a-7b2f-4c8e-9a61-5f0d2b7c4e19';
+
             CREATE INDEX IF NOT EXISTS idx_itsm_outbox_status_retry
                 ON ITSM_OUTBOX (status, next_retry_at);
         ";
-        cmd.ExecuteNonQuery();
+
+        // Review PG-1: concurrent replica starts must not run the DDL at the same time ("tuple concurrently updated").
+        ExecuteSchemaCommand(conn, "SELECT pg_advisory_lock(" + SchemaAdvisoryLockKey + ")");
+        try
+        {
+            cmd.ExecuteNonQuery();
+
+            // Review PG-2: append-only audit table (a table owner can still drop the trigger; the runtime role should only
+            // hold INSERT/SELECT, the schema is applied with a separate migration role). One command per statement.
+            ExecuteSchemaCommand(conn, @"CREATE OR REPLACE FUNCTION autheris_audit_append_only() RETURNS trigger AS $audit$
+                BEGIN
+                    RAISE EXCEPTION 'AUDIT_LOG_ENTRIES is append-only (%)', TG_OP USING ERRCODE = '42501';
+                END;
+                $audit$ LANGUAGE plpgsql");
+            ExecuteSchemaCommand(conn, @"CREATE OR REPLACE TRIGGER trg_audit_append_only_row BEFORE UPDATE OR DELETE ON AUDIT_LOG_ENTRIES
+                FOR EACH ROW EXECUTE FUNCTION autheris_audit_append_only()");
+            ExecuteSchemaCommand(conn, @"CREATE OR REPLACE TRIGGER trg_audit_append_only_trunc BEFORE TRUNCATE ON AUDIT_LOG_ENTRIES
+                FOR EACH STATEMENT EXECUTE FUNCTION autheris_audit_append_only()");
+        }
+        finally
+        {
+            ExecuteSchemaCommand(conn, "SELECT pg_advisory_unlock(" + SchemaAdvisoryLockKey + ")");
+        }
 
         var (tailHash, tailSeq) = ReadAuditTail(null);
         if (tailHash != null)
