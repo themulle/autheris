@@ -129,7 +129,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
 
         foreach (var key in tableKeys)
         {
-            var evaluated = await EvaluateTableAsync(key, user, userSid, tenantId, consentBypassed, ct).ConfigureAwait(false);
+            var evaluated = await EvaluateTableAsync(definition.CatalogDomain, key, user, userSid, tenantId, consentBypassed, ct).ConfigureAwait(false);
             if (evaluated == null)
             {
                 await AuditAsync("PROCEDURE_DENIED", "DENY", definition, tenantId, userSid, new { reason = "consent" }, ct).ConfigureAwait(false);
@@ -268,6 +268,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     /// in memory (differs from SQL semantics, review E-6); such a consent therefore denies the call (fail-closed).
     /// </summary>
     private async Task<(TableAccessDecision Decision, TableMetadata Meta)?> EvaluateTableAsync(
+        string catalogDomain,
         string tableKey,
         ClaimsPrincipal user,
         Sid userSid,
@@ -275,7 +276,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         bool consentBypassed,
         CancellationToken ct)
     {
-        if (_tableRepository == null || !TableIdentifier.TryParse("default." + tableKey, out var tableId))
+        if (_tableRepository == null || !TableIdentifier.TryParse(catalogDomain + "." + tableKey, out var tableId))
         {
             return null;
         }

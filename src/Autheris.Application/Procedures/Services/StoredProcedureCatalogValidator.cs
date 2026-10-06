@@ -362,7 +362,7 @@ public sealed class StoredProcedureCatalogValidator
             return;
         }
 
-        var meta = await _tableRepository.GetTableMetadataAsync(new TableIdentifier("default", schema, name), ct).ConfigureAwait(false);
+        var meta = await _tableRepository.GetTableMetadataAsync(new TableIdentifier(definition.CatalogDomain, schema, name), ct).ConfigureAwait(false);
         if (meta == null || meta.Columns.Count == 0)
         {
             errors.Add($"Table '{full}' is not registered in the data catalog; governance is impossible.");
