@@ -57,8 +57,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
                            Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
                            Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
         bool isDevTransport = string.IsNullOrEmpty(transportEnv) ||
-                              string.Equals(transportEnv, "Development", StringComparison.OrdinalIgnoreCase) ||
-                              string.Equals(transportEnv, "Testing", StringComparison.OrdinalIgnoreCase);
+                              string.Equals(transportEnv, "Development", StringComparison.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(connStr))
         {
             // Review PG-7: no default credentials outside Development/Test.
@@ -117,8 +116,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
             catch (Exception ex)
             {
                 var env = environment?.EnvironmentName ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
-                bool isDev = string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase) ||
-                             string.Equals(env, "Testing", StringComparison.OrdinalIgnoreCase);
+                bool isDev = string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase);
                 if (!isDev)
                 {
                     throw new InvalidOperationException($"Security critical: Failed to load AuditHmacKeyVaultRef '{auditSecretRef}' from Key Vault in non-development environment.", ex);
@@ -150,8 +148,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
                       Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
                       Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
         bool isDevOrTest = string.IsNullOrEmpty(envName) ||
-                           string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
-                           string.Equals(envName, "Testing", StringComparison.OrdinalIgnoreCase);
+                           string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase);
 
         if (key == null || key.Length == 0)
         {
