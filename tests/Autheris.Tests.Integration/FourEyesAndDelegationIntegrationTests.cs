@@ -359,12 +359,12 @@ public class FourEyesAndDelegationIntegrationTests : IClassFixture<WebApplicatio
             });
         }
 
-        // Query an odd number of parent entities (e.g., 7) with nested relation "items"
+        // Query an odd number of parent entities (e.g., 3; kept small because M-9 weights nested unpaginated lists by the list multiplier) with nested relation "items"
         var query = new
         {
             query = @"query {
                 finance {
-                    invoicesWithItems(first: 7) {
+                    invoicesWithItems(first: 3) {
                         id
                         amount
                         vendor

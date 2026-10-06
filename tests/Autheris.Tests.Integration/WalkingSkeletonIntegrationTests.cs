@@ -424,7 +424,7 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
         {
             query = @"query {
                 finance {
-                    invoicesWithItems(first: 30) {
+                    invoicesWithItems(first: 15) {
                         id
                         amount
                         vendor
