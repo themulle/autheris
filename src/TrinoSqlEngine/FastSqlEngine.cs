@@ -749,12 +749,13 @@ public sealed partial class FastSqlEngine
 
     public string RewriteRls(ReadOnlyMemory<char> sql, RlsOptions? options, CancellationToken cancellationToken)
     {
-        if (string.Equals(SqlRewriterEngine, "AstCompiler", StringComparison.OrdinalIgnoreCase))
+        string engine = options?.RewriterEngine ?? SqlRewriterEngine;
+        if (string.Equals(engine, "AstCompiler", StringComparison.OrdinalIgnoreCase))
         {
             return GenerateGovernedSql(sql, options, cancellationToken);
         }
 
-        if (string.Equals(SqlRewriterEngine, "ShadowDualRun", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(engine, "ShadowDualRun", StringComparison.OrdinalIgnoreCase))
         {
             var legacyResult = RunLegacyRewrite(sql, options, cancellationToken);
             try

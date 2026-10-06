@@ -1257,6 +1257,7 @@ public sealed class WebSqlOptions
     /// denylist are never permitted, even if listed here.
     /// </summary>
     public List<string> AdditionalAllowedFunctions { get; init; } = [];
+    public string? SqlRewriterEngine { get; init; }
 
     /// <summary>
     /// Legacy alias for <see cref="AllowDml"/> (reported as WARN with the hint to use WebSql.AllowDml).

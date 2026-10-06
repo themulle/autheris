@@ -602,7 +602,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             RejectUnfilteredDml = true,
             PolicyProvider = policyProvider,
             TableColumnsProvider = tbl => tableColumnsMap.TryGetValue(tbl, out var cols) ? cols : null,
-            ColumnMaskingProvider = maskingProvider
+            ColumnMaskingProvider = maskingProvider,
+            RewriterEngine = _options.Value.WebSql.SqlRewriterEngine
         };
 
         // 7. Rewrite SQL AST

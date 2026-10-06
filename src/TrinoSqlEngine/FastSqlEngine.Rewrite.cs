@@ -10,6 +10,7 @@ public sealed partial class FastSqlEngine
     /// For SQL Server, simple unqualified names are quoted in brackets [tableName].
     /// For other dialects, simple unqualified names are emitted.
     /// </summary>
+    [Obsolete("Use AST dialect generator (ISqlDialectGenerator) instead.")]
     public static string FormatTableAlias(string normalizedTableName, TargetSqlDialect dialect)
     {
         string simpleName = SqlIdentifierHelper.NormalizeIdentifier(SqlIdentifierHelper.GetSimpleName(normalizedTableName));
@@ -25,6 +26,7 @@ public sealed partial class FastSqlEngine
     /// If an OFFSET clause is already present, only the FETCH NEXT clause is returned.
     /// If no ORDER BY exists, an ORDER BY (SELECT NULL) is prepended because T-SQL requires ORDER BY for OFFSET/FETCH.
     /// </summary>
+    [Obsolete("Use AST dialect generator (ISqlDialectGenerator) instead.")]
     public static string BuildTsqlLimitClause(long rowCount, bool hasOffset, bool hasOrderBy)
     {
         string countStr = rowCount.ToString(CultureInfo.InvariantCulture);
