@@ -222,6 +222,12 @@ public sealed partial class FastSqlEngine
     /// </summary>
     public SemaphoreSlim? ParseConcurrencyLimiter { get; set; }
 
+    /// <summary>
+    /// Configures the SQL rewrite execution engine: "LegacyTokenStream", "AstCompiler", or "ShadowDualRun".
+    /// Defaults to "LegacyTokenStream" during transitional phase.
+    /// </summary>
+    public string SqlRewriterEngine { get; set; } = "LegacyTokenStream";
+
     // Defaults for direct Parse/ParseExpression/Analyze calls without explicit SqlTokenSecurityOptions.
     // SEC P-06: These stay false so that plain syntax parsing (Trino compliance fixtures with comments, time travel,
     // quoted dotted identifiers) keeps working. The security-relevant rewrite path (RewriteRls) never uses them; it
@@ -743,11 +749,77 @@ public sealed partial class FastSqlEngine
 
     public string RewriteRls(ReadOnlyMemory<char> sql, RlsOptions? options, CancellationToken cancellationToken)
     {
+        if (string.Equals(SqlRewriterEngine, "AstCompiler", StringComparison.OrdinalIgnoreCase))
+        {
+            return GenerateGovernedSql(sql, options, cancellationToken);
+        }
+
+        if (string.Equals(SqlRewriterEngine, "ShadowDualRun", StringComparison.OrdinalIgnoreCase))
+        {
+            var legacyResult = RunLegacyRewrite(sql, options, cancellationToken);
+            try
+            {
+                _ = GenerateGovernedSql(sql, options, cancellationToken);
+            }
+            catch
+            {
+                // In shadow dual run mode, legacy result is authoritative for the caller
+            }
+            return legacyResult;
+        }
+
+        return RunLegacyRewrite(sql, options, cancellationToken);
+    }
+
+    private string RunLegacyRewrite(ReadOnlyMemory<char> sql, RlsOptions? options, CancellationToken cancellationToken)
+    {
         var effectiveOptions = options ?? new RlsOptions();
         var (tree, tokens) = Parse(sql, SqlTokenSecurityOptions.FromRlsOptions(effectiveOptions), cancellationToken);
+#pragma warning disable CS0618
         var listener = new RlsListener(tokens, effectiveOptions);
+#pragma warning restore CS0618
         ParseTreeWalker.Default.Walk(listener, tree);
         return listener.GetSecuredSql();
+    }
+
+    /// <summary>
+    /// Generates governed SQL using the AST compiler pipeline:
+    /// ParseTree -> SqlAstBuilder -> AstSecurityVisitor -> ISqlDialectGenerator.
+    /// Eliminates syntax differentials, comment injection vectors, and enforces AST security invariants.
+    /// </summary>
+    public string GenerateGovernedSql(ReadOnlyMemory<char> sql, RlsOptions? options = null)
+    {
+        return GenerateGovernedSql(sql, options, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Generates governed SQL using the AST compiler pipeline:
+    /// ParseTree -> SqlAstBuilder -> AstSecurityVisitor -> ISqlDialectGenerator.
+    /// </summary>
+    public string GenerateGovernedSql(ReadOnlyMemory<char> sql, RlsOptions? options, CancellationToken cancellationToken)
+    {
+        var effectiveOptions = options ?? new RlsOptions();
+        var tokenOptions = SqlTokenSecurityOptions.FromRlsOptions(effectiveOptions);
+        var (tree, _) = Parse(sql, tokenOptions, cancellationToken);
+
+        var builderOptions = Ast.Builder.AstBuilderOptions.FromRlsOptions(effectiveOptions);
+        var astBuilder = new Ast.Builder.SqlAstBuilder(builderOptions);
+        var ast = astBuilder.BuildStatement(tree);
+
+        var securityVisitor = new Ast.Visitors.AstSecurityVisitor(effectiveOptions, this);
+        var securedAst = (Ast.Nodes.SqlStatement)securityVisitor.Visit(ast);
+
+        var validationVisitor = new Ast.Visitors.AstValidationVisitor();
+        validationVisitor.Validate(securedAst);
+
+        var generator = Ast.Generators.SqlDialectGeneratorFactory.GetGenerator(effectiveOptions.TargetDialect);
+        return generator.GenerateSql(securedAst);
+    }
+
+    public string GenerateGovernedSql(string sql, RlsOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+        return GenerateGovernedSql(sql.AsMemory(), options, CancellationToken.None);
     }
 
     /// <summary>

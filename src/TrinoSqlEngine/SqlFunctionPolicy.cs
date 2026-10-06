@@ -110,13 +110,21 @@ public static class SqlFunctionPolicy
     public static bool IsFunctionAllowed(string functionName, RlsOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+        return IsFunctionAllowed(functionName, options.AllowedFunctions, options.AdditionalDeniedFunctions);
+    }
+
+    public static bool IsFunctionAllowed(
+        string functionName,
+        IReadOnlySet<string>? allowedFunctions,
+        IReadOnlySet<string>? additionalDeniedFunctions)
+    {
         if (string.IsNullOrWhiteSpace(functionName)) return false;
 
         string full = functionName.Trim().ToLowerInvariant();
         string simple = GetSimpleName(full);
 
-        if (options.AdditionalDeniedFunctions != null &&
-            (ContainsIgnoreCase(options.AdditionalDeniedFunctions, full) || ContainsIgnoreCase(options.AdditionalDeniedFunctions, simple)))
+        if (additionalDeniedFunctions != null &&
+            (ContainsIgnoreCase(additionalDeniedFunctions, full) || ContainsIgnoreCase(additionalDeniedFunctions, simple)))
         {
             return false;
         }
@@ -127,10 +135,10 @@ public static class SqlFunctionPolicy
             return false;
         }
 
-        if (options.AllowedFunctions != null)
+        if (allowedFunctions != null)
         {
             // Allowlist mode: exact (qualified) name match only.
-            return ContainsIgnoreCase(options.AllowedFunctions, full);
+            return ContainsIgnoreCase(allowedFunctions, full);
         }
 
         return true;

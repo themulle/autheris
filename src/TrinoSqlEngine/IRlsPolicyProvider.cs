@@ -287,6 +287,8 @@ public enum TargetSqlDialect
     Ansi,
     PostgreSql,
     SqlServer,
-    Sqlite
+    Sqlite,
+    DuckDb,
+    Snowflake
 }
 
