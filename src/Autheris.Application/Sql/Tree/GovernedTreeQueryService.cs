@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -49,6 +50,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     private readonly GatewayOptions _options;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly ILogger<GovernedTreeQueryService>? _logger;
+    private readonly IDbSessionContextInitializer _sessionInitializer;
 
     // G5: per request (the service is scoped). GraphQL resolves root fields in parallel, hence the lock.
     private readonly Dictionary<TableIdentifier, ResolvedTableAccess> _accessByTable = [];
@@ -64,7 +66,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         IColumnMaskingProvider maskingProvider,
         IOptions<GatewayOptions> options,
         ITableReadConcurrencyGate? concurrencyGate = null,
-        ILogger<GovernedTreeQueryService>? logger = null)
+        ILogger<GovernedTreeQueryService>? logger = null,
+        IDbSessionContextInitializer? sessionInitializer = null)
     {
         _accessResolver = accessResolver ?? throw new ArgumentNullException(nameof(accessResolver));
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
@@ -73,6 +76,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _concurrencyGate = concurrencyGate;
         _logger = logger;
+        _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
     }
 
     public async Task<JsonDocument> ExecuteAsync(
@@ -260,19 +264,14 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         DbTransaction? tx = null;
         try
         {
-            if (provider.ToLowerInvariant() is "postgres" or "postgresql" or "npgsql")
-            {
-                // Same session initialization as SqlDataSourceExecutor (transaction-local tenant and UTC time zone).
-                tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-                await using var setCmd = connection.CreateCommand();
-                setCmd.Transaction = tx;
-                setCmd.CommandText = "SELECT set_config('app.tenant_id', @p_tenant, true), set_config('TimeZone', 'UTC', true);";
-                var p = setCmd.CreateParameter();
-                p.ParameterName = "@p_tenant";
-                p.Value = tenant.Value;
-                setCmd.Parameters.Add(p);
-                await setCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
+            tx = await _sessionInitializer.InitializeSessionAsync(
+                connection,
+                provider,
+                tenant,
+                userSid: null,
+                purpose: null,
+                requireTransaction: true,
+                ct: ct).ConfigureAwait(false);
 
             await using var command = connection.CreateCommand();
             command.Transaction = tx;

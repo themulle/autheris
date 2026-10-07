@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Procedures.Interfaces;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
@@ -133,6 +134,8 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                         columns.Add(reader.GetName(i));
                     }
 
+                    var maxBytes = _options.Value?.GraphQL?.MaxResponseBytes > 0 ? _options.Value.GraphQL.MaxResponseBytes : 10 * 1024 * 1024;
+                    long estimatedBytes = 0;
                     var rows = new List<object?[]>();
                     bool truncated = false;
                     while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -147,7 +150,16 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                         var values = new object?[columns.Count];
                         for (int i = 0; i < values.Length; i++)
                         {
-                            values[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                            var val = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                            values[i] = val;
+                            estimatedBytes += EstimateSerializedBytes(columns[i], val);
+                        }
+
+                        if (estimatedBytes > maxBytes)
+                        {
+                            TryCancel(cmd);
+                            throw new GatewaySecurityException(
+                                $"Antwortgröße überschreitet das konfigurierte Limit von {maxBytes} Bytes.", "RESPONSE_TOO_LARGE");
                         }
 
                         rows.Add(values);
@@ -390,4 +402,13 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
             _ => throw new ArgumentException($"Unsupported SQL type '{baseType}'.", nameof(sqlType))
         };
     }
+
+    private static long EstimateSerializedBytes(string columnName, object? value) =>
+        columnName.Length * 2L + value switch
+        {
+            null => 0,
+            string s => s.Length * 2L,
+            byte[] b => b.Length,
+            _ => 16
+        };
 }

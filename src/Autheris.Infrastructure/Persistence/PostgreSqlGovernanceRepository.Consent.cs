@@ -1124,18 +1124,26 @@ public partial class PostgreSqlGovernanceRepository
             ConsentApprovalPolicy.EnsureApprovableStatus(requestId, currentStatus, isExternalItsmApproval);
 
             bool requiresFourEyes = false;
+            string? tableSensitivity = null;
             await using (var feCmd = conn.CreateCommand())
             {
                 feCmd.Transaction = tx;
-                feCmd.CommandText = @"SELECT t.requires_four_eyes
+                feCmd.CommandText = @"SELECT t.requires_four_eyes, t.sensitivity
                                       FROM TABLES t
                                       JOIN CONSENT_REQUESTS r ON t.id = r.table_id
                                       WHERE r.id = @id";
                 feCmd.Parameters.AddWithValue("@id", requestId.ToString());
-                var feObj = await feCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-                if (feObj != null)
+                await using var reader = await feCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    requiresFourEyes = Convert.ToInt32(feObj) == 1;
+                    if (!reader.IsDBNull(0))
+                    {
+                        requiresFourEyes = Convert.ToInt32(reader.GetValue(0)) == 1;
+                    }
+                    if (!reader.IsDBNull(1))
+                    {
+                        tableSensitivity = reader.GetString(1);
+                    }
                 }
             }
 
@@ -1196,7 +1204,7 @@ public partial class PostgreSqlGovernanceRepository
 
             // Review PG-4 (same contract as SQLite): the final approval yields APPROVED; the caller creates the consent
             // (GraphQL: with column snapshot) or calls ActivateConsentAsync (ITSM). Review E-9: ITSM keeps its second step.
-            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, stepNumber, isExternalItsmApproval);
+            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, stepNumber, isExternalItsmApproval, tableSensitivity);
 
             await using (var updateReq = conn.CreateCommand())
             {
@@ -1405,6 +1413,46 @@ public partial class PostgreSqlGovernanceRepository
                 cmd.Parameters.AddWithValue("@validTo", req.RequestedValidTo.ToString("O"));
                 cmd.Parameters.AddWithValue("@tenantId", req.TenantId.Value);
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            // POL-3: Freeze full column snapshot from table metadata on ITSM activation
+            var columnRules = new List<(Guid Id, Guid ColId, string ColName, int AccessLevel)>();
+            await using (var colCmd = conn.CreateCommand())
+            {
+                colCmd.Transaction = tx;
+                colCmd.CommandText = @"SELECT c.id, c.column_name, c.is_sensitive,
+                                              MAX(CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END) AS has_mask
+                                       FROM TABLE_COLUMNS c
+                                       LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+                                       WHERE c.table_id = @tid
+                                       GROUP BY c.id, c.column_name, c.is_sensitive";
+                colCmd.Parameters.AddWithValue("@tid", req.TableId.ToString());
+                await using var reader = await colCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var colId = Guid.Parse(reader.GetString(0));
+                    var colName = reader.GetString(1);
+                    var isSensitive = Convert.ToInt32(reader.GetValue(2)) == 1;
+                    var hasMask = Convert.ToInt32(reader.GetValue(3)) == 1;
+                    int accessLevel = (isSensitive || hasMask)
+                        ? (int)Autheris.Domain.Interfaces.ColumnAccessLevel.Mask
+                        : (int)Autheris.Domain.Interfaces.ColumnAccessLevel.Clear;
+                    columnRules.Add((Guid.NewGuid(), colId, colName, accessLevel));
+                }
+            }
+
+            foreach (var (ruleId, colId, colName, accessLevel) in columnRules)
+            {
+                await using var ruleCmd = conn.CreateCommand();
+                ruleCmd.Transaction = tx;
+                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
+                                        VALUES (@id, @consentId, @colId, @colName, @level)";
+                ruleCmd.Parameters.AddWithValue("@id", ruleId.ToString());
+                ruleCmd.Parameters.AddWithValue("@consentId", consentId.ToString());
+                ruleCmd.Parameters.AddWithValue("@colId", colId.ToString());
+                ruleCmd.Parameters.AddWithValue("@colName", colName);
+                ruleCmd.Parameters.AddWithValue("@level", accessLevel);
+                await ruleCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
             await IncrementTableEpochInternalAsync(conn, tx, req.TableIdentifier, ct).ConfigureAwait(false);

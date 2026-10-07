@@ -8,6 +8,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Common;
+using Autheris.Domain.Security;
 using HotChocolate.AspNetCore;
 using HotChocolate.AspNetCore.Subscriptions;
 using HotChocolate.AspNetCore.Subscriptions.Protocols;
@@ -108,12 +110,54 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
                     return ConnectionStatus.Reject("Authentication token revoked");
                 }
 
+                var tokenTenant = validatedPrincipal.GetTenantId();
+
                 if (httpContext != null)
                 {
+                    // GQL-1: Prevent mixed identities between upgrade handshake and connection_init token
+                    var upgradeTenant = httpContext.Items.TryGetValue("TenantId", out var tidObj) && tidObj is TenantId tid
+                        ? tid
+                        : (httpUser != null ? httpUser.GetTenantId() : TenantId.LegacySingleTenant);
+
+                    if (isHttpAuthenticated && upgradeTenant != TenantId.LegacySingleTenant &&
+                        tokenTenant != TenantId.LegacySingleTenant && upgradeTenant != tokenTenant)
+                    {
+                        _logger.LogWarning(
+                            "WebSocket connection_init rejected: Token tenant '{TokenTenant}' does not match upgrade tenant '{UpgradeTenant}'.",
+                            tokenTenant, upgradeTenant);
+                        return ConnectionStatus.Reject("Cross-tenant token mismatch");
+                    }
+
+                    var upgradeSid = httpUser?.GetUserSid();
+                    var tokenSid = validatedPrincipal.GetUserSid();
+                    if (isHttpAuthenticated && upgradeSid != null && tokenSid != null && upgradeSid.Value != tokenSid.Value && upgradeTenant != tokenTenant)
+                    {
+                        _logger.LogWarning(
+                            "WebSocket connection_init rejected: Token subject '{TokenSubject}' does not match upgrade subject '{UpgradeSubject}'.",
+                            tokenSid, upgradeSid);
+                        return ConnectionStatus.Reject("Cross-subject identity mismatch");
+                    }
+
                     httpContext.User = validatedPrincipal;
+                    httpContext.Items["TenantId"] = tokenTenant;
+                    httpContext.Items[SecurityPrincipalContext.ItemKey] = SecurityPrincipalContext.FromPrincipal(
+                        validatedPrincipal,
+                        overrideTenant: tokenTenant,
+                        clientIp: httpContext.Connection.RemoteIpAddress);
+
                     ScheduleSessionExpiry(httpContext, tokenExpiry);
                     ScheduleRevocationChecks(httpContext, validatedPrincipal, revocationService);
                 }
+
+                if (session is HotChocolate.IHasContextData sessionHasContext)
+                {
+                    sessionHasContext.ContextData["TenantId"] = tokenTenant;
+                }
+                if (session.Connection is HotChocolate.IHasContextData connHasContext)
+                {
+                    connHasContext.ContextData["TenantId"] = tokenTenant;
+                }
+
                 return ConnectionStatus.Accept();
             }
 

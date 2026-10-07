@@ -291,12 +291,13 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         var visitedWhere = node.Where != null ? (Expression)Visit(node.Where) : null;
 
         // WITH CHECK OPTION verification on assignments
+        string tenantColumn = _options.GetTenantColumnName(normalizedName);
         if (_options.EnforceWithCheckOption)
         {
             foreach (var assignment in visitedAssignments)
             {
                 string colName = assignment.Column.Value;
-                if (colName.Equals(_options.TenantColumnName, StringComparison.OrdinalIgnoreCase))
+                if (colName.Equals(tenantColumn, StringComparison.OrdinalIgnoreCase))
                 {
                     if (_options.DisallowTenantColumnModificationInUpdate)
                     {
@@ -309,7 +310,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                     }
 
                     string expectedTenant = SqlIdentifierHelper.UnquoteStringLiteral(_options.ExpectedTenantValue);
-                    EnsureTenantLiteral(assignment.Value, expectedTenant, "UPDATE");
+                    EnsureTenantLiteral(assignment.Value, expectedTenant, "UPDATE", tenantColumn);
                 }
             }
         }
@@ -337,6 +338,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
     {
         string normalizedName = node.TargetTable.Name.NormalizedName;
         string simpleTableName = node.TargetTable.Name.SimpleName;
+        string tenantColumn = _options.GetTenantColumnName(normalizedName);
 
         // SQ-07: Reject INSERT on tables that have custom row-level consent filters beyond simple tenant partition
         if (_options.RejectConsentFilteredInsert && _options.TablesWithConsentRowFilter.Count > 0)
@@ -355,7 +357,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             {
                 for (int i = 0; i < node.Columns.Count; i++)
                 {
-                    if (node.Columns[i].Value.Equals(_options.TenantColumnName, StringComparison.OrdinalIgnoreCase))
+                    if (node.Columns[i].Value.Equals(tenantColumn, StringComparison.OrdinalIgnoreCase))
                     {
                         tenantIndex = i;
                         break;
@@ -367,7 +369,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             {
                 if (_options.RequireTenantColumnInInsert)
                 {
-                    throw new SecurityException($"Tenant column '{_options.TenantColumnName}' must be explicitly specified in INSERT statement.");
+                    throw new SecurityException($"Tenant column '{tenantColumn}' must be explicitly specified in INSERT statement.");
                 }
             }
             else
@@ -377,7 +379,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                     throw new SecurityException("Expected tenant value must be configured when WITH CHECK OPTION is active.");
                 }
                 string expectedTenant = SqlIdentifierHelper.UnquoteStringLiteral(_options.ExpectedTenantValue);
-                VerifyInsertSource(node.Source, tenantIndex, expectedTenant);
+                VerifyInsertSource(node.Source, tenantIndex, expectedTenant, tenantColumn);
             }
         }
 
@@ -386,7 +388,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         return node with { Source = source };
     }
 
-    private void VerifyInsertSource(QueryBody source, int tenantIndex, string expectedTenant)
+    private void VerifyInsertSource(QueryBody source, int tenantIndex, string expectedTenant, string tenantColumn)
     {
         switch (source)
         {
@@ -399,9 +401,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 {
                     if (tenantIndex >= row.Elements.Count)
                     {
-                        throw new SecurityException($"Tenant column '{_options.TenantColumnName}' has no value in an INSERT VALUES row.");
+                        throw new SecurityException($"Tenant column '{tenantColumn}' has no value in an INSERT VALUES row.");
                     }
-                    EnsureTenantLiteral(row.Elements[tenantIndex], expectedTenant, "INSERT");
+                    EnsureTenantLiteral(row.Elements[tenantIndex], expectedTenant, "INSERT", tenantColumn);
                 }
                 break;
             case QuerySpecification select:
@@ -409,35 +411,35 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 {
                     if (select.Projections[i] is not ColumnSelectItem)
                     {
-                        throw new SecurityException($"Tenant column '{_options.TenantColumnName}' in INSERT SELECT cannot be verified (wildcard projection).");
+                        throw new SecurityException($"Tenant column '{tenantColumn}' in INSERT SELECT cannot be verified (wildcard projection).");
                     }
                 }
                 if (tenantIndex >= select.Projections.Count || select.Projections[tenantIndex] is not ColumnSelectItem colItem)
                 {
-                    throw new SecurityException($"Tenant column '{_options.TenantColumnName}' has no value in INSERT SELECT.");
+                    throw new SecurityException($"Tenant column '{tenantColumn}' has no value in INSERT SELECT.");
                 }
-                EnsureTenantLiteral(colItem.Expression, expectedTenant, "INSERT SELECT");
+                EnsureTenantLiteral(colItem.Expression, expectedTenant, "INSERT SELECT", tenantColumn);
                 break;
             case SetOperationQuery setOp:
-                VerifyInsertSource(setOp.Left, tenantIndex, expectedTenant);
-                VerifyInsertSource(setOp.Right, tenantIndex, expectedTenant);
+                VerifyInsertSource(setOp.Left, tenantIndex, expectedTenant, tenantColumn);
+                VerifyInsertSource(setOp.Right, tenantIndex, expectedTenant, tenantColumn);
                 break;
             default:
                 throw new SecurityException("INSERT source query shape cannot be verified against the tenant WITH CHECK OPTION.");
         }
     }
 
-    private void EnsureTenantLiteral(Expression expr, string expectedTenant, string operation)
+    private void EnsureTenantLiteral(Expression expr, string expectedTenant, string operation, string tenantColumn)
     {
         if (expr is not LiteralExpression lit || lit.Value == null)
         {
-            throw new SecurityException($"Tenant column '{_options.TenantColumnName}' in {operation} must be a literal value.");
+            throw new SecurityException($"Tenant column '{tenantColumn}' in {operation} must be a literal value.");
         }
 
         string val = lit.Value.ToString() ?? string.Empty;
         if (!val.Equals(expectedTenant, StringComparison.Ordinal))
         {
-            throw new SecurityException($"Tenant column '{_options.TenantColumnName}' {operation} value '{val}' does not match expected tenant '{expectedTenant}'.");
+            throw new SecurityException($"Tenant column '{tenantColumn}' {operation} value '{val}' does not match expected tenant '{expectedTenant}'.");
         }
     }
 

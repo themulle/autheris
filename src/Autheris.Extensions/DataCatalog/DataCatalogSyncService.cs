@@ -147,7 +147,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                 Identifier = tableAsset.Identifier,
                 Table = new Table
                 {
-                    SourceName = tableAsset.Identifier.Domain,
+                    SourceName = !string.IsNullOrWhiteSpace(existing?.Table.SourceName) ? existing.Table.SourceName : tableAsset.Identifier.Domain,
                     SchemaName = tableAsset.Identifier.Schema,
                     TableName = tableAsset.Identifier.TableName,
                     DisplayName = tableAsset.DisplayName ?? tableAsset.Identifier.TableName,

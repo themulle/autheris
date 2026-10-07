@@ -329,12 +329,13 @@ public sealed class RlsListener : SqlBaseBaseListener
         EnsureFilteredDml(context.where, "UPDATE");
 
         // 1. WITH CHECK OPTION verification on assignments
+        string tenantColumn = _options.GetTenantColumnName(normalizedName);
         if (_options.EnforceWithCheckOption && assignments != null)
         {
             foreach (var assignment in assignments)
             {
                 string colName = SqlIdentifierHelper.NormalizeIdentifier(assignment.identifier().GetText());
-                if (colName.Equals(_options.TenantColumnName, StringComparison.OrdinalIgnoreCase))
+                if (colName.Equals(tenantColumn, StringComparison.OrdinalIgnoreCase))
                 {
                     if (_options.DisallowTenantColumnModificationInUpdate)
                     {
@@ -347,7 +348,7 @@ public sealed class RlsListener : SqlBaseBaseListener
                     }
 
                     string expectedTenant = SqlIdentifierHelper.UnquoteStringLiteral(_options.ExpectedTenantValue);
-                    EnsureTenantLiteral(assignment.expression(), expectedTenant, "UPDATE");
+                    EnsureTenantLiteral(assignment.expression(), expectedTenant, "UPDATE", tenantColumn);
                 }
             }
         }
@@ -390,6 +391,7 @@ public sealed class RlsListener : SqlBaseBaseListener
             }
         }
 
+        string tenantColumn = _options.GetTenantColumnName(normalizedName);
         if (!_options.EnforceWithCheckOption)
             return;
 
@@ -402,7 +404,7 @@ public sealed class RlsListener : SqlBaseBaseListener
             for (int i = 0; i < idList.Length; i++)
             {
                 string col = SqlIdentifierHelper.NormalizeIdentifier(idList[i].GetText());
-                if (col.Equals(_options.TenantColumnName, StringComparison.OrdinalIgnoreCase))
+                if (col.Equals(tenantColumn, StringComparison.OrdinalIgnoreCase))
                 {
                     tenantIndex = i;
                     break;
@@ -414,7 +416,7 @@ public sealed class RlsListener : SqlBaseBaseListener
         {
             if (_options.RequireTenantColumnInInsert)
             {
-                throw new SecurityException($"Tenant column '{_options.TenantColumnName}' must be explicitly specified in INSERT statement.");
+                throw new SecurityException($"Tenant column '{tenantColumn}' must be explicitly specified in INSERT statement.");
             }
             return;
         }
@@ -431,26 +433,26 @@ public sealed class RlsListener : SqlBaseBaseListener
             throw new SecurityException("Expected tenant value must be configured when WITH CHECK OPTION is active.");
         }
         string expectedTenant = SqlIdentifierHelper.UnquoteStringLiteral(_options.ExpectedTenantValue);
-        VerifyInsertQueryTerm(queryNoWith.queryTerm(), tenantIndex, expectedTenant);
+        VerifyInsertQueryTerm(queryNoWith.queryTerm(), tenantIndex, expectedTenant, tenantColumn);
     }
 
-    private void VerifyInsertQueryTerm(SqlBaseParser.QueryTermContext? term, int tenantIndex, string expectedTenant)
+    private void VerifyInsertQueryTerm(SqlBaseParser.QueryTermContext? term, int tenantIndex, string expectedTenant, string tenantColumn)
     {
         switch (term)
         {
             case SqlBaseParser.SetOperationContext setOperation:
-                VerifyInsertQueryTerm(setOperation.left, tenantIndex, expectedTenant);
-                VerifyInsertQueryTerm(setOperation.right, tenantIndex, expectedTenant);
+                VerifyInsertQueryTerm(setOperation.left, tenantIndex, expectedTenant, tenantColumn);
+                VerifyInsertQueryTerm(setOperation.right, tenantIndex, expectedTenant, tenantColumn);
                 return;
             case SqlBaseParser.QueryTermDefaultContext termDefault:
-                VerifyInsertQueryPrimary(termDefault.queryPrimary(), tenantIndex, expectedTenant);
+                VerifyInsertQueryPrimary(termDefault.queryPrimary(), tenantIndex, expectedTenant, tenantColumn);
                 return;
             default:
                 throw new SecurityException("INSERT source query shape cannot be verified against the tenant WITH CHECK OPTION.");
         }
     }
 
-    private void VerifyInsertQueryPrimary(SqlBaseParser.QueryPrimaryContext? primary, int tenantIndex, string expectedTenant)
+    private void VerifyInsertQueryPrimary(SqlBaseParser.QueryPrimaryContext? primary, int tenantIndex, string expectedTenant, string tenantColumn)
     {
         switch (primary)
         {
@@ -467,9 +469,9 @@ public sealed class RlsListener : SqlBaseBaseListener
                         var values = ExtractRowValues(row);
                         if (tenantIndex >= values.Count)
                         {
-                            throw new SecurityException($"Tenant column '{_options.TenantColumnName}' has no value in an INSERT VALUES row.");
+                            throw new SecurityException($"Tenant column '{tenantColumn}' has no value in an INSERT VALUES row.");
                         }
-                        EnsureTenantLiteral(values[tenantIndex], expectedTenant, "INSERT");
+                        EnsureTenantLiteral(values[tenantIndex], expectedTenant, "INSERT", tenantColumn);
                     }
                     return;
                 }
@@ -486,37 +488,37 @@ public sealed class RlsListener : SqlBaseBaseListener
                     {
                         if (items[i] is not SqlBaseParser.SelectSingleContext)
                         {
-                            throw new SecurityException($"Tenant column '{_options.TenantColumnName}' in INSERT SELECT cannot be verified (wildcard projection).");
+                            throw new SecurityException($"Tenant column '{tenantColumn}' in INSERT SELECT cannot be verified (wildcard projection).");
                         }
                     }
 
                     if (tenantIndex >= items.Length || items[tenantIndex] is not SqlBaseParser.SelectSingleContext single || single.expression() == null)
                     {
-                        throw new SecurityException($"Tenant column '{_options.TenantColumnName}' has no value in INSERT SELECT.");
+                        throw new SecurityException($"Tenant column '{tenantColumn}' has no value in INSERT SELECT.");
                     }
 
-                    EnsureTenantLiteral(single.expression(), expectedTenant, "INSERT SELECT");
+                    EnsureTenantLiteral(single.expression(), expectedTenant, "INSERT SELECT", tenantColumn);
                     return;
                 }
             case SqlBaseParser.SubqueryContext subquery:
-                VerifyInsertQueryTerm(subquery.queryNoWith()?.queryTerm(), tenantIndex, expectedTenant);
+                VerifyInsertQueryTerm(subquery.queryNoWith()?.queryTerm(), tenantIndex, expectedTenant, tenantColumn);
                 return;
             default:
                 throw new SecurityException("INSERT source query shape cannot be verified against the tenant WITH CHECK OPTION.");
         }
     }
 
-    private void EnsureTenantLiteral(SqlBaseParser.ExpressionContext? expr, string expectedTenant, string operation)
+    private void EnsureTenantLiteral(SqlBaseParser.ExpressionContext? expr, string expectedTenant, string operation, string tenantColumn)
     {
         string? literal = TryGetLiteralValue(expr);
         if (literal == null)
         {
-            throw new SecurityException($"Tenant column '{_options.TenantColumnName}' in {operation} must be a literal value.");
+            throw new SecurityException($"Tenant column '{tenantColumn}' in {operation} must be a literal value.");
         }
 
         if (!literal.Equals(expectedTenant, StringComparison.Ordinal))
         {
-            throw new SecurityException($"Tenant column '{_options.TenantColumnName}' {operation} value '{literal}' does not match expected tenant '{expectedTenant}'.");
+            throw new SecurityException($"Tenant column '{tenantColumn}' {operation} value '{literal}' does not match expected tenant '{expectedTenant}'.");
         }
     }
 
