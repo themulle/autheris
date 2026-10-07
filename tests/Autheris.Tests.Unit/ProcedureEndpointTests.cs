@@ -1,5 +1,6 @@
 using System.Security;
 using System.Security.Claims;
+using Autheris.Api.Endpoints;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Application.Procedures.Services;
@@ -7,6 +8,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
@@ -1195,5 +1198,58 @@ public class ProcedureEndpointTests
     {
         string yaml = "name: x\nprocedure: tem.p\nvalidation: declared\nresult_table: md.crane\noutputs:\n  " + output + "\n";
         Should.Throw<FormatException>(() => ProcedureDefinitionParser.ParseYaml(yaml, "x", false, 30));
+    }
+
+    // ---------- OpenAPI documentation (OpenSchema mode) ----------
+
+    [Fact]
+    public void HandleOpenApi_AnonymousCaller_WhenDocumentAllForAnonymousFalse_OmitsEndpoints()
+    {
+        var registry = new InMemoryProcedureRegistry();
+        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        registry.Register(def);
+        registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["order_id"], ["sales.orders"], new Dictionary<string, string>()));
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity()); // unauthenticated
+
+        var result = ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, documentAllForAnonymous: false);
+        var ok = result.ShouldBeOfType<Ok<Dictionary<string, object>>>();
+        var paths = (Dictionary<string, object>)ok.Value!["paths"];
+        paths.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void HandleOpenApi_AnonymousCaller_WhenDocumentAllForAnonymousTrue_IncludesActiveEndpoints()
+    {
+        var registry = new InMemoryProcedureRegistry();
+        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        registry.Register(def);
+        registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["order_id"], ["sales.orders"], new Dictionary<string, string>()));
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity()); // unauthenticated
+
+        var result = ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, documentAllForAnonymous: true);
+        var ok = result.ShouldBeOfType<Ok<Dictionary<string, object>>>();
+        var paths = (Dictionary<string, object>)ok.Value!["paths"];
+        paths.ShouldContainKey("/api/v1/procedures/get_orders");
+    }
+
+    [Fact]
+    public void HandleOpenApi_AuthenticatedCaller_IncludesEndpoints()
+    {
+        var registry = new InMemoryProcedureRegistry();
+        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        registry.Register(def);
+        registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["order_id"], ["sales.orders"], new Dictionary<string, string>()));
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.User = User(); // authenticated
+
+        var result = ProcedureEndpointRoutes.HandleOpenApi(httpContext, registry, documentAllForAnonymous: false);
+        var ok = result.ShouldBeOfType<Ok<Dictionary<string, object>>>();
+        var paths = (Dictionary<string, object>)ok.Value!["paths"];
+        paths.ShouldContainKey("/api/v1/procedures/get_orders");
     }
 }

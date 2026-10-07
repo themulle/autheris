@@ -81,6 +81,19 @@ public static class GatewayApplicationBuilderExtensions
             await next();
         });
 
+        // OData v4 Protocol Compliance (OData Version 4.01 Part 1: Protocol §8.1.5):
+        // All OData responses (including $metadata, service document, entity sets, and error/unauthorized responses)
+        // MUST include an OData-Version header with value "4.0". Microsoft Excel / Power Query relies
+        // on this header to recognize the endpoint as a valid OData feed.
+        app.Use(async (context, next) =>
+        {
+            if (context.Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.Headers["OData-Version"] = "4.0";
+            }
+            await next();
+        });
+
         if (!app.Environment.IsDevelopment())
         {
             app.UseHsts();
