@@ -247,4 +247,54 @@ public sealed class CatalogGraphQlSchemaTests
         Assert.Contains("errors", json);
         Assert.Contains(expectedCode, json);
     }
+
+    [Fact]
+    public async Task ExecuteQuery_UnderGermanCulture_PreservesDecimalWhereFilter()
+    {
+        var prevCulture = System.Globalization.CultureInfo.CurrentCulture;
+        var prevUiCulture = System.Globalization.CultureInfo.CurrentUICulture;
+        var deCulture = new System.Globalization.CultureInfo("de-DE");
+        System.Globalization.CultureInfo.CurrentCulture = deCulture;
+        System.Globalization.CultureInfo.CurrentUICulture = deCulture;
+
+        try
+        {
+            TreeQueryNode? capturedNode = null;
+            _treeService.ExecuteAsync(
+                    Arg.Any<ClaimsPrincipal>(),
+                    Arg.Do<TreeQueryNode>(node => capturedNode = node),
+                    Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                    Arg.Any<string?>(),
+                    Arg.Any<CancellationToken>())
+                .Returns(JsonDocument.Parse("[]"));
+
+            var executor = await CreateExecutorAsync();
+
+            var query = """
+            query {
+                sales_dbo_orders(where: { amount: { gte: 1.5 } }) {
+                    order_id
+                    amount
+                }
+            }
+            """;
+
+            var result = await executor.ExecuteAsync(query);
+            var json = result.ToJson();
+            Assert.DoesNotContain("errors", json);
+            Assert.NotNull(capturedNode);
+            Assert.NotNull(capturedNode.Where);
+
+            var comp = Assert.IsType<TreeComparison>(capturedNode.Where);
+            Assert.Equal("amount", comp.Column);
+            Assert.Equal(TreeFilterOperator.Gte, comp.Operator);
+            Assert.Equal(1.5m, comp.Value);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = prevCulture;
+            System.Globalization.CultureInfo.CurrentUICulture = prevUiCulture;
+        }
+    }
 }
+
