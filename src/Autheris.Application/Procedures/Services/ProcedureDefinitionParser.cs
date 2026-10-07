@@ -503,13 +503,26 @@ public static class ProcedureDefinitionParser
             throw new FormatException("'required_roles' is present but contains no role; remove the key or list at least one role.");
         }
 
-        var outputs = ParseYamlOutputs(model.Outputs, out var outputTypes);
+        var outputs = ParseYamlOutputs(model.Outputs, out var outputTypes, out var outputSources);
         var cleared = (model.ClearedColumns ?? []).Select(c => RequireIdentifier(c?.Trim(), "cleared column")).ToList();
 
         string? resultTable = string.IsNullOrWhiteSpace(model.ResultTable) ? null : model.ResultTable.Trim();
         if (resultTable != null && !ResultTableRegex.IsMatch(resultTable))
         {
             throw new FormatException("result_table must have the form schema.table.");
+        }
+
+        var referencedTables = (model.ReferencedTables ?? [])
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Select(r => r.Trim())
+            .ToList();
+
+        foreach (var rt in referencedTables)
+        {
+            if (!ResultTableRegex.IsMatch(rt))
+            {
+                throw new FormatException($"referenced_tables entry '{rt}' must have the form schema.table.");
+            }
         }
 
         var duplicate = parameters.GroupBy(p => p.Name, StringComparer.OrdinalIgnoreCase).FirstOrDefault(g => g.Count() > 1);
@@ -550,6 +563,9 @@ public static class ProcedureDefinitionParser
         {
             ArgumentOrder = argumentOrder,
             DeclaredOutputTypes = outputTypes,
+            DeclaredOutputSources = outputSources,
+            ReferencedTables = referencedTables,
+            DdlHash = model.Integrity?.DdlHash?.Trim(),
             RowScopeKey = ValidateRowScopeKey(SplitRowScopeKey(ParseYamlRowScopeKey(model.RowScopeKey), out var scopeTableColumns), resultTable, validationMode, outputs),
             RowScopeKeyTable = scopeTableColumns
         };
@@ -642,16 +658,23 @@ public static class ProcedureDefinitionParser
 
     /// <summary>
     /// Outputs may be plain column names or typed: <c>- name</c>, <c>- {name: gps_latitude, type: float}</c> or the short
-    /// form <c>- gps_latitude: float</c>. Types only document the contract (OpenAPI); they are not enforced at runtime.
+    /// form <c>- gps_latitude: float</c>. Can also declare <c>source_table</c> and <c>source_column</c> (or <c>source: schema.table.column</c>)
+    /// for offline/pure-YAML column-level governance. Types only document the contract (OpenAPI).
     /// </summary>
-    private static List<string> ParseYamlOutputs(List<object>? raw, out Dictionary<string, string> types)
+    private static List<string> ParseYamlOutputs(
+        List<object>? raw,
+        out Dictionary<string, string> types,
+        out Dictionary<string, ResultColumnSource> sources)
     {
         types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        sources = new Dictionary<string, ResultColumnSource>(StringComparer.OrdinalIgnoreCase);
         var names = new List<string>();
         foreach (var item in raw ?? [])
         {
             string? name;
             string? type = null;
+            string? sourceTable = null;
+            string? sourceColumn = null;
             switch (item)
             {
                 case string s:
@@ -660,11 +683,37 @@ public static class ProcedureDefinitionParser
                 case IDictionary<object, object> map when map.TryGetValue("name", out var n):
                     name = n?.ToString();
                     type = map.TryGetValue("type", out var t) ? t?.ToString() : null;
+                    if (map.TryGetValue("source", out var srcVal) && srcVal != null)
+                    {
+                        var parts = srcVal.ToString()!.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        if (parts.Length == 3)
+                        {
+                            sourceTable = $"{parts[0]}.{parts[1]}";
+                            sourceColumn = parts[2];
+                        }
+                        else if (parts.Length == 2)
+                        {
+                            sourceTable = parts[0];
+                            sourceColumn = parts[1];
+                        }
+                        else
+                        {
+                            throw new FormatException($"Invalid source '{srcVal}'. Expected 'table.column' or 'schema.table.column'.");
+                        }
+                    }
+                    if (map.TryGetValue("source_table", out var stVal) && stVal != null)
+                    {
+                        sourceTable = stVal.ToString()?.Trim();
+                    }
+                    if (map.TryGetValue("source_column", out var scVal) && scVal != null)
+                    {
+                        sourceColumn = scVal.ToString()?.Trim();
+                    }
                     foreach (var key in map.Keys)
                     {
-                        if (key?.ToString() is not ("name" or "type"))
+                        if (key?.ToString() is not ("name" or "type" or "source" or "source_table" or "source_column"))
                         {
-                            throw new FormatException($"Unknown key '{key}' in output declaration (allowed: name, type).");
+                            throw new FormatException($"Unknown key '{key}' in output declaration (allowed: name, type, source, source_table, source_column).");
                         }
                     }
 
@@ -683,6 +732,13 @@ public static class ProcedureDefinitionParser
             if (type != null)
             {
                 types[column] = NormalizeOutputSqlType(type);
+            }
+            if (!string.IsNullOrWhiteSpace(sourceTable) && !string.IsNullOrWhiteSpace(sourceColumn))
+            {
+                var tableParts = sourceTable.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                string? schema = tableParts.Length == 2 ? tableParts[0] : null;
+                string table = tableParts.Length == 2 ? tableParts[1] : tableParts[0];
+                sources[column] = new ResultColumnSource(schema, table, sourceColumn);
             }
         }
 
@@ -756,9 +812,19 @@ public sealed class ProcedureYamlModel
     public List<ProcedureContextYamlModel>? ContextBindings { get; set; }
     public List<object>? Outputs { get; set; }
     public List<string>? ClearedColumns { get; set; }
-
     /// <summary>A column name or a list of column names.</summary>
     public object? RowScopeKey { get; set; }
+
+    /// <summary>Explicit list of physical tables referenced by the procedure.</summary>
+    public List<string>? ReferencedTables { get; set; }
+
+    /// <summary>Optional integrity metadata (e.g. ddl_hash) for drift prevention.</summary>
+    public ProcedureIntegrityYamlModel? Integrity { get; set; }
+}
+
+public sealed class ProcedureIntegrityYamlModel
+{
+    public string? DdlHash { get; set; }
 }
 
 public sealed class ProcedureParameterYamlModel

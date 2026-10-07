@@ -100,12 +100,21 @@ public sealed class ProcedureRegistrationService : BackgroundService
 
             if (entry.Definition.ValidationMode == ProcedureValidationMode.Declared)
             {
+                var referenced = entry.Definition.ReferencedTables.Count > 0
+                    ? entry.Definition.ReferencedTables
+                    : (entry.Definition.ResultTable != null ? [entry.Definition.ResultTable] : []);
+
+                var sources = entry.Definition.DeclaredOutputSources.Count > 0
+                    ? entry.Definition.DeclaredOutputSources
+                    : null;
+
                 var declaredResult = new ProcedureValidationResult(
                     IsValid: true,
                     Errors: [],
                     ResultColumns: entry.Definition.DeclaredOutputs,
-                    ReferencedTables: entry.Definition.ResultTable != null ? [entry.Definition.ResultTable] : [],
-                    ParameterSqlTypes: entry.Definition.Parameters.ToDictionary(p => p.Name, p => p.SqlType, StringComparer.OrdinalIgnoreCase));
+                    ReferencedTables: referenced,
+                    ParameterSqlTypes: entry.Definition.Parameters.ToDictionary(p => p.Name, p => p.SqlType, StringComparer.OrdinalIgnoreCase),
+                    ResultColumnSources: sources);
 
                 // Review P-7: only the exact definition that was snapshotted may be activated.
                 if (!_registry.TryMarkActive(entry.Definition, declaredResult))
