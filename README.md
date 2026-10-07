@@ -7,7 +7,7 @@
 [![OData](https://img.shields.io/badge/Protocol-OData%20v4-0078D4)](#)
 [![AuthZ](https://img.shields.io/badge/AuthZ-Casbin%20ABAC-009688)](#)
 [![CI Build & Test](https://img.shields.io/badge/CI-Passing-brightgreen?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/Tests-2%2C261%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
+[![Tests](https://img.shields.io/badge/Tests-3%2C340%2B%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
 [![Security Review](https://img.shields.io/badge/Security%20Review-2026--10--02%20Remediated-brightgreen)](security-review-2026-10-02.md)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/themulle/gql/pkgs/container/gql)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20Onion-blue)](docs/architecture/arc42.md)
@@ -76,6 +76,19 @@ Instead of traditional coarse-grained role-based access control (RBAC), access t
   - **Auto-Generated OpenAPI 3.0 Specification**: Dynamically generates `/api/v1/queries/openapi.json` from parsed SQL metadata, doc-blocks (`-- @name`, `-- @summary`, `-- @param`), and query projections for immediate interactive testing in Swagger UI.
   - **Zero-Trust AST Injection**: Automatically injects tenant isolation, Casbin ABAC, Row-Level Security (`RlsListener`), and dynamic column masking directly into the generated SQL execution plan.
   - **Dual Ingestion Mode**: Hot-reloading via `FileSystemWatcher` (Option A) and automatic model sync from dbt pipelines (Option B).
+
+- **Trino-Compatible AST Target Dialect Compiler (`ADR-017`, `TrinoSqlEngine`)**:
+  - **Full High-Performance AST Compiler Pipeline**: Replaces raw SQL string manipulation with a multi-stage ANTLR4-driven AST compilation pipeline (`SqlAstBuilder` -> `AstSecurityVisitor` -> `AstSimplificationVisitor` -> `ISqlDialectGenerator`).
+  - **Multi-Dialect Code Generation**: Native code emitters generate dialect-specific queries tailored for **PostgreSQL** (double-quoted, lowercased identifiers, standard boolean expressions), **Microsoft SQL Server / T-SQL** (bracket identifiers `[...]`, Unicode string literals `N'...'`, boolean projection wrapping `CASE WHEN ... THEN 1 ELSE 0 END`, OFFSET/FETCH pagination), and **SQLite**.
+  - **AST Simplification Engine**: Built-in AST simplification visitor performs compile-time constant folding, boolean algebra optimization (identity laws, absorption, De Morgan), tautology reduction (`1 = 1`), and contradiction detection (`1 = 0`).
+  - **Deep Security Invariants**: Hardened AST-level defense including grammar recursion depth limits, cycle detection for nested correlated subqueries, comment stripping, and parameter boundary enforcement.
+
+- **Zero-Privilege Contract-First Stored Procedure Governance (`ADR-018`, `F-SQL-02`)**:
+  - **Zero Database Metadata Privileges**: In `validation: declared` mode, Autheris requires strictly `GRANT EXECUTE` on target stored procedures. No `VIEW DEFINITION` or `VIEW DATABASE STATE` permissions are required on the production database.
+  - **Contract-First Output Schema & Source Mapping**: Declarative `.proc.yaml` definitions specify output columns mapped to underlying source tables/columns (`source_table`, `source_column`), allowing Autheris to transparently apply entity-level consent checks, ABAC policies, and column masking (e.g. salary redaction) to stored procedure outputs.
+  - **Fail-Closed Result Pruning**: Undeclared database columns returned by the procedure at runtime are automatically discarded before the payload leaves the gateway.
+  - **DDL Integrity Verification**: Optional SHA-256 hash checks (`integrity.ddl_hash`) guarantee that procedure definitions in the database have not been altered without an approved contract update.
+  - **Offline CI/CD Generator Tool (`IProcedureYamlGenerator`)**: Companion tool to inspect staging procedures and automatically generate compliant `.proc.yaml` contract files without manual drafting.
 
 - **Governed WebSQL Engine (`F-DATA-02`)**:
   - **Secure HTTP-based SQL Execution**: Execute ad-hoc SQL queries over HTTP (`POST /api/v1/sql`) modeled after Trino/Presto, completely eliminating the need for exposed database ports (1433/5432) or uncontrolled database logins.

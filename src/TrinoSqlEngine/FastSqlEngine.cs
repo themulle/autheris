@@ -155,6 +155,9 @@ internal sealed class CancellableTokenStream : CommonTokenStream
 
 public sealed partial class FastSqlEngine : ISqlEngine
 {
+    /// <summary>Thread-safe default shared instance of <see cref="FastSqlEngine"/>.</summary>
+    public static FastSqlEngine Default { get; } = new();
+
     /// <summary>SQ-08: Default stack size of the dedicated parser thread (16 MB).</summary>
     public const int DefaultParseThreadStackSize = 16 * 1024 * 1024;
 

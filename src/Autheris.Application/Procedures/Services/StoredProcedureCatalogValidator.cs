@@ -155,9 +155,29 @@ public sealed class StoredProcedureCatalogValidator
             // Encrypted modules cannot be inspected.
             errors.Add("The procedure definition is not readable (encrypted or missing VIEW DEFINITION); dynamic SQL cannot be excluded.");
         }
-        else if (!definition.AllowDynamicSql && DynamicSqlRegex.IsMatch(definitionText))
+        else
         {
-            errors.Add("The procedure appears to use dynamic SQL (sp_executesql / EXEC(...)). Declare '@allow-dynamic-sql' after a DBA review.");
+            if (!definition.AllowDynamicSql && DynamicSqlRegex.IsMatch(definitionText))
+            {
+                errors.Add("The procedure appears to use dynamic SQL (sp_executesql / EXEC(...)). Declare '@allow-dynamic-sql' after a DBA review.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(definition.DdlHash))
+            {
+                string expectedHash = definition.DdlHash.Trim();
+                if (expectedHash.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+                {
+                    expectedHash = expectedHash["sha256:".Length..].Trim();
+                }
+
+                byte[] hashBytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(definitionText.Trim()));
+                string actualHex = Convert.ToHexString(hashBytes).ToLowerInvariant();
+
+                if (!string.Equals(expectedHash, actualHex, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"Procedure DDL hash mismatch (expected: '{definition.DdlHash}', computed: 'sha256:{actualHex}'). Procedure code on database has been modified.");
+                }
+            }
         }
 
         // 3. Parameters

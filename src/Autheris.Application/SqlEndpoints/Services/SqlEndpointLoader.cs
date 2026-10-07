@@ -42,7 +42,7 @@ public sealed class SqlEndpointLoader : IDisposable
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _logger = logger;
-        _sqlEngine = sqlEngine ?? new FastSqlEngine();
+        _sqlEngine = sqlEngine ?? FastSqlEngine.Default;
     }
 
     /// <summary>

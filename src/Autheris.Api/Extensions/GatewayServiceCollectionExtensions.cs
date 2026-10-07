@@ -345,6 +345,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IDataSourceExecutor, DeclarativeHttpDataSourceExecutor>();
         services.AddSingleton<IDataSourceExecutor, PluginHttpDataSourceExecutor>();
         services.AddSingleton<TrinoSqlEngine.ISqlEngine, TrinoSqlEngine.FastSqlEngine>();
+        services.AddSingleton<Autheris.Application.Sql.Interfaces.ISqlSecurityValidator, Autheris.Application.Sql.Services.DefaultSqlSecurityValidator>();
         services.AddScoped<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService, Autheris.Application.Sql.Services.GovernedSqlExecutionService>();
         services.AddSingleton<Autheris.Application.SqlEndpoints.Interfaces.ISqlEndpointRegistry, Autheris.Application.SqlEndpoints.Services.InMemorySqlEndpointRegistry>();
         services.AddSingleton<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
@@ -358,6 +359,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.Application.Procedures.Interfaces.IProcedureInvoker, Autheris.Application.Procedures.Services.MssqlProcedureInvoker>();
         services.AddSingleton<Autheris.Application.Procedures.Interfaces.IProcedureRowScopeResolver, Autheris.Application.Procedures.Services.SqlProcedureRowScopeResolver>();
         services.AddScoped<Autheris.Application.Procedures.Interfaces.IProcedureExecutionService, Autheris.Application.Procedures.Services.GovernedProcedureExecutionService>();
+        services.AddSingleton<Autheris.Application.Procedures.Tools.IProcedureYamlGenerator, Autheris.Application.Procedures.Tools.ProcedureYamlGenerator>();
         if (gatewayOptions.SqlEndpoints.Procedures.Enabled)
         {
             services.AddHostedService<Autheris.Application.Procedures.Services.ProcedureRegistrationService>();

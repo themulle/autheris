@@ -54,6 +54,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
     private readonly ISqlEngine _sqlEngine;
     private readonly ICompiledSqlQueryPlanCache? _planCache;
+    private readonly ISqlSecurityValidator _sqlSecurityValidator;
     private readonly IOptions<GatewayOptions> _options;
     private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly IConsentResolutionService? _consentResolution;
@@ -82,7 +83,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         IConsentRepository? consentRepository = null,
         IKeyVaultSecretProvider? secretProvider = null,
         ISqlEngine? sqlEngine = null,
-        ICompiledSqlQueryPlanCache? planCache = null)
+        ICompiledSqlQueryPlanCache? planCache = null,
+        ISqlSecurityValidator? sqlSecurityValidator = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement;
@@ -95,8 +97,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         _logger = logger;
         _consentRepository = consentRepository;
         _secretProvider = secretProvider;
-        _sqlEngine = sqlEngine ?? new FastSqlEngine();
+        _sqlEngine = sqlEngine ?? FastSqlEngine.Default;
         _planCache = planCache;
+        _sqlSecurityValidator = sqlSecurityValidator ?? new DefaultSqlSecurityValidator();
     }
 
     public async Task<string> RewriteSqlAsync(
@@ -457,7 +460,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
             {
-                SqlSecurityValidator.ValidatePredicateSql(decision.CombinedRowFilterSql, "CombinedRowFilterSql");
+                _sqlSecurityValidator.ValidatePredicateSql(decision.CombinedRowFilterSql, "CombinedRowFilterSql");
                 rlsParts.Add($"({decision.CombinedRowFilterSql})");
                 AddInternalRowFilterParameters(decision.RowFilterParameters, internalParameters);
                 tablesWithConsentRowFilter.Add(target.FullName);
