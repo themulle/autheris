@@ -87,6 +87,14 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         if (error.Code != null && WhitelistedSafeCodes.Contains(error.Code))
         {
             var cleanError = error.WithException(null);
+
+            // R-ERR-1: INVALID_QUERY messages name tables and columns; outside Development they stay generic so the
+            // catalog cannot be enumerated (same text as GraphQlEnumerationShieldMiddleware).
+            if (string.Equals(cleanError.Code, GraphQlEnumerationShieldMiddleware.Code, StringComparison.OrdinalIgnoreCase))
+            {
+                return cleanError.WithMessage(GraphQlEnumerationShieldMiddleware.Message);
+            }
+
             if (ContainsSensitivePatterns(cleanError.Message))
             {
                 return cleanError.WithMessage("Die Anfrage enthält ungültige Parameter oder kann nicht verarbeitet werden.");
