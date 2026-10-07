@@ -5,6 +5,8 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Application.FinOps.Interfaces;
+using Autheris.Domain.Common;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
@@ -42,12 +44,44 @@ public sealed class FinOpsBudgetMiddleware
             return;
         }
 
-        var tenantId = context.User.FindFirst("tenant_id")?.Value
-                       ?? context.User.FindFirst("tid")?.Value
-                       ?? context.User.FindFirst("tenant")?.Value
-                       ?? "default";
+        // API-4: Anonyme / unauthentifizierte Anfragen belasten kein FinOps-Budget
+        if (context.User.Identity?.IsAuthenticated != true)
+        {
+            await _next(context).ConfigureAwait(false);
+            return;
+        }
 
-        var principalId = context.User.Identity?.Name ?? "anonymous";
+        string tenantId;
+        string principalId;
+
+        if (context.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var item) && item is SecurityPrincipalContext secContext)
+        {
+            if (!secContext.IsAuthenticated)
+            {
+                await _next(context).ConfigureAwait(false);
+                return;
+            }
+
+            tenantId = secContext.TenantId.Value;
+            principalId = secContext.UserSid.Value;
+        }
+        else
+        {
+            var rawTenant = context.User.FindFirst("tenant_id")?.Value ??
+                            context.User.FindFirst("tid")?.Value ??
+                            context.User.FindFirst("tenant")?.Value;
+
+            if (string.IsNullOrWhiteSpace(rawTenant) || !TenantId.TryParse(rawTenant, out var parsedTenant))
+            {
+                await _next(context).ConfigureAwait(false);
+                return;
+            }
+
+            tenantId = parsedTenant.Value;
+            principalId = context.User.FindFirst(System.Security.Claims.ClaimTypes.PrimarySid)?.Value ??
+                          context.User.FindFirst("sub")?.Value ??
+                          context.User.Identity?.Name ?? "authenticated";
+        }
 
         var budgetStatus = await accountingService.CheckBudgetAsync(tenantId, context.RequestAborted).ConfigureAwait(false);
 

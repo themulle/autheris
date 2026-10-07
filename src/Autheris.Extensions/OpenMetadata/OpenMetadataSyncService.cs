@@ -121,7 +121,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
                     var tableId = resolved.Identifier;
                     tableTenantMap[tableId] = resolved.TenantId;
                     var existing = dryRun ? null : await _metadataRepo.GetTableMetadataAsync(tableId, ct);
-                    var (tableMeta, maskingCount) = MapToTableMetadata(omTable, tableId, omOptions, isNewTable: existing == null);
+                    var (tableMeta, maskingCount) = MapToTableMetadata(omTable, tableId, omOptions, isNewTable: existing == null, existingSourceType: existing?.Table.SourceType, existingSourceName: existing?.Table.SourceName);
 
                     tableMetadataMap[tableId] = tableMeta;
                     syncedTablesCount++;
@@ -619,7 +619,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
                 var tableId = resolved.Identifier;
                 // SEC M-32: webhook-triggered updates use the same tighten-only merge.
                 var existing = await _metadataRepo.GetTableMetadataAsync(tableId, ct);
-                var (tableMeta, _) = MapToTableMetadata(omTable, tableId, omOptions, isNewTable: existing == null);
+                var (tableMeta, _) = MapToTableMetadata(omTable, tableId, omOptions, isNewTable: existing == null, existingSourceType: existing?.Table.SourceType, existingSourceName: existing?.Table.SourceName);
                 var merged = Autheris.Application.DataCatalog.Services.CatalogGovernanceRatchet.Merge(tableMeta, existing);
                 await _metadataRepo.UpsertTableMetadataAsync(merged, ct);
                 await _epochRepo.IncrementTableEpochAsync(tableId, ct);
@@ -666,8 +666,21 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         OpenMetadataTable omTable,
         TableIdentifier tableId,
         OpenMetadataOptions omOptions,
-        bool isNewTable)
+        bool isNewTable,
+        string? existingSourceType = null,
+        string? existingSourceName = null)
     {
+        // D-1: the OpenMetadata service type (Mssql, Postgres, Snowflake, ...) becomes the dialect only if it is a supported
+        // one and the table has no supported dialect yet; a sync never switches the dialect of an existing table.
+        var sourceType = Autheris.Domain.Common.DatabaseDialectExtensions.ResolveCatalogSourceType(
+            omTable.ServiceType ?? "PostgreSQL", existingSourceType, out var dialectSupported);
+        if (!dialectSupported)
+        {
+            _logger.LogWarning(
+                "OpenMetadata table {Table}: service type {ServiceType} is not a supported SQL dialect; the table cannot be queried until its source type is set.",
+                tableId, omTable.ServiceType);
+        }
+
         var catalogOptions = _options.Value.Catalog;
         var art9Tags = catalogOptions.GdprArticle9Tags;
         var piiTags = catalogOptions.PiiTags;
@@ -738,8 +751,8 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         var tableEntity = new Table
         {
             Id = tableGuid,
-            SourceType = omTable.ServiceType ?? "PostgreSQL",
-            SourceName = tableId.Domain,
+            SourceType = sourceType,
+            SourceName = !string.IsNullOrWhiteSpace(existingSourceName) ? existingSourceName : tableId.Domain,
             SchemaName = tableId.Schema,
             TableName = tableId.TableName,
             DisplayName = omTable.DisplayName ?? omTable.Name,

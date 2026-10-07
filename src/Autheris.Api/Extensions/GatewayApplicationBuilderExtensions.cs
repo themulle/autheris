@@ -17,6 +17,10 @@ public static class GatewayApplicationBuilderExtensions
 {
     public static WebApplication UseGatewayPipeline(this WebApplication app, GatewayOptions gatewayOptions)
     {
+        // O9: first middleware, so it catches everything below it. In Development ASP.NET Core puts the developer
+        // exception page in front of the pipeline; it never sees an exception because this handler answers first.
+        app.UseExceptionHandler();
+
         // Capture physical TCP remote IP before UseForwardedHeaders() overrides it with X-Forwarded-For
         app.Use(async (context, next) =>
         {
@@ -438,7 +442,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapDuckDbOlapEndpoints();
         app.MapIcebergRestCatalogEndpoints();
         app.MapEnvoyExtAuthzEndpoints();
-        app.MapWebSqlEndpoints();
+        app.MapWebSqlEndpoints(gatewayOptions);
         app.MapSqlEndpoints(gatewayOptions);
         app.MapProcedureEndpoints(gatewayOptions);
         app.MapDevPortalEndpoints(gatewayOptions);

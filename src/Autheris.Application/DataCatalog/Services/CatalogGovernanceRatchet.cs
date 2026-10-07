@@ -28,7 +28,7 @@ public static class CatalogGovernanceRatchet
         {
             Id = tableId,
             SourceType = !string.IsNullOrWhiteSpace(exTable.SourceType) ? exTable.SourceType : inTable.SourceType,
-            SourceName = inTable.SourceName,
+            SourceName = !string.IsNullOrWhiteSpace(exTable.SourceName) ? exTable.SourceName : inTable.SourceName,
             SchemaName = inTable.SchemaName,
             TableName = inTable.TableName,
             DisplayName = !string.IsNullOrWhiteSpace(inTable.DisplayName) ? inTable.DisplayName : exTable.DisplayName,
@@ -124,7 +124,7 @@ public static class CatalogGovernanceRatchet
         _ => 4 // unknown classifications are treated conservatively
     };
 
-    private static int MaskingRuleStrength(MaskingRule rule) => (rule.RuleType ?? string.Empty).Trim().ToUpperInvariant() switch
+    public static int MaskingRuleStrength(MaskingRule rule) => (rule.RuleType ?? string.Empty).Trim().ToUpperInvariant() switch
     {
         "NULLIFY" => 4,
         "REDACT" => 3,

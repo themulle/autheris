@@ -19,14 +19,19 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
     private static readonly HashSet<string> WhitelistedSafeCodes = new(StringComparer.OrdinalIgnoreCase)
     {
         "FORBIDDEN",
+        "ACCESS_DENIED",
         "UNAUTHORIZED",
         "NOT_FOUND",
         "RATE_LIMIT_EXCEEDED",
+        "TOO_MANY_REQUESTS",
         "QUERY_TOO_COMPLEX",
         "BAD_REQUEST",
+        "INVALID_QUERY",
         "ALREADY_PROCESSED",
         "VALIDATION_ERROR",
-        "RESPONSE_TOO_LARGE"
+        "RESPONSE_TOO_LARGE",
+        "TIMEOUT",
+        "UNAVAILABLE"
     };
 
     private static readonly string[] SensitivePatterns =

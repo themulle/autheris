@@ -149,7 +149,7 @@ public class ColumnMaskingTests
     public void DefaultEnvironmentSecretProvider_WhenSecretRefIsKeyVaultUri_ResolvesSecretFromSecretName()
     {
         var config = NSubstitute.Substitute.For<Microsoft.Extensions.Configuration.IConfiguration>();
-        config["hmac-key"].Returns("SuperSecretHmacKeyValue123!");
+        config["hmac-key"].Returns("SuperSecretHmacKeyValue123!AtLeast32Bytes");
 
         var env = NSubstitute.Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Production");
@@ -157,7 +157,7 @@ public class ColumnMaskingTests
         var secretProvider = new Autheris.Infrastructure.Security.DefaultEnvironmentSecretProvider(config, env);
 
         var secretBytes = secretProvider.GetSecretBytes("https://my-vault.vault.azure.net/secrets/hmac-key/v1");
-        System.Text.Encoding.UTF8.GetString(secretBytes).ShouldBe("SuperSecretHmacKeyValue123!");
+        System.Text.Encoding.UTF8.GetString(secretBytes).ShouldBe("SuperSecretHmacKeyValue123!AtLeast32Bytes");
     }
 
     [Theory]

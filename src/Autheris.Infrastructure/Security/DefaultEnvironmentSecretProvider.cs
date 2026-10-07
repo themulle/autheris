@@ -82,6 +82,22 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             candidates.Add("Gateway:DataMasking:HmacSecret");
             candidates.Add("Gateway__DataMasking__HmacSecret");
         }
+        else if (secretRef.StartsWith("audit:", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(secretRef, "audit-hmac-key", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(secretRef, "AUDIT_HMAC_KEY", StringComparison.OrdinalIgnoreCase))
+        {
+            candidates.Add("AUDIT_HMAC_KEY");
+            candidates.Add("Gateway:GovernanceDb:AuditHmacKey");
+            candidates.Add("Gateway__GovernanceDb__AuditHmacKey");
+        }
+        else if (secretRef.StartsWith("forwardauth:", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(secretRef, "forwardauth-secret", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(secretRef, "FORWARDAUTH_SHARED_SECRET", StringComparison.OrdinalIgnoreCase))
+        {
+            candidates.Add("FORWARDAUTH_SHARED_SECRET");
+            candidates.Add("Gateway:Authentication:ForwardAuth:SharedSecret");
+            candidates.Add("Gateway__Authentication__ForwardAuth__SharedSecret");
+        }
 
         foreach (var key in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {
@@ -89,21 +105,27 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             if (!string.IsNullOrWhiteSpace(secretVal))
             {
                 _logger?.LogWarning("Secret reference '{SecretRef}' resolved from configuration key '{CandidateKey}'. In production, ensure sensitive secrets are stored securely in Azure Key Vault or environment variables rather than configuration files.", secretRef, key);
-                return Encoding.UTF8.GetBytes(secretVal);
+                var bytes = Encoding.UTF8.GetBytes(secretVal);
+                ValidateSecretLength(bytes, secretRef);
+                return bytes;
             }
 
             var envVal = Environment.GetEnvironmentVariable(key.Replace(":", "__").Replace("-", "_"));
             if (!string.IsNullOrWhiteSpace(envVal))
             {
                 _logger?.LogDebug("Resolved secret reference '{SecretRef}' using environment variable '{CandidateKey}'.", secretRef, key);
-                return Encoding.UTF8.GetBytes(envVal);
+                var bytes = Encoding.UTF8.GetBytes(envVal);
+                ValidateSecretLength(bytes, secretRef);
+                return bytes;
             }
 
             envVal = Environment.GetEnvironmentVariable(key);
             if (!string.IsNullOrWhiteSpace(envVal))
             {
                 _logger?.LogDebug("Resolved secret reference '{SecretRef}' using direct environment variable '{CandidateKey}'.", secretRef, key);
-                return Encoding.UTF8.GetBytes(envVal);
+                var bytes = Encoding.UTF8.GetBytes(envVal);
+                ValidateSecretLength(bytes, secretRef);
+                return bytes;
             }
         }
 
@@ -139,5 +161,26 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
     {
         var segments = secretRef.Split(':');
         return segments.Length >= 3 && segments.All(segment => segment.Length > 0);
+    }
+
+    private void ValidateSecretLength(byte[] bytes, string secretRef)
+    {
+        // DEP-6 / POL-14: Enforce minimum key length of 32 bytes outside Development for cryptographic keys
+        if (!_environment.IsDevelopment() && IsCryptographicKeyRequiringMinLength(secretRef) && bytes.Length < 32)
+        {
+            throw new InvalidOperationException(
+                $"Sicherheitsfehler: Das kryptografische Secret ({DescribeReference(secretRef)}) muss außerhalb der Entwicklungsumgebung mindestens 32 Bytes lang sein (aktuelle Länge: {bytes.Length}).");
+        }
+    }
+
+    private static bool IsCryptographicKeyRequiringMinLength(string secretRef)
+    {
+        return secretRef.StartsWith("hmac", StringComparison.OrdinalIgnoreCase) ||
+               secretRef.Contains("hmac", StringComparison.OrdinalIgnoreCase) ||
+               secretRef.StartsWith("audit", StringComparison.OrdinalIgnoreCase) ||
+               secretRef.Contains("audit", StringComparison.OrdinalIgnoreCase) ||
+               secretRef.StartsWith("forwardauth", StringComparison.OrdinalIgnoreCase) ||
+               secretRef.Contains("forwardauth", StringComparison.OrdinalIgnoreCase) ||
+               secretRef.Contains("forward-auth", StringComparison.OrdinalIgnoreCase);
     }
 }

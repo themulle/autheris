@@ -6,6 +6,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Common;
 using Autheris.Application.Interfaces;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
@@ -19,6 +20,15 @@ public sealed partial class ODataHandler(
     Microsoft.Extensions.Hosting.IHostEnvironment? environment = null) : IODataHandler
 {
     private const string GenericDenied = "Access denied.";
+
+    /// <summary>
+    /// O6: Upper bound for $skip. Larger offsets make the database read and discard that many filtered rows per page;
+    /// clients page further with smaller result sets or (later) keyset-based next links.
+    /// </summary>
+    public const int MaxSkip = 100_000;
+
+    /// <summary>O7: Retry-After for 503 responses (deadlock, failover, exhausted pool).</summary>
+    private const int UnavailableRetryAfterSeconds = 5;
 
     // G3 / RR-L3: detailed denial and not-found messages are only returned in Development (fail-closed when unknown).
     private readonly bool _verboseErrors = string.Equals(environment?.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
@@ -134,6 +144,18 @@ public sealed partial class ODataHandler(
             );
         }
 
+        if (skip.HasValue && skip.Value > MaxSkip)
+        {
+            return Error(400, "InvalidQueryOption", $"The query parameter '$skip' must not exceed {MaxSkip}.");
+        }
+
+        // O5: $count used to report the number of rows on the page, not the total. Until the engine reader can count
+        // with the same row filter, the option is answered with 501 instead of a wrong number.
+        if (includeCount)
+        {
+            return Error(501, "NotImplemented", "The query option '$count' is not supported by this service.");
+        }
+
         // Safe limit handling: default top 100, max 1000
         var effectiveTop = top.HasValue ? Math.Clamp(top.Value, 1, 1000) : 100;
         var effectiveSkip = skip.HasValue ? Math.Max(0, skip.Value) : 0;
@@ -173,6 +195,33 @@ public sealed partial class ODataHandler(
                 requestHeaders: headers,
                 ct: ct
             ).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ct.IsCancellationRequested)
+        {
+            // O8: the client went away; SqlClient reports the cancelled command as SqlException, not as cancellation.
+            _logger.LogInformation("OData query for {Table} cancelled by the client ({ExceptionType}).", table, ex.GetType().Name);
+            return Error(499, "ClientClosedRequest", "The client closed the request.");
+        }
+        catch (Autheris.Domain.Exceptions.GatewayInvalidQueryException iqEx)
+        {
+            _logger.LogWarning("OData query for {Table} rejected: {Message}", table, iqEx.Message);
+            return Error(400, "InvalidQueryOption", iqEx.Message);
+        }
+        catch (Autheris.Domain.Exceptions.GatewayThrottledException thEx)
+        {
+            _logger.LogWarning("OData query for {Table} throttled (too many concurrent reads).", table);
+            return Error(429, "TooManyRequests", thEx.Message, thEx.RetryAfterSeconds);
+        }
+        catch (Autheris.Domain.Exceptions.GatewayUnsupportedColumnTypeException utEx)
+        {
+            _logger.LogWarning(utEx, "OData query for {Table} hit an unsupported column type.", table);
+            return Error(501, "UnsupportedColumnType", utEx.Message);
+        }
+        catch (Autheris.Domain.Exceptions.GatewaySecurityException sizeEx) when (sizeEx.ErrorCode == "RESPONSE_TOO_LARGE")
+        {
+            // O11: a size limit is not an access decision; tell the client how to narrow the request.
+            _logger.LogWarning("OData query for {Table} exceeded the response size limit.", table);
+            return Error(400, "ResponseTooLarge", "The response exceeds the size limit. Narrow it with $select or a smaller $top.");
         }
         catch (Autheris.Domain.Exceptions.TableNotFoundException nfEx)
         {
@@ -220,6 +269,35 @@ public sealed partial class ODataHandler(
                 ErrorMessage: secMessage
             );
         }
+        catch (Exception ex) when (DataAccessErrorClassifier.Classify(ex) == DataAccessErrorKind.Timeout)
+        {
+            _logger.LogWarning(ex, "OData query for {Table} timed out.", table);
+            return new ODataQueryResult(
+                Success: false,
+                StatusCode: 504,
+                Payload: ODataResponseFormatter.FormatErrorResponse("ExecutionTimeout", "The query exceeded the execution time limit. Narrow the query or check database locks."),
+                ErrorCode: "ExecutionTimeout",
+                ErrorMessage: "The query exceeded the execution time limit."
+            );
+        }
+        catch (Exception ex) when (DataAccessErrorClassifier.Classify(ex) == DataAccessErrorKind.Unavailable)
+        {
+            // O7: deadlock, failover, exhausted pool: retryable, and the database error text stays in the log.
+            _logger.LogWarning(ex, "OData query for {Table} failed with a transient data source error.", table);
+            return Error(503, "ServiceUnavailable", "The data source is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "OData query for {Table} failed unexpectedly.", table);
+            var msg = _verboseErrors ? ex.Message : "The data access request could not be processed. Contact support.";
+            return new ODataQueryResult(
+                Success: false,
+                StatusCode: 500,
+                Payload: ODataResponseFormatter.FormatErrorResponse("INTERNAL_ERROR", msg),
+                ErrorCode: "INTERNAL_ERROR",
+                ErrorMessage: msg
+            );
+        }
 
         if (!decision.IsAllowed)
         {
@@ -245,4 +323,13 @@ public sealed partial class ODataHandler(
             Payload: payload
         );
     }
+
+    private static ODataQueryResult Error(int statusCode, string errorCode, string message, int? retryAfterSeconds = null) =>
+        new(
+            Success: false,
+            StatusCode: statusCode,
+            Payload: ODataResponseFormatter.FormatErrorResponse(errorCode, message),
+            ErrorCode: errorCode,
+            ErrorMessage: message,
+            RetryAfterSeconds: retryAfterSeconds);
 }

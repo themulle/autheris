@@ -558,12 +558,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 continue;
             }
 
-            if (cleared.Contains(col))
-            {
-                plan.Add((i, col, ColumnAccessLevel.Clear, null));
-                continue;
-            }
-
             if (foreign && level != ColumnAccessLevel.Clear)
             {
                 continue;

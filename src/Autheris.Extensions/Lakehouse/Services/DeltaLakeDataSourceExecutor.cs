@@ -201,6 +201,10 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
                     var rule = context.Metadata.ColumnMaskingRules.TryGetValue(kvp.Key, out var mRule)
                         ? mRule
                         : new MaskingRule { RuleType = "REDACT" };
+                    if (IsHmacRule(rule) && !string.IsNullOrWhiteSpace(tenantId))
+                    {
+                        rule = MaskingRule.CreateTenantScopedHmacRule(rule, tenantId, _options.Value.DataMasking?.HmacKeyId);
+                    }
                     val = _maskingProvider.MaskValue(kvp.Key, val, rule);
                 }
 
@@ -209,6 +213,7 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
             resultRows.Add(cleanRow);
         }
 
+        context.Items["InDbColumnMaskingExecuted"] = true;
         return resultRows;
     }
 
@@ -231,4 +236,8 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
         }
         return predicates;
     }
+
+    private static bool IsHmacRule(MaskingRule rule) =>
+        rule.RuleType != null &&
+        rule.RuleType.StartsWith("HMAC", StringComparison.OrdinalIgnoreCase);
 }

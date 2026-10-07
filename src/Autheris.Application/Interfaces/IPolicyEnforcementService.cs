@@ -30,11 +30,25 @@ public interface IPolicyEnforcementService
     /// <summary>
     /// Loads or reloads policies for the specified tenant from CSV or policy definition text.
     /// </summary>
-    void LoadPolicyFromText(TenantId tenant, string policyText);
+    void LoadPolicyFromText(TenantId tenant, string policyText) =>
+        throw new NotSupportedException("Policy loading is not supported by this policy enforcement implementation.");
+
+    /// <summary>
+    /// Loads or reloads policies from CSV or policy definition text across all defined tenants or wildcards.
+    /// </summary>
+    void LoadPolicyFromText(string policyText) =>
+        throw new NotSupportedException("Policy loading is not supported by this policy enforcement implementation.");
 
     /// <summary>
     /// Loads policies from a file and optionally watches the file for changes to hot-reload without restarting the host.
     /// </summary>
-    void LoadPolicyFromFile(TenantId tenant, string filePath, bool watchFile = false);
+    void LoadPolicyFromFile(TenantId tenant, string filePath, bool watchFile = false) =>
+        throw new NotSupportedException("Policy loading is not supported by this policy enforcement implementation.");
+
+    /// <summary>
+    /// Loads policies from a file across all defined tenants and optionally watches the file for changes to hot-reload.
+    /// </summary>
+    void LoadPolicyFromFile(string filePath, bool watchFile = false) =>
+        throw new NotSupportedException("Policy loading is not supported by this policy enforcement implementation.");
 }
 

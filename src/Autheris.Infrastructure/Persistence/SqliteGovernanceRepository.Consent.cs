@@ -813,6 +813,46 @@ public partial class SqliteGovernanceRepository
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
+            // POL-3: Freeze full column snapshot from table metadata on ITSM activation
+            var columnRules = new List<(Guid Id, Guid ColId, string ColName, int AccessLevel)>();
+            using (var colCmd = _connection.CreateCommand())
+            {
+                colCmd.Transaction = tx;
+                colCmd.CommandText = @"SELECT c.id, c.column_name, c.is_sensitive,
+                                              MAX(CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END) AS has_mask
+                                       FROM TABLE_COLUMNS c
+                                       LEFT JOIN COLUMN_MASKING_RULES m ON c.id = m.table_column_id
+                                       WHERE c.table_id = @tid
+                                       GROUP BY c.id, c.column_name, c.is_sensitive";
+                colCmd.Parameters.AddWithValue("@tid", req.TableId.ToString());
+                using var reader = await colCmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    var colId = Guid.Parse(reader.GetString(0));
+                    var colName = reader.GetString(1);
+                    var isSensitive = Convert.ToInt32(reader.GetValue(2)) == 1;
+                    var hasMask = Convert.ToInt32(reader.GetValue(3)) == 1;
+                    int accessLevel = (isSensitive || hasMask)
+                        ? (int)Autheris.Domain.Interfaces.ColumnAccessLevel.Mask
+                        : (int)Autheris.Domain.Interfaces.ColumnAccessLevel.Clear;
+                    columnRules.Add((Guid.NewGuid(), colId, colName, accessLevel));
+                }
+            }
+
+            foreach (var (ruleId, colId, colName, accessLevel) in columnRules)
+            {
+                using var ruleCmd = _connection.CreateCommand();
+                ruleCmd.Transaction = tx;
+                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
+                                        VALUES (@id, @cid, @tcid, @col, @lvl)";
+                ruleCmd.Parameters.AddWithValue("@id", ruleId.ToString());
+                ruleCmd.Parameters.AddWithValue("@cid", consentId.ToString());
+                ruleCmd.Parameters.AddWithValue("@tcid", colId.ToString());
+                ruleCmd.Parameters.AddWithValue("@col", colName);
+                ruleCmd.Parameters.AddWithValue("@lvl", accessLevel);
+                await ruleCmd.ExecuteNonQueryAsync(ct);
+            }
+
             await IncrementTableEpochInternalAsync(req.TableIdentifier, tx, ct);
             await tx.CommitAsync(ct);
 
@@ -1014,14 +1054,22 @@ public partial class SqliteGovernanceRepository
 
             // Check if table requires four-eyes
             bool requiresFourEyes = false;
+            string? tableSensitivity = null;
             using (var cmd = _connection.CreateCommand())
             {
-                cmd.CommandText = "SELECT requires_four_eyes FROM TABLES WHERE id = @tid";
+                cmd.CommandText = "SELECT requires_four_eyes, sensitivity FROM TABLES WHERE id = @tid";
                 cmd.Parameters.AddWithValue("@tid", req.TableId.ToString());
-                var obj = await cmd.ExecuteScalarAsync(ct);
-                if (obj != null && obj != DBNull.Value)
+                using var reader = await cmd.ExecuteReaderAsync(ct);
+                if (await reader.ReadAsync(ct))
                 {
-                    requiresFourEyes = Convert.ToInt32(obj) == 1;
+                    if (!reader.IsDBNull(0))
+                    {
+                        requiresFourEyes = Convert.ToInt32(reader.GetValue(0)) == 1;
+                    }
+                    if (!reader.IsDBNull(1))
+                    {
+                        tableSensitivity = reader.GetString(1);
+                    }
                 }
             }
 
@@ -1059,7 +1107,7 @@ public partial class SqliteGovernanceRepository
             int nextStep = existingApprovers.Count + 1;
             // Review E-9: an ITSM-governed request stays with the change board for its second step as well, so the
             // four-eyes decision cannot be assembled from one ITSM and one GraphQL approval.
-            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, nextStep, isExternalItsmApproval);
+            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(requiresFourEyes, nextStep, isExternalItsmApproval, tableSensitivity);
 
             using var tx = _connection.BeginTransaction();
             // Insert approval step

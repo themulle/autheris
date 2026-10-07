@@ -10,6 +10,7 @@ using Autheris.Application.Workflows;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using HotChocolate;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
@@ -189,11 +190,26 @@ public sealed class Mutation
                 .Build());
         }
 
-        var tenantId = TenantId.LegacySingleTenant;
-        if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
+        var principalTenant = principal?.GetTenantId() ?? TenantId.LegacySingleTenant;
+        var contextTenant = TenantId.LegacySingleTenant;
+        if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
         {
-            tenantId = tid;
+            contextTenant = secCtx.TenantId;
         }
+        else if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
+        {
+            contextTenant = tid;
+        }
+
+        if (principalTenant != TenantId.LegacySingleTenant && contextTenant != TenantId.LegacySingleTenant && principalTenant != contextTenant)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("FORBIDDEN")
+                .SetMessage("Mandantenübergreifender Zugriff verboten: Token-Mandant stimmt nicht mit dem Verbindungskontext überein.")
+                .Build());
+        }
+
+        var tenantId = principalTenant != TenantId.LegacySingleTenant ? principalTenant : contextTenant;
 
         bool isItsmEnabled = itsmDispatcher != null && (gatewayOptions?.Value.Itsm.Enabled == true);
 
@@ -364,15 +380,26 @@ public sealed class Mutation
         bool isCrossTenantAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal); // RR-L2-01: single cross-tenant definition
         bool isPrivilegedAdmin = roles.Contains("GovernanceAdmin") || isCrossTenantAdmin;
 
-        var tenantId = TenantId.LegacySingleTenant;
-        if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
+        var principalTenant = principal?.GetTenantId() ?? TenantId.LegacySingleTenant;
+        var contextTenant = TenantId.LegacySingleTenant;
+        if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
         {
-            tenantId = tid;
+            contextTenant = secCtx.TenantId;
         }
-        else if (principal != null)
+        else if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
         {
-            tenantId = principal.GetTenantId();
+            contextTenant = tid;
         }
+
+        if (principalTenant != TenantId.LegacySingleTenant && contextTenant != TenantId.LegacySingleTenant && principalTenant != contextTenant && !isCrossTenantAdmin)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("FORBIDDEN")
+                .SetMessage("Mandantenübergreifender Zugriff verboten: Token-Mandant stimmt nicht mit dem Mandanten des Verbindungskontexts überein.")
+                .Build());
+        }
+
+        var tenantId = principalTenant != TenantId.LegacySingleTenant ? principalTenant : contextTenant;
 
         if (req.TenantId != tenantId && !isCrossTenantAdmin)
         {
@@ -522,15 +549,26 @@ public sealed class Mutation
         bool isCrossTenantAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal); // RR-L2-01: single cross-tenant definition
         bool isPrivilegedAdmin = roles.Contains("GovernanceAdmin") || isCrossTenantAdmin;
 
-        var tenantId = TenantId.LegacySingleTenant;
-        if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
+        var principalTenant = principal?.GetTenantId() ?? TenantId.LegacySingleTenant;
+        var contextTenant = TenantId.LegacySingleTenant;
+        if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
         {
-            tenantId = tid;
+            contextTenant = secCtx.TenantId;
         }
-        else if (principal != null)
+        else if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
         {
-            tenantId = principal.GetTenantId();
+            contextTenant = tid;
         }
+
+        if (principalTenant != TenantId.LegacySingleTenant && contextTenant != TenantId.LegacySingleTenant && principalTenant != contextTenant && !isCrossTenantAdmin)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("FORBIDDEN")
+                .SetMessage("Mandantenübergreifender Zugriff verboten: Token-Mandant stimmt nicht mit dem Mandanten des Verbindungskontexts überein.")
+                .Build());
+        }
+
+        var tenantId = principalTenant != TenantId.LegacySingleTenant ? principalTenant : contextTenant;
 
         if (req.TenantId != tenantId && !isCrossTenantAdmin)
         {
@@ -613,15 +651,26 @@ public sealed class Mutation
         bool isCrossTenantAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal); // RR-L2-01: single cross-tenant definition
         bool isPrivilegedAdmin = roles.Contains("GovernanceAdmin") || isCrossTenantAdmin;
 
-        var tenantId = TenantId.LegacySingleTenant;
-        if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
+        var principalTenant = principal?.GetTenantId() ?? TenantId.LegacySingleTenant;
+        var contextTenant = TenantId.LegacySingleTenant;
+        if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
         {
-            tenantId = tid;
+            contextTenant = secCtx.TenantId;
         }
-        else if (principal != null)
+        else if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
         {
-            tenantId = principal.GetTenantId();
+            contextTenant = tid;
         }
+
+        if (principalTenant != TenantId.LegacySingleTenant && contextTenant != TenantId.LegacySingleTenant && principalTenant != contextTenant && !isCrossTenantAdmin)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("FORBIDDEN")
+                .SetMessage("Mandantenübergreifender Zugriff verboten: Token-Mandant stimmt nicht mit dem Mandanten des Verbindungskontexts überein.")
+                .Build());
+        }
+
+        var tenantId = principalTenant != TenantId.LegacySingleTenant ? principalTenant : contextTenant;
 
         if (consent.TenantId != tenantId && !isCrossTenantAdmin)
         {

@@ -117,4 +117,54 @@ public sealed record SecurityPrincipalContext
         AuthenticationScheme = "Anonymous",
         IsAuthenticated = false
     };
+
+    /// <summary>
+    /// Constructs a canonical SecurityPrincipalContext from a ClaimsPrincipal, partitioning roles and extracting SIDs and tenant.
+    /// </summary>
+    public static SecurityPrincipalContext FromPrincipal(
+        System.Security.Claims.ClaimsPrincipal principal,
+        TenantId? overrideTenant = null,
+        string? authenticationScheme = null,
+        string? breakGlassJustification = null,
+        System.Net.IPAddress? clientIp = null)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+
+        var userSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "ANONYMOUS");
+        var groupSids = principal.GetGroupSids();
+        var rawRoles = principal.GetUserRoles();
+        var clusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var tenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool clusterAdminAllowed = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+
+        foreach (var r in rawRoles)
+        {
+            if (ClusterAdminPolicy.IsClusterAdminRole(r))
+            {
+                if (clusterAdminAllowed)
+                {
+                    clusterRoles.Add("ClusterAdmin");
+                }
+            }
+            else
+            {
+                tenantRoles.Add(r);
+            }
+        }
+
+        var tenantId = overrideTenant ?? principal.GetTenantId();
+
+        return new SecurityPrincipalContext
+        {
+            UserSid = userSid,
+            TenantId = tenantId,
+            GroupSids = groupSids,
+            TenantRoles = tenantRoles,
+            ClusterRoles = clusterRoles,
+            AuthenticationScheme = authenticationScheme ?? principal.Identity?.AuthenticationType ?? "Token",
+            IsAuthenticated = principal.Identity?.IsAuthenticated ?? true,
+            BreakGlassJustification = breakGlassJustification,
+            ClientIp = clientIp
+        };
+    }
 }
