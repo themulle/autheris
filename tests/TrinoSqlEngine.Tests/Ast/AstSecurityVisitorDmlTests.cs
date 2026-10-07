@@ -128,4 +128,62 @@ public sealed class AstSecurityVisitorDmlTests
         string sql = "UPDATE orders SET tenant_id = 42 WHERE id = 1";
         Assert.Throws<SecurityException>(() => SecureAndGenerate(sql, options));
     }
+
+    [Fact]
+    public void Dml_SubqueryInUpdateSetAndWhere_RewritesWithRls()
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
+            TargetDialect = TargetSqlDialect.PostgreSql
+        };
+
+        string sql = "UPDATE orders SET total = (SELECT sum(price) FROM items) WHERE customer_id IN (SELECT id FROM customers)";
+        string result = SecureAndGenerate(sql, options);
+
+        // All three tables (orders, items, customers) must have RLS applied
+        Assert.Contains("WHERE \"tenant_id\" = 't1'", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("items", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("customers", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Dml_SubqueryInDeleteWhere_RewritesWithRls()
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
+            TargetDialect = TargetSqlDialect.PostgreSql
+        };
+
+        string sql = "DELETE FROM orders WHERE customer_id IN (SELECT id FROM customers)";
+        string result = SecureAndGenerate(sql, options);
+
+        Assert.Contains("WHERE \"tenant_id\" = 't1'", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("customers", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Dml_MaskedColumnInCastOrLike_ThrowsSecurityException()
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            RejectMaskedColumnsInDml = true,
+            ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
+                (t, c) => c.Equals("salary", StringComparison.OrdinalIgnoreCase),
+                (t, c) => "NULL")
+        };
+
+        // CAST on masked column in WHERE is rejected
+        Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM employees WHERE CAST(salary AS VARCHAR) = '50000'", options));
+
+        // LIKE on masked column in WHERE is rejected
+        Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM employees WHERE salary LIKE '500%'", options));
+
+        // Subquery referencing masked column in UPDATE SET is rejected
+        Assert.Throws<SecurityException>(() => SecureAndGenerate("UPDATE notes SET content = (SELECT salary FROM employees WHERE id = 1) WHERE id = 1", options));
+    }
 }

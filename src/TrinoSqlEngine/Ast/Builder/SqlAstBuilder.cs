@@ -815,8 +815,22 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
             args.Add(new ColumnReference(new SqlQualifiedName("*")));
         }
 
+        WindowSpecification? window = null;
+        var overCtx = context.over();
+        if (overCtx?.windowSpecification() != null)
+        {
+            var winSpec = overCtx.windowSpecification();
+            var partitionExprs = winSpec._partition != null && winSpec._partition.Count > 0
+                ? winSpec._partition.Select(p => (Expression)Visit(p)).ToList().AsReadOnly()
+                : null;
+            var orderBy = winSpec.orderBy() != null
+                ? (OrderByClause)Visit(winSpec.orderBy())
+                : null;
+            window = new WindowSpecification(partitionExprs, orderBy);
+        }
+
         bool distinct = context.setQuantifier()?.DISTINCT() != null;
-        return new FunctionCallExpression(qName, args, distinct, null);
+        return new FunctionCallExpression(qName, args, distinct, window);
     }
 
     public override SqlNode VisitMethodCall(SqlBaseParser.MethodCallContext context)

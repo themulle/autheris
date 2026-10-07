@@ -28,46 +28,36 @@ public static class ClaimsNormalizer
         var originalIdentity = principal.Identity as ClaimsIdentity;
         bool isAuthenticated = originalIdentity?.IsAuthenticated == true;
 
-        // If unauthenticated and no client certificate is present, return unchanged
-        if (!isAuthenticated && clientCertificate == null)
-        {
-            return principal;
-        }
-
-        // Check if already normalized with trusted issuer
-        if (originalIdentity != null &&
-            (originalIdentity.HasClaim(c => c.Type == NormalizedMarkerClaimType && string.Equals(c.Issuer, MiddlewareMarkerIssuer, StringComparison.Ordinal)) ||
-             originalIdentity.HasClaim(c => c.Type == LegacyMarkerClaimType && string.Equals(c.Issuer, LegacyMarkerIssuer, StringComparison.Ordinal))))
+        // If unauthenticated, return unchanged - never forge an authenticated identity from an unvalidated raw TLS client cert
+        if (!isAuthenticated)
         {
             return principal;
         }
 
         // Clone the principal and identity to avoid mutating shared/cached ClaimsPrincipal (M-1)
-        ClaimsPrincipal clonedPrincipal;
-        ClaimsIdentity identity;
+        var clonedPrincipal = principal.Clone();
+        var identity = (ClaimsIdentity)clonedPrincipal.Identity!;
 
-        if (originalIdentity?.IsAuthenticated == true)
-        {
-            clonedPrincipal = principal.Clone();
-            identity = (ClaimsIdentity)clonedPrincipal.Identity!;
-        }
-        else if (clientCertificate != null)
+        if (clientCertificate != null)
         {
             var thumbprint = clientCertificate.Thumbprint ?? clientCertificate.GetCertHashString();
             var certName = clientCertificate.GetNameInfo(X509NameType.SimpleName, false) ?? clientCertificate.Subject;
-            identity = new ClaimsIdentity("Certificate", ClaimTypes.Name, ClaimTypes.Role);
-            identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, $"cert:{thumbprint}"));
-            identity.AddClaim(new Claim(ClaimTypes.PrimarySid, $"cert:{thumbprint}"));
-            identity.AddClaim(new Claim(ClaimTypes.Name, certName));
+            if (identity.FindFirst(ClaimTypes.NameIdentifier) == null)
+            {
+                identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, $"cert:{thumbprint}"));
+            }
+            if (identity.FindFirst(ClaimTypes.PrimarySid) == null)
+            {
+                identity.AddClaim(new Claim(ClaimTypes.PrimarySid, $"cert:{thumbprint}"));
+            }
+            if (identity.FindFirst(ClaimTypes.Name) == null)
+            {
+                identity.AddClaim(new Claim(ClaimTypes.Name, certName));
+            }
             identity.AddClaim(new Claim("x509_thumbprint", thumbprint));
             identity.AddClaim(new Claim("client_cert_thumbprint", thumbprint));
             identity.AddClaim(new Claim("x509_subject", clientCertificate.Subject));
             identity.AddClaim(new Claim("x509_issuer", clientCertificate.Issuer));
-            clonedPrincipal = new ClaimsPrincipal(identity);
-        }
-        else
-        {
-            return principal;
         }
 
         // RR-L2-04: Strip any forged marker claims supplied by untrusted issuers

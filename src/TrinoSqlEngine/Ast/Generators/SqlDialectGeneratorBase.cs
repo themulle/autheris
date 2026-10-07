@@ -2,6 +2,7 @@ namespace TrinoSqlEngine.Ast.Generators;
 
 using System;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Buffer;
 using TrinoSqlEngine.Ast.Nodes;
@@ -401,7 +402,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 FormatQualifiedName(ref builder, col.Name, context);
                 break;
             case ParameterReference param:
-                context.FormatNextParameterMarker(ref builder);
+                FormatParameter(ref builder, param, context);
                 break;
             case LiteralExpression lit:
                 FormatLiteral(ref builder, lit, context);
@@ -577,6 +578,35 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         if (parensRight) builder.Append(')');
     }
 
+    private static readonly Regex SafeParamIdentifierRegex = new(
+        @"\A[A-Za-z_][A-Za-z0-9_]{0,127}\z", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+
+    protected virtual void FormatParameter(ref ValueStringBuilder builder, ParameterReference param, SqlEmitterContext context)
+    {
+        if (!string.IsNullOrWhiteSpace(param.Name) && param.Name != "?" && !param.Name.StartsWith('$') && !param.IsSynthetic)
+        {
+            var rawName = param.Name.TrimStart('@', ':');
+            if (SafeParamIdentifierRegex.IsMatch(rawName))
+            {
+                switch (context.Dialect)
+                {
+                    case TargetSqlDialect.SqlServer:
+                    case TargetSqlDialect.Sqlite:
+                        builder.Append('@');
+                        builder.Append(rawName);
+                        return;
+                    case TargetSqlDialect.Oracle:
+                    case TargetSqlDialect.Snowflake:
+                        builder.Append(':');
+                        builder.Append(rawName);
+                        return;
+                }
+            }
+        }
+
+        context.FormatNextParameterMarker(ref builder);
+    }
+
     protected virtual void FormatUnaryExpression(ref ValueStringBuilder builder, UnaryExpression u, SqlEmitterContext context)
     {
         switch (u.Operator)
@@ -592,12 +622,30 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(')');
                 break;
             case UnaryOperator.IsNull:
-                GenerateExpression(u.Operand, ref builder, context);
-                builder.Append(" IS NULL");
+                if (u.Operand is BinaryExpression or BetweenExpression or LikeExpression)
+                {
+                    builder.Append('(');
+                    GenerateExpression(u.Operand, ref builder, context);
+                    builder.Append(") IS NULL");
+                }
+                else
+                {
+                    GenerateExpression(u.Operand, ref builder, context);
+                    builder.Append(" IS NULL");
+                }
                 break;
             case UnaryOperator.IsNotNull:
-                GenerateExpression(u.Operand, ref builder, context);
-                builder.Append(" IS NOT NULL");
+                if (u.Operand is BinaryExpression or BetweenExpression or LikeExpression)
+                {
+                    builder.Append('(');
+                    GenerateExpression(u.Operand, ref builder, context);
+                    builder.Append(") IS NOT NULL");
+                }
+                else
+                {
+                    GenerateExpression(u.Operand, ref builder, context);
+                    builder.Append(" IS NOT NULL");
+                }
                 break;
         }
     }
@@ -641,12 +689,21 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     private static bool NeedsParentheses(Expression child, BinaryOperator parentOp, bool isLeft)
     {
-        if (child is not BinaryExpression childBinary) return false;
-        int parentPrec = GetPrecedence(parentOp);
-        int childPrec = GetPrecedence(childBinary.Operator);
-        if (childPrec < parentPrec) return true;
-        if (childPrec == parentPrec && !isLeft && (parentOp == BinaryOperator.Subtract || parentOp == BinaryOperator.Divide))
+        if (child is BinaryExpression childBinary)
+        {
+            int parentPrec = GetPrecedence(parentOp);
+            int childPrec = GetPrecedence(childBinary.Operator);
+            if (childPrec < parentPrec) return true;
+            if (childPrec == parentPrec && !isLeft && (parentOp == BinaryOperator.Subtract || parentOp == BinaryOperator.Divide || parentOp == BinaryOperator.Modulo))
+                return true;
+            return false;
+        }
+
+        if (child is BetweenExpression && parentOp is BinaryOperator.And or BinaryOperator.Or)
+        {
             return true;
+        }
+
         return false;
     }
 

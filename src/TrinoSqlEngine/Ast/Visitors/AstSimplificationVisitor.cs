@@ -128,11 +128,7 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
             return uniqueOperands[0];
         }
 
-        // Contradiction detection: col = v1 AND col = v2 (where v1 != v2)
-        if (HasDirectContradiction(uniqueOperands))
-        {
-            return CanonicalFalse;
-        }
+        // Note: Do not fold (col = v1 AND col = v2) -> 1 = 0 as it alters SQL three-valued logic when col is NULL.
 
         // Reconstruct left-associative AND tree
         Expression result = uniqueOperands[0];

@@ -25,7 +25,7 @@ public static class GovernanceEndpoints
     internal static async Task<bool> IsAuthorizedForSimulationAsync(HttpContext context, string? targetTable)
     {
         var user = context.User;
-        if (GatewayPolicies.HasAnyRole(user, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]))
+        if (user.IsInRole("PrivacyAdmin") || GatewayPolicies.HasAnyRole(user, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]))
         {
             return true;
         }
@@ -240,7 +240,7 @@ public static class GovernanceEndpoints
         {
             var isCanonicalClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
             var isPrivileged = isCanonicalClusterAdmin ||
-                               GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
+                               GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin]);
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);

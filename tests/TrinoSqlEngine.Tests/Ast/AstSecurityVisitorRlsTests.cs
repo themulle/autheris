@@ -234,4 +234,22 @@ public sealed class AstSecurityVisitorRlsTests
         Assert.Contains("N'DELIVERED'", result);
         Assert.Contains("[tenant_id] = N't1'", result);
     }
+
+    [Fact]
+    public void TableQueryBody_RewritesWithRlsAndMasking()
+    {
+        var options = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
+            TargetDialect = TargetSqlDialect.PostgreSql
+        };
+
+        string sql = "TABLE orders";
+        string result = SecureAndGenerate(sql, options);
+
+        // Desugared and rewritten with RLS subquery
+        Assert.Contains("SELECT", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orders", result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("WHERE \"tenant_id\" = 't1'", result, StringComparison.OrdinalIgnoreCase);
+    }
 }

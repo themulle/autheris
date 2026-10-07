@@ -617,14 +617,24 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         // 7. Rewrite SQL AST (with plan cache fast-path if enabled)
         string securedSql;
         ulong queryHash = 0;
-        ulong rlsHash = 0;
-        bool canUsePlanCache = _planCache != null;
+        ulong policyHash = 0;
+        var planCache = _planCache;
+        bool canUsePlanCache = planCache != null && targetDatabaseDialect.HasValue;
 
-        if (canUsePlanCache)
+        if (canUsePlanCache && planCache != null)
         {
-            queryHash = _planCache!.ComputeHash(rawSql.AsSpan());
-            rlsHash = _planCache.ComputeRlsFilterHash(tableRlsFilters);
-            if (_planCache.TryGetCompiledSql(queryHash, targetDatabaseDialect.Value, tenantId, rlsHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
+            queryHash = planCache.ComputeHash(rawSql.AsSpan());
+            policyHash = planCache.ComputePolicyHash(
+                tableRlsFilters,
+                tableMaskingExpressions,
+                tablesWithoutRls,
+                maxRows,
+                isDml,
+                webSqlOptions.SqlRewriterEngine ?? "LegacyTokenStream",
+                tablesWithConsentRowFilter,
+                tablesWithMaskedColumns);
+
+            if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
             {
                 return new GovernedRewrite(cachedSql, internalParameters);
             }
@@ -633,9 +643,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         try
         {
             securedSql = _sqlEngine.RewriteRls(rawSql.AsMemory(), rlsOptions, ct);
-            if (canUsePlanCache && !string.IsNullOrEmpty(securedSql))
+            if (canUsePlanCache && planCache != null && !string.IsNullOrEmpty(securedSql))
             {
-                _planCache!.SetCompiledSql(queryHash, targetDatabaseDialect.Value, tenantId, rlsHash, securedSql);
+                planCache.SetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, securedSql);
             }
         }
         catch (WebSqlPolicyException)

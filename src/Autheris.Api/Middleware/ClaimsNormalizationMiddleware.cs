@@ -16,10 +16,17 @@ public sealed class ClaimsNormalizationMiddleware(RequestDelegate next)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (context.User?.Identity?.IsAuthenticated == true || context.Connection.ClientCertificate != null)
+        if (context.Items.ContainsKey("__ClaimsNormalized"))
+        {
+            await next(context).ConfigureAwait(false);
+            return;
+        }
+
+        if (context.User?.Identity?.IsAuthenticated == true)
         {
             var clientCert = context.Connection.ClientCertificate;
-            context.User = ClaimsNormalizer.Normalize(context.User ?? new System.Security.Claims.ClaimsPrincipal(), clientCert);
+            context.User = ClaimsNormalizer.Normalize(context.User, clientCert);
+            context.Items["__ClaimsNormalized"] = true;
         }
 
         await next(context).ConfigureAwait(false);

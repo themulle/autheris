@@ -24,7 +24,7 @@ public sealed record SecurityPrincipalContext
     public System.Net.IPAddress? ClientIp { get; init; }
 
     /// <summary>Cluster-level administrator authorized to perform cross-tenant operations.</summary>
-    public bool IsClusterAdmin => ClusterRoles.Contains("ClusterAdmin");
+    public bool IsClusterAdmin => ClusterRoles.Any(r => !r.Contains(':') && string.Equals(r, "ClusterAdmin", StringComparison.Ordinal));
 
     /// <summary>Returns true if the principal possesses any of the specified roles in either tenant or cluster scope.</summary>
     public bool HasAnyRole(params string[] roles)
@@ -51,13 +51,41 @@ public sealed record SecurityPrincipalContext
     public bool HasRole(GatewayRole role)
     {
         if (IsClusterAdmin) return true;
-        foreach (var r in TenantRoles.Concat(ClusterRoles))
+
+        // Cluster roles can satisfy any role (global scope), but roles containing ':' are tenant-scoped and must be ignored for global checks
+        foreach (var r in ClusterRoles)
         {
+            if (r.Contains(':')) continue;
             if (GatewayRoleExtensions.TryParseRole(r, out var parsed) && parsed.Implies(role))
             {
                 return true;
             }
         }
+
+        // Global administrative roles (ClusterAdmin, GovernanceAdmin) can NEVER be satisfied by tenant-scoped roles
+        if (role is GatewayRole.ClusterAdmin or GatewayRole.GovernanceAdmin)
+        {
+            return false;
+        }
+
+        // Tenant-scoped roles can only satisfy domain/tenant-scoped roles; ignore prefixed roles containing ':'
+        foreach (var r in TenantRoles)
+        {
+            if (r.Contains(':')) continue;
+            if (GatewayRoleExtensions.TryParseRole(r, out var parsed))
+            {
+                if (parsed is GatewayRole.ClusterAdmin or GatewayRole.GovernanceAdmin)
+                {
+                    continue;
+                }
+
+                if (parsed.Implies(role))
+                {
+                    return true;
+                }
+            }
+        }
+
         return false;
     }
 

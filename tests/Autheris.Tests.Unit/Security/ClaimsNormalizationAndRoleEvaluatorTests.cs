@@ -86,6 +86,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
 
         var context = new DefaultHttpContext();
+        context.User = new ClaimsPrincipal(new ClaimsIdentity("Certificate"));
         context.Connection.ClientCertificate = cert;
 
         var middleware = new ClaimsNormalizationMiddleware(next: (ctx) => Task.CompletedTask);
@@ -101,6 +102,22 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         user.FindFirst("client_cert_thumbprint")?.Value.ShouldBe(thumbprint);
         user.FindFirst(ClaimTypes.NameIdentifier)?.Value.ShouldBe($"cert:{thumbprint}");
         user.FindFirst(ClaimTypes.PrimarySid)?.Value.ShouldBe($"cert:{thumbprint}");
+    }
+
+    [Fact]
+    public async Task Middleware_DoesNotAuthenticate_WhenClientCertificatePresentsOnUnauthenticatedConnection()
+    {
+        using var rsa = RSA.Create(2048);
+        var req = new CertificateRequest("CN=attacker, O=Untrusted", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+
+        var context = new DefaultHttpContext();
+        context.Connection.ClientCertificate = cert;
+
+        var middleware = new ClaimsNormalizationMiddleware(next: (ctx) => Task.CompletedTask);
+        await middleware.InvokeAsync(context);
+
+        context.User.Identity?.IsAuthenticated.ShouldBeFalse();
     }
 
     [Fact]
@@ -218,5 +235,25 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         secContext.HasRole(GatewayRole.GovernanceAdmin).ShouldBeFalse();
 
         secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.DataOwner).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void SecurityPrincipalContext_TenantScopedRoleWithColon_CannotSatisfyClusterAdminOrGovernanceAdmin()
+    {
+        var secContext = new SecurityPrincipalContext
+        {
+            UserSid = new Sid("user-tenant-admin"),
+            TenantId = new TenantId("tenant-1"),
+            GroupSids = new HashSet<Sid>(),
+            TenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "tenant-1:ClusterAdmin", "tenant-1:GovernanceAdmin" },
+            ClusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "tenant-1:ClusterAdmin" },
+            AuthenticationScheme = "Bearer"
+        };
+
+        // Colon-prefixed roles must never satisfy global administrative roles
+        secContext.IsClusterAdmin.ShouldBeFalse();
+        secContext.HasRole(GatewayRole.ClusterAdmin).ShouldBeFalse();
+        secContext.HasRole(GatewayRole.GovernanceAdmin).ShouldBeFalse();
+        secContext.HasAnyRole(GatewayRole.ClusterAdmin, GatewayRole.GovernanceAdmin).ShouldBeFalse();
     }
 }

@@ -58,7 +58,7 @@ public sealed class ProcedureYamlGenerator : IProcedureYamlGenerator
 
         if (!string.IsNullOrWhiteSpace(request.ResultTable))
         {
-            sb.AppendLine($"result_table: {request.ResultTable}");
+            sb.AppendLine($"result_table: {FormatScalar(request.ResultTable)}");
         }
 
         if (request.ReferencedTables.Count > 0)
@@ -66,7 +66,7 @@ public sealed class ProcedureYamlGenerator : IProcedureYamlGenerator
             sb.AppendLine("referenced_tables:");
             foreach (var table in request.ReferencedTables)
             {
-                sb.AppendLine($"  - {table}");
+                sb.AppendLine($"  - {FormatScalar(table)}");
             }
         }
 
@@ -75,7 +75,7 @@ public sealed class ProcedureYamlGenerator : IProcedureYamlGenerator
             sb.AppendLine("required_roles:");
             foreach (var role in request.RequiredRoles)
             {
-                sb.AppendLine($"  - {role}");
+                sb.AppendLine($"  - {FormatScalar(role)}");
             }
         }
 
@@ -90,8 +90,8 @@ public sealed class ProcedureYamlGenerator : IProcedureYamlGenerator
             sb.AppendLine("parameters:");
             foreach (var p in request.Parameters)
             {
-                sb.AppendLine($"  - name: {p.Name}");
-                sb.AppendLine($"    type: {p.SqlType}");
+                sb.AppendLine($"  - name: {FormatScalar(p.Name)}");
+                sb.AppendLine($"    type: {FormatScalar(p.SqlType)}");
                 sb.AppendLine($"    required: {(p.IsRequired ? "true" : "false")}");
                 if (!string.IsNullOrWhiteSpace(p.Description))
                 {
@@ -101,7 +101,7 @@ public sealed class ProcedureYamlGenerator : IProcedureYamlGenerator
 
             foreach (var c in request.ContextBindings)
             {
-                sb.AppendLine($"  - name: {c.ParameterName.TrimStart('@')}");
+                sb.AppendLine($"  - name: {FormatScalar(c.ParameterName.TrimStart('@'))}");
                 string contextStr = c.Key switch
                 {
                     ProcedureContextKey.TenantId => "tenant_id",
@@ -118,15 +118,15 @@ public sealed class ProcedureYamlGenerator : IProcedureYamlGenerator
             sb.AppendLine("outputs:");
             foreach (var outCol in request.Outputs)
             {
-                sb.AppendLine($"  - name: {outCol.Name}");
-                sb.AppendLine($"    type: {outCol.SqlType}");
+                sb.AppendLine($"  - name: {FormatScalar(outCol.Name)}");
+                sb.AppendLine($"    type: {FormatScalar(outCol.SqlType)}");
                 if (!string.IsNullOrWhiteSpace(outCol.SourceTable) && !string.IsNullOrWhiteSpace(outCol.SourceColumn))
                 {
                     string fullTable = string.IsNullOrWhiteSpace(outCol.SourceSchema)
                         ? outCol.SourceTable
                         : $"{outCol.SourceSchema}.{outCol.SourceTable}";
-                    sb.AppendLine($"    source_table: {fullTable}");
-                    sb.AppendLine($"    source_column: {outCol.SourceColumn}");
+                    sb.AppendLine($"    source_table: {FormatScalar(fullTable)}");
+                    sb.AppendLine($"    source_column: {FormatScalar(outCol.SourceColumn)}");
                 }
             }
         }
@@ -134,5 +134,62 @@ public sealed class ProcedureYamlGenerator : IProcedureYamlGenerator
         return sb.ToString();
     }
 
-    private static string EscapeYaml(string value) => value.Replace("\"", "\\\"", StringComparison.Ordinal);
+    private static string EscapeYaml(string value)
+    {
+        if (value == null) return string.Empty;
+        var sb = new StringBuilder(value.Length + 8);
+        foreach (char c in value)
+        {
+            switch (c)
+            {
+                case '\\': sb.Append(@"\\"); break;
+                case '"': sb.Append(@"\"""); break;
+                case '\n': sb.Append(@"\n"); break;
+                case '\r': sb.Append(@"\r"); break;
+                case '\t': sb.Append(@"\t"); break;
+                case '\b': sb.Append(@"\b"); break;
+                case '\f': sb.Append(@"\f"); break;
+                default:
+                    if (char.IsControl(c))
+                    {
+                        sb.Append($@"\u{(int)c:x4}");
+                    }
+                    else
+                    {
+                        sb.Append(c);
+                    }
+                    break;
+            }
+        }
+        return sb.ToString();
+    }
+
+    private static string FormatScalar(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return "\"\"";
+        return NeedsQuoting(value) ? $"\"{EscapeYaml(value)}\"" : value;
+    }
+
+    private static bool NeedsQuoting(string s)
+    {
+        if (s.Length == 0) return true;
+        if (char.IsWhiteSpace(s[0]) || char.IsWhiteSpace(s[^1])) return true;
+
+        if (s is "true" or "false" or "null" or "yes" or "no" or "on" or "off" or "y" or "n") return true;
+
+        foreach (char c in s)
+        {
+            if (c is ':' or '{' or '}' or '[' or ']' or ',' or '&' or '*' or '#' or '?' or '|' or '-' or '<' or '>' or '=' or '!' or '%' or '@' or '`' or '"' or '\'' or '\\')
+            {
+                return true;
+            }
+
+            if (char.IsControl(c))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

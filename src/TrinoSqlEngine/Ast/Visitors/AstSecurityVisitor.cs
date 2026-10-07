@@ -212,6 +212,19 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         return new SubqueryTableSource(subqueryStatement, subqueryAlias);
     }
 
+    public override SqlNode VisitTableQueryBody(TableQueryBody node)
+    {
+        var namedTableSource = new NamedTableSource(node.TableName, null);
+        var securedSource = (TableSource)Visit(namedTableSource);
+        return new QuerySpecification(
+            Distinct: false,
+            Projections: new[] { new WildcardSelectItem(null) },
+            From: securedSource,
+            Where: null,
+            GroupBy: null,
+            Having: null);
+    }
+
     public override SqlNode VisitDeleteStatement(DeleteStatement node)
     {
         string normalizedName = node.TargetTable.Name.NormalizedName;
@@ -225,9 +238,12 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         // DML guardrail: Reject unfiltered or tautological WHERE
         EnsureFilteredDml(node.Where, "DELETE");
 
+        // Visit WHERE clause so subqueries within WHERE have RLS/masking applied
+        var visitedWhere = node.Where != null ? (Expression)Visit(node.Where) : null;
+
         if (IsCte(node.TargetTable.Name) || !_options.PolicyProvider.ShouldApplyPolicy(normalizedName))
         {
-            return node;
+            return node with { Where = visitedWhere };
         }
 
         string policyFilter = _options.PolicyProvider.GetPolicyFilter(normalizedName);
@@ -237,8 +253,8 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         }
 
         var rlsFilter = ParseFilterExpression(policyFilter);
-        var combinedWhere = node.Where != null
-            ? new BinaryExpression(node.Where, BinaryOperator.And, rlsFilter)
+        var combinedWhere = visitedWhere != null
+            ? new BinaryExpression(visitedWhere, BinaryOperator.And, rlsFilter)
             : rlsFilter;
 
         return node with { Where = combinedWhere };
@@ -248,6 +264,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
     {
         string normalizedName = node.TargetTable.Name.NormalizedName;
 
+        var visitedAssignments = new List<UpdateAssignment>(node.Assignments.Count);
         // SEC H-15 / SQ-03: Ensure no masked column or whole-row references in SET or WHERE
         foreach (var assignment in node.Assignments)
         {
@@ -257,6 +274,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 throw new SecurityException($"Masked column '{colName}' of table '{normalizedName}' must not be referenced in UPDATE SET.");
             }
             EnsureNoMaskedColumnReferences(normalizedName, assignment.Value, "UPDATE SET");
+
+            var visitedValue = (Expression)Visit(assignment.Value);
+            visitedAssignments.Add(assignment with { Value = visitedValue });
         }
 
         if (node.Where != null)
@@ -267,10 +287,13 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         // DML guardrail: Reject unfiltered or tautological WHERE
         EnsureFilteredDml(node.Where, "UPDATE");
 
+        // Visit WHERE clause so subqueries within WHERE have RLS/masking applied
+        var visitedWhere = node.Where != null ? (Expression)Visit(node.Where) : null;
+
         // WITH CHECK OPTION verification on assignments
         if (_options.EnforceWithCheckOption)
         {
-            foreach (var assignment in node.Assignments)
+            foreach (var assignment in visitedAssignments)
             {
                 string colName = assignment.Column.Value;
                 if (colName.Equals(_options.TenantColumnName, StringComparison.OrdinalIgnoreCase))
@@ -293,7 +316,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
         if (IsCte(node.TargetTable.Name) || !_options.PolicyProvider.ShouldApplyPolicy(normalizedName))
         {
-            return node;
+            return node with { Assignments = visitedAssignments.AsReadOnly(), Where = visitedWhere };
         }
 
         string policyFilter = _options.PolicyProvider.GetPolicyFilter(normalizedName);
@@ -303,11 +326,11 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         }
 
         var rlsFilter = ParseFilterExpression(policyFilter);
-        var combinedWhere = node.Where != null
-            ? new BinaryExpression(node.Where, BinaryOperator.And, rlsFilter)
+        var combinedWhere = visitedWhere != null
+            ? new BinaryExpression(visitedWhere, BinaryOperator.And, rlsFilter)
             : rlsFilter;
 
-        return node with { Where = combinedWhere };
+        return node with { Assignments = visitedAssignments.AsReadOnly(), Where = combinedWhere };
     }
 
     public override SqlNode VisitInsertStatement(InsertStatement node)
@@ -515,6 +538,17 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             case UnaryExpression u:
                 stack.Push(u.Operand);
                 break;
+            case CastExpression cast:
+                stack.Push(cast.Operand);
+                break;
+            case LikeExpression lk:
+                stack.Push(lk.Pattern);
+                stack.Push(lk.Operand);
+                break;
+            case IsDistinctFromExpression df:
+                stack.Push(df.Right);
+                stack.Push(df.Left);
+                break;
             case BetweenExpression bt:
                 stack.Push(bt.Upper);
                 stack.Push(bt.Lower);
@@ -524,6 +558,20 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 foreach (var it in inL.Items) stack.Push(it);
                 stack.Push(inL.Operand);
                 break;
+            case InSubqueryExpression inSq:
+                stack.Push(inSq.Subquery);
+                stack.Push(inSq.Operand);
+                break;
+            case ScalarSubqueryExpression sc:
+                stack.Push(sc.Subquery);
+                break;
+            case ExistsExpression ex:
+                stack.Push(ex.Subquery);
+                break;
+            case QuantifiedComparisonExpression qc:
+                stack.Push(qc.Subquery);
+                stack.Push(qc.Left);
+                break;
             case FunctionCallExpression fn:
                 foreach (var arg in fn.Arguments) stack.Push(arg);
                 break;
@@ -531,6 +579,34 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 if (cs.ElseResult != null) stack.Push(cs.ElseResult);
                 foreach (var w in cs.WhenClauses) { stack.Push(w.Result); stack.Push(w.Condition); }
                 if (cs.Operand != null) stack.Push(cs.Operand);
+                break;
+            case RowValueExpression row:
+                foreach (var el in row.Elements) stack.Push(el);
+                break;
+            case ArrayConstructorExpression arr:
+                foreach (var el in arr.Elements) stack.Push(el);
+                break;
+            case SubscriptExpression sub:
+                stack.Push(sub.Index);
+                stack.Push(sub.Target);
+                break;
+            case ExtractExpression ext:
+                stack.Push(ext.Source);
+                break;
+            case SelectStatement s:
+                stack.Push(s.Body);
+                if (s.OrderBy != null) stack.Push(s.OrderBy);
+                break;
+            case QuerySpecification qs:
+                foreach (var p in qs.Projections) stack.Push(p);
+                if (qs.Where != null) stack.Push(qs.Where);
+                if (qs.Having != null) stack.Push(qs.Having);
+                break;
+            case ColumnSelectItem csi:
+                stack.Push(csi.Expression);
+                break;
+            case OrderByClause ob:
+                foreach (var el in ob.Elements) stack.Push(el.Expression);
                 break;
         }
     }

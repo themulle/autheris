@@ -147,13 +147,15 @@ public sealed class AstSimplificationVisitorTests
     }
 
     [Fact]
-    public void ContradictionDetection_DisjointTenantEquality_CollapsesToFalse()
+    public void ContradictionDetection_PreservesNullSemantics_DoesNotCollapseToFalse()
     {
-        // Query specifying two different equality values on the same column in AND
+        // Audit finding: col='a' AND col='b' must NOT fold to 1=0 because in SQL 3-valued logic NULL='a' AND NULL='b' is UNKNOWN, not FALSE.
         var stmt = SimplifySql("SELECT id FROM orders WHERE tenant_id = 't1' AND tenant_id = 't2'");
         var sql = GenerateSql(stmt);
 
-        Assert.Contains("1 = 0", sql);
+        Assert.DoesNotContain("1 = 0", sql);
+        Assert.Contains("\"tenant_id\" = 't1'", sql);
+        Assert.Contains("\"tenant_id\" = 't2'", sql);
     }
 
     [Fact]

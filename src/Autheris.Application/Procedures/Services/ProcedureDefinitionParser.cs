@@ -22,31 +22,31 @@ public static class ProcedureDefinitionParser
         TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex EndpointNameRegex = new(
-        @"^[A-Za-z][A-Za-z0-9_-]{0,63}$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+        @"\A[A-Za-z][A-Za-z0-9_-]{0,63}\z", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex IdentifierRegex = new(
-        @"^[A-Za-z_][A-Za-z0-9_]{0,127}$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+        @"\A[A-Za-z_][A-Za-z0-9_]{0,127}\z", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex ProcedureNameRegex = new(
-        @"^([A-Za-z_][A-Za-z0-9_]{0,127})\.([A-Za-z_][A-Za-z0-9_]{0,127})$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
+        @"\A([A-Za-z_][A-Za-z0-9_]{0,127})\.([A-Za-z_][A-Za-z0-9_]{0,127})\z", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex ParamRegex = new(
-        @"^@?([A-Za-z_][A-Za-z0-9_]{0,127})[ \t]+([A-Za-z0-9]+(?:\([ \t]*(?:\d+|max)(?:[ \t]*,[ \t]*\d+)?[ \t]*\))?)[ \t]+(required|optional)(?:[ \t]+(.*))?$",
+        @"\A@?([A-Za-z_][A-Za-z0-9_]{0,127})[ \t]+([A-Za-z0-9]+(?:\([ \t]*(?:\d+|max)(?:[ \t]*,[ \t]*\d+)?[ \t]*\))?)[ \t]+(required|optional)(?:[ \t]+(.*))?\z",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex ContextRegex = new(
-        @"^(tenant_id|user_sid|purpose)[ \t]*->[ \t]*@?([A-Za-z_][A-Za-z0-9_]{0,127})$",
+        @"\A(tenant_id|user_sid|purpose)[ \t]*->[ \t]*@?([A-Za-z_][A-Za-z0-9_]{0,127})\z",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex ResultColumnRegex = new(
-        @"^([A-Za-z_][A-Za-z0-9_]{0,127})[ \t]+clear$",
+        @"\A([A-Za-z_][A-Za-z0-9_]{0,127})[ \t]+clear\z",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex ResultTableRegex = new(
-        @"^[A-Za-z_][A-Za-z0-9_]{0,127}\.[A-Za-z_][A-Za-z0-9_]{0,127}$",
+        @"\A[A-Za-z_][A-Za-z0-9_]{0,127}\.[A-Za-z_][A-Za-z0-9_]{0,127}\z",
         RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(100));
 
@@ -755,7 +755,7 @@ public static class ProcedureDefinitionParser
     private static string NormalizeOutputSqlType(string text)
     {
         string t = Regex.Replace(text.Trim().ToLowerInvariant(), @"\s+", string.Empty, RegexOptions.None, TimeSpan.FromMilliseconds(100));
-        if (!Regex.IsMatch(t, @"^[a-z0-9]+(\((\d+|max)(,\d+)?\))?$", RegexOptions.None, TimeSpan.FromMilliseconds(100)))
+        if (!Regex.IsMatch(t, @"\A[a-z0-9]+(\((\d+|max)(,\d+)?\))?\z", RegexOptions.None, TimeSpan.FromMilliseconds(100)))
         {
             throw new FormatException($"Invalid output type '{text}'.");
         }

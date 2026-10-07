@@ -24,26 +24,16 @@ public enum GatewayRole
 
 public static class GatewayRoleExtensions
 {
-    private static readonly Dictionary<string, GatewayRole> NameToRole = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly Dictionary<string, GatewayRole> NameToRole = new(StringComparer.Ordinal)
     {
         ["ClusterAdmin"] = GatewayRole.ClusterAdmin,
-        ["PlatformAdmin"] = GatewayRole.TenantAdmin,
-        ["GatewayAdmin"] = GatewayRole.TenantAdmin,
         ["TenantAdmin"] = GatewayRole.TenantAdmin,
         ["GovernanceAdmin"] = GatewayRole.GovernanceAdmin,
-        ["SecurityAdmin"] = GatewayRole.GovernanceAdmin,
-        ["PrivacyAdmin"] = GatewayRole.TenantAdmin,
-        ["BillingAdmin"] = GatewayRole.TenantAdmin,
-        ["StreamingAdmin"] = GatewayRole.TenantAdmin,
-        ["DbtAdmin"] = GatewayRole.DataOwner,
-        ["DataProtectionOfficer"] = GatewayRole.SecurityAuditor,
         ["SecurityAuditor"] = GatewayRole.SecurityAuditor,
         ["Auditor"] = GatewayRole.SecurityAuditor,
         ["DataOwner"] = GatewayRole.DataOwner,
         ["DataSteward"] = GatewayRole.DataSteward,
-        ["SchemaAdmin"] = GatewayRole.SchemaPublisher,
         ["SchemaPublisher"] = GatewayRole.SchemaPublisher,
-        ["Developer"] = GatewayRole.Consumer,
         ["Consumer"] = GatewayRole.Consumer,
         ["Analyst"] = GatewayRole.Consumer
     };

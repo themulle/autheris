@@ -79,7 +79,7 @@ public sealed class ProcedureRegistrationService : BackgroundService
 
         var due = _registry.GetAll()
             .Where(r => r.State == ProcedureState.Pending
-                || (r.Definition.ValidationMode == ProcedureValidationMode.Catalog && (r.ValidatedAt == null
+                || ((r.Definition.ValidationMode == ProcedureValidationMode.Catalog || !string.IsNullOrWhiteSpace(r.Definition.DdlHash)) && (r.ValidatedAt == null
                     || now - r.ValidatedAt >= (r.State == ProcedureState.Disabled ? DisabledRetryInterval : interval))))
             .ToList();
 
@@ -89,9 +89,7 @@ public sealed class ProcedureRegistrationService : BackgroundService
         }
 
         using var scope = _scopeFactory.CreateScope();
-        var validator = due.Any(r => r.Definition.ValidationMode == ProcedureValidationMode.Catalog)
-            ? scope.ServiceProvider.GetRequiredService<StoredProcedureCatalogValidator>()
-            : null;
+        var validator = scope.ServiceProvider.GetService<StoredProcedureCatalogValidator>();
         var audit = scope.ServiceProvider.GetService<IAuditLogRepository>();
 
         foreach (var entry in due)
@@ -100,6 +98,43 @@ public sealed class ProcedureRegistrationService : BackgroundService
 
             if (entry.Definition.ValidationMode == ProcedureValidationMode.Declared)
             {
+                if (!string.IsNullOrWhiteSpace(entry.Definition.DdlHash) && validator != null)
+                {
+                    var ddlCheck = await validator.ValidateDeclaredDdlHashAsync(entry.Definition, ct).ConfigureAwait(false);
+                    if (!ddlCheck.IsValid)
+                    {
+                        string ddlReason = string.Join(" | ", ddlCheck.Errors.OrderBy(e => e, StringComparer.Ordinal));
+                        bool wasAlreadyDisabledDdl = entry.State == ProcedureState.Disabled;
+                        if (!_registry.TryMarkDisabled(entry.Definition, ddlReason))
+                        {
+                            continue;
+                        }
+
+                        if (!wasAlreadyDisabledDdl)
+                        {
+                            _logger?.LogWarning("Declared procedure endpoint '{Endpoint}' disabled: {Reason}", entry.Definition.Name, ddlReason);
+                        }
+
+                        if (audit != null && entry.State != ProcedureState.Disabled)
+                        {
+                            await audit.RecordAuditEventAsync(
+                                new AuditLogEntry
+                                {
+                                    TenantId = TenantId.LegacySingleTenant,
+                                    EventType = "PROCEDURE_DISABLED",
+                                    ActorSid = new Sid("system:procedure-validator"),
+                                    TargetTable = entry.Definition.ProcedureName,
+                                    Decision = "DENY",
+                                    TraceId = Guid.NewGuid().ToString("N"),
+                                    DetailsJson = JsonSerializer.Serialize(new { endpoint = entry.Definition.Name, errors = ddlCheck.Errors })
+                                },
+                                ct).ConfigureAwait(false);
+                        }
+
+                        continue;
+                    }
+                }
+
                 var referenced = entry.Definition.ReferencedTables.Count > 0
                     ? entry.Definition.ReferencedTables
                     : (entry.Definition.ResultTable != null ? [entry.Definition.ResultTable] : []);
