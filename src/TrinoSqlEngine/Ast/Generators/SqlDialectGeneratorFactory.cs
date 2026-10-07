@@ -29,6 +29,7 @@ public static class SqlDialectGeneratorFactory
             return generator;
         }
 
-        return Generators[TargetSqlDialect.Ansi];
+        // SQL-3: no silent fallback to ANSI for an unknown dialect (fail-closed).
+        throw new ArgumentOutOfRangeException(nameof(dialect), dialect, "No SQL generator is registered for this dialect.");
     }
 }
