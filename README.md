@@ -468,6 +468,15 @@ In `Development` mode (with `Gateway:Authentication:EnableTestAuthHandler = true
 
 > ⚠️ **Security Warning**: `TestAuthHandler` is strictly blocked in production environments (`IsProduction()`). Any attempt to enable it outside of `Development` triggers a fatal startup validation exception.
 
+### Example: Query Gateway Schema (Introspection)
+
+```bash
+curl -X POST http://localhost:5000/graphql \
+  -H "Content-Type: application/json" \
+  -H "GraphQL-Preflight: 1" \
+  -d '{"query": "{ __schema { queryType { name } } }"}'
+```
+
 ### Example: Query Active Catalog via cURL
 
 ```bash
