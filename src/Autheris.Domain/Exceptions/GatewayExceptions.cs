@@ -99,3 +99,17 @@ public sealed class ResourceGroupExhaustedException : GatewaySecurityException
         RejectionReason = rejectionReason;
     }
 }
+
+/// <summary>
+/// S-2: Explicit 501 Not Implemented exception with standardized, non-leaking message (SEC M-10).
+/// </summary>
+public sealed class GatewayNotImplementedException : Exception
+{
+    public string ErrorCode => "NOT_IMPLEMENTED";
+
+    public GatewayNotImplementedException(string message = "The requested feature or data source capability is not implemented.", Exception? innerException = null)
+        : base(message, innerException)
+    {
+    }
+}
+

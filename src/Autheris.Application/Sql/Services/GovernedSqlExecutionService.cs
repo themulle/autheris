@@ -797,14 +797,13 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
         if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString) || _connectionFactory == null)
         {
-            bool isDevOrTest = _environment == null ||
-                               string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
-                               string.Equals(_environment.EnvironmentName, "Test", StringComparison.OrdinalIgnoreCase);
+            bool isDev = _environment != null &&
+                         string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
             bool isExplicitlyAllowed = _options.Value.AreExternalSystemsMockedIfUnreachable;
 
-            if (!isDevOrTest && !isExplicitlyAllowed)
+            if (!isDev && !isExplicitlyAllowed)
             {
-                throw new NotSupportedException($"No active database connection configured for data source '{dsName}'. Synthetic fallback is disabled in production.");
+                throw new GatewayNotImplementedException($"No active database connection configured for data source '{dsName}'. Synthetic fallback is disabled outside Development.");
             }
 
             if (dmlContext.IsDml)

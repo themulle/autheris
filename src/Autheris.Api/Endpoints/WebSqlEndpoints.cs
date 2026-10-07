@@ -343,6 +343,18 @@ public static class WebSqlEndpoints
                 }, ct);
                 break;
 
+            case GatewayNotImplementedException notImplEx:
+                logger.LogWarning(notImplEx, "WebSQL Not Implemented. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status501NotImplemented;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "NotImplemented",
+                    message = notImplEx.Message,
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
             case NotSupportedException notSuppEx:
                 logger.LogWarning(notSuppEx, "WebSQL Not Supported. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status501NotImplemented;
@@ -350,7 +362,7 @@ public static class WebSqlEndpoints
                 await httpContext.Response.WriteAsJsonAsync(new
                 {
                     error = "NotImplemented",
-                    message = notSuppEx.Message,
+                    message = "The requested operation is not supported.",
                     traceId = httpContext.TraceIdentifier
                 }, ct);
                 break;
