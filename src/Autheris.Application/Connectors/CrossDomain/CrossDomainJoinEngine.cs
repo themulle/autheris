@@ -162,12 +162,14 @@ public sealed class CrossDomainJoinEngine : ICrossDomainJoinEngine
             primaryRows.AddRange(batch);
         }
 
+        bool primaryAlreadyMasked = primarySession.Items.TryGetValue("InDbColumnMaskingExecuted", out var pm) && pm is true;
+
         if (primaryRows.Count == 0 || !joinedDecision.IsAllowed)
         {
             // If primary has no rows or caller has no consent for joined table (SEC-CDJ-02), return masked primary rows with null relation
             var sanitizedPrimaryOnly = primaryRows.Select(r =>
             {
-                var maskedPrimary = ConnectorRowMasker.MaskRow(r, primaryMeta, primaryDecision, _maskingProvider, request.Tenant?.Value);
+                var maskedPrimary = ConnectorRowMasker.MaskRow(r, primaryMeta, primaryDecision, _maskingProvider, request.Tenant?.Value, alreadyMasked: primaryAlreadyMasked);
                 var dict = new Dictionary<string, object?>(maskedPrimary, StringComparer.OrdinalIgnoreCase)
                 {
                     [request.TargetRelationPropertyName] = null
@@ -197,7 +199,7 @@ public sealed class CrossDomainJoinEngine : ICrossDomainJoinEngine
         {
             var noFkRows = primaryRows.Select(r =>
             {
-                var maskedPrimary = ConnectorRowMasker.MaskRow(r, primaryMeta, primaryDecision, _maskingProvider, request.Tenant?.Value);
+                var maskedPrimary = ConnectorRowMasker.MaskRow(r, primaryMeta, primaryDecision, _maskingProvider, request.Tenant?.Value, alreadyMasked: primaryAlreadyMasked);
                 var dict = new Dictionary<string, object?>(maskedPrimary, StringComparer.OrdinalIgnoreCase)
                 {
                     [request.TargetRelationPropertyName] = null
@@ -274,6 +276,8 @@ public sealed class CrossDomainJoinEngine : ICrossDomainJoinEngine
             joinedRows.AddRange(batch);
         }
 
+        bool joinedAlreadyMasked = joinedSession.Items.TryGetValue("InDbColumnMaskingExecuted", out var jm) && jm is true;
+
         // 7. SEC-CDJ-01: Dual-Tenant Isolation & Hash Indexing
         var joinedIndex = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
         foreach (var jRow in joinedRows)
@@ -291,7 +295,7 @@ public sealed class CrossDomainJoinEngine : ICrossDomainJoinEngine
                 }
 
                 // Apply column masking to joined row
-                var maskedJoined = ConnectorRowMasker.MaskRow(jRow, joinedMeta, joinedDecision, _maskingProvider, request.Tenant?.Value);
+                var maskedJoined = ConnectorRowMasker.MaskRow(jRow, joinedMeta, joinedDecision, _maskingProvider, request.Tenant?.Value, alreadyMasked: joinedAlreadyMasked);
                 joinedIndex[pkVal.ToString()!] = maskedJoined;
             }
         }
@@ -303,7 +307,7 @@ public sealed class CrossDomainJoinEngine : ICrossDomainJoinEngine
         foreach (var pRow in primaryRows)
         {
             // SEC-CDJ-05: Enforce Zero-Trust column masking on primary driving entities
-            var maskedPrimary = ConnectorRowMasker.MaskRow(pRow, primaryMeta, primaryDecision, _maskingProvider, request.Tenant?.Value);
+            var maskedPrimary = ConnectorRowMasker.MaskRow(pRow, primaryMeta, primaryDecision, _maskingProvider, request.Tenant?.Value, alreadyMasked: primaryAlreadyMasked);
             var dict = new Dictionary<string, object?>(maskedPrimary, StringComparer.OrdinalIgnoreCase);
 
             if (pRow.TryGetValue(request.ForeignKeyColumn, out var fkVal) &&

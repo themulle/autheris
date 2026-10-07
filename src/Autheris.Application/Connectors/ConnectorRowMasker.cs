@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
@@ -14,10 +15,23 @@ public static class ConnectorRowMasker
     public static Dictionary<string, object?> MaskRow(
         IReadOnlyDictionary<string, object?> rawRow,
         TableMetadata metadata,
+        ConnectorSessionContext session,
+        IColumnMaskingProvider maskingProvider,
+        string? defaultHmacKeyId = null)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        bool alreadyMasked = session.Items.TryGetValue("InDbColumnMaskingExecuted", out var m) && m is true;
+        return MaskRow(rawRow, metadata, session.AccessDecision, maskingProvider, session.Tenant?.Value, defaultHmacKeyId, alreadyMasked);
+    }
+
+    public static Dictionary<string, object?> MaskRow(
+        IReadOnlyDictionary<string, object?> rawRow,
+        TableMetadata metadata,
         TableAccessDecision decision,
         IColumnMaskingProvider maskingProvider,
         string? tenantId = null,
-        string? defaultHmacKeyId = null)
+        string? defaultHmacKeyId = null,
+        bool alreadyMasked = false)
     {
         ArgumentNullException.ThrowIfNull(rawRow);
         ArgumentNullException.ThrowIfNull(metadata);
@@ -42,7 +56,7 @@ public static class ConnectorRowMasker
 
             if (rawRow.TryGetValue(col.ColumnName, out var rawVal))
             {
-                if (access == ColumnAccessLevel.Mask)
+                if (access == ColumnAccessLevel.Mask && !alreadyMasked)
                 {
                     var rule = metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
                         ? mRule

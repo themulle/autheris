@@ -255,7 +255,7 @@ Legende: ✅ behoben · 🟡 teilweise · ⛔ offen · 🔻 verschlechtert · �
 | SQL2-11 Parameter-Präfix | ⛔ (fail-closed) |
 | SQL2-12 HMAC-Normalisierung | ⛔ |
 | SQL2-13 Memo pro Tabelle | ✅ weitgehend (G-3, G-4, D-7) |
-| Laufzeit: DEP-4 (✅ behoben), SQL2-2, SQL-4, GQL-2, SQL2-4, MCP-2/-3, EXT-4, API-7, -14, -15, INF-4, -5, EXT-8, GQL-8, -11, SQL2-17, SQL-7, -8 | 🟡 DEP-4 behoben, Rest offen |
+| Laufzeit: DEP-4 (✅ behoben), SQL2-2 (✅ behoben), SQL2-4 (✅ behoben), SQL-4, GQL-2, MCP-2/-3, EXT-4, API-7, -14, -15, INF-4, -5, EXT-8, GQL-8, -11, SQL2-17, SQL-7, -8 | 🟡 DEP-4, SQL2-2, SQL2-4 behoben, Rest offen |
 | Arch 1 zentrale Zugriffsentscheidung | ⛔ |
 | Arch 2 gemeinsamer Konnektor-Lesepfad | ⛔ |
 | Arch 3 toter Code | 🟡 `SingleQueryAstCompiler` entfernt; R-SQL-12 offen |
@@ -426,9 +426,9 @@ Den irreführenden Test `DbSessionContextInitializer_RollsBackTransaction_OnErro
 ### Phase 6 – Laufzeitfehler (M–L)
 
 1. **DEP-4:** ✅ behoben (`HTTPS_PORTS` weg, `/app/data` mit `chown` und als VOLUME, Startvalidierung & automatische Verzeichniserstellung).
-2. **SQL2-2:** OLAP-Kapazität.
+2. **SQL2-2:** ✅ behoben (OLAP-Kapazität: dynamischer Ceiling in SqlConnector, Staging + 1 Anforderung und deterministischer 400-Abbruch bei Überschreitung).
 3. **GQL-2:** WebSocket-Header.
-4. **SQL2-4:** keine Doppelmaskierung.
+4. **SQL2-4:** ✅ behoben (keine Doppelmaskierung: ConnectorRowMasker und CrossDomainJoinEngine prüfen InDbColumnMaskingExecuted).
 5. **EXT-4:** Stubs außerhalb von Development ablehnen.
 6. **MCP-2, MCP-3:** async Store, ein Writer pro SSE-Session, Subscription freigeben.
 7. Danach: SQL-4, API-7, API-14, API-15, INF-4, INF-5, EXT-8, GQL-8, GQL-11, SQL2-17, SQL-7, SQL-8.

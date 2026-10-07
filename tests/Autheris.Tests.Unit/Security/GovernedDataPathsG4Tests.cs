@@ -16,6 +16,7 @@ using Autheris.Application.Caching.Interfaces;
 using Autheris.Application.Connectors;
 using Autheris.Application.Connectors.CrossDomain;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Connectors;
 using Autheris.Application.Kernel;
 using Autheris.Application.Olap;
 using Autheris.Application.Policy;
@@ -413,6 +414,49 @@ public sealed class GovernedDataPathsG4Tests
         ConnectorRowMasker.MaskRow(new Dictionary<string, object?> { ["email"] = "a@b.c" }, meta, decision, provider, "tenant-1");
 
         seen!.HmacKeyId.ShouldBe("default|tenant:tenant-1");
+    }
+
+    [Fact]
+    public void SQL204_ConnectorRowMasker_WhenAlreadyMasked_DoesNotDoubleMask()
+    {
+        var id = new TableIdentifier("d", "s", "t");
+        var meta = HmacMeta(id);
+        var decision = TableAccessDecision.Allowed(id, new Dictionary<string, ColumnAccessLevel> { ["email"] = ColumnAccessLevel.Mask });
+        var provider = Substitute.For<IColumnMaskingProvider>();
+        provider.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("SECOND_MASK");
+
+        var row = new Dictionary<string, object?> { ["email"] = "ALREADY_MASKED_PSEUDO" };
+
+        var result = ConnectorRowMasker.MaskRow(row, meta, decision, provider, "tenant-1", alreadyMasked: true);
+
+        // Value must remain the first pseudonym, MaskValue must not be invoked again
+        result["email"].ShouldBe("ALREADY_MASKED_PSEUDO");
+        provider.DidNotReceive().MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>());
+    }
+
+    [Fact]
+    public void SQL204_ConnectorRowMasker_WithSession_RespectsInDbColumnMaskingExecuted()
+    {
+        var id = new TableIdentifier("d", "s", "t");
+        var meta = HmacMeta(id);
+        var decision = TableAccessDecision.Allowed(id, new Dictionary<string, ColumnAccessLevel> { ["email"] = ColumnAccessLevel.Mask });
+        var provider = Substitute.For<IColumnMaskingProvider>();
+        provider.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("SECOND_MASK");
+
+        var session = new ConnectorSessionContext(
+            Principal: new ClaimsPrincipal(),
+            Tenant: new TenantId("tenant-1"),
+            AccessDecision: decision,
+            ProjectedColumns: ["email"],
+            Arguments: new Dictionary<string, object?>());
+        session.Items["InDbColumnMaskingExecuted"] = true;
+
+        var row = new Dictionary<string, object?> { ["email"] = "ALREADY_MASKED_PSEUDO" };
+
+        var result = ConnectorRowMasker.MaskRow(row, meta, session, provider);
+
+        result["email"].ShouldBe("ALREADY_MASKED_PSEUDO");
+        provider.DidNotReceive().MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>());
     }
 
     [Fact]
