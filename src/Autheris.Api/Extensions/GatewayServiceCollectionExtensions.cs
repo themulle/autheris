@@ -1340,6 +1340,38 @@ public static class GatewayServiceCollectionExtensions
             {
                 throw new ValidationException("Sicherheitsverletzung: In-Memory SQLite-Datenbanken (GovernanceDb.ConnectionString) sind außerhalb von Development streng verboten!");
             }
+
+            // DEP-4: In container environments, a relative SQLite database path in /app is unwritable for non-root APP_UID
+            if (IsTruthy(getEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER")) &&
+                string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(options.GovernanceDb.ConnectionString);
+                    if (!string.IsNullOrWhiteSpace(builder.DataSource) &&
+                        !builder.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) &&
+                        builder.Mode != Microsoft.Data.Sqlite.SqliteOpenMode.Memory)
+                    {
+                        var isDirectRootFile = !builder.DataSource.Contains('/') && !builder.DataSource.Contains('\\');
+                        var isAppRoot = builder.DataSource.Equals("/app/governance.db", StringComparison.OrdinalIgnoreCase);
+                        if (isDirectRootFile || isAppRoot)
+                        {
+                            throw new ValidationException(
+                                "Sicherheits- und Konfigurationsfehler (DEP-4): Im Container läuft der Prozess als non-root User ($APP_UID). " +
+                                $"Der SQLite-Pfad '{builder.DataSource}' liegt direkt im nicht-beschreibbaren Anwendungsverzeichnis (/app). " +
+                                "Bitte verwenden Sie das beschreibbare Datenverzeichnis '/app/data' (z. B. 'Data Source=/app/data/governance.db;Cache=Shared').");
+                        }
+                    }
+                }
+                catch (ValidationException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // Ignore parse errors here; SqliteConnection will handle them
+                }
+            }
         }
 
         if (!string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase) &&

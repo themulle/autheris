@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -66,6 +67,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
         _logger = logger;
         _options = options?.Value;
         var connStr = options?.Value?.GovernanceDb?.ConnectionString ?? $"Data Source=governance_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        EnsureSqliteDirectoryExists(connStr);
         _connection = new SqliteConnection(connStr);
         _connection.Open();
 
@@ -223,5 +225,27 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
             _lock.Dispose();
         }
         catch { }
+    }
+
+    private static void EnsureSqliteDirectoryExists(string connectionString)
+    {
+        try
+        {
+            var builder = new SqliteConnectionStringBuilder(connectionString);
+            if (!string.IsNullOrWhiteSpace(builder.DataSource) &&
+                !builder.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) &&
+                builder.Mode != SqliteOpenMode.Memory)
+            {
+                var dir = Path.GetDirectoryName(builder.DataSource);
+                if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+            }
+        }
+        catch
+        {
+            // Ignore parse errors; SqliteConnection will validate
+        }
     }
 }
