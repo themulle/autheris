@@ -62,6 +62,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     // G5 & R-GQL-3: memo and audit are keyed by operationId to isolate WebSocket operations across connection lifetime
     private readonly System.Collections.Concurrent.ConcurrentDictionary<(string OpId, TableIdentifier Table), ResolvedTableAccess> _accessByOperationAndTable = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<(string OpId, TableIdentifier Table, bool Allowed), byte> _auditedByOperation = new();
+    private readonly string _defaultOperationId = Guid.NewGuid().ToString("N");
     private readonly SemaphoreSlim _memoLock = new(1, 1);
 
     private const int ThrottledRetryAfterSeconds = 2;
@@ -102,7 +103,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     {
         ArgumentNullException.ThrowIfNull(root);
 
-        operationId ??= Guid.NewGuid().ToString("N");
+        operationId ??= _defaultOperationId;
 
         var maxRows = _options.GraphQL?.MaxResponseRows > 0 ? _options.GraphQL.MaxResponseRows : 1000;
         if (root.Limit > maxRows)

@@ -138,6 +138,7 @@ public sealed class CatalogGraphQlSchemaTests
                 Arg.Any<ClaimsPrincipal>(),
                 Arg.Do<TreeQueryNode>(node => capturedNode = node),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string?>(),
                 Arg.Any<CancellationToken>())
             .Returns(callInfo =>
             {
@@ -235,6 +236,7 @@ public sealed class CatalogGraphQlSchemaTests
                 Arg.Any<ClaimsPrincipal>(),
                 Arg.Any<TreeQueryNode>(),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string?>(),
                 Arg.Any<CancellationToken>())
             .Returns<Task<JsonDocument>>(_ => Task.FromException<JsonDocument>(ex));
 

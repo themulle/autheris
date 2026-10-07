@@ -60,8 +60,18 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
                 }
                 catch
                 {
-                    await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-                    await tx.DisposeAsync().ConfigureAwait(false);
+                    try
+                    {
+                        await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // suppress rollback failure to ensure original exception is preserved
+                    }
+                    finally
+                    {
+                        await tx.DisposeAsync().ConfigureAwait(false);
+                    }
                     throw;
                 }
             }

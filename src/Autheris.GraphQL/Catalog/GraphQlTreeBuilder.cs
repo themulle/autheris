@@ -23,7 +23,31 @@ public static class GraphQlTreeBuilder
         var selection = context.Selection;
         var operation = context.Operation;
 
-        return BuildNode(context, selection, operation, rootTable, schema, maxResponseRows, isRoot: true);
+        var root = BuildNode(context, selection, operation, rootTable, schema, maxResponseRows, isRoot: true);
+        ValidateTreeBudget(root);
+        return root;
+    }
+
+    public const int MaxAggregateBudget = 50_000;
+
+    private static void ValidateTreeBudget(TreeQueryNode root)
+    {
+        long estimatedRows = EstimateRows(root, 1);
+        if (estimatedRows > MaxAggregateBudget)
+        {
+            throw new GatewayInvalidQueryException($"The query exceeds the aggregate row budget of {MaxAggregateBudget} across nested relations (estimated worst-case rows: {estimatedRows}).");
+        }
+    }
+
+    private static long EstimateRows(TreeQueryNode node, long parentMultiplier)
+    {
+        long currentRows = parentMultiplier * node.Limit;
+        long total = currentRows;
+        foreach (var rel in node.Relations)
+        {
+            total += EstimateRows(rel.Child, currentRows);
+        }
+        return total;
     }
 
     private static TreeQueryNode BuildNode(
@@ -210,7 +234,7 @@ public static class GraphQlTreeBuilder
                 {
                     if (listNode.Items.Count == 0)
                     {
-                        items.Add(new TreeRawFilter("1 = 0"));
+                        items.Add(new TreeOrFilter([]));
                     }
                     else
                     {

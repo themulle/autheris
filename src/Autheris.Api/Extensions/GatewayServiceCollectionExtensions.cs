@@ -375,7 +375,8 @@ public static class GatewayServiceCollectionExtensions
         {
             var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
             var rlsGen = sp.GetService<Autheris.Application.Interfaces.IRlsFilterGenerator>();
-            var service = new CasbinEnforcementService(options.Casbin.ModelPath, rlsGen);
+            var logger = sp.GetService<Microsoft.Extensions.Logging.ILogger<CasbinEnforcementService>>();
+            var service = new CasbinEnforcementService(options.Casbin.ModelPath, rlsGen, logger);
             if (options.Casbin.Enabled && !string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
                 service.LoadPolicyFromFile(options.Casbin.PolicyPath, options.Casbin.WatchPolicyFile);

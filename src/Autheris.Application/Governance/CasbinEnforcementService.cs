@@ -19,6 +19,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging;
 
 public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDisposable
 {
@@ -37,8 +38,8 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
     private readonly string _modelText;
     private long _policyEpoch = 1;
 
-    public event Action<TenantId>? OnPolicyReloaded;
-
+    public event Action<string>? OnPolicyReloaded;
+    private readonly ILogger<CasbinEnforcementService>? _logger;
 
     public sealed record CasbinRuleMetadata(
         string Sub,
@@ -53,8 +54,10 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
 
     public CasbinEnforcementService(
         string? modelConfigPath = null,
-        IRlsFilterGenerator? rlsFilterGenerator = null)
+        IRlsFilterGenerator? rlsFilterGenerator = null,
+        ILogger<CasbinEnforcementService>? logger = null)
     {
+        _logger = logger;
         _rlsFilterGenerator = rlsFilterGenerator ?? RlsFilterGenerator.Instance;
 
         if (!string.IsNullOrWhiteSpace(modelConfigPath) && File.Exists(modelConfigPath))
@@ -799,7 +802,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
     /// <summary>
     /// Raised when a file-based (hot) reload was rejected. The last-known-good policy set stays active.
     /// </summary>
-    public event Action<TenantId, Exception>? OnPolicyReloadFailed;
+    public event Action<string, Exception>? OnPolicyReloadFailed;
 
     /// <summary>
     /// Splits a policy line at top-level commas only. Commas inside single/double quoted strings and inside
@@ -985,7 +988,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         _decisionCache.Clear();
 
         Interlocked.Increment(ref _policyEpoch);
-        OnPolicyReloaded?.Invoke(tenant);
+        OnPolicyReloaded?.Invoke(tenant.Value);
     }
 
     public void LoadPolicyFromFile(TenantId tenant, string filePath, bool watchFile = false)
@@ -1121,7 +1124,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             {
                 _tenantEnforcers.TryRemove(prevTenant, out _);
                 _tenantRules.TryRemove(prevTenant, out _);
-                OnPolicyReloaded?.Invoke(new TenantId(prevTenant));
+                OnPolicyReloaded?.Invoke(prevTenant);
             }
         }
 
@@ -1154,7 +1157,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         Interlocked.Increment(ref _policyEpoch);
         foreach (var tName in rulesByTenant.Keys)
         {
-            OnPolicyReloaded?.Invoke(new TenantId(tName));
+            OnPolicyReloaded?.Invoke(tName);
         }
     }
 
@@ -1192,12 +1195,15 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 }
                 else
                 {
-                    OnPolicyReloadFailed?.Invoke(new TenantId("*"), new FileNotFoundException("Casbin policy file not found during hot reload.", fullPath));
+                    var fnf = new FileNotFoundException("Casbin policy file not found during hot reload.", fullPath);
+                    _logger?.LogError(fnf, "Casbin global policy file not found during hot reload: {Path}", fullPath);
+                    OnPolicyReloadFailed?.Invoke("*", fnf);
                 }
             }
             catch (Exception ex)
             {
-                OnPolicyReloadFailed?.Invoke(new TenantId("*"), ex);
+                _logger?.LogError(ex, "Casbin global policy reload failed.");
+                OnPolicyReloadFailed?.Invoke("*", ex);
             }
         };
 
@@ -1254,13 +1260,16 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 else
                 {
                     // RR-L4-05: a vanished file (rename-based atomic write in progress, ConfigMap swap) never clears policies.
-                    OnPolicyReloadFailed?.Invoke(tenant, new FileNotFoundException("Casbin policy file not found during hot reload.", fullPath));
+                    var fnf = new FileNotFoundException("Casbin policy file not found during hot reload.", fullPath);
+                    _logger?.LogError(fnf, "Casbin policy file not found during hot reload for tenant {Tenant}: {Path}", tenant.Value, fullPath);
+                    OnPolicyReloadFailed?.Invoke(tenant.Value, fnf);
                 }
             }
             catch (Exception ex)
             {
                 // RR-L4-05: last-known-good stays active; surface the failure instead of silently swallowing it.
-                OnPolicyReloadFailed?.Invoke(tenant, ex);
+                _logger?.LogError(ex, "Casbin policy reload failed for tenant {Tenant}.", tenant.Value);
+                OnPolicyReloadFailed?.Invoke(tenant.Value, ex);
             }
         };
 
@@ -1308,7 +1317,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             _decisionCache.Clear();
             _tenantEnforcers.TryRemove(tenant.Value, out _);
             _tenantRules.TryRemove(tenant.Value, out _);
-            OnPolicyReloaded?.Invoke(tenant);
+            OnPolicyReloaded?.Invoke(tenant.Value);
         }
 
         return Task.CompletedTask;

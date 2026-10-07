@@ -67,18 +67,20 @@ public sealed class FinOpsBudgetMiddleware
         }
         else
         {
-            var tid = context.User.GetTenantId();
-            if (tid == TenantId.LegacySingleTenant &&
-                context.User.FindFirst("tenant_id") == null &&
-                context.User.FindFirst("tid") == null &&
-                context.User.FindFirst("tenant") == null)
+            var rawTenant = context.User.FindFirst("tenant_id")?.Value ??
+                            context.User.FindFirst("tid")?.Value ??
+                            context.User.FindFirst("tenant")?.Value;
+
+            if (string.IsNullOrWhiteSpace(rawTenant) || !TenantId.TryParse(rawTenant, out var parsedTenant))
             {
                 await _next(context).ConfigureAwait(false);
                 return;
             }
 
-            tenantId = tid.Value;
-            principalId = context.User.GetUserSid()?.Value ?? context.User.Identity?.Name ?? "authenticated";
+            tenantId = parsedTenant.Value;
+            principalId = context.User.FindFirst(System.Security.Claims.ClaimTypes.PrimarySid)?.Value ??
+                          context.User.FindFirst("sub")?.Value ??
+                          context.User.Identity?.Name ?? "authenticated";
         }
 
         var budgetStatus = await accountingService.CheckBudgetAsync(tenantId, context.RequestAborted).ConfigureAwait(false);

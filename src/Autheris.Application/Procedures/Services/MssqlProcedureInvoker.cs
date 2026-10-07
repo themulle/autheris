@@ -10,7 +10,10 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
+using Autheris.Application.Services;
+using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -28,11 +31,16 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
 
     private readonly ProcedureConnectionProvider _connections;
     private readonly IOptions<GatewayOptions> _options;
+    private readonly IDbSessionContextInitializer _sessionInitializer;
 
-    public MssqlProcedureInvoker(ProcedureConnectionProvider connections, IOptions<GatewayOptions> options)
+    public MssqlProcedureInvoker(
+        ProcedureConnectionProvider connections,
+        IOptions<GatewayOptions> options,
+        IDbSessionContextInitializer? sessionInitializer = null)
     {
         _connections = connections ?? throw new ArgumentNullException(nameof(connections));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
     }
 
     public async Task<RawProcedureResult> ExecuteReadAsync(
@@ -55,39 +63,35 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
             try
             {
                 // 1. Session settings + security context on the very same connection.
-                if (dialect == Autheris.Domain.Common.DatabaseDialect.SqlServer)
+                if (dialect == DatabaseDialect.SqlServer)
                 {
-                    // Read-only SESSION_CONTEXT (pool reuse safe: set on every call, sp_reset_connection clears it).
                     await using var init = connection.CreateCommand();
                     init.CommandType = CommandType.Text;
                     init.CommandTimeout = 30;
                     init.CommandText =
                         "SET XACT_ABORT ON; " +
-                        "SET LOCK_TIMEOUT " + settings.LockTimeoutMs.ToString(CultureInfo.InvariantCulture) + "; " +
-                        "EXEC sys.sp_set_session_context @key = N'autheris.tenant_id', @value = @tenant, @read_only = 1; " +
-                        "EXEC sys.sp_set_session_context @key = N'autheris.user_sid', @value = @sid, @read_only = 1; " +
-                        "EXEC sys.sp_set_session_context @key = N'autheris.purpose', @value = @purpose, @read_only = 1;";
-                    AddParameter(init, "@tenant", DbType.String, security.TenantId);
-                    AddParameter(init, "@sid", DbType.String, security.UserSid);
-                    AddParameter(init, "@purpose", DbType.String, security.Purpose);
+                        "SET LOCK_TIMEOUT " + settings.LockTimeoutMs.ToString(CultureInfo.InvariantCulture) + ";";
                     await init.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+                    await _sessionInitializer.InitializeSessionAsync(
+                        connection,
+                        tx: null,
+                        dialect,
+                        new TenantId(security.TenantId),
+                        userSid: security.UserSid,
+                        purpose: security.Purpose,
+                        ct: ct).ConfigureAwait(false);
                 }
-                else if (dialect == Autheris.Domain.Common.DatabaseDialect.PostgreSql)
+                else if (dialect == DatabaseDialect.PostgreSql)
                 {
-                    // Review P-6: transaction-local settings (set_config(..., true)) inside the same transaction as the
-                    // call. They vanish at the end of the transaction and stay on one server connection even behind a
-                    // transaction-pooling proxy (PgBouncer). PostgreSQL has no read-only GUCs; the function must not
-                    // overwrite them (DBA review).
-                    transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-                    await using var init = connection.CreateCommand();
-                    init.Transaction = transaction;
-                    init.CommandType = CommandType.Text;
-                    init.CommandTimeout = 30;
-                    init.CommandText = "SELECT set_config('autheris.tenant_id', @tenant, true), set_config('autheris.user_sid', @sid, true), set_config('autheris.purpose', @purpose, true);";
-                    AddParameter(init, "@tenant", DbType.String, security.TenantId);
-                    AddParameter(init, "@sid", DbType.String, security.UserSid);
-                    AddParameter(init, "@purpose", DbType.String, security.Purpose);
-                    await init.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                    transaction = await _sessionInitializer.InitializeSessionAsync(
+                        connection,
+                        dialect,
+                        new TenantId(security.TenantId),
+                        userSid: security.UserSid,
+                        purpose: security.Purpose,
+                        requireTransaction: true,
+                        ct: ct).ConfigureAwait(false);
                 }
                 else if (definition.RlsMode == ProcedureRlsMode.SessionContext)
                 {
