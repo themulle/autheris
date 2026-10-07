@@ -153,4 +153,85 @@ public sealed class AstSecurityVisitorRlsTests
         string sql = "SELECT id FROM orders";
         Assert.Throws<System.Security.SecurityException>(() => SecureAndGenerate(sql, options));
     }
+
+    [Fact]
+    public void Rls_JoinWithExistsAndTableAliases_GeneratesSecuredDialectSql_PostgreSql()
+    {
+        var options = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
+            TargetDialect = TargetSqlDialect.PostgreSql
+        };
+
+        string sql = @"
+            SELECT o.id, o.total, c.name 
+            FROM orders AS o 
+            JOIN customers AS c ON o.customer_id = c.id 
+            WHERE EXISTS (
+                SELECT 1 
+                FROM shipments AS s 
+                WHERE s.order_id = o.id AND s.status = 'DELIVERED'
+            )";
+
+        string result = _engine.GenerateGovernedSql(sql, options);
+
+        // 1. All three physical tables must be wrapped with RLS subqueries
+        Assert.Contains("\"orders\"", result);
+        Assert.Contains("\"customers\"", result);
+        Assert.Contains("\"shipments\"", result);
+
+        // 2. Table aliases must be preserved for correlation
+        Assert.Contains("AS \"o\"", result);
+        Assert.Contains("AS \"c\"", result);
+        Assert.Contains("AS \"s\"", result);
+
+        // 3. JOIN condition and EXISTS subquery structure must be preserved
+        Assert.Contains("JOIN", result);
+        Assert.Contains("\"o\".\"customer_id\" = \"c\".\"id\"", result);
+        Assert.Contains("EXISTS (", result);
+        Assert.Contains("\"s\".\"order_id\" = \"o\".\"id\"", result);
+        Assert.Contains("'DELIVERED'", result);
+
+        // 4. RLS tenant filter must be injected
+        Assert.Contains("\"tenant_id\" = 't1'", result);
+    }
+
+    [Fact]
+    public void Rls_JoinWithExistsAndTableAliases_GeneratesSecuredDialectSql_SqlServer()
+    {
+        var options = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
+            TargetDialect = TargetSqlDialect.SqlServer
+        };
+
+        string sql = @"
+            SELECT o.id, o.total, c.name 
+            FROM orders AS o 
+            JOIN customers AS c ON o.customer_id = c.id 
+            WHERE EXISTS (
+                SELECT 1 
+                FROM shipments AS s 
+                WHERE s.order_id = o.id AND s.status = 'DELIVERED'
+            )";
+
+        string result = _engine.GenerateGovernedSql(sql, options);
+
+        // 1. Square brackets for SQL Server identifiers
+        Assert.Contains("[orders]", result);
+        Assert.Contains("[customers]", result);
+        Assert.Contains("[shipments]", result);
+
+        // 2. Table aliases preserved with T-SQL brackets
+        Assert.Contains("AS [o]", result);
+        Assert.Contains("AS [c]", result);
+        Assert.Contains("AS [s]", result);
+
+        // 3. Predicate preservation
+        Assert.Contains("[o].[customer_id] = [c].[id]", result);
+        Assert.Contains("EXISTS (", result);
+        Assert.Contains("[s].[order_id] = [o].[id]", result);
+        Assert.Contains("N'DELIVERED'", result);
+        Assert.Contains("[tenant_id] = N't1'", result);
+    }
 }

@@ -810,11 +810,14 @@ public sealed partial class FastSqlEngine : ISqlEngine
         var securityVisitor = new Ast.Visitors.AstSecurityVisitor(effectiveOptions, this);
         var securedAst = (Ast.Nodes.SqlStatement)securityVisitor.Visit(ast);
 
+        var simplifier = new Ast.Visitors.AstSimplificationVisitor();
+        var simplifiedAst = (Ast.Nodes.SqlStatement)simplifier.Visit(securedAst);
+
         var validationVisitor = new Ast.Visitors.AstValidationVisitor();
-        validationVisitor.Validate(securedAst);
+        validationVisitor.Validate(simplifiedAst);
 
         var generator = Ast.Generators.SqlDialectGeneratorFactory.GetGenerator(effectiveOptions.TargetDialect);
-        return generator.GenerateSql(securedAst);
+        return generator.GenerateSql(simplifiedAst);
     }
 
     public string GenerateGovernedSql(string sql, RlsOptions? options = null)
