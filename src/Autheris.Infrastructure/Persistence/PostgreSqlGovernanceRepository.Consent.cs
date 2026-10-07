@@ -1395,7 +1395,7 @@ public partial class PostgreSqlGovernanceRepository
             }
 
             var consentId = Guid.NewGuid();
-            var granteeSid = req.RequestedGranteeType == GranteeType.User ? new Sid(req.RequestedGranteeRef) : (Sid?)null;
+            var granteeSid = req.RequestedGranteeType != GranteeType.Role ? new Sid(req.RequestedGranteeRef) : (Sid?)null;
             var roleName = req.RequestedGranteeType == GranteeType.Role ? req.RequestedGranteeRef : null;
 
             await using (var cmd = conn.CreateCommand())

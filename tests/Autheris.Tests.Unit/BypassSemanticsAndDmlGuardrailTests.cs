@@ -281,7 +281,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     [Fact]
     public async Task SEM_Health_WarnKeepsSecurityComponentHealthy_WithDegradedDescription()
     {
-        var options = WithWarnSwitch("itsm_legacy_global_webhook_secret");
+        var options = WithWarnSwitch("catalog_legacy_payload_only_signature");
 
         var report = await CheckHealthAsync(options, Environments.Production);
 
@@ -290,7 +290,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         component.IsHealthy.ShouldBeTrue();
         component.Description.ShouldNotBeNull();
         component.Description!.ShouldStartWith("degraded: ");
-        component.Description!.ShouldContain("WARN:itsm_legacy_global_webhook_secret");
+        component.Description!.ShouldContain("WARN:catalog_legacy_payload_only_signature");
     }
 
     [Fact]

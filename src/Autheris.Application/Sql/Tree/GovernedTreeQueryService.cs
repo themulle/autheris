@@ -27,6 +27,13 @@ public interface IGovernedTreeQueryService
         TreeQueryNode root,
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         CancellationToken ct = default);
+
+    Task<JsonDocument> ExecuteAsync(
+        ClaimsPrincipal? principal,
+        TreeQueryNode root,
+        IReadOnlyDictionary<string, string[]>? requestHeaders,
+        string? operationId,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -52,9 +59,9 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     private readonly ILogger<GovernedTreeQueryService>? _logger;
     private readonly IDbSessionContextInitializer _sessionInitializer;
 
-    // G5: per request (the service is scoped). GraphQL resolves root fields in parallel, hence the lock.
-    private readonly Dictionary<TableIdentifier, ResolvedTableAccess> _accessByTable = [];
-    private readonly HashSet<(TableIdentifier Table, bool Allowed)> _audited = [];
+    // G5 & R-GQL-3: memo and audit are keyed by operationId to isolate WebSocket operations across connection lifetime
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string OpId, TableIdentifier Table), ResolvedTableAccess> _accessByOperationAndTable = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string OpId, TableIdentifier Table, bool Allowed), byte> _auditedByOperation = new();
     private readonly SemaphoreSlim _memoLock = new(1, 1);
 
     private const int ThrottledRetryAfterSeconds = 2;
@@ -79,13 +86,23 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
     }
 
+    public Task<JsonDocument> ExecuteAsync(
+        ClaimsPrincipal? principal,
+        TreeQueryNode root,
+        IReadOnlyDictionary<string, string[]>? requestHeaders,
+        CancellationToken ct = default) =>
+        ExecuteAsync(principal, root, requestHeaders, operationId: null, ct);
+
     public async Task<JsonDocument> ExecuteAsync(
         ClaimsPrincipal? principal,
         TreeQueryNode root,
         IReadOnlyDictionary<string, string[]>? requestHeaders,
+        string? operationId,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(root);
+
+        operationId ??= Guid.NewGuid().ToString("N");
 
         var maxRows = _options.GraphQL?.MaxResponseRows > 0 ? _options.GraphQL.MaxResponseRows : 1000;
         if (root.Limit > maxRows)
@@ -93,15 +110,15 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             throw new GatewayInvalidQueryException($"The page size must not exceed {maxRows}.");
         }
 
-        // 1. Access per table (memoized), denied tables fail before any database access.
+        // 1. Access per table (memoized per operation), denied tables fail before any database access.
         var columnsByTable = new Dictionary<TableIdentifier, List<string>>();
         CollectColumns(root, columnsByTable);
 
         var resolved = new Dictionary<TableIdentifier, ResolvedTableAccess>();
         foreach (var (table, columns) in columnsByTable)
         {
-            var access = await ResolveOnceAsync(principal, table, columns, requestHeaders, ct).ConfigureAwait(false);
-            await AuditOnceAsync(access, table, ct).ConfigureAwait(false);
+            var access = await ResolveOnceAsync(operationId, principal, table, columns, requestHeaders, ct).ConfigureAwait(false);
+            await AuditOnceAsync(operationId, access, table, ct).ConfigureAwait(false);
             if (!access.Decision.IsAllowed)
             {
                 throw new GatewayForbiddenException("Access denied.");
@@ -158,7 +175,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
 
         // 4. Bounded concurrency per user and root table, then one round trip.
         using var lease = AcquireLease(rootAccess);
-        var json = await RunAsync(compiled, connOptions, provider, rootAccess.Tenant, ct).ConfigureAwait(false);
+        var json = await RunAsync(compiled, connOptions, dialect, rootAccess.Tenant, rootAccess.UserSid.Value, purpose: null, ct).ConfigureAwait(false);
 
         // 5. Parse once; rewrite only HMAC columns.
         if (compiled.HmacColumns.Count == 0)
@@ -198,21 +215,27 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     }
 
     private async Task<ResolvedTableAccess> ResolveOnceAsync(
+        string opId,
         ClaimsPrincipal? principal,
         TableIdentifier table,
         IReadOnlyList<string> columns,
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         CancellationToken ct)
     {
+        if (_accessByOperationAndTable.TryGetValue((opId, table), out var cached))
+        {
+            return cached;
+        }
+
         await _memoLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_accessByTable.TryGetValue(table, out var cached))
+            if (_accessByOperationAndTable.TryGetValue((opId, table), out cached))
             {
                 return cached;
             }
             var access = await _accessResolver.ResolveTableAccessAsync(principal, table, columns, requestHeaders, ct).ConfigureAwait(false);
-            _accessByTable[table] = access;
+            _accessByOperationAndTable[(opId, table)] = access;
             return access;
         }
         finally
@@ -221,20 +244,13 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         }
     }
 
-    private async Task AuditOnceAsync(ResolvedTableAccess access, TableIdentifier table, CancellationToken ct)
+    private async Task AuditOnceAsync(string opId, ResolvedTableAccess access, TableIdentifier table, CancellationToken ct)
     {
-        await _memoLock.WaitAsync(ct).ConfigureAwait(false);
-        try
+        if (!_auditedByOperation.TryAdd((opId, table, access.Decision.IsAllowed), 1))
         {
-            if (!_audited.Add((table, access.Decision.IsAllowed)))
-            {
-                return;
-            }
+            return;
         }
-        finally
-        {
-            _memoLock.Release();
-        }
+
         await _auditLog.RecordAuditEventAsync(new AuditLogEntry
         {
             TenantId = access.Tenant,
@@ -258,7 +274,14 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         return _concurrencyGate.TryEnter(key, max) ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
     }
 
-    private async Task<string> RunAsync(CompiledTreeQuery compiled, DataSourceConnectionOptions connOptions, string provider, TenantId tenant, CancellationToken ct)
+    private async Task<string> RunAsync(
+        CompiledTreeQuery compiled,
+        DataSourceConnectionOptions connOptions,
+        DatabaseDialect dialect,
+        TenantId tenant,
+        string? userSid,
+        string? purpose,
+        CancellationToken ct)
     {
         await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
         DbTransaction? tx = null;
@@ -266,10 +289,10 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         {
             tx = await _sessionInitializer.InitializeSessionAsync(
                 connection,
-                provider,
+                dialect,
                 tenant,
-                userSid: null,
-                purpose: null,
+                userSid: userSid,
+                purpose: purpose,
                 requireTransaction: true,
                 ct: ct).ConfigureAwait(false);
 
@@ -304,11 +327,18 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             }
             return json;
         }
-        catch
+        catch (Exception)
         {
             if (tx != null)
             {
-                await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception rbEx)
+                {
+                    _logger?.LogWarning(rbEx, "Failed to rollback transaction after error in GovernedTreeQueryService");
+                }
             }
             throw;
         }
