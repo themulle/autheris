@@ -78,18 +78,41 @@ public sealed class CatalogSchemaModel
             .ThenBy(t => t.Identifier.TableName)
             .ToList();
 
-        var usedTypeNames = new HashSet<string>(StringComparer.Ordinal);
-        var tableBuilders = new List<(TableMetadata Metadata, string TypeName, string QueryFieldName, List<CatalogColumnField> Columns)>();
+        var usedSchemaTypeNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Query", "AutherisSortDirection",
+            "AutherisStringFilter", "AutherisIntFilter", "AutherisLongFilter",
+            "AutherisFloatFilter", "AutherisDecimalFilter", "AutherisBooleanFilter",
+            "AutherisDateTimeFilter"
+        };
+
+        var reservedFilterKeywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "and", "or", "not", "where", "orderBy"
+        };
+
+        var tableBuilders = new List<(TableMetadata Metadata, string TypeName, string QueryFieldName, string FilterTypeName, string OrderByTypeName, List<CatalogColumnField> Columns)>();
 
         foreach (var meta in activeSqlTables)
         {
             var baseName = SanitizeGraphQlName($"{meta.Identifier.Domain}_{meta.Identifier.Schema}_{meta.Identifier.TableName}");
             var typeName = baseName;
+            var filterTypeName = $"{typeName}_filter";
+            var orderTypeName = $"{typeName}_order_by";
             var suffix = 2;
-            while (!usedTypeNames.Add(typeName))
+
+            while (usedSchemaTypeNames.Contains(typeName) ||
+                   usedSchemaTypeNames.Contains(filterTypeName) ||
+                   usedSchemaTypeNames.Contains(orderTypeName))
             {
                 typeName = $"{baseName}_{suffix++}";
+                filterTypeName = $"{typeName}_filter";
+                orderTypeName = $"{typeName}_order_by";
             }
+
+            usedSchemaTypeNames.Add(typeName);
+            usedSchemaTypeNames.Add(filterTypeName);
+            usedSchemaTypeNames.Add(orderTypeName);
 
             var queryFieldName = typeName; // Same name for root query field and object type
             var columns = new List<CatalogColumnField>();
@@ -98,6 +121,11 @@ public sealed class CatalogSchemaModel
             foreach (var col in meta.Columns)
             {
                 var colFieldName = SanitizeGraphQlName(col.ColumnName);
+                if (reservedFilterKeywords.Contains(colFieldName))
+                {
+                    colFieldName = $"{colFieldName}_col";
+                }
+
                 var colSuffix = 2;
                 while (!usedColNames.Add(colFieldName))
                 {
@@ -108,24 +136,30 @@ public sealed class CatalogSchemaModel
                 columns.Add(new CatalogColumnField(colFieldName, col.ColumnName, fieldType, col.DataType, true));
             }
 
-            tableBuilders.Add((meta, typeName, queryFieldName, columns));
+            tableBuilders.Add((meta, typeName, queryFieldName, filterTypeName, orderTypeName, columns));
         }
 
         var tableMapById = tableBuilders.ToDictionary(
             t => t.Metadata.Identifier,
             t => t);
 
+        // Pre-fetch relations for all active tables in O(N) instead of O(N^2) (R-GQL-7)
+        var relationsByTable = new Dictionary<TableIdentifier, IReadOnlyList<TableRelation>>();
+        foreach (var builder in tableBuilders)
+        {
+            var rels = await relationRepository.GetRelationsForTableAsync(builder.Metadata.Identifier, ct).ConfigureAwait(false);
+            relationsByTable[builder.Metadata.Identifier] = rels ?? Array.Empty<TableRelation>();
+        }
+
         // Map relations
         var finalTables = new List<CatalogTableType>();
 
-        foreach (var (meta, typeName, queryFieldName, columns) in tableBuilders)
+        foreach (var (meta, typeName, queryFieldName, filterTypeName, orderTypeName, columns) in tableBuilders)
         {
             var relations = new List<CatalogRelationField>();
             var usedRelationFieldNames = new HashSet<string>(columns.Select(c => c.FieldName), StringComparer.Ordinal);
 
-            var rawRelations = await relationRepository.GetRelationsForTableAsync(meta.Identifier, ct).ConfigureAwait(false);
-
-            if (rawRelations != null)
+            if (relationsByTable.TryGetValue(meta.Identifier, out var rawRelations))
             {
                 foreach (var rel in rawRelations)
                 {
@@ -142,7 +176,7 @@ public sealed class CatalogSchemaModel
 
                     var isList = rel.Cardinality == RelationCardinality.OneToMany;
                     var relFieldName = SanitizeGraphQlName(rel.RelationName);
-                    if (usedRelationFieldNames.Contains(relFieldName))
+                    if (usedRelationFieldNames.Contains(relFieldName) || reservedFilterKeywords.Contains(relFieldName))
                     {
                         relFieldName += "_rel";
                     }
@@ -164,7 +198,7 @@ public sealed class CatalogSchemaModel
             }
 
             // Also check for reverse relations where this table is the child
-            // We inspect relations of all tables targeting this table
+            // Lookup in cached relationsByTable in memory
             foreach (var other in tableBuilders)
             {
                 if (other.Metadata.Identifier.Equals(meta.Identifier))
@@ -172,8 +206,10 @@ public sealed class CatalogSchemaModel
                     continue;
                 }
 
-                var otherRelations = await relationRepository.GetRelationsForTableAsync(other.Metadata.Identifier, ct).ConfigureAwait(false);
-                if (otherRelations == null) continue;
+                if (!relationsByTable.TryGetValue(other.Metadata.Identifier, out var otherRelations))
+                {
+                    continue;
+                }
 
                 foreach (var rel in otherRelations)
                 {
@@ -191,7 +227,7 @@ public sealed class CatalogSchemaModel
                     var isList = rel.Cardinality != RelationCardinality.OneToMany;
                     var parentTableName = other.Metadata.Identifier.TableName;
                     var revFieldName = SanitizeGraphQlName($"{parentTableName}_by_{rel.RelationName}");
-                    if (usedRelationFieldNames.Contains(revFieldName))
+                    if (usedRelationFieldNames.Contains(revFieldName) || reservedFilterKeywords.Contains(revFieldName))
                     {
                         revFieldName += "_rel";
                     }
@@ -216,8 +252,8 @@ public sealed class CatalogSchemaModel
                 meta.Identifier,
                 typeName,
                 queryFieldName,
-                $"{typeName}_filter",
-                $"{typeName}_order_by",
+                filterTypeName,
+                orderTypeName,
                 meta,
                 columns,
                 relations));

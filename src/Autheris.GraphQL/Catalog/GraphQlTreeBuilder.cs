@@ -68,6 +68,17 @@ public static class GraphQlTreeBuilder
             throw new GatewayInvalidQueryException("The offset cannot be negative.");
         }
 
+        const int MaxAllowedOffset = 10_000;
+        if (offset > MaxAllowedOffset)
+        {
+            throw new GatewayInvalidQueryException($"The offset cannot exceed {MaxAllowedOffset}.");
+        }
+
+        if (!isRoot && offset > 0)
+        {
+            throw new GatewayInvalidQueryException("Offset paging is only supported on root table queries.");
+        }
+
         // 2. Inspect child selections
         var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var relations = new List<TreeRelationNode>();
@@ -190,25 +201,42 @@ public static class GraphQlTreeBuilder
 
             if (string.Equals(fieldName, "or", StringComparison.OrdinalIgnoreCase))
             {
+                if (valLiteral is NullValueNode)
+                {
+                    throw new GatewayInvalidQueryException("The 'or' filter argument cannot be null.");
+                }
+
                 if (valLiteral is ListValueNode listNode)
                 {
-                    var orItems = new List<TreeFilter>();
-                    foreach (var item in listNode.Items)
+                    if (listNode.Items.Count == 0)
                     {
-                        var itemLiteral = item is VariableNode ivn ? ResolveVariableLiteral(ivn, context) : item;
-                        if (itemLiteral is ObjectValueNode ovn)
-                        {
-                            var parsed = ParseObjectFilter(ovn, table, context);
-                            if (parsed != null) orItems.Add(parsed);
-                        }
+                        items.Add(new TreeRawFilter("1 = 0"));
                     }
-                    if (orItems.Count > 0) items.Add(new TreeOrFilter(orItems));
+                    else
+                    {
+                        var orItems = new List<TreeFilter>();
+                        foreach (var item in listNode.Items)
+                        {
+                            var itemLiteral = item is VariableNode ivn ? ResolveVariableLiteral(ivn, context) : item;
+                            if (itemLiteral is ObjectValueNode ovn)
+                            {
+                                var parsed = ParseObjectFilter(ovn, table, context);
+                                if (parsed != null) orItems.Add(parsed);
+                            }
+                        }
+                        if (orItems.Count > 0) items.Add(new TreeOrFilter(orItems));
+                    }
                 }
                 continue;
             }
 
             if (string.Equals(fieldName, "not", StringComparison.OrdinalIgnoreCase))
             {
+                if (valLiteral is NullValueNode)
+                {
+                    throw new GatewayInvalidQueryException("The 'not' filter argument cannot be null.");
+                }
+
                 if (valLiteral is ObjectValueNode notObj)
                 {
                     var parsed = ParseObjectFilter(notObj, table, context);
@@ -219,13 +247,25 @@ public static class GraphQlTreeBuilder
 
             // Column filter
             var col = table.Columns.FirstOrDefault(c => string.Equals(c.FieldName, fieldName, StringComparison.Ordinal));
-            if (col != null && valLiteral is ObjectValueNode colOps)
+            if (col != null)
             {
-                foreach (var opField in colOps.Fields)
+                if (valLiteral is NullValueNode)
                 {
-                    var opName = opField.Name.Value.ToLowerInvariant();
-                    var opValLiteral = opField.Value is VariableNode opVn ? ResolveVariableLiteral(opVn, context) : opField.Value;
-                    var rawVal = ResolveValue(opValLiteral, context);
+                    throw new GatewayInvalidQueryException($"Column filter for '{fieldName}' cannot be null. Use '{fieldName}: {{ isNull: true }}'.");
+                }
+
+                if (valLiteral is ObjectValueNode colOps)
+                {
+                    foreach (var opField in colOps.Fields)
+                    {
+                        var opName = opField.Name.Value.ToLowerInvariant();
+                        var opValLiteral = opField.Value is VariableNode opVn ? ResolveVariableLiteral(opVn, context) : opField.Value;
+                        if (opValLiteral is NullValueNode && opName != "isnull")
+                        {
+                            throw new GatewayInvalidQueryException($"Value for operator '{opName}' on field '{fieldName}' cannot be null.");
+                        }
+
+                        var rawVal = ResolveValue(opValLiteral, context);
 
                     var filterOp = opName switch
                     {
@@ -244,8 +284,9 @@ public static class GraphQlTreeBuilder
                         _ => throw new GatewayInvalidQueryException($"Unsupported filter operator '{opName}' on '{fieldName}'.")
                     };
 
-                    object? typedValue = CoerceValue(rawVal, col.FieldType, filterOp);
-                    items.Add(new TreeComparison(col.ColumnName, filterOp, typedValue));
+                        object? typedValue = CoerceValue(rawVal, col.FieldType, filterOp);
+                        items.Add(new TreeComparison(col.ColumnName, filterOp, typedValue));
+                    }
                 }
             }
         }
@@ -289,8 +330,18 @@ public static class GraphQlTreeBuilder
                     {
                         throw new GatewayInvalidQueryException($"Unknown sort column '{f.Name.Value}'.");
                     }
-                    var dirVal = (f.Value is EnumValueNode ev ? ev.Value : f.Value.ToString())?.ToUpperInvariant();
-                    bool desc = dirVal == "DESC";
+                    var dirVal = f.Value switch
+                    {
+                        EnumValueNode ev => ev.Value,
+                        StringValueNode sv => sv.Value,
+                        _ => throw new GatewayInvalidQueryException($"Invalid sort direction for '{f.Name.Value}'. Expected ASC or DESC.")
+                    };
+                    if (!string.Equals(dirVal, "ASC", StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(dirVal, "DESC", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new GatewayInvalidQueryException($"Invalid sort direction '{dirVal}' for '{f.Name.Value}'. Expected ASC or DESC.");
+                    }
+                    bool desc = string.Equals(dirVal, "DESC", StringComparison.OrdinalIgnoreCase);
                     orders.Add(new TreeOrder(col.ColumnName, desc));
                 }
             }
@@ -307,8 +358,18 @@ public static class GraphQlTreeBuilder
             {
                 throw new GatewayInvalidQueryException($"Unknown sort column '{f.Name.Value}'.");
             }
-            var dirVal = (f.Value is EnumValueNode ev ? ev.Value : f.Value.ToString())?.ToUpperInvariant();
-            bool desc = dirVal == "DESC";
+            var dirVal = f.Value switch
+            {
+                EnumValueNode ev => ev.Value,
+                StringValueNode sv => sv.Value,
+                _ => throw new GatewayInvalidQueryException($"Invalid sort direction for '{f.Name.Value}'. Expected ASC or DESC.")
+            };
+            if (!string.Equals(dirVal, "ASC", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(dirVal, "DESC", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new GatewayInvalidQueryException($"Invalid sort direction '{dirVal}' for '{f.Name.Value}'. Expected ASC or DESC.");
+            }
+            bool desc = string.Equals(dirVal, "DESC", StringComparison.OrdinalIgnoreCase);
             orders.Add(new TreeOrder(col.ColumnName, desc));
         }
 
@@ -331,7 +392,7 @@ public static class GraphQlTreeBuilder
         {
             VariableNode vn => ResolveValue(ResolveVariableLiteral(vn, context), context),
             IntValueNode iv => iv.ToInt64(),
-            FloatValueNode fv => fv.ToDouble(),
+            FloatValueNode fv => decimal.TryParse(fv.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var dec) ? (object)dec : fv.ToDouble(),
             StringValueNode sv => sv.Value,
             BooleanValueNode bv => bv.Value,
             EnumValueNode ev => ev.Value,
@@ -350,7 +411,7 @@ public static class GraphQlTreeBuilder
         {
             if (rawVal is bool b) return b;
             if (bool.TryParse(rawVal.ToString(), out var pb)) return pb;
-            return true;
+            throw new GatewayInvalidQueryException("The 'isNull' filter value must be a boolean (true or false).");
         }
 
         if (op is TreeFilterOperator.In or TreeFilterOperator.NotIn)
@@ -372,12 +433,22 @@ public static class GraphQlTreeBuilder
 
         return type switch
         {
-            CatalogFieldType.Int => int.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i) ? (object)i : Convert.ToInt64(val, CultureInfo.InvariantCulture),
-            CatalogFieldType.Long => Convert.ToInt64(val, CultureInfo.InvariantCulture),
-            CatalogFieldType.Decimal => decimal.TryParse(str, NumberStyles.Number, CultureInfo.InvariantCulture, out var d) ? (object)d : Convert.ToDecimal(val, CultureInfo.InvariantCulture),
-            CatalogFieldType.Float => double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var f) ? (object)f : Convert.ToDouble(val, CultureInfo.InvariantCulture),
-            CatalogFieldType.Boolean => val is bool b ? b : bool.TryParse(str, out var pb) && pb,
-            CatalogFieldType.DateTime => DateTimeOffset.TryParse(str, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dto) ? dto : str,
+            CatalogFieldType.Int => int.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var i)
+                ? (object)i
+                : throw new GatewayInvalidQueryException($"Invalid integer value '{str}'."),
+            CatalogFieldType.Long => long.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l)
+                ? (object)l
+                : throw new GatewayInvalidQueryException($"Invalid long integer value '{str}'."),
+            CatalogFieldType.Decimal => decimal.TryParse(str, NumberStyles.Number | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out var d)
+                ? (object)d
+                : throw new GatewayInvalidQueryException($"Invalid decimal value '{str}'."),
+            CatalogFieldType.Float => double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var f)
+                ? (object)f
+                : throw new GatewayInvalidQueryException($"Invalid float value '{str}'."),
+            CatalogFieldType.Boolean => val is bool b ? b : (bool.TryParse(str, out var pb) ? pb : throw new GatewayInvalidQueryException($"Invalid boolean value '{str}'.")),
+            CatalogFieldType.DateTime => DateTimeOffset.TryParse(str, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dto)
+                ? dto
+                : throw new GatewayInvalidQueryException($"Invalid datetime value '{str}'."),
             _ => str
         };
     }

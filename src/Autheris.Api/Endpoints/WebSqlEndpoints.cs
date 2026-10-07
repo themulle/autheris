@@ -328,6 +328,32 @@ public static class WebSqlEndpoints
 
         switch (ex)
         {
+            case GatewayThrottledException throttledEx:
+                logger.LogWarning(throttledEx, "WebSQL concurrency limit reached. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                httpContext.Response.Headers.RetryAfter = throttledEx.RetryAfterSeconds.ToString();
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "TooManyRequests",
+                    message = "Too many concurrent requests. Retry later.",
+                    retryAfterSeconds = throttledEx.RetryAfterSeconds,
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
+            case NotSupportedException notSuppEx:
+                logger.LogWarning(notSuppEx, "WebSQL Not Supported. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status501NotImplemented;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "NotImplemented",
+                    message = notSuppEx.Message,
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
             case SecurityException secEx:
                 logger.LogWarning(secEx, "WebSQL Security Violation. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;

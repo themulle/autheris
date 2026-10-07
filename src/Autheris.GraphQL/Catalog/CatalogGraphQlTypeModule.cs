@@ -304,17 +304,17 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule
 
         return col.FieldType switch
         {
-            CatalogFieldType.Int => prop.ValueKind == JsonValueKind.Number ? prop.GetInt32() : int.Parse(prop.GetString()!, System.Globalization.CultureInfo.InvariantCulture),
-            CatalogFieldType.Long => prop.ValueKind == JsonValueKind.Number ? prop.GetInt64() : long.Parse(prop.GetString()!, System.Globalization.CultureInfo.InvariantCulture),
-            CatalogFieldType.Float => prop.ValueKind == JsonValueKind.Number ? prop.GetDouble() : double.Parse(prop.GetString()!, System.Globalization.CultureInfo.InvariantCulture),
-            CatalogFieldType.Decimal => prop.ValueKind == JsonValueKind.Number ? prop.GetDecimal() : decimal.Parse(prop.GetString()!, System.Globalization.CultureInfo.InvariantCulture),
+            CatalogFieldType.Int => prop.ValueKind == JsonValueKind.Number ? prop.GetInt32() : (int.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : null),
+            CatalogFieldType.Long => prop.ValueKind == JsonValueKind.Number ? prop.GetInt64() : (long.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var l) ? l : null),
+            CatalogFieldType.Float => prop.ValueKind == JsonValueKind.Number ? prop.GetDouble() : (double.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null),
+            CatalogFieldType.Decimal => prop.ValueKind == JsonValueKind.Number ? prop.GetDecimal() : (decimal.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var m) ? m : null),
             CatalogFieldType.Boolean => prop.ValueKind switch
             {
                 JsonValueKind.True => true,
                 JsonValueKind.False => false,
                 JsonValueKind.Number => prop.GetInt32() != 0,
-                JsonValueKind.String => bool.TryParse(prop.GetString(), out var b) ? b : prop.GetString() == "1",
-                _ => false
+                JsonValueKind.String => bool.TryParse(prop.GetString(), out var b) ? b : (prop.GetString() == "1" ? true : (prop.GetString() == "0" ? false : null)),
+                _ => null
             },
             CatalogFieldType.String or CatalogFieldType.DateTime => prop.ValueKind == JsonValueKind.String ? prop.GetString() : prop.GetRawText(),
             _ => prop.ToString()
@@ -389,10 +389,16 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule
             // Fallback to default
         }
 
+        if (!ctx.ContextData.TryGetValue("AutherisOperationId", out var opIdObj) || opIdObj is not string opId)
+        {
+            opId = Guid.NewGuid().ToString("N");
+            ctx.ContextData["AutherisOperationId"] = opId;
+        }
+
         try
         {
             var queryNode = GraphQlTreeBuilder.BuildTree(ctx, table, schema, maxResponseRows);
-            using var doc = await treeService.ExecuteAsync(principal, queryNode, headers, ctx.RequestAborted)
+            using var doc = await treeService.ExecuteAsync(principal, queryNode, headers, opId, ctx.RequestAborted)
                 .ConfigureAwait(false);
 
             var root = doc.RootElement.Clone();

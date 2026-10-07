@@ -77,7 +77,7 @@ g = _, _
 e = some(where (p.eft == allow)) && !some(where (p.eft == deny))
 
 [matchers]
-m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act == p.act || p.act == ""*"") && eval(p.sub_rule)
+m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(r.obj, p.obj) && (r.act == p.act || p.act == ""*"") && eval(p.sub_rule)
 ";
         }
     }
@@ -279,24 +279,21 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
         var sw = Stopwatch.StartNew();
         var enforcer = GetOrCreateEnforcer(context.Tenant);
 
-        List<CasbinRuleMetadata> tenantRulesSnapshot;
-        if (_tenantRules.TryGetValue(context.Tenant.Value, out var tenantRulesList))
-        {
-            lock (tenantRulesList)
-            {
-                tenantRulesSnapshot = tenantRulesList.ToList();
-            }
-        }
-        else if (_tenantRules.TryGetValue("*", out var wildcardRulesList))
+        var tenantRulesSnapshot = new List<CasbinRuleMetadata>();
+        if (_tenantRules.TryGetValue("*", out var wildcardRulesList))
         {
             lock (wildcardRulesList)
             {
-                tenantRulesSnapshot = wildcardRulesList.ToList();
+                tenantRulesSnapshot.AddRange(wildcardRulesList);
             }
         }
-        else
+        if (!string.Equals(context.Tenant.Value, "*", StringComparison.OrdinalIgnoreCase) &&
+            _tenantRules.TryGetValue(context.Tenant.Value, out var tenantRulesList))
         {
-            tenantRulesSnapshot = new List<CasbinRuleMetadata>();
+            lock (tenantRulesList)
+            {
+                tenantRulesSnapshot.AddRange(tenantRulesList);
+            }
         }
 
         // Subjects evaluated exactly like the Casbin request: the user itself and each of its groups.
@@ -318,8 +315,9 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
             bool denied = false;
             foreach (var rule in tenantRulesSnapshot)
             {
-                // Deny rules are matched conservatively (any action, any rule tenant within this tenant's rule set).
+                // Deny rules are matched conservatively (any action, wildcard tenant or current tenant).
                 if (!string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase) ||
+                    (!string.Equals(rule.Tenant, "*", StringComparison.Ordinal) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.Ordinal)) ||
                     !MatchObjectPattern(rule.Obj, tableStr))
                 {
                     continue;
@@ -471,8 +469,9 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
             return false;
         }
 
-        // Same tenant condition as the Casbin matcher (r.tenant == p.tenant)
-        if (!string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.Ordinal))
+        // Same tenant condition as the Casbin matcher (r.tenant == p.tenant || p.tenant == "*")
+        if (!string.Equals(rule.Tenant, "*", StringComparison.Ordinal) &&
+            !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.Ordinal))
         {
             return false;
         }
@@ -1112,6 +1111,32 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
         {
             var model = DefaultModel.CreateFromText(_modelText);
             rulesByTenant["*"] = (new Enforcer(model), new List<CasbinRuleMetadata>());
+        }
+
+        // Remove tenants that no longer exist in the new policy
+        var previousTenants = _tenantEnforcers.Keys.ToList();
+        foreach (var prevTenant in previousTenants)
+        {
+            if (!rulesByTenant.ContainsKey(prevTenant))
+            {
+                _tenantEnforcers.TryRemove(prevTenant, out _);
+                _tenantRules.TryRemove(prevTenant, out _);
+                OnPolicyReloaded?.Invoke(new TenantId(prevTenant));
+            }
+        }
+
+        // Add wildcard '*' rules to specific tenant enforcers so Enforce() checks global rules too
+        if (rulesByTenant.TryGetValue("*", out var wildcardEntry))
+        {
+            foreach (var (tName, entry) in rulesByTenant)
+            {
+                if (tName == "*") continue;
+                foreach (var rule in wildcardEntry.Rules)
+                {
+                    var normalizedSubRule = Regex.Replace(rule.SubRule, @"'([^']{2,})'", "\"$1\"");
+                    entry.Enforcer.AddPolicy(rule.Sub, rule.Tenant, rule.Obj, rule.Act, normalizedSubRule, rule.Eft);
+                }
+            }
         }
 
         foreach (var (tName, (enforcer, rules)) in rulesByTenant)

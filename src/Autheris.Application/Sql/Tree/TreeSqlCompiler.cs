@@ -177,7 +177,9 @@ public static partial class TreeSqlCompiler
                 }
                 else
                 {
-                    outputs.Add(new OutputColumn(column, null, MaskLiteral(rule, context.Dialect)));
+                    var colMeta = metadata.GetColumn(column);
+                var isString = colMeta == null || IsStringType(colMeta.DataType);
+                outputs.Add(new OutputColumn(column, null, MaskLiteral(rule, context.Dialect, isString)));
                 }
             }
             else
@@ -321,9 +323,28 @@ public static partial class TreeSqlCompiler
     private static bool IsHmacRule(MaskingRule rule) =>
         rule.RuleType?.ToUpperInvariant() is "HMAC" or "HMAC_SHA256" or "HASH";
 
-    private static string MaskLiteral(MaskingRule rule, DatabaseDialect dialect)
+    private static bool IsStringType(string? dataType)
     {
-        if (string.Equals(rule.RuleType, "NULLIFY", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(dataType)) return true;
+        var dt = dataType.Trim().ToLowerInvariant();
+        if (dt.Contains("interval") || dt.Contains("point") || dt.Contains("polygon") ||
+            dt.Contains("geometry") || dt.Contains("geography") || dt.Contains("line") ||
+            dt.Contains("json") || dt.Contains("xml") || dt.Contains("uuid") || dt.Contains("guid"))
+        {
+            return true;
+        }
+
+        var baseType = dt.Split('(', '[', ' ')[0].Trim();
+        if (baseType.StartsWith("bit") || baseType.StartsWith("bool")) return false;
+        if (baseType is "bigint" or "int8" or "long" or "int" or "integer" or "int4" or "smallint" or "int2" or "tinyint") return false;
+        if (baseType is "decimal" or "numeric" or "money" or "smallmoney" or "float" or "double" or "real" or "float4" or "float8") return false;
+
+        return true;
+    }
+
+    private static string MaskLiteral(MaskingRule rule, DatabaseDialect dialect, bool isString)
+    {
+        if (!isString || string.Equals(rule.RuleType, "NULLIFY", StringComparison.OrdinalIgnoreCase))
         {
             return "NULL";
         }
