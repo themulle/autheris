@@ -52,6 +52,13 @@ public sealed class EpochValidationService : IEpochValidationService
     }
 
     public async Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default)
+        => (await GetCurrentEpochCoreAsync(table).ConfigureAwait(false)).Epoch;
+
+    /// <summary>
+    /// INF-1: <c>Authoritative</c> is false when Redis is configured but the read failed. The local epoch is then
+    /// only a fallback and must not confirm a cached decision (another node may have revoked it meanwhile).
+    /// </summary>
+    private async Task<(long Epoch, bool Authoritative)> GetCurrentEpochCoreAsync(TableIdentifier table)
     {
         var key = table.ToString().ToLowerInvariant();
 
@@ -85,17 +92,18 @@ public sealed class EpochValidationService : IEpochValidationService
                 _highestSeenRedisEpoch.AddOrUpdate(key, rEpoch, (_, current) => Math.Max(current, rEpoch));
                 _epochs[key] = rEpoch;
                 _lastEpochRefresh[key] = DateTimeOffset.UtcNow;
-                return rEpoch;
+                return (rEpoch, true);
             }
-            catch
+            catch (Exception ex)
             {
-                // Fall back to local degraded evaluation
+                _logger?.LogWarning(ex, "Policy epoch read from Redis failed for {Table}; cached decisions are re-evaluated (degraded).", key);
+                return (_epochs.GetOrAdd(key, 1), false);
             }
         }
 
         var epoch = _epochs.GetOrAdd(key, 1);
         _lastEpochRefresh.TryAdd(key, DateTimeOffset.UtcNow);
-        return epoch;
+        return (epoch, _multiplexer == null);
     }
 
     public async Task<IReadOnlyDictionary<TableIdentifier, long>> GetCurrentEpochsAsync(
@@ -143,7 +151,13 @@ public sealed class EpochValidationService : IEpochValidationService
             }
         }
 
-        var current = await GetCurrentEpochAsync(table, ct).ConfigureAwait(false);
+        var (current, authoritative) = await GetCurrentEpochCoreAsync(table).ConfigureAwait(false);
+        if (!authoritative && !isDegraded)
+        {
+            // INF-1: Redis is configured and reported as connected, but the epoch could not be read -> fail closed.
+            return false;
+        }
+
         return current == cachedEpoch;
     }
 
@@ -161,9 +175,10 @@ public sealed class EpochValidationService : IEpochValidationService
                 var incremented = await db.StringIncrementAsync($"{_redisPrefix}epoch:{key}").ConfigureAwait(false);
                 _highestSeenRedisEpoch.AddOrUpdate(key, incremented, (_, current) => Math.Max(current, incremented));
             }
-            catch
+            catch (Exception ex)
             {
                 // Fallback to local and event bus
+                _logger?.LogWarning(ex, "Policy epoch increment in Redis failed for {Table}; relying on local epoch and event bus.", key);
             }
         }
 
