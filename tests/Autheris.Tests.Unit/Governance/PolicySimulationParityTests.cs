@@ -11,6 +11,7 @@ using Autheris.Application.Governance;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using NSubstitute;
 using Shouldly;
@@ -140,11 +141,12 @@ public sealed class PolicySimulationParityTests
 
         const string invalidPolicyCsv = "p, alice, tenant-a, hr.dbo.employees, read, true, unsupported_effect\n";
 
-        // Simulation must reject invalid effect with FormatException
-        await Should.ThrowAsync<FormatException>(() =>
+        // Simulation must reject the invalid effect; the parser error surfaces as a client error (400)
+        var simEx = await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
             simService.SimulateAsync(
                 new PolicySimulationRequest(DraftPolicyCsv: invalidPolicyCsv, Tenant: TenantA, TargetTable: "hr.dbo.employees", Limit: 10),
                 TenantA));
+        simEx.Message.ShouldContain("effect");
 
         // Enforcement must also reject invalid effect with FormatException
         Should.Throw<FormatException>(() =>
