@@ -378,7 +378,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             {
                 var parameter = command.CreateParameter();
                 parameter.ParameterName = name;
-                parameter.Value = value ?? DBNull.Value;
+                parameter.Value = ToProviderValue(value, dialect) ?? DBNull.Value;
                 command.Parameters.Add(parameter);
             }
 
@@ -489,4 +489,13 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         }
         return total;
     }
+
+    /// <summary>
+    /// R-GQL-10: Microsoft.Data.Sqlite binds DateTimeOffset as "yyyy-MM-dd HH:mm:ss+00:00" (space). ISO-8601 text values
+    /// ("...T...Z") then compare wrongly, so SQLite receives the UTC value in ISO-8601 form; other providers bind natively.
+    /// </summary>
+    internal static object? ToProviderValue(object? value, DatabaseDialect dialect) =>
+        dialect == DatabaseDialect.Sqlite && value is DateTimeOffset dto
+            ? dto.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", System.Globalization.CultureInfo.InvariantCulture)
+            : value;
 }
