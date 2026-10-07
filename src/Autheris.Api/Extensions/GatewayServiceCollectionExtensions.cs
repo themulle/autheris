@@ -530,6 +530,7 @@ public static class GatewayServiceCollectionExtensions
 
         // Realtime Event Subscriptions & In-Stream RLS (P5 & F-CDC-03)
         services.AddSingleton<ICdcEventChannel, InMemoryCdcEventChannel>();
+        services.AddSingleton<Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor>();
         services.AddSingleton<ICdcEventIngestionService, CdcEventIngestionService>();
         services.AddScoped<IStreamRlsPolicyEnforcer, StreamRlsPolicyEnforcer>();
         services.AddSingleton<Autheris.Infrastructure.Streaming.PostgreSqlLogicalReplicationService>();

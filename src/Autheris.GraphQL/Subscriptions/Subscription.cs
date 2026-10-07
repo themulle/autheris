@@ -53,10 +53,12 @@ public sealed class Subscription
                     .Build());
         }
 
-        var cleanTable = table.Trim().ToLowerInvariant();
-        var topic = cleanTable.StartsWith("cdc_", StringComparison.OrdinalIgnoreCase)
-            ? cleanTable
-            : $"cdc_{cleanTable}";
+        if (string.IsNullOrWhiteSpace(table))
+        {
+            throw new GraphQLException(ErrorBuilder.New().SetMessage("A table is required.").SetCode("INVALID_QUERY").Build());
+        }
+
+        var (topic, tableId) = CdcSubscriptionGovernor.ResolveTopic(table);
 
         // SEC A-3: Subscriptions over HTTP SSE / multipart bypass the WebSocket interceptor, so the stream itself
         // enforces token expiry / max session lifetime (M-14) and periodic revocation checks.
@@ -97,6 +99,17 @@ public sealed class Subscription
             _ = CheckRevocationAsync(cts, svc, p);
         }, (guardCts, revocation, principal), interval, interval);
 
+        // GQL-3 / GQL-4: topic admission (catalog + access decision, cdc_all for admins), per-subject limit, audit.
+        var governor = services.GetService<CdcSubscriptionGovernor>()
+            ?? throw new GraphQLException(ErrorBuilder.New().SetMessage("Subscriptions are not available.").SetCode("UNAVAILABLE").Build());
+        await using var lease = await governor.AdmitAsync(
+            principal,
+            topic,
+            tableId,
+            services.GetService<ITableAccessResolver>(),
+            services.GetService<IAuditLogRepository>(),
+            ct).ConfigureAwait(false);
+
         var sourceStream = eventChannel.SubscribeAsync(topic, guardCts.Token);
         var subscriber = principal;
 
@@ -125,6 +138,7 @@ public sealed class Subscription
                 continue; // Zero leakage: unauthorized events dropped
             }
 
+            lease.CountDelivered();
             yield return new StreamCdcEvent(
                 EventId: cdcEvent.EventId,
                 Table: cdcEvent.Table.ToQualifiedName(),
