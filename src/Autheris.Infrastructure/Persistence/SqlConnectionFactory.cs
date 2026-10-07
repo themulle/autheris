@@ -11,6 +11,9 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     /// <summary>RR-L5-01: Session settings required by the literal escaping in <c>DatabaseDialect.EscapeSqlLiteral</c>.</summary>
     public const string PostgreSqlSessionInitializationSql = "SET standard_conforming_strings = on";
 
+    /// <summary>Dirty read for SQL Server sessions of data sources with <c>ReadUncommitted</c> (reads take no shared locks).</summary>
+    public const string SqlServerReadUncommittedSql = "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED";
+
     public async Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -40,6 +43,14 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
                 await using var initCmd = pgConn.CreateCommand();
                 initCmd.CommandText = PostgreSqlSessionInitializationSql;
                 await initCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            if (options.ReadUncommitted && connection is SqlConnection)
+            {
+                // Pooled connections are reset to the default isolation level, so the setting is applied on every open.
+                await using var isolationCmd = connection.CreateCommand();
+                isolationCmd.CommandText = SqlServerReadUncommittedSql;
+                await isolationCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
             if (connection is SqliteConnection sqliteConn)

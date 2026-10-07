@@ -290,7 +290,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         foreach (var target in metadata.ReferencedTables)
         {
             // SEC C-03: Tables without catalog metadata (or without column metadata) cannot be governed -> reject.
-            TableIdentifier tableId = ResolveTableIdentifier(target);
+            TableIdentifier tableId = ResolveTableIdentifier(target, dataSourceName);
             TableIdentifier resolvedId = tableId;
             TableMetadata? tableMeta = null;
             if (_tableRepository != null)
@@ -822,7 +822,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
                 var p = command.CreateParameter();
                 p.ParameterName = normalizedName;
-                p.Value = paramVal ?? DBNull.Value;
+                p.Value = WebSqlParameterValues.Normalize(paramVal) ?? DBNull.Value;
                 command.Parameters.Add(p);
             }
         }
@@ -1326,14 +1326,22 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     }
 
-    private static TableIdentifier ResolveTableIdentifier(TableAccessTarget target)
+    /// <summary>
+    /// Catalog identifier of a referenced table. Without a catalog part, a schema-qualified name (schema.table) is looked up
+    /// in the domain of the data source the statement runs on (the catalog keys tables by their data source); it falls back
+    /// to "default" when it is not catalogued there (see the caller).
+    /// </summary>
+    private static TableIdentifier ResolveTableIdentifier(TableAccessTarget target, string? dataSourceName)
     {
         if (TableIdentifier.TryParse(target.FullName, out var parsed))
         {
             return parsed;
         }
 
-        string domain = !string.IsNullOrWhiteSpace(target.Catalog) ? target.Catalog : "default";
+        // Only schema-qualified names use the data source's domain; unqualified names keep their "default" resolution.
+        string domain = !string.IsNullOrWhiteSpace(target.Catalog)
+            ? target.Catalog
+            : !string.IsNullOrWhiteSpace(target.Schema) && !string.IsNullOrWhiteSpace(dataSourceName) ? dataSourceName : "default";
         string schema = !string.IsNullOrWhiteSpace(target.Schema) ? target.Schema : "public";
         return new TableIdentifier(domain, schema, target.TableName);
     }

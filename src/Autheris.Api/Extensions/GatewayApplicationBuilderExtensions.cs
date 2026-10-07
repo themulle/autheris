@@ -438,7 +438,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapDuckDbOlapEndpoints();
         app.MapIcebergRestCatalogEndpoints();
         app.MapEnvoyExtAuthzEndpoints();
-        app.MapWebSqlEndpoints();
+        app.MapWebSqlEndpoints(gatewayOptions);
         app.MapSqlEndpoints(gatewayOptions);
         app.MapProcedureEndpoints(gatewayOptions);
         app.MapDevPortalEndpoints(gatewayOptions);

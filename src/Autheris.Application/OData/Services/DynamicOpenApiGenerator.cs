@@ -93,6 +93,11 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             apis.Add(new("Stored Procedures", "/api/v1/procedures/openapi.json"));
         }
 
+        if (_options.IncludeWebSqlSpec)
+        {
+            apis.Add(new("WebSQL (ad-hoc SQL)", "/api/v1/sql/openapi.json"));
+        }
+
         foreach (var group in domainGroups)
         {
             var domain = group.Key;

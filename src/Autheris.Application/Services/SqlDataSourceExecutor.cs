@@ -277,8 +277,10 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         {
             case DatabaseDialect.SqlServer:
                 // SQL Server requires an ORDER BY clause for OFFSET-FETCH.
-                var orderCol = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "id", StringComparison.OrdinalIgnoreCase))?.ColumnName
-                               ?? (metadata.Columns.Count > 0 ? metadata.Columns[0].ColumnName : null);
+                // If a primary key or 'id' column exists, prefer it to leverage clustered index order.
+                // Otherwise fall back to (SELECT 1) to avoid an expensive full-table sort on an arbitrary first column.
+                var pkCol = metadata.PrimaryKeyColumns.FirstOrDefault(pk => metadata.HasColumn(pk));
+                var orderCol = pkCol ?? metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "id", StringComparison.OrdinalIgnoreCase))?.ColumnName;
                 var orderClause = orderCol != null ? dialect.QuoteIdentifier(orderCol) : "(SELECT 1)";
                 sqlBuilder.Append($" ORDER BY {orderClause} OFFSET @gql_offset ROWS FETCH NEXT @gql_limit ROWS ONLY");
                 break;

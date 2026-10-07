@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using System.Data.Common;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -220,6 +221,29 @@ public sealed partial class ODataHandler(
                 ErrorMessage: secMessage
             );
         }
+        catch (Exception ex) when (IsExecutionTimeout(ex))
+        {
+            _logger.LogWarning(ex, "OData query for {Table} timed out.", table);
+            return new ODataQueryResult(
+                Success: false,
+                StatusCode: 504,
+                Payload: ODataResponseFormatter.FormatErrorResponse("ExecutionTimeout", "The query exceeded the execution time limit. Narrow the query or check database locks."),
+                ErrorCode: "ExecutionTimeout",
+                ErrorMessage: "The query exceeded the execution time limit."
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "OData query for {Table} failed unexpectedly.", table);
+            var msg = _verboseErrors ? ex.Message : "The data access request could not be processed. Contact support.";
+            return new ODataQueryResult(
+                Success: false,
+                StatusCode: 500,
+                Payload: ODataResponseFormatter.FormatErrorResponse("INTERNAL_ERROR", msg),
+                ErrorCode: "INTERNAL_ERROR",
+                ErrorMessage: msg
+            );
+        }
 
         if (!decision.IsAllowed)
         {
@@ -244,5 +268,19 @@ public sealed partial class ODataHandler(
             StatusCode: 200,
             Payload: payload
         );
+    }
+
+    private static bool IsExecutionTimeout(Exception ex)
+    {
+        for (var e = ex; e != null; e = e.InnerException)
+        {
+            if (e is TimeoutException ||
+                (e is DbException && e.Message.Contains("Timeout", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
