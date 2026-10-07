@@ -22,7 +22,7 @@ public static class FinOpsEndpoints
             IFinOpsAccountingService accountingService) =>
         {
             var user = request.HttpContext.User;
-            var isAuthorized = GatewayPolicies.HasAnyRole(user, [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
+            var isAuthorized = user.IsInRole("BillingAdmin") || GatewayPolicies.HasAnyRole(user, [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
             if (!isAuthorized)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -77,7 +77,7 @@ public static class FinOpsEndpoints
             IFinOpsAccountingService accountingService) =>
         {
             var user = request.HttpContext.User;
-            var isAuthorized = GatewayPolicies.HasAnyRole(user, [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
+            var isAuthorized = user.IsInRole("BillingAdmin") || GatewayPolicies.HasAnyRole(user, [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
             if (!isAuthorized)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
