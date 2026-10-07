@@ -295,7 +295,7 @@ Legende: ✅ behoben · 🟡 teilweise · ⛔ offen · 🔻 verschlechtert · �
 | R-EXT-1 dbt-Status „Approved“ ohne Wirkung | ⛔ | |
 | R-EXT-2 `TableMetadata`-Kopie | ✅ | D-5. |
 | R-DEP-1 Schlüssellänge an Verbrauchern | ⛔ | |
-| R-ERR-1 `INVALID_QUERY`-Text | ⛔ | |
+| R-ERR-1 `INVALID_QUERY`-Text | ⛔ | Siehe `plan-graphql-anti-enumeration-r-gql-6-r-err-1.md`. |
 | R-API-1 Migrationshinweis | ⛔ | |
 | R-API-2 FinOps-Fallback | ✅ | |
 | R-GQL-1 maskierte Typen | ✅ | G-8; HMAC-Spalten im Schema als String typisiert; maskierte Nicht-String-Felder liefern null mit Fehlercode MASKED. |
@@ -303,7 +303,7 @@ Legende: ✅ behoben · 🟡 teilweise · ⛔ offen · 🔻 verschlechtert · �
 | R-GQL-3 Memo pro Verbindung | ✅ | G-3, G-4, G-7, D-7; `ClearOperation` im Request-Middleware nach Request-Ende, FIFO-Eviction als Fallback. |
 | R-GQL-4 Budget/Offset | ✅ | D-8; Zeilenbudget und MaxOffset in Optionen und Dienst durchgesetzt. |
 | R-GQL-5 verschachteltes offset | ✅ | |
-| R-GQL-6 Katalog aufzählbar | ⛔ | |
+| R-GQL-6 Katalog aufzählbar | ⛔ | HC16-Pipeline-Trennung: IErrorFilter greift nicht bei Validierungsfehlern. Siehe `plan-graphql-anti-enumeration-r-gql-6-r-err-1.md`. |
 | R-GQL-7 N² Relationen | ✅ | |
 | R-GQL-8 ✔ | ✅ | Subjektprüfung strikt für alle Tenanten; Token ohne SID abgewiesen. |
 | R-GQL-9 | ⛔ | |
@@ -387,7 +387,7 @@ Den irreführenden Test `DbSessionContextInitializer_RollsBackTransaction_OnErro
 2. **D-8 (SQL2-7) ✔:** ✅ Zeilenbudget und `MaxOffset` konfigurierbar und im Dienst prüfen.
 3. **G-8 (R-GQL-1) ✔:** ✅ HMAC-Spalten als String oder Code `MASKED`; Executor-Tests mit maskierter Int- und Bool-Spalte (SQLite).
 4. **G-3, G-4, G-7, D-7 ✔:** ✅ Memo pro Operation bereinigt, opId thread-safe im Resolver/Interceptor, eine `ExecuteAsync` mit Pflicht-`operationId` und `CatalogOperationCleanupMiddleware`.
-5. **R-GQL-6, R-ERR-1:** Unbekannte und gesperrte Felder einheitlich melden; `EnableSchemaRequests = false`; generischer Text für `INVALID_QUERY`.
+5. **R-GQL-6, R-ERR-1:** Unbekannte und gesperrte Felder einheitlich melden; `EnableSchemaRequests = false`; generischer Text für `INVALID_QUERY` (HC16-Erkenntnisse analysiert in `plan-graphql-anti-enumeration-r-gql-6-r-err-1.md`).
 6. **R-GQL-9:** `SecurityPrincipalContext.TenantId` als Quelle in den Mutationen; Admin-Ausnahme einheitlich.
 7. **R-GQL-10, G-9, G-5:** SQLite-Datumsformat, Null-Semantik, Variablen in `orderBy`.
 8. **R-GQL-12, R-GQL-13, G-6:** Schema-Reload an die Katalog-Epoch koppeln; nicht abfragbare Spalten und Dialekte auslassen; gemeinsamer Typklassifizierer.
