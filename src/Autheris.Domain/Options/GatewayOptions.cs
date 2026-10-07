@@ -882,6 +882,14 @@ public sealed class DataSourceConnectionOptions
     public string Provider { get; init; } = "Sqlite"; // "Sqlite", "SqlServer", "PostgreSql"
     public string ConnectionString { get; init; } = string.Empty;
     [Range(1, 300)] public int CommandTimeoutSeconds { get; init; } = 30;
+
+    /// <summary>
+    /// SQL Server only: every session of this data source runs <c>SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED</c>
+    /// ("dirty read"). Reads then neither wait for nor block writers (no shared locks), at the price of seeing uncommitted,
+    /// possibly rolled back rows and occasionally missing or duplicating rows during page splits. Meant for analytical reads
+    /// on busy operational databases; default false. Ignored by other providers (PostgreSQL has no dirty reads).
+    /// </summary>
+    public bool ReadUncommitted { get; init; }
 }
 
 public sealed class ItsmOptions

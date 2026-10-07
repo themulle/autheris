@@ -20,6 +20,11 @@ public sealed record OpenApiDocumentOptions
     /// SqlEndpoints:Procedures:Enabled is set, so the link must follow that switch.
     /// </summary>
     public bool IncludeStoredProcedureSpec { get; init; } = false;
+
+    /// <summary>
+    /// Lists the WebSQL spec (/api/v1/sql/openapi.json) in the index. The route follows WebSql:Enabled.
+    /// </summary>
+    public bool IncludeWebSqlSpec { get; init; } = false;
 }
 
 /// <summary>

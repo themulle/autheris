@@ -293,7 +293,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
         services.AddSingleton<IDbtHealthCircuitBreaker, DbtHealthCircuitBreaker>();
         services.AddSingleton<IOpenApiCacheManager, OpenApiCacheManager>();
-        services.AddSingleton(new Autheris.Domain.Model.OpenApiDocumentOptions { IncludeStoredProcedureSpec = gatewayOptions.SqlEndpoints.Procedures.Enabled });
+        services.AddSingleton(new Autheris.Domain.Model.OpenApiDocumentOptions { IncludeStoredProcedureSpec = gatewayOptions.SqlEndpoints.Procedures.Enabled, IncludeWebSqlSpec = gatewayOptions.WebSql.Enabled });
         services.AddSingleton<IDynamicOpenApiGenerator, DynamicOpenApiGenerator>();
         services.AddSingleton<IRlsFilterGenerator, RlsFilterGenerator>();
         services.AddSingleton<IRowFilterSqlBuilder, RowFilterSqlBuilder>();

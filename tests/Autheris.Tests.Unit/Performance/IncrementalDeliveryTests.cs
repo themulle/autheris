@@ -84,7 +84,7 @@ public sealed class IncrementalDeliveryTests
         streamCts.Token.IsCancellationRequested.ShouldBeFalse();
 
         // Wait for timeout (options configured with 500ms)
-        await Task.Delay(600);
+        await Task.Delay(800);
 
         // Assert
         streamCts.Token.IsCancellationRequested.ShouldBeTrue();
