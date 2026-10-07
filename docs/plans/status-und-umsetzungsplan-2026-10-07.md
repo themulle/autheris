@@ -8,9 +8,9 @@ Branch `feat/ast-target-dialect-generator`, Stand `db3aef1`.
 1. **F-3 `TenantId` akzeptiert `*`:** Die Härtung ist für alle Eingänge zurückgenommen (Claims, `X-Tenant-ID`, Envoy, ForwardAuth). Kein konkretes Leck gefunden, aber unnötig. Zurückbauen, Wildcard nur intern im Casbin-Service.
 2. **F-1 ✔ Mandanten-Datei nur mit `g`-Zeilen:** Sie löscht ohne Fehler alle Deny- und RLS-Regeln des Mandanten (fail-open).
 3. **S-1/D-2 erfundene Daten:** Ein fehlendes Environment und `"Test"` gelten als Development; dazu kommt der Ersatz-Executor. Beides liefert ohne DB-Verbindung erfundene Daten.
-4. **S-2 501 mit Originaltext:** Interne Fehlermeldungen gehen an den Client.
+4. **S-2 ✔ 501 mit Originaltext:** ✅ behoben (generischer Text bei 501, Antlr4-Parserfehler auf 400).
 5. **G-1 Decimal-Filter:** Unter de-DE wird `1.5` zu 15.
-6. **R-GQL-8 WebSocket-Subjekt:** Die Subjektprüfung ist wirkungslos, ein Token ohne SID wird akzeptiert.
+6. **R-GQL-8 ✔ WebSocket-Subjekt:** ✅ behoben (Subjektprüfung für alle Tenanten strikt, Token ohne SID abgewiesen).
 7. **PoC DEP-1/2/3:** Passwörter und HMAC-Schlüssel rotieren, Ports, LWETEM_PROD.
 
 **Casbin-Rest:**
@@ -187,7 +187,7 @@ Unauffällig in `d58449c`:
 | ID | Status | Befund | Behebung |
 |---|---|---|---|
 | S-1 | 🔻 | Ersatz-Executor liefert erfundene Daten; `null` und `"Test"` gelten überall als Development (D-2). | `null` gilt als Produktion, kein `"Test"`, Ersatz-Executor entfernen. |
-| S-2 | ⛔ | Jede `NotSupportedException` geht als 501 mit Original-Text an den Client (`GatewayExceptionHandler.cs:79`, `WebSqlEndpoints.cs`). | `GatewayNotImplementedException` mit generischem Text; Parserfehler auf 400. |
+| S-2 ✔ | ✅ | `GatewayNotImplementedException` mit generischem Text; Parserfehler auf 400. |
 
 ### GraphQL
 
@@ -269,7 +269,7 @@ Legende: ✅ behoben · 🟡 teilweise · ⛔ offen · 🔻 verschlechtert · �
 | ID | Status | Rest |
 |---|---|---|
 | R-SQL-1 Tests brechen | 🟡 🔻 | Durch S-1/D-2 „gelöst“. |
-| R-SQL-2 501 | 🟡 | S-2. |
+| R-SQL-2 501 | ✅ | S-2 behoben. |
 | R-SQL-3 Sitzungs-GUCs WebSQL | ✅ | D-1 behoben (d77d650); D-10. |
 | R-SQL-4 READ ONLY Row-Scope | ⛔ | |
 | R-SQL-5 429 Drosselung | ✅ 🧪 | |
@@ -305,7 +305,8 @@ Legende: ✅ behoben · 🟡 teilweise · ⛔ offen · 🔻 verschlechtert · �
 | R-GQL-5 verschachteltes offset | ✅ | |
 | R-GQL-6 Katalog aufzählbar | ⛔ | |
 | R-GQL-7 N² Relationen | ✅ | |
-| R-GQL-8, R-GQL-9 | ⛔ | |
+| R-GQL-8 ✔ | ✅ | Subjektprüfung strikt für alle Tenanten; Token ohne SID abgewiesen. |
+| R-GQL-9 | ⛔ | |
 | R-GQL-10 Datum/Decimal | 🟡 | G-1; SQLite-Format. |
 | R-GQL-11 Null-Semantik | 🟡 | G-9. |
 | R-GQL-12 TypesChanged | ⛔ | |
@@ -348,9 +349,9 @@ Aufwand: S = bis 2 h, M = halber bis ganzer Tag, L = mehrere Tage.
    - E-3 bis E-6 niedrig, mit Phase 7.
 3. **R-POL-5-Rest, F-7, R-POL-8:** Policy-Datei beim Start probeweise parsen (gemeinsamer Parser); `ModelPath` auch bei `Enabled=false` prüfen oder Service eager auflösen; Warnung bei `Enabled=false`. (Modellprüfung beim Start ✅ 8636038.)
 4. **S-1, D-2:** Ersatz-Executor entfernen; `null` gilt überall als Produktion, kein `"Test"`. Die betroffenen Tests mit Development-Environment oder injiziertem Executor bauen. Den Test `R_SQL_1_…GeneratesSyntheticData_InDevelopmentOrUnitTests` umkehren.
-5. **S-2:** `GatewayNotImplementedException` mit generischem Text auf 501, Parserfehler auf 400.
+5. **S-2:** ✅ behoben (`GatewayNotImplementedException` mit generischem Text auf 501, Parserfehler auf 400).
 6. **G-1:** Kulturunabhängige Konvertierung; Test unter de-DE.
-7. **R-GQL-8:** Bei HTTP-Anmeldung und abweichendem Subjekt abweisen, Token ohne SID abweisen; gemeinsame Kontext-Fabrik in Domain.
+7. **R-GQL-8:** ✅ behoben (Bei HTTP-Anmeldung und abweichendem Subjekt immer abweisen, Token ohne SID abweisen).
 8. **D-4:** Entscheidung zur Sensitivitäts-Einstufung festhalten (MEDIUM, CONFIDENTIAL, PII), Tests für die Wertetabelle, Migrationshinweis.
 
 ### Phase 2 – Tests für die behobenen Befunde (M)

@@ -316,7 +316,7 @@ public static class WebSqlEndpoints
         }
     }
 
-    private static async Task WriteWebSqlErrorAsync(
+    internal static async Task WriteWebSqlErrorAsync(
         HttpContext httpContext,
         Exception ex,
         ILogger logger,
@@ -350,7 +350,43 @@ public static class WebSqlEndpoints
                 await httpContext.Response.WriteAsJsonAsync(new
                 {
                     error = "NotImplemented",
-                    message = notImplEx.Message,
+                    message = "The requested feature or data source capability is not implemented.",
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
+            case Antlr4.Runtime.Misc.ParseCanceledException parseEx:
+                logger.LogWarning(parseEx, "WebSQL SQL Syntax Error. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "BadRequest",
+                    message = "Invalid SQL syntax.",
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
+            case Antlr4.Runtime.RecognitionException recogEx:
+                logger.LogWarning(recogEx, "WebSQL SQL Syntax Error. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "BadRequest",
+                    message = "Invalid SQL syntax.",
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
+            case Exception exWithParse when exWithParse.InnerException is Antlr4.Runtime.Misc.ParseCanceledException or Antlr4.Runtime.RecognitionException:
+                logger.LogWarning(exWithParse, "WebSQL SQL Syntax Error. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "BadRequest",
+                    message = "Invalid SQL syntax.",
                     traceId = httpContext.TraceIdentifier
                 }, ct);
                 break;
