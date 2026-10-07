@@ -14,15 +14,15 @@ Branch `feat/ast-target-dialect-generator`, Stand `db3aef1`.
 7. **PoC DEP-1/2/3:** Passwörter und HMAC-Schlüssel rotieren, Ports, LWETEM_PROD.
 
 **Casbin-Rest:**
-- R-POL-5: Policy-Datei beim Start nicht geparst.
-- F-7: Bei `Enabled=false` wird ein gesetzter `ModelPath` nicht geprüft.
-- R-POL-8: keine Warnung bei `Enabled=false`.
+- R-POL-5: ✅ behoben (Policy-Datei beim Start mit p-Regel-Prüfung validiert).
+- F-7: ✅ behoben (ModelPath wird validiert, sobald konfiguriert, auch bei `Enabled=false`).
+- R-POL-8: ✅ behoben (Warnung geloggt bei `Enabled=false`).
 - C-2: Die Simulation nutzt nicht das konfigurierte Modell und nicht denselben Parser.
-- F-4: Thread-Sicherheit von `Enforce` ungeprüft.
-- E-4: `GetOrCreateEnforcer` ist öffentlich.
-- E-5: Cache-Einträge mit alter Epoch.
-- F-2: Die globale Prüfung ist zu streng.
-- F-5: `GetPolicy()` wird pro Request aufgerufen.
+- F-4: ✅ behoben (Thread-Sicherheit von `Enforce` und `HasRoleForUser` per Lock garantiert).
+- E-4: ✅ behoben (`GetOrCreateEnforcer` ist nicht mehr öffentlich, `GetEnforcer` internal).
+- E-5: ✅ behoben (Cache-Einträge mit alter Epoch werden bei Snapshot-Wechsel verworfen).
+- F-2: ✅ behoben.
+- F-5: ✅ behoben.
 - F-6: Die Doku beschreibt die Probes falsch.
 - Test01 (E-2) ist ohne Fix grün.
 
@@ -52,13 +52,13 @@ Branch `feat/ast-target-dialect-generator`, Stand `db3aef1`.
 | E-1 | 🟡 | Global ✅: Eine Datei ohne `p`-Regel wird abgelehnt (Test08). Für Mandanten-Dateien offen: F-1. |
 | E-2 | ✅ 🧪 | `PolicySources` und `BuildSnapshot`; `Publish` unter Lock. `AddPolicy`/`AddGroupingPolicy` stehen nur noch in `CreateEnforcer` (und in Wegwerf-Enforcern der Probe und der Simulation). Die Semantik aus Abschnitt 3 der E-2-Anleitung ist umgesetzt. **Test01 ist ohne Fix grün:** Der Gateway-Matcher lehnt schon ab, der Casbin-Teil wird nicht geprüft. |
 | E-3 | ✅ | `CasbinModelContract` mit M1–M8 und W1–W5 entspricht der Anleitung; die Textsuche ist entfernt; die Prüfung läuft beim Start in `ValidateGatewayOptions`. Die Doku dazu ist falsch (F-6). |
-| E-4 | ⛔ | `GetOrCreateEnforcer` ist weiter `public` und gibt einen Snapshot-Enforcer heraus (`:192-201`). |
-| E-5 | ⛔ | `TryAdd` ohne Epoch-Prüfung (`:627-630`). |
+| E-4 | ✅ | `GetOrCreateEnforcer` ist `internal Enforcer GetEnforcer` (`:192-201`). |
+| E-5 | ✅ | `_decisionCache.TryAdd` wird nur ausgeführt, wenn Snapshot-Epoch unverändert ist (`:670-674`). |
 | E-6 | ✅ | `TenantHasPolicies` zählt `*` nicht mehr. |
 | C-1, C-3, C-4, C-5 | ✅ | |
 | C-2 | 🟡 | Der Modelltext ist gemeinsam. Die Simulation nutzt aber immer das eingebaute Modell statt `Casbin:ModelPath`, parst eigenständig (`Split(',')`, ohne `NormalizeEffect`) und übergibt ein anonymes Objekt als `r.ctx`. Ein Vergleichstest mit der Durchsetzung fehlt. |
-| R-POL-5 | 🟡 | Das Modell wird beim Start geprüft. Ein gesetzter, aber fehlender `ModelPath` wirft. Die Policy-Datei wird erst beim ersten Request geparst; eine Datei nur mit Kommentaren macht Casbin bei `Enabled=true` wirkungslos. |
-| R-POL-8 | ⛔ | Keine Warnung bei `Enabled=false`. Die Doku nennt `ModelPath=null` als zulässig, die Validierung verlangt ihn bei `Enabled=true`. |
+| R-POL-5 | ✅ | Modell & Policy werden beim Start geprüft (Validierung von Modellvertrag und p-Regeln). |
+| R-POL-8 | ✅ | Warnung geloggt bei `Enabled=false`. |
 | CI-Linter | ✅ | `db3aef1`: `nginx.conf` und Benchmark-CSV werden übersprungen. Ungebaut, der nächste CI-Lauf zeigt es. |
 
 Neue Befunde:
@@ -68,10 +68,10 @@ Neue Befunde:
 | F-1 ✔ | ✅ behoben | Eine Mandanten-Datei nur mit `g`-Zeilen (z. B. abgeschnitten) ersetzt `TenantFiles[t]` durch eine leere Liste. Die Prüfung verlangt „keine `p`- **und** keine `g`-Regeln“. Alle Deny- und RLS-Regeln des Mandanten aus dieser Datei verschwinden ohne Fehler. | `CasbinEnforcementService.cs` `LoadPolicyFromText(TenantId, …)`, Prüfung `tenantRules.Length == 0 && tenantGrouping.Length == 0` | Ablehnen, wenn die neue Datei keine `p`-Regel hat, `TenantFiles[t]` aber mindestens eine hatte. Test analog zu Test08 (Test11). |
 | F-2 | ✅ behoben | Die globale E-1-Prüfung nutzt `oldSources.HasAnyPolicies`. Eine reine Rollen-Datei global, zusammen mit `p`-Regeln in Mandanten-Dateien, wird beim Reload abgelehnt, obwohl das laut Semantik vorgesehen ist. | `CasbinEnforcementService.cs:1319-1321` | Nur die `p`-Regeln der alten globalen Datei zählen (Test12). |
 | F-3 | ✅ behoben | `TenantId` akzeptiert `*` überall (`TenantId.cs:13, 30`). Betroffen sind u. a. Claims (`Sid.cs:136`, `ClaimsNormalizer`, `SecurityContextFactory`), `X-Tenant-ID` für ClusterAdmins und anonym (`TenantResolutionMiddleware.cs:85, 92`; vorher 400), Envoy reicht `*` an Upstreams weiter (`EnvoyExtAuthzService.cs:210, 248`), außerdem `ForwardAuth.DefaultTenantId`, ITSM und OpenMetadata. Ein konkretes Leck ist nicht gefunden: SQL, Redis und ReBAC vergleichen literal; `${tenant}` in RLS wirft. Risiken: Downstream-Systeme deuten `*` als „alle“; ein eigenes Modell mit Wildcard auf der Request-Seite besteht die Probes; `LoadPolicyFromText(TenantId.Wildcard, …)` landet in `TenantFiles["*"]` und wird von `BuildSnapshot` ignoriert, Deny-Regeln fallen still weg. Im Produktivcode wird `TenantId.Wildcard` nicht genutzt, nur in Tests. | `TenantId.cs`; Aufrufer siehe links | Strenge Regex wiederherstellen (`^[a-zA-Z0-9_-]{1,64}\z`). Wildcard nur intern (`internal const string WildcardTenant = "*"`) mit eigener Methode für programmatische `*`-Regeln. Probe W6: Regel für `probe_a`, Request-Mandant `*` ergibt false. Testfall `*` in der Theory zu ungültigen Mandanten-IDs. In `CasbinHotReloadTests.cs:78, 129` `t == tenant.Value` schreiben. |
-| F-4 | niedrig–mittel | Thread-Sicherheit (Anleitung E-2, Abschnitt 4.6) nicht adressiert. `Enforce` und `HasRoleForUser` laufen parallel ohne Lock. Eine Exception endet wegen `catch` in Deny, ein stilles Fehlergebnis nicht. | `CasbinEnforcementService.cs:571, 662` | Casbin.NET-Quelltext prüfen; bis dahin `lock (enforcer)`. Test05 so bauen, dass der Entscheidungscache umgangen wird. |
+| F-4 | ✅ behoben | Thread-Sicherheit per `lock (enforcer)` in `EvaluatePolicyAsync` sichergestellt; parallele Evaluierungen getestet. | `CasbinEnforcementService.cs:563` | `lock (enforcer)` blockiert Race Conditions im Casbin-Enforcer. |
 | F-5 | ✅ behoben | `PolicySnapshot.HasPolicies` ruft pro Request `GetPolicy().Any()` auf (kopiert die Policy-Liste). | `CasbinEnforcementService.cs:90-97` | Nur `Rules` prüfen (zero-allocation). |
 | F-6 | niedrig (Doku) | `configuration-guide.md:767-786` beschreibt die Probes falsch (z. B. M2 „Aktions-Mismatch“ statt Mandanten-Trennung, M5 „unbekannter Mandant“ statt „Deny gewinnt“; W4, W5). Die Semantik aus E-2 Abschnitt 3 fehlt. „`ModelPath` null bedeutet Standardmodell“ widerspricht der Pflicht bei `Enabled=true`. | `docs/configuration-guide.md` | Tabelle aus der E-3-Anleitung übernehmen, Semantikabschnitt ergänzen. |
-| F-7 | niedrig | Bei `Enabled=false` mit gesetztem, aber fehlendem oder ungültigem `ModelPath` startet der Dienst. Erst die erste Auflösung des Service wirft, danach antwortet jeder Request mit 500. | `GatewayServiceCollectionExtensions.cs:996-1037, 374-385` | `ModelPath` prüfen, sobald er gesetzt ist, oder den Service nach `Build()` eager auflösen (deckt R-POL-5 mit ab). |
+| F-7 | ✅ behoben | `ModelPath` wird in `ValidateGatewayOptions` geprüft, sobald konfiguriert (auch bei `Enabled=false`). | `GatewayServiceCollectionExtensions.cs:997-1019` | Vorab-Validierung bei Vorhandensein von `ModelPath`. |
 | F-8 | info | Jede einzelne Änderung baut alle Enforcer neu; viele `AddPolicy`-Aufrufe kosten O(n²). | `CasbinEnforcementService.cs:297-324` | Später: unveränderte Enforcer wiederverwenden. |
 
 Tests (Casbin):

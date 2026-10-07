@@ -847,6 +847,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         }
 
         DbTransaction? tx = null;
+        bool txCommitted = false;
         try
         {
             // Real Database Execution
@@ -908,7 +909,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             if (dmlContext.IsDml)
             {
                 await ExecuteDmlInTransactionAsync(connection, command, tx, tenantId, user, dsName, dmlContext, securedSql, ct).ConfigureAwait(false);
-                tx = null;
+                txCommitted = true;
 
                 // DML produces no result set; hand an empty reader to the writer (same shape as before).
                 using var emptyTable = new DataTable();
@@ -925,13 +926,13 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             if (tx != null)
             {
                 await tx.CommitAsync(ct).ConfigureAwait(false);
-                tx = null;
+                txCommitted = true;
             }
             return securedSql;
         }
         catch (Exception)
         {
-            if (tx != null)
+            if (tx != null && !txCommitted)
             {
                 try
                 {
@@ -979,32 +980,59 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         long maxAffectedRows = _options.Value.WebSql.MaxAffectedRows;
         int affectedRows;
 
+        bool ownsTx = existingTx == null;
         DbTransaction transaction = existingTx ?? await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         command.Transaction = transaction;
 
         try
         {
-            affectedRows = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            try
+            {
+                affectedRows = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                try
+                {
+                    await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception rbEx)
+                {
+                    _logger?.LogWarning(rbEx, "Failed to rollback WebSQL DML transaction.");
+                }
+
+                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_FAILED", "DENY", securedSql, affectedRows: null, reason: ex.GetType().Name, synthetic: false, ct).ConfigureAwait(false);
+                throw;
+            }
+
+            if (maxAffectedRows > 0 && (affectedRows < 0 || affectedRows > maxAffectedRows))
+            {
+                try
+                {
+                    await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception rbEx)
+                {
+                    _logger?.LogWarning(rbEx, "Failed to rollback WebSQL DML transaction after row limit exceeded.");
+                }
+
+                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_REJECTED", "DENY", securedSql, affectedRows, reason: "MaxAffectedRows exceeded; rolled back", synthetic: false, ct).ConfigureAwait(false);
+
+                throw new WebSqlPolicyException(affectedRows < 0
+                    ? "The number of rows affected by the DML statement could not be verified against WebSql.MaxAffectedRows. The statement was rolled back."
+                    : $"The DML statement affected {affectedRows} rows, which exceeds the configured limit of {maxAffectedRows} (WebSql.MaxAffectedRows). The statement was rolled back.");
+            }
+
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_EXECUTED", "ALLOW", securedSql, affectedRows, reason: null, synthetic: false, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        finally
         {
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_FAILED", "DENY", securedSql, affectedRows: null, reason: ex.GetType().Name, synthetic: false, ct).ConfigureAwait(false);
-            throw;
+            if (ownsTx)
+            {
+                await transaction.DisposeAsync().ConfigureAwait(false);
+            }
         }
-
-        if (maxAffectedRows > 0 && (affectedRows < 0 || affectedRows > maxAffectedRows))
-        {
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_REJECTED", "DENY", securedSql, affectedRows, reason: "MaxAffectedRows exceeded; rolled back", synthetic: false, ct).ConfigureAwait(false);
-
-            throw new WebSqlPolicyException(affectedRows < 0
-                ? "The number of rows affected by the DML statement could not be verified against WebSql.MaxAffectedRows. The statement was rolled back."
-                : $"The DML statement affected {affectedRows} rows, which exceeds the configured limit of {maxAffectedRows} (WebSql.MaxAffectedRows). The statement was rolled back.");
-        }
-
-        await transaction.CommitAsync(ct).ConfigureAwait(false);
-        await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_EXECUTED", "ALLOW", securedSql, affectedRows, reason: null, synthetic: false, ct).ConfigureAwait(false);
     }
 
     /// <summary>
