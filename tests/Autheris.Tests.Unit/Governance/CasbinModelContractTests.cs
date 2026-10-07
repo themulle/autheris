@@ -212,7 +212,7 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
             using var casbin = new CasbinEnforcementService(tempFile);
 
             var ex = Should.Throw<InvalidOperationException>(() =>
-                casbin.AddPolicy(new TenantId("*"), "alice", "hr.employees", "read"));
+                casbin.AddWildcardPolicy("alice", "hr.employees", "read"));
 
             ex.Message.ShouldContain("W1");
             ex.Message.ShouldContain("Wildcard-Mandanten");

@@ -439,4 +439,30 @@ public class DomainAndModelEdgeCasesTests
     }
 
     #endregion
+
+    #region TenantId Edge Cases
+
+    [Fact]
+    public void TenantId_WildcardAsterisk_ThrowsArgumentException_AndTryParseReturnsFalse()
+    {
+        // F-3: External wildcard '*' is strictly forbidden at domain boundary
+        Should.Throw<ArgumentException>(() => new TenantId("*"));
+        TenantId.TryParse("*", out _).ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("tenant-1")]
+    [InlineData("TENANT_CORP_123")]
+    [InlineData("a")]
+    [InlineData("legacy-single-tenant")]
+    public void TenantId_ValidInputs_PassValidationAndPreserveValue(string validVal)
+    {
+        var tenant = new TenantId(validVal);
+        tenant.Value.ShouldBe(validVal);
+        tenant.ToString().ShouldBe(validVal);
+        TenantId.TryParse(validVal, out var parsed).ShouldBeTrue();
+        parsed.ShouldBe(tenant);
+    }
+
+    #endregion
 }

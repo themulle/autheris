@@ -271,7 +271,7 @@ public sealed class CasbinSnapshotImmutabilityTests
         casbin.LoadPolicyFromText(TenantA, "p, alice, tenant-a, hr.dbo.employees, read, true, allow\n");
 
         // Programmatic AddPolicy with wildcard tenant '*'
-        casbin.AddPolicy(new TenantId("*"), "charlie", "hr.dbo.employees", "read", "true", "allow");
+        casbin.AddWildcardPolicy("charlie", "hr.dbo.employees", "read", "true", "allow");
 
         // Charlie should now be allowed for tenant-a
         var decision = await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "charlie", HrTable));
@@ -301,5 +301,42 @@ public sealed class CasbinSnapshotImmutabilityTests
 
         // Programmatic rule for bob must be gone
         (await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "bob", HrTable))).IsAllowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Test11_F1_TenantFileWithOnlyGroupingRulesWhenPoliciesActive_ThrowsInvalidOperationException_AndPreservesSnapshot()
+    {
+        using var casbin = new CasbinEnforcementService();
+
+        // Tenant A has active p-rules in its tenant file
+        casbin.LoadPolicyFromText(TenantA, "p, alice, tenant-a, hr.dbo.employees, read, true, allow\n");
+
+        // Reloading tenant file with only grouping rules (e.g. truncated file) must be rejected fail-closed
+        Should.Throw<InvalidOperationException>(() =>
+            casbin.LoadPolicyFromText(TenantA, "g, alice, role:viewer\n"));
+
+        // Prior policy must remain active
+        var aliceEval = await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "alice", HrTable));
+        aliceEval.IsAllowed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Test12_F2_GlobalReloadWithOnlyGroupingRules_AllowedWhenGlobalHadNoPRulesEvenIfTenantsHaveRules()
+    {
+        using var casbin = new CasbinEnforcementService();
+
+        // Global file initially has only grouping rules, no p-rules
+        casbin.LoadPolicyFromText("g, alice, role:viewer\n");
+
+        // Tenant A has active p-rules
+        casbin.LoadPolicyFromText(TenantA, "p, role:viewer, tenant-a, hr.dbo.employees, read, true, allow\n");
+
+        // Global reload with another g-rule should NOT throw, because global source never had p-rules
+        Should.NotThrow(() =>
+            casbin.LoadPolicyFromText("g, alice, role:viewer\ng, bob, role:viewer\n"));
+
+        // Both alice and bob should now be allowed for tenant-a
+        (await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "alice", HrTable))).IsAllowed.ShouldBeTrue();
+        (await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "bob", HrTable))).IsAllowed.ShouldBeTrue();
     }
 }

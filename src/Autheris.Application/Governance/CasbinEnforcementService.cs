@@ -90,12 +90,12 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
         public bool HasPolicies(string tenant)
         {
             if (Rules.TryGetValue(tenant, out var r) && r.Length > 0) return true;
-            if (Enforcers.TryGetValue(tenant, out var e) && e.GetPolicy().Any()) return true;
-            if (Rules.TryGetValue("*", out var wr) && wr.Length > 0) return true;
-            if (WildcardEnforcer.GetPolicy().Any()) return true;
+            if (Rules.TryGetValue(WildcardTenant, out var wr) && wr.Length > 0) return true;
             return false;
         }
     }
+
+    public const string WildcardTenant = "*";
 
     private PolicySources _sources = PolicySources.Empty;
     private PolicySnapshot _currentSnapshot;
@@ -447,6 +447,50 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 : ImmutableArray<GroupingRule>.Empty;
             var nextList = currentList.Add(grouping);
             var nextDict = src.ProgrammaticGrouping.SetItem(tenant.Value, nextList);
+            return src with { ProgrammaticGrouping = nextDict };
+        });
+    }
+
+    public void AddWildcardPolicy(
+        string sub,
+        string obj,
+        string act,
+        string subRule = "true",
+        string eft = "allow",
+        string? rlsFilter = null,
+        ConsentRowFilter? correlatedRowFilter = null)
+    {
+        ValidateSubRuleTokens(subRule, rlsFilter);
+
+        if (!_modelSupportsWildcardTenant)
+        {
+            throw new InvalidOperationException("Das Casbin-Modell unterstützt keine Wildcard-Mandanten (Probe W1). `*`-Regeln sind nicht erlaubt.");
+        }
+
+        var ruleMeta = new CasbinRuleMetadata(sub, WildcardTenant, obj, act, subRule, eft, rlsFilter, correlatedRowFilter);
+
+        Publish(src =>
+        {
+            var currentList = src.ProgrammaticRules.TryGetValue(WildcardTenant, out var list)
+                ? list
+                : ImmutableArray<CasbinRuleMetadata>.Empty;
+            var nextList = currentList.Add(ruleMeta);
+            var nextDict = src.ProgrammaticRules.SetItem(WildcardTenant, nextList);
+            return src with { ProgrammaticRules = nextDict };
+        });
+    }
+
+    public void AddWildcardRoleForUser(string user, string role)
+    {
+        var grouping = new GroupingRule(user, role);
+
+        Publish(src =>
+        {
+            var currentList = src.ProgrammaticGrouping.TryGetValue(WildcardTenant, out var list)
+                ? list
+                : ImmutableArray<GroupingRule>.Empty;
+            var nextList = currentList.Add(grouping);
+            var nextDict = src.ProgrammaticGrouping.SetItem(WildcardTenant, nextList);
             return src with { ProgrammaticGrouping = nextDict };
         });
     }
@@ -1256,6 +1300,15 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 var tenantRules = newSources.TenantFiles.TryGetValue(tenant.Value, out var r) ? r : ImmutableArray<CasbinRuleMetadata>.Empty;
                 var tenantGrouping = newSources.TenantGrouping.TryGetValue(tenant.Value, out var g) ? g : ImmutableArray<GroupingRule>.Empty;
 
+                bool hadRules = oldSources.TenantFiles.TryGetValue(tenant.Value, out var oldR) && oldR.Length > 0;
+                if (tenantRules.Length == 0 && hadRules)
+                {
+                    _logger?.LogWarning("Casbin tenant policy reload rejected: the new policy set has no 'p' rules while active policies exist for tenant {Tenant}. Preserving last-known-good.", tenant.Value);
+                    throw new InvalidOperationException(
+                        $"Casbin policy reload rejected: the new policy set has no 'p' rules while active policies exist for tenant '{tenant.Value}'. " +
+                        "The last-known-good policy set remains active.");
+                }
+
                 if (tenantRules.Length == 0 && tenantGrouping.Length == 0 && oldSources.TenantHasPolicies(tenant.Value))
                 {
                     _logger?.LogWarning("Casbin tenant policy reload rejected: empty policy while active policies exist for tenant {Tenant}. Preserving last-known-good.", tenant.Value);
@@ -1317,8 +1370,9 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             (oldSources, newSources) =>
             {
                 int totalPRules = newSources.GlobalRules.Values.Sum(r => r.Length);
+                int oldGlobalPRules = oldSources.GlobalRules.Values.Sum(r => r.Length);
 
-                if (oldSources.HasAnyPolicies && totalPRules == 0)
+                if (oldGlobalPRules > 0 && totalPRules == 0)
                 {
                     if (newSources.GlobalRules.Count == 0 && newSources.GlobalGrouping.Length == 0)
                     {
