@@ -684,6 +684,7 @@ public static class GatewayServiceCollectionExtensions
         // 2. Traefik / Kubernetes Ingress ForwardAuth
         authBuilder.AddScheme<AuthenticationSchemeOptions, ForwardAuthAuthenticationHandler>(
             GatewayAuthSchemes.ForwardAuth, _ => { });
+        services.AddHostedService<ForwardAuthSecretStartupValidator>();
 
         // 3. Windows Negotiate (Kerberos / NTLM) or TestAuthHandler
         bool isTestAuthAllowed = environment.IsDevelopment() &&
