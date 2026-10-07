@@ -190,26 +190,28 @@ Speicherort für Metadaten, Freigaben, Delegationen, Vier-Augen-Genehmigungen un
 
 ### 2.4 `DataSources` (Backend-Fachdatenbanken & RLS-Pushdown)
 
-Konfiguriert echte relationale Datenbank-Backends für die abgefragten Fachdaten. Das Gateway unterstützt über `ISqlConnectionFactory` die Provider `"SqlServer"`, `"PostgreSql"`, `"Sqlite"`, `"Oracle"` und `"Databricks"`. 
+Konfiguriert echte relationale Datenbank-Backends für die abgefragten Fachdaten. Das Gateway unterstützt über `ISqlConnectionFactory` die Provider `"SqlServer"`, `"PostgreSql"` und `"Sqlite"`. 
 
 Im Gegensatz zu synthetischen Stubs führt der `SqlDataSourceExecutor` echte SQL-Queries aus und **pushed Row-Level Security (RLS) Filter direkt als WHERE-Klausel in die Datenbank**:
 
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
-| `DataSources:{sourceName}:Provider` | `string` | `"SqlServer"`, `"PostgreSql"`, `"Sqlite"` | `"SqlServer"` | Datenbank-Treiber für die Ziel-Datenquelle. |
-| `DataSources:{sourceName}:ConnectionString` | `string` | ADO.NET ConnStr | `""` | Verbindungszeichenfolge zur Zieldatenbank. |
+| `DataSources:Connections:{sourceName}:Provider` | `string` | `"SqlServer"`, `"PostgreSql"`, `"Sqlite"` | `"Sqlite"` | Datenbank-Treiber für die Ziel-Datenquelle. |
+| `DataSources:Connections:{sourceName}:ConnectionString` | `string` | ADO.NET ConnStr | `""` | Verbindungszeichenfolge zur Zieldatenbank. DEP-7: außerhalb von Development verlangt der Start bei PostgreSQL `SSL Mode=VerifyFull` (oder `VerifyCA`), bei SQL Server `Encrypt=Mandatory`/`Strict` ohne `TrustServerCertificate=true`. |
 | `DataSources:RequireTenantColumn` | `bool` | `true`, `false` | `false` | Review E-5: when `true`, a table without a tenant column (`tenant_id`, `TenantId`, ...) is refused fail-closed instead of being read unscoped. |
 | `DataSources:TenantColumnExemptTables` | `string[]` | `schema.table` or `table` | `[]` | Tables that are deliberately shared across tenants and therefore exempt from `RequireTenantColumn`. |
 
 ```json
 "DataSources": {
-  "finance": {
-    "Provider": "SqlServer",
-    "ConnectionString": "Server=sql-finance.corp.local;Database=FinanceDb;Integrated Security=SSPI;TrustServerCertificate=true;"
-  },
-  "hr": {
-    "Provider": "PostgreSql",
-    "ConnectionString": "Host=pg-hr.corp.local;Port=5432;Database=HrDb;Username=gql_app;Password=SuperSecretPass!;SSL Mode=Require;"
+  "Connections": {
+    "finance": {
+      "Provider": "SqlServer",
+      "ConnectionString": "Server=sql-finance.corp.local;Database=FinanceDb;Integrated Security=SSPI;Encrypt=Mandatory;TrustServerCertificate=false;"
+    },
+    "hr": {
+      "Provider": "PostgreSql",
+      "ConnectionString": "Host=pg-hr.corp.local;Port=5432;Database=HrDb;Username=gql_app;Password=<secret>;SSL Mode=VerifyFull;"
+    }
   }
 }
 ```
@@ -810,8 +812,8 @@ Gateway__Authentication__RequireKerberosOnly=true
 Gateway__Authentication__EnableTestAuthHandler=false
 
 # Governance-Datenbank
-Gateway__GovernanceDb__Provider=SqlServer
-Gateway__GovernanceDb__ConnectionString="Server=sql-ha.corp.local;Database=Governance;Integrated Security=SSPI;TrustServerCertificate=True;"
+Gateway__GovernanceDb__Provider=PostgreSql
+Gateway__GovernanceDb__ConnectionString="Host=pg-ha.corp.local;Database=governance;Username=autheris_app;Password=<secret>;SSL Mode=VerifyFull"
 
 # Caching & Redis Cluster
 Gateway__Caching__Redis__Configuration="redis-ha.corp.local:6379,abortConnect=false,ssl=true,password=SecretRedisPass!"
