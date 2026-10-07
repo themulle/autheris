@@ -128,21 +128,7 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
         ConsentRowFilter? CorrelatedRowFilter = null
     );
 
-    public CasbinEnforcementService(
-        string? modelConfigPath = null,
-        IRlsFilterGenerator? rlsFilterGenerator = null,
-        ILogger<CasbinEnforcementService>? logger = null)
-    {
-        _logger = logger;
-        _rlsFilterGenerator = rlsFilterGenerator ?? RlsFilterGenerator.Instance;
-
-        if (!string.IsNullOrWhiteSpace(modelConfigPath) && File.Exists(modelConfigPath))
-        {
-            _modelText = File.ReadAllText(modelConfigPath);
-        }
-        else
-        {
-            _modelText = @"
+    internal const string DefaultModelText = @"
 [request_definition]
 r = sub, tenant, obj, act, ctx
 
@@ -158,14 +144,36 @@ e = some(where (p.eft == allow)) && !some(where (p.eft == deny))
 [matchers]
 m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(r.obj, p.obj) && (r.act == p.act || p.act == ""*"") && eval(p.sub_rule)
 ";
+
+    public CasbinEnforcementService(
+        string? modelConfigPath = null,
+        IRlsFilterGenerator? rlsFilterGenerator = null,
+        ILogger<CasbinEnforcementService>? logger = null)
+    {
+        _logger = logger;
+        _rlsFilterGenerator = rlsFilterGenerator ?? RlsFilterGenerator.Instance;
+
+        string modelSource;
+        if (!string.IsNullOrWhiteSpace(modelConfigPath))
+        {
+            if (!File.Exists(modelConfigPath))
+            {
+                throw new FileNotFoundException($"Casbin model config file not found: {modelConfigPath}", modelConfigPath);
+            }
+            _modelText = File.ReadAllText(modelConfigPath);
+            modelSource = $"file '{modelConfigPath}'";
+        }
+        else
+        {
+            _modelText = DefaultModelText;
+            modelSource = "embedded default";
         }
 
-        _modelSupportsWildcardTenant = _modelText.Contains("p.tenant == \"*\"") ||
-                                       _modelText.Contains("p.tenant == '*\"") ||
-                                       _modelText.Contains("p.tenant == \"*'\"") ||
-                                       _modelText.Contains("p.tenant == '*'") ||
-                                       _modelText.Contains("p.tenant==\"*\"") ||
-                                       _modelText.Contains("p.tenant=='*'");
+        var capabilities = CasbinModelContract.Verify(_modelText);
+        _modelSupportsWildcardTenant = capabilities.SupportsWildcardTenant;
+
+        _logger?.LogInformation("Casbin model loaded from {ModelSource}. SupportsWildcardTenant: {SupportsWildcardTenant}", modelSource, _modelSupportsWildcardTenant);
+
         var initialWildcardEnforcer = new Enforcer(DefaultModel.CreateFromText(_modelText));
         _currentSnapshot = new PolicySnapshot(
             FrozenDictionary<string, Enforcer>.Empty,
@@ -401,7 +409,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
         if (tenant.Value == "*" && !_modelSupportsWildcardTenant)
         {
-            throw new InvalidOperationException("Casbin model does not support wildcard tenant rules ('*'). The model matcher must include 'p.tenant == \"*\"'.");
+            throw new InvalidOperationException("Das Casbin-Modell unterstützt keine Wildcard-Mandanten (Probe W1). `*`-Regeln sind nicht erlaubt.");
         }
 
         var ruleMeta = new CasbinRuleMetadata(sub, tenant.Value, obj, act, subRule, eft, rlsFilter, correlatedRowFilter);
@@ -1171,7 +1179,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
                     if (ruleTenant == "*" && !_modelSupportsWildcardTenant)
                     {
-                        throw new InvalidOperationException($"Casbin model does not support wildcard tenant rules ('{ruleTenant}'). The model matcher must include 'p.tenant == \"*\"'.");
+                        throw new InvalidOperationException("Das Casbin-Modell unterstützt keine Wildcard-Mandanten (Probe W1). `*`-Regeln sind nicht erlaubt.");
                     }
 
                     obj = parts.Count > 3 ? parts[3] : "*";

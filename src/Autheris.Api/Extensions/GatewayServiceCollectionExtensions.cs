@@ -1009,6 +1009,15 @@ public static class GatewayServiceCollectionExtensions
                 throw new ValidationException($"Casbin ist aktiviert, aber Model-Datei '{options.Casbin.ModelPath}' ist leer.");
             }
 
+            try
+            {
+                CasbinModelContract.Verify(File.ReadAllText(options.Casbin.ModelPath));
+            }
+            catch (CasbinModelValidationException ex)
+            {
+                throw new ValidationException($"Casbin-Modell '{options.Casbin.ModelPath}' erfüllt den Gateway-Vertrag nicht: {string.Join("; ", ex.Violations)}", ex);
+            }
+
             if (string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
                 throw new ValidationException("Casbin ist aktiviert (Gateway:Casbin:Enabled = true), aber Casbin:PolicyPath ist nicht konfiguriert.");
