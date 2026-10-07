@@ -39,6 +39,13 @@ using Xunit;
 /// </summary>
 public sealed class SecurityReview20261002WebSqlTests
 {
+    private static Microsoft.Extensions.Hosting.IHostEnvironment CreateDevEnvironment()
+    {
+        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        return env;
+    }
+
     private const string Tenant = "tenant_a";
     private const string HmacSecretRef = "GQL-HMAC-SECRET-KEY";
     private const string HmacSecretValue = "super-secret-hmac-value-0123456789";
@@ -213,7 +220,7 @@ public sealed class SecurityReview20261002WebSqlTests
             auditLogRepository: auditLog,
             connectionFactory: null,
             clientIpResolver: null,
-            environment: null,
+            environment: CreateDevEnvironment(),
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: withConsentServices ? (consentRepository ?? CreateConsentRepository()) : null,
             secretProvider: secretProvider);
@@ -468,7 +475,7 @@ public sealed class SecurityReview20261002WebSqlTests
             Arguments: new Dictionary<string, object?> { ["name"] = "Alice" },
             RequestedFields: ["id", "name"]);
 
-        var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance);
+        var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance, environment: CreateDevEnvironment());
 
         var rows = await executor.ExecuteAsync(context);
         rows.ShouldNotBeNull();

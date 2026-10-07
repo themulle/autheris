@@ -75,8 +75,9 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
     {
         GatewayInvalidQueryException e => (StatusCodes.Status400BadRequest, e.Message, null),
         GatewayThrottledException e => (StatusCodes.Status429TooManyRequests, "Too many concurrent requests. Retry later.", e.RetryAfterSeconds),
+        GatewayNotImplementedException e => (StatusCodes.Status501NotImplemented, e.Message, null),
         GatewayUnsupportedColumnTypeException e => (StatusCodes.Status501NotImplemented, e.Message, null),
-        NotSupportedException e => (StatusCodes.Status501NotImplemented, e.Message, null),
+        NotSupportedException => (StatusCodes.Status501NotImplemented, "The requested operation is not supported.", null),
         GatewayUnauthorizedException => (StatusCodes.Status401Unauthorized, "Authentication required.", null),
         GatewaySecurityException { ErrorCode: "RESPONSE_TOO_LARGE" } => (StatusCodes.Status400BadRequest, "The response exceeds the size limit.", null),
         GatewaySecurityException => (StatusCodes.Status403Forbidden, "Access denied.", null),

@@ -37,7 +37,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly Autheris.Application.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
-    private readonly IDataSourceExecutor _defaultSqlExecutor = new SqlDataSourceExecutor();
 
     /// <summary>O10: Retry-After for a throttled read; the typical duration of a slow read is the query timeout.</summary>
     private const int ThrottledRetryAfterSeconds = 2;
@@ -156,14 +155,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         var executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
         if (executor == null)
         {
-            if (metadata.Table.DataSourceType == DataSourceType.Sql)
-            {
-                executor = _defaultSqlExecutor;
-            }
-            else
-            {
-                throw new NotSupportedException($"Für den DataSourceType '{metadata.Table.DataSourceType}' ist kein Executor registriert.");
-            }
+            throw new GatewayNotImplementedException($"Für den DataSourceType '{metadata.Table.DataSourceType}' ist kein Executor registriert.");
         }
 
         var execArgs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)

@@ -123,13 +123,19 @@ public class PipelineAndInfrastructureSecurityTests
             Arg.Any<DatabaseDialect>())
             .Returns(decision);
 
+        var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        devEnv.EnvironmentName.Returns("Development");
+        var sqlExecutor = new SqlDataSourceExecutor(environment: devEnv);
+
         var executionService = new GatewayExecutionService(
             repository,
             resolutionService,
             cacheService,
             maskingProvider,
             null,
-            null);
+            null,
+            null,
+            dataSourceExecutors: [sqlExecutor]);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {

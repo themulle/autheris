@@ -97,14 +97,13 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         // If no real connection is configured, or connection factory is missing, execute synthetic demo data generator (fallback for dev & unit tests)
         if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString) || _connectionFactory == null)
         {
-            bool isDevOrTest = _environment == null ||
-                               string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
-                               string.Equals(_environment.EnvironmentName, "Test", StringComparison.OrdinalIgnoreCase);
+            bool isDev = _environment != null &&
+                         string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
             bool isExplicitlyAllowed = _options?.Value?.AreExternalSystemsMockedIfUnreachable == true;
 
-            if (!isDevOrTest && !isExplicitlyAllowed)
+            if (!isDev && !isExplicitlyAllowed)
             {
-                throw new NotSupportedException($"Die SQL-Datenquelle '{context.SourceName}' besitzt keine gültige Datenbankverbindung. Synthetischer Daten-Fallback ist in Produktivumgebungen deaktiviert.");
+                throw new GatewayNotImplementedException($"Die SQL-Datenquelle '{context.SourceName}' besitzt keine aktive Datenbankverbindung. Synthetischer Daten-Fallback ist außerhalb der Development-Umgebung deaktiviert.");
             }
 
             return GenerateSyntheticRows(context);
