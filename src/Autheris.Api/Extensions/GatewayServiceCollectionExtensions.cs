@@ -91,6 +91,9 @@ public static class GatewayServiceCollectionExtensions
             .Bind(configuration.GetSection(GatewayOptions.SectionName))
             .ValidateDataAnnotations()
             .Validate(opts =>
+                Enum.IsDefined(opts.RowFilters.SubqueryStrategy),
+                "Gateway:RowFilters:SubqueryStrategy muss Exists, InCorrelated oder In sein.")
+            .Validate(opts =>
                 opts.HighAvailability.ShutdownTimeoutSeconds >= opts.HighAvailability.QueryTimeoutSeconds + 10,
                 "NF-HA-01 Verletzung: ShutdownTimeoutSeconds muss mindestens 10s größer als QueryTimeoutSeconds sein.")
             .Validate(opts =>
@@ -425,6 +428,8 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.Application.Connectors.Streaming.IStreamingResultPipeline, Autheris.Application.Connectors.Streaming.StreamingResultPipeline>();
 
         services.AddScoped<IClientIpResolver, Autheris.Api.Security.HttpContextClientIpResolver>();
+        // O10: process-wide counter of running table reads per tenant, user and table
+        services.AddSingleton<ITableReadConcurrencyGate, TableReadConcurrencyGate>();
         services.AddScoped<GatewayExecutionService>(sp => new GatewayExecutionService(
             sp.GetRequiredService<ITableMetadataRepository>(),
             sp.GetRequiredService<IConsentRepository>(),
@@ -438,7 +443,8 @@ public static class GatewayServiceCollectionExtensions
             sp.GetServices<IDataSourceExecutor>(),
             sp.GetService<IPolicyEnforcementService>(),
             sp.GetService<IClientIpResolver>(),
-            sp.GetService<Autheris.Application.Connectors.IAutherisConnectorRegistry>()));
+            sp.GetService<Autheris.Application.Connectors.IAutherisConnectorRegistry>(),
+            sp.GetService<ITableReadConcurrencyGate>()));
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddSingleton<IExecutionGuardrailService, ExecutionGuardrailService>();
         services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
@@ -839,6 +845,9 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, DevAuthorizationResultHandler>();
             services.AddProblemDetails();
         }
+        // O9: every unhandled exception becomes application/problem+json without details (all environments)
+        services.AddProblemDetails();
+        services.AddExceptionHandler<Autheris.Api.Middleware.GatewayExceptionHandler>();
         services.AddSingleton<Autheris.Application.Interfaces.IGatewayRoleEvaluator, Autheris.Application.Security.GatewayRoleEvaluator>();
         services.AddHttpContextAccessor();
 

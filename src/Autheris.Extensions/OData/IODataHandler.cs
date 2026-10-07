@@ -11,7 +11,8 @@ public sealed record ODataQueryResult(
     int StatusCode,
     object Payload,
     string? ErrorCode = null,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    int? RetryAfterSeconds = null
 );
 
 public interface IODataHandler

@@ -278,6 +278,41 @@ Authentifizierung: OAuth M2M mit Service Principal (kein PAT), Token-Cache mit A
 
 **Tests:** je Zeile der Tabelle ein Endpunkttest (`ODataEndpointsTests`, `ODataTests`); Zeitüberschreitung über einen Executor, der `SqlException` Nummer -2 wirft; Prüfung, dass keine Antwort `text/html` oder einen Stacktrace enthält (für alle Endpunkte, auch unbehandelte Ausnahmen).
 
+**Umsetzungsstand (07.10.2026, Build und Tests stehen aus):**
+- O1/O2/O13 in `GatewayExecutionService` (gilt für OData, Kernel, MCP): unbekannte oder gesperrte Spalte → `GatewayInvalidQueryException` (gleiche Meldung), Katalogschreibweise, Duplikate entfernt.
+- O3/O4 in `ODataEndpoints.ValidateSystemQueryOptions`; OpenAPI bewirbt nur `$select`, `$top`, `$skip`.
+- O5 `$count=true` → 501. O6 `$skip` > 100 000 → 400.
+- O7 `DataAccessErrorClassifier` (Fehlernummer, SQLSTATE, `IsTransient`; Text nur ohne beides) → 504/503 mit `Retry-After`.
+- O8 Abbruch durch den Client → 499 ohne Fehlerlog.
+- O9 `GatewayExceptionHandler` (`IExceptionHandler`, `UseExceptionHandler()` als erste Middleware): Problem-JSON ohne Details in allen Umgebungen. Compose bleibt `Development`, weil `Production` im PoC an Key-Vault-Pflichten scheitert.
+- O10 `TableReadConcurrencyGate`, `Gateway:DataSources:MaxConcurrentReadsPerUserAndTable` (Standard 4) → 429. Drosselung nach wiederholten Zeitüberschreitungen: offen.
+- O11 Größenprüfung schon beim Lesen (`SqlDataSourceExecutor.ReadRowsAsync`, gleiches Limit `GraphQL.MaxResponseBytes`), OData meldet 400 statt 403.
+- O12 nicht lesbarer Spaltentyp → `GatewayUnsupportedColumnTypeException` → 501 mit Spaltenname.
+- D-1: `ParseDialect` ohne stillen Rückfall (leer, unbekannt, undefinierte Zahl), SQL-Tabellen fail-closed, Nicht-SQL-Quellen neutral; Abgleich in `SqlDataSourceExecutor` mit effektivem Provider; Katalog-Synchronisation (Alation, Collibra, Purview, OpenMetadata) überschreibt einen unterstützten Dialekt nicht mehr. WebSQL und Prozedur-Row-Scope hatten den Abgleich bereits.
+
+### GraphQL im Vergleich zu Hasura (Befund 07.10.2026)
+
+Hasura übersetzt den ganzen Abfragebaum in **ein** SQL, lässt die Datenbank das JSON bauen (`FOR JSON PATH`, `json_agg`/`json_build_object`), setzt Berechtigungen je Ebene als `WHERE` mit Bind-Parametern ein und reicht das JSON unverändert durch. Autheris macht heute nichts davon:
+
+| | Hasura | Autheris heute (`QueryTypes.GetTableAsync`) |
+|---|---|---|
+| Abfrageform | ein SQL für den ganzen Baum | ein flaches SQL je Wurzelfeld, keine Joins |
+| Projektion | nur angefragte Felder | **alle** freigegebenen Spalten (`requestedFields: null`); es gibt keine typisierten Felder, `DynamicTableType` ist nicht registriert, das Ergebnis ist eine Liste von JSON-Strings |
+| Relationen | geschachtelt in einem Statement | **nicht vorhanden** (`TableRelation`/`GetRelationsForTableAsync` ungenutzt); einziger DataLoader ist Demo-Code ohne SQL |
+| Filter/Sortierung | `where`/`order_by` im SQL | nur `first`/`after` (Offset); `SqlFilterProvider` registriert, aber ungenutzt |
+| Berechtigungen | `WHERE` je Ebene, Bind-Parameter | Zeilenfilter als validierter Text im `WHERE` (Werte als Literale), danach zweite Masken-/Sperr-Runde im Speicher |
+| JSON | von der DB, durchgereicht | Reader → Dictionary → Kopie → neue Dictionary → Größenschätzung → `JsonSerializer` je Zeile → HotChocolate serialisiert die Strings erneut |
+| Vorhandener Baustein | – | `SingleQueryAstCompiler` (FOR JSON PATH / `json_agg` / `json_group_array`, RLS je Ebene Pflicht) ist registriert und aktiviert, **wird aber nirgends aufgerufen** |
+
+Folgerung: Der Ansatz kann Hasura überlegen sein (Trino-Engine mit Plan-Cache, Policy-Modell mit Einwilligungen, Masken und Audit, mehrere Dialekte), ist es heute im GraphQL-Pfad aber nicht. Vorschlag als eigener Abschnitt nach Schritt 4 (Engine-Reader):
+1. **G1 Typisiertes Schema** je Tabelle und Rolle (`DynamicTableType` registrieren; nur Spalten mit Zugriff), Feldauswahl → `requestedFields` (Projektion).
+2. **G2 Relationen** aus `TableRelation` als Navigationsfelder; Kompilierung des ganzen Auswahlbaums über die Engine zu **einem** Statement je Wurzelfeld (Ausbau von `SingleQueryAstCompiler`: Wurzel ebenfalls als JSON, PostgreSQL mit `LEFT JOIN LATERAL`, Zeilenfilter je Ebene über `RewriteRls`, Werte als Parameter).
+3. **G3 JSON-Durchreichung:** DB-JSON als Rohwert an HotChocolate (`JsonElement`/Raw-Value), Masken und HMAC dann in SQL bzw. im Gateway nur für HMAC-Spalten; keine Doppelserialisierung.
+4. **G4 `where`/`order_by`** über `SqlFilterProvider` (parametrisiert), Keyset-Paging.
+5. **G5 Kosten je Anfrage senken:** Audit-Schreiben asynchron gepuffert, Zugriffsentscheidung je Anfrage und Tabelle einmal (Memoization), Metadaten im Speicher.
+
+Messlatte wie für OData: `fms/air1` mit zwei Ebenen in unter 2 s, ein Datenbank-Roundtrip je Wurzelfeld, gleiche Zeilenmengen wie WebSQL.
+
 ## 2. Ziel
 
 SQL Server soll für Zeilenfilter dieser Art einen stabilen, schnellen Plan wählen, unabhängig von `FETCH NEXT n` und Sortierung. Dafür bekommt der Generator eine **konfigurierbare Strategie** für die Form des Filters. Die Standardform bleibt `EXISTS` (kein Verhaltenswechsel für bestehende Installationen).

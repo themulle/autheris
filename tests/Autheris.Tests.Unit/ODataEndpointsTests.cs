@@ -154,7 +154,6 @@ public sealed class ODataEndpointsTests
     [InlineData("?$count=true", true)]
     [InlineData("?$count=TRUE", true)]
     [InlineData("?$count=false", false)]
-    [InlineData("?$count=notabool", false)]
     [InlineData("", false)]
     public async Task HandleEntitySetRequestAsync_Count_ParsedCorrectly(string queryString, bool expectedCount)
     {
@@ -174,6 +173,91 @@ public sealed class ODataEndpointsTests
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
             Arg.Any<CancellationToken>()
         );
+    }
+
+    // ---- O3/O4 (docs/plans/rls-subquery-in-strategy.md): query options are never ignored silently ----
+
+    private static async Task<(int Status, string Body)> InvokeAsync(string queryString, IODataHandler handler)
+    {
+        var context = CreateHttpContext(queryString);
+        var result = await ODataEndpoints.HandleEntitySetRequestAsync("lwetem_prod", "fms", "air1", handler, context);
+        context.Response.Headers["OData-Version"].ToString().ShouldBe("4.0");
+        var status = result.ShouldBeAssignableTo<IStatusCodeHttpResult>()!.StatusCode ?? StatusCodes.Status200OK;
+        var value = (result as IValueHttpResult)?.Value;
+        return (status, value == null ? string.Empty : JsonSerializer.Serialize(value));
+    }
+
+    private static Task DidNotExecute(IODataHandler handler) =>
+        handler.DidNotReceive().ExecuteEntitySetQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(),
+            Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<bool>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+
+    [Theory]
+    [InlineData("?$filter=amount gt 1000")]
+    [InlineData("?$orderby=ts")]
+    [InlineData("?$expand=client")]
+    [InlineData("?$search=crane")]
+    [InlineData("?$apply=aggregate(ts with max as m)")]
+    [InlineData("?$compute=a add b as c")]
+    [InlineData("?$skiptoken=abc")]
+    [InlineData("?$FILTER=amount gt 1")]
+    public async Task HandleEntitySetRequestAsync_UnsupportedSystemQueryOption_Returns501(string queryString)
+    {
+        var handler = CreateMockHandler(new ODataQueryResult(true, 200, new object()));
+
+        var (status, body) = await InvokeAsync(queryString, handler);
+
+        status.ShouldBe(StatusCodes.Status501NotImplemented);
+        body.ShouldContain("NotImplemented");
+        await DidNotExecute(handler);
+    }
+
+    [Theory]
+    [InlineData("?$foo=1")]
+    [InlineData("?$topp=5")]
+    [InlineData("?$top=1&$top=1000")]
+    [InlineData("?$select=ts&$select=client_id")]
+    [InlineData("?$count=notabool")]
+    [InlineData("?$count=1")]
+    [InlineData("?$format=xml")]
+    public async Task HandleEntitySetRequestAsync_UnknownDuplicateOrInvalidOption_Returns400(string queryString)
+    {
+        var handler = CreateMockHandler(new ODataQueryResult(true, 200, new object()));
+
+        var (status, body) = await InvokeAsync(queryString, handler);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        body.ShouldContain("InvalidQueryOption");
+        await DidNotExecute(handler);
+    }
+
+    [Theory]
+    [InlineData("?$format=json")]
+    [InlineData("?$format=application/json")]
+    [InlineData("?customParam=x")]
+    public async Task HandleEntitySetRequestAsync_SupportedOrCustomOptions_AreAccepted(string queryString)
+    {
+        var handler = CreateMockHandler(new ODataQueryResult(true, 200, new Dictionary<string, object?> { ["value"] = Array.Empty<object>() }));
+
+        var (status, _) = await InvokeAsync(queryString, handler);
+
+        status.ShouldBe(StatusCodes.Status200OK);
+    }
+
+    [Theory]
+    [InlineData(StatusCodes.Status429TooManyRequests, "TooManyRequests", 2)]
+    [InlineData(StatusCodes.Status503ServiceUnavailable, "ServiceUnavailable", 5)]
+    public async Task HandleEntitySetRequestAsync_RetryAfter_IsSetFromHandlerResult(int statusCode, string errorCode, int retryAfter)
+    {
+        var context = CreateHttpContext();
+        var payload = ODataResponseFormatter.FormatErrorResponse(errorCode, "retry later");
+        var handler = CreateMockHandler(new ODataQueryResult(false, statusCode, payload, errorCode, "retry later", retryAfter));
+
+        var result = await ODataEndpoints.HandleEntitySetRequestAsync("sales", "dbo", "invoices", handler, context);
+
+        result.ShouldBeAssignableTo<IStatusCodeHttpResult>()!.StatusCode.ShouldBe(statusCode);
+        context.Response.Headers.RetryAfter.ToString().ShouldBe(retryAfter.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     [Fact]

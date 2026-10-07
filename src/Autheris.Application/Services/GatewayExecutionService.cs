@@ -36,7 +36,14 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
     private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly Autheris.Application.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
+    private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly IDataSourceExecutor _defaultSqlExecutor = new SqlDataSourceExecutor();
+
+    /// <summary>O10: Retry-After for a throttled read; the typical duration of a slow read is the query timeout.</summary>
+    private const int ThrottledRetryAfterSeconds = 2;
+
+    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
+    private static partial Regex EchoableColumnNameRegex();
 
     public int LastDispatchedChildQueryCount { get; private set; }
 
@@ -54,7 +61,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
         IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null,
         IPolicyEnforcementService? policyEnforcementService = null,
         IClientIpResolver? clientIpResolver = null,
-        Autheris.Application.Connectors.IAutherisConnectorRegistry? connectorRegistry = null)
+        Autheris.Application.Connectors.IAutherisConnectorRegistry? connectorRegistry = null,
+        ITableReadConcurrencyGate? concurrencyGate = null)
     {
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
@@ -69,6 +77,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
         _policyEnforcementService = policyEnforcementService;
         _clientIpResolver = clientIpResolver;
         _connectorRegistry = connectorRegistry;
+        _concurrencyGate = concurrencyGate;
     }
 
     public GatewayExecutionService(
@@ -290,15 +299,15 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
             .Select(c => c.ColumnName)
             .ToList();
 
+        // O1/O2/O13: requested columns are validated, never dropped silently (a dropped column used to widen the
+        // projection to all columns). Unknown and denied columns are rejected with the same message.
         var effectiveRequestedFields = (requestedFields != null && requestedFields.Count > 0)
-            ? requestedFields.Where(f => authorizedColumns.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList()
+            ? ResolveRequestedFields(requestedFields, authorizedColumns)
             : authorizedColumns;
 
-        if (effectiveRequestedFields.Count == 0 && authorizedColumns.Count > 0)
-        {
-            effectiveRequestedFields = authorizedColumns;
-        }
-
+        // O10: bound concurrent reads of the same table by the same user (each slow read holds a database worker).
+        var maxConcurrentReads = _options?.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
+        using var readLease = AcquireReadLease(tenantId, userSid, table, maxConcurrentReads);
 
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rawRows;
         bool rlsPushdownAlreadyOccurred = false;
@@ -453,6 +462,42 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
         }
 
         return (processedRows, decision);
+    }
+
+    /// <summary>
+    /// O1/O2/O13: maps requested columns to their catalog spelling (deduplicated, request order). Throws for any column
+    /// that is unknown or denied; the message is identical for both cases.
+    /// </summary>
+    private static List<string> ResolveRequestedFields(IReadOnlyList<string> requestedFields, IReadOnlyList<string> authorizedColumns)
+    {
+        var resolved = new List<string>(requestedFields.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var requested in requestedFields)
+        {
+            var catalogName = authorizedColumns.FirstOrDefault(c => string.Equals(c, requested?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (catalogName == null)
+            {
+                var echo = requested != null && EchoableColumnNameRegex().IsMatch(requested.Trim()) ? requested.Trim() : "(invalid name)";
+                throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
+            }
+            if (seen.Add(catalogName))
+            {
+                resolved.Add(catalogName);
+            }
+        }
+        return resolved;
+    }
+
+    private IDisposable? AcquireReadLease(TenantId tenantId, Sid userSid, TableIdentifier table, int maxConcurrentReads)
+    {
+        if (_concurrencyGate == null || maxConcurrentReads <= 0)
+        {
+            return null;
+        }
+
+        var key = $"{tenantId.Value}|{userSid.Value}|{table.ToQualifiedName()}".ToLowerInvariant();
+        return _concurrencyGate.TryEnter(key, maxConcurrentReads)
+               ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
     }
 
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
