@@ -200,7 +200,7 @@ Unauffällig in `d58449c`:
 | G-5 | ⛔ | Variable in `orderBy` wird nicht aufgelöst. | `ResolveVariableLiteral`. |
 | G-6 | ⛔ | `IsStringType` dupliziert `MapDataType`. | Gemeinsamer Typklassifizierer. |
 | G-7 | 🟡 | Zwei `ExecuteAsync`-Überladungen; ohne opId jetzt Default pro Scope (D-7). | Eine Methode mit Pflicht-`operationId`. |
-| G-8 | ⛔ | HMAC auf Zahlenspalten wird still `null`; `NumberStyles.Any`; `GetInt32()` bei Bool wirft bei `1.0`. | HMAC-Spalten im Schema als String oder Code `MASKED`. |
+| G-8 ✔ | ✅ | HMAC auf Nicht-String-Spalten wird im Schema als String typisiert; `NumberStyles.Any` durch strikte Formate ersetzt; Bool unterstützt Zahlenwerte wie `1.0`; Maskierte Werte auf Nicht-String-Spalten melden Fehlercode `MASKED` und `null`. | `CatalogSchemaModel.cs`, `CatalogGraphQlTypeModule.cs` |
 | G-9 | ⛔ | `isNull: null` wird `IS NOT NULL`; `not: {}` filtert nichts. | Ablehnen bzw. als false. |
 
 ## 4. Gesamtstatus aller Befunde
@@ -298,7 +298,7 @@ Legende: ✅ behoben · 🟡 teilweise · ⛔ offen · 🔻 verschlechtert · �
 | R-ERR-1 `INVALID_QUERY`-Text | ⛔ | |
 | R-API-1 Migrationshinweis | ⛔ | |
 | R-API-2 FinOps-Fallback | ✅ | |
-| R-GQL-1 maskierte Typen | 🟡 | G-8. |
+| R-GQL-1 maskierte Typen | ✅ | G-8; HMAC-Spalten im Schema als String typisiert; maskierte Nicht-String-Felder liefern null mit Fehlercode MASKED. |
 | R-GQL-2 Kollisionen | ✅ | G-2; Kollidierende Tabellen ausgelassen, kanonische Tabellen bleiben stabil, Fehler wird geloggt. |
 | R-GQL-3 Memo pro Verbindung | ✅ weitgehend | G-3, G-4, D-7. |
 | R-GQL-4 Budget/Offset | ✅ | D-8; Zeilenbudget und MaxOffset in Optionen und Dienst durchgesetzt. |
@@ -385,7 +385,7 @@ Den irreführenden Test `DbSessionContextInitializer_RollsBackTransaction_OnErro
 
 1. **G-2 (R-GQL-2) ✔:** ✅ Stabile Namensvergabe; Fehler pro Tabelle loggen und die Tabelle auslassen; Executor-Test, dass das Schema mit Kollisionen startet.
 2. **D-8 (SQL2-7) ✔:** ✅ Zeilenbudget und `MaxOffset` konfigurierbar und im Dienst prüfen.
-3. **G-8 (R-GQL-1):** HMAC-Spalten als String oder Code `MASKED`; Executor-Tests mit maskierter Int- und Bool-Spalte (SQLite).
+3. **G-8 (R-GQL-1) ✔:** ✅ HMAC-Spalten als String oder Code `MASKED`; Executor-Tests mit maskierter Int- und Bool-Spalte (SQLite).
 4. **G-3, G-4, G-7, D-7:** Memo pro Operation in `ContextData`, opId im Request-Interceptor, eine `ExecuteAsync` mit Pflicht-`operationId`.
 5. **R-GQL-6, R-ERR-1:** Unbekannte und gesperrte Felder einheitlich melden; `EnableSchemaRequests = false`; generischer Text für `INVALID_QUERY`.
 6. **R-GQL-9:** `SecurityPrincipalContext.TenantId` als Quelle in den Mutationen; Admin-Ausnahme einheitlich.

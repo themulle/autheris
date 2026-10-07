@@ -154,6 +154,47 @@ public sealed class CatalogSchemaModelTests
     }
 
     [Fact]
+    public async Task BuildAsync_ColumnWithHmacMaskingRule_IsTypedAsStringInSchema()
+    {
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+
+        var table = CreateTable(
+            new TableIdentifier("billing", "dbo", "payments"),
+            dialect: "PostgreSql",
+            columns:
+            [
+                new TableColumn { ColumnName = "id", DataType = "bigint" },
+                new TableColumn { ColumnName = "user_id", DataType = "int" },
+                new TableColumn { ColumnName = "amount", DataType = "decimal(18,2)" },
+                new TableColumn { ColumnName = "is_verified", DataType = "boolean" },
+                new TableColumn { ColumnName = "created_at", DataType = "timestamptz" }
+            ],
+            columnMaskingRules: new Dictionary<string, MaskingRule>
+            {
+                ["user_id"] = new MaskingRule { RuleType = "HMAC" },
+                ["amount"] = new MaskingRule { RuleType = "HMAC_SHA256" },
+                ["is_verified"] = new MaskingRule { RuleType = "HASH" }
+            });
+
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([table]);
+
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
+        var tableType = Assert.Single(model.Tables);
+
+        var colMap = tableType.Columns.ToDictionary(c => c.ColumnName, c => c.FieldType);
+        Assert.Equal(CatalogFieldType.Long, colMap["id"]); // unmasked
+        Assert.Equal(CatalogFieldType.String, colMap["user_id"]); // HMAC -> String
+        Assert.Equal(CatalogFieldType.String, colMap["amount"]); // HMAC_SHA256 -> String
+        Assert.Equal(CatalogFieldType.String, colMap["is_verified"]); // HASH -> String
+        Assert.Equal(CatalogFieldType.DateTime, colMap["created_at"]); // unmasked
+    }
+
+    [Fact]
     public async Task BuildAsync_CreatesBidirectionalRelationsWithCorrectJoinKeysAndListFlags()
     {
         var metaRepo = Substitute.For<ITableMetadataRepository>();
@@ -259,7 +300,8 @@ public sealed class CatalogSchemaModelTests
         bool isActive = true,
         DataSourceType dsType = DataSourceType.Sql,
         string dialect = "PostgreSql",
-        IReadOnlyList<TableColumn>? columns = null)
+        IReadOnlyList<TableColumn>? columns = null,
+        IReadOnlyDictionary<string, MaskingRule>? columnMaskingRules = null)
     {
         return new TableMetadata
         {
@@ -270,7 +312,8 @@ public sealed class CatalogSchemaModelTests
                 SourceType = dialect,
                 DataSourceType = dsType
             },
-            Columns = columns ?? [new TableColumn { ColumnName = "id", DataType = "int" }]
+            Columns = columns ?? [new TableColumn { ColumnName = "id", DataType = "int" }],
+            ColumnMaskingRules = columnMaskingRules ?? new Dictionary<string, MaskingRule>()
         };
     }
 }

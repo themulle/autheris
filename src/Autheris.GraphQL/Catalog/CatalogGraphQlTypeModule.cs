@@ -286,6 +286,16 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule
         _ => "AutherisStringFilter"
     };
 
+    private static object? ReportMasked(IResolverContext ctx, CatalogColumnField col)
+    {
+        ctx.ReportError(ErrorBuilder.New()
+            .SetMessage($"Column '{col.ColumnName}' is masked.")
+            .SetCode("MASKED")
+            .SetPath(ctx.Path)
+            .Build());
+        return null;
+    }
+
     private static object? ResolveColumnValue(IResolverContext ctx, CatalogColumnField col)
     {
         var parent = ctx.Parent<JsonElement>();
@@ -307,18 +317,37 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule
 
         return col.FieldType switch
         {
-            CatalogFieldType.Int => prop.ValueKind == JsonValueKind.Number ? prop.GetInt32() : (int.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : null),
-            CatalogFieldType.Long => prop.ValueKind == JsonValueKind.Number ? prop.GetInt64() : (long.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var l) ? l : null),
-            CatalogFieldType.Float => prop.ValueKind == JsonValueKind.Number ? prop.GetDouble() : (double.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null),
-            CatalogFieldType.Decimal => prop.ValueKind == JsonValueKind.Number ? prop.GetDecimal() : (decimal.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var m) ? m : null),
+            CatalogFieldType.Int => prop.ValueKind == JsonValueKind.Number
+                ? (prop.TryGetInt32(out var n) ? n : (int.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var pi) ? pi : ReportMasked(ctx, col)))
+                : (int.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var strN) ? strN : ReportMasked(ctx, col)),
+
+            CatalogFieldType.Long => prop.ValueKind == JsonValueKind.Number
+                ? (prop.TryGetInt64(out var l) ? l : (long.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var pl) ? pl : ReportMasked(ctx, col)))
+                : (long.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var strL) ? strL : ReportMasked(ctx, col)),
+
+            CatalogFieldType.Float => prop.ValueKind == JsonValueKind.Number
+                ? (prop.TryGetDouble(out var d) ? d : (double.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var pd) ? pd : ReportMasked(ctx, col)))
+                : (double.TryParse(prop.GetString(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var strD) ? strD : ReportMasked(ctx, col)),
+
+            CatalogFieldType.Decimal => prop.ValueKind == JsonValueKind.Number
+                ? (prop.TryGetDecimal(out var m) ? m : (decimal.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var pm) ? pm : ReportMasked(ctx, col)))
+                : (decimal.TryParse(prop.GetString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var strM) ? strM : ReportMasked(ctx, col)),
+
             CatalogFieldType.Boolean => prop.ValueKind switch
             {
                 JsonValueKind.True => true,
                 JsonValueKind.False => false,
-                JsonValueKind.Number => prop.GetInt32() != 0,
-                JsonValueKind.String => bool.TryParse(prop.GetString(), out var b) ? b : (prop.GetString() == "1" ? true : (prop.GetString() == "0" ? false : null)),
-                _ => null
+                JsonValueKind.Number => prop.TryGetInt64(out var i)
+                    ? i != 0
+                    : (prop.TryGetDouble(out var dVal) ? Math.Abs(dVal) > double.Epsilon : ReportMasked(ctx, col)),
+                JsonValueKind.String => string.Equals(prop.GetString(), "true", StringComparison.OrdinalIgnoreCase) ? true
+                    : (string.Equals(prop.GetString(), "false", StringComparison.OrdinalIgnoreCase) ? false
+                    : (prop.GetString() == "1" ? true
+                    : (prop.GetString() == "0" ? false
+                    : ReportMasked(ctx, col)))),
+                _ => ReportMasked(ctx, col)
             },
+
             CatalogFieldType.String or CatalogFieldType.DateTime => prop.ValueKind == JsonValueKind.String ? prop.GetString() : prop.GetRawText(),
             _ => prop.ToString()
         };

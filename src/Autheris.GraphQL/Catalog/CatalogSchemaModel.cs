@@ -139,6 +139,14 @@ public sealed class CatalogSchemaModel
                 }
 
                 var fieldType = MapDataType(col.DataType);
+                if (meta.ColumnMaskingRules != null &&
+                    meta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var maskRule) &&
+                    (string.Equals(maskRule.RuleType, "HMAC", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(maskRule.RuleType, "HMAC_SHA256", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(maskRule.RuleType, "HASH", StringComparison.OrdinalIgnoreCase)))
+                {
+                    fieldType = CatalogFieldType.String;
+                }
                 columns.Add(new CatalogColumnField(colFieldName, col.ColumnName, fieldType, col.DataType, true));
             }
 
