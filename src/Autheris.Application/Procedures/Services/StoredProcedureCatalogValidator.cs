@@ -92,6 +92,96 @@ public sealed class StoredProcedureCatalogValidator
         }
     }
 
+    /// <summary>
+    /// Validates the DDL hash of a declared procedure against the database catalog to detect unauthorized procedure modifications.
+    /// </summary>
+    public async Task<ProcedureValidationResult> ValidateDeclaredDdlHashAsync(ProcedureDefinition definition, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        if (string.IsNullOrWhiteSpace(definition.DdlHash))
+        {
+            return new ProcedureValidationResult(true, [], [], [], new Dictionary<string, string>());
+        }
+
+        var parts = definition.ProcedureName.Split('.');
+        var settings = _options.Value.SqlEndpoints.Procedures;
+        if (parts.Length != 2 || !settings.AllowedSchemas.Contains(parts[0], StringComparer.OrdinalIgnoreCase))
+        {
+            return ProcedureValidationResult.Failed("Procedure schema is not listed in SqlEndpoints.Procedures.AllowedSchemas.");
+        }
+
+        string quoted = $"[{parts[0]}].[{parts[1]}]";
+        DbConnection connection;
+        try
+        {
+            (connection, _) = await _connections.OpenAsync(definition, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            _logger?.LogWarning("Procedure '{Procedure}' could not be validated: configuration error: {Message}", definition.Name, ex.Message);
+            return ProcedureValidationResult.Failed($"Procedure connection is not configured correctly: {ex.Message}");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogWarning("Procedure '{Procedure}' could not be validated: database not reachable ({ExceptionType}: {Message}).", definition.Name, ex.GetType().Name, ex.Message);
+            return ProcedureValidationResult.Failed("The database is not reachable with the configured procedure connection (check DNS/VPN and credentials).");
+        }
+
+        await using (connection.ConfigureAwait(false))
+        {
+            try
+            {
+                int objectId;
+                await using (var cmd = CreateCommand(connection, "SELECT object_id FROM sys.objects WHERE object_id = OBJECT_ID(@n)", ("@n", quoted)))
+                await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
+                {
+                    if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+                    {
+                        return ProcedureValidationResult.Failed("The object does not exist.");
+                    }
+
+                    objectId = Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture);
+                }
+
+                string? definitionText = null;
+                await using (var cmd = CreateCommand(connection, "SELECT definition FROM sys.sql_modules WHERE object_id = @id", ("@id", objectId)))
+                await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
+                {
+                    if (await reader.ReadAsync(ct).ConfigureAwait(false))
+                    {
+                        definitionText = reader.IsDBNull(0) ? null : reader.GetString(0);
+                    }
+                }
+
+                if (definitionText == null)
+                {
+                    return ProcedureValidationResult.Failed("The procedure definition is not readable (encrypted or missing VIEW DEFINITION).");
+                }
+
+                string expectedHash = definition.DdlHash.Trim();
+                if (expectedHash.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+                {
+                    expectedHash = expectedHash["sha256:".Length..].Trim();
+                }
+
+                byte[] hashBytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(definitionText.Trim()));
+                string actualHex = Convert.ToHexString(hashBytes).ToLowerInvariant();
+
+                if (!string.Equals(expectedHash, actualHex, StringComparison.OrdinalIgnoreCase))
+                {
+                    return ProcedureValidationResult.Failed($"Procedure DDL hash mismatch (expected: '{definition.DdlHash}', computed: 'sha256:{actualHex}'). Procedure code on database has been modified.");
+                }
+
+                return new ProcedureValidationResult(true, [], [], [], new Dictionary<string, string>());
+            }
+            catch (DbException ex)
+            {
+                _logger?.LogWarning(ex, "Procedure '{Procedure}' DDL hash validation failed with a database error.", definition.Name);
+                return ProcedureValidationResult.Failed("Database metadata could not be read (missing VIEW DEFINITION / VIEW DATABASE STATE?).");
+            }
+        }
+    }
+
     private async Task<ProcedureValidationResult> ValidateCoreAsync(
         DbConnection connection,
         ProcedureDefinition definition,
@@ -155,9 +245,29 @@ public sealed class StoredProcedureCatalogValidator
             // Encrypted modules cannot be inspected.
             errors.Add("The procedure definition is not readable (encrypted or missing VIEW DEFINITION); dynamic SQL cannot be excluded.");
         }
-        else if (!definition.AllowDynamicSql && DynamicSqlRegex.IsMatch(definitionText))
+        else
         {
-            errors.Add("The procedure appears to use dynamic SQL (sp_executesql / EXEC(...)). Declare '@allow-dynamic-sql' after a DBA review.");
+            if (!definition.AllowDynamicSql && DynamicSqlRegex.IsMatch(definitionText))
+            {
+                errors.Add("The procedure appears to use dynamic SQL (sp_executesql / EXEC(...)). Declare '@allow-dynamic-sql' after a DBA review.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(definition.DdlHash))
+            {
+                string expectedHash = definition.DdlHash.Trim();
+                if (expectedHash.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+                {
+                    expectedHash = expectedHash["sha256:".Length..].Trim();
+                }
+
+                byte[] hashBytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(definitionText.Trim()));
+                string actualHex = Convert.ToHexString(hashBytes).ToLowerInvariant();
+
+                if (!string.Equals(expectedHash, actualHex, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add($"Procedure DDL hash mismatch (expected: '{definition.DdlHash}', computed: 'sha256:{actualHex}'). Procedure code on database has been modified.");
+                }
+            }
         }
 
         // 3. Parameters

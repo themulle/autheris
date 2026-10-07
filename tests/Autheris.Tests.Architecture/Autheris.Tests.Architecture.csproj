@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -27,6 +27,7 @@
     <ProjectReference Include="..\..\src\Autheris.GraphQL\Autheris.GraphQL.csproj" />
     <ProjectReference Include="..\..\src\Autheris.Api\Autheris.Api.csproj" />
     <ProjectReference Include="..\..\src\Autheris.Extensions\Autheris.Extensions.csproj" />
+    <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj" />
   </ItemGroup>
 
 </Project>

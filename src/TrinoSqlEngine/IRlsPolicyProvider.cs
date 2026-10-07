@@ -113,6 +113,12 @@ public sealed class RlsOptions
     public IRlsPolicyProvider PolicyProvider { get; set; } = new DefaultRlsPolicyProvider();
 
     /// <summary>
+    /// Explicit engine override: "AstCompiler", "LegacyTokenStream", or "ShadowDualRun".
+    /// When null, defaults to <see cref="FastSqlEngine.SqlRewriterEngine"/>.
+    /// </summary>
+    public string? RewriterEngine { get; set; }
+
+    /// <summary>
     /// Column masking provider that provides SQL masking expressions (e.g. 'NULL', '***', or hash).
     /// </summary>
     public IColumnMaskingPolicyProvider? ColumnMaskingProvider { get; set; }
@@ -287,6 +293,9 @@ public enum TargetSqlDialect
     Ansi,
     PostgreSql,
     SqlServer,
-    Sqlite
+    Sqlite,
+    DuckDb,
+    Snowflake,
+    Oracle
 }
 

@@ -19,14 +19,15 @@ public sealed class GoldenQueryService : IGoldenQueryService
     private readonly int _maxResults;
     private readonly bool _enabled;
 
-    public GoldenQueryService(IOptions<GatewayOptions>? options, ILogger<GoldenQueryService> logger)
+    /// <param name="demoData">Without a switch (direct construction) the built-in demo queries are registered, as before.</param>
+    public GoldenQueryService(IOptions<GatewayOptions>? options, ILogger<GoldenQueryService> logger, IDemoDataSwitch? demoData = null)
     {
         _logger = logger;
         var goldenOpts = options?.Value.GoldenQueries ?? new GoldenQueryOptions();
         _enabled = goldenOpts.Enabled;
         _maxResults = goldenOpts.MaxResultsPerRequest > 0 ? goldenOpts.MaxResultsPerRequest : 20;
 
-        InitializeQueries(goldenOpts.InitialQueries);
+        InitializeQueries(goldenOpts.InitialQueries, demoData?.Enabled ?? true);
     }
 
     private const int MaxQueryStoreCapacity = 5000;
@@ -92,7 +93,7 @@ public sealed class GoldenQueryService : IGoldenQueryService
         return ValueTask.FromResult(query);
     }
 
-    private void InitializeQueries(IReadOnlyList<GoldenQueryDefinition>? initialQueries)
+    private void InitializeQueries(IReadOnlyList<GoldenQueryDefinition>? initialQueries, bool includeDemoQueries)
     {
         if (initialQueries != null && initialQueries.Count > 0)
         {
@@ -113,7 +114,12 @@ public sealed class GoldenQueryService : IGoldenQueryService
             return;
         }
 
-        // Built-in Golden Queries for immediate few-shot prompting
+        // Built-in Golden Queries (finance demo catalog) only with demo data enabled
+        if (!includeDemoQueries)
+        {
+            return;
+        }
+
         RegisterGoldenQuery(new GoldenQuery(
             Id: "golden_customers_active",
             Domain: "finance",

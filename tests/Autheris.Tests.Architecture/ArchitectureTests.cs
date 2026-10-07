@@ -12,13 +12,14 @@ public class ArchitectureTests
     private const string GraphQlNamespace = "Autheris.GraphQL";
     private const string ApiNamespace = "Autheris.Api";
     private const string ExtensionsNamespace = "Autheris.Extensions";
+    private const string TrinoSqlEngineNamespace = "TrinoSqlEngine";
 
     [Fact]
     public void Domain_ShouldNotHaveDependencyOnOtherProjects()
     {
         var result = Types.InAssembly(typeof(Autheris.Domain.Common.Sid).Assembly)
             .ShouldNot()
-            .HaveDependencyOnAny(ApplicationNamespace, InfrastructureNamespace, GraphQlNamespace, ApiNamespace)
+            .HaveDependencyOnAny(ApplicationNamespace, InfrastructureNamespace, GraphQlNamespace, ApiNamespace, TrinoSqlEngineNamespace)
             .GetResult();
 
         result.IsSuccessful.ShouldBeTrue(
@@ -144,5 +145,57 @@ public class ArchitectureTests
             .ToList();
 
         violations.ShouldBeEmpty($"Foreign system connectors found in core layers: {string.Join(", ", violations)}");
+    }
+
+    [Fact]
+    public void TrinoSqlEngine_ShouldNotHaveDependencyOnAutheris()
+    {
+        var result = Types.InAssembly(typeof(TrinoSqlEngine.FastSqlEngine).Assembly)
+            .ShouldNot()
+            .HaveDependencyOnAny(DomainNamespace, ApplicationNamespace, InfrastructureNamespace, GraphQlNamespace, ApiNamespace, ExtensionsNamespace)
+            .GetResult();
+
+        result.IsSuccessful.ShouldBeTrue(
+            $"TrinoSqlEngine violates autonomous boundary dependencies: {string.Join(", ", result.FailingTypeNames ?? Array.Empty<string>())}");
+    }
+
+    [Fact]
+    public void GraphQl_ShouldNotHaveDependencyOnInfrastructureOrApi()
+    {
+        var result = Types.InAssembly(typeof(Autheris.GraphQL.Types.DataCatalogSyncPayload).Assembly)
+            .ShouldNot()
+            .HaveDependencyOnAny(InfrastructureNamespace, ApiNamespace)
+            .GetResult();
+
+        result.IsSuccessful.ShouldBeTrue(
+            $"GraphQL layer violates Clean Architecture dependencies: {string.Join(", ", result.FailingTypeNames ?? Array.Empty<string>())}");
+    }
+
+    [Fact]
+    public void Application_Interfaces_ShouldStartWithI()
+    {
+        var result = Types.InAssembly(typeof(Autheris.Application.Services.ConsentResolutionService).Assembly)
+            .That()
+            .AreInterfaces()
+            .Should()
+            .HaveNameStartingWith("I")
+            .GetResult();
+
+        result.IsSuccessful.ShouldBeTrue(
+            $"Application layer interfaces must follow standard 'I' prefix naming: {string.Join(", ", result.FailingTypeNames ?? Array.Empty<string>())}");
+    }
+
+    [Fact]
+    public void Domain_Interfaces_ShouldStartWithI()
+    {
+        var result = Types.InAssembly(typeof(Autheris.Domain.Common.Sid).Assembly)
+            .That()
+            .AreInterfaces()
+            .Should()
+            .HaveNameStartingWith("I")
+            .GetResult();
+
+        result.IsSuccessful.ShouldBeTrue(
+            $"Domain layer interfaces must follow standard 'I' prefix naming: {string.Join(", ", result.FailingTypeNames ?? Array.Empty<string>())}");
     }
 }

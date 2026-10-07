@@ -10,6 +10,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -60,7 +61,7 @@ public static class RebacEndpoints
             IAuditLogRepository auditLog) =>
         {
             var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
-            if (!secContext.HasAnyRole("GovernanceAdmin", "SecurityAdmin", "ClusterAdmin"))
+            if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -100,7 +101,7 @@ public static class RebacEndpoints
             IAuditLogRepository auditLog) =>
         {
             var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
-            if (!secContext.HasAnyRole("GovernanceAdmin", "SecurityAdmin", "ClusterAdmin"))
+            if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -127,7 +128,7 @@ public static class RebacEndpoints
             IRebacStore store) =>
         {
             var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
-            if (!secContext.HasAnyRole("GovernanceAdmin", "SecurityAdmin", "ClusterAdmin"))
+            if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -179,7 +180,7 @@ public static class RebacEndpoints
                 }
 
                 // Prevent third-party authorization probing by non-admins
-                if (!secContext.HasAnyRole("GovernanceAdmin", "SecurityAdmin"))
+                if (!secContext.HasRole(GatewayRole.GovernanceAdmin))
                 {
                     if (!string.Equals(secContext.UserSid.Value, check.User, StringComparison.OrdinalIgnoreCase))
                     {
@@ -220,7 +221,7 @@ public static class RebacEndpoints
                     return Results.StatusCode(StatusCodes.Status403Forbidden);
                 }
 
-                if (!secContext.HasAnyRole("GovernanceAdmin", "SecurityAdmin"))
+                if (!secContext.HasRole(GatewayRole.GovernanceAdmin))
                 {
                     foreach (var c in batchCheck.Checks)
                     {

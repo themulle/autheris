@@ -57,7 +57,7 @@ internal static class EndpointSecurity
 
     /// <summary>Cluster-wide administrator (may act across tenants).</summary>
     public static bool IsClusterAdmin(ClaimsPrincipal? principal)
-        => GatewayPolicies.HasAnyRole(principal, GatewayPolicies.ClusterAdminRoles);
+        => GatewayPolicies.HasRole(principal, GatewayRole.ClusterAdmin);
 
     /// <summary>SEC M-1 / M-4: Canonical ClusterAdmin role check (strictly global, not mapped from tenant-scoped aliases).</summary>
     public static bool IsCanonicalClusterAdmin(ClaimsPrincipal? principal)
@@ -67,11 +67,11 @@ internal static class EndpointSecurity
     /// SEC M-11: Global (tenant-independent) governance administrators: GovernanceAdmin or ClusterAdmin.
     /// </summary>
     public static bool IsGlobalGovernanceAdmin(ClaimsPrincipal? principal)
-        => GatewayPolicies.HasAnyRole(principal, GatewayPolicies.GovernanceAdminRoles);
+        => GatewayPolicies.HasRole(principal, GatewayRole.GovernanceAdmin);
 
     /// <summary>SEC C-05: Approver roles (DataSteward, DataOwner, GovernanceAdmin) or ClusterAdmin.</summary>
     public static bool IsApprover(ClaimsPrincipal? principal)
-        => GatewayPolicies.HasAnyRole(principal, GatewayPolicies.ApproverRoles) || IsClusterAdmin(principal);
+        => GatewayPolicies.HasAnyRole(principal, [GatewayRole.DataSteward, GatewayRole.DataOwner, GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
 
     /// <summary>
     /// Canonical caller identity from HttpContext using SecurityPrincipalContext if authenticated,

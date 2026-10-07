@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Security;
 using Autheris.Application.FinOps.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -21,7 +22,7 @@ public static class FinOpsEndpoints
             IFinOpsAccountingService accountingService) =>
         {
             var user = request.HttpContext.User;
-            var isAuthorized = GatewayPolicies.HasAnyRole(user, ["BillingAdmin", "GovernanceAdmin", "ClusterAdmin"]);
+            var isAuthorized = user.IsInRole("BillingAdmin") || GatewayPolicies.HasAnyRole(user, [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
             if (!isAuthorized)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -76,7 +77,7 @@ public static class FinOpsEndpoints
             IFinOpsAccountingService accountingService) =>
         {
             var user = request.HttpContext.User;
-            var isAuthorized = GatewayPolicies.HasAnyRole(user, ["BillingAdmin", "GovernanceAdmin", "ClusterAdmin"]);
+            var isAuthorized = user.IsInRole("BillingAdmin") || GatewayPolicies.HasAnyRole(user, [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
             if (!isAuthorized)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);

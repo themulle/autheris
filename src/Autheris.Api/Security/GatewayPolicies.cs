@@ -52,32 +52,7 @@ public static class GatewayPolicies
     public static bool HasAnyRole(ClaimsPrincipal? principal, IReadOnlyList<string> roles)
     {
         ArgumentNullException.ThrowIfNull(roles);
-
-        if (principal?.Identity?.IsAuthenticated != true)
-        {
-            return false;
-        }
-
-        // 1. Direct claim or IsInRole check
-        foreach (var role in roles)
-        {
-            if (principal.IsInRole(role))
-            {
-                return true;
-            }
-        }
-
-        if (principal.Claims.Any(c =>
-            RoleClaimTypes.Contains(c.Type, StringComparer.Ordinal) &&
-            roles.Contains(c.Value, StringComparer.OrdinalIgnoreCase)))
-        {
-            return true;
-        }
-
-        // G3: The name-list overload matches exact role names only. Mapping names to GatewayRole levels
-        // made hierarchy-implied roles pass (e.g. Analyst satisfying SchemaPublisherRoles). Use the typed
-        // GatewayRole overload when hierarchy semantics are wanted.
-        return false;
+        return Evaluator.HasAnyExactRole(principal, roles);
     }
 
     /// <summary>

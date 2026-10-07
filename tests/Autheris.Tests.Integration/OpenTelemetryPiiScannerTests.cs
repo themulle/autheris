@@ -51,13 +51,16 @@ public class OpenTelemetryPiiScannerTests
 
         using var listener = new ActivityListener
         {
-            ShouldListenTo = _ => true,
+            ShouldListenTo = s => s.Name == "Test.PiiGuardrail",
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
             ActivityStopped = act =>
             {
-                foreach (var tag in act.Tags)
+                lock (exportedTags)
                 {
-                    exportedTags.Add(tag);
+                    foreach (var tag in act.Tags)
+                    {
+                        exportedTags.Add(tag);
+                    }
                 }
             }
         };
@@ -75,7 +78,13 @@ public class OpenTelemetryPiiScannerTests
         }
 
         // Run PII Regex scanner over all recorded tag values
-        foreach (var tag in exportedTags)
+        List<KeyValuePair<string, string?>> snapshot;
+        lock (exportedTags)
+        {
+            snapshot = exportedTags.ToList();
+        }
+
+        foreach (var tag in snapshot)
         {
             var strVal = tag.Value?.ToString() ?? string.Empty;
             EmailRegex.IsMatch(strVal).ShouldBeFalse($"Tag '{tag.Key}' with value '{strVal}' contains an email address!");

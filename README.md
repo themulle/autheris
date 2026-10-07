@@ -7,167 +7,236 @@
 [![OData](https://img.shields.io/badge/Protocol-OData%20v4-0078D4)](#)
 [![AuthZ](https://img.shields.io/badge/AuthZ-Casbin%20ABAC-009688)](#)
 [![CI Build & Test](https://img.shields.io/badge/CI-Passing-brightgreen?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/Tests-2%2C261%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
+[![Tests](https://img.shields.io/badge/Tests-3%2C700%2B%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
 [![Security Review](https://img.shields.io/badge/Security%20Review-2026--10--02%20Remediated-brightgreen)](security-review-2026-10-02.md)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/themulle/gql/pkgs/container/gql)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20Onion-blue)](docs/architecture/arc42.md)
-[![Features](https://img.shields.io/badge/Features-Enterprise%20Catalog-blueviolet)](featurelist.md)
-[![Comparison](https://img.shields.io/badge/Comparison-Market%20Moats-orange)](featurecomparison.md)
+[![Diagram](https://img.shields.io/badge/Diagram-Architecture%20%26%20Capabilities-informational)](#-architecture--capabilities-overview-at-a-glance)
+[![Features](https://img.shields.io/badge/Features-45%2B%20Enterprise%20Catalog-blueviolet)](docs/features/README.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1%20%2F%20Commercial-blue)](#-license)
 
 Autheris is a high-performance, secure, centralized enterprise GraphQL gateway built with **.NET 10** and **Hot Chocolate 16.6.7**. It provides unified GraphQL access to heterogeneous enterprise databases (**Microsoft SQL Server / MSSQL, SQLite, PostgreSQL, Databricks, Oracle**), modern **Apache Iceberg Lakehouses**, REST APIs, and federated **Hot Chocolate Fusion Subgraphs** while enforcing a strict **Zero-Trust Data-Owner-Consent** governance model.
 
 Instead of traditional coarse-grained role-based access control (RBAC), access to tables, rows, and columns requires explicitly granted, time-bounded, and auditable consents governed directly by data owners.
 
-> 📚 **Product & Strategy Documentation**:
-> - [📋 Complete Enterprise Feature List (featurelist.md)](featurelist.md) — Detailed inventory of all enterprise capabilities.
-> - [⚖️ Market & Competitive Comparison (featurecomparison.md)](featurecomparison.md) — Autheris vs. Apollo Federation v2, Hasura DDN, WunderGraph Cosmo, StepZen, Immuta, and Tyk/Kong/Envoy.
-> - [📊 Market Analysis & Strategic Roadmap (marktanalyse.md)](marktanalyse.md) — In-depth market research, feature-gap analysis, and RICE-C prioritization.
+> 📚 **Product & Architecture Documentation**:
+> - [📋 Complete Enterprise Feature Catalog (docs/features/README.md)](docs/features/README.md) — Comprehensive inventory and deep-dive documentation for all 45+ enterprise features.
+> - [🏛️ Architecture Documentation (arc42.md)](docs/architecture/arc42.md) — System context, building blocks, runtime view, and quality goals.
+> - [🔒 Threat Model & Security Whitepaper](docs/threat-model/threat-model.md) — STRIDE analysis, attack surface, mitigation matrices, and cryptographic guarantees.
+> - [⚙️ Configuration Guide](docs/configuration-guide.md) — Comprehensive reference of all `appsettings.json` sections and environment variables.
+> - [🛠️ Endpoints & Testing Guide](docs/endpoints-and-testing.md) — Complete inventory of 100+ mapped API endpoints and testing strategy.
 
 ---
 
-## 🌟 Key Features
+![Autheris Architecture & Capabilities Overview](docs/architecture/autheris-overview.svg)
 
-- **Zero-Trust Governance Model**:
-  - Default fail-closed: Non-consented tables, columns, or rows are strictly denied (`FORBIDDEN`).
-  - Active Directory Windows Security Identifiers (`Sid`) integration for both users and security groups.
-  - Multi-step **Four-Eyes Approval Workflow** with segregation of duties (requester cannot approve own requests; duplicate approvals rejected).
-  - Time-bounded delegations (`DATA_OWNER_DELEGATIONS`) allowing seamless holiday/vacation handovers.
+---
 
-- **Multi-Protocol Enterprise Identity & ForwardAuth (Kubernetes / Traefik)**:
-  - **Traefik Ingress ForwardAuth**: Native support for Kubernetes ingress authentication offloading (Authelia, Keycloak, Authentik, OAuth2-Proxy). Validates proxy network CIDRs (`TrustedNetworks`, `TrustedProxies`) and timing-safe shared secrets (`X-Forwarded-Secret`), extracting `X-Forwarded-User`, `X-Forwarded-Groups`, `X-Forwarded-Roles`, and `X-Forwarded-Email`.
-  - **Microsoft Entra ID (Azure AD) & AD FS**: Native JWT Bearer token authentication with normalized enterprise claims transformation (`EnterpriseClaimsTransformation`) mapping `oid`, `onprem_sid`, `primarygroupsid`, and claim roles into canonical `Sid` value objects.
-  - **HTTP Basic Authentication**: Support for direct Basic Auth headers on GraphQL queries and a dedicated credential verification endpoint (`GET` / `POST /api/auth/login`). Production enforces salted PBKDF2 (`$pbkdf2$...`) with dynamic dummy-iteration parity for non-existent users; plaintext and unsalted SHA-256 are strictly restricted to `Development`. All comparisons use `CryptographicOperations.FixedTimeEquals`.
-  - **Kerberos / SPNEGO Negotiate**: Windows Integrated Authentication with strict Kerberos-only enforcement and group SID resolution.
-  - **Smart Dynamic Scheme Selector**: Automatic header-based protocol arbitration dispatching requests to ForwardAuth, Bearer, Basic, or Negotiate schemes.
+### 🎯 What Autheris Does & Core Business Value
 
-- **Heterogeneous Multi-Source Data Architecture & Real SQL Execution**:
-  - Dynamic type projection and schema generation based on the active governance catalog.
-  - **Native SQL Execution with RLS Pushdown**: Direct ADO.NET execution via `ISqlConnectionFactory` supporting **MSSQL (SQL Server)**, **SQLite**, **PostgreSQL**, **Databricks**, and **Oracle**. Row-Level Security (RLS) filters are pushed down directly into generated SQL queries (`CombinedRowFilterSql`), preventing unauthorized rows from ever leaving the database engine.
-  - **Modern Apache Iceberg v2 Lakehouse Connector (Pattern 4)**: Direct querying of Iceberg v2 tables on Amazon S3 (SigV4), Azure Blob Storage, and local filesystems with vectorized partition pruning, Min/Max statistics filtering, and L1 metadata caching.
-  - **Declarative REST Data Source Engine (Pattern 3)**: Expose external REST APIs with URL-template parameter substitution (`/api/v1/customers/{id}`), header/query pushdown (`X-Tenant-Id`, `X-User-Sid`), bearer token forwarding / API keys, JSONPath extraction, and adaptive batching (`QueryParameterList`, `JsonBodyArray`, `ParallelSingleRequests` throttled via `SemaphoreSlim`). Integrated **SSRF Defense** with DNS pre-resolution (blocking RFC 1918, link-local, loopback, and cloud metadata) and hop-by-hop HTTP redirect protection (`AllowAutoRedirect = false`).
-  - **Hot Chocolate Fusion Subgraph Router**: Composes distributed microservice subgraphs into a unified supergraph schema with zero-trust client token forwarding and in-memory result masking.
-  - **Isolated C# Plugin System (Pattern 4)**: Host specialized HTTP/data connectors in isolated, collectible `AssemblyLoadContext` instances (`IHttpDataSourcePlugin`) preventing dependency collisions with host packages.
-  - **Dual-Mode Enterprise Extensibility**: Native in-process C# DLL/NuGet middlewares for the high-performance hot path (<0.1ms overhead, zero IPC) alongside decoupled out-of-process gRPC coprocess interceptors.
-  - **Central Zero-Trust Pipeline**: Regardless of source (SQL, Lakehouse, REST, Plugin, or Subgraph), all data passes through central consent evaluation (`GatewayExecutionService`), in-memory RLS post-filtering, central column masking, response budgeting, and audit logging.
-  - Efficient DataLoader-based batching and selective child relation loading with chunking to protect underlying database parameter limits (e.g. SQLite 999, Oracle 1000, MSSQL 2100, PostgreSQL/Databricks 10000).
-  - Introspection and Banana Cake Pop (Nitro) UI configurable per environment.
+Autheris is a **Zero-Trust Enterprise Data Access Gateway** that securely exposes heterogeneous data sources over modern protocols — **without opening direct database ports (1433/5432)** and **without unmonitored service accounts**.
 
-- **Realtime Event Streaming & CDC (Change Data Capture)**:
-  - **GraphQL Subscriptions**: Full WebSocket (`graphql-transport-ws`) and Server-Sent Events (SSE) support with `WebSocketAuthInterceptor` token validation during `connection_init`.
-  - **In-Stream Row-Level Security**: `StreamRlsPolicyEnforcer` validates dynamic Casbin ABAC permissions per emitted event, ensuring immediate drop of unconsented data.
-  - **Debezium / Kafka CDC Ingestion**: `DebeziumCdcParser` decodes change events (`op: c, u, d`) with strict tenant stream isolation and in-stream column masking.
+| Dimension | Challenge Without Autheris | 🚀 Autheris Advantage & Value Added |
+|---|---|---|
+| **🛡️ Perimeter & Data Security** | Open database ports across corporate networks, static credentials, high risk of SQL injection, and data exfiltration. | **Zero-Port Exposure:** Databases remain isolated. All queries flow through hardened APIs with native ANTLR4 AST validation and rewriting. |
+| **🔐 Access Control & Governance** | Rigid, coarse-grained RBAC; central IT assigns blanket rights; data owners have zero visibility or control. | **Data-Owner Consent & ReBAC:** Data owners govern table, row, and column permissions directly — with Dual Authorization (SoD) and vacation delegations. |
+| **⚡ Performance & Scalability** | N+1 roundtrips in REST/GraphQL, slow full-table scans, high latency from post-retrieval in-memory filtering. | **Deep AST Pushdown & Plan Cache:** RLS predicates injected directly into the SQL `WHERE` tree; compiled query plan cache (<1ms latency) & L1/L2 Redis caching. |
+| **🤖 Agentic AI & LLMs** | AI agents hallucinate schemas, execute destructive queries, and risk prompt injection attacks. | **Enterprise MCP Gateway:** Semantic schema grounding, golden queries, OWASP LLM01 guardrails, FOCUS FinOps token budgets, and HITL approvals. |
+| **📜 Compliance & Audit** | Incomplete logs, high audit friction, and labor-intensive GDPR Art. 15 disclosure requests. | **Cryptographic WORM Audit:** HMAC-SHA256 tamper-evident hash chaining, SEC Rule 17a-4 S3 export, and one-click GDPR Art. 15 disclosure reports. |
+| **🔌 Multi-Protocol Flexibility** | Data silos split between app developers (GraphQL/REST), BI analysts (Power BI/Excel), and data scientists (Python/Spark). | **Universal Data Access:** Identical governed data exposed as GraphQL, REST, WebSQL, OData v4, Apache Parquet, or Apache Arrow Flight. |
 
-- **Agentic AI & Model Context Protocol (MCP) Gateway**:
-  - Native MCP server exposing GraphQL queries and schema as AI Agent Tools via Stdio (`McpStdioRunner`) and Streamable HTTP/SSE (`/mcp`, `/mcp/sse`).
-  - **Semantic Prompt Injection Defense**: `SemanticPromptGuardrail` inspects tool arguments against OWASP LLM01 prompt injection patterns, ChatML delimiters, and Base64 evasion techniques.
-  - **AI Data Guardrail Engine**: Dynamic PII scrubbing, token consumption budgeting, query cost limits, and session ownership enforcement.
+---
 
-- **dbt Data Mesh & Contract Governance**:
-  - High-throughput streaming parser for dbt `manifest.json`, `catalog.json`, and `run_results.json`.
-  - **Data Health Circuit Breaker**: Tables with failing upstream `dbt test` executions are quarantined (`CircuitBreaker: Open`) to prevent serving dirty data.
-  - **Model Contract Breaking-Change CI Gate**: Validates dbt model contracts against active schemas before deployment.
-  - **Live Telemetry in dbt Exposures**: Mirrors real GraphQL query frequencies and consumer metadata back into dbt `exposure` declarations.
-  - **Omnichannel Documentation Passthrough (`F-DOC-01`)**: Lossless ingestion of dbt markdown doc-blocks and OpenMetadata business definitions into GraphQL Web UI (Banana Cake Pop), MCP AI tool signatures, Dynamic OpenAPI 3.1 Swagger, and OData CSDL `$metadata` tooltips.
+## 🌟 Complete Enterprise Feature Inventory
 
-- **Declarative SQL-to-API Engine & Auto-Generated OpenAPI 3.0 / Swagger (`F-SQL-01`)**:
-  - **Zero-Code SQL Endpoints**: Instantly expose governed REST endpoints directly from version-controlled `.sql` files (`queries/*.sql`) via `GET` and `POST /api/v1/queries/{name}`.
-  - **Universal Parameter Syntax & AST Token Normalization**: Supports native database parameter syntax (`@param`) as well as templating syntax (`{{param}}`) with automatic token extraction, type inference, and AST normalization.
-  - **Auto-Generated OpenAPI 3.0 Specification**: Dynamically generates `/api/v1/queries/openapi.json` from parsed SQL metadata, doc-blocks (`-- @name`, `-- @summary`, `-- @param`), and query projections for immediate interactive testing in Swagger UI.
-  - **Zero-Trust AST Injection**: Automatically injects tenant isolation, Casbin ABAC, Row-Level Security (`RlsListener`), and dynamic column masking directly into the generated SQL execution plan.
-  - **Dual Ingestion Mode**: Hot-reloading via `FileSystemWatcher` (Option A) and automatic model sync from dbt pipelines (Option B).
+Autheris encompasses **45+ production-ready enterprise features**, documented in [`docs/features/`](docs/features/README.md). These capabilities are structured across 7 strategic pillars:
 
-- **Governed WebSQL Engine (`F-DATA-02`)**:
-  - **Secure HTTP-based SQL Execution**: Execute ad-hoc SQL queries over HTTP (`POST /api/v1/sql`) modeled after Trino/Presto, completely eliminating the need for exposed database ports (1433/5432) or uncontrolled database logins.
-  - **AST-Level Security Linter & Rewriter**: Uses the high-performance `TrinoSqlEngine` / ANTLR4 parser to enforce strict read-only semantics (`SELECT` only), prevent multi-statement injection (`;`), block system functions (`@@`, comments), and enforce maximum result pagination limits.
-  - **Deep AST Row-Level Security Pushdown**: Injects Casbin ABAC rules and correlated subquery filters (`IN`, `EXISTS`) transparently into the `WHERE` tree before the query hits the database.
-  - **DML guardrails (`WebSql.AllowDml`, regular option)**: DML requires a role from `WebSql.DmlWriterRoles`; `UPDATE`/`DELETE` without `WHERE` or with a trivially true condition (`WHERE 1=1`, `WHERE true`, `… OR 1=1`, `id = id`) are rejected on the original statement (`RlsOptions.RejectUnfilteredDml`, default `true`); each DML statement runs in a transaction and is rolled back if it affects more than `WebSql.MaxAffectedRows` rows (default `1000`, `0` = unlimited); executed, rejected and failed DML is written to the audit chain (`WEBSQL_DML_EXECUTED` / `WEBSQL_DML_REJECTED` / `WEBSQL_DML_FAILED`: statement type, tables, affected rows, actor, tenant, SHA-256 of the SQL – no SQL text or literal values). Per-table write permissions via a Casbin `write` action are planned.
+### Pillar 1: Multi-Protocol Data Access & Execution Engines
 
-- **Enterprise Governance Mutations & 4-Eyes Segregation of Duties**:
-  - **Fail-Closed Mutation Suite**: Granular GraphQL mutations (`requestConsent`, `approveConsent`, `rejectConsent`, `revokeConsent`, `recertifyConsent`) requiring explicit tenant authorization.
-  - **Anti-Self-Approval (Four-Eyes Principle / SoD)**: Data owners cannot approve their own requests; approvals strictly reject duplicate approval attempts.
-  - **Idempotency & Replay Protection**: User-scoped 24-hour distributed idempotency keys (`RedisIdempotencyStore`) prevent double-submission of approval requests.
+- **Enterprise GraphQL Gateway with Hot Chocolate 16.6.7**:
+  - Dynamic schema generation and type projection driven by the active governance catalog.
+  - Incremental data delivery via `@defer` and `@stream` ([`F-PERF-12`](docs/features/f-perf-12-incremental-delivery.md)) to dramatically reduce Time-to-First-Byte (TTFB) for large payloads.
+  - GraphQL-to-SQL AST Single-Query Compiler ([`F-PERF-09`](docs/features/f-perf-09-single-query-pushdown.md)): Compiles deeply nested GraphQL selections directly into a single optimized SQL statement with relational `JOIN`s, eliminating N+1 roundtrips.
+  - Multi-Stage Pushdown Cascades & Cross-Domain Joins ([`F-GOV-06`](docs/features/f-gov-06-cross-domain-joins.md)): Cross-domain joins across heterogeneous data sources with automated split execution.
+  - Dynamic Schema Contracts & Tag-Based Projection via `@tag` ([`F-GOV-08`](docs/features/f-gov-08-schema-contracts-tag-projection.md)).
+  - OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing ([`F-OPEN-01`](docs/features/f-open-01-openschema-catalog-slicing.md)).
+- **Governed WebSQL Engine ([`F-DATA-02`](docs/features/f-data-02-governed-websql.md))**:
+  - Secure HTTP-based SQL execution (`POST /api/v1/sql` & `/api/sql`) modeled after Trino/Presto — eliminates open database ports (1433/5432) across the corporate network.
+  - AST-Level Security Linter & Rewriter (ANTLR4-based): Enforces strict read-only semantics (`SELECT`), rejects multiple statements (`;`), comments, and system functions (`@@`).
+  - DML Guardrails (`WebSql.AllowDml`): DML requires dedicated `WebSql.DmlWriterRoles`; unfiltered `UPDATE`/`DELETE` queries (`WHERE 1=1`, `WHERE true`) are strictly rejected (`RejectUnfilteredDml`); automated transaction limits with rollback on exceeding `WebSql.MaxAffectedRows` (default: 1,000 rows); cryptographic audit logging of all DML events.
+- **Declarative SQL-to-API REST Engine & Auto-OpenAPI 3.0 ([`F-SQL-01`](docs/features/f-sql-01-declarative-sql-endpoints.md))**:
+  - Zero-code REST endpoints directly from versioned `.sql` files (`GET` / `POST /api/v1/queries/{name}`).
+  - Universal parameter syntax: Automatic extraction and AST normalization for `@param` as well as mustache template syntax `{{param}}`.
+  - Auto-generated OpenAPI 3.0 specification (`/api/v1/queries/openapi.json`) with embedded Swagger UI for interactive API exploration.
+  - Automatic injection of tenant isolation, Casbin ABAC, and RLS filters into the compiled query plan.
+- **Zero-Privilege Contract-First Stored Procedures ([`F-SQL-02`](docs/features/f-sql-02-governed-stored-procedures.md), `ADR-018`)**:
+  - Declarative `.proc.yaml` contracts: Requires only `GRANT EXECUTE` in the production database (zero `VIEW DEFINITION` or DBA permissions required).
+  - Source Column Governance (`source_table`, `source_column`): Transparently inherits table and column consents, ABAC rules, and masking policies onto stored procedure return types.
+  - Fail-Closed Result Pruning: Undeclared result columns are stripped before leaving the gateway.
+  - DDL Integrity Verification via SHA-256 (`integrity.ddl_hash`) to detect and reject unauthorized database schema drift.
+  - Offline CI/CD generator tool (`ProcedureYamlGenerator`) for automated contract generation from staging databases.
+- **Dual-Access OData v4 & Dynamic OpenAPI 3.1 ([`F-API-03`](docs/features/f-api-03-odata-openapi.md))**:
+  - Full-featured OData v4 endpoint (`/odata/v4/{domain}/{schema}/{table}`) for standard BI clients (Power BI, Microsoft Excel, Tableau) with CSDL `$metadata`.
+  - Dynamic OpenAPI 3.1 specification (`/odata/v4/$openapi`) with integrated offline-capable Swagger UI (`/docs`, `/ui/swagger`).
+- **Apache Arrow Flight SQL & Arrow Binary Egress ([`F-DATA-04`](docs/features/f-data-04-arrow-flight-sql.md))**:
+  - High-speed zero-copy columnar data transport for Data Science (Python Pandas, Polars, Apache Spark) via Apache Arrow Flight SQL (`/api/v1/flight/sql/*`) and Arrow Binary Export (`/api/v1/export/arrow`).
+- **Hierarchical Apache Parquet Binary Egress ([`F-DATA-01`](docs/features/f-data-01-parquet-egress.md))**:
+  - On-the-fly serialization to authentic, Snappy-compressed Parquet files across all data channels (GraphQL, WebSQL, SQL endpoints, OData) when requested via `Accept: application/vnd.apache.parquet`.
+  - Strict Zero-Trust guarantee: Parquet serialization occurs post-RLS, post-masking, and post-consent — files contain only authorized, sanitized data.
+- **Embedded In-Memory OLAP via DuckDB.NET ([`F-DATA-03`](docs/features/f-data-03-duckdb-olap.md))**:
+  - Fast analytical query execution (`POST /api/v1/olap/query`) over in-memory tables and Parquet files without requiring a separate OLAP cluster.
+- **Modern Lakehouse Connector (Apache Iceberg v2, `P4`)**:
+  - Direct querying of Apache Iceberg v2 tables on Amazon S3 (SigV4), Azure Blob Storage, and local filesystems.
+  - Vectorized partition pruning, min/max metadata statistics pruning, and L1 manifest caching.
+- **Declarative REST Data Source Engine & Isolated C# Plugins (`P9`, [`F-ARCH-10`](docs/features/f-arch-10-connector-spi.md))**:
+  - Integration of external REST APIs with URL templates, header pushdown (`X-Tenant-Id`, `X-User-Sid`), adaptive batching strategies, and built-in SSRF protection.
+  - Standardized Connector SPI and isolated `AssemblyLoadContext` sandboxes for DLL/NuGet extensions without dependency conflicts.
+- **Hot Chocolate Fusion Subgraph Router (`P7`)**:
+  - Composes distributed microservice subgraphs into a unified supergraph schema with Zero-Trust token forwarding and in-memory result masking.
 
-- **WORM Storage Cryptographic Audit Logging for Consents**:
-  - **Full Lifecycle Audit Sealing**: Every consent grant (`CONSENT_GRANTED`), revocation (`CONSENT_REVOKED`), and recertification (`CONSENT_RECERTIFIED_AND_EXTENDED`) is cryptographically sealed in the immutable HMAC-SHA256 hash chain.
-  - **WORM-Drive Export**: Seamless automated export to WORM storage (S3 Object Lock Compliance Mode / Read-Only filesystem) guaranteeing compliance with SEC Rule 17a-4 and GDPR audit standards.
+---
 
-- **Distributed Multi-Instance Clustering (Redis)**:
-  - **Redis Pub/Sub Event Bus (`RedisEventBus`)**: Real-time cross-pod propagation of catalog and policy epoch increments, invalidating distributed caches across all cluster nodes simultaneously.
-  - **Resilient Distributed Token-Bucket Rate Limiting (`RedisRateLimiterService`)**: Sliding-window IP rate limiting and atomic token-bucket consumption per user SID across multi-node Kubernetes deployments with **transparent automatic fallback** to local `InMemoryRateLimiterService` (featuring lock-free atomic `Interlocked` counters) upon Redis cluster degradation.
-  - **Distributed Mutation Idempotency (`RedisIdempotencyStore`)**: High-availability deduplication of sensitive governance mutations across gateway instances.
-  - **Deep Cluster Health Checks (`IGatewayHealthCheckService`)**: Comprehensive Kubernetes readiness probes checking Governance DB, Redis cluster, and Active Directory connectivity.
+### Pillar 2: Zero-Trust Governance, Access Control & Privacy
 
-- **Column-Level Data Masking & Dynamic RLS**:
-  - Transparent column-level policies: `Clear`, `Mask` (redaction / zero-allocation format-preserving masking via `ReadOnlySpan<char>` and `string.Create` / HMAC-SHA256 pseudonymization via `HMACSHA256.HashData` and stack memory), or `Deny`.
-  - Side-channel inference defense (Rule 5 compliance): GraphQL AST `where` clauses referencing `Mask` or `Deny` columns are strictly rejected with a `SecurityException`, thwarting binary search inference attacks.
-  - Dialect-aware SQL Row-Level Security (RLS) generation supporting SQLite, SQL Server (T-SQL), PostgreSQL (PL/pgSQL), Databricks, and Oracle with full row filter propagation across nested child DataLoaders.
-  - Support for comparison operators, set inclusion (`IN`, tuple `IN`), temporal validity filters, and parameterized subqueries (`EXISTS`).
+- **Sovereign Data-Owner-Consent Engine (`P10`)**:
+  - Fail-Closed default: Any entity, row, or column without explicit, valid consent returns `FORBIDDEN`.
+  - Native Active Directory Windows Security Identifiers (`Sid`) for enterprise users and security groups.
+  - Dual Authorization & Segregation of Duties (SoD): Requesters cannot approve their own requests; duplicate approvals are strictly blocked.
+  - Time-bounded vacation delegations (`DATA_OWNER_DELEGATIONS`).
+  - Distributed idempotency and replay protection: 24-hour distributed idempotency keys (`RedisIdempotencyStore`) preventing duplicate submissions.
+- **Relationship-Based Access Control / ReBAC ([`F-SEC-04`](docs/features/f-sec-04-rebac-openfga.md))**:
+  - Fine-grained authorization following the Google Zanzibar / OpenFGA model (`/api/v1/rebac/tuples`, `/check`, `/batch-check`).
+  - Graph-based relation evaluation (e.g., `user:alice` is `editor` of `folder:finance` -> inherits `viewer` of `report:q4`).
+- **Casbin ABAC / RBAC Engine**:
+  - Dynamic attribute-based access control with sub-rule evaluation and standalone policy linter (`tools/casbin-policy-lint`).
+- **Unified RBAC & Claims Normalizer (`ADR-017 Pillar 3`)**:
+  - Central, type-safe `GatewayRole` enum with role inheritance hierarchy (`ClusterAdmin`, `GovernanceAdmin`, `DataOwner`, `DataConsumer`, `Auditor`, `PrivacyAdmin`, `FinOpsAdmin`, `SecurityAdmin`, `DbtAdmin`, `IngestionService`, `LLMAgent`).
+  - `ClaimsNormalizationMiddleware` deterministically normalizes AD SIDs, OIDC claims, and certificates into canonical claims upon boundary entry.
+  - `IGatewayRoleEvaluator` serves as the Single Source of Truth for all authorization decisions (including tenant-qualified roles `TenantId:Role`).
+- **Column Masking & Differential Privacy**:
+  - Column policies: `Clear`, `Mask` (format-preserving redaction via `ReadOnlySpan<char>`), HMAC-SHA256 pseudonymization (`HMACSHA256.HashData`), or `Deny`.
+  - Side-Channel Inference Defense (Rule 5): GraphQL and SQL filters (`WHERE` clauses) on masked or denied columns are blocked with a `SecurityException` to prevent bisection and inference attacks.
+  - Differential Privacy: Dynamic Laplace noise injection and epsilon budgeting for privacy-preserving analytical aggregations.
+- **GDPR Art. 9 & Art. 15 Compliance**:
+  - Automated protection for special category data (GDPR Art. 9: health, genetics, biometrics, religious beliefs): Automatically elevated to `HIGH` sensitivity, mandatory Dual Authorization, and `REDACT` masking (`[REDACTED-GDPR-ART9]`).
+  - GDPR Art. 15 Disclosure Report (`gdprDataDisclosureReport`): Generates legally compliant disclosure reports covering all recipients, columns, masking rules, and purposes over a rolling 365-day retention window.
+- **Cryptographic WORM Audit Logging (`P8`)**:
+  - Unbroken HMAC-SHA256 hash chaining (`PrevHash -> EntryHash`) for every consent decision and data access event.
+  - Automated export to WORM storage (AWS S3 Object Lock Compliance Mode / Read-Only Filesystem) satisfying SEC Rule 17a-4 and GDPR compliance standards.
 
-- **High-Performance Two-Tier Caching & Invalidation**:
-  - **L1 In-Memory Cache** (MemoryCache) for ultra-low latency sub-millisecond lookups with lock-free table indexing.
-  - **L2 Distributed Cache** (Redis) with fast pipelined batch operations.
-  - **Epoch-based Invalidation**: Monotonic policy epochs invalidate stale cache entries across all gateway instances without cache stampedes.
-  - High-throughput batch hydration for active consents (`WHERE consent_id IN (...)`) eliminating N+1 query overhead.
+---
 
-- **Tamper-Evident HMAC-SHA256 Audit Hash Chain**:
-  - Every access evaluation, consent creation, approval, and revocation records an immutable audit entry.
-  - Transaction-safe atomic audit log persistence with keyed `HMACSHA256.HashData(secretKey, payload)` preventing hash chain tampering even with direct database write access.
-  - Continuous cryptographic HMAC-SHA256 hash chaining (`PrevHash -> EntryHash`) persisted across gateway restarts and verifiable via automated health routines using timing-safe `CryptographicOperations.FixedTimeEquals`.
+### Pillar 3: Agentic AI & Model Context Protocol (MCP)
 
-- **Enterprise Data Catalog Integration (Microsoft Purview, Collibra, Alation, OpenMetadata)**:
-  - Unified multi-catalog provider abstraction (`IDataCatalogClient`) supporting **Microsoft Purview** (Apache Atlas REST), **Collibra** (REST Core API v2), **Alation** (API v2), and **OpenMetadata**.
-  - **Mirror Mode**: Synchronizes schemas, descriptions, tags, and classification rules directly into the local SQLite governance store.
-  - **Reference Mode**: Dynamic, federated on-demand metadata lookup without duplicate persistence.
-  - **Automated GDPR Art. 9 Special Category Protection**: Automatic classification of health, genetic, biometric, religious, and political data (`GDPR_ARTICLE_9`) enforcing mandatory `HIGH` sensitivity, four-eyes approval (`RequiresFourEyes = true`), and `REDACT` masking (`[REDACTED-GDPR-ART9]`).
-  - **Automated PII Tag Mapping**: Maps catalog PII tags (`TagToMaskingRuleMap`) to masking algorithms (`MASK_EMAIL`, `HMAC_SHA256`, `REDACT`).
-  - Administrative GraphQL mutation `syncDataCatalog(dryRun: Boolean)`.
+- **Enterprise MCP Server Gateway ([`ADR-014`](docs/adr/ADR-014-enterprise-model-context-protocol-and-ai-data-guardrails.md))**:
+  - Standard I/O runner (`McpStdioRunner`) and streaming HTTP/SSE endpoints (`/mcp`, `/mcp/sse`) for AI agents (Claude, Cursor, LangChain).
+- **Semantic MCP Compiler & Schema Grounding ([`F-AI-02`](docs/features/f-ai-02-semantic-mcp-compiler.md))**:
+  - Automatically transforms GraphQL and relational database schemas into semantically enriched, LLM-optimized tool signatures.
+- **Dynamic Few-Shot Golden Query Injection ([`F-AI-03`](docs/features/f-ai-03-golden-queries.md))**:
+  - Dynamically injects validated, canonical example queries into agent prompts to eliminate schema hallucinations.
+- **Pre-Flight Query Simulator & Safety Limits ([`F-AI-04`](docs/features/f-ai-04-preflight-simulator.md))**:
+  - Simulates query execution costs, query plans, and AST complexity prior to execution to protect backends from Denial-of-Service.
+- **Human-in-the-Loop (HITL) Step-Up Approval ([`F-AI-05`](docs/features/f-ai-05-hitl-step-up-approval.md))**:
+  - Generates approval tickets (`/api/governance/hitl/*`) with multi-node state synchronization for security-critical AI tool calls.
+- **Explainable AI & Provenance Footnotes ([`F-AI-06`](docs/features/f-ai-06-provenance-footnoting.md))**:
+  - Appends transparent provenance footnotes to AI tool responses, citing origin tables, applied masking rules, and audit trail references.
+- **Dynamic Semantic Schema Pruning & Just-in-Time Tools ([`F-AI-07`](docs/features/f-ai-07-dynamic-semantic-schema-pruning.md))**:
+  - Minimizes LLM token context by filtering schemas down to task-relevant entities and attributes.
+- **FOCUS FinOps Token & Compute Accounting ([`F-AI-08`](docs/features/f-ai-08-focus-finops-accounting.md))**:
+  - FinOps Open Cost and Usage Specification accounting (`/api/v1/finops/*`) with tenant- and user-level budget tracking for LLM tokens and compute latency.
+- **Native Vector Database & RAG Egress ([`F-AI-09`](docs/features/f-ai-09-native-vector-database-rag-egress.md))**:
+  - Direct vector search execution and egress pipelines targeting pgvector, Qdrant, and Milvus.
+- **Semantic Query Cache & Autonomous Policy Recommendation ([`F-AI-10`](docs/features/f-ai-10-semantic-cache-policy-recommendation.md))**:
+  - Vector similarity caching and ML-driven policy recommendations derived from live access patterns.
 
-- **Data Lineage: Downstream Consumer Impact & GDPR Art. 15 Disclosure**:
-  - **Static Graph Lineage (DAG BFS)**: Iterative cycle-safe traversal over Dashboards (PowerBI, Tableau), ETL Pipelines (dbt, Airflow), and External Services with distance-from-root metrics.
-  - **Operational Runtime Lineage**: Correlates static graph nodes with cryptographically signed audit logs to identify active consumers, query frequencies, and distinct actors over configurable timeframes.
-  - **Pre-Schema-Change Risk Rating**: Automated blast radius calculation (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`) with proactive mitigation recommendations (deprecation notice windows, affected dashboard/pipeline owner notifications).
-  - **Zero-Trust Contact Protection**: Owner contact emails are masked (`null`) unless the caller is an authorized Data Owner, GovernanceAdmin, or ClusterAdmin.
-  - **GDPR Art. 15 Disclosure Reporting (Right of Access)**: Produces legally compliant reports (Art. 15 Abs. 1 Bst. c DSGVO) detailing all disclosed recipients, recipient categories, accessed columns, masking rules, and purposes over up to 365 days.
+---
 
-- **Modern Hybrid Identity & Machine-to-Machine (M2M) Service Principals**:
-  - Unified Identity Provider abstraction (`IIdentityProvider`) decoupling gateway logic from specific IdPs.
-  - Seamless hybrid migration support for **Microsoft Entra ID / Azure AD (OIDC)** alongside on-premises Windows Active Directory / Kerberos.
-  - **M2M / Batch Service Accounts**: Dedicated Client-Credentials and mutual TLS (mTLS) authentication schema with service principal consents (`SP-<client_id>` SIDs) distinct from interactive user accounts.
+### Pillar 4: AST Target Dialect Compiler Pipeline (`ADR-017` / `TrinoSqlEngine`)
 
-- **Developer Onboarding & "Insecure Modes" (Explicit Risk Controls)**:
-  - Pragmatic onboarding for external integrations and incoming webhooks. Every security switch defaults to `false` and is classified in `GatewayOptions.GetAllActiveBypasses()` (the configuration property names are kept for compatibility; a historic `warn_*` name may be classified as DANGER):
-  - **DANGER** (genuinely not recommended): outside `Development` the gateway refuses to start (`ValidateGatewayOptions`); the health component `SecurityConfiguration` is unhealthy (outside Development `/health/ready` → 503); startup banner "INSECURE GETTING-STARTED CONFIGURATION".
-  - **WARN** (mildly security-relevant): permitted in Production, but loud: console warning at startup, health component stays healthy with the description `degraded: …`, listed in the Development health details (`activeBypasses`, `activeWarnings`). Production health responses expose no additional details.
-  - **Regular options** (e.g. `WebSql.AllowDml`): no message.
-  - `securityMode` in the Development health details: `INSECURE_DEV_MODE` (any DANGER), `STRICT_WITH_WARNINGS` (only WARN), `STRICT_ZERO_TRUST` (none). The `X-Gateway-Insecure-Mode` header (Development only) lists all DANGER and WARN entries.
+- **High-Performance Compiler Architecture**:
+  - Replaced brittle regex/token rewriting with a multi-stage ANTLR4-based AST compiler pipeline:
+    1. ParseTree -> Strongly typed, dialect-neutral AST via `SqlAstBuilder`.
+    2. `AstSecurityVisitor`: Direct in-tree injection of tenant isolation, Row-Level Security (RLS) predicates, and column masking rules.
+    3. `AstSimplificationVisitor`: Compile-time constant folding, Boolean algebra simplification (identity laws, absorption, De Morgan's laws), tautology elimination (`1 = 1`), and contradiction detection (`1 = 0`).
+    4. `ISqlDialectGenerator`: High-performance code emitters tailored to target dialects.
+- **Multi-Dialect Code Generation**:
+  - **PostgreSQL**: Double-quoted lowercase identifiers, standard ANSI Boolean expressions, positional parameters (`$1, $2`).
+  - **Microsoft SQL Server (T-SQL)**: Bracket identifiers `[...]`, Unicode string literals `N'...'`, wrapped Boolean projections (`CASE WHEN ... THEN 1 ELSE 0 END`), `OFFSET / FETCH` pagination, `@p1` parameters.
+  - **SQLite**: Standard SQL types, identifier escaping, `?1` parameter emitters.
+  - **Oracle Database**: Uppercase identifiers, double-quote escaping, omitted `AS` keyword on `FROM` table aliases, `NUMBER(1)` Booleans, `:p1` parameters, `OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`.
+  - **Analytical Dialects**: Dedicated AST generators for DuckDB, Databricks / Spark SQL, Snowflake, and Trino.
+- **Compiled SQL Query Plan Cache (`ICompiledSqlQueryPlanCache`)**:
+  - Thread-safe, tenant-isolated cache for compiled AST plans providing sub-millisecond latency for parameterized recurring queries.
+- **Security Invariants**:
+  - Recursion depth guards (Anti-DoS), subquery correlation cycle detection, strict parameter count limits, and total comment stripping.
 
-  | Switch (configuration property) | Class |
-  |---|---|
-  | `danger_allow_anonymous_access`, `danger_bypass_consent_checks`, `danger_disable_column_masking`, `danger_allow_insecure_transport`, `danger_bypass_webhook_signature_validation` / `danger_allow_anonymous_webhooks`, `danger_allow_untrusted_certificates`, `danger_bypass_mcp_auth`, `danger_bypass_lakehouse_auth`, `danger_bypass_websql_governance`, `OpenSchema` / `Catalog.OpenSchema` | DANGER |
-  | `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_ignore_webhook_timestamp_tolerance` | DANGER (historic `warn_` name) |
-  | `warn_allow_all_cors_origins`, `warn_relaxed_query_limits`, `warn_enable_introspection`, `warn_fallback_default_tenant_for_webhooks` | WARN |
-  | `Catalog.AllowLegacyPayloadOnlySignature`, `Itsm.LegacyGlobalWebhookSecret`, `OpenMetadata.AutoCreateConsents` | WARN |
-  | `AllowDevelopmentInContainer` | WARN (additionally only effective together with `Development`, see container check) |
-  | `Insecure.warn_allow_websql_dml` (legacy alias) | WARN – use `WebSql.AllowDml` |
-  | `WebSql.AllowDml` (+ mandatory `WebSql.DmlWriterRoles`) | regular option, no message |
+---
 
-  - Independent hard checks stay in place in every non-Development environment: Quickstart profile, `EnableTestAuthHandler`, anonymous access, `SeedDemoData`, valid HMAC Key-Vault reference, Development-in-container opt-in; `WebSql.AllowDml` without `DmlWriterRoles` aborts startup in every environment.
+### Pillar 5: Realtime Event Streaming & CDC (Change Data Capture)
 
-- **Two-Phase ITSM Integration & AI-Assisted Governance**:
-  - **ITSM Webhook Integration**: Bi-directional integration with **ServiceNow** and **Jira** for approval workflows. Webhooks secured with timing-safe HMAC-SHA256 verification and 5-minute replay prevention.
-  - **AI-Assisted Justification Triage**: Evaluates business justifications via `OpenJevClient` with prompt-injection defense, strict 500-character limits, and token-bucket rate limiting.
-  - **Casbin ABAC/RBAC Engine**: Dynamic policy evaluation (`sub_rule`) with standalone policy validation tool (`tools/casbin-policy-lint`).
+- **GraphQL Subscriptions (`P5`)**:
+  - Full WebSocket (`graphql-transport-ws`) and Server-Sent-Events (SSE) support with token authentication during `connection_init`.
+- **In-Stream Row-Level Security (`StreamRlsPolicyEnforcer`)**:
+  - Evaluates dynamic Casbin ABAC permissions for every emitted event and discards unauthorized events directly within the stream.
+- **Native MSSQL Change Tracking Ingestion ([`F-CDC-02`](docs/features/f-cdc-02-mssql-change-tracking.md))**:
+  - Continuous capture of modified database rows directly via SQL Server Change Tracking.
+- **Zero-Kafka PostgreSQL CDC via Logical Streaming Replication ([`F-CDC-03`](docs/features/f-cdc-03-zero-kafka-postgresql-cdc.md))**:
+  - Direct CDC streaming using PostgreSQL Logical Replication (`pgoutput` plugin) without requiring an intermediate Kafka cluster.
+- **Debezium / Kafka CDC Ingestion**:
+  - Decodes change events (`op: c, u, d`) with strict tenant stream isolation and in-stream column masking.
 
-- **Enterprise Network & Edge Protection**:
-  - Pre-Authentication IP Rate Limiting and Post-Authentication SID Token-Bucket Concurrency Limiting.
-  - Anti-CSRF Preflight enforcement on GraphQL endpoints.
-  - Table Oracle Defense: `ErrorSanitizingFilter` masks `TableNotFoundException` as generic `FORBIDDEN` in non-development environments to prevent schema probing.
-  - Secure `ReverseProxyOptions` with populated `KnownIPNetworks` (`System.Net.IPNetwork`) and `KnownProxies` to prevent `X-Forwarded-For` spoofing.
-  - Dual Kubernetes probes (`/health/live`, `/health/ready`) and 6-phase graceful traffic drain controller for zero-downtime rolling deployments.
+---
 
-- **Zero External Dependencies in Development**:
-  - Includes an embedded in-memory SQLite governance catalog and a simulated `TestAuthHandler` enabled exclusively in `Development` mode.
+### Pillar 6: Data Catalog Integration & dbt Data Mesh
+
+- **Multi-Catalog Connectors (`P1`)**:
+  - Unified provider abstraction (`IDataCatalogClient`) for **Microsoft Purview** (Apache Atlas REST), **Collibra** (REST Core v2), **Alation** (API v2), and **OpenMetadata**.
+  - **Mirror Mode** (synchronization into local governance store) and **Reference Mode** (federated on-demand metadata queries).
+- **dbt Data Health Circuit Breaker ([`F-DBT-01`](docs/features/f-dbt-01-health-circuit-breaker.md))**:
+  - Quarantines tables with failed `dbt test` runs (`CircuitBreaker: Open`) to halt corrupted data propagation to consumers.
+- **dbt Model Contract Enforcement & Breaking-Change CI Gate ([`F-DBT-02`](docs/features/f-dbt-02-contract-enforcement.md))**:
+  - Blocks breaking schema changes between dbt model contracts and active gateway schemas during CI/CD.
+- **Live Telemetry in dbt Exposures ([`F-DBT-03`](docs/features/f-dbt-03-telemetry-exposures.md))**:
+  - Feeds actual query frequencies and consumer metadata back into dbt `exposure` declarations.
+- **Zero-Touch dbt Orchestrator Webhooks ([`F-DBT-04`](docs/features/f-dbt-04-orchestrator-webhooks.md))**:
+  - Webhook endpoints (`/api/extensions/dbt/webhook`) for dbt Cloud, Airflow, and Dagster for instant schema synchronization.
+- **Policy & RLS Auto-Sync ([`F-DBT-06`](docs/features/f-dbt-06-policy-rls-sync.md))**:
+  - Automatically translates dbt security tags and row filters into Casbin ABAC rules and SQL RLS predicates.
+- **Omnichannel Semantic Documentation Passthrough ([`F-DOC-01`](docs/features/f-doc-01-omnichannel-documentation.md))**:
+  - Lossless propagation of Markdown descriptions from dbt and enterprise catalogs to GraphQL Banana Cake Pop, Swagger UI, MCP AI tool definitions, and OData CSDL `$metadata`.
+
+---
+
+### Pillar 7: Enterprise Identity, Edge Defense & Multi-Node Clustering
+
+- **Multi-Protocol Authentication & Smart Scheme Selector**:
+  - **Traefik Ingress ForwardAuth**: Validates proxy CIDR networks (`TrustedNetworks`) and timing-safe shared secrets (`X-Forwarded-Secret`).
+  - **Microsoft Entra ID (Azure AD) & AD FS**: JWT Bearer tokens with claims transformation (`EnterpriseClaimsTransformation`).
+  - **HTTP Basic Auth**: Dedicated verification endpoint (`/api/auth/login`) with PBKDF2 salted hashing in production.
+  - **Kerberos / SPNEGO**: Windows Integrated Authentication with automated group SID resolution.
+- **Pluggable Multi-Node Cluster State Synchronization (`ADR-017 Pillar 1`)**:
+  - `IDistributedClusterStateProvider` with implementations for **Redis** (`RedisClusterStateProvider`) and In-Memory.
+  - Synchronizes HITL Step-Up approval tickets, MCP sessions, FinOps token budgets, and token revocations across horizontally scaled Kubernetes pods.
+  - Instant cluster-wide cache invalidation via Redis Pub/Sub policy epochs (`RedisEventBus`).
+  - Resilient distributed token-bucket rate limiting (`RedisRateLimiterService`) with seamless fallback to `InMemoryRateLimiterService`.
+- **Token Revocation Endpoint (`POST /api/admin/tokens/revoke`)**:
+  - Cluster-wide JTI blacklisting for immediate token invalidation.
+- **AST-Aware Production Traffic Shadowing & Dark Replay ([`F-OPS-01`](docs/features/f-ops-01-traffic-shadowing-dark-replay.md))**:
+  - Asynchronous shadowing of live queries to benchmark and validate new versions without impacting production traffic.
+- **SSRF Defense & Reverse Proxy Hardening**:
+  - `SsrfProtectionHandler`: DNS pre-resolution blocks RFC 1918, loopback, link-local, and cloud metadata addresses (169.254.169.254).
+  - Strict internal CIDR allowlists (`TrustedInternalNetworks`) for approved on-premises systems (Jira, ServiceNow).
+  - HTTP redirects disabled (`AllowAutoRedirect = false`) to thwart redirect-based SSRF exploits.
+- **Developer Quickstart & Insecure Mode Governance ([`F-DX-01`](docs/features/f-dx-01-developer-quickstart.md), `ADR-012`)**:
+  - Turnkey getting-started container with embedded Microsoft Garnet cache and pre-seeded demo personas.
+  - Strict startup validation: Risk switches categorized into `DANGER` (immediate startup abortion outside of `Development`) and `WARN` (production warning banners).
+
+| Configuration Switch | Classification | Behavior |
+|---|---|---|
+| `danger_allow_anonymous_access`, `danger_bypass_consent_checks`, `danger_disable_column_masking`, `danger_allow_insecure_transport`, `danger_bypass_webhook_signature_validation`, `danger_bypass_mcp_auth`, `danger_bypass_websql_governance`, `OpenSchema` | DANGER | Outside of `Development`, the gateway strictly refuses to start (`ValidateGatewayOptions`). `/health/ready` reports 503 Unhealthy. |
+| `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests` | DANGER (Legacy Prefix) | Fatal startup error outside of `Development`. |
+| `warn_allow_all_cors_origins`, `warn_relaxed_query_limits`, `warn_enable_introspection`, `warn_fallback_default_tenant_for_webhooks`, `Catalog.AllowLegacyPayloadOnlySignature`, `Itsm.LegacyGlobalWebhookSecret` | WARN | Permitted in production, but generates console warning banners and marks health status as `degraded`. |
+| `WebSql.AllowDml` (+ mandatory `WebSql.DmlWriterRoles`) | Regular Option | Transactional DML execution with automated rollback and cryptographic audit trail logging. |
 
 ---
 
@@ -240,18 +309,18 @@ Additional Security Invariants (Audit E-01 through E-04):
 
 | Project | Target | Description |
 |---|---|---|
-| [`Autheris.Domain`](src/Autheris.Domain) | `net10.0` | Value Objects (`Sid`, `TableIdentifier`, `CompositeKey`), Models, Options, Enums |
-| [`Autheris.Application`](src/Autheris.Application) | `net10.0` | Central execution engine (`GatewayExecutionService`), business services (`ConsentResolutionService`, `ColumnMaskingProvider`, `RlsFilterGenerator`), streaming RLS (`StreamRlsPolicyEnforcer`), MCP services |
-| [`Autheris.Infrastructure`](src/Autheris.Infrastructure) | `net10.0` | Persistence (`SqliteGovernanceRepository`, `SqlConnectionFactory`), Caching (`ConsentCacheService`), Multi-Instance Messaging (`RedisEventBus`), Rate Limiting (`RedisRateLimiterService`), Security Handlers (`ForwardAuthAuthenticationHandler`, `BasicAuthenticationHandler`) |
+| [`Autheris.Domain`](src/Autheris.Domain) | `net10.0` | Value Objects (`Sid`, `TableIdentifier`, `CompositeKey`), Models, Options, Enums, `GatewayRole` |
+| [`Autheris.Application`](src/Autheris.Application) | `net10.0` | Central execution engine (`GatewayExecutionService`), business services (`ConsentResolutionService`, `ColumnMaskingProvider`, `RlsFilterGenerator`), streaming RLS (`StreamRlsPolicyEnforcer`), MCP services, procedures (`ProcedureRegistrationService`), compiled plan cache (`CompiledSqlQueryPlanCache`) |
+| [`Autheris.Infrastructure`](src/Autheris.Infrastructure) | `net10.0` | Persistence (`SqliteGovernanceRepository`, `SqlConnectionFactory`), Caching (`ConsentCacheService`), Multi-Instance Messaging (`RedisEventBus`), Rate Limiting (`RedisRateLimiterService`), Security Handlers (`ForwardAuthAuthenticationHandler`, `BasicAuthenticationHandler`), Cluster State (`RedisClusterStateProvider`) |
 | [`Autheris.GraphQL`](src/Autheris.GraphQL) | `net10.0` | Hot Chocolate 16.6.7 GraphQL engine, dynamic schemas, Subscriptions, Fusion Router (`FusionGatewayExtensions`), MCP Server, queries & mutations |
-| [`Autheris.Api`](src/Autheris.Api) | `net10.0` | ASP.NET Core Host, Basic Auth Login (`/api/auth/login`), ForwardAuth header security, rate limiting, anti-CSRF, health probes, ITSM webhooks, MCP endpoints |
+| [`Autheris.Api`](src/Autheris.Api) | `net10.0` | ASP.NET Core Host, Basic Auth Login (`/api/auth/login`), ForwardAuth header security, rate limiting, anti-CSRF, health probes, ITSM webhooks, MCP endpoints, WebSQL, Declarative SQL & Stored Procedure endpoints, FinOps, ReBAC |
 | [`Autheris.Extensions`](src/Autheris.Extensions) | `net10.0` | All connectors to foreign systems: Data Catalogs (Purview, Collibra, Alation, OpenMetadata), ITSM (ServiceNow, Jira, webhooks), OpenMetadata sync, dbt, OData, Iceberg Lakehouse, OpenLineage/OpenJEV, Backstage export, CDC sources (MSSQL Change Tracking, Debezium) |
-| [`TrinoSqlEngine`](src/TrinoSqlEngine) | `net10.0` | High-performance ANTLR4 SQL Parser, AST Rewriter, WebSQL engine, and parameter extractor (857 parser tests) |
+| [`TrinoSqlEngine`](src/TrinoSqlEngine) | `net10.0` | High-performance ANTLR4 SQL Parser, AST Rewriter, WebSQL engine, multi-dialect AST generators (PostgreSQL, T-SQL, SQLite, Oracle, DuckDB, Databricks, Snowflake), and parameter extractor (1,072 tests) |
 | [`Autheris.Benchmarks`](benchmarks/Autheris.Benchmarks) | `net10.0` | BenchmarkDotNet suites for throughput, cache hit/miss, and masking allocations |
-| [`Autheris.Tests.Unit`](tests/Autheris.Tests.Unit) | `net10.0` | 1,180 Unit & Property-Based tests (xUnit, Shouldly, FsCheck, NSubstitute) |
-| [`Autheris.Tests.Architecture`](tests/Autheris.Tests.Architecture) | `net10.0` | 8 NetArchTest/reflection rules enforcing Clean Architecture dependency directions (incl. Kern vs. Extensions) |
-| [`Autheris.Tests.Integration`](tests/Autheris.Tests.Integration) | `net10.0` | 144 End-to-end integration tests using `WebApplicationFactory<Program>` |
-| [`Autheris.Extensions.Tests`](tests/Autheris.Extensions.Tests) | `net10.0` | 75 Unit & Integration tests for Iceberg Lakehouse, Data Catalogs, dbt, ITSM, and OData |
+| [`Autheris.Tests.Unit`](tests/Autheris.Tests.Unit) | `net10.0` | 2,288 Unit & Property-Based tests (xUnit, Shouldly, FsCheck, NSubstitute) |
+| [`Autheris.Tests.Architecture`](tests/Autheris.Tests.Architecture) | `net10.0` | 12 NetArchTest/reflection rules enforcing Clean Architecture dependency directions (incl. Core vs. Extensions) |
+| [`Autheris.Tests.Integration`](tests/Autheris.Tests.Integration) | `net10.0` | 239 End-to-end integration tests using `WebApplicationFactory<Program>` |
+| [`Autheris.Extensions.Tests`](tests/Autheris.Extensions.Tests) | `net10.0` | 117 Unit & Integration tests for Iceberg Lakehouse, Data Catalogs, dbt, ITSM, and OData |
 
 ---
 
@@ -266,23 +335,20 @@ Additional Security Invariants (Audit E-01 through E-04):
 
 ```bash
 dotnet build Autheris.sln -c Release
-dotnet build Autheris.sln -c Release
 ```
-*Note: Both solutions enforce `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>` (0 warnings, 0 errors).*
+*Note: The solution enforces `<TreatWarningsAsErrors>true</TreatWarningsAsErrors>` (0 warnings, 0 errors).*
 
 ### 2. Run Tests
 
 ```bash
 dotnet test Autheris.sln -c Release
-dotnet test Autheris.sln -c Release
-dotnet test src/TrinoSqlEngine/TrinoSqlEngine.csproj -c Release
 ```
-Currently passes **2,261 / 2,261 tests (100% green)** across all test suites:
-- **857 TrinoSqlEngine & WebSQL Parser Tests** (ANTLR4 parsing, AST statement validation, parameter extraction, RLS AST-injection, type inference)
-- **1,180 Unit Tests** (Authentication & ForwardAuth Security, Multi-Dialect RLS, Declarative SQL-to-API Execution, Casbin ABAC Hot-Reload, Four-Eyes & Delegation Stress, Concurrency & Audit Replication, DataLoader Odd Batching, AST Filter Inference Defense, Zero-Allocation Column Masking, Downstream Lineage BFS, GDPR Art. 15 Disclosure, MCP Guardrails, Differential Privacy)
-- **144 Integration Tests** (End-to-end GraphQL pipeline, Traefik ForwardAuth Ingress, Basic Auth Login & Query Verification, Declarative REST & Plugin Zero-Trust enforcement, Declarative SQL Endpoints & OpenAPI 3.0 Generation, Anti-CSRF, Four-Eyes Multi-Step Approval, Vacation Delegation, Red-Team Prompt Injection Defense, Insecure Mode Guardrails, Subscriptions & In-Stream RLS, Fusion Federation)
-- **75 Extensions Tests** (Apache Iceberg v2 Lakehouse connector & partition pruning, Microsoft Purview, Collibra, Alation, OpenMetadata catalog sync, GDPR Art. 9 tag enforcement, dbt manifest ingestion & contract validation, ServiceNow/Jira webhooks, OData)
-- **8 Architecture Tests** (Clean Architecture layering enforcement via NetArchTest including zero-dependency checks on AspNetCore in Domain and Application and the Kern-vs-Extensions boundary)
+Currently passes **3,728 / 3,728 tests (100% green)** across all test suites:
+- **1,072 TrinoSqlEngine & WebSQL Parser / Dialect Tests** (ANTLR4 parsing, AST statement validation, multi-dialect code generators for PostgreSQL, MSSQL, SQLite, Oracle, DuckDB, Databricks, parameter extraction, RLS AST-injection, type inference)
+- **2,288 Unit Tests** (Authentication & ForwardAuth Security, Multi-Dialect RLS, Declarative SQL-to-API Execution, Contract-First Stored Procedures, Casbin ABAC Hot-Reload, Dual Authorization & Delegation Stress, Concurrency & Audit Replication, DataLoader Odd Batching, AST Filter Inference Defense, Zero-Allocation Column Masking, Downstream Lineage BFS, GDPR Art. 15 Disclosure, MCP Guardrails, Differential Privacy)
+- **239 Integration Tests** (End-to-end GraphQL pipeline, Traefik ForwardAuth Ingress, Basic Auth Login & Query Verification, Declarative REST & Plugin Zero-Trust enforcement, Declarative SQL Endpoints & OpenAPI 3.0 Generation, Anti-CSRF, Dual Authorization Multi-Step Approval, Vacation Delegation, Red-Team Prompt Injection Defense, Insecure Mode Guardrails, Subscriptions & In-Stream RLS, Fusion Federation)
+- **117 Extensions Tests** (Apache Iceberg v2 Lakehouse connector & partition pruning, Microsoft Purview, Collibra, Alation, OpenMetadata catalog sync, GDPR Art. 9 tag enforcement, dbt manifest ingestion & contract validation, ServiceNow/Jira webhooks, OData)
+- **12 Architecture Tests** (Clean Architecture layering enforcement via NetArchTest including zero-dependency checks on AspNetCore in Domain and Application and the Core-vs-Extensions boundary)
 
 ### 3. Run Gateway via Docker Container (Fastest / Getting Started)
 
@@ -308,13 +374,21 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 #### Out-of-the-Box Endpoints on Port 8080:
 - **Banana Cake Pop GraphQL IDE**: [`http://localhost:8080/graphql`](http://localhost:8080/graphql)
-- **Swagger UI (REST / OpenAPI Explorer)**: [`http://localhost:8080/docs`](http://localhost:8080/docs)
+- **Swagger UI (REST / OpenAPI Explorer)**: [`http://localhost:8080/docs`](http://localhost:8080/docs) (Aliase: `/ui/swagger`, `$swagger`)
 - **Declarative SQL OpenAPI 3.0 Specification**: [`http://localhost:8080/api/v1/queries/openapi.json`](http://localhost:8080/api/v1/queries/openapi.json)
 - **Declarative SQL-to-API Endpoints**: `GET` / `POST http://localhost:8080/api/v1/queries/{name}`
-- **Governed WebSQL Execution**: `POST http://localhost:8080/api/v1/sql`
+- **Zero-Privilege Stored Procedures**: `POST http://localhost:8080/api/v1/procedures/{name}`
+- **Governed WebSQL Execution**: `POST http://localhost:8080/api/v1/sql` & `/api/sql`
 - **OData v4 Data Access (REST / Excel / Power BI)**: `GET http://localhost:8080/odata/v4/{domain}/{schema}/{table}`
 - **OpenAPI 3.1 Specification (OData)**: [`http://localhost:8080/odata/v4/$openapi`](http://localhost:8080/odata/v4/$openapi)
-- **MCP (Model Context Protocol for AI Agents)**: `POST http://localhost:8080/mcp`
+- **Model Context Protocol (MCP for AI Agents)**: `POST http://localhost:8080/mcp`, SSE: `/mcp/sse`
+- **Apache Arrow Flight SQL & Export**: `POST http://localhost:8080/api/v1/flight/sql/*`, `POST http://localhost:8080/api/v1/export/arrow`
+- **DuckDB In-Memory OLAP**: `POST http://localhost:8080/api/v1/olap/query`
+- **ReBAC Relationship Tuples & Check**: `POST http://localhost:8080/api/v1/rebac/tuples`, `/check`
+- **FinOps Token & Compute Accounting**: `GET/POST http://localhost:8080/api/v1/finops/focus`, `/budget/{tenant}`
+- **Human-in-the-Loop (HITL) Approvals**: `POST http://localhost:8080/api/governance/hitl/{pending,approve,reject}`
+- **CDC Realtime Event Streaming**: `GET http://localhost:8080/api/v1/cdc/events`, `/subscriptions`
+- **Token Revocation (JTI Blacklisting)**: `POST http://localhost:8080/api/admin/tokens/revoke`
 - **Health Checks**: [`http://localhost:8080/health/live`](http://localhost:8080/health/live) & [`/health/ready`](http://localhost:8080/health/ready)
 
 ### 4. Run Gateway Locally from Source
@@ -584,7 +658,7 @@ query AssessSchemaChangeImpact {
 
 ### 3. GDPR Art. 15 Disclosure Reporting (Right of Access)
 
-Generate legally binding disclosure reports under Art. 15 Abs. 1 Bst. c DSGVO for auditors or data subjects:
+Generate legally binding disclosure reports under GDPR Article 15(1)(c) for auditors or data subjects:
 
 ```graphql
 query GenerateGdprDisclosureReport {

@@ -18,10 +18,11 @@ public sealed class McpToolRegistry : IMcpToolRegistry
 {
     private readonly ConcurrentDictionary<string, McpToolDefinition> _tools = new(StringComparer.OrdinalIgnoreCase);
 
-    public McpToolRegistry(IOptions<GatewayOptions>? options = null)
+    /// <param name="demoData">Without a switch (direct construction) the demo tools are registered, as before.</param>
+    public McpToolRegistry(IOptions<GatewayOptions>? options = null, IDemoDataSwitch? demoData = null)
     {
         var mcpOpts = options?.Value.Mcp;
-        InitializeDefaultTools(mcpOpts?.AllowedOperations);
+        InitializeDefaultTools(mcpOpts?.AllowedOperations, demoData?.Enabled ?? true);
     }
 
     public void RegisterTool(McpToolDefinition tool)
@@ -41,9 +42,11 @@ public sealed class McpToolRegistry : IMcpToolRegistry
         return _tools.TryGetValue(toolName, out var tool) ? tool : null;
     }
 
-    private void InitializeDefaultTools(IReadOnlyList<string>? allowedOperations)
+    private void InitializeDefaultTools(IReadOnlyList<string>? allowedOperations, bool includeDemoTools)
     {
-        // 1. Built-in tool: Query Customers
+        // 1./2. Demo tools (Query Customers, Query Invoices) on the demo catalog: only with demo data enabled
+        if (includeDemoTools)
+        {
         RegisterTool(new McpToolDefinition(
             Name: "query_customers",
             Description: "Queries customer records with automatic PII masking and tenant isolation.",
@@ -76,6 +79,7 @@ public sealed class McpToolRegistry : IMcpToolRegistry
             TargetGraphQLOperation: "query GetInvoices($invoiceId: String, $currency: String) { invoices(invoiceId: $invoiceId, currency: $currency) { invoiceId amount currency status } }",
             TargetTable: new TableIdentifier("finance", "dbo", "invoices")
         ));
+        }
 
         // 3. Built-in tool: Query Data Catalog Metadata
         RegisterTool(new McpToolDefinition(

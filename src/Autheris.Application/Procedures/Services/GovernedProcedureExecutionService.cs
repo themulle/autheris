@@ -508,12 +508,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 continue;
             }
 
-            if (cleared.Contains(col))
-            {
-                plan.Add((i, col, ColumnAccessLevel.Clear, null));
-                continue;
-            }
-
             // SEC D-2: with browse-mode source information every result column is governed by the decision of ITS source table.
             // Computed / ambiguous columns (no source) are removed unless declared clear; columns of tables other than the
             // result table survive only with an explicit column-level Clear.
@@ -522,7 +516,13 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             {
                 if (!sources.TryGetValue(col, out var src) || string.IsNullOrWhiteSpace(src.Table) || string.IsNullOrWhiteSpace(src.Column))
                 {
-                    continue; // computed / ambiguous column: fail closed
+                    // Computed / ambiguous column without source: only survives if declared clear AND result table is not denied
+                    if (!cleared.Contains(col) || mapped == null || !mapped.Value.Decision.IsAllowed)
+                    {
+                        continue;
+                    }
+                    plan.Add((i, col, ColumnAccessLevel.Clear, null));
+                    continue;
                 }
 
                 var key = $"{(string.IsNullOrWhiteSpace(src.Schema) ? "dbo" : src.Schema)}.{src.Table}";
@@ -546,8 +546,25 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 (decision, meta) = mapped.Value;
             }
 
+            // If source table access is denied, fail closed
+            if (!decision.IsAllowed)
+            {
+                continue;
+            }
+
             var level = decision.GetEffectiveColumnAccess(sourceColumn, meta);
-            if (level == ColumnAccessLevel.Deny || (foreign && level != ColumnAccessLevel.Clear))
+            if (level == ColumnAccessLevel.Deny)
+            {
+                continue;
+            }
+
+            if (cleared.Contains(col))
+            {
+                plan.Add((i, col, ColumnAccessLevel.Clear, null));
+                continue;
+            }
+
+            if (foreign && level != ColumnAccessLevel.Clear)
             {
                 continue;
             }
