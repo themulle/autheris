@@ -184,6 +184,10 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
     public long CurrentEpoch => Volatile.Read(ref _currentSnapshot).Epoch;
 
+    public string ModelText => _modelText;
+
+    public bool ModelSupportsWildcardTenant => _modelSupportsWildcardTenant;
+
     public bool HasPolicies(TenantId tenant)
     {
         return Volatile.Read(ref _currentSnapshot).HasPolicies(tenant.Value);
@@ -352,31 +356,31 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
         if (subRule.Length > 500)
         {
-            throw new ArgumentException("Sicherheitsfehler: Casbin sub_rule überschreitet die maximale Länge von 500 Zeichen.", nameof(subRule));
+            throw new ArgumentException("Security validation error / Sicherheitsfehler: Casbin sub_rule überschreitet die maximale Länge von 500 Zeichen.", nameof(subRule));
         }
 
         if (!SafeSubRulePattern.IsMatch(subRule))
         {
-            throw new ArgumentException("Sicherheitsfehler: Casbin sub_rule enthält nicht erlaubte Zeichen.", nameof(subRule));
+            throw new ArgumentException("Security validation error / Sicherheitsfehler: Casbin sub_rule enthält nicht erlaubte Zeichen.", nameof(subRule));
         }
 
         if (!string.IsNullOrWhiteSpace(rlsFilter))
         {
             if (rlsFilter.Length > 1000)
             {
-                throw new ArgumentException("Sicherheitsfehler: Casbin rls_filter überschreitet die maximale Länge von 1000 Zeichen.", nameof(rlsFilter));
+                throw new ArgumentException("Security validation error / Sicherheitsfehler: Casbin rls_filter überschreitet die maximale Länge von 1000 Zeichen.", nameof(rlsFilter));
             }
 
             if (!SafeRlsFilterPattern.IsMatch(rlsFilter))
             {
-                throw new ArgumentException("Sicherheitsfehler: Casbin rls_filter enthält nicht erlaubte Zeichen.", nameof(rlsFilter));
+                throw new ArgumentException("Security validation error / Sicherheitsfehler: Casbin rls_filter enthält nicht erlaubte Zeichen.", nameof(rlsFilter));
             }
 
             foreach (var sqlToken in DangerousSqlTokens)
             {
                 if (rlsFilter.Contains(sqlToken, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new ArgumentException($"Sicherheitsfehler: Casbin rls_filter enthält nicht erlaubten SQL-Ausdruck '{sqlToken.Trim()}'.", nameof(rlsFilter));
+                    throw new ArgumentException($"Security validation error / Sicherheitsfehler: Casbin rls_filter enthält nicht erlaubten SQL-Ausdruck '{sqlToken.Trim()}'.", nameof(rlsFilter));
                 }
             }
         }
@@ -385,12 +389,12 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         {
             if (subRule.Contains(token, StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException($"Sicherheitsfehler: Casbin sub_rule enthält nicht erlaubten Ausdruck '{token}'.", nameof(subRule));
+                throw new ArgumentException($"Security validation error / Sicherheitsfehler: Casbin sub_rule enthält nicht erlaubten Ausdruck '{token}'.", nameof(subRule));
             }
 
             if (!string.IsNullOrWhiteSpace(rlsFilter) && rlsFilter.Contains(token, StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException($"Sicherheitsfehler: Casbin rls_filter enthält nicht erlaubten Ausdruck '{token}'.", nameof(rlsFilter));
+                throw new ArgumentException($"Security validation error / Sicherheitsfehler: Casbin rls_filter enthält nicht erlaubten Ausdruck '{token}'.", nameof(rlsFilter));
             }
         }
     }
@@ -1157,7 +1161,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
     internal static (ImmutableDictionary<string, ImmutableArray<CasbinRuleMetadata>> Rules, ImmutableArray<GroupingRule> Grouping) ParsePolicyText(
         string policyText,
         string? defaultTenant,
-        bool modelSupportsWildcardTenant)
+        bool modelSupportsWildcardTenant,
+        bool allowWildcardForDefaultTenant = false)
     {
         ArgumentNullException.ThrowIfNull(policyText);
 
@@ -1229,9 +1234,19 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                     {
                         if (specifiedTenant != null && !string.Equals(specifiedTenant, defaultTenant, StringComparison.OrdinalIgnoreCase))
                         {
-                            throw new FormatException($"Casbin policy line {lineNumber}: tenant policy file for '{defaultTenant}' cannot define rules for '{specifiedTenant}'.");
+                            if (allowWildcardForDefaultTenant && string.Equals(specifiedTenant, "*", StringComparison.OrdinalIgnoreCase))
+                            {
+                                ruleTenant = "*";
+                            }
+                            else
+                            {
+                                throw new FormatException($"Casbin policy line {lineNumber}: tenant policy file for '{defaultTenant}' cannot define rules for '{specifiedTenant}'.");
+                            }
                         }
-                        ruleTenant = defaultTenant;
+                        else
+                        {
+                            ruleTenant = defaultTenant;
+                        }
                     }
                     else
                     {

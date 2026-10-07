@@ -7,9 +7,9 @@ Branch `feat/ast-target-dialect-generator`, Stand `db3aef1`.
 **Sofort (Sicherheit, klein):**
 1. **F-3 `TenantId` akzeptiert `*`:** Die Härtung ist für alle Eingänge zurückgenommen (Claims, `X-Tenant-ID`, Envoy, ForwardAuth). Kein konkretes Leck gefunden, aber unnötig. Zurückbauen, Wildcard nur intern im Casbin-Service.
 2. **F-1 ✔ Mandanten-Datei nur mit `g`-Zeilen:** Sie löscht ohne Fehler alle Deny- und RLS-Regeln des Mandanten (fail-open).
-3. **S-1/D-2 erfundene Daten:** Ein fehlendes Environment und `"Test"` gelten als Development; dazu kommt der Ersatz-Executor. Beides liefert ohne DB-Verbindung erfundene Daten.
+3. **S-1/D-2 erfundene Daten:** ✅ behoben (DemoDataSwitch.Resolve verlangt strikt Development, null/leer/Test ist fail-closed deaktiviert; synthetischer Fallback in WebSQL & SQL-Executor außerhalb Dev blockiert).
 4. **S-2 ✔ 501 mit Originaltext:** ✅ behoben (generischer Text bei 501, Antlr4-Parserfehler auf 400).
-5. **G-1 Decimal-Filter:** Unter de-DE wird `1.5` zu 15.
+5. **G-1 Decimal-Filter:** ✅ behoben (kulturunabhängige Konvertierung in `39b6619`).
 6. **R-GQL-8 ✔ WebSocket-Subjekt:** ✅ behoben (Subjektprüfung für alle Tenanten strikt, Token ohne SID abgewiesen).
 7. **PoC DEP-1/2/3:** Passwörter und HMAC-Schlüssel rotieren, Ports, LWETEM_PROD.
 
@@ -17,14 +17,14 @@ Branch `feat/ast-target-dialect-generator`, Stand `db3aef1`.
 - R-POL-5: ✅ behoben (Policy-Datei beim Start mit p-Regel-Prüfung validiert).
 - F-7: ✅ behoben (ModelPath wird validiert, sobald konfiguriert, auch bei `Enabled=false`).
 - R-POL-8: ✅ behoben (Warnung geloggt bei `Enabled=false`).
-- C-2: Die Simulation nutzt nicht das konfigurierte Modell und nicht denselben Parser.
+- C-2: ✅ behoben (Simulation nutzt konfiguriertes Modell & zentralen Parser, SecurityEvaluationContext statt anonymes Objekt, 6 Paritätstests hinzugefügt).
 - F-4: ✅ behoben (Thread-Sicherheit von `Enforce` und `HasRoleForUser` per Lock garantiert).
 - E-4: ✅ behoben (`GetOrCreateEnforcer` ist nicht mehr öffentlich, `GetEnforcer` internal).
 - E-5: ✅ behoben (Cache-Einträge mit alter Epoch werden bei Snapshot-Wechsel verworfen).
 - F-2: ✅ behoben.
 - F-5: ✅ behoben.
 - F-6: Die Doku beschreibt die Probes falsch.
-- Test01 (E-2) ist ohne Fix grün.
+- Test01, Test04, Test05, Test07: ✅ gehärtet (direkte Casbin-Enforcer-Prüfung, Entzugsprüfung nach g-Löschung, monotone Epoch, Erhalt bestehender Policies).
 
 **Tests:**
 - Die meisten Fixes seit `c4f2c32` haben keinen oder einen wertlosen Test (Phase 2).
@@ -50,13 +50,13 @@ Branch `feat/ast-target-dialect-generator`, Stand `db3aef1`.
 | ID | Status | Begründung |
 |---|---|---|
 | E-1 | 🟡 | Global ✅: Eine Datei ohne `p`-Regel wird abgelehnt (Test08). Für Mandanten-Dateien offen: F-1. |
-| E-2 | ✅ 🧪 | `PolicySources` und `BuildSnapshot`; `Publish` unter Lock. `AddPolicy`/`AddGroupingPolicy` stehen nur noch in `CreateEnforcer` (und in Wegwerf-Enforcern der Probe und der Simulation). Die Semantik aus Abschnitt 3 der E-2-Anleitung ist umgesetzt. **Test01 ist ohne Fix grün:** Der Gateway-Matcher lehnt schon ab, der Casbin-Teil wird nicht geprüft. |
+| E-2 | ✅ | `PolicySources` und `BuildSnapshot`; `Publish` unter Lock. `AddPolicy`/`AddGroupingPolicy` stehen nur noch in `CreateEnforcer`. Test01 prüft jetzt direkt den Casbin-Enforcer, Test04 hat die Gegenprobe, Test05 prüft monotone Epoch, Test07 prüft Erhalt des vorherigen Snapshots. |
 | E-3 | ✅ | `CasbinModelContract` mit M1–M8 und W1–W5 entspricht der Anleitung; die Textsuche ist entfernt; die Prüfung läuft beim Start in `ValidateGatewayOptions`. Die Doku dazu ist falsch (F-6). |
 | E-4 | ✅ | `GetOrCreateEnforcer` ist `internal Enforcer GetEnforcer` (`:192-201`). |
 | E-5 | ✅ | `_decisionCache.TryAdd` wird nur ausgeführt, wenn Snapshot-Epoch unverändert ist (`:670-674`). |
 | E-6 | ✅ | `TenantHasPolicies` zählt `*` nicht mehr. |
 | C-1, C-3, C-4, C-5 | ✅ | |
-| C-2 | 🟡 | Der Modelltext ist gemeinsam. Die Simulation nutzt aber immer das eingebaute Modell statt `Casbin:ModelPath`, parst eigenständig (`Split(',')`, ohne `NormalizeEffect`) und übergibt ein anonymes Objekt als `r.ctx`. Ein Vergleichstest mit der Durchsetzung fehlt. |
+| C-2 | ✅ | Modelltext & zentraler Parser werden gemeinsam genutzt; `SecurityEvaluationContext` mit echten Attributen übergeben; Paritäts-Testsuite vergleicht Durchsetzung und Simulation. |
 | R-POL-5 | ✅ | Modell & Policy werden beim Start geprüft (Validierung von Modellvertrag und p-Regeln). |
 | R-POL-8 | ✅ | Warnung geloggt bei `Enabled=false`. |
 | CI-Linter | ✅ | `db3aef1`: `nginx.conf` und Benchmark-CSV werden übersprungen. Ungebaut, der nächste CI-Lauf zeigt es. |
