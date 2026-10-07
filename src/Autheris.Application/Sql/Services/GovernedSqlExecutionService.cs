@@ -397,12 +397,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 throw TableDenied(target);
             }
 
-            // SQ-09: If a 3-part name was used, validate the catalog part against the data source / catalog
-            if (!string.IsNullOrWhiteSpace(target.Catalog) &&
-                !string.Equals(target.Catalog, dataSourceName, StringComparison.OrdinalIgnoreCase) &&
-                (string.IsNullOrWhiteSpace(tableMeta.Table.SourceName) || !string.Equals(target.Catalog, tableMeta.Table.SourceName, StringComparison.OrdinalIgnoreCase)))
+            // SQ-09 / SQL-5: The catalog part of a 3-part name is emitted verbatim. On SQL Server it names a database,
+            // which is not the logical data source name it was checked against -> 3-part names are rejected.
+            if (!string.IsNullOrWhiteSpace(target.Catalog))
             {
-                _logger?.LogWarning("WebSQL rejected table {Table}: 3-part catalog '{Catalog}' does not match data source '{DataSource}'.", target.FullName, target.Catalog, dataSourceName);
+                _logger?.LogWarning("WebSQL rejected table {Table}: 3-part names (catalog '{Catalog}') are not supported.", target.FullName, target.Catalog);
                 throw TableDenied(target);
             }
 
