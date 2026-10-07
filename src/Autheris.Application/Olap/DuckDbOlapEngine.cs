@@ -99,6 +99,10 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         using (var queryCmd = connection.CreateCommand())
         {
             queryCmd.CommandText = request.Sql;
+
+            // SQL2-9: DuckDB.NET checks the token only before it starts; Cancel() calls duckdb_interrupt and stops a
+            // running query when the timeout fires or the caller aborts.
+            using var interrupt = cts.Token.Register(static state => ((System.Data.Common.DbCommand)state!).Cancel(), queryCmd);
             using var reader = await queryCmd.ExecuteReaderAsync(cts.Token).ConfigureAwait(false);
 
             int fieldCount = reader.FieldCount;
@@ -294,7 +298,9 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         {
             "CREATE", "DROP", "ALTER", "INSERT", "UPDATE", "DELETE",
             "ATTACH", "DETACH", "COPY", "EXPORT", "IMPORT", "INSTALL", "LOAD",
-            "PRAGMA", "SET"
+            "PRAGMA", "SET",
+            // SQL2-9: recursive CTEs generate unbounded rows
+            "RECURSIVE"
         };
 
         var tokens = ExtractTokens(trimmed);
@@ -306,14 +312,11 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             }
         }
 
-        // 4. Prohibit unbounded generator table functions if no sources were staged
-        if (sources == null || sources.Count == 0)
+        // 4. SQL2-9: unbounded generator table functions are prohibited, also next to staged tables (cross join bomb).
+        var match = DisallowedGeneratorRegex.Match(trimmed);
+        if (match.Success)
         {
-            var match = DisallowedGeneratorRegex.Match(trimmed);
-            if (match.Success)
-            {
-                throw new System.Security.SecurityException($"Table generator function '{match.Groups[1].Value}' is not permitted without staged tables.");
-            }
+            throw new System.Security.SecurityException($"Table generator function '{match.Groups[1].Value}' is not permitted in OLAP queries.");
         }
     }
 
