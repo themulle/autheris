@@ -5,6 +5,7 @@ using System.Security;
 using System.Text;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -324,10 +325,15 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             var userSid = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.PrimarySid)?.Value
                           ?? context.Principal?.FindFirst("sub")?.Value;
 
+            if (!TenantId.TryParse(tenantVal, out var validatedTenantId))
+            {
+                throw new GatewayForbiddenException($"Invalid tenant identity '{tenantVal}'.");
+            }
+
             tx = await _sessionInitializer.InitializeSessionAsync(
                 connection,
                 connOptions.Provider,
-                new TenantId(tenantVal),
+                validatedTenantId,
                 userSid: userSid,
                 purpose: null,
                 requireTransaction: true,
@@ -351,11 +357,18 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
             return results;
         }
-        catch
+        catch (Exception)
         {
             if (tx != null)
             {
-                await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                try
+                {
+                    await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception rbEx)
+                {
+                    _logger?.LogWarning(rbEx, "Failed to rollback transaction after error in SqlDataSourceExecutor");
+                }
             }
             throw;
         }

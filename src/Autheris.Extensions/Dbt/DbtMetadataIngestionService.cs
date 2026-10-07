@@ -474,12 +474,8 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 [proposal.ColumnName] = newRule
             };
 
-            var newTableMeta = new TableMetadata
+            var newTableMeta = tableMeta with
             {
-                Table = tableMeta.Table,
-                Identifier = tableMeta.Identifier,
-                Columns = tableMeta.Columns,
-                PrimaryKeyColumns = tableMeta.PrimaryKeyColumns,
                 ColumnMaskingRules = updatedRules
             };
 

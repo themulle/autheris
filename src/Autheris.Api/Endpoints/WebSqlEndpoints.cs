@@ -15,6 +15,7 @@ using Autheris.Application.Serialization;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;

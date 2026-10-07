@@ -797,9 +797,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
         if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString) || _connectionFactory == null)
         {
-            bool isDevOrTest = _environment != null &&
-                               (string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
-                                string.Equals(_environment.EnvironmentName, "Test", StringComparison.OrdinalIgnoreCase));
+            bool isDevOrTest = _environment == null ||
+                               string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(_environment.EnvironmentName, "Test", StringComparison.OrdinalIgnoreCase);
             bool isExplicitlyAllowed = _options.Value.AreExternalSystemsMockedIfUnreachable;
 
             if (!isDevOrTest && !isExplicitlyAllowed)
@@ -847,28 +847,34 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
         }
 
+        DbTransaction? tx = null;
         try
         {
             // Real Database Execution
             await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
 
-            // SEC P-05 / SQ-01 & M-1: Initialize session context (PostgreSQL GUCs, standard-conforming strings, SQL Server SESSION_CONTEXT)
+            // SEC P-05 / SQ-01 & M-1 & R-SQL-3: Initialize session context inside a transaction
+            // so PostgreSQL GUCs are transaction-scoped (isLocal = true) and cannot leak to pooled connections / PgBouncer.
             if (TryMapProviderToDialect(connOptions.Provider, out var connectionDialect))
             {
                 var userSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
                               ?? user.FindFirst("sub")?.Value;
 
-                await _sessionInitializer.InitializeSessionAsync(
+                tx = await _sessionInitializer.InitializeSessionAsync(
                     connection,
                     connectionDialect,
                     tenantId,
                     userSid: userSid,
                     purpose: null,
-                    requireTransaction: false,
+                    requireTransaction: true,
                     ct: ct).ConfigureAwait(false);
             }
 
             await using var command = connection.CreateCommand();
+            if (tx != null)
+            {
+                command.Transaction = tx;
+            }
             command.CommandText = securedSql;
             command.CommandTimeout = Math.Max(1, _options.Value.WebSql.ExecutionTimeoutSeconds);
 
@@ -902,7 +908,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (dmlContext.IsDml)
             {
-                await ExecuteDmlInTransactionAsync(connection, command, tenantId, user, dsName, dmlContext, securedSql, ct).ConfigureAwait(false);
+                await ExecuteDmlInTransactionAsync(connection, command, tx, tenantId, user, dsName, dmlContext, securedSql, ct).ConfigureAwait(false);
+                tx = null;
 
                 // DML produces no result set; hand an empty reader to the writer (same shape as before).
                 using var emptyTable = new DataTable();
@@ -913,10 +920,33 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false);
             await rowWriter(reader, ct).ConfigureAwait(false);
+            if (tx != null)
+            {
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
             return securedSql;
+        }
+        catch (Exception)
+        {
+            if (tx != null)
+            {
+                try
+                {
+                    await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception rbEx)
+                {
+                    _logger?.LogWarning(rbEx, "Failed to rollback WebSQL transaction.");
+                }
+            }
+            throw;
         }
         finally
         {
+            if (tx != null)
+            {
+                await tx.DisposeAsync().ConfigureAwait(false);
+            }
             if (leases != null)
             {
                 foreach (var lease in leases)
@@ -935,6 +965,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     private async Task ExecuteDmlInTransactionAsync(
         DbConnection connection,
         DbCommand command,
+        DbTransaction? existingTx,
         TenantId tenantId,
         ClaimsPrincipal user,
         string dsName,
@@ -945,7 +976,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         long maxAffectedRows = _options.Value.WebSql.MaxAffectedRows;
         int affectedRows;
 
-        await using var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        DbTransaction transaction = existingTx ?? await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         command.Transaction = transaction;
 
         try

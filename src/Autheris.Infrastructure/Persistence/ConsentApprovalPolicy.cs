@@ -120,9 +120,7 @@ internal static class ConsentApprovalPolicy
     /// ADR-008: HIGH, RESTRICTED, and SECRET sensitivity classifications mandate four-eyes approval by default.
     /// </summary>
     public static bool IsHighSensitivity(string? sensitivity) =>
-        string.Equals(sensitivity, "HIGH", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(sensitivity, "RESTRICTED", StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(sensitivity, "SECRET", StringComparison.OrdinalIgnoreCase);
+        Table.IsSensitivityHigh(sensitivity);
 
     public static bool RequiresFourEyesApproval(bool requiresFourEyes, string? sensitivity = null) =>
         requiresFourEyes || IsHighSensitivity(sensitivity);

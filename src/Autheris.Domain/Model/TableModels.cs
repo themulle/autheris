@@ -34,8 +34,22 @@ public sealed class Table
     public HttpEndpointDescriptor? HttpEndpoint { get; init; }
     public string? PluginName { get; init; }
 
+    public static bool IsSensitivityHigh(string? sensitivity)
+    {
+        if (string.IsNullOrWhiteSpace(sensitivity)) return false;
+        var s = sensitivity.Trim();
+        if (string.Equals(s, "PUBLIC", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(s, "INTERNAL", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(s, "NORMAL", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(s, "LOW", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        return true;
+    }
+
     public bool IsHighlySensitive =>
-        string.Equals(Sensitivity, "HIGH", StringComparison.OrdinalIgnoreCase) || RequiresFourEyes;
+        RequiresFourEyes || IsSensitivityHigh(Sensitivity);
 
     /// <summary>
     /// D-1: SQL tables fail closed on an unknown source type. Other sources (HTTP, plugins, lakehouse) never send SQL to a
@@ -109,7 +123,7 @@ public sealed class MaskingRule
     }
 }
 
-public sealed class TableMetadata
+public sealed record TableMetadata
 {
     public Table Table { get; init; } = new();
     public TableIdentifier Identifier { get; init; }
