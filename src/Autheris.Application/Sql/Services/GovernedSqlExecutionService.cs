@@ -301,6 +301,22 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         // is used. Every referenced table must have exactly this dialect.
         DatabaseDialect? targetDatabaseDialect = ResolveConnectionDialect(dataSourceName);
 
+        // SQL-2: the policy maps below are keyed case-insensitively. Two references that fold to the same key but are
+        // spelled differently may address different physical relations (PostgreSQL quoted identifiers, SQL Server with
+        // a case-sensitive collation), and their policies would overwrite each other -> reject.
+        var referenceSpellings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var target in metadata.ReferencedTables)
+        {
+            if (referenceSpellings.TryGetValue(target.FullName, out var firstSpelling) &&
+                !string.Equals(firstSpelling, target.FullName, StringComparison.Ordinal))
+            {
+                _logger?.LogWarning("WebSQL rejected table {Table}: referenced with differing letter case ('{First}').", target.FullName, firstSpelling);
+                throw TableDenied(target);
+            }
+
+            referenceSpellings[target.FullName] = target.FullName;
+        }
+
         foreach (var target in metadata.ReferencedTables)
         {
             // SEC C-03: Tables without catalog metadata (or without column metadata) cannot be governed -> reject.
