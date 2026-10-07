@@ -1,0 +1,245 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 930" width="100%" height="100%" style="background-color: #0d1117; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="40%" stop-color="#818cf8"/>
+      <stop offset="80%" stop-color="#c084fc"/>
+      <stop offset="100%" stop-color="#f472b6"/>
+    </linearGradient>
+    <linearGradient id="coreGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e1e3e"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="protocolGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+
+    <!-- Arrow Markers -->
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowPrimary" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#34d399"/>
+    </marker>
+    <marker id="arrowPurple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#c084fc"/>
+    </marker>
+    <marker id="arrowOrange" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 8 5 L 0 9 z" fill="#fb923c"/>
+    </marker>
+  </defs>
+
+  <!-- ================= HEADER BANNER ================= -->
+  <text x="580" y="38" text-anchor="middle" font-size="23" font-weight="800" fill="url(#headerGrad)" letter-spacing="1.5">AUTHERIS ZERO-TRUST ARCHITECTURE &amp; WORKFLOW</text>
+  <text x="580" y="58" text-anchor="middle" font-size="12" fill="#94a3b8" letter-spacing="0.5">.NET 10 • Hot Chocolate 16 • ANTLR4 Trino Engine • Zero-Trust Data-Owner-Consent Gateway</text>
+
+  <!-- ================= TIER 0: PROTOCOLS & WIRE FORMATS ================= -->
+  <rect x="50" y="74" width="1060" height="46" rx="8" fill="#111827" stroke="#38bdf8" stroke-width="1.2" stroke-dasharray="4 2"/>
+  <text x="68" y="101" font-size="10" font-weight="700" fill="#38bdf8" letter-spacing="1">PROTOCOLS &amp; FORMATS:</text>
+
+  <g transform="translate(230, 83)">
+    <!-- Badge 1: JSON/GraphQL -->
+    <rect width="115" height="26" rx="13" fill="#1e293b" stroke="#38bdf8" stroke-width="1"/>
+    <text x="57" y="17" text-anchor="middle" font-size="10" font-weight="600" fill="#f0f6fc">JSON / HTTP</text>
+
+    <!-- Badge 2: Arrow Flight SQL -->
+    <rect x="125" width="135" height="26" rx="13" fill="#1e293b" stroke="#38bdf8" stroke-width="1"/>
+    <text x="192" y="17" text-anchor="middle" font-size="10" font-weight="600" fill="#f0f6fc">Arrow Flight SQL</text>
+
+    <!-- Badge 3: Parquet -->
+    <rect x="270" width="125" height="26" rx="13" fill="#1e293b" stroke="#38bdf8" stroke-width="1"/>
+    <text x="332" y="17" text-anchor="middle" font-size="10" font-weight="600" fill="#f0f6fc">Parquet Egress</text>
+
+    <!-- Badge 4: WS & SSE -->
+    <rect x="405" width="135" height="26" rx="13" fill="#1e293b" stroke="#38bdf8" stroke-width="1"/>
+    <text x="472" y="17" text-anchor="middle" font-size="10" font-weight="600" fill="#f0f6fc">WebSocket &amp; SSE</text>
+
+    <!-- Badge 5: MCP Stdio -->
+    <rect x="550" width="145" height="26" rx="13" fill="#1e293b" stroke="#38bdf8" stroke-width="1"/>
+    <text x="622" y="17" text-anchor="middle" font-size="10" font-weight="600" fill="#f0f6fc">MCP Stdio / Stream</text>
+
+    <!-- Badge 6: OData v4 -->
+    <rect x="705" width="155" height="26" rx="13" fill="#1e293b" stroke="#38bdf8" stroke-width="1"/>
+    <text x="782" y="17" text-anchor="middle" font-size="10" font-weight="600" fill="#f0f6fc">OData v4 / OpenAPI 3.1</text>
+  </g>
+
+  <!-- ================= TIER 1: INGRESS INTERFACES ================= -->
+  <rect x="50" y="132" width="1060" height="96" rx="8" fill="#161b22" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="70" y="154" font-size="11" font-weight="700" fill="#38bdf8" letter-spacing="1">1. INGRESS: GATEWAY INTERFACES &amp; CONNECTORS</text>
+
+  <g transform="translate(68, 164)">
+    <!-- Box 1: GraphQL -->
+    <rect width="245" height="52" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="14" y="22" font-size="12" font-weight="600" fill="#f0f6fc">GraphQL &amp; Subscriptions</text>
+    <text x="14" y="38" font-size="10" fill="#8b949e">Hot Chocolate 16 • WS/SSE • Nitro UI</text>
+
+    <!-- Box 2: MCP -->
+    <rect x="257" width="245" height="52" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="271" y="22" font-size="12" font-weight="600" fill="#f0f6fc">Agentic AI (MCP Gateway)</text>
+    <text x="271" y="38" font-size="10" fill="#8b949e">Stdio / SSE • OWASP LLM01 Guardrails</text>
+
+    <!-- Box 3: SQL-to-API -->
+    <rect x="514" width="245" height="52" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="528" y="22" font-size="12" font-weight="600" fill="#f0f6fc">Declarative SQL-to-API &amp; REST</text>
+    <text x="528" y="38" font-size="10" fill="#8b949e">Dynamic OpenAPI 3.1 • Swagger UI</text>
+
+    <!-- Box 4: WebSQL & Procedures -->
+    <rect x="771" width="253" height="52" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="785" y="22" font-size="12" font-weight="600" fill="#f0f6fc">Governed WebSQL &amp; Procedures</text>
+    <text x="785" y="38" font-size="10" fill="#8b949e">Trino AST Linter • Pure-YAML Procs</text>
+  </g>
+
+  <!-- Ingress Flow Arrow -->
+  <line x1="580" y1="228" x2="580" y2="265" stroke="#38bdf8" stroke-width="2" marker-end="url(#arrowPrimary)"/>
+
+  <!-- ================= LEFT: WORKFLOWS & COMPLIANCE ================= -->
+  <rect x="50" y="265" width="310" height="400" rx="8" fill="#161b22" stroke="#34d399" stroke-width="1.5"/>
+  <text x="70" y="290" font-size="11" font-weight="700" fill="#34d399" letter-spacing="1">WORKFLOWS &amp; COMPLIANCE</text>
+
+  <g transform="translate(65, 305)">
+    <!-- Item 1: Identity -->
+    <rect width="280" height="98" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="14" y="22" font-size="12" font-weight="600" fill="#34d399">Enterprise Identity &amp; Auth</text>
+    <text x="14" y="42" font-size="10" fill="#c9d1d9">• Traefik Ingress ForwardAuth</text>
+    <text x="14" y="58" font-size="10" fill="#c9d1d9">• Entra ID (Azure AD) / Kerberos SPNEGO</text>
+    <text x="14" y="74" font-size="10" fill="#c9d1d9">• Normalized Windows SID Value Objects</text>
+    <text x="14" y="90" font-size="10" fill="#c9d1d9">• mTLS Service Principals &amp; Basic Auth</text>
+
+    <!-- Item 2: 4-Eyes Consent -->
+    <rect y="112" width="280" height="106" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="14" y="132" font-size="12" font-weight="600" fill="#34d399">4-Eyes Consent Workflow</text>
+    <text x="14" y="152" font-size="10" fill="#c9d1d9">• Fail-Closed Default Deny (Tables/Cols/Rows)</text>
+    <text x="14" y="168" font-size="10" fill="#c9d1d9">• Anti-Self-Approval (Segregation of Duties)</text>
+    <text x="14" y="184" font-size="10" fill="#c9d1d9">• Time-Bounded Delegations &amp; Handovers</text>
+    <text x="14" y="200" font-size="10" fill="#c9d1d9">• 24h Distributed Idempotency Keys</text>
+
+    <!-- Item 3: WORM Audit -->
+    <rect y="232" width="280" height="114" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="14" y="252" font-size="12" font-weight="600" fill="#34d399">WORM Audit &amp; Pure-YAML Procs</text>
+    <text x="14" y="272" font-size="10" fill="#c9d1d9">• Cryptographic HMAC-SHA256 Hash Chain</text>
+    <text x="14" y="288" font-size="10" fill="#c9d1d9">• SEC Rule 17a-4 S3 Object Lock Export</text>
+    <text x="14" y="304" font-size="10" fill="#c9d1d9">• GDPR Art. 15 Subject Access Disclosure</text>
+    <text x="14" y="320" font-size="10" fill="#c9d1d9">• Zero-Privilege Declared Procs (DDL Hash)</text>
+  </g>
+
+  <!-- Connectors Left <-> Center -->
+  <line x1="360" y1="390" x2="385" y2="390" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+  <line x1="385" y1="520" x2="360" y2="520" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+
+  <!-- ================= CENTER: AUTHERIS CORE GATEWAY ================= -->
+  <rect x="385" y="265" width="390" height="400" rx="8" fill="url(#coreGrad)" stroke="#818cf8" stroke-width="2"/>
+  <text x="405" y="290" font-size="12" font-weight="700" fill="#818cf8" letter-spacing="1">AUTHERIS CORE GATEWAY ENGINE</text>
+
+  <g transform="translate(400, 305)">
+    <!-- Stage 1 -->
+    <rect width="360" height="60" rx="6" fill="#161b22" stroke="#4338ca"/>
+    <text x="15" y="24" font-size="12" font-weight="600" fill="#e0e7ff">1. Identity &amp; SID Normalization</text>
+    <text x="15" y="44" font-size="10" fill="#a5b4fc">Arbitration to canonical Windows SIDs • Claims transform</text>
+
+    <!-- Stage 2 -->
+    <rect y="70" width="360" height="66" rx="6" fill="#161b22" stroke="#4338ca"/>
+    <text x="15" y="93" font-size="12" font-weight="600" fill="#e0e7ff">2. Zero-Trust Consent Gate</text>
+    <text x="15" y="113" font-size="10" fill="#a5b4fc">Dynamic Consent Resolution • Casbin ABAC Evaluation</text>
+    <text x="15" y="127" font-size="10" fill="#a5b4fc">Fail-Closed Verification for Tables, Columns &amp; Rows</text>
+
+    <!-- Stage 3 -->
+    <rect y="146" width="360" height="88" rx="6" fill="#161b22" stroke="#4338ca"/>
+    <text x="15" y="169" font-size="12" font-weight="600" fill="#e0e7ff">3. Trino-Compatible AST Target Compiler</text>
+    <text x="15" y="189" font-size="10" fill="#a5b4fc">ANTLR4 SqlAstBuilder • AstSecurityVisitor RLS Pushdown</text>
+    <text x="15" y="205" font-size="10" fill="#a5b4fc">AstSimplificationVisitor: Constant Folding &amp; Tautology Reduction</text>
+    <text x="15" y="221" font-size="10" fill="#a5b4fc">Target Dialects: PostgreSQL, SQL Server (T-SQL), SQLite</text>
+
+    <!-- Stage 4 -->
+    <rect y="244" width="360" height="96" rx="6" fill="#161b22" stroke="#4338ca"/>
+    <text x="15" y="267" font-size="12" font-weight="600" fill="#e0e7ff">4. Pipeline, Caching &amp; Masking</text>
+    <text x="15" y="287" font-size="10" fill="#a5b4fc">L1 Memory Cache &amp; Batch-DataLoader with Chunking</text>
+    <text x="15" y="303" font-size="10" fill="#a5b4fc">Zero-Allocation Data Masking (HMAC-SHA256 / Redaction)</text>
+    <text x="15" y="319" font-size="10" fill="#a5b4fc">Side-Channel Defense (Rejection of Mask/Deny WHERE Filters)</text>
+  </g>
+
+  <!-- Connectors Center <-> Right -->
+  <line x1="775" y1="390" x2="800" y2="390" stroke="#c084fc" stroke-width="1.5" marker-end="url(#arrowPurple)"/>
+  <line x1="800" y1="520" x2="775" y2="520" stroke="#c084fc" stroke-width="1.5" marker-end="url(#arrowPurple)"/>
+
+  <!-- ================= RIGHT: INTEGRATIONS ================= -->
+  <rect x="800" y="265" width="310" height="400" rx="8" fill="#161b22" stroke="#c084fc" stroke-width="1.5"/>
+  <text x="820" y="290" font-size="11" font-weight="700" fill="#c084fc" letter-spacing="1">ENTERPRISE INTEGRATIONS</text>
+
+  <g transform="translate(815, 305)">
+    <!-- Item 1: dbt -->
+    <rect width="280" height="98" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="14" y="22" font-size="12" font-weight="600" fill="#c084fc">dbt Data Mesh &amp; Contracts</text>
+    <text x="14" y="42" font-size="10" fill="#c9d1d9">• Manifest &amp; Catalog Streaming Parser</text>
+    <text x="14" y="58" font-size="10" fill="#c9d1d9">• Data Health Circuit Breaker (Quarantine)</text>
+    <text x="14" y="74" font-size="10" fill="#c9d1d9">• Model Contract Breaking-Change CI Gate</text>
+    <text x="14" y="90" font-size="10" fill="#c9d1d9">• Omnichannel Doc-Block Passthrough</text>
+
+    <!-- Item 2: Metadata Catalogs -->
+    <rect y="112" width="280" height="106" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="14" y="132" font-size="12" font-weight="600" fill="#c084fc">Metadata Catalogs &amp; Lineage</text>
+    <text x="14" y="152" font-size="10" fill="#c9d1d9">• Purview, Collibra, Alation &amp; OpenMetadata</text>
+    <text x="14" y="168" font-size="10" fill="#c9d1d9">• Automated GDPR Art. 9 Classification</text>
+    <text x="14" y="184" font-size="10" fill="#c9d1d9">• OpenLineage &amp; OpenJEV Event Export</text>
+    <text x="14" y="200" font-size="10" fill="#c9d1d9">• Backstage Software Catalog Export</text>
+
+    <!-- Item 3: Clustering -->
+    <rect y="232" width="280" height="114" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="14" y="252" font-size="12" font-weight="600" fill="#c084fc">Distributed Clustering (Redis)</text>
+    <text x="14" y="272" font-size="10" fill="#c9d1d9">• Redis Pub/Sub Policy Epoch Bus</text>
+    <text x="14" y="288" font-size="10" fill="#c9d1d9">• Atomic Token-Bucket Rate Limiter</text>
+    <text x="14" y="304" font-size="10" fill="#c9d1d9">• Lock-free In-Memory Interlocked Fallback</text>
+    <text x="14" y="320" font-size="10" fill="#c9d1d9">• Deep K8s Readiness &amp; Liveness Probes</text>
+  </g>
+
+  <!-- Output Arrow Center -> Bottom -->
+  <line x1="580" y1="665" x2="580" y2="710" stroke="#fb923c" stroke-width="2" marker-end="url(#arrowOrange)"/>
+  <rect x="440" y="675" width="280" height="24" rx="4" fill="#0d1117" stroke="#fb923c" stroke-width="1.2"/>
+  <text x="580" y="691" text-anchor="middle" font-size="10" font-weight="700" fill="#fb923c" letter-spacing="0.5">DIALECT-AWARE SQL &amp; FILTER PUSHDOWN</text>
+
+  <!-- ================= BOTTOM: STORAGE & DATA SOURCES ================= -->
+  <rect x="50" y="715" width="1060" height="175" rx="8" fill="#161b22" stroke="#fb923c" stroke-width="1.5"/>
+  <text x="70" y="738" font-size="11" font-weight="700" fill="#fb923c" letter-spacing="1">DATA SOURCES &amp; STORAGE ENGINES</text>
+
+  <g transform="translate(68, 750)">
+    <!-- Store 1: SQL Databases -->
+    <rect width="245" height="125" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="15" y="22" font-size="12" font-weight="600" fill="#f0f6fc">SQL Databases</text>
+    <text x="15" y="42" font-size="10" fill="#8b949e">• MSSQL / Microsoft SQL Server</text>
+    <text x="15" y="58" font-size="10" fill="#8b949e">• PostgreSQL &amp; SQLite</text>
+    <text x="15" y="74" font-size="10" fill="#8b949e">• Oracle &amp; Databricks SQL</text>
+    <text x="15" y="90" font-size="10" fill="#8b949e">• Native ADO.NET Connection Pools</text>
+    <text x="15" y="106" font-size="10" fill="#8b949e">• Zero-Privilege Stored Procedures</text>
+
+    <!-- Store 2: Lakehouse -->
+    <rect x="257" width="245" height="125" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="271" y="22" font-size="12" font-weight="600" fill="#f0f6fc">Lakehouse v2</text>
+    <text x="271" y="42" font-size="10" fill="#8b949e">• Apache Iceberg v2 Tables</text>
+    <text x="271" y="58" font-size="10" fill="#8b949e">• Amazon S3 (SigV4 Authentication)</text>
+    <text x="271" y="74" font-size="10" fill="#8b949e">• Azure Blob Storage &amp; Local Filesystem</text>
+    <text x="271" y="90" font-size="10" fill="#8b949e">• Vectorized Partition Pruning</text>
+    <text x="271" y="106" font-size="10" fill="#8b949e">• Min/Max Column Stats Filtering</text>
+
+    <!-- Store 3: REST & Fusion -->
+    <rect x="514" width="245" height="125" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="528" y="22" font-size="12" font-weight="600" fill="#f0f6fc">REST &amp; Subgraphs</text>
+    <text x="528" y="42" font-size="10" fill="#8b949e">• Declarative REST Engine (URL Templates)</text>
+    <text x="528" y="58" font-size="10" fill="#8b949e">• Hot Chocolate Fusion Supergraph</text>
+    <text x="528" y="74" font-size="10" fill="#8b949e">• Isolated C# Plugins (AssemblyLoadContext)</text>
+    <text x="528" y="90" font-size="10" fill="#8b949e">• Anti-SSRF DNS Pre-Resolution Defense</text>
+    <text x="528" y="106" font-size="10" fill="#8b949e">• Adaptive Request Batching</text>
+
+    <!-- Store 4: Streams & CDC -->
+    <rect x="771" width="253" height="125" rx="6" fill="#0d1117" stroke="#30363d"/>
+    <text x="785" y="22" font-size="12" font-weight="600" fill="#f0f6fc">Event Streams &amp; CDC</text>
+    <text x="785" y="42" font-size="10" fill="#8b949e">• Apache Kafka Event Streaming</text>
+    <text x="785" y="58" font-size="10" fill="#8b949e">• Debezium Change Data Capture</text>
+    <text x="785" y="74" font-size="10" fill="#8b949e">• In-Stream Casbin ABAC RLS Policies</text>
+    <text x="785" y="90" font-size="10" fill="#8b949e">• Dynamic CDC Payload Column Masking</text>
+    <text x="785" y="106" font-size="10" fill="#8b949e">• MSSQL Change Tracking Poller</text>
+  </g>
+</svg>
