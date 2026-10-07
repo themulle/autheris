@@ -208,7 +208,8 @@ public sealed class CompiledSqlQueryPlanCache : ICompiledSqlQueryPlanCache
         bool isDml = false,
         string? rewriterEngine = null,
         IReadOnlySet<string>? tablesWithConsentRowFilter = null,
-        IReadOnlySet<string>? tablesWithMaskedColumns = null)
+        IReadOnlySet<string>? tablesWithMaskedColumns = null,
+        RowFilterSubqueryStrategy subqueryStrategy = RowFilterSubqueryStrategy.Exists)
     {
         var hasher = new XxHash3();
 
@@ -276,6 +277,10 @@ public sealed class CompiledSqlQueryPlanCache : ICompiledSqlQueryPlanCache
         byte dmlByte = isDml ? (byte)1 : (byte)0;
         hasher.Append(MemoryMarshal.CreateReadOnlySpan(ref dmlByte, 1));
         AppendLengthPrefixed(hasher, rewriterEngine ?? string.Empty);
+
+        // 7. Subquery Strategy
+        byte strategyByte = (byte)subqueryStrategy;
+        hasher.Append(MemoryMarshal.CreateReadOnlySpan(ref strategyByte, 1));
 
         return hasher.GetCurrentHashAsUInt64();
     }
