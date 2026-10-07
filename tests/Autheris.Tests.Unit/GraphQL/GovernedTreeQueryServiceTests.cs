@@ -80,6 +80,14 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         public required ITableAccessResolver Resolver { get; init; }
         public required IAuditLogRepository Audit { get; init; }
         public required CountingFactory Factory { get; init; }
+
+        public Task<JsonDocument> ExecuteAsync(
+            ClaimsPrincipal? principal,
+            TreeQueryNode root,
+            IReadOnlyDictionary<string, string[]>? headers,
+            string? opId = null,
+            CancellationToken ct = default) =>
+            Service.ExecuteAsync(principal, root, headers, opId ?? Guid.NewGuid().ToString("N"), ct);
     }
 
     private Fixture Create(
@@ -135,7 +143,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     {
         var fixture = Create();
 
-        using var result = await fixture.Service.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null);
+        using var result = await fixture.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null);
 
         fixture.Factory.Opened.ShouldBe(1);
         var root = result.RootElement;
@@ -159,8 +167,9 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             ]
         };
 
-        await fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null);
-        await fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null); // same request scope: memoized
+        var opId = "op-shared-test";
+        await fixture.ExecuteAsync(new ClaimsPrincipal(), tree, null, opId);
+        await fixture.ExecuteAsync(new ClaimsPrincipal(), tree, null, opId); // same request scope: memoized
 
         await fixture.Resolver.Received(1).ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Authors, Arg.Any<IReadOnlyList<string>?>(),
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
@@ -173,7 +182,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     {
         var fixture = Create();
 
-        await fixture.Service.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null);
+        await fixture.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null);
 
         await fixture.Audit.Received(2).RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
         await fixture.Audit.Received(1).RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.TargetTable == Articles.ToString() && e.Decision == "ALLOW"), Arg.Any<CancellationToken>());
@@ -184,7 +193,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     {
         var fixture = Create(a => a[Articles] = a[Articles] with { Decision = TableAccessDecision.Denied(Articles, "no consent") });
 
-        await Should.ThrowAsync<GatewayForbiddenException>(() => fixture.Service.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null));
+        await Should.ThrowAsync<GatewayForbiddenException>(() => fixture.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null));
 
         fixture.Factory.Opened.ShouldBe(0);
         await fixture.Audit.Received(1).RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.TargetTable == Articles.ToString() && e.Decision == "DENY"), Arg.Any<CancellationToken>());
@@ -199,7 +208,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             Relations = [new TreeRelationNode("contacts", ["id"], ["author_id"], true, new TreeQueryNode(Elsewhere, ["id"]))]
         };
 
-        await Should.ThrowAsync<GatewayInvalidQueryException>(() => fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null));
+        await Should.ThrowAsync<GatewayInvalidQueryException>(() => fixture.ExecuteAsync(new ClaimsPrincipal(), tree, null));
         fixture.Factory.Opened.ShouldBe(0);
     }
 
@@ -231,7 +240,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             Limit = 1
         };
 
-        using var result = await fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null);
+        using var result = await fixture.ExecuteAsync(new ClaimsPrincipal(), tree, null);
 
         result.RootElement[0].GetProperty("author").GetProperty("email").GetString().ShouldBe("H(ann@example.com)");
         masking.Received().MaskValue("email", Arg.Any<object?>(), Arg.Is<MaskingRule>(r => r.HmacKeyId != null && r.HmacKeyId.Contains("tenant:t1")));
@@ -242,7 +251,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
     {
         var fixture = Create(options: new GatewayOptions { GraphQL = new GraphQLOptions { MaxResponseBytes = 16 } });
 
-        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => fixture.Service.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null));
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => fixture.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null));
 
         ex.ErrorCode.ShouldBe("RESPONSE_TOO_LARGE");
     }
@@ -253,7 +262,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         var fixture = Create(options: new GatewayOptions { GraphQL = new GraphQLOptions { MaxResponseRows = 10 } });
 
         await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
-            fixture.Service.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]) { Limit = 11 }, null));
+            fixture.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]) { Limit = 11 }, null));
     }
 
     [Fact]
@@ -263,7 +272,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         gate.TryEnter(Arg.Any<string>(), Arg.Any<int>()).Returns((IDisposable?)null);
         var fixture = Create(options: new GatewayOptions { DataSources = new SqlDataSourceOptions { MaxConcurrentReadsPerUserAndTable = 1 } }, gate: gate);
 
-        await Should.ThrowAsync<GatewayThrottledException>(() => fixture.Service.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null));
+        await Should.ThrowAsync<GatewayThrottledException>(() => fixture.ExecuteAsync(new ClaimsPrincipal(), AuthorsWithArticles(), null));
         fixture.Factory.Opened.ShouldBe(0);
     }
 
@@ -286,7 +295,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         });
 
         await Should.ThrowAsync<InvalidOperationException>(() =>
-            fixture.Service.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]), null));
+            fixture.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]), null));
         fixture.Factory.Opened.ShouldBe(0);
     }
 
@@ -296,7 +305,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         var fixture = Create();
 
         var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
-            fixture.Service.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]) { Offset = -1 }, null));
+            fixture.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]) { Offset = -1 }, null));
 
         ex.Message.ShouldContain("negative");
         fixture.Factory.Opened.ShouldBe(0);
@@ -308,7 +317,7 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         var fixture = Create(options: new GatewayOptions { GraphQL = new GraphQLOptions { MaxAllowedOffset = 50 } });
 
         var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
-            fixture.Service.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]) { Offset = 51 }, null));
+            fixture.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]) { Offset = 51 }, null));
 
         ex.Message.ShouldContain("offset cannot exceed 50");
         fixture.Factory.Opened.ShouldBe(0);
@@ -326,10 +335,53 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         };
 
         var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
-            fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null));
+            fixture.ExecuteAsync(new ClaimsPrincipal(), tree, null));
 
         ex.Message.ShouldContain("aggregate row budget");
         fixture.Factory.Opened.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task EmptyOrNullOperationId_ThrowsArgumentException()
+    {
+        var fixture = Create();
+        var tree = new TreeQueryNode(Authors, ["id"]);
+
+        await Should.ThrowAsync<ArgumentException>(() =>
+            fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null, ""));
+        await Should.ThrowAsync<ArgumentException>(() =>
+            fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null, "   "));
+    }
+
+    [Fact]
+    public async Task ClearOperation_RemovesMemoAndAudit_AllowingFreshReEvaluation()
+    {
+        var fixture = Create();
+        var tree = new TreeQueryNode(Authors, ["id"]);
+        var opId = "op-clear-test";
+
+        await fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null, opId);
+        await fixture.Resolver.Received(1).ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Authors, Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+
+        fixture.Service.ClearOperation(opId);
+
+        await fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null, opId);
+        await fixture.Resolver.Received(2).ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Authors, Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DifferentOperationIds_DoNotShareTableAccessMemo()
+    {
+        var fixture = Create();
+        var tree = new TreeQueryNode(Authors, ["id"]);
+
+        await fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null, "op-A");
+        await fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null, "op-B");
+
+        await fixture.Resolver.Received(2).ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Authors, Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
     }
 }
 

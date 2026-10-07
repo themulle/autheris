@@ -26,21 +26,20 @@ public interface IGovernedTreeQueryService
         ClaimsPrincipal? principal,
         TreeQueryNode root,
         IReadOnlyDictionary<string, string[]>? requestHeaders,
+        string operationId,
         CancellationToken ct = default);
 
-    Task<JsonDocument> ExecuteAsync(
-        ClaimsPrincipal? principal,
-        TreeQueryNode root,
-        IReadOnlyDictionary<string, string[]>? requestHeaders,
-        string? operationId,
-        CancellationToken ct = default);
+    /// <summary>
+    /// Cleans up any cached table access decisions, locks, and audit tracking for the given GraphQL operation.
+    /// </summary>
+    void ClearOperation(string operationId);
 }
 
 /// <summary>
 /// G2/G3/G5 (docs/plans/rls-subquery-in-strategy.md): governed execution of a GraphQL selection tree.
 /// <list type="bullet">
-/// <item>Access per table is resolved once per request (scoped service) through <see cref="ITableAccessResolver"/>,
-/// the same decision path as OData and the table root field; one audit entry per table and request.</item>
+/// <item>Access per table is resolved once per operation through <see cref="ITableAccessResolver"/>,
+/// the same decision path as OData and the table root field; one audit entry per table and operation.</item>
 /// <item>All tables must live in one SQL data source whose provider matches the catalog dialect (D-1).</item>
 /// <item>The tree runs as ONE statement (<see cref="TreeSqlCompiler"/>); the database builds the JSON, the gateway reads
 /// one text value with a size limit, parses it once and only rewrites HMAC columns.</item>
@@ -48,7 +47,27 @@ public interface IGovernedTreeQueryService
 /// </summary>
 public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDisposable
 {
-    public void Dispose() => _memoLock.Dispose();
+    private sealed class OperationMemo : IDisposable
+    {
+        public System.Collections.Concurrent.ConcurrentDictionary<TableIdentifier, ResolvedTableAccess> AccessByTable { get; } = new();
+        public System.Collections.Concurrent.ConcurrentDictionary<(TableIdentifier Table, bool Allowed), byte> Audited { get; } = new();
+        public SemaphoreSlim Lock { get; } = new(1, 1);
+        public DateTime CreatedAtUtc { get; } = DateTime.UtcNow;
+
+        public void Dispose()
+        {
+            Lock.Dispose();
+        }
+    }
+
+    public void Dispose()
+    {
+        foreach (var memo in _memos.Values)
+        {
+            memo.Dispose();
+        }
+        _memos.Clear();
+    }
 
     private readonly ITableAccessResolver _accessResolver;
     private readonly ISqlConnectionFactory _connectionFactory;
@@ -59,11 +78,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     private readonly ILogger<GovernedTreeQueryService>? _logger;
     private readonly IDbSessionContextInitializer _sessionInitializer;
 
-    // G5 & R-GQL-3: memo and audit are keyed by operationId to isolate WebSocket operations across connection lifetime
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string OpId, TableIdentifier Table), ResolvedTableAccess> _accessByOperationAndTable = new();
-    private readonly System.Collections.Concurrent.ConcurrentDictionary<(string OpId, TableIdentifier Table, bool Allowed), byte> _auditedByOperation = new();
-    private readonly string _defaultOperationId = Guid.NewGuid().ToString("N");
-    private readonly SemaphoreSlim _memoLock = new(1, 1);
+    // G3, G4, G7, D7 & R-GQL-3: memo and audit are scoped per operationId to isolate operations and prevent unbounded memory growth in long-lived WebSocket sessions.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, OperationMemo> _memos = new();
 
     private const int ThrottledRetryAfterSeconds = 2;
 
@@ -87,23 +103,67 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
     }
 
-    public Task<JsonDocument> ExecuteAsync(
-        ClaimsPrincipal? principal,
-        TreeQueryNode root,
-        IReadOnlyDictionary<string, string[]>? requestHeaders,
-        CancellationToken ct = default) =>
-        ExecuteAsync(principal, root, requestHeaders, operationId: null, ct);
+    public void ClearOperation(string operationId)
+    {
+        if (string.IsNullOrWhiteSpace(operationId))
+        {
+            return;
+        }
+
+        if (_memos.TryRemove(operationId, out var memo))
+        {
+            memo.Dispose();
+        }
+    }
+
+    private void EvictStaleMemosIfNecessary()
+    {
+        if (_memos.Count <= 50)
+        {
+            return;
+        }
+
+        var threshold = DateTime.UtcNow.AddMinutes(-5);
+        foreach (var kvp in _memos)
+        {
+            if (kvp.Value.CreatedAtUtc < threshold && _memos.TryRemove(kvp.Key, out var stale))
+            {
+                stale.Dispose();
+            }
+        }
+
+        // Hard capacity cap to defend against exhaustion attacks
+        if (_memos.Count > 200)
+        {
+            var oldestKeys = _memos
+                .OrderBy(kvp => kvp.Value.CreatedAtUtc)
+                .Take(_memos.Count - 200)
+                .Select(kvp => kvp.Key)
+                .ToList();
+
+            foreach (var key in oldestKeys)
+            {
+                if (_memos.TryRemove(key, out var oldest))
+                {
+                    oldest.Dispose();
+                }
+            }
+        }
+    }
 
     public async Task<JsonDocument> ExecuteAsync(
         ClaimsPrincipal? principal,
         TreeQueryNode root,
         IReadOnlyDictionary<string, string[]>? requestHeaders,
-        string? operationId,
+        string operationId,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(root);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
 
-        operationId ??= _defaultOperationId;
+        EvictStaleMemosIfNecessary();
+
+        var memo = _memos.GetOrAdd(operationId, _ => new OperationMemo());
 
         var maxRows = _options.GraphQL?.MaxResponseRows > 0 ? _options.GraphQL.MaxResponseRows : 1000;
         if (root.Limit > maxRows)
@@ -131,8 +191,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         var resolved = new Dictionary<TableIdentifier, ResolvedTableAccess>();
         foreach (var (table, columns) in columnsByTable)
         {
-            var access = await ResolveOnceAsync(operationId, principal, table, columns, requestHeaders, ct).ConfigureAwait(false);
-            await AuditOnceAsync(operationId, access, table, ct).ConfigureAwait(false);
+            var access = await ResolveOnceAsync(memo, principal, table, columns, requestHeaders, ct).ConfigureAwait(false);
+            await AuditOnceAsync(memo, access, table, ct).ConfigureAwait(false);
             if (!access.Decision.IsAllowed)
             {
                 throw new GatewayForbiddenException("Access denied.");
@@ -229,38 +289,38 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     }
 
     private async Task<ResolvedTableAccess> ResolveOnceAsync(
-        string opId,
+        OperationMemo memo,
         ClaimsPrincipal? principal,
         TableIdentifier table,
         IReadOnlyList<string> columns,
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         CancellationToken ct)
     {
-        if (_accessByOperationAndTable.TryGetValue((opId, table), out var cached))
+        if (memo.AccessByTable.TryGetValue(table, out var cached))
         {
             return cached;
         }
 
-        await _memoLock.WaitAsync(ct).ConfigureAwait(false);
+        await memo.Lock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_accessByOperationAndTable.TryGetValue((opId, table), out cached))
+            if (memo.AccessByTable.TryGetValue(table, out cached))
             {
                 return cached;
             }
             var access = await _accessResolver.ResolveTableAccessAsync(principal, table, columns, requestHeaders, ct).ConfigureAwait(false);
-            _accessByOperationAndTable[(opId, table)] = access;
+            memo.AccessByTable[table] = access;
             return access;
         }
         finally
         {
-            _memoLock.Release();
+            memo.Lock.Release();
         }
     }
 
-    private async Task AuditOnceAsync(string opId, ResolvedTableAccess access, TableIdentifier table, CancellationToken ct)
+    private async Task AuditOnceAsync(OperationMemo memo, ResolvedTableAccess access, TableIdentifier table, CancellationToken ct)
     {
-        if (!_auditedByOperation.TryAdd((opId, table, access.Decision.IsAllowed), 1))
+        if (!memo.Audited.TryAdd((table, access.Decision.IsAllowed), 1))
         {
             return;
         }
