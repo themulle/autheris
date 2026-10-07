@@ -903,6 +903,8 @@ public static class GatewayServiceCollectionExtensions
             .AddGraphQLServer()
             .UseInstrumentation()
             .UseExceptions()
+            // R-GQL-6: wraps validation and execution so unknown and denied fields yield the same result.
+            .UseRequest<GraphQlEnumerationShieldMiddleware>()
             .UseTimeout()
             .UseDocumentCache();
 
@@ -977,6 +979,9 @@ public static class GatewayServiceCollectionExtensions
         if (!gatewayOptions.GraphQL.EnableIntrospection && !gatewayOptions.IsIntrospectionForced)
         {
             gqlBuilder.DisableIntrospection();
+
+            // R-GQL-6: GET /graphql?sdl and /graphql/schema.graphql serve the SDL independently of introspection.
+            gqlBuilder.ModifyServerOptions(opt => opt.EnableSchemaRequests = false);
         }
 
         return services;
