@@ -329,7 +329,7 @@ public static partial class TreeSqlCompiler
         }
         var text = !string.IsNullOrWhiteSpace(rule.Replacement) ? rule.Replacement : "***";
         var prefix = dialect == DatabaseDialect.SqlServer ? "N" : string.Empty;
-        return $"{prefix}'{text.Replace("'", "''", StringComparison.Ordinal)}'";
+        return $"{prefix}'{dialect.EscapeSqlLiteral(text)}'";
     }
 
     // ---------------------------------------------------------------- SQL

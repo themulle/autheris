@@ -166,10 +166,17 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         var tenant = rootAccess.Tenant.Value;
         foreach (var hmac in compiled.HmacColumns)
         {
-            var rule = ScopeHmacRule(hmac.Rule, tenant, _options.DataMasking?.HmacKeyId);
+            var rule = MaskingRule.CreateTenantScopedHmacRule(hmac.Rule, tenant, _options.DataMasking?.HmacKeyId);
             Pseudonymize(node, hmac.Path, 0, hmac.Column, rule);
         }
-        return JsonDocument.Parse(node.ToJsonString());
+
+        using var stream = new System.IO.MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            node.WriteTo(writer);
+        }
+        stream.Position = 0;
+        return JsonDocument.Parse(stream);
     }
 
     private static void CollectColumns(TreeQueryNode node, Dictionary<TableIdentifier, List<string>> columnsByTable)
@@ -358,20 +365,5 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                 }
                 break;
         }
-    }
-
-    /// <summary>SEC H-13: tenant-scoped HMAC key id (same derivation as SqlDataSourceExecutor and GatewayExecutionService).</summary>
-    private static MaskingRule ScopeHmacRule(MaskingRule rule, string tenant, string? defaultKeyId)
-    {
-        var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
-        return new MaskingRule
-        {
-            Id = rule.Id,
-            TableColumnId = rule.TableColumnId,
-            RuleType = "HMAC_SHA256",
-            PatternOrFormat = rule.PatternOrFormat,
-            Replacement = rule.Replacement,
-            HmacKeyId = $"{baseKeyId}|tenant:{tenant}"
-        };
     }
 }

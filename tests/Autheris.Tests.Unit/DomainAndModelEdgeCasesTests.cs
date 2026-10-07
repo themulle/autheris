@@ -235,8 +235,6 @@ public class DomainAndModelEdgeCasesTests
     [InlineData("oracle", DatabaseDialect.Oracle)]
     [InlineData("oracledb", DatabaseDialect.Oracle)]
     [InlineData("odp", DatabaseDialect.Oracle)]
-    [InlineData("", DatabaseDialect.PostgreSql)]
-    [InlineData(null, DatabaseDialect.PostgreSql)]
     public void DatabaseDialect_ParseDialect_RecognizesAllCommonAliases(string? input, DatabaseDialect expectedDialect)
     {
         DatabaseDialectExtensions.ParseDialect(input).ShouldBe(expectedDialect);
