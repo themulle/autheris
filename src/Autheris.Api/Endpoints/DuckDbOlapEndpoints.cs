@@ -222,9 +222,9 @@ public static class DuckDbOlapEndpoints
                     Tenant: tenantId,
                     AccessDecision: decision,
                     ProjectedColumns: meta.Columns.Select(c => c.ColumnName).ToList(),
-                    Arguments: new Dictionary<string, object?> { ["limit"] = options.MaxStagedRowsPerTable },
+                    Arguments: new Dictionary<string, object?> { ["limit"] = options.MaxStagedRowsPerTable + 1 },
                     PushdownFilterSql: decision.CombinedRowFilterSql,
-                    Limit: options.MaxStagedRowsPerTable,
+                    Limit: options.MaxStagedRowsPerTable + 1,
                     Offset: 0);
 
                 session.Items["TableMetadata"] = meta;
@@ -234,7 +234,7 @@ public static class DuckDbOlapEndpoints
                 foreach (var split in splits)
                 {
                     var batch = await connector.RecordSource.ReadBatchAsync(split, session, ct).ConfigureAwait(false);
-                    // RR-L3-01: verify staging capacity BEFORE adding batch
+                    // RR-L3-01 / SQL2-2: verify staging capacity BEFORE adding batch
                     if (rawRows.Count + batch.Count > options.MaxStagedRowsPerTable)
                     {
                         httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -244,8 +244,9 @@ public static class DuckDbOlapEndpoints
                     rawRows.AddRange(batch);
                 }
 
-                // Dynamic Column Masking preservation (SEC-OLAP-04)
-                var maskedRows = rawRows.Select(r => ConnectorRowMasker.MaskRow(r, meta, decision, maskingProvider, tenantId.Value, gatewayOptions.Value.DataMasking?.HmacKeyId)).ToList();
+                // Dynamic Column Masking preservation (SEC-OLAP-04 / SQL2-4: keine Doppelmaskierung)
+                bool alreadyMasked = session.Items.TryGetValue("InDbColumnMaskingExecuted", out var m) && m is true;
+                var maskedRows = rawRows.Select(r => ConnectorRowMasker.MaskRow(r, meta, decision, maskingProvider, tenantId.Value, gatewayOptions.Value.DataMasking?.HmacKeyId, alreadyMasked)).ToList();
                 if (!await TryAuditAsync("OLAP_TABLE_STAGED", meta.Identifier.ToQualifiedName(), new
                 {
                     tenant = tenantId.Value,

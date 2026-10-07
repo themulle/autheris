@@ -112,6 +112,7 @@ public sealed class SqlConnector : IAutherisConnector
     {
         private readonly SqlDataSourceExecutor _executor;
         private readonly string _connectorId;
+        private readonly IOptions<GatewayOptions>? _options;
 
         public SqlConnectorRecordSource(
             ISqlConnectionFactory connectionFactory,
@@ -124,6 +125,7 @@ public sealed class SqlConnector : IAutherisConnector
             // SEC H-13: Without the masking provider HMAC columns would only be redacted instead of pseudonymized.
             _executor = new SqlDataSourceExecutor(connectionFactory, options, null, environment, maskingProvider);
             _connectorId = connectorId;
+            _options = options;
         }
 
         public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ReadSplitAsync(
@@ -152,7 +154,18 @@ public sealed class SqlConnector : IAutherisConnector
 
             ConnectorSecurityPolicyEvaluator.EnforceSecurityPolicy(session, meta);
 
-            var clampedLimit = Math.Clamp(session.Limit ?? 1000, 1, 5000);
+            // SQL2-2: Dynamic ceiling based on options (Olap MaxStagedRowsPerTable / Export MaxExportRows)
+            // instead of hardcoding 5000 which truncated OLAP queries silently.
+            var maxAllowed = Math.Max(5000, Math.Max(
+                _options?.Value?.DuckDbOlap?.MaxStagedRowsPerTable ?? 250_000,
+                _options?.Value?.Arrow?.MaxExportRows ?? 1_000_000));
+            if (session.Limit.HasValue && session.Limit.Value > maxAllowed)
+            {
+                maxAllowed = session.Limit.Value;
+            }
+
+            var defaultLimit = session.Limit ?? 1000;
+            var clampedLimit = Math.Clamp(defaultLimit, 1, maxAllowed);
 
             var dsContext = new DataSourceExecutionContext(
                 // The connection is configured per data source (Gateway:DataSources:Connections:<source>), so the

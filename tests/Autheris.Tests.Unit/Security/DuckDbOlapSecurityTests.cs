@@ -1,13 +1,28 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Security.Claims;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Endpoints;
+using Autheris.Application.Connectors;
+using Autheris.Application.Connectors.CrossDomain;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
+using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
+using Shouldly;
 using Xunit;
 
 namespace Autheris.Tests.Unit.Security;
@@ -387,6 +402,81 @@ public sealed class DuckDbOlapSecurityTests
             ex.Message.Contains("configuration", StringComparison.OrdinalIgnoreCase) ||
             ex.Message.Contains("cannot be changed", StringComparison.OrdinalIgnoreCase),
             $"Expected configuration lock exception, got: {ex.Message}");
+    }
+
+    [Fact]
+    public async Task SQL202_DuckDbOlap_TableExceedingMaxStagedRows_FailsWith400()
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER")], "Bearer"));
+
+        var json = JsonSerializer.Serialize(new
+        {
+            sql = "SELECT COUNT(*) FROM sales.orders",
+            tableNames = new[] { "sales.orders" }
+        });
+        httpContext.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(json));
+
+        var table = new TableIdentifier("sales", "public", "orders");
+        var meta = new TableMetadata
+        {
+            Identifier = table,
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
+
+        // Connector that returns 11 rows when limit is 11
+        var connector = Substitute.For<IAutherisConnector>();
+        var splitManager = Substitute.For<IConnectorSplitManager>();
+        var recordSource = Substitute.For<IConnectorRecordSource>();
+        connector.SplitManager.Returns(splitManager);
+        connector.RecordSource.Returns(recordSource);
+
+        var split = new ConnectorSplit("s1", new Dictionary<string, object?>());
+        splitManager.GetSplitsAsync(Arg.Any<TableMetadata>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns([split]);
+
+        // MaxStagedRowsPerTable is configured as 10. The endpoint requests limit = 11.
+        // If the table has 11 rows, recordSource returns 11 rows.
+        var rows = Enumerable.Range(1, 11).Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["id"] = i }).ToList();
+        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns(rows);
+
+        var registry = Substitute.For<IAutherisConnectorRegistry>();
+        registry.TryGetConnectorForTable(table, out Arg.Any<IAutherisConnector>()!)
+            .Returns(x => { x[1] = connector; return true; });
+
+        var accessResolver = Substitute.For<ICrossDomainAccessResolver>();
+        accessResolver.ResolveAccessAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
+
+        var rebac = Substitute.For<IRebacEvaluator>();
+        rebac.IsEnabled.Returns(false);
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DuckDbOlap = new DuckDbOlapOptions { Enabled = true, MaxStagedRowsPerTable = 10 }
+        });
+        var engine = Substitute.For<IDuckDbOlapEngine>();
+
+        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+            httpContext,
+            engine,
+            metadataRepo,
+            registry,
+            accessResolver,
+            Substitute.For<IColumnMaskingProvider>(),
+            rebac,
+            options,
+            NullLoggerFactory.Instance);
+
+        httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        httpContext.Response.Body.Seek(0, SeekOrigin.Begin);
+        var responseText = new StreamReader(httpContext.Response.Body).ReadToEnd();
+        responseText.ShouldContain("exceeds maximum allowed staging rows (10)");
     }
 }
 
