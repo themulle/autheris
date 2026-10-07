@@ -68,11 +68,6 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
             bool isArt9 = tableAsset.Tags.Any(t => catalogOpts.GdprArticle9Tags.Contains(t, StringComparer.OrdinalIgnoreCase)) ||
                           tableAsset.Classifications.Any(c => catalogOpts.GdprArticle9Tags.Contains(c, StringComparer.OrdinalIgnoreCase));
 
-            if (isArt9)
-            {
-                art9Tables++;
-            }
-
             var maskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
             var tableColumns = new List<TableColumn>();
 
@@ -80,7 +75,14 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
             {
                 syncedColumns++;
                 var matchedTag = col.Tags.FirstOrDefault(t => catalogOpts.TagToMaskingRuleMap.ContainsKey(t));
-                var isSensitive = matchedTag != null || col.Tags.Any(t => catalogOpts.PiiTags.Contains(t, StringComparer.OrdinalIgnoreCase));
+
+                // POL-5: Art. 9 tags or classifications on a column (e.g. HealthData) make the column sensitive and the table
+                // Art. 9 (HIGH, four eyes), as in the OpenMetadata sync.
+                var isArt9Column = col.Tags.Any(t => catalogOpts.GdprArticle9Tags.Contains(t, StringComparer.OrdinalIgnoreCase)) ||
+                                   col.Classifications.Any(c => catalogOpts.GdprArticle9Tags.Contains(c, StringComparer.OrdinalIgnoreCase));
+                isArt9 |= isArt9Column;
+
+                var isSensitive = matchedTag != null || isArt9Column || col.Tags.Any(t => catalogOpts.PiiTags.Contains(t, StringComparer.OrdinalIgnoreCase));
 
                 // Ratchet: Never downgrade sensitive status if existing column is already sensitive
                 var existingCol = existing?.Columns?.FirstOrDefault(c => string.Equals(c.ColumnName, col.ColumnName, StringComparison.OrdinalIgnoreCase));
@@ -97,6 +99,16 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                         RuleType = ruleType
                     };
                 }
+                else if (isArt9Column)
+                {
+                    // POL-5: without an explicit masking rule an Art. 9 column is redacted.
+                    maskedColumns++;
+                    maskingRules[col.ColumnName] = new MaskingRule
+                    {
+                        RuleType = "REDACT",
+                        Replacement = "[REDACTED]"
+                    };
+                }
 
                 tableColumns.Add(new TableColumn
                 {
@@ -106,6 +118,11 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                     Description = col.Description,
                     DocumentationSource = "DataCatalog"
                 });
+            }
+
+            if (isArt9)
+            {
+                art9Tables++;
             }
 
             // Merge with existing masking rules so custom / manual rules are preserved
