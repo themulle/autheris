@@ -527,7 +527,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(cast.IsTryCast ? "TRY_CAST(" : "CAST(");
                 GenerateExpression(cast.Operand, ref builder, context);
                 builder.Append(" AS ");
-                builder.Append(cast.TargetType);
+                builder.Append(TrinoSqlEngine.Ast.SqlSafeTokens.EnsureTypeName(cast.TargetType));
                 builder.Append(')');
                 break;
             case RowValueExpression row:
@@ -550,7 +550,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 break;
             case ExtractExpression ext:
                 builder.Append("EXTRACT(");
-                builder.Append(ext.Field);
+                builder.Append(TrinoSqlEngine.Ast.SqlSafeTokens.EnsureExtractField(ext.Field));
                 builder.Append(" FROM ");
                 GenerateExpression(ext.Source, ref builder, context);
                 builder.Append(')');
@@ -756,7 +756,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 FormatStringLiteral(ref builder, lit.Value.ToString() ?? string.Empty, context);
                 break;
             case LiteralType.Binary:
-                builder.Append(lit.Value.ToString() ?? string.Empty);
+                builder.Append(TrinoSqlEngine.Ast.SqlSafeTokens.EnsureBinaryLiteral(lit.Value.ToString() ?? string.Empty));
                 break;
             default:
                 builder.Append(lit.Value.ToString() ?? string.Empty);

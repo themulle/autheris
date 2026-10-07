@@ -892,9 +892,26 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     {
         using var _ = EnterScope();
         var operand = (Expression)Visit(context.expression());
-        string targetType = context.type().GetText();
+        // SQL-3: GetText() drops whitespace and keeps quoted identifiers; rebuild from tokens and allow plain type names only.
+        var tokens = new List<string>();
+        CollectTerminalTexts(context.type(), tokens);
+        string targetType = TrinoSqlEngine.Ast.SqlSafeTokens.EnsureTypeName(string.Join(' ', tokens));
         bool isTryCast = context.TRY_CAST() != null;
         return new CastExpression(operand, targetType, isTryCast);
+    }
+
+    private static void CollectTerminalTexts(Antlr4.Runtime.Tree.IParseTree node, List<string> tokens)
+    {
+        if (node is Antlr4.Runtime.Tree.ITerminalNode terminal)
+        {
+            tokens.Add(terminal.GetText());
+            return;
+        }
+
+        for (var i = 0; i < node.ChildCount; i++)
+        {
+            CollectTerminalTexts(node.GetChild(i), tokens);
+        }
     }
 
     public override SqlNode VisitArrayConstructor(SqlBaseParser.ArrayConstructorContext context)
@@ -942,7 +959,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitExtract(SqlBaseParser.ExtractContext context)
     {
         using var _ = EnterScope();
-        string field = context.identifier().GetText();
+        string field = TrinoSqlEngine.Ast.SqlSafeTokens.EnsureExtractField(context.identifier().GetText());
         var source = (Expression)Visit(context.valueExpression());
         return new ExtractExpression(field, source);
     }
