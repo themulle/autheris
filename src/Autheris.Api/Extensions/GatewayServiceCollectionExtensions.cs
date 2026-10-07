@@ -1276,6 +1276,15 @@ public static class GatewayServiceCollectionExtensions
                 throw new ValidationException("Sicherheitsverletzung: danger_allow_untrusted_certificates darf AUSSCHLIESSLICH in der Development-Umgebung true sein!");
             }
 
+            // DEP-7 / INF-6: data source connections must encrypt and verify the server certificate outside Development.
+            foreach (var (name, connection) in options.DataSources.Connections)
+            {
+                if (Autheris.Infrastructure.Persistence.ConnectionTlsPolicy.Validate(connection.Provider, connection.ConnectionString) is { } tlsError)
+                {
+                    throw new ValidationException($"Sicherheitsverletzung: DataSources:Connections:{name}: {tlsError}");
+                }
+            }
+
             if (options.GraphQL.TrustedOrigins.Contains("*"))
             {
                 throw new ValidationException("Sicherheitsverletzung: TrustedOrigins '*' (Wildcard-CORS) ist außerhalb der Development-Umgebung aus Sicherheitsgründen (CSRF-Schutz) verboten!");

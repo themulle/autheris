@@ -76,11 +76,10 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
             foreach (var (name, candidate) in new[] { ("ConnectionString", connStr), ("MigrationConnectionString", options?.Value?.GovernanceDb?.MigrationConnectionString) })
             {
                 if (string.IsNullOrWhiteSpace(candidate)) continue;
-                var csb = new NpgsqlConnectionStringBuilder(candidate);
-                if (csb.SslMode is not (SslMode.Require or SslMode.VerifyCA or SslMode.VerifyFull))
+                // DEP-7: 'Require' encrypts without verifying the server certificate (MITM) -> VerifyCA/VerifyFull only.
+                if (ConnectionTlsPolicy.Validate("postgresql", candidate) is { } tlsError)
                 {
-                    throw new InvalidOperationException(
-                        $"Security critical: GovernanceDb:{name} must use 'SSL Mode=Require', 'VerifyCA' or 'VerifyFull' outside Development.");
+                    throw new InvalidOperationException($"Security critical: GovernanceDb:{name}: {tlsError}");
                 }
             }
         }
