@@ -25,13 +25,16 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule
 {
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly ITableRelationRepository _relationRepo;
+    private readonly Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? _logger;
 
     public CatalogGraphQlTypeModule(
         ITableMetadataRepository metadataRepo,
-        ITableRelationRepository relationRepo)
+        ITableRelationRepository relationRepo,
+        Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? logger = null)
     {
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _relationRepo = relationRepo ?? throw new ArgumentNullException(nameof(relationRepo));
+        _logger = logger;
     }
 
     public event EventHandler<EventArgs>? TypesChanged
@@ -44,7 +47,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule
         IDescriptorContext context,
         CancellationToken cancellationToken)
     {
-        var schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, cancellationToken)
+        var schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, cancellationToken)
             .ConfigureAwait(false);
 
         var types = new List<ITypeSystemMember>();

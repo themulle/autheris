@@ -111,6 +111,19 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             throw new GatewayInvalidQueryException($"The page size must not exceed {maxRows}.");
         }
 
+        var maxOffset = _options.GraphQL?.MaxAllowedOffset >= 0 ? _options.GraphQL.MaxAllowedOffset : 10000;
+        if (root.Offset < 0)
+        {
+            throw new GatewayInvalidQueryException("The offset cannot be negative.");
+        }
+        if (root.Offset > maxOffset)
+        {
+            throw new GatewayInvalidQueryException($"The offset cannot exceed {maxOffset}.");
+        }
+
+        var maxBudget = _options.GraphQL?.MaxAggregateRowBudget > 0 ? _options.GraphQL.MaxAggregateRowBudget : 50000;
+        ValidateTreeBudget(root, maxBudget);
+
         // 1. Access per table (memoized per operation), denied tables fail before any database access.
         var columnsByTable = new Dictionary<TableIdentifier, List<string>>();
         CollectColumns(root, columnsByTable);
@@ -395,5 +408,25 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
                 }
                 break;
         }
+    }
+
+    private static void ValidateTreeBudget(TreeQueryNode root, int maxBudget)
+    {
+        long estimatedRows = EstimateRows(root, 1, isList: true);
+        if (estimatedRows > maxBudget)
+        {
+            throw new GatewayInvalidQueryException($"The query exceeds the aggregate row budget of {maxBudget} across nested relations (estimated worst-case rows: {estimatedRows}).");
+        }
+    }
+
+    private static long EstimateRows(TreeQueryNode node, long parentMultiplier, bool isList = true)
+    {
+        long currentRows = isList ? parentMultiplier * Math.Max(1, node.Limit) : parentMultiplier;
+        long total = currentRows;
+        foreach (var rel in node.Relations)
+        {
+            total += EstimateRows(rel.Child, currentRows, rel.IsList);
+        }
+        return total;
     }
 }

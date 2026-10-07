@@ -23,29 +23,37 @@ public static class GraphQlTreeBuilder
         var selection = context.Selection;
         var operation = context.Operation;
 
-        var root = BuildNode(context, selection, operation, rootTable, schema, maxResponseRows, isRoot: true);
-        ValidateTreeBudget(root);
+        var gqlOptions = context.Services.GetService(typeof(Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>)) as Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>;
+        var maxBudget = gqlOptions?.Value?.GraphQL?.MaxAggregateRowBudget > 0
+            ? gqlOptions.Value.GraphQL.MaxAggregateRowBudget
+            : MaxAggregateBudget;
+        var maxAllowedOffset = gqlOptions?.Value?.GraphQL?.MaxAllowedOffset >= 0
+            ? gqlOptions.Value.GraphQL.MaxAllowedOffset
+            : 10_000;
+
+        var root = BuildNode(context, selection, operation, rootTable, schema, maxResponseRows, isRoot: true, maxAllowedOffset: maxAllowedOffset);
+        ValidateTreeBudget(root, maxBudget);
         return root;
     }
 
     public const int MaxAggregateBudget = 50_000;
 
-    private static void ValidateTreeBudget(TreeQueryNode root)
+    private static void ValidateTreeBudget(TreeQueryNode root, int maxBudget = MaxAggregateBudget)
     {
-        long estimatedRows = EstimateRows(root, 1);
-        if (estimatedRows > MaxAggregateBudget)
+        long estimatedRows = EstimateRows(root, 1, isList: true);
+        if (estimatedRows > maxBudget)
         {
-            throw new GatewayInvalidQueryException($"The query exceeds the aggregate row budget of {MaxAggregateBudget} across nested relations (estimated worst-case rows: {estimatedRows}).");
+            throw new GatewayInvalidQueryException($"The query exceeds the aggregate row budget of {maxBudget} across nested relations (estimated worst-case rows: {estimatedRows}).");
         }
     }
 
-    private static long EstimateRows(TreeQueryNode node, long parentMultiplier)
+    private static long EstimateRows(TreeQueryNode node, long parentMultiplier, bool isList = true)
     {
-        long currentRows = parentMultiplier * node.Limit;
+        long currentRows = isList ? parentMultiplier * node.Limit : parentMultiplier;
         long total = currentRows;
         foreach (var rel in node.Relations)
         {
-            total += EstimateRows(rel.Child, currentRows);
+            total += EstimateRows(rel.Child, currentRows, rel.IsList);
         }
         return total;
     }
@@ -57,7 +65,8 @@ public static class GraphQlTreeBuilder
         CatalogTableType currentTable,
         CatalogSchemaModel schema,
         int maxAllowedLimit,
-        bool isRoot)
+        bool isRoot,
+        int maxAllowedOffset = 10_000)
     {
         // 1. Parse Arguments (where, orderBy, first, offset)
         var whereFilter = ParseWhereArgument(currentSelection, currentTable, context);
@@ -92,10 +101,9 @@ public static class GraphQlTreeBuilder
             throw new GatewayInvalidQueryException("The offset cannot be negative.");
         }
 
-        const int MaxAllowedOffset = 10_000;
-        if (offset > MaxAllowedOffset)
+        if (offset > maxAllowedOffset)
         {
-            throw new GatewayInvalidQueryException($"The offset cannot exceed {MaxAllowedOffset}.");
+            throw new GatewayInvalidQueryException($"The offset cannot exceed {maxAllowedOffset}.");
         }
 
         if (!isRoot && offset > 0)

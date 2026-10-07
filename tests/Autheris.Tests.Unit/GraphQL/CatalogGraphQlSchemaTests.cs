@@ -296,5 +296,64 @@ public sealed class CatalogGraphQlSchemaTests
             System.Globalization.CultureInfo.CurrentUICulture = prevUiCulture;
         }
     }
+
+    [Fact]
+    public async Task Schema_WithCollidingCatalogTables_StartsSuccessfullyAndExecutesCanonicalQuery()
+    {
+        var collidingTable = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "dbo", "orders_filter"),
+            Table = new Table
+            {
+                IsActive = true,
+                SourceType = "PostgreSql",
+                DataSourceType = DataSourceType.Sql
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "int" }
+            ],
+            PrimaryKeyColumns = ["id"]
+        };
+
+        // Add collidingTable alongside existing custTable and orderTable
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([
+                new TableMetadata
+                {
+                    Identifier = _custTableId,
+                    Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
+                    Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
+                    PrimaryKeyColumns = ["id"]
+                },
+                new TableMetadata
+                {
+                    Identifier = _orderTableId,
+                    Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
+                    Columns = [new TableColumn { ColumnName = "order_id", DataType = "int" }],
+                    PrimaryKeyColumns = ["order_id"]
+                },
+                collidingTable
+            ]);
+
+        // Creating executor must succeed without SchemaException (G-2 / R-GQL-2)
+        var executor = await CreateExecutorAsync();
+        Assert.NotNull(executor.Schema);
+
+        // Canonical orderTable query field must exist and be queryable
+        Assert.NotNull(executor.Schema.QueryType.Fields["sales_dbo_orders"]);
+
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(),
+                Arg.Any<TreeQueryNode>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(JsonDocument.Parse("[]"));
+
+        var query = "query { sales_dbo_orders { order_id } }";
+        var result = await executor.ExecuteAsync(query);
+        Assert.DoesNotContain("errors", result.ToJson());
+    }
 }
 
