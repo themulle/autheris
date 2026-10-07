@@ -471,3 +471,91 @@ Weil alle Tabellen über denselben Zwischenschritt laufen, lässt sich die erlau
 2. **Auswahl bei Mehrdeutigkeit:** Pflicht bei der Vergabe, oder Voreinstellung über eine Rangfolge der Beziehungen (nicht empfohlen: weniger transparent).
 3. **Gültigkeit des Schlüsselmengen-Caches** und Obergrenze der Mengengröße.
 4. **Pflege der Beziehungen:** Wer darf `TABLE_RELATIONS` ändern, und braucht eine Änderung ein Vier-Augen-Verfahren (sie beeinflusst Zugriffe über `RelationScope`)?
+
+## 9. Messergebnisse und Beispiel für `InCorrelated` (07.10.2026)
+
+Gemessen gegen LWETEM_PROD (SQL Server) mit Autheris-Image vom 07.10.2026 (14:09 UTC), Zeitlimit 10 s je Abfrage, Netz und Datenbank erreichbar. Tabelle `fms.air1` (1,5 Mio. Zeilen, Primärschlüssel `(ts, client_id)`), Zeilenfilter für `david`: nur Zeilen von Geräten, deren Kran nicht ausgeliefert ist (`md.crane.is_delivered IS NULL`). Zeiten sind Wandzeit der HTTP-Antwort. Eine Messung je Zeile, keine Wiederholungsreihe.
+
+### 9.1 Beispiel: dasselbe WebSQL, drei Strategien
+
+Anfrage von `david`:
+
+```sql
+SELECT ts FROM lwetem_prod.fms.air1 ORDER BY client_id LIMIT 500
+```
+
+Der Filter steht in allen drei Fällen im Subselect, das die Tabelle ersetzt. Nur seine Form unterscheidet sich (aus dem Audit-Log, `securedSql`, die Spaltenliste ist hier gekürzt):
+
+**`Exists`** (Standard, `AUTHERIS_ROWFILTER_STRATEGY=Exists`)
+
+```sql
+SELECT ts FROM (
+  SELECT "client_id", "created_at", ..., "ts"
+  FROM lwetem_prod.fms.air1 AS autheris_target
+  WHERE (EXISTS (SELECT 1 FROM [conf].[client] AS [c]
+                 INNER JOIN [md].[crane] AS [cr] ON [c].[crane_serial_number] = [cr].[serial_number]
+                 WHERE [c].[client_id] = [autheris_target].[client_id] AND [cr].[is_delivered] IS NULL))
+) AS [air1]
+ORDER BY client_id OFFSET 0 ROWS FETCH NEXT 500 ROWS ONLY
+```
+
+**`In`** (unkorrelierte Unterabfrage)
+
+```sql
+SELECT ts FROM (
+  SELECT "client_id", "created_at", ..., "ts"
+  FROM lwetem_prod.fms.air1 AS autheris_target
+  WHERE ([autheris_target].[client_id] IN (
+           SELECT [c].[client_id] FROM [conf].[client] AS [c]
+           INNER JOIN [md].[crane] AS [cr] ON [c].[crane_serial_number] = [cr].[serial_number]
+           WHERE [cr].[is_delivered] IS NULL))
+) AS [air1]
+ORDER BY client_id OFFSET 0 ROWS FETCH NEXT 500 ROWS ONLY
+```
+
+**`InCorrelated`** (`AUTHERIS_ROWFILTER_STRATEGY=InCorrelated`)
+
+```sql
+SELECT ts FROM (
+  SELECT "client_id", "created_at", ..., "ts"
+  FROM lwetem_prod.fms.air1 AS autheris_target
+  WHERE ([autheris_target].[client_id] IN (
+           SELECT [c].[client_id] FROM [conf].[client] AS [c]
+           INNER JOIN [md].[crane] AS [cr] ON [c].[crane_serial_number] = [cr].[serial_number]
+           WHERE [c].[client_id] = [autheris_target].[client_id] AND [cr].[is_delivered] IS NULL))
+) AS [air1]
+ORDER BY client_id OFFSET 0 ROWS FETCH NEXT 500 ROWS ONLY
+```
+
+Der Unterschied zu `In` ist allein die Bedingung `[c].[client_id] = [autheris_target].[client_id]` in der Unterabfrage. Sie ändert die Zeilenmenge nicht (`IN` und diese Bedingung wählen dieselben Zeilen), beeinflusst aber, welchen Plan SQL Server wählt.
+
+### 9.2 Zeiten über den echten Pfad (`david`, Autheris)
+
+| Abfrage | `Exists` | `In` | `InCorrelated` |
+|---|---|---|---|
+| OData `fms/air1?$top=1000` | 1,6 s | 1,9 s | 2,0 s |
+| WebSQL `ORDER BY client_id LIMIT 5` | **504 (10,5 s)** | **504 (10,5 s)** | **0,56 s** |
+| WebSQL `ORDER BY client_id LIMIT 500` | **504 (10,5 s)** | **504 (10,5 s)** | **0,54 s** |
+| WebSQL `COUNT(*)` | 0,65 s | 0,48 s | 0,59 s |
+| WebSQL `ORDER BY ts DESC LIMIT 100` | 0,56 s | 0,41 s | 0,48 s |
+| WebSQL `GROUP BY client_id LIMIT 50` | 0,64 s | 0,49 s | 0,57 s |
+| WebSQL `tem.crane_state ORDER BY client_id LIMIT 5` (24 Mio. Zeilen) | 0,54 s | 0,48 s | 0,52 s |
+
+### 9.3 Zeiten für handgeschriebenes SQL (`admin`, ohne Zeilenfilter, `ORDER BY client_id`)
+
+| Form | `LIMIT 5` | `LIMIT 500` | `LIMIT 5000` |
+|---|---|---|---|
+| `EXISTS` (korreliert) | 504 | 504 | 0,55 s |
+| `IN` unkorreliert (auch in der Form `SELECT a.* FROM (SELECT * FROM air1 a WHERE client_id IN (…)) a`) | 504 | 504 | 0,52 s |
+| `INNER JOIN` auf `DISTINCT`-Schlüsselmenge | 504 | 504 | 0,55 s |
+| **`IN` korreliert** | **0,43 s** | **0,45 s** | 0,51 s |
+| `COUNT(*)` mit `EXISTS` / mit `JOIN` auf `DISTINCT`-Schlüsselmenge | 0,55 s / 0,62 s | | |
+
+### 9.4 Einordnung
+
+- **Der Fall, der kippt:** kleine Seitengröße (`FETCH NEXT n` bis etwa 500) zusammen mit einer Sortierung nach `client_id`, die nicht dem Clustered Key `(ts, client_id)` entspricht. Mit `ORDER BY ts`, ohne `ORDER BY` oder bei `n = 5000` sind alle Formen schnell.
+- **Nur `InCorrelated` bleibt in diesem Fall stabil.** `Exists`, `In` und ein Join auf die Schlüsselmenge laufen in das Zeitlimit. Warum, ist nicht belegt (keine Ausführungspläne gesehen). Plausibel ist ein Planwechsel durch das Row Goal von `FETCH NEXT n`; das ist eine Vermutung.
+- **Bei den übrigen Abfragen kein deutlicher Unterschied** zwischen `InCorrelated` und `Exists` (unter 0,5 s; OData `$top=1000` 2,0 s gegen 1,6 s bei je einer Messung, also im Bereich der Streuung). Die Messung deckt `fms.air1` und `tem.crane_state` mit diesem Filter ab, nicht andere Tabellen oder andere Filter.
+- **Grenzen der Messung:** eine Messung je Wert, Tageszeit und Last der Datenbank nicht kontrolliert, Statistiken und Planverhalten können sich ändern. Vor einer Umstellung für Produktivdaten mit Ausführungsplänen in SSMS und mehreren Wiederholungen bestätigen.
+- **Empfehlung für den PoC:** `AUTHERIS_ROWFILTER_STRATEGY=InCorrelated`. DENY-Filter und Filter mit Zeitbedingungen bleiben `EXISTS` (Abschnitt 3.2).
+- **Frühere Messungen im selben Zeitraum** (siehe Abschnitt 1), als das Netz zeitweise ausfiel oder alte Images liefen, sind nicht mit diesen Werten vergleichbar.
