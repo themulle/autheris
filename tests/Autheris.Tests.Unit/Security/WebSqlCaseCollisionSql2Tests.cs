@@ -106,4 +106,16 @@ public sealed class WebSqlCaseCollisionSql2Tests
 
         sql.ShouldContain("tenant_id = 'tenant_a'");
     }
+    // SQL-5: the catalog part of a 3-part name was only checked against the logical data source name but emitted
+    // verbatim. On SQL Server it names a database, so a data source named like another database reached that one.
+    [Theory]
+    [InlineData("SELECT id FROM default.dbo.Orders")]
+    [InlineData("SELECT id FROM otherdb.dbo.Orders")]
+    public async Task SqlServer_ThreePartName_IsRejected(string sql)
+    {
+        var service = CreateService(CreateTable("dbo", "Orders", "SqlServer"));
+
+        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant)));
+    }
 }
