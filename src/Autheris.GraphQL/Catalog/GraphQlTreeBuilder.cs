@@ -510,7 +510,8 @@ public static class GraphQlTreeBuilder
 
             case CatalogFieldType.DateTime:
                 if (val is DateTimeOffset dtoVal) return dtoVal;
-                if (val is DateTime dtVal) return new DateTimeOffset(dtVal.ToUniversalTime(), TimeSpan.Zero);
+                // R-GQL-10: a DateTime without kind is UTC, not server local time.
+                if (val is DateTime dtVal) return new DateTimeOffset(dtVal.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dtVal, DateTimeKind.Utc) : dtVal.ToUniversalTime(), TimeSpan.Zero);
                 break;
 
             default:
