@@ -46,7 +46,7 @@ public sealed class CatalogSchemaModelTests
     }
 
     [Fact]
-    public async Task BuildAsync_DeduplicatesCollidingTableNames()
+    public async Task BuildAsync_CollidingTableNames_OmitsDuplicateAndPreservesCanonicalTable()
     {
         var metaRepo = Substitute.For<ITableMetadataRepository>();
         var relRepo = Substitute.For<ITableRelationRepository>();
@@ -63,9 +63,58 @@ public sealed class CatalogSchemaModelTests
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
 
-        Assert.Equal(2, model.Tables.Count);
-        Assert.NotEqual(model.Tables[0].TypeName, model.Tables[1].TypeName);
-        Assert.EndsWith("_2", model.Tables[1].TypeName);
+        // G-2: Stable naming - the canonical table is preserved, the colliding duplicate is omitted
+        var canonicalTable = Assert.Single(model.Tables);
+        Assert.Equal(table1.Identifier, canonicalTable.Identifier);
+        Assert.Equal("sales_dbo_orders_item", canonicalTable.TypeName);
+    }
+
+    [Fact]
+    public async Task BuildAsync_TableCollidingWithFilterNameOfEarlierTable_IsOmittedAndPreservesCanonicalTable()
+    {
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+
+        var table1 = CreateTable(new TableIdentifier("db", "public", "orders"), dialect: "SqlServer");
+        var table2 = CreateTable(new TableIdentifier("db", "public", "orders_filter"), dialect: "SqlServer");
+
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([table1, table2]);
+
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
+
+        // G-2: orders is preserved with canonical name and not renamed to orders_2; orders_filter is omitted
+        var canonicalTable = Assert.Single(model.Tables);
+        Assert.Equal(table1.Identifier, canonicalTable.Identifier);
+        Assert.Equal("db_public_orders", canonicalTable.TypeName);
+        Assert.Equal("db_public_orders_filter", canonicalTable.FilterTypeName);
+    }
+
+    [Fact]
+    public async Task BuildAsync_TableCollidingWithOrderByNameOfEarlierTable_IsOmittedAndPreservesCanonicalTable()
+    {
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+
+        var table1 = CreateTable(new TableIdentifier("db", "public", "orders"), dialect: "SqlServer");
+        var table2 = CreateTable(new TableIdentifier("db", "public", "orders_order_by"), dialect: "SqlServer");
+
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([table1, table2]);
+
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
+
+        // G-2: orders is preserved with canonical name and not renamed; orders_order_by is omitted
+        var canonicalTable = Assert.Single(model.Tables);
+        Assert.Equal(table1.Identifier, canonicalTable.Identifier);
+        Assert.Equal("db_public_orders", canonicalTable.TypeName);
+        Assert.Equal("db_public_orders_order_by", canonicalTable.OrderByTypeName);
     }
 
     [Fact]

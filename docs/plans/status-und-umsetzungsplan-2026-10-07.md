@@ -150,7 +150,7 @@ Noch ohne Test: Datei nur mit `g`-Zeilen (E-1); Wildcard-Regeln zusammen mit Man
 | D-5 | niedrig | `TableMetadata` ist jetzt ein `record`: Wertgleichheit statt Referenzgleichheit, und `ToString()` gibt alle Eigenschaften aus, einschließlich Maskierungsregeln mit `HmacKeyId`, falls das Objekt irgendwo geloggt wird. | `TableModels.cs:126` | Logging-Stellen prüfen; gegebenenfalls `PrintMembers` überschreiben. Verwendung als Dictionary-Key prüfen. |
 | D-6 | niedrig | `GatewayForbiddenException($"Invalid tenant identity '{tenantVal}'.")` gibt den rohen Claim-Wert zurück. `FORBIDDEN` steht auf der Whitelist des `ErrorSanitizingFilter`, der Text geht also an den Client. | `SqlDataSourceExecutor.cs:328-331` | Generischer Text, Wert nur loggen. |
 | D-7 | niedrig | Ohne `operationId` gilt jetzt eine Default-opId pro Scope. Aufrufer ohne opId teilen sich bei WebSocket das Memo für die ganze Verbindung (R-GQL-3 für diese Aufrufer wieder offen). Heute übergibt der GraphQL-Resolver die opId, deshalb ist das nur latent. | `GovernedTreeQueryService.cs:65, 106` | G-7: eine Methode mit Pflicht-`operationId` oder Memo pro Aufruf, wenn keine opId kommt. |
-| D-8 | niedrig | Das Gesamt-Zeilenbudget ist eine Konstante (50.000) nur im GraphQL-Builder, nicht im Dienst und nicht konfigurierbar. `MaxOffset` ist ebenfalls fest. Andere Aufrufer von `IGovernedTreeQueryService` umgehen beide Grenzen. | `GraphQlTreeBuilder.cs:31-51` | Budget und `MaxOffset` in die Optionen und in `GovernedTreeQueryService` verlagern. Test für das Budget. |
+| D-8 ✔ | ✅ behoben | Das Gesamt-Zeilenbudget und `MaxOffset` sind jetzt konfigurierbar in `GraphQLOptions` (`MaxAggregateRowBudget`, `MaxAllowedOffset`) und werden direkt in `GovernedTreeQueryService` und `GraphQlTreeBuilder` durchgesetzt. | `GovernedTreeQueryService.cs`, `GraphQlTreeBuilder.cs`, `GatewayOptions.cs` | Budget und `MaxOffset` in die Optionen und in `GovernedTreeQueryService` verlagert. Tests für Budget und Offset. |
 | D-9 | niedrig | `MssqlProcedureInvoker` baut `new TenantId(security.TenantId)` ohne Prüfung; ein ungültiger Wert ergibt 500 statt 403. | `MssqlProcedureInvoker.cs:77, 89` | `TenantId.TryParse` wie in `SqlDataSourceExecutor`. |
 
 Unauffällig in `d58449c`:
@@ -194,7 +194,7 @@ Unauffällig in `d58449c`:
 | ID | Status | Befund | Behebung |
 |---|---|---|---|
 | G-1 | ⛔ | `val.ToString()` kulturabhängig: Unter de-DE wird `1.5` für eine Decimal-Spalte zu 15 (`GraphQlTreeBuilder.cs`, `ResolveValue`/`CoerceValue`). | `CultureInfo.InvariantCulture`; Test unter de-DE. |
-| G-2 | ⛔ | Kollisionsauflösung hängt von der Reihenfolge ab; neue Tabelle `x` benennt bestehenden Typ und Root-Feld `…_x_filter` um; `OrderBy` ohne Comparer (`CatalogSchemaModel.cs:76-114`). | `StringComparer.Ordinal`; stabile Namenszuordnung; Kollisionen loggen. |
+| G-2 ✔ | ✅ | Kollisionsauflösung deterministisch mit `StringComparer.Ordinal`; kollidierende Tabellen werden geloggt und ausgelassen, kanonische Tabellen behalten ihren stabilen Namen (`CatalogSchemaModel.cs`). | `StringComparer.Ordinal`; stabile Namenszuordnung; Kollisionen loggen. |
 | G-3 | ⛔ | Memo und Audit-Set wachsen pro Operation über die Lebensdauer des Scopes (`GovernedTreeQueryService.cs:63-64`). | Memo pro Operation in `ContextData` oder nach der Operation entfernen. |
 | G-4 | ⛔ | opId per Check-then-set aus parallelen Root-Resolvern (`CatalogGraphQlTypeModule.cs:392-396`). | opId im Request-Interceptor setzen oder `GetOrAdd`. |
 | G-5 | ⛔ | Variable in `orderBy` wird nicht aufgelöst. | `ResolveVariableLiteral`. |
@@ -251,7 +251,7 @@ Legende: ✅ behoben · 🟡 teilweise · ⛔ offen · 🔻 verschlechtert · �
 | Niedrig: POL-8 bis -13, POL-19, GQL-5, -6, -12, MCP-4 bis -7, API-8, -9, -11, -13, -16, -17, EXT-6, -7, INF-2, -3, SQL-6, SQL2-10, -14, -15, -16, -19, WF-1, DEP-9 bis -16 | ⛔ alle offen |
 | POL-15 PG-SID | ✅ 🧪 |
 | SQL2-18 Rollback-Token | ✅ (Executor, Initializer, WebSQL, Baum) |
-| SQL2-7 Zeilenbudget, MaxOffset | 🟡 Gesamtbudget 50.000 und `MaxOffset` fest im GraphQL-Builder (D-8) |
+| SQL2-7 Zeilenbudget, MaxOffset | ✅ Konfigurierbares Zeilenbudget (`MaxAggregateRowBudget`) und `MaxOffset` in Optionen und Dienst durchgesetzt (D-8) |
 | SQL2-11 Parameter-Präfix | ⛔ (fail-closed) |
 | SQL2-12 HMAC-Normalisierung | ⛔ |
 | SQL2-13 Memo pro Tabelle | ✅ weitgehend (G-3, G-4, D-7) |
@@ -299,9 +299,9 @@ Legende: ✅ behoben · 🟡 teilweise · ⛔ offen · 🔻 verschlechtert · �
 | R-API-1 Migrationshinweis | ⛔ | |
 | R-API-2 FinOps-Fallback | ✅ | |
 | R-GQL-1 maskierte Typen | 🟡 | G-8. |
-| R-GQL-2 Kollisionen | 🟡 | G-2; kein Auslassen pro Tabelle. |
+| R-GQL-2 Kollisionen | ✅ | G-2; Kollidierende Tabellen ausgelassen, kanonische Tabellen bleiben stabil, Fehler wird geloggt. |
 | R-GQL-3 Memo pro Verbindung | ✅ weitgehend | G-3, G-4, D-7. |
-| R-GQL-4 Budget/Offset | 🟡 | D-8. |
+| R-GQL-4 Budget/Offset | ✅ | D-8; Zeilenbudget und MaxOffset in Optionen und Dienst durchgesetzt. |
 | R-GQL-5 verschachteltes offset | ✅ | |
 | R-GQL-6 Katalog aufzählbar | ⛔ | |
 | R-GQL-7 N² Relationen | ✅ | |
@@ -377,14 +377,14 @@ Jeder Test muss ohne Fix rot werden:
 | R-SQL-11 | Ungültiger Mandant ergibt 403 ohne Claim-Text in der Antwort (D-6). |
 | R-POL-4 | Reload-Fehler wird geloggt, Event mit `"*"` wirft nicht. |
 | R-POL-6 | Default-Methoden werfen. |
-| D-8 | Gesamt-Zeilenbudget überschritten ergibt `INVALID_QUERY`. |
+| D-8 ✔ | ✅ Gesamt-Zeilenbudget überschritten ergibt `INVALID_QUERY`, im Dienst und Builder validiert. |
 
 Den irreführenden Test `DbSessionContextInitializer_RollsBackTransaction_OnError` umbenennen oder ersetzen.
 
 ### Phase 3 – GraphQL fertigstellen (L)
 
-1. **G-2 (R-GQL-2):** Stabile Namensvergabe; Fehler pro Tabelle loggen und die Tabelle auslassen; Executor-Test, dass das Schema mit Kollisionen startet.
-2. **D-8:** Zeilenbudget und `MaxOffset` konfigurierbar und im Dienst prüfen.
+1. **G-2 (R-GQL-2) ✔:** ✅ Stabile Namensvergabe; Fehler pro Tabelle loggen und die Tabelle auslassen; Executor-Test, dass das Schema mit Kollisionen startet.
+2. **D-8 (SQL2-7) ✔:** ✅ Zeilenbudget und `MaxOffset` konfigurierbar und im Dienst prüfen.
 3. **G-8 (R-GQL-1):** HMAC-Spalten als String oder Code `MASKED`; Executor-Tests mit maskierter Int- und Bool-Spalte (SQLite).
 4. **G-3, G-4, G-7, D-7:** Memo pro Operation in `ContextData`, opId im Request-Interceptor, eine `ExecuteAsync` mit Pflicht-`operationId`.
 5. **R-GQL-6, R-ERR-1:** Unbekannte und gesperrte Felder einheitlich melden; `EnableSchemaRequests = false`; generischer Text für `INVALID_QUERY`.

@@ -289,4 +289,47 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
             fixture.Service.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]), null));
         fixture.Factory.Opened.ShouldBe(0);
     }
+
+    [Fact]
+    public async Task NegativeOffset_ThrowsGatewayInvalidQueryException()
+    {
+        var fixture = Create();
+
+        var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
+            fixture.Service.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]) { Offset = -1 }, null));
+
+        ex.Message.ShouldContain("negative");
+        fixture.Factory.Opened.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task OffsetAboveMaxAllowed_ThrowsGatewayInvalidQueryException()
+    {
+        var fixture = Create(options: new GatewayOptions { GraphQL = new GraphQLOptions { MaxAllowedOffset = 50 } });
+
+        var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
+            fixture.Service.ExecuteAsync(new ClaimsPrincipal(), new TreeQueryNode(Authors, ["id"]) { Offset = 51 }, null));
+
+        ex.Message.ShouldContain("offset cannot exceed 50");
+        fixture.Factory.Opened.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task AggregateRowBudget_Exceeded_ThrowsGatewayInvalidQueryException()
+    {
+        var fixture = Create(options: new GatewayOptions { GraphQL = new GraphQLOptions { MaxAggregateRowBudget = 100 } });
+        // Root limit 20, relation limit 10 => 20 + 20 * 10 = 220 > 100
+        var tree = new TreeQueryNode(Authors, ["id"])
+        {
+            Limit = 20,
+            Relations = [new TreeRelationNode("articles", ["id"], ["author_id"], true, new TreeQueryNode(Articles, ["id"]) { Limit = 10 })]
+        };
+
+        var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
+            fixture.Service.ExecuteAsync(new ClaimsPrincipal(), tree, null));
+
+        ex.Message.ShouldContain("aggregate row budget");
+        fixture.Factory.Opened.ShouldBe(0);
+    }
 }
+

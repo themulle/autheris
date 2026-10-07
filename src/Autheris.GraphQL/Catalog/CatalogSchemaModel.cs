@@ -2,6 +2,7 @@ using System.Text;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging;
 
 namespace Autheris.GraphQL.Catalog;
 
@@ -61,6 +62,7 @@ public sealed class CatalogSchemaModel
     public static async Task<CatalogSchemaModel> BuildAsync(
         ITableMetadataRepository metadataRepository,
         ITableRelationRepository relationRepository,
+        Microsoft.Extensions.Logging.ILogger? logger = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(metadataRepository);
@@ -68,19 +70,19 @@ public sealed class CatalogSchemaModel
 
         var allTables = await metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
 
-        // Filter: only active SQL tables with supported database dialect
+        // Filter: only active SQL tables with supported database dialect, ordered deterministically
         var activeSqlTables = allTables
             .Where(t => t.Table.IsActive &&
                         t.DataSourceType == DataSourceType.Sql &&
                         DatabaseDialectExtensions.TryParseDialect(t.Table.SourceType, out _))
-            .OrderBy(t => t.Identifier.Domain)
-            .ThenBy(t => t.Identifier.Schema)
-            .ThenBy(t => t.Identifier.TableName)
+            .OrderBy(t => t.Identifier.Domain, StringComparer.Ordinal)
+            .ThenBy(t => t.Identifier.Schema, StringComparer.Ordinal)
+            .ThenBy(t => t.Identifier.TableName, StringComparer.Ordinal)
             .ToList();
 
         var usedSchemaTypeNames = new HashSet<string>(StringComparer.Ordinal)
         {
-            "Query", "AutherisSortDirection",
+            "Query", "Mutation", "Subscription", "AutherisSortDirection",
             "AutherisStringFilter", "AutherisIntFilter", "AutherisLongFilter",
             "AutherisFloatFilter", "AutherisDecimalFilter", "AutherisBooleanFilter",
             "AutherisDateTimeFilter"
@@ -99,15 +101,19 @@ public sealed class CatalogSchemaModel
             var typeName = baseName;
             var filterTypeName = $"{typeName}_filter";
             var orderTypeName = $"{typeName}_order_by";
-            var suffix = 2;
 
-            while (usedSchemaTypeNames.Contains(typeName) ||
-                   usedSchemaTypeNames.Contains(filterTypeName) ||
-                   usedSchemaTypeNames.Contains(orderTypeName))
+            string? collidingName = null;
+            if (usedSchemaTypeNames.Contains(typeName)) collidingName = typeName;
+            else if (usedSchemaTypeNames.Contains(filterTypeName)) collidingName = filterTypeName;
+            else if (usedSchemaTypeNames.Contains(orderTypeName)) collidingName = orderTypeName;
+
+            if (collidingName != null)
             {
-                typeName = $"{baseName}_{suffix++}";
-                filterTypeName = $"{typeName}_filter";
-                orderTypeName = $"{typeName}_order_by";
+                logger?.LogError(
+                    "GraphQL catalog schema: table '{Table}' conflicts with existing schema type name '{CollidingName}'. The table is omitted from GraphQL schema generation to preserve schema stability.",
+                    meta.Identifier.ToQualifiedName(),
+                    collidingName);
+                continue;
             }
 
             usedSchemaTypeNames.Add(typeName);

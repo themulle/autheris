@@ -726,6 +726,8 @@ public sealed class GraphQLOptions
     /// caller's token was revoked (ITokenRevocationService). Revoked sessions are closed.
     /// </summary>
     [Range(5, 3600)] public int SubscriptionRevalidationSeconds { get; init; } = 60;
+    [Range(100, 1000000)] public int MaxAggregateRowBudget { get; init; } = 50000;
+    [Range(0, 100000)] public int MaxAllowedOffset { get; init; } = 10000;
     public List<string> TrustedOrigins { get; init; } = [];
 }
 

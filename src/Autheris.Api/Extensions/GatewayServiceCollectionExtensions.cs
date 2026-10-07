@@ -944,7 +944,8 @@ public static class GatewayServiceCollectionExtensions
             .AddApplicationService<ITableRelationRepository>()
             .AddTypeModule(sp => new CatalogGraphQlTypeModule(
                 sp.GetRequiredService<ITableMetadataRepository>(),
-                sp.GetRequiredService<ITableRelationRepository>()))
+                sp.GetRequiredService<ITableRelationRepository>(),
+                sp.GetService<ILogger<CatalogGraphQlTypeModule>>()))
             .AddErrorFilter(sp => sp.GetRequiredService<ErrorSanitizingFilter>())
             .AddQueryType<Query>()
             .AddMutationType<Mutation>()

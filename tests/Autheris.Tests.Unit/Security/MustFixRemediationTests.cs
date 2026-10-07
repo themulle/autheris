@@ -371,9 +371,9 @@ p, auditor, *, {table}, read, true, allow
         ordersTable.Columns.ShouldContain(c => c.ColumnName == "and" && c.FieldName == "and_col");
         ordersTable.Columns.ShouldContain(c => c.ColumnName == "or" && c.FieldName == "or_col");
 
-        // Verify type names in schema model avoid collisions
+        // Verify type names in schema model avoid collisions: canonical table is preserved, colliding table is omitted (G-2)
+        schemaModel.Tables.Count.ShouldBe(1);
         schemaModel.Tables.Any(t => t.TypeName == "db_public_orders").ShouldBeTrue();
-        schemaModel.Tables.Any(t => t.TypeName == "db_public_orders_filter_2").ShouldBeTrue();
     }
 
     private sealed class TestHostEnvironment : IHostEnvironment
