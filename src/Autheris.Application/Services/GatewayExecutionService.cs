@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -34,6 +35,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly ITrafficDrainController? _drainController;
     private readonly IEnumerable<IDataSourceExecutor>? _dataSourceExecutors;
     private readonly IPolicyEnforcementService? _policyEnforcementService;
+    private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly Autheris.Application.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
@@ -61,7 +63,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IPolicyEnforcementService? policyEnforcementService = null,
         IClientIpResolver? clientIpResolver = null,
         Autheris.Application.Connectors.IAutherisConnectorRegistry? connectorRegistry = null,
-        ITableReadConcurrencyGate? concurrencyGate = null)
+        ITableReadConcurrencyGate? concurrencyGate = null,
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null)
     {
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
@@ -77,6 +80,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _clientIpResolver = clientIpResolver;
         _connectorRegistry = connectorRegistry;
         _concurrencyGate = concurrencyGate;
+        _rebacEvaluator = rebacEvaluator;
     }
 
     public GatewayExecutionService(
@@ -406,6 +410,13 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         if (metadata == null)
         {
             throw new TableNotFoundException(table);
+        }
+
+        // POL-6: optional ReBAC gate on the query paths (OData, GraphQL tree, table queries).
+        if (RebacTableGate.IsEnforcedOnQueryPaths(_options) &&
+            !await RebacTableGate.IsAllowedAsync(_rebacEvaluator, tenantId, userSid, table, ct).ConfigureAwait(false))
+        {
+            return new ResolvedTableAccess(metadata, TableAccessDecision.Denied(table, "ReBAC Access Denied: Not authorized by relationship graph."), tenantId, userSid, principal);
         }
 
         TableAccessDecision decision;
@@ -870,6 +881,13 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
 
         var tenantId = principal.GetTenantId();
+
+        // POL-6: optional ReBAC gate on the query paths.
+        if (RebacTableGate.IsEnforcedOnQueryPaths(_options) &&
+            !await RebacTableGate.IsAllowedAsync(_rebacEvaluator, tenantId, userSid, table, ct).ConfigureAwait(false))
+        {
+            return TableAccessDecision.Denied(table, "ReBAC Access Denied: Not authorized by relationship graph.");
+        }
 
         var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles);
         var decision = await _cacheService.GetCachedDecisionAsync(tenantId, userSid, table, contextHash, ct);

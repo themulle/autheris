@@ -39,6 +39,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly IConsentResolutionService? _consentResolution;
     private readonly IColumnMaskingProvider? _masking;
     private readonly IPolicyEnforcementService? _policyEnforcement;
+    private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly IAuditLogRepository? _audit;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IProcedureRowScopeResolver? _rowScope;
@@ -56,7 +57,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IAuditLogRepository? audit = null,
         IClientIpResolver? clientIpResolver = null,
         ILogger<GovernedProcedureExecutionService>? logger = null,
-        IProcedureRowScopeResolver? rowScope = null)
+        IProcedureRowScopeResolver? rowScope = null,
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
@@ -70,6 +72,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         _clientIpResolver = clientIpResolver;
         _logger = logger;
         _rowScope = rowScope;
+        _rebacEvaluator = rebacEvaluator;
     }
 
     public async Task<GovernedProcedureResult> ExecuteAsync(
@@ -304,6 +307,13 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
 
         var meta = await _tableRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
         if (meta == null || meta.Columns.Count == 0)
+        {
+            return null;
+        }
+
+        // POL-6: optional ReBAC gate on the query paths.
+        if (Autheris.Application.Policy.RebacTableGate.IsEnforcedOnQueryPaths(_options.Value) &&
+            !await Autheris.Application.Policy.RebacTableGate.IsAllowedAsync(_rebacEvaluator, tenantId, userSid, tableId, ct).ConfigureAwait(false))
         {
             return null;
         }

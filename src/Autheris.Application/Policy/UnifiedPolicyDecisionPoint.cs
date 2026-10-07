@@ -71,8 +71,8 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
             var rebacRequest = new RebacCheckRequest(
                 tenantId.Value,
                 userSid.Value,
-                "can_query",
-                $"table:{table.Domain}.{table.TableName}");
+                RebacTableGate.Relation,
+                RebacTableGate.ObjectId(table));
 
             var rebacResult = await _rebacEvaluator.CheckAsync(rebacRequest, ct).ConfigureAwait(false);
             if (!rebacResult.Allowed)
