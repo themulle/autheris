@@ -15,7 +15,7 @@ Serving different consumer tiers (e.g. Public Mobile Apps, Internal Microservice
 
 - **Single Schema, Multiple Contract Views**: Eliminate the need to maintain duplicate gateways or proxy layers for internal vs. external audiences.
 - **Safe API Evolution**: Mark new fields with `@tag(name: "beta")` and restrict exposure to early-access partners before general availability.
-- **Automated Client Isolation**: External partners cannot introspect or access internal operational fields.
+- **Client Views**: Partners see the schema slice of their contract; data access itself is governed by consents and policies.
 
 ---
 
@@ -24,6 +24,15 @@ Serving different consumer tiers (e.g. Public Mobile Apps, Internal Microservice
 - Apollo-compatible `@tag(name: "...")` schema directive support.
 - Dynamic AST filtering pruning unpermitted types, fields, and arguments from introspection.
 - Client tier resolution via JWT claims or API key metadata.
+
+### Security scope (API-3)
+
+A schema contract selects a **view** of the schema; it is not an access control. Which tables, columns and rows a
+caller may read is decided by consents, Casbin, ReBAC and row filters on every path, independent of the contract.
+
+Contract selection: a `contract` claim of the authenticated identity takes precedence. `X-Gateway-Contract` or
+`?contract=` may only select a contract when the identity carries none; a request that names a contract different from
+the claim is rejected with 403. Unknown contracts are rejected with 400.
 
 ---
 
