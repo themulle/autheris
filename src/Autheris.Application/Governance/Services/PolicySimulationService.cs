@@ -2,6 +2,7 @@ namespace Autheris.Application.Governance.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Net;
 using System.Text.RegularExpressions;
@@ -12,6 +13,7 @@ using Casbin.Model;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -219,11 +221,7 @@ public sealed partial class PolicySimulationService : IPolicySimulationService
 
     private Enforcer CreateSimulationEnforcer(string policyCsv, string defaultTenant)
     {
-        var (parsedRules, parsedGrouping) = CasbinEnforcementService.ParsePolicyText(
-            policyCsv,
-            defaultTenant,
-            _modelSupportsWildcardTenant,
-            allowWildcardForDefaultTenant: true);
+        var (parsedRules, parsedGrouping) = ParseDraftPolicy(policyCsv, defaultTenant);
 
         var model = DefaultModel.CreateFromText(_modelText);
         var enforcer = new Enforcer(model);
@@ -243,6 +241,25 @@ public sealed partial class PolicySimulationService : IPolicySimulationService
         }
 
         return enforcer;
+    }
+
+    private (ImmutableDictionary<string, ImmutableArray<CasbinEnforcementService.CasbinRuleMetadata>> Rules, ImmutableArray<CasbinEnforcementService.GroupingRule> Grouping) ParseDraftPolicy(
+        string policyCsv,
+        string defaultTenant)
+    {
+        try
+        {
+            return CasbinEnforcementService.ParsePolicyText(
+                policyCsv,
+                defaultTenant,
+                _modelSupportsWildcardTenant,
+                allowWildcardForDefaultTenant: true);
+        }
+        catch (FormatException ex)
+        {
+            // The draft is client input: a malformed or cross-tenant draft is a 400, not a 500.
+            throw new GatewayInvalidQueryException($"Invalid draft policy: {ex.Message}");
+        }
     }
 
     private sealed class TableStatAccumulator(string tableName)
