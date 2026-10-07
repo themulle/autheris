@@ -918,11 +918,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 return securedSql;
             }
 
-            await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false);
-            await rowWriter(reader, ct).ConfigureAwait(false);
+            await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
+            {
+                await rowWriter(reader, ct).ConfigureAwait(false);
+            }
+
             if (tx != null)
             {
                 await tx.CommitAsync(ct).ConfigureAwait(false);
+                tx = null;
             }
             return securedSql;
         }

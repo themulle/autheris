@@ -4,7 +4,9 @@ namespace Autheris.Tests.Unit;
 
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Data.Common;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Security;
 using System.Security.Claims;
@@ -64,7 +66,7 @@ public sealed class SecurityReview20261002WebSqlTests
     {
         return new TableMetadata
         {
-            Identifier = new TableIdentifier("default", "public", "employees"),
+            Identifier = new TableIdentifier(sourceName ?? "default", "public", "employees"),
             Table = new Table
             {
                 TableName = "employees",
@@ -726,4 +728,325 @@ public sealed class SecurityReview20261002WebSqlTests
         public Task<string> RewriteSqlAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
             => Task.FromException<string>(toThrow);
     }
+
+    // =========================================================================
+    // D-1: WebSQL must dispose DataReader BEFORE committing the transaction
+    // =========================================================================
+
+    [Fact]
+    public async Task D01_ExecuteGovernedQuery_WhenTransactionActive_DisposesReaderBeforeCommit()
+    {
+        var options = new GatewayOptions
+        {
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                AllowedDataSources = ["pg_ds"],
+                DefaultMaxRows = 100,
+                MaxAllowedRows = 500
+            },
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["pg_ds"] = new()
+                    {
+                        ConnectionString = "Host=localhost;Database=test",
+                        Provider = "PostgreSQL"
+                    }
+                }
+            }
+        };
+
+        var fakeConnection = new StrictDriverDbConnection();
+        var connectionFactory = Substitute.For<ISqlConnectionFactory>();
+        connectionFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<DbConnection>(fakeConnection));
+
+        var employeesMeta = CreateEmployeesMetadata("pg_ds");
+        var tableRepo = Substitute.For<ITableMetadataRepository>();
+        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
+
+        var service = new GovernedSqlExecutionService(
+            Options.Create(options),
+            policyEnforcement: CreateCasbin(),
+            consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
+            consentRepository: CreateConsentRepository(),
+            tableRepository: tableRepo,
+            connectionFactory: connectionFactory,
+            logger: NullLogger<GovernedSqlExecutionService>.Instance);
+
+        var request = new GovernedSqlQueryRequest("SELECT id, name FROM public.employees", DataSourceName: "pg_ds");
+
+        bool rowsObserved = false;
+
+        // Act
+        await service.ExecuteGovernedQueryAsync(
+            request,
+            CreateUser(),
+            new TenantId(Tenant),
+            async (reader, ct) =>
+            {
+                while (await reader.ReadAsync(ct))
+                {
+                    rowsObserved = true;
+                }
+            });
+
+        // Assert
+        rowsObserved.ShouldBeTrue();
+        fakeConnection.CurrentTransaction.ShouldNotBeNull();
+        fakeConnection.CurrentTransaction.WasCommitted.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task D01_ExecuteGovernedQuery_WhenStreamingFails_DisposesReaderBeforeRollback()
+    {
+        var options = new GatewayOptions
+        {
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                AllowedDataSources = ["pg_ds"],
+                DefaultMaxRows = 100,
+                MaxAllowedRows = 500
+            },
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["pg_ds"] = new()
+                    {
+                        ConnectionString = "Host=localhost;Database=test",
+                        Provider = "PostgreSQL"
+                    }
+                }
+            }
+        };
+
+        var fakeConnection = new StrictDriverDbConnection();
+        var connectionFactory = Substitute.For<ISqlConnectionFactory>();
+        connectionFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<DbConnection>(fakeConnection));
+
+        var employeesMeta = CreateEmployeesMetadata("pg_ds");
+        var tableRepo = Substitute.For<ITableMetadataRepository>();
+        tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.Arg<TableIdentifier>().TableName == "employees" ? Task.FromResult<TableMetadata?>(employeesMeta) : Task.FromResult<TableMetadata?>(null));
+
+        var service = new GovernedSqlExecutionService(
+            Options.Create(options),
+            policyEnforcement: CreateCasbin(),
+            consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
+            consentRepository: CreateConsentRepository(),
+            tableRepository: tableRepo,
+            connectionFactory: connectionFactory,
+            logger: NullLogger<GovernedSqlExecutionService>.Instance);
+
+        var request = new GovernedSqlQueryRequest("SELECT id, name FROM public.employees", DataSourceName: "pg_ds");
+
+        // Act & Assert: Exception during streaming must trigger rollback after reader is disposed
+        await Should.ThrowAsync<InvalidDataException>(async () =>
+        {
+            await service.ExecuteGovernedQueryAsync(
+                request,
+                CreateUser(),
+                new TenantId(Tenant),
+                async (reader, ct) =>
+                {
+                    if (await reader.ReadAsync(ct))
+                    {
+                        throw new InvalidDataException("Simulated streaming failure");
+                    }
+                });
+        });
+
+        fakeConnection.CurrentTransaction.ShouldNotBeNull();
+        fakeConnection.CurrentTransaction.WasRolledBack.ShouldBeTrue();
+    }
+
+    private sealed class StrictDriverDbConnection : DbConnection
+    {
+        public StrictDriverDbTransaction? CurrentTransaction { get; private set; }
+
+        protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel)
+        {
+            CurrentTransaction = new StrictDriverDbTransaction(this);
+            return CurrentTransaction;
+        }
+
+        public override void ChangeDatabase(string databaseName) { }
+        public override void Close() { }
+        [AllowNull] public override string ConnectionString { get; set; } = "Host=localhost;Database=test";
+        public override string Database => "test";
+        public override ConnectionState State => ConnectionState.Open;
+        public override string DataSource => "localhost";
+        public override string ServerVersion => "16.0";
+        public override void Open() { }
+
+        protected override DbCommand CreateDbCommand()
+        {
+            using var sqliteCmd = new Microsoft.Data.Sqlite.SqliteCommand();
+            return new StrictDriverDbCommand(sqliteCmd, this);
+        }
+    }
+
+    private sealed class StrictDriverDbTransaction : DbTransaction
+    {
+        public StrictDriverDbDataReader? ActiveReader { get; set; }
+        public bool WasCommitted { get; private set; }
+        public bool WasRolledBack { get; private set; }
+        private readonly DbConnection _connection;
+
+        public StrictDriverDbTransaction(DbConnection connection) => _connection = connection;
+
+        public override void Commit()
+        {
+            if (ActiveReader != null && !ActiveReader.IsClosed)
+            {
+                throw new InvalidOperationException("Npgsql driver error: An operation is already in progress. DataReader is still open on connection during commit.");
+            }
+            WasCommitted = true;
+        }
+
+        public override Task CommitAsync(CancellationToken cancellationToken = default)
+        {
+            Commit();
+            return Task.CompletedTask;
+        }
+
+        public override void Rollback()
+        {
+            if (ActiveReader != null && !ActiveReader.IsClosed)
+            {
+                throw new InvalidOperationException("Npgsql driver error: An operation is already in progress. DataReader is still open on connection during rollback.");
+            }
+            WasRolledBack = true;
+        }
+
+        public override Task RollbackAsync(CancellationToken cancellationToken = default)
+        {
+            Rollback();
+            return Task.CompletedTask;
+        }
+
+        public override IsolationLevel IsolationLevel => IsolationLevel.ReadCommitted;
+        protected override DbConnection DbConnection => _connection;
+    }
+
+    private sealed class StrictDriverDbCommand : DbCommand
+    {
+        private readonly DbCommand _inner;
+        private readonly StrictDriverDbConnection _conn;
+
+        public StrictDriverDbCommand(DbCommand inner, StrictDriverDbConnection conn)
+        {
+            _inner = inner;
+            _conn = conn;
+        }
+
+        protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
+        {
+            var table = new System.Data.DataTable();
+            table.Columns.Add("id", typeof(int));
+            table.Columns.Add("name", typeof(string));
+            table.Rows.Add(1, "Alice");
+            var reader = table.CreateDataReader();
+            return new StrictDriverDbDataReader(reader, _conn.CurrentTransaction!);
+        }
+
+        protected override Task<DbDataReader> ExecuteDbDataReaderAsync(CommandBehavior behavior, CancellationToken cancellationToken)
+        {
+            return Task.FromResult<DbDataReader>(ExecuteDbDataReader(behavior));
+        }
+
+        public override void Cancel() => _inner.Cancel();
+        public override int ExecuteNonQuery() => 1;
+        public override Task<int> ExecuteNonQueryAsync(CancellationToken cancellationToken) => Task.FromResult(1);
+        public override object? ExecuteScalar() => 1;
+        public override Task<object?> ExecuteScalarAsync(CancellationToken cancellationToken) => Task.FromResult<object?>(1);
+        public override void Prepare() => _inner.Prepare();
+        [AllowNull] public override string CommandText { get => _inner.CommandText; set => _inner.CommandText = value ?? string.Empty; }
+        public override int CommandTimeout { get => _inner.CommandTimeout; set => _inner.CommandTimeout = value; }
+        public override CommandType CommandType { get => _inner.CommandType; set => _inner.CommandType = value; }
+        protected override DbConnection? DbConnection { get => _conn; set { } }
+        protected override DbParameterCollection DbParameterCollection => _inner.Parameters;
+        protected override DbTransaction? DbTransaction { get => _conn.CurrentTransaction; set { } }
+        public override bool DesignTimeVisible { get => false; set { } }
+        public override UpdateRowSource UpdatedRowSource { get => _inner.UpdatedRowSource; set => _inner.UpdatedRowSource = value; }
+        protected override DbParameter CreateDbParameter() => _inner.CreateParameter();
+    }
+
+    private sealed class StrictDriverDbDataReader : DbDataReader
+    {
+        private readonly DbDataReader _inner;
+        private readonly StrictDriverDbTransaction _tx;
+        private bool _isClosed;
+
+        public StrictDriverDbDataReader(DbDataReader inner, StrictDriverDbTransaction tx)
+        {
+            _inner = inner;
+            _tx = tx;
+            _tx.ActiveReader = this;
+        }
+
+        public override bool IsClosed => _isClosed;
+
+        public override void Close()
+        {
+            _isClosed = true;
+            _inner.Close();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _isClosed = true;
+                _inner.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            _isClosed = true;
+            await _inner.DisposeAsync();
+            await base.DisposeAsync();
+        }
+
+        public override int FieldCount => _inner.FieldCount;
+        public override bool HasRows => _inner.HasRows;
+        public override int RecordsAffected => _inner.RecordsAffected;
+        public override int Depth => _inner.Depth;
+        public override object this[int ordinal] => _inner[ordinal];
+        public override object this[string name] => _inner[name];
+        public override bool GetBoolean(int ordinal) => _inner.GetBoolean(ordinal);
+        public override byte GetByte(int ordinal) => _inner.GetByte(ordinal);
+        public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length) => _inner.GetBytes(ordinal, dataOffset, buffer, bufferOffset, length);
+        public override char GetChar(int ordinal) => _inner.GetChar(ordinal);
+        public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length) => _inner.GetChars(ordinal, dataOffset, buffer, bufferOffset, length);
+        public override string GetDataTypeName(int ordinal) => _inner.GetDataTypeName(ordinal);
+        public override DateTime GetDateTime(int ordinal) => _inner.GetDateTime(ordinal);
+        public override decimal GetDecimal(int ordinal) => _inner.GetDecimal(ordinal);
+        public override double GetDouble(int ordinal) => _inner.GetDouble(ordinal);
+        public override Type GetFieldType(int ordinal) => _inner.GetFieldType(ordinal);
+        public override float GetFloat(int ordinal) => _inner.GetFloat(ordinal);
+        public override Guid GetGuid(int ordinal) => _inner.GetGuid(ordinal);
+        public override short GetInt16(int ordinal) => _inner.GetInt16(ordinal);
+        public override int GetInt32(int ordinal) => _inner.GetInt32(ordinal);
+        public override long GetInt64(int ordinal) => _inner.GetInt64(ordinal);
+        public override string GetName(int ordinal) => _inner.GetName(ordinal);
+        public override int GetOrdinal(string name) => _inner.GetOrdinal(name);
+        public override string GetString(int ordinal) => _inner.GetString(ordinal);
+        public override object GetValue(int ordinal) => _inner.GetValue(ordinal);
+        public override int GetValues(object[] values) => _inner.GetValues(values);
+        public override bool IsDBNull(int ordinal) => _inner.IsDBNull(ordinal);
+        public override bool NextResult() => _inner.NextResult();
+        public override bool Read() => _inner.Read();
+        public override Task<bool> ReadAsync(CancellationToken cancellationToken) => _inner.ReadAsync(cancellationToken);
+        public override System.Collections.IEnumerator GetEnumerator() => _inner.GetEnumerator();
+    }
 }
+
