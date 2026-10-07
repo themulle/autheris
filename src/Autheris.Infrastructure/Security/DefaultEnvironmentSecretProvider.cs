@@ -72,8 +72,9 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             candidates.Add("ITSM_WEBHOOK_SECRET");
             candidates.Add("Gateway:Itsm:WebhookSecret");
         }
-        else if (secretRef.StartsWith("hmac:", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(secretRef, "hmac-masking-secret", StringComparison.OrdinalIgnoreCase) ||
+        // R-DEP-1: well-known aliases apply to exact reference names only. A prefix match ("audit:tenant-x") would
+        // silently resolve a missing, specific secret to the global one.
+        else if (string.Equals(secretRef, "hmac-masking-secret", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(secretRef, "HMAC_SECRET", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(secretRef, "HMAC_SECRET_KEY", StringComparison.OrdinalIgnoreCase))
         {
@@ -82,16 +83,14 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             candidates.Add("Gateway:DataMasking:HmacSecret");
             candidates.Add("Gateway__DataMasking__HmacSecret");
         }
-        else if (secretRef.StartsWith("audit:", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(secretRef, "audit-hmac-key", StringComparison.OrdinalIgnoreCase) ||
+        else if (string.Equals(secretRef, "audit-hmac-key", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(secretRef, "AUDIT_HMAC_KEY", StringComparison.OrdinalIgnoreCase))
         {
             candidates.Add("AUDIT_HMAC_KEY");
             candidates.Add("Gateway:GovernanceDb:AuditHmacKey");
             candidates.Add("Gateway__GovernanceDb__AuditHmacKey");
         }
-        else if (secretRef.StartsWith("forwardauth:", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(secretRef, "forwardauth-secret", StringComparison.OrdinalIgnoreCase) ||
+        else if (string.Equals(secretRef, "forwardauth-secret", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(secretRef, "FORWARDAUTH_SHARED_SECRET", StringComparison.OrdinalIgnoreCase))
         {
             candidates.Add("FORWARDAUTH_SHARED_SECRET");
