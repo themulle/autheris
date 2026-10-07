@@ -16,6 +16,13 @@ public enum RowFilterType
     CrossSourceSetFilter = 2     // Multi-Source: Two-Phase GraphQL / DataLoader Virtual Set
 }
 
+public enum RowFilterSubqueryStrategy
+{
+    Exists = 0,        // Standard: EXISTS (SELECT 1 FROM ... WHERE ...)
+    InCorrelated = 1,  // Correlated IN: target.fk IN (SELECT dep.pk FROM ... WHERE dep.pk = target.fk AND ...)
+    In = 2             // Uncorrelated IN: target.fk IN (SELECT dep.pk FROM ... WHERE ...)
+}
+
 public sealed class SubqueryJoinHop
 {
     public TableIdentifier Table { get; init; }

@@ -632,7 +632,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 isDml,
                 webSqlOptions.SqlRewriterEngine ?? "LegacyTokenStream",
                 tablesWithConsentRowFilter,
-                tablesWithMaskedColumns);
+                tablesWithMaskedColumns,
+                _options.Value.RowFilters.SubqueryStrategy);
 
             if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
             {
@@ -670,6 +671,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         catch (OperationCanceledException parseEx) when (!ct.IsCancellationRequested)
         {
             throw new ArgumentException("The SQL statement could not be parsed.", nameof(rawSql), parseEx);
+        }
+
+        if (_options.Value.Logging.LogGeneratedSql)
+        {
+            _logger?.LogDebug("GovernedSqlExecutionService: Generated secured SQL: {SecuredSql}", securedSql);
         }
 
         return new GovernedRewrite(securedSql, internalParameters);
@@ -729,6 +735,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         }
 
         string securedSql = RestoreClientParameters(rewrite.Sql, clientParameterNames);
+        if (_options.Value.Logging.LogGeneratedSql)
+        {
+            _logger?.LogDebug("GovernedSqlExecutionService: Executing secured SQL: {SecuredSql}", securedSql);
+        }
 
         // Audit Log Entry (secured SQL only contains parameter placeholders, never masking keys).
         // DML statements are audited separately (WEBSQL_DML_*), without SQL text that may carry literal data values.

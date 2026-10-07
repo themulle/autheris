@@ -298,6 +298,10 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         }
 
         command.CommandText = sqlBuilder.ToString();
+        if (_options?.Value?.Logging?.LogGeneratedSql == true)
+        {
+            _logger?.LogDebug("SqlDataSourceExecutor: Generated SQL: {Sql}", command.CommandText);
+        }
         _logger?.LogDebug("Executing SQL Backend query for table '{Table}' with {ParamCount} parameters", context.Metadata.Identifier.ToQualifiedName(), command.Parameters.Count);
 
         // Stufe 2: Native PostgreSQL Transaktions-Scoped Session RLS (SET LOCAL app.tenant_id = @p)

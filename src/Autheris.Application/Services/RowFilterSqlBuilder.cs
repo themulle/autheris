@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Options;
 
 namespace Autheris.Application.Services;
 
@@ -20,10 +21,12 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
     };
 
     private readonly IRlsFilterGenerator _rlsFilterGenerator;
+    private readonly RowFilterSubqueryStrategy _subqueryStrategy;
 
-    public RowFilterSqlBuilder(IRlsFilterGenerator? rlsFilterGenerator = null)
+    public RowFilterSqlBuilder(IRlsFilterGenerator? rlsFilterGenerator = null, IOptions<Autheris.Domain.Options.GatewayOptions>? options = null)
     {
         _rlsFilterGenerator = rlsFilterGenerator ?? RlsFilterGenerator.Instance;
+        _subqueryStrategy = options?.Value.RowFilters?.SubqueryStrategy ?? RowFilterSubqueryStrategy.Exists;
     }
 
     public string? BuildCombinedRowFilter(
@@ -212,7 +215,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
     {
         if (filter.FilterType == RowFilterType.SubqueryCorrelated)
         {
-            return _rlsFilterGenerator.BuildCorrelatedSubquery(filter, dialect);
+            return _rlsFilterGenerator.BuildCorrelatedSubquery(filter, dialect, _subqueryStrategy, isDeny);
         }
 
         if (filter.FilterType == RowFilterType.CrossSourceSetFilter)
@@ -353,7 +356,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
     {
         if (filter.FilterType == RowFilterType.SubqueryCorrelated)
         {
-            return _rlsFilterGenerator.BuildCorrelatedSubquery(filter, dialect);
+            return _rlsFilterGenerator.BuildCorrelatedSubquery(filter, dialect, _subqueryStrategy, isDeny);
         }
 
         if (filter.FilterType == RowFilterType.CrossSourceSetFilter)

@@ -49,6 +49,8 @@ public sealed class GatewayOptions
     [Required] public RebacOptions Rebac { get; init; } = new();
     [Required] public ArrowExportOptions Arrow { get; init; } = new();
     [Required] public DuckDbOlapOptions DuckDbOlap { get; init; } = new();
+    [Required] public RowFilterOptions RowFilters { get; init; } = new();
+    [Required] public LoggingOptions Logging { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".
@@ -1491,6 +1493,22 @@ public sealed class DuckDbOlapOptions
     public int QueryTimeoutSeconds { get; init; } = 60;
     public int MaxThreads { get; init; } = 2;
     public bool EnableCrossDomainJoinOptimization { get; init; } = true;
+}
+
+/// <summary>
+/// Row-Level Security row filter generation strategy options.
+/// </summary>
+public sealed class RowFilterOptions
+{
+    public RowFilterSubqueryStrategy SubqueryStrategy { get; set; } = RowFilterSubqueryStrategy.Exists;
+}
+
+/// <summary>
+/// Diagnostics and logging options for generated SQL queries.
+/// </summary>
+public sealed class LoggingOptions
+{
+    public bool LogGeneratedSql { get; set; } = false;
 }
 
 

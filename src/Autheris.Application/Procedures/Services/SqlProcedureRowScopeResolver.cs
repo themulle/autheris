@@ -15,6 +15,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -36,12 +37,17 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
 
     private readonly ISqlConnectionFactory _connectionFactory;
     private readonly IOptions<GatewayOptions> _options;
+    private readonly ILogger<SqlProcedureRowScopeResolver>? _logger;
     private readonly ConcurrentDictionary<string, (bool Unique, DateTimeOffset CheckedAt)> _uniquenessCache = new(StringComparer.Ordinal);
 
-    public SqlProcedureRowScopeResolver(ISqlConnectionFactory connectionFactory, IOptions<GatewayOptions> options)
+    public SqlProcedureRowScopeResolver(
+        ISqlConnectionFactory connectionFactory,
+        IOptions<GatewayOptions> options,
+        ILogger<SqlProcedureRowScopeResolver>? logger = null)
     {
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _logger = logger;
     }
 
     public async Task<IReadOnlySet<string>> GetAllowedKeysAsync(
@@ -147,6 +153,10 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
             cmd.CommandType = CommandType.Text;
             cmd.CommandTimeout = timeout;
             cmd.CommandText = BuildKeyQuery(dialect, table, keyColumns, tenantColumn, filterSql, batch.Count);
+            if (_options.Value.Logging?.LogGeneratedSql == true)
+            {
+                _logger?.LogDebug("SqlProcedureRowScopeResolver: Generated SQL: {Sql}", cmd.CommandText);
+            }
 
             if (tenantColumn != null)
             {

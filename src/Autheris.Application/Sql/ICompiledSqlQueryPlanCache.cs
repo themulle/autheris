@@ -57,7 +57,8 @@ public interface ICompiledSqlQueryPlanCache
         bool isDml = false,
         string? rewriterEngine = null,
         IReadOnlySet<string>? tablesWithConsentRowFilter = null,
-        IReadOnlySet<string>? tablesWithMaskedColumns = null);
+        IReadOnlySet<string>? tablesWithMaskedColumns = null,
+        RowFilterSubqueryStrategy subqueryStrategy = RowFilterSubqueryStrategy.Exists);
 
     void Clear();
 }

@@ -296,4 +296,19 @@ public sealed class GovernedSqlPlanCacheTests
         cache.TryGetCompiledSql(12345, DatabaseDialect.PostgreSql, tenantId, 999, out var expiredSql).ShouldBeFalse();
         expiredSql.ShouldBeNull();
     }
+
+    [Fact]
+    public void CompiledSqlQueryPlanCache_PolicyHash_DifferentiatesSubqueryStrategies()
+    {
+        var cache = new CompiledSqlQueryPlanCache();
+        var rlsFilters = new Dictionary<string, string> { ["orders"] = "autheris_target.id = 1" };
+
+        var hashExists = cache.ComputePolicyHash(rlsFilters, subqueryStrategy: RowFilterSubqueryStrategy.Exists);
+        var hashInCorrelated = cache.ComputePolicyHash(rlsFilters, subqueryStrategy: RowFilterSubqueryStrategy.InCorrelated);
+        var hashIn = cache.ComputePolicyHash(rlsFilters, subqueryStrategy: RowFilterSubqueryStrategy.In);
+
+        hashExists.ShouldNotBe(hashInCorrelated);
+        hashExists.ShouldNotBe(hashIn);
+        hashInCorrelated.ShouldNotBe(hashIn);
+    }
 }

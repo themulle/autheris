@@ -19,7 +19,11 @@ public static partial class AdvancedRlsFilterGenerator
     [GeneratedRegex(@"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$")]
     private static partial Regex SafeQualifiedIdentifierRegex();
 
-    public static string BuildCorrelatedSubquery(ConsentRowFilter filter, DatabaseDialect dialect = DatabaseDialect.SqlServer)
+    public static string BuildCorrelatedSubquery(
+        ConsentRowFilter filter,
+        DatabaseDialect dialect = DatabaseDialect.SqlServer,
+        RowFilterSubqueryStrategy strategy = RowFilterSubqueryStrategy.Exists,
+        bool isDeny = false)
     {
         if (filter.DependentTable == null)
         {
@@ -52,6 +56,22 @@ public static partial class AdvancedRlsFilterGenerator
             }
         }
 
+        // Determine effective strategy: only SQL Server for ALLOW filters.
+        // DENY filters must stay EXISTS (NOT (x IN (...)) with NULL semantics differs).
+        var effectiveStrategy = strategy;
+        if (dialect != DatabaseDialect.SqlServer || isDeny)
+        {
+            effectiveStrategy = RowFilterSubqueryStrategy.Exists;
+        }
+        else if (effectiveStrategy == RowFilterSubqueryStrategy.In &&
+                 !string.IsNullOrWhiteSpace(filter.TargetTemporalColumn) &&
+                 !string.IsNullOrWhiteSpace(filter.DependentValidFromColumn))
+        {
+            // Temporal validity conditions compare target columns against dependent columns
+            // and require correlation; fall back to EXISTS for uncorrelated IN strategy.
+            effectiveStrategy = RowFilterSubqueryStrategy.Exists;
+        }
+
         string Rebase(string qualifiedColumn) => RebaseTargetQualifier(qualifiedColumn, configuredTargetAlias);
 
         var quotedDepTable = FormatTableIdentifier(filter.DependentTable.Value, dialect);
@@ -79,10 +99,11 @@ public static partial class AdvancedRlsFilterGenerator
             }
         }
 
-        var whereConditions = new List<string>
+        var whereConditions = new List<string>();
+        if (effectiveStrategy != RowFilterSubqueryStrategy.In)
         {
-            $"{quotedDepAlias}.{quotedDepPk} = {quotedTargetAlias}.{quotedTargetFk}"
-        };
+            whereConditions.Add($"{quotedDepAlias}.{quotedDepPk} = {quotedTargetAlias}.{quotedTargetFk}");
+        }
 
         // Parse and append subquery predicates
         if (!string.IsNullOrWhiteSpace(filter.SubqueryFilterPredicateJson))
@@ -119,10 +140,17 @@ public static partial class AdvancedRlsFilterGenerator
         }
 
         var joinsStr = joinClauses.Count > 0 ? " " + string.Join(" ", joinClauses) : string.Empty;
-        var whereStr = string.Join(" AND ", whereConditions);
+        var whereStr = whereConditions.Count > 0 ? $" WHERE {string.Join(" AND ", whereConditions)}" : string.Empty;
         var fromAs = dialect == DatabaseDialect.Oracle ? " " : " AS ";
 
-        return $"EXISTS (SELECT 1 FROM {quotedDepTable}{fromAs}{quotedDepAlias}{joinsStr} WHERE {whereStr})";
+        return effectiveStrategy switch
+        {
+            RowFilterSubqueryStrategy.InCorrelated or RowFilterSubqueryStrategy.In =>
+                $"{quotedTargetAlias}.{quotedTargetFk} IN (SELECT {quotedDepAlias}.{quotedDepPk} FROM {quotedDepTable}{fromAs}{quotedDepAlias}{joinsStr}{whereStr})",
+            RowFilterSubqueryStrategy.Exists =>
+                $"EXISTS (SELECT 1 FROM {quotedDepTable}{fromAs}{quotedDepAlias}{joinsStr}{whereStr})",
+            _ => throw new InvalidOperationException($"Unsupported row filter subquery strategy: {strategy}")
+        };
     }
 
     public static string BuildCrossSourceSetFilter(ConsentRowFilter filter, int maxBatchSize = 500, DatabaseDialect dialect = DatabaseDialect.SqlServer)

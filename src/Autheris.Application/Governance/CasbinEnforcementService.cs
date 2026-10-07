@@ -474,7 +474,11 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
             // Handle Correlated Row Filter (Fail-closed on generation failure)
             if (rule.CorrelatedRowFilter != null)
             {
-                var subquery = _rlsFilterGenerator.BuildCorrelatedSubquery(rule.CorrelatedRowFilter, context.TargetDialect ?? Autheris.Domain.Common.DatabaseDialect.SqlServer);
+                var subquery = _rlsFilterGenerator.BuildCorrelatedSubquery(
+                    rule.CorrelatedRowFilter,
+                    context.TargetDialect ?? Autheris.Domain.Common.DatabaseDialect.SqlServer,
+                    RowFilterSubqueryStrategy.Exists,
+                    isDeny: false);
                 if (!string.IsNullOrWhiteSpace(subquery))
                 {
                     result.Add(subquery);
