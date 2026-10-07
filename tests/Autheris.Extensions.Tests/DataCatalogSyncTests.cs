@@ -105,6 +105,45 @@ public class DataCatalogSyncTests
         await _epochService.Received(1).InvalidateEpochAsync(Arg.Is<TableIdentifier>(t => t.Equals(tableId)), Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SyncCatalogAsync_Art9TagOnColumnOnly_RedactsColumnAndTightensTable(bool asClassification)
+    {
+        // POL-5: an Art. 9 tag on a single column (table without the tag) must protect that column and the table.
+        var tableId = new TableIdentifier("healthcare", "dbo", "visits");
+        var healthColumn = asClassification
+            ? new CatalogColumnAsset { ColumnName = "diagnosis", DataType = "varchar", Classifications = ["gdpr_art9"] }
+            : new CatalogColumnAsset { ColumnName = "diagnosis", DataType = "varchar", Tags = ["gdpr_art9"] };
+        var catalogTable = new CatalogTableAsset
+        {
+            Identifier = tableId,
+            Tags = ["clinical"],
+            Columns =
+            [
+                new() { ColumnName = "visit_id", DataType = "int" },
+                healthColumn
+            ]
+        };
+
+        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<CatalogTableAsset> { catalogTable });
+
+        var result = await _sut.SyncCatalogAsync(dryRun: false);
+
+        result.Art9ProtectedTablesCount.ShouldBe(1);
+        await _tableRepo.Received(1).UpsertTableMetadataAsync(
+            Arg.Is<TableMetadata>(m =>
+                m.Identifier.Equals(tableId) &&
+                m.Table.Sensitivity == "HIGH" &&
+                m.Table.RequiresFourEyes &&
+                m.Columns.Single(c => c.ColumnName == "diagnosis").IsSensitive &&
+                !m.Columns.Single(c => c.ColumnName == "visit_id").IsSensitive &&
+                m.ColumnMaskingRules.ContainsKey("diagnosis") &&
+                m.ColumnMaskingRules["diagnosis"].RuleType == "REDACT"),
+            Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task SyncCatalogAsync_DryRunMode_DoesNotPersistToRepository()
     {
