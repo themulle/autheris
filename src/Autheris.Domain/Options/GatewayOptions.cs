@@ -1347,6 +1347,9 @@ public sealed class ProcedureEndpointsOptions
     [Range(1, 1440)] public int RevalidationIntervalMinutes { get; init; } = 15;
     [Range(0, 60000)] public int LockTimeoutMs { get; init; } = 5000;
     [Range(1, 100000)] public int MaxRows { get; init; } = 5000;
+
+    /// <summary>R-SQL-8: response budget of one procedure call (estimated JSON size; binary values count as Base64).</summary>
+    [Range(1024, 104857600)] public long MaxResponseBytes { get; init; } = 10485760;
     [Range(1, 1000000)] public int MaxStringParameterLength { get; init; } = 4000;
     [Range(1, 300)] public int MaxTimeoutSeconds { get; init; } = 60;
     public bool EnableHotReload { get; init; } = true;

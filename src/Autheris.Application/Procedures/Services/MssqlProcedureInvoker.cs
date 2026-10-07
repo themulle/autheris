@@ -138,7 +138,8 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
 
                 try
                 {
-                    await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                    // R-SQL-8: sequential access, so LOB values are read in chunks against the remaining budget.
+                    await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false);
 
                     var columns = new List<string>(reader.FieldCount);
                     for (int i = 0; i < reader.FieldCount; i++)
@@ -146,7 +147,7 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                         columns.Add(reader.GetName(i));
                     }
 
-                    var maxBytes = _options.Value?.GraphQL?.MaxResponseBytes > 0 ? _options.Value.GraphQL.MaxResponseBytes : 10 * 1024 * 1024;
+                    var maxBytes = settings.MaxResponseBytes > 0 ? settings.MaxResponseBytes : 10 * 1024 * 1024;
                     long estimatedBytes = 0;
                     var rows = new List<object?[]>();
                     bool truncated = false;
@@ -162,9 +163,17 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                         var values = new object?[columns.Count];
                         for (int i = 0; i < values.Length; i++)
                         {
-                            var val = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                            values[i] = val;
-                            estimatedBytes += EstimateSerializedBytes(columns[i], val);
+                            estimatedBytes += columns[i].Length * 2L;
+                            try
+                            {
+                                values[i] = BoundedValueReader.Read(reader, i, maxBytes - estimatedBytes, out var consumed);
+                                estimatedBytes += consumed;
+                            }
+                            catch (GatewaySecurityException)
+                            {
+                                TryCancel(cmd);
+                                throw;
+                            }
                         }
 
                         if (estimatedBytes > maxBytes)
@@ -415,12 +424,4 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
         };
     }
 
-    private static long EstimateSerializedBytes(string columnName, object? value) =>
-        columnName.Length * 2L + value switch
-        {
-            null => 0,
-            string s => s.Length * 2L,
-            byte[] b => b.Length,
-            _ => 16
-        };
 }

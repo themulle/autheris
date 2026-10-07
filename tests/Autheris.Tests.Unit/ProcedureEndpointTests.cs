@@ -763,7 +763,7 @@ public class ProcedureEndpointTests
         var reader = Substitute.For<System.Data.Common.DbDataReader>();
         reader.FieldCount.Returns(0);
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+        execCmd.ExecuteReaderAsync(Arg.Any<System.Data.CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
 
         conn.CreateCommand().Returns(initCmd, execCmd);
 
@@ -830,7 +830,7 @@ public class ProcedureEndpointTests
         var reader = Substitute.For<System.Data.Common.DbDataReader>();
         reader.FieldCount.Returns(0);
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+        execCmd.ExecuteReaderAsync(Arg.Any<System.Data.CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
 
         conn.CreateCommand().Returns(execCmd);
 
@@ -895,7 +895,7 @@ public class ProcedureEndpointTests
         var reader = Substitute.For<System.Data.Common.DbDataReader>();
         reader.FieldCount.Returns(0);
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+        execCmd.ExecuteReaderAsync(Arg.Any<System.Data.CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
 
         conn.CreateCommand().Returns(execCmd);
 
@@ -1019,7 +1019,7 @@ public class ProcedureEndpointTests
         var reader = Substitute.For<System.Data.Common.DbDataReader>();
         reader.FieldCount.Returns(0);
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+        execCmd.ExecuteReaderAsync(Arg.Any<System.Data.CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
         conn.CreateCommand().Returns(initCmd, execCmd);
         connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(conn));
 
