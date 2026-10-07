@@ -77,6 +77,24 @@ public sealed class SecurityReviewG5Tests : IDisposable
         public ValueTask PublishAsync(CdcEvent cdcEvent, CancellationToken ct = default) => ValueTask.CompletedTask;
     }
 
+    /// <summary>GQL-3/GQL-4: admitted subscriptions need the governor and an allowing access decision.</summary>
+    private static IServiceCollection SubscriptionServices()
+    {
+        var resolver = Substitute.For<ITableAccessResolver>();
+        resolver.ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
+            .Returns(ci => Task.FromResult(new ResolvedTableAccess(
+                new TableMetadata { Identifier = ci.ArgAt<TableIdentifier>(1) },
+                TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(1), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
+                TenantId.LegacySingleTenant,
+                new Sid("S-1-5-21-G5"),
+                ci.ArgAt<ClaimsPrincipal?>(0)!)));
+        return new ServiceCollection()
+            .AddLogging()
+            .AddSingleton(Options.Create(new GatewayOptions()))
+            .AddSingleton<CdcSubscriptionGovernor>()
+            .AddSingleton(resolver);
+    }
+
     private static ClaimsPrincipal TokenPrincipal(DateTimeOffset exp) => new(new ClaimsIdentity(
         [new Claim("exp", exp.ToUnixTimeSeconds().ToString()), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-G5")], "Bearer"));
 
@@ -109,7 +127,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
     {
         var enumerator = new Subscription().SubscribeToTableEventsAsync(
             "orders", null, new BlockingChannel(), Substitute.For<IStreamRlsPolicyEnforcer>(),
-            new ServiceCollection().BuildServiceProvider(), TokenPrincipal(DateTimeOffset.UtcNow.AddSeconds(2)), CancellationToken.None).GetAsyncEnumerator();
+            SubscriptionServices().BuildServiceProvider(), TokenPrincipal(DateTimeOffset.UtcNow.AddSeconds(2)), CancellationToken.None).GetAsyncEnumerator();
 
         var moveNext = enumerator.MoveNextAsync().AsTask();
         var finished = await Task.WhenAny(moveNext, Task.Delay(TimeSpan.FromSeconds(10)));
@@ -125,7 +143,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
         revocation.IsRevokedAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<CancellationToken>())
             .Returns(_ => new ValueTask<bool>(Volatile.Read(ref revoked) == 1));
         var options = Options.Create(new GatewayOptions { GraphQL = new GraphQLOptions { SubscriptionRevalidationSeconds = 1 } });
-        var sp = new ServiceCollection().AddSingleton(revocation).AddSingleton(options).BuildServiceProvider();
+        var sp = SubscriptionServices().AddSingleton(revocation).AddSingleton(options).BuildServiceProvider();
 
         var enumerator = new Subscription().SubscribeToTableEventsAsync(
             "orders", null, new BlockingChannel(), Substitute.For<IStreamRlsPolicyEnforcer>(),
