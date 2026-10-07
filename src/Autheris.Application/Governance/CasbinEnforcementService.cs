@@ -2,7 +2,9 @@ namespace Autheris.Application.Governance;
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -23,37 +25,81 @@ using Microsoft.Extensions.Logging;
 
 public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDisposable
 {
+    private sealed record GroupingRule(string User, string Role);
+
+    private sealed record PolicySources(
+        ImmutableDictionary<string, ImmutableArray<CasbinRuleMetadata>> GlobalRules,
+        ImmutableArray<GroupingRule> GlobalGrouping,
+        ImmutableDictionary<string, ImmutableArray<CasbinRuleMetadata>> TenantFiles,
+        ImmutableDictionary<string, ImmutableArray<GroupingRule>> TenantGrouping,
+        ImmutableDictionary<string, ImmutableArray<CasbinRuleMetadata>> ProgrammaticRules,
+        ImmutableDictionary<string, ImmutableArray<GroupingRule>> ProgrammaticGrouping)
+    {
+        public static readonly PolicySources Empty = new(
+            ImmutableDictionary<string, ImmutableArray<CasbinRuleMetadata>>.Empty.WithComparers(StringComparer.OrdinalIgnoreCase),
+            ImmutableArray<GroupingRule>.Empty,
+            ImmutableDictionary<string, ImmutableArray<CasbinRuleMetadata>>.Empty.WithComparers(StringComparer.OrdinalIgnoreCase),
+            ImmutableDictionary<string, ImmutableArray<GroupingRule>>.Empty.WithComparers(StringComparer.OrdinalIgnoreCase),
+            ImmutableDictionary<string, ImmutableArray<CasbinRuleMetadata>>.Empty.WithComparers(StringComparer.OrdinalIgnoreCase),
+            ImmutableDictionary<string, ImmutableArray<GroupingRule>>.Empty.WithComparers(StringComparer.OrdinalIgnoreCase));
+
+        public bool HasAnyPolicies =>
+            GlobalRules.Values.Any(r => r.Length > 0) ||
+            TenantFiles.Values.Any(r => r.Length > 0) ||
+            ProgrammaticRules.Values.Any(r => r.Length > 0);
+
+        public bool TenantHasPolicies(string tenant)
+        {
+            if (TenantFiles.TryGetValue(tenant, out var tf) && tf.Length > 0) return true;
+            if (TenantGrouping.TryGetValue(tenant, out var tg) && tg.Length > 0) return true;
+            if (ProgrammaticRules.TryGetValue(tenant, out var pr) && pr.Length > 0) return true;
+            if (ProgrammaticGrouping.TryGetValue(tenant, out var pg) && pg.Length > 0) return true;
+            if (GlobalRules.TryGetValue(tenant, out var gr) && gr.Length > 0) return true;
+            return false;
+        }
+
+        public IEnumerable<string> AllTenants =>
+            GlobalRules.Keys
+                .Concat(TenantFiles.Keys)
+                .Concat(TenantGrouping.Keys)
+                .Concat(ProgrammaticRules.Keys)
+                .Concat(ProgrammaticGrouping.Keys)
+                .Where(t => !string.Equals(t, "*", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
     private sealed class PolicySnapshot
     {
-        public Dictionary<string, Enforcer> Enforcers { get; }
-        public Dictionary<string, List<CasbinRuleMetadata>> Rules { get; }
+        public FrozenDictionary<string, Enforcer> Enforcers { get; }
+        public FrozenDictionary<string, ImmutableArray<CasbinRuleMetadata>> Rules { get; }
+        public Enforcer WildcardEnforcer { get; }
         public long Epoch { get; }
 
         public PolicySnapshot(
-            Dictionary<string, Enforcer> enforcers,
-            Dictionary<string, List<CasbinRuleMetadata>> rules,
+            FrozenDictionary<string, Enforcer> enforcers,
+            FrozenDictionary<string, ImmutableArray<CasbinRuleMetadata>> rules,
+            Enforcer wildcardEnforcer,
             long epoch)
         {
-            Enforcers = new Dictionary<string, Enforcer>(enforcers, StringComparer.OrdinalIgnoreCase);
-            Rules = new Dictionary<string, List<CasbinRuleMetadata>>(
-                rules.ToDictionary(kv => kv.Key, kv => new List<CasbinRuleMetadata>(kv.Value), StringComparer.OrdinalIgnoreCase),
-                StringComparer.OrdinalIgnoreCase);
+            Enforcers = enforcers;
+            Rules = rules;
+            WildcardEnforcer = wildcardEnforcer;
             Epoch = epoch;
         }
 
         public bool HasPolicies(string tenant)
         {
-            if (Rules.TryGetValue(tenant, out var r) && r.Count > 0) return true;
+            if (Rules.TryGetValue(tenant, out var r) && r.Length > 0) return true;
             if (Enforcers.TryGetValue(tenant, out var e) && e.GetPolicy().Any()) return true;
-            if (Rules.TryGetValue("*", out var wr) && wr.Count > 0) return true;
-            if (Enforcers.TryGetValue("*", out var we) && we.GetPolicy().Any()) return true;
+            if (Rules.TryGetValue("*", out var wr) && wr.Length > 0) return true;
+            if (WildcardEnforcer.GetPolicy().Any()) return true;
             return false;
         }
     }
 
+    private PolicySources _sources = PolicySources.Empty;
     private PolicySnapshot _currentSnapshot;
     private readonly object _syncLock = new();
-    private readonly Enforcer _emptyFallbackEnforcer;
     private readonly bool _modelSupportsWildcardTenant;
 
     private sealed record CachedDecision(TableAccessDecision Decision, long CreatedTimestampTicks);
@@ -120,8 +166,12 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                                        _modelText.Contains("p.tenant == '*'") ||
                                        _modelText.Contains("p.tenant==\"*\"") ||
                                        _modelText.Contains("p.tenant=='*'");
-        _emptyFallbackEnforcer = new Enforcer(DefaultModel.CreateFromText(_modelText));
-        _currentSnapshot = new PolicySnapshot(new(), new(), 1);
+        var initialWildcardEnforcer = new Enforcer(DefaultModel.CreateFromText(_modelText));
+        _currentSnapshot = new PolicySnapshot(
+            FrozenDictionary<string, Enforcer>.Empty,
+            FrozenDictionary<string, ImmutableArray<CasbinRuleMetadata>>.Empty,
+            initialWildcardEnforcer,
+            1);
     }
 
     public long CurrentEpoch => Volatile.Read(ref _currentSnapshot).Epoch;
@@ -139,12 +189,130 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             return existing;
         }
 
-        if (snapshot.Enforcers.TryGetValue("*", out var wildcardEnforcer))
+        return snapshot.WildcardEnforcer;
+    }
+
+    private Enforcer CreateEnforcer(
+        IEnumerable<CasbinRuleMetadata> ownRules,
+        IEnumerable<CasbinRuleMetadata> wildcardRules,
+        IEnumerable<GroupingRule> groupingRules)
+    {
+        var model = DefaultModel.CreateFromText(_modelText);
+        var enforcer = new Enforcer(model);
+
+        foreach (var rule in ownRules)
         {
-            return wildcardEnforcer;
+            var normalizedSubRule = Regex.Replace(rule.SubRule, @"'([^']{2,})'", "\"$1\"");
+            enforcer.AddPolicy(rule.Sub, rule.Tenant, rule.Obj, rule.Act, normalizedSubRule, rule.Eft);
         }
 
-        return _emptyFallbackEnforcer;
+        foreach (var rule in wildcardRules)
+        {
+            var normalizedSubRule = Regex.Replace(rule.SubRule, @"'([^']{2,})'", "\"$1\"");
+            enforcer.AddPolicy(rule.Sub, rule.Tenant, rule.Obj, rule.Act, normalizedSubRule, rule.Eft);
+        }
+
+        foreach (var g in groupingRules)
+        {
+            enforcer.AddGroupingPolicy(g.User, g.Role);
+        }
+
+        return enforcer;
+    }
+
+    private PolicySnapshot BuildSnapshot(PolicySources src, long epoch)
+    {
+        var wildcardRules = new List<CasbinRuleMetadata>();
+        if (src.GlobalRules.TryGetValue("*", out var gw))
+        {
+            wildcardRules.AddRange(gw);
+        }
+        if (src.ProgrammaticRules.TryGetValue("*", out var pw))
+        {
+            wildcardRules.AddRange(pw);
+        }
+
+        var wildcardGrouping = new List<GroupingRule>(src.GlobalGrouping);
+        if (src.ProgrammaticGrouping.TryGetValue("*", out var pwg))
+        {
+            wildcardGrouping.AddRange(pwg);
+        }
+
+        var enforcersDict = new Dictionary<string, Enforcer>(StringComparer.OrdinalIgnoreCase);
+        var rulesDict = new Dictionary<string, ImmutableArray<CasbinRuleMetadata>>(StringComparer.OrdinalIgnoreCase);
+
+        var wildcardEnforcer = CreateEnforcer(
+            Enumerable.Empty<CasbinRuleMetadata>(),
+            wildcardRules,
+            wildcardGrouping);
+
+        rulesDict["*"] = wildcardRules.ToImmutableArray();
+
+        foreach (var tenant in src.AllTenants)
+        {
+            var tenantRules = new List<CasbinRuleMetadata>();
+            if (src.GlobalRules.TryGetValue(tenant, out var gr))
+            {
+                tenantRules.AddRange(gr);
+            }
+            if (src.TenantFiles.TryGetValue(tenant, out var tr))
+            {
+                tenantRules.AddRange(tr);
+            }
+            if (src.ProgrammaticRules.TryGetValue(tenant, out var pr))
+            {
+                tenantRules.AddRange(pr);
+            }
+
+            var tenantGrouping = new List<GroupingRule>(wildcardGrouping);
+            if (src.TenantGrouping.TryGetValue(tenant, out var tg))
+            {
+                tenantGrouping.AddRange(tg);
+            }
+            if (src.ProgrammaticGrouping.TryGetValue(tenant, out var pg))
+            {
+                tenantGrouping.AddRange(pg);
+            }
+
+            var enforcer = CreateEnforcer(tenantRules, wildcardRules, tenantGrouping);
+            enforcersDict[tenant] = enforcer;
+            rulesDict[tenant] = tenantRules.ToImmutableArray();
+        }
+
+        return new PolicySnapshot(
+            enforcersDict.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
+            rulesDict.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
+            wildcardEnforcer,
+            epoch);
+    }
+
+    private void Publish(
+        Func<PolicySources, PolicySources> change,
+        Action<PolicySources, PolicySources>? validate = null)
+    {
+        List<string> tenantsToNotify;
+        lock (_syncLock)
+        {
+            var nextSources = change(_sources);
+            validate?.Invoke(_sources, nextSources);
+            var current = Volatile.Read(ref _currentSnapshot);
+            var nextSnapshot = BuildSnapshot(nextSources, current.Epoch + 1);
+            _sources = nextSources;
+            Interlocked.Exchange(ref _currentSnapshot, nextSnapshot);
+            _decisionCache.Clear();
+
+            tenantsToNotify = current.Enforcers.Keys
+                .Union(current.Rules.Keys, StringComparer.OrdinalIgnoreCase)
+                .Union(nextSnapshot.Enforcers.Keys, StringComparer.OrdinalIgnoreCase)
+                .Union(nextSnapshot.Rules.Keys, StringComparer.OrdinalIgnoreCase)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        foreach (var tName in tenantsToNotify)
+        {
+            OnPolicyReloaded?.Invoke(tName);
+        }
     }
 
     private static readonly string[] DangerousSubRuleTokens =
@@ -236,39 +404,17 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             throw new InvalidOperationException("Casbin model does not support wildcard tenant rules ('*'). The model matcher must include 'p.tenant == \"*\"'.");
         }
 
-        // Normalize single-quoted strings (length > 1) to double-quoted C# strings for DynamicExpresso
-        var normalizedSubRule = Regex.Replace(subRule, @"'([^']{2,})'", "\"$1\"");
+        var ruleMeta = new CasbinRuleMetadata(sub, tenant.Value, obj, act, subRule, eft, rlsFilter, correlatedRowFilter);
 
-        lock (_syncLock)
+        Publish(src =>
         {
-            var current = Volatile.Read(ref _currentSnapshot);
-            var nextEnforcers = new Dictionary<string, Enforcer>(current.Enforcers, StringComparer.OrdinalIgnoreCase);
-            var nextRules = new Dictionary<string, List<CasbinRuleMetadata>>(
-                current.Rules.ToDictionary(kv => kv.Key, kv => new List<CasbinRuleMetadata>(kv.Value), StringComparer.OrdinalIgnoreCase),
-                StringComparer.OrdinalIgnoreCase);
-
-            if (!nextEnforcers.TryGetValue(tenant.Value, out var enforcer))
-            {
-                var model = DefaultModel.CreateFromText(_modelText);
-                enforcer = new Enforcer(model);
-                nextEnforcers[tenant.Value] = enforcer;
-            }
-
-            enforcer.AddPolicy(sub, tenant.Value, obj, act, normalizedSubRule, eft);
-
-            if (!nextRules.TryGetValue(tenant.Value, out var rules))
-            {
-                rules = new List<CasbinRuleMetadata>();
-                nextRules[tenant.Value] = rules;
-            }
-
-            var ruleMeta = new CasbinRuleMetadata(sub, tenant.Value, obj, act, subRule, eft, rlsFilter, correlatedRowFilter);
-            rules.Add(ruleMeta);
-
-            var nextSnapshot = new PolicySnapshot(nextEnforcers, nextRules, current.Epoch + 1);
-            Interlocked.Exchange(ref _currentSnapshot, nextSnapshot);
-            _decisionCache.Clear();
-        }
+            var currentList = src.ProgrammaticRules.TryGetValue(tenant.Value, out var list)
+                ? list
+                : ImmutableArray<CasbinRuleMetadata>.Empty;
+            var nextList = currentList.Add(ruleMeta);
+            var nextDict = src.ProgrammaticRules.SetItem(tenant.Value, nextList);
+            return src with { ProgrammaticRules = nextDict };
+        });
     }
 
     public void AddRlsPolicy(
@@ -284,27 +430,17 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
     public void AddRoleForUser(TenantId tenant, string user, string role)
     {
-        lock (_syncLock)
+        var grouping = new GroupingRule(user, role);
+
+        Publish(src =>
         {
-            var current = Volatile.Read(ref _currentSnapshot);
-            var nextEnforcers = new Dictionary<string, Enforcer>(current.Enforcers, StringComparer.OrdinalIgnoreCase);
-            var nextRules = new Dictionary<string, List<CasbinRuleMetadata>>(
-                current.Rules.ToDictionary(kv => kv.Key, kv => new List<CasbinRuleMetadata>(kv.Value), StringComparer.OrdinalIgnoreCase),
-                StringComparer.OrdinalIgnoreCase);
-
-            if (!nextEnforcers.TryGetValue(tenant.Value, out var enforcer))
-            {
-                var model = DefaultModel.CreateFromText(_modelText);
-                enforcer = new Enforcer(model);
-                nextEnforcers[tenant.Value] = enforcer;
-            }
-
-            enforcer.AddGroupingPolicy(user, role);
-
-            var nextSnapshot = new PolicySnapshot(nextEnforcers, nextRules, current.Epoch + 1);
-            Interlocked.Exchange(ref _currentSnapshot, nextSnapshot);
-            _decisionCache.Clear();
-        }
+            var currentList = src.ProgrammaticGrouping.TryGetValue(tenant.Value, out var list)
+                ? list
+                : ImmutableArray<GroupingRule>.Empty;
+            var nextList = currentList.Add(grouping);
+            var nextDict = src.ProgrammaticGrouping.SetItem(tenant.Value, nextList);
+            return src with { ProgrammaticGrouping = nextDict };
+        });
     }
 
     private const string RequestedAction = "read";
@@ -343,9 +479,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         var sw = Stopwatch.StartNew();
         var enforcer = snapshot.Enforcers.TryGetValue(context.Tenant.Value, out var existing)
             ? existing
-            : snapshot.Enforcers.TryGetValue("*", out var wildcardEnforcer)
-                ? wildcardEnforcer
-                : _emptyFallbackEnforcer;
+            : snapshot.WildcardEnforcer;
 
         var tenantRulesSnapshot = new List<CasbinRuleMetadata>();
         if (snapshot.Rules.TryGetValue("*", out var wildcardRulesList))
@@ -952,16 +1086,16 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         throw new FormatException("Casbin policy effect must be 'allow' or 'deny'.");
     }
 
-    public void LoadPolicyFromText(TenantId tenant, string policyText)
+    private (ImmutableDictionary<string, ImmutableArray<CasbinRuleMetadata>> Rules, ImmutableArray<GroupingRule> Grouping) ParsePolicyText(
+        string policyText,
+        string? defaultTenant = null)
     {
         ArgumentNullException.ThrowIfNull(policyText);
 
-        var model = DefaultModel.CreateFromText(_modelText);
-        var newEnforcer = new Enforcer(model);
-        var newRules = new List<CasbinRuleMetadata>();
-        var groupingCount = 0;
-
         var lines = policyText.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var rulesBuilder = new Dictionary<string, List<CasbinRuleMetadata>>(StringComparer.OrdinalIgnoreCase);
+        var groupingBuilder = new List<GroupingRule>();
+
         var lineNumber = 0;
         foreach (var rawLine in lines)
         {
@@ -982,7 +1116,6 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             var type = parts[0].ToLowerInvariant();
             if (type == "p")
             {
-                // p, sub, tenant, obj, act, [subRule], [eft], [rlsFilter]
                 if (parts.Count < 4 || parts.Count > 8)
                 {
                     throw new FormatException($"Casbin policy line {lineNumber}: 'p' rules require 4 to 8 fields.");
@@ -994,42 +1127,85 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                     throw new FormatException($"Casbin policy line {lineNumber}: subject must not be empty.");
                 }
 
-                var ruleTenant = parts.Count > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2] : tenant.Value;
-                if (ruleTenant == "*" && !_modelSupportsWildcardTenant)
-                {
-                    throw new InvalidOperationException($"Casbin model does not support wildcard tenant rules ('{ruleTenant}'). The model matcher must include 'p.tenant == \"*\"'.");
-                }
+                var specifiedTenant = parts.Count > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2] : null;
 
-                var obj = parts.Count > 3 ? parts[3] : "*";
-                var act = parts.Count > 4 ? parts[4] : "read";
-                var subRule = parts.Count > 5 && !string.IsNullOrWhiteSpace(parts[5]) ? parts[5] : "true";
+                string ruleTenant;
+                string obj;
+                string act;
+                string subRule;
                 string eft;
-                try
-                {
-                    eft = NormalizeEffect(parts.Count > 6 ? parts[6] : null);
-                }
-                catch (FormatException ex)
-                {
-                    throw new FormatException($"Casbin policy line {lineNumber}: {ex.Message}", ex);
-                }
+                string? rlsFilter;
 
-                var rlsFilter = parts.Count > 7 && !string.IsNullOrWhiteSpace(parts[7]) ? parts[7] : null;
+                if (defaultTenant != null && specifiedTenant != null && (specifiedTenant.Contains('.') || specifiedTenant.Contains(':')))
+                {
+                    // Format without explicit tenant field: p, sub, obj, act, [eft], [subRule]
+                    ruleTenant = defaultTenant;
+                    obj = parts[2];
+                    act = parts.Count > 3 ? parts[3] : "read";
+                    if (parts.Count > 4 && (string.Equals(parts[4], "allow", StringComparison.OrdinalIgnoreCase) || string.Equals(parts[4], "deny", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        eft = NormalizeEffect(parts[4]);
+                        subRule = parts.Count > 5 && !string.IsNullOrWhiteSpace(parts[5]) ? parts[5] : "true";
+                    }
+                    else
+                    {
+                        subRule = parts.Count > 4 && !string.IsNullOrWhiteSpace(parts[4]) ? parts[4] : "true";
+                        eft = parts.Count > 5 ? NormalizeEffect(parts[5]) : "allow";
+                    }
+                    rlsFilter = parts.Count > 6 && !string.IsNullOrWhiteSpace(parts[6]) ? parts[6] : null;
+                }
+                else
+                {
+                    if (defaultTenant != null)
+                    {
+                        if (specifiedTenant != null && !string.Equals(specifiedTenant, defaultTenant, StringComparison.OrdinalIgnoreCase))
+                        {
+                            throw new FormatException($"Casbin policy line {lineNumber}: tenant policy file for '{defaultTenant}' cannot define rules for '{specifiedTenant}'.");
+                        }
+                        ruleTenant = defaultTenant;
+                    }
+                    else
+                    {
+                        ruleTenant = specifiedTenant ?? "*";
+                    }
+
+                    if (ruleTenant == "*" && !_modelSupportsWildcardTenant)
+                    {
+                        throw new InvalidOperationException($"Casbin model does not support wildcard tenant rules ('{ruleTenant}'). The model matcher must include 'p.tenant == \"*\"'.");
+                    }
+
+                    obj = parts.Count > 3 ? parts[3] : "*";
+                    act = parts.Count > 4 ? parts[4] : "read";
+                    subRule = parts.Count > 5 && !string.IsNullOrWhiteSpace(parts[5]) ? parts[5] : "true";
+                    try
+                    {
+                        eft = NormalizeEffect(parts.Count > 6 ? parts[6] : null);
+                    }
+                    catch (FormatException ex)
+                    {
+                        throw new FormatException($"Casbin policy line {lineNumber}: {ex.Message}", ex);
+                    }
+                    rlsFilter = parts.Count > 7 && !string.IsNullOrWhiteSpace(parts[7]) ? parts[7] : null;
+                }
 
                 ValidateSubRuleTokens(subRule, rlsFilter);
-                var normalizedSubRule = Regex.Replace(subRule, @"'([^']{2,})'", "\"$1\"");
-                newEnforcer.AddPolicy(sub, ruleTenant, obj, act, normalizedSubRule, eft);
-                newRules.Add(new CasbinRuleMetadata(sub, ruleTenant, obj, act, subRule, eft, rlsFilter, null));
+
+                if (!rulesBuilder.TryGetValue(ruleTenant, out var list))
+                {
+                    list = new List<CasbinRuleMetadata>();
+                    rulesBuilder[ruleTenant] = list;
+                }
+
+                list.Add(new CasbinRuleMetadata(sub, ruleTenant, obj, act, subRule, eft, rlsFilter, null));
             }
             else if (type == "g")
             {
-                // g, user, role
                 if (parts.Count != 3 || string.IsNullOrWhiteSpace(parts[1]) || string.IsNullOrWhiteSpace(parts[2]))
                 {
                     throw new FormatException($"Casbin policy line {lineNumber}: 'g' rules require exactly 3 fields.");
                 }
 
-                newEnforcer.AddGroupingPolicy(parts[1], parts[2]);
-                groupingCount++;
+                groupingBuilder.Add(new GroupingRule(parts[1], parts[2]));
             }
             else
             {
@@ -1037,44 +1213,49 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             }
         }
 
-        lock (_syncLock)
-        {
-            var current = Volatile.Read(ref _currentSnapshot);
+        var rules = rulesBuilder.ToImmutableDictionary(
+            kv => kv.Key,
+            kv => kv.Value.ToImmutableArray(),
+            StringComparer.OrdinalIgnoreCase);
 
-            // RR-L4-05: Last-known-good. An empty policy set must never silently replace an existing one
-            // (truncated file during ConfigMap/editor write would otherwise disable all ABAC DENY rules and RLS filters).
-            if (newRules.Count == 0 && groupingCount == 0 && current.HasPolicies(tenant.Value))
-            {
-                _logger?.LogWarning("Casbin tenant policy reload rejected: empty policy while active policies exist for tenant {Tenant}. Preserving last-known-good.", tenant.Value);
-                throw new InvalidOperationException(
-                    "Casbin policy reload rejected: the new policy set is empty while the tenant has active policies. " +
-                    "The last-known-good policy set remains active.");
-            }
+        return (rules, groupingBuilder.ToImmutableArray());
+    }
 
-            // Also inject wildcard '*' rules from current snapshot if any exist
-            if (current.Rules.TryGetValue("*", out var wildcardRules))
+    public void LoadPolicyFromText(TenantId tenant, string policyText)
+    {
+        ArgumentNullException.ThrowIfNull(policyText);
+
+        var (rules, grouping) = ParsePolicyText(policyText, tenant.Value);
+
+        Publish(
+            src =>
             {
-                foreach (var wRule in wildcardRules)
+                var tenantRules = rules.TryGetValue(tenant.Value, out var r)
+                    ? r
+                    : ImmutableArray<CasbinRuleMetadata>.Empty;
+
+                var nextTenantFiles = src.TenantFiles.SetItem(tenant.Value, tenantRules);
+                var nextTenantGrouping = src.TenantGrouping.SetItem(tenant.Value, grouping);
+
+                return src with
                 {
-                    var normalizedSubRule = Regex.Replace(wRule.SubRule, @"'([^']{2,})'", "\"$1\"");
-                    newEnforcer.AddPolicy(wRule.Sub, wRule.Tenant, wRule.Obj, wRule.Act, normalizedSubRule, wRule.Eft);
+                    TenantFiles = nextTenantFiles,
+                    TenantGrouping = nextTenantGrouping
+                };
+            },
+            (oldSources, newSources) =>
+            {
+                var tenantRules = newSources.TenantFiles.TryGetValue(tenant.Value, out var r) ? r : ImmutableArray<CasbinRuleMetadata>.Empty;
+                var tenantGrouping = newSources.TenantGrouping.TryGetValue(tenant.Value, out var g) ? g : ImmutableArray<GroupingRule>.Empty;
+
+                if (tenantRules.Length == 0 && tenantGrouping.Length == 0 && oldSources.TenantHasPolicies(tenant.Value))
+                {
+                    _logger?.LogWarning("Casbin tenant policy reload rejected: empty policy while active policies exist for tenant {Tenant}. Preserving last-known-good.", tenant.Value);
+                    throw new InvalidOperationException(
+                        "Casbin policy reload rejected: the new policy set is empty while the tenant has active policies. " +
+                        "The last-known-good policy set remains active.");
                 }
-            }
-
-            var nextEnforcers = new Dictionary<string, Enforcer>(current.Enforcers, StringComparer.OrdinalIgnoreCase);
-            var nextRules = new Dictionary<string, List<CasbinRuleMetadata>>(
-                current.Rules.ToDictionary(kv => kv.Key, kv => new List<CasbinRuleMetadata>(kv.Value), StringComparer.OrdinalIgnoreCase),
-                StringComparer.OrdinalIgnoreCase);
-
-            nextEnforcers[tenant.Value] = newEnforcer;
-            nextRules[tenant.Value] = newRules;
-
-            var nextSnapshot = new PolicySnapshot(nextEnforcers, nextRules, current.Epoch + 1);
-            Interlocked.Exchange(ref _currentSnapshot, nextSnapshot);
-            _decisionCache.Clear();
-        }
-
-        OnPolicyReloaded?.Invoke(tenant.Value);
+            });
     }
 
     public void LoadPolicyFromFile(TenantId tenant, string filePath, bool watchFile = false)
@@ -1117,188 +1298,34 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
     {
         ArgumentNullException.ThrowIfNull(policyText);
 
-        var lines = policyText.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var rulesByTenant = new Dictionary<string, (Enforcer Enforcer, List<CasbinRuleMetadata> Rules)>(StringComparer.OrdinalIgnoreCase);
-        var globalGroupingRules = new List<(string User, string Role)>();
+        var (rules, grouping) = ParsePolicyText(policyText, defaultTenant: null);
 
-        var lineNumber = 0;
-        foreach (var rawLine in lines)
-        {
-            lineNumber++;
-            var line = rawLine.Trim();
-            if (line.StartsWith('#') || string.IsNullOrWhiteSpace(line)) continue;
-
-            List<string> parts;
-            try
+        Publish(
+            src => src with
             {
-                parts = SplitPolicyLine(line);
-            }
-            catch (FormatException ex)
+                GlobalRules = rules,
+                GlobalGrouping = grouping
+            },
+            (oldSources, newSources) =>
             {
-                throw new FormatException($"Casbin policy line {lineNumber}: {ex.Message}", ex);
-            }
+                int totalPRules = newSources.GlobalRules.Values.Sum(r => r.Length);
 
-            var type = parts[0].ToLowerInvariant();
-            if (type == "p")
-            {
-                if (parts.Count < 4 || parts.Count > 8)
+                if (oldSources.HasAnyPolicies && totalPRules == 0)
                 {
-                    throw new FormatException($"Casbin policy line {lineNumber}: 'p' rules require 4 to 8 fields.");
-                }
-
-                var sub = parts[1];
-                if (string.IsNullOrWhiteSpace(sub))
-                {
-                    throw new FormatException($"Casbin policy line {lineNumber}: subject must not be empty.");
-                }
-
-                var ruleTenant = parts.Count > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2] : "*";
-                if (ruleTenant == "*" && !_modelSupportsWildcardTenant)
-                {
-                    throw new InvalidOperationException($"Casbin model does not support wildcard tenant rules ('{ruleTenant}'). The model matcher must include 'p.tenant == \"*\"'.");
-                }
-
-                var obj = parts.Count > 3 ? parts[3] : "*";
-                var act = parts.Count > 4 ? parts[4] : "read";
-                var subRule = parts.Count > 5 && !string.IsNullOrWhiteSpace(parts[5]) ? parts[5] : "true";
-                string eft;
-                try
-                {
-                    eft = NormalizeEffect(parts.Count > 6 ? parts[6] : null);
-                }
-                catch (FormatException ex)
-                {
-                    throw new FormatException($"Casbin policy line {lineNumber}: {ex.Message}", ex);
-                }
-
-                var rlsFilter = parts.Count > 7 && !string.IsNullOrWhiteSpace(parts[7]) ? parts[7] : null;
-
-                ValidateSubRuleTokens(subRule, rlsFilter);
-                var normalizedSubRule = Regex.Replace(subRule, @"'([^']{2,})'", "\"$1\"");
-
-                if (!rulesByTenant.TryGetValue(ruleTenant, out var entry))
-                {
-                    var model = DefaultModel.CreateFromText(_modelText);
-                    entry = (new Enforcer(model), new List<CasbinRuleMetadata>());
-                    rulesByTenant[ruleTenant] = entry;
-                }
-
-                entry.Enforcer.AddPolicy(sub, ruleTenant, obj, act, normalizedSubRule, eft);
-                entry.Rules.Add(new CasbinRuleMetadata(sub, ruleTenant, obj, act, subRule, eft, rlsFilter, null));
-            }
-            else if (type == "g")
-            {
-                if (parts.Count != 3 || string.IsNullOrWhiteSpace(parts[1]) || string.IsNullOrWhiteSpace(parts[2]))
-                {
-                    throw new FormatException($"Casbin policy line {lineNumber}: 'g' rules require exactly 3 fields.");
-                }
-
-                globalGroupingRules.Add((parts[1], parts[2]));
-            }
-            else
-            {
-                throw new FormatException($"Casbin policy line {lineNumber}: unknown rule type.");
-            }
-        }
-
-        if (rulesByTenant.Count == 0 && globalGroupingRules.Count > 0)
-        {
-            var model = DefaultModel.CreateFromText(_modelText);
-            rulesByTenant["*"] = (new Enforcer(model), new List<CasbinRuleMetadata>());
-        }
-
-        // Add wildcard '*' rules to specific tenant enforcers so Enforce() checks global rules too
-        bool hasWildcard = rulesByTenant.TryGetValue("*", out var wildcardEntry);
-        if (hasWildcard)
-        {
-            foreach (var (tName, entry) in rulesByTenant)
-            {
-                if (tName == "*") continue;
-                foreach (var rule in wildcardEntry.Rules)
-                {
-                    var normalizedSubRule = Regex.Replace(rule.SubRule, @"'([^']{2,})'", "\"$1\"");
-                    entry.Enforcer.AddPolicy(rule.Sub, rule.Tenant, rule.Obj, rule.Act, normalizedSubRule, rule.Eft);
-                }
-            }
-        }
-
-        foreach (var (_, (enforcer, _)) in rulesByTenant)
-        {
-            foreach (var (u, r) in globalGroupingRules)
-            {
-                enforcer.AddGroupingPolicy(u, r);
-            }
-        }
-
-        List<string> tenantsToNotify;
-
-        lock (_syncLock)
-        {
-            var current = Volatile.Read(ref _currentSnapshot);
-
-            // C-1: FAIL-CLOSED CHECK
-            if (rulesByTenant.Count == 0 && globalGroupingRules.Count == 0 && (current.Enforcers.Count > 0 || current.Rules.Count > 0))
-            {
-                _logger?.LogWarning("Casbin policy reload rejected: the new policy set is empty while active policies exist. Preserving last-known-good.");
-                throw new InvalidOperationException(
-                    "Casbin policy reload rejected: the new policy set is empty while active policies exist. " +
-                    "The last-known-good policy set remains active.");
-            }
-
-            var nextEnforcers = new Dictionary<string, Enforcer>(StringComparer.OrdinalIgnoreCase);
-            var nextRules = new Dictionary<string, List<CasbinRuleMetadata>>(StringComparer.OrdinalIgnoreCase);
-
-            // Preserve any tenants that were loaded from dedicated per-tenant policy files
-            foreach (var (tenantFileKey, _) in _tenantPolicyFiles)
-            {
-                if (current.Enforcers.TryGetValue(tenantFileKey, out var existingEnforcer))
-                {
-                    nextEnforcers[tenantFileKey] = existingEnforcer;
-                }
-                if (current.Rules.TryGetValue(tenantFileKey, out var existingRules))
-                {
-                    nextRules[tenantFileKey] = new List<CasbinRuleMetadata>(existingRules);
-                }
-            }
-
-            foreach (var (tName, (enforcer, rules)) in rulesByTenant)
-            {
-                nextEnforcers[tName] = enforcer;
-                nextRules[tName] = rules;
-            }
-
-            // Also if wildcard rules were loaded globally, apply them to preserved per-tenant enforcers
-            if (hasWildcard)
-            {
-                foreach (var (tenantFileKey, _) in _tenantPolicyFiles)
-                {
-                    if (nextEnforcers.TryGetValue(tenantFileKey, out var perTenantEnforcer) && !rulesByTenant.ContainsKey(tenantFileKey))
+                    if (newSources.GlobalRules.Count == 0 && newSources.GlobalGrouping.Length == 0)
                     {
-                        foreach (var rule in wildcardEntry.Rules)
-                        {
-                            var normalizedSubRule = Regex.Replace(rule.SubRule, @"'([^']{2,})'", "\"$1\"");
-                            perTenantEnforcer.AddPolicy(rule.Sub, rule.Tenant, rule.Obj, rule.Act, normalizedSubRule, rule.Eft);
-                        }
+                        _logger?.LogWarning("Casbin policy reload rejected: the new policy set is empty while active policies exist. Preserving last-known-good.");
+                        throw new InvalidOperationException(
+                            "Casbin policy reload rejected: the new policy set is empty while active policies exist. " +
+                            "The last-known-good policy set remains active.");
                     }
+
+                    _logger?.LogWarning("Casbin policy reload rejected: the new policy set has no 'p' rules while active policies exist. Preserving last-known-good.");
+                    throw new InvalidOperationException(
+                        "Casbin policy reload rejected: the new policy set has no 'p' rules while active policies exist. " +
+                        "The last-known-good policy set remains active.");
                 }
-            }
-
-            tenantsToNotify = current.Enforcers.Keys
-                .Union(current.Rules.Keys, StringComparer.OrdinalIgnoreCase)
-                .Union(nextEnforcers.Keys, StringComparer.OrdinalIgnoreCase)
-                .Union(nextRules.Keys, StringComparer.OrdinalIgnoreCase)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            var nextSnapshot = new PolicySnapshot(nextEnforcers, nextRules, current.Epoch + 1);
-            Interlocked.Exchange(ref _currentSnapshot, nextSnapshot);
-            _decisionCache.Clear();
-        }
-
-        foreach (var tName in tenantsToNotify)
-        {
-            OnPolicyReloaded?.Invoke(tName);
-        }
+            });
     }
 
     private void EnableGlobalFileWatcher(string filePath)
@@ -1453,25 +1480,43 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         }
         else
         {
-            lock (_syncLock)
+            Publish(src => src with
             {
-                var current = Volatile.Read(ref _currentSnapshot);
-                var nextEnforcers = new Dictionary<string, Enforcer>(current.Enforcers, StringComparer.OrdinalIgnoreCase);
-                var nextRules = new Dictionary<string, List<CasbinRuleMetadata>>(
-                    current.Rules.ToDictionary(kv => kv.Key, kv => new List<CasbinRuleMetadata>(kv.Value), StringComparer.OrdinalIgnoreCase),
-                    StringComparer.OrdinalIgnoreCase);
-
-                nextEnforcers.Remove(tenant.Value);
-                nextRules.Remove(tenant.Value);
-
-                var nextSnapshot = new PolicySnapshot(nextEnforcers, nextRules, current.Epoch + 1);
-                Interlocked.Exchange(ref _currentSnapshot, nextSnapshot);
-                _decisionCache.Clear();
-            }
-            OnPolicyReloaded?.Invoke(tenant.Value);
+                ProgrammaticRules = src.ProgrammaticRules.Remove(tenant.Value),
+                ProgrammaticGrouping = src.ProgrammaticGrouping.Remove(tenant.Value)
+            });
         }
 
         return Task.CompletedTask;
+    }
+
+    internal int DiagnosticPolicyCount(string tenant)
+    {
+        var snapshot = Volatile.Read(ref _currentSnapshot);
+        if (snapshot.Enforcers.TryGetValue(tenant, out var e))
+        {
+            return e.GetPolicy().Count();
+        }
+        return snapshot.WildcardEnforcer.GetPolicy().Count();
+    }
+
+    internal object DiagnosticEnforcerIdentity(string tenant)
+    {
+        var snapshot = Volatile.Read(ref _currentSnapshot);
+        if (snapshot.Enforcers.TryGetValue(tenant, out var e))
+        {
+            return e;
+        }
+        return snapshot.WildcardEnforcer;
+    }
+
+    internal static int DiagnosticEnforcerPolicyCount(object enforcer)
+    {
+        if (enforcer is Enforcer e)
+        {
+            return e.GetPolicy().Count();
+        }
+        return 0;
     }
 
     public void Dispose()
