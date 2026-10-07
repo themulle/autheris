@@ -404,4 +404,39 @@ public class DomainAndModelEdgeCasesTests
     }
 
     #endregion
+
+    #region MaskingRule Tenant-Scoping (SEC H-13)
+
+    [Fact]
+    public void MaskingRule_CreateTenantScopedHmacRule_WhenUnscoped_AppendsTenant()
+    {
+        var rule = new MaskingRule { RuleType = "HMAC_SHA256", HmacKeyId = "master_key" };
+        var scoped = MaskingRule.CreateTenantScopedHmacRule(rule, "tenant_a");
+
+        scoped.HmacKeyId.ShouldBe("master_key|tenant:tenant_a");
+    }
+
+    [Fact]
+    public void MaskingRule_CreateTenantScopedHmacRule_WhenAlreadyScopedToSameTenant_IsIdempotent()
+    {
+        var rule = new MaskingRule { RuleType = "HMAC_SHA256", HmacKeyId = "master_key|tenant:tenant_a" };
+        var scoped = MaskingRule.CreateTenantScopedHmacRule(rule, "tenant_a");
+
+        scoped.ShouldBeSameAs(rule);
+    }
+
+    [Fact]
+    public void MaskingRule_CreateTenantScopedHmacRule_WhenScopedToForeignTenant_ThrowsInvalidOperationException()
+    {
+        // SEC H-13: Catalog rule scoped to Tenant A must never be re-used or accessible by Tenant B
+        var ruleTenantA = new MaskingRule { RuleType = "HMAC_SHA256", HmacKeyId = "master_key|tenant:tenant_a" };
+
+        var ex = Should.Throw<InvalidOperationException>(() =>
+            MaskingRule.CreateTenantScopedHmacRule(ruleTenantA, "tenant_b"));
+
+        ex.Message.ShouldContain("tenant_a");
+        ex.Message.ShouldContain("tenant_b");
+    }
+
+    #endregion
 }
