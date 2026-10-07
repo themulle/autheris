@@ -92,6 +92,7 @@ public sealed class TrafficShadowingService : ITrafficShadowingService, IHostedS
 
         var sanitizedRequest = request with
         {
+            PathAndQuery = PiiShadowingRedactor.RedactPathAndQuery(request.PathAndQuery),
             Headers = sanitizedHeaders,
             Body = sanitizedBody
         };
