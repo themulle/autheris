@@ -355,5 +355,176 @@ public sealed class CatalogGraphQlSchemaTests
         var result = await executor.ExecuteAsync(query);
         Assert.DoesNotContain("errors", result.ToJson());
     }
+
+    [Fact]
+    public async Task Schema_WithMaskedNumericAndBooleanColumns_ReportsMaskedErrorCodeAndNull()
+    {
+        var dealTableId = new TableIdentifier("sales", "dbo", "deals");
+        var dealTable = new TableMetadata
+        {
+            Identifier = dealTableId,
+            Table = new Table
+            {
+                IsActive = true,
+                SourceName = "sales",
+                SchemaName = "dbo",
+                TableName = "deals",
+                SourceType = "PostgreSql",
+                DataSourceType = DataSourceType.Sql
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "int" },
+                new TableColumn { ColumnName = "amount", DataType = "decimal" },
+                new TableColumn { ColumnName = "is_confidential", DataType = "boolean" }
+            ],
+            PrimaryKeyColumns = ["id"]
+        };
+
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([dealTable]);
+        _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var executor = await CreateExecutorAsync();
+
+        // Return redacted string values for numeric and boolean columns
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(),
+                Arg.Any<TreeQueryNode>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(JsonDocument.Parse("""
+                [
+                    { "id": "***", "amount": "***", "is_confidential": "***" }
+                ]
+                """));
+
+        var query = "query { sales_dbo_deals { id amount is_confidential } }";
+        var result = await executor.ExecuteAsync(query);
+        var json = result.ToJson();
+
+        // Data should have null for masked fields
+        using var doc = JsonDocument.Parse(json);
+        var deal = doc.RootElement.GetProperty("data").GetProperty("sales_dbo_deals")[0];
+        Assert.Equal(JsonValueKind.Null, deal.GetProperty("id").ValueKind);
+        Assert.Equal(JsonValueKind.Null, deal.GetProperty("amount").ValueKind);
+        Assert.Equal(JsonValueKind.Null, deal.GetProperty("is_confidential").ValueKind);
+
+        // Errors should contain MASKED error code (G-8 / R-GQL-1)
+        Assert.Contains("MASKED", json);
+    }
+
+    [Fact]
+    public async Task Schema_WithBooleanColumn_AcceptsFloatingPointOnePointZero()
+    {
+        var dealTableId = new TableIdentifier("sales", "dbo", "flags");
+        var flagTable = new TableMetadata
+        {
+            Identifier = dealTableId,
+            Table = new Table
+            {
+                IsActive = true,
+                SourceName = "sales",
+                SchemaName = "dbo",
+                TableName = "flags",
+                SourceType = "PostgreSql",
+                DataSourceType = DataSourceType.Sql
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "int" },
+                new TableColumn { ColumnName = "is_active", DataType = "boolean" }
+            ],
+            PrimaryKeyColumns = ["id"]
+        };
+
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([flagTable]);
+        _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var executor = await CreateExecutorAsync();
+
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(),
+                Arg.Any<TreeQueryNode>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(JsonDocument.Parse("""
+                [
+                    { "id": 1, "is_active": 1.0 }
+                ]
+                """));
+
+        var query = "query { sales_dbo_flags { id is_active } }";
+        var result = await executor.ExecuteAsync(query);
+        var json = result.ToJson();
+
+        Assert.DoesNotContain("errors", json);
+        using var doc = JsonDocument.Parse(json);
+        var flag = doc.RootElement.GetProperty("data").GetProperty("sales_dbo_flags")[0];
+        Assert.True(flag.GetProperty("is_active").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Schema_WithHmacMaskedColumn_ReturnsPseudonymAsString()
+    {
+        var tableId = new TableIdentifier("crm", "dbo", "users");
+        var userTable = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table
+            {
+                IsActive = true,
+                SourceName = "crm",
+                SchemaName = "dbo",
+                TableName = "users",
+                SourceType = "PostgreSql",
+                DataSourceType = DataSourceType.Sql
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "int" },
+                new TableColumn { ColumnName = "account_no", DataType = "bigint" }
+            ],
+            ColumnMaskingRules = new Dictionary<string, MaskingRule>
+            {
+                ["account_no"] = new MaskingRule { RuleType = "HMAC_SHA256" }
+            },
+            PrimaryKeyColumns = ["id"]
+        };
+
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([userTable]);
+        _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var executor = await CreateExecutorAsync();
+
+        // account_no is typed as String in the GraphQL schema because of HMAC
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(),
+                Arg.Any<TreeQueryNode>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(JsonDocument.Parse("""
+                [
+                    { "id": 1, "account_no": "HMAC-HEX-987654" }
+                ]
+                """));
+
+        var query = "query { crm_dbo_users { id account_no } }";
+        var result = await executor.ExecuteAsync(query);
+        var json = result.ToJson();
+
+        Assert.DoesNotContain("errors", json);
+        using var doc = JsonDocument.Parse(json);
+        var user = doc.RootElement.GetProperty("data").GetProperty("crm_dbo_users")[0];
+        Assert.Equal("HMAC-HEX-987654", user.GetProperty("account_no").GetString());
+    }
 }
 
