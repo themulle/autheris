@@ -738,7 +738,56 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 }
 ```
 
+
+### 2.21 `Casbin` (ABAC/RBAC Policy Engine & Model-Contract)
+
+Das Gateway integriert Casbin für feingranulare Autorisierungs- und Row-Level-Security-Regeln (ABAC/RBAC). Richtlinien und Modell können als Dateien hinterlegt oder mit dem integrierten Standardmodell betrieben werden.
+
+| Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
+| :--- | :--- | :--- | :--- | :--- |
+| `Casbin:Enabled` | `bool` | `true \| false` | `false` | Aktiviert das Casbin-Enforcement im Gateway. |
+| `Casbin:EnforceInQueryPipeline` | `bool` | `true \| false` | `true` | Führt Casbin-Prüfungen in der Query-Pipeline aus. |
+| `Casbin:ModelPath` | `string?` | Dateipfad | `null` | Pfad zu einer benutzerdefinierten Casbin-Modell-Datei (`.conf`). Wenn `null`, wird das integrierte Standardmodell genutzt. |
+| `Casbin:PolicyPath` | `string?` | Dateipfad | `null` | Pfad zur globalen Casbin-Policy-Datei (`.csv`). |
+| `Casbin:WatchPolicyFile` | `bool` | `true \| false` | `true` | Überwacht die Policy-Datei auf Änderungen zur Laufzeit (Hot Reload). |
+
+```json
+"Casbin": {
+  "Enabled": true,
+  "EnforceInQueryPipeline": true,
+  "ModelPath": "config/casbin-model.conf",
+  "PolicyPath": "config/casbin-policy.csv",
+  "WatchPolicyFile": true
+}
+```
+
+#### Startup-Validierung & Model Contract (Probes M1–M8, W1–W5)
+
+Um Fehlkonfigurationen (z. B. unbemerkte Syntaxfehler, falsche Klammerung / Operator-Präzedenz wie `g(...) && r.tenant == p.tenant || p.tenant == "*"` oder fehlende `sub_rule`-Auswertung) auszuschließen, prüft das Gateway benutzerdefinierte und eingebaute Casbin-Modelle **nicht über Textsuche**, sondern führt beim Start (**Fail-Fast**) automatische Verhaltens-Probes auf einem isolierten Enforcer aus:
+
+1. **Pflicht-Eigenschaften (Mandatory Probes M1–M8):**
+   - **M1 (Basis-Allow):** Eine passende Allow-Regel für Subjekt, Mandant, Objekt und Aktion muss `true` ergeben.
+   - **M2 (Aktions-Mismatch):** Falsche Aktion muss `false` ergeben.
+   - **M3 (Rollen-Auflösung `g`):** Ein Benutzer mit passender Rolle `g(r.sub, p.sub)` muss autorisiert werden.
+   - **M4 (Mandanten-Isolation):** Eine Regel für `tenant_a` darf **niemals** Zugriff für `tenant_b` gewähren.
+   - **M5 (Unbekannter Mandant):** Zugriff mit nicht gematchtem Mandanten muss fail-closed abgewiesen werden (`false`).
+   - **M6 (`sub_rule` ABAC-Auswertung):** Dynamische ABAC-Ausdrücke via `eval(p.sub_rule)` müssen ausgewertet werden (z. B. `ctx.Classification != 'RESTRICTED'`).
+   - **M7 (Deny-Priorität):** Bei gleichzeitigem Vorliegen einer Allow- und einer Deny-Regel muss Deny gewinnen (`policy_effect: !some(where (p.eft == deny))`).
+   - **M8 (Arität & Syntax):** Modell-Parser und Request-Arität (`r = sub, tenant, obj, act, ctx`, `p = sub, tenant, obj, act, sub_rule, eft`) müssen fehlerfrei initialisierbar sein.
+
+2. **Wildcard-Mandanten-Fähigkeit & Sicherheit (Probes W1, W2–W5):**
+   - **W1 (Wildcard-Capability):** Eine globale Regel mit Mandant `*` wird für einen spezifischen Mandanten getestet. Ergibt sie `true`, gilt `SupportsWildcardTenant = true`. Ergibt sie `false`, wird das Modell als mandantenspezifisch akzeptiert, aber `*`-Regeln werden in Policies abgewiesen.
+   - **W2–W5 (Wildcard-Safety – nur wenn W1 `true`):**
+     - **W2:** Eine `*`-Regel für eine fremde Rolle darf fremde Nutzer **nicht** autorisieren (Schutz vor fehlenden Klammern bei `||`).
+     - **W3:** Eine `*`-Regel für eine fremde Tabelle/Objekt darf andere Tabellen **nicht** öffnen.
+     - **W4:** Eine `*`-Regel für eine fremde Aktion darf andere Aktionen **nicht** freigeben.
+     - **W5:** Eine `*`-Regel mit einschränkender `sub_rule` darf bei Nichterfüllung der Bedingung **nicht** autorisieren.
+
+Schlägt ein Pflicht-Test (M1–M8) oder bei Wildcard-Modellen einer der Sicherheitstests (W2–W5) fehl, bricht der Start mit einer `ValidationException` bzw. `CasbinModelValidationException` sofort ab.
+
 ---
+
+
 
 
 ## 3. Deployment & Umgebungsvariablen
