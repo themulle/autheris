@@ -234,9 +234,10 @@ public sealed class S3LakehouseStorageProvider : ILakehouseStorageProvider
         // SEC EX-10 / M-33: reject ?, #, % and traversal segments in object keys
         LakehouseLocationGuard.EnsureSafeStorageKey(key, location);
 
-        // SEC M-33: bucket allowlist (configured S3 bucket + buckets of configured table locations)
+        // SEC M-33 / EXT-5: bucket allowlist (configured S3 bucket, S3AllowedBuckets, buckets of configured table
+        // locations). An empty allowlist no longer means "any *.s3.amazonaws.com bucket" (fail-closed).
         var allowedBuckets = LakehouseLocationGuard.GetAllowedBuckets(_options.Value);
-        if (allowedBuckets.Count > 0 && !allowedBuckets.Contains(bucket))
+        if (!allowedBuckets.Contains(bucket))
         {
             throw new System.Security.SecurityException($"S3 bucket '{bucket}' is not part of the configured lakehouse locations.");
         }

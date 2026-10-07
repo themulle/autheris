@@ -1074,6 +1074,19 @@ public sealed class LakehouseStorageOptions
     public string AzureContainer { get; init; } = string.Empty;
     public string AzureAccountKey { get; init; } = string.Empty;
 
+    /// <summary>
+    /// EXT-5: additional S3 buckets that may be addressed besides <see cref="S3Bucket"/> and the buckets of configured
+    /// table locations. Without any allowed bucket every S3 request is refused (fail-closed).
+    /// </summary>
+    public List<string> S3AllowedBuckets { get; init; } = [];
+
+    /// <summary>
+    /// EXT-5: additional Azure containers that may be addressed besides <see cref="AzureContainer"/> and the containers of
+    /// configured table locations. The account key signs requests for the whole account, so without any allowed container
+    /// every Azure request is refused (fail-closed).
+    /// </summary>
+    public List<string> AzureAllowedContainers { get; init; } = [];
+
     /// <summary>SEC: Maximale Byte-Anzahl beim Lesen von Metadaten-/Manifest-Dateien (Standard 64 MB).</summary>
     public long MaxReadBytes { get; init; } = 64L * 1024 * 1024;
 }

@@ -167,7 +167,7 @@ public sealed class SecurityReview20261002ExtensionsTests
         var options = Options.Create(new GatewayOptions
         {
             Insecure = new InsecureGettingStartedOptions { warn_allow_unsigned_s3_requests = true },
-            Lakehouse = new LakehouseOptions()
+            Lakehouse = new LakehouseOptions { Storage = new LakehouseStorageOptions { S3Bucket = "my-bucket" } }
         });
         var provider = new S3LakehouseStorageProvider(new HttpClient(new RecordingHandler()), options, NullLogger<S3LakehouseStorageProvider>.Instance);
 
@@ -901,7 +901,7 @@ public sealed class SecurityReview20261002ExtensionsTests
             Insecure = new InsecureGettingStartedOptions { warn_allow_unsigned_s3_requests = true },
             Lakehouse = new LakehouseOptions
             {
-                Storage = new LakehouseStorageOptions { S3Endpoint = "http://minio:9000", MaxReadBytes = 1024 }
+                Storage = new LakehouseStorageOptions { S3Endpoint = "http://minio:9000", MaxReadBytes = 1024, S3Bucket = "bucket" }
             }
         });
         var provider = new S3LakehouseStorageProvider(new HttpClient(handler), options, NullLogger<S3LakehouseStorageProvider>.Instance);
