@@ -109,6 +109,11 @@ public static class DbtEndpoints
             {
                 return Results.NotFound(new { error = $"Proposal '{id}' not found." });
             }
+            catch (InvalidOperationException ex)
+            {
+                // R-EXT-1: not pending, not applicable (RLS/Casbin) or blocked by the ratchet; the status is unchanged.
+                return Results.Conflict(new { error = ex.Message });
+            }
         }).RequireAuthorization();
 
         app.MapPost("/api/extensions/dbt/proposals/{id:guid}/reject", async (
@@ -132,6 +137,10 @@ public static class DbtEndpoints
             catch (KeyNotFoundException)
             {
                 return Results.NotFound(new { error = $"Proposal '{id}' not found." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.Conflict(new { error = ex.Message });
             }
         }).RequireAuthorization();
 

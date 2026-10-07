@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
 
@@ -165,7 +166,31 @@ public class DbtIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
         var firstProposal = doc.RootElement.EnumerateArray().First();
         var proposalId = firstProposal.GetProperty("id").GetString();
 
-        // 3. Approve proposal
+        // 3. R-EXT-1: approving a proposal for a table that is not in the catalog has no effect -> 409, still pending
+        var conflictResponse = await client.PostAsync($"/api/extensions/dbt/proposals/{proposalId}/approve", null);
+        conflictResponse.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+
+        // 4. Register the table, then the approval applies the masking rule
+        var tableJson = firstProposal.GetProperty("table");
+        var tableId = new Autheris.Domain.Common.TableIdentifier(
+            tableJson.GetProperty("domain").GetString()!,
+            tableJson.GetProperty("schema").GetString()!,
+            tableJson.GetProperty("tableName").GetString()!);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Interfaces.ITableMetadataRepository>();
+            await repo.UpsertTableMetadataAsync(new Autheris.Domain.Model.TableMetadata
+            {
+                Identifier = tableId,
+                Table = new Autheris.Domain.Model.Table { SourceName = tableId.Domain, SchemaName = tableId.Schema, TableName = tableId.TableName, SourceType = "PostgreSQL" },
+                Columns =
+                [
+                    new Autheris.Domain.Model.TableColumn { ColumnName = "account_id", DataType = "integer" },
+                    new Autheris.Domain.Model.TableColumn { ColumnName = "contact_email", DataType = "varchar" }
+                ]
+            });
+        }
+
         var approveResponse = await client.PostAsync($"/api/extensions/dbt/proposals/{proposalId}/approve", null);
         approveResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
         var approveBody = await approveResponse.Content.ReadAsStringAsync();
