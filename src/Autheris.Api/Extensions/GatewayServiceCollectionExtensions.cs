@@ -344,6 +344,8 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IDataSourceExecutor, SqlDataSourceExecutor>();
         services.AddSingleton<IDataSourceExecutor, DeclarativeHttpDataSourceExecutor>();
         services.AddSingleton<IDataSourceExecutor, PluginHttpDataSourceExecutor>();
+        services.AddSingleton<TrinoSqlEngine.ISqlEngine, TrinoSqlEngine.FastSqlEngine>();
+        services.AddSingleton<Autheris.Application.Sql.Interfaces.ISqlSecurityValidator, Autheris.Application.Sql.Services.DefaultSqlSecurityValidator>();
         services.AddScoped<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService, Autheris.Application.Sql.Services.GovernedSqlExecutionService>();
         services.AddSingleton<Autheris.Application.SqlEndpoints.Interfaces.ISqlEndpointRegistry, Autheris.Application.SqlEndpoints.Services.InMemorySqlEndpointRegistry>();
         services.AddSingleton<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
@@ -357,6 +359,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.Application.Procedures.Interfaces.IProcedureInvoker, Autheris.Application.Procedures.Services.MssqlProcedureInvoker>();
         services.AddSingleton<Autheris.Application.Procedures.Interfaces.IProcedureRowScopeResolver, Autheris.Application.Procedures.Services.SqlProcedureRowScopeResolver>();
         services.AddScoped<Autheris.Application.Procedures.Interfaces.IProcedureExecutionService, Autheris.Application.Procedures.Services.GovernedProcedureExecutionService>();
+        services.AddSingleton<Autheris.Application.Procedures.Tools.IProcedureYamlGenerator, Autheris.Application.Procedures.Tools.ProcedureYamlGenerator>();
         if (gatewayOptions.SqlEndpoints.Procedures.Enabled)
         {
             services.AddHostedService<Autheris.Application.Procedures.Services.ProcedureRegistrationService>();
@@ -844,7 +847,8 @@ public static class GatewayServiceCollectionExtensions
 
     public static IServiceCollection AddGatewayGraphQL(
         this IServiceCollection services,
-        GatewayOptions gatewayOptions)
+        GatewayOptions gatewayOptions,
+        bool demoDataEnabled = true)
     {
         // RR-L3-05: In production without explicit opt-in, relaxed limits are capped to moderate thresholds
         var maxDepth = gatewayOptions.AreQueryLimitsRelaxed
@@ -884,6 +888,14 @@ public static class GatewayServiceCollectionExtensions
             gqlBuilder.UseRequest<TrustedDocumentsOnlyMiddleware>();
         }
 
+        if (demoDataEnabled)
+        {
+            // Sample content (finance/hr root fields, InvoiceRecord): only with demo data enabled
+            gqlBuilder
+                .AddTypeExtension<DemoQueryExtensions>()
+                .AddTypeExtension<InvoiceRecordExtensions>();
+        }
+
         gqlBuilder
             .UseDocumentParser()
             .UseDocumentValidation()
@@ -905,7 +917,6 @@ public static class GatewayServiceCollectionExtensions
             .AddSubscriptionType<Subscription>()
             .AddInMemorySubscriptions()
             .AddSocketSessionInterceptor(sp => sp.GetRequiredService<WebSocketAuthInterceptor>())
-            .AddTypeExtension<InvoiceRecordExtensions>()
             .AddDirectiveType<Autheris.GraphQL.Directives.McpToolDirectiveType>()
             .AddDirectiveType<Autheris.GraphQL.Directives.RebacDirectiveType>()
             .AddMaxExecutionDepthRule(maxDepth)

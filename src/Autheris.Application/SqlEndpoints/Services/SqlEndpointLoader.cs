@@ -25,22 +25,24 @@ public sealed class SqlEndpointLoader : IDisposable
         TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex ParamHeaderRegex = new(
-        @"^([a-zA-Z0-9_]+)\s*:\s*([a-zA-Z0-9_]+)(\!)?(?:\s*=\s*(.+))?$",
+        @"\A([a-zA-Z0-9_]+)\s*:\s*([a-zA-Z0-9_]+)(\!)?(?:\s*=\s*(.+))?\z",
         RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(100));
 
     private readonly ISqlEndpointRegistry _registry;
-    private readonly FastSqlEngine _sqlEngine = new();
+    private readonly ISqlEngine _sqlEngine;
     private readonly ILogger<SqlEndpointLoader>? _logger;
     private FileSystemWatcher? _watcher;
     private bool _disposed;
 
     public SqlEndpointLoader(
         ISqlEndpointRegistry registry,
-        ILogger<SqlEndpointLoader>? logger = null)
+        ILogger<SqlEndpointLoader>? logger = null,
+        ISqlEngine? sqlEngine = null)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _logger = logger;
+        _sqlEngine = sqlEngine ?? FastSqlEngine.Default;
     }
 
     /// <summary>
@@ -401,12 +403,12 @@ public sealed class SqlEndpointLoader : IDisposable
     public const string DbtGeneratedMarker = "-- @generated_by: autheris-dbt-sync";
 
     private static readonly Regex DbtNameRegex = new(
-        @"^[A-Za-z0-9_]{1,128}\z",
+        @"\A[A-Za-z0-9_]{1,128}\z",
         RegexOptions.Compiled | RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(100));
 
     private static readonly Regex DbtDataSourceRegex = new(
-        @"^[A-Za-z0-9_.\-]{1,128}\z",
+        @"\A[A-Za-z0-9_.\-]{1,128}\z",
         RegexOptions.Compiled | RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(100));
 

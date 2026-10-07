@@ -59,6 +59,13 @@ public static class SqlFunctionAllowlists
         "format", "group_concat", "total", "unicode", "char", "trunc", "pi",
     ];
 
+    private static readonly string[] OracleFunctions =
+    [
+        "sysdate", "systimestamp", "nvl", "nvl2", "decode", "trunc", "to_char", "to_date", "to_timestamp",
+        "to_number", "add_months", "months_between", "last_day", "next_day", "initcap", "instr",
+        "listagg", "median", "translate", "dump", "vsize", "nanvl",
+    ];
+
     /// <summary>Dialect-neutral (ANSI) allowlist.</summary>
     public static IReadOnlySet<string> Ansi { get; } = Create(CommonFunctions);
 
@@ -71,12 +78,16 @@ public static class SqlFunctionAllowlists
     /// <summary>SQLite allowlist (ANSI + SQLite date/string/aggregate functions).</summary>
     public static IReadOnlySet<string> Sqlite { get; } = Create(CommonFunctions, SqliteFunctions);
 
+    /// <summary>Oracle allowlist (ANSI + Oracle date/string/null-handling functions).</summary>
+    public static IReadOnlySet<string> Oracle { get; } = Create(CommonFunctions, OracleFunctions);
+
     /// <summary>Returns the curated default allowlist for <paramref name="dialect"/>.</summary>
     public static IReadOnlySet<string> GetDefault(TargetSqlDialect dialect) => dialect switch
     {
         TargetSqlDialect.PostgreSql => PostgreSql,
         TargetSqlDialect.SqlServer => SqlServer,
         TargetSqlDialect.Sqlite => Sqlite,
+        TargetSqlDialect.Oracle => Oracle,
         _ => Ansi
     };
 

@@ -52,7 +52,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         RejectTimeTravelQueries = true
     };
 
-    private readonly FastSqlEngine _sqlEngine = new();
+    private readonly ISqlEngine _sqlEngine;
+    private readonly ICompiledSqlQueryPlanCache? _planCache;
+    private readonly ISqlSecurityValidator _sqlSecurityValidator;
     private readonly IOptions<GatewayOptions> _options;
     private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly IConsentResolutionService? _consentResolution;
@@ -79,7 +81,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         IHostEnvironment? environment = null,
         ILogger<GovernedSqlExecutionService>? logger = null,
         IConsentRepository? consentRepository = null,
-        IKeyVaultSecretProvider? secretProvider = null)
+        IKeyVaultSecretProvider? secretProvider = null,
+        ISqlEngine? sqlEngine = null,
+        ICompiledSqlQueryPlanCache? planCache = null,
+        ISqlSecurityValidator? sqlSecurityValidator = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement;
@@ -92,6 +97,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         _logger = logger;
         _consentRepository = consentRepository;
         _secretProvider = secretProvider;
+        _sqlEngine = sqlEngine ?? FastSqlEngine.Default;
+        _planCache = planCache;
+        _sqlSecurityValidator = sqlSecurityValidator ?? new DefaultSqlSecurityValidator();
     }
 
     public async Task<string> RewriteSqlAsync(
@@ -452,7 +460,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
             {
-                SqlSecurityValidator.ValidatePredicateSql(decision.CombinedRowFilterSql, "CombinedRowFilterSql");
+                _sqlSecurityValidator.ValidatePredicateSql(decision.CombinedRowFilterSql, "CombinedRowFilterSql");
                 rlsParts.Add($"({decision.CombinedRowFilterSql})");
                 AddInternalRowFilterParameters(decision.RowFilterParameters, internalParameters);
                 tablesWithConsentRowFilter.Add(target.FullName);
@@ -602,14 +610,43 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             RejectUnfilteredDml = true,
             PolicyProvider = policyProvider,
             TableColumnsProvider = tbl => tableColumnsMap.TryGetValue(tbl, out var cols) ? cols : null,
-            ColumnMaskingProvider = maskingProvider
+            ColumnMaskingProvider = maskingProvider,
+            RewriterEngine = _options.Value.WebSql.SqlRewriterEngine
         };
 
-        // 7. Rewrite SQL AST
+        // 7. Rewrite SQL AST (with plan cache fast-path if enabled)
         string securedSql;
+        ulong queryHash = 0;
+        ulong policyHash = 0;
+        var planCache = _planCache;
+        bool canUsePlanCache = planCache != null && targetDatabaseDialect.HasValue;
+
+        if (canUsePlanCache && planCache != null)
+        {
+            queryHash = planCache.ComputeHash(rawSql.AsSpan());
+            policyHash = planCache.ComputePolicyHash(
+                tableRlsFilters,
+                tableMaskingExpressions,
+                tablesWithoutRls,
+                maxRows,
+                isDml,
+                webSqlOptions.SqlRewriterEngine ?? "LegacyTokenStream",
+                tablesWithConsentRowFilter,
+                tablesWithMaskedColumns);
+
+            if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
+            {
+                return new GovernedRewrite(cachedSql, internalParameters);
+            }
+        }
+
         try
         {
             securedSql = _sqlEngine.RewriteRls(rawSql.AsMemory(), rlsOptions, ct);
+            if (canUsePlanCache && planCache != null && !string.IsNullOrEmpty(securedSql))
+            {
+                planCache.SetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, securedSql);
+            }
         }
         catch (WebSqlPolicyException)
         {

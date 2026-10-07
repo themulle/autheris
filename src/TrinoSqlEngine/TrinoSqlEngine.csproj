@@ -27,7 +27,7 @@
     <Antlr4 Include="SqlBase.g4">
       <Generator>MSBuild:Compile</Generator>
       <CustomToolNamespace>TrinoSqlEngine</CustomToolNamespace>
-      <Visitor>false</Visitor>
+      <Visitor>true</Visitor>
       <Listener>true</Listener>
     </Antlr4>
   </ItemGroup>

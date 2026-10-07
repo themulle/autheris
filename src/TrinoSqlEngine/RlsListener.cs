@@ -8,6 +8,7 @@ using Antlr4.Runtime;
 using Antlr4.Runtime.Misc;
 using Antlr4.Runtime.Tree;
 
+[Obsolete("Superseded by AstSecurityVisitor and Dialect Generators")]
 public sealed class RlsListener : SqlBaseBaseListener
 {
     private readonly TokenStreamRewriter _rewriter;

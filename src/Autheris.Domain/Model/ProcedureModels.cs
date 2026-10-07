@@ -114,6 +114,22 @@ public sealed record ProcedureDefinition(
     public IReadOnlyDictionary<string, string> DeclaredOutputTypes { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Contract-First / Pure-YAML: Result column source mappings (output column -> ResultColumnSource) declared in YAML.
+    /// Enables table- and column-level consent and masking governance without requiring database catalog inspect permissions.
+    /// </summary>
+    public IReadOnlyDictionary<string, ResultColumnSource> DeclaredOutputSources { get; init; } = new Dictionary<string, ResultColumnSource>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Explicit list of physical tables referenced by the procedure, declared in YAML.
+    /// </summary>
+    public IReadOnlyList<string> ReferencedTables { get; init; } = [];
+
+    /// <summary>
+    /// Optional SHA-256 hash of the procedure DDL/header for schema drift prevention.
+    /// </summary>
+    public string? DdlHash { get; init; }
+
+    /// <summary>
     /// Review P-2: Order of all arguments (client parameters and context bindings) as declared. Table-valued functions
     /// (and every other positional call) bind their arguments in exactly this order. When not set, client parameters
     /// come first, followed by the context bindings.

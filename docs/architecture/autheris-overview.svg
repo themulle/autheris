@@ -1,0 +1,346 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 820" width="100%" height="100%" style="background:#090d16; font-family:'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;">
+  <defs>
+    <!-- Background Gradients -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#080c14"/>
+      <stop offset="50%" stop-color="#0d1424"/>
+      <stop offset="100%" stop-color="#090d18"/>
+    </linearGradient>
+
+    <!-- Card Gradients -->
+    <linearGradient id="cardGradDark" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#141c2e"/>
+      <stop offset="100%" stop-color="#0f1624"/>
+    </linearGradient>
+    <linearGradient id="coreCardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1a1e38"/>
+      <stop offset="100%" stop-color="#121528"/>
+    </linearGradient>
+    
+    <!-- Filter Shadows -->
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+    <filter id="coreGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="0" stdDeviation="8" flood-color="#6366f1" flood-opacity="0.3"/>
+    </filter>
+
+    <!-- Markers -->
+    <marker id="arrowBlue" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#38bdf8"/>
+    </marker>
+    <marker id="arrowIndigo" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#818cf8"/>
+    </marker>
+  </defs>
+
+  <!-- Canvas Background -->
+  <rect width="1280" height="820" fill="url(#bgGrad)"/>
+  
+  <!-- Subtle Grid Pattern -->
+  <g opacity="0.04" stroke="#ffffff" stroke-width="1">
+    <path d="M 0,50 L 1280,50 M 0,100 L 1280,100 M 0,150 L 1280,150 M 0,200 L 1280,200 M 0,250 L 1280,250 M 0,300 L 1280,300 M 0,350 L 1280,350 M 0,400 L 1280,400 M 0,450 L 1280,450 M 0,500 L 1280,500 M 0,550 L 1280,550 M 0,600 L 1280,600 M 0,650 L 1280,650 M 0,700 L 1280,700 M 0,750 L 1280,750" />
+    <path d="M 50,0 L 50,820 M 100,0 L 100,820 M 150,0 L 150,820 M 200,0 L 200,820 M 250,0 L 250,820 M 300,0 L 300,820 M 350,0 L 350,820 M 400,0 L 400,820 M 450,0 L 450,820 M 500,0 L 500,820 M 550,0 L 550,820 M 600,0 L 600,820 M 650,0 L 650,820 M 700,0 L 700,820 M 750,0 L 750,820 M 800,0 L 800,820 M 850,0 L 850,820 M 900,0 L 900,820 M 950,0 L 950,820 M 1000,0 L 1000,820 M 1050,0 L 1050,820 M 1100,0 L 1100,820 M 1150,0 L 1150,820 M 1200,0 L 1200,820 M 1250,0 L 1250,820" />
+  </g>
+
+  <!-- ============================================================== -->
+  <!-- TOP SECTION: TRANSPORTS, PROTOCOLS & APIS                      -->
+  <!-- ============================================================== -->
+  <g id="top-section">
+    <!-- Section Frame -->
+    <rect x="30" y="16" width="1220" height="152" rx="10" fill="#0f172a" fill-opacity="0.8" stroke="#1e293b" stroke-width="1.5" filter="url(#shadow)"/>
+    
+    <!-- Title & Transport Pills Bar -->
+    <text x="50" y="42" font-size="12" font-weight="700" fill="#94a3b8" letter-spacing="1.2">INGRESS CONNECTORS, PROTOCOLS &amp; SERIALIZATION FORMATS</text>
+    
+    <g transform="translate(430, 26)">
+      <!-- Pill 1: JSON / Ndjson -->
+      <rect x="0" y="0" width="175" height="24" rx="12" fill="#1e293b" stroke="#38bdf8" stroke-width="1"/>
+      <circle cx="12" cy="12" r="4" fill="#38bdf8"/>
+      <text x="24" y="16" font-size="11" font-weight="600" fill="#e2e8f0">JSON / Ndjson (REST &amp; GQL)</text>
+
+      <!-- Pill 2: Parquet -->
+      <rect x="190" y="0" width="195" height="24" rx="12" fill="#1e293b" stroke="#0ea5e9" stroke-width="1"/>
+      <circle cx="202" cy="12" r="4" fill="#0ea5e9"/>
+      <text x="214" y="16" font-size="11" font-weight="600" fill="#e2e8f0">Snappy Parquet (Binary Egress)</text>
+
+      <!-- Pill 3: Arrow -->
+      <rect x="400" y="0" width="195" height="24" rx="12" fill="#1e293b" stroke="#6366f1" stroke-width="1"/>
+      <circle cx="412" cy="12" r="4" fill="#6366f1"/>
+      <text x="424" y="16" font-size="11" font-weight="600" fill="#e2e8f0">Apache Arrow Flight (Zero-Copy)</text>
+
+      <!-- Pill 4: SSE & WS -->
+      <rect x="610" y="0" width="175" height="24" rx="12" fill="#1e293b" stroke="#10b981" stroke-width="1"/>
+      <circle cx="622" cy="12" r="4" fill="#10b981"/>
+      <text x="634" y="16" font-size="11" font-weight="600" fill="#e2e8f0">SSE &amp; WebSockets (Realtime)</text>
+    </g>
+
+    <!-- 5 API Cards -->
+    <!-- Card 1: GraphQL -->
+    <g transform="translate(46, 60)">
+      <rect width="228" height="94" rx="8" fill="url(#cardGradDark)" stroke="#2563eb" stroke-width="1.2"/>
+      <rect x="10" y="10" width="6" height="6" rx="3" fill="#38bdf8"/>
+      <text x="24" y="17" font-size="13" font-weight="700" fill="#ffffff">GraphQL &amp; Subscriptions</text>
+      <text x="12" y="36" font-size="11" fill="#94a3b8">• Hot Chocolate 16 / Banana UI</text>
+      <text x="12" y="52" font-size="11" fill="#94a3b8">• WS/SSE Streaming · @defer / @stream</text>
+      <rect x="10" y="66" width="208" height="20" rx="4" fill="#1e293b" fill-opacity="0.8"/>
+      <text x="16" y="80" font-size="10.5" font-weight="600" fill="#38bdf8">🚀 0% Overfetching &amp; Auto-Batching</text>
+    </g>
+
+    <!-- Card 2: AI Agents (MCP) -->
+    <g transform="translate(288, 60)">
+      <rect width="228" height="94" rx="8" fill="url(#cardGradDark)" stroke="#818cf8" stroke-width="1.2"/>
+      <rect x="10" y="10" width="6" height="6" rx="3" fill="#818cf8"/>
+      <text x="24" y="17" font-size="13" font-weight="700" fill="#ffffff">AI Agents (MCP Gateway)</text>
+      <text x="12" y="36" font-size="11" fill="#94a3b8">• Model Context Protocol (/mcp)</text>
+      <text x="12" y="52" font-size="11" fill="#94a3b8">• Schema Grounding &amp; Golden Queries</text>
+      <rect x="10" y="66" width="208" height="20" rx="4" fill="#1e293b" fill-opacity="0.8"/>
+      <text x="16" y="80" font-size="10.5" font-weight="600" fill="#a5b4fc">🛡️ OWASP LLM01 AI Guardrails</text>
+    </g>
+
+    <!-- Card 3: REST & Procs -->
+    <g transform="translate(530, 60)">
+      <rect width="228" height="94" rx="8" fill="url(#cardGradDark)" stroke="#0284c7" stroke-width="1.2"/>
+      <rect x="10" y="10" width="6" height="6" rx="3" fill="#38bdf8"/>
+      <text x="24" y="17" font-size="13" font-weight="700" fill="#ffffff">REST SQL &amp; Stored Procs</text>
+      <text x="12" y="36" font-size="11" fill="#94a3b8">• Zero-Code SQL Endpoints (/queries)</text>
+      <text x="12" y="52" font-size="11" fill="#94a3b8">• .proc.yaml Contract Governance</text>
+      <rect x="10" y="66" width="208" height="20" rx="4" fill="#1e293b" fill-opacity="0.8"/>
+      <text x="16" y="80" font-size="10.5" font-weight="600" fill="#38bdf8">🚀 Instant OpenAPI 3.0 Specs</text>
+    </g>
+
+    <!-- Card 4: Governed WebSQL -->
+    <g transform="translate(772, 60)">
+      <rect width="228" height="94" rx="8" fill="url(#cardGradDark)" stroke="#0d9488" stroke-width="1.2"/>
+      <rect x="10" y="10" width="6" height="6" rx="3" fill="#2dd4bf"/>
+      <text x="24" y="17" font-size="13" font-weight="700" fill="#ffffff">Governed WebSQL Engine</text>
+      <text x="12" y="36" font-size="11" fill="#94a3b8">• Trino/Presto-like HTTP SQL (/sql)</text>
+      <text x="12" y="52" font-size="11" fill="#94a3b8">• ANTLR4 Read-Only Linter &amp; Rewriter</text>
+      <rect x="10" y="66" width="208" height="20" rx="4" fill="#1e293b" fill-opacity="0.8"/>
+      <text x="16" y="80" font-size="10.5" font-weight="600" fill="#2dd4bf">🛡️ Zero DB Ports (1433/5432)</text>
+    </g>
+
+    <!-- Card 5: OData v4 & BI -->
+    <g transform="translate(1014, 60)">
+      <rect width="220" height="94" rx="8" fill="url(#cardGradDark)" stroke="#0284c7" stroke-width="1.2"/>
+      <rect x="10" y="10" width="6" height="6" rx="3" fill="#38bdf8"/>
+      <text x="24" y="17" font-size="13" font-weight="700" fill="#ffffff">OData v4 &amp; OpenAPI 3.1</text>
+      <text x="12" y="36" font-size="11" fill="#94a3b8">• Native Power BI, Excel &amp; Tableau</text>
+      <text x="12" y="52" font-size="11" fill="#94a3b8">• CSDL $metadata Tooltip Catalog</text>
+      <rect x="10" y="66" width="200" height="20" rx="4" fill="#1e293b" fill-opacity="0.8"/>
+      <text x="16" y="80" font-size="10.5" font-weight="600" fill="#38bdf8">🚀 Direct No-ETL BI Access</text>
+    </g>
+  </g>
+
+  <!-- Flow Arrow: Top to Center Core -->
+  <path d="M 640,168 L 640,198" fill="none" stroke="#38bdf8" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+  <rect x="525" y="174" width="230" height="18" rx="9" fill="#0f172a" stroke="#38bdf8" stroke-width="1"/>
+  <text x="640" y="187" font-size="10.5" font-weight="600" fill="#38bdf8" text-anchor="middle">Incoming Request &amp; Auth Tokens</text>
+
+  <!-- ============================================================== -->
+  <!-- MIDDLE SECTION: THREE-COLUMN WORKFLOW, CORE, INTEGRATIONS      -->
+  <!-- ============================================================== -->
+
+  <!-- LEFT COLUMN: WORKFLOWS & COMPLIANCE (Width: 350) -->
+  <g transform="translate(30, 204)">
+    <rect width="350" height="400" rx="10" fill="#120e06" fill-opacity="0.85" stroke="#78350f" stroke-width="1.5" filter="url(#shadow)"/>
+    
+    <!-- Header Badge -->
+    <rect x="16" y="14" width="318" height="26" rx="6" fill="#451a03" stroke="#f59e0b" stroke-width="1"/>
+    <text x="175" y="31" font-size="12" font-weight="700" fill="#fef3c7" text-anchor="middle" letter-spacing="1">WORKFLOWS &amp; COMPLIANCE PROCESSES</text>
+
+    <!-- Card 1: Identity & AuthN -->
+    <g transform="translate(16, 52)">
+      <rect width="318" height="98" rx="6" fill="#1c1308" stroke="#92400e" stroke-width="1"/>
+      <text x="12" y="20" font-size="12.5" font-weight="700" fill="#fbbf24">Enterprise Identity &amp; AuthN</text>
+      <text x="12" y="38" font-size="11" fill="#d1d5db">• Traefik ForwardAuth (Proxy CIDR, HMAC Secret)</text>
+      <text x="12" y="54" font-size="11" fill="#d1d5db">• Microsoft Entra ID (Azure AD) / AD FS JWT Bearer</text>
+      <text x="12" y="70" font-size="11" fill="#d1d5db">• PBKDF2 Salted Basic Auth &amp; Kerberos SPNEGO</text>
+      <text x="12" y="88" font-size="10.5" font-weight="600" fill="#f59e0b">🚀 Seamless SSO · No Shared DB Credentials</text>
+    </g>
+
+    <!-- Card 2: Dual Authorization & ReBAC -->
+    <g transform="translate(16, 162)">
+      <rect width="318" height="110" rx="6" fill="#1c1308" stroke="#92400e" stroke-width="1"/>
+      <text x="12" y="20" font-size="12.5" font-weight="700" fill="#fbbf24">Dual Authorization &amp; ReBAC</text>
+      <text x="12" y="38" font-size="11" fill="#d1d5db">• Granular Mutations: requestConsent, approveConsent</text>
+      <text x="12" y="54" font-size="11" fill="#d1d5db">• Segregation of Duties (SoD): Requester ≠ Approver</text>
+      <text x="12" y="70" font-size="11" fill="#d1d5db">• Time-Bounded Delegations (Vacation / Absence)</text>
+      <text x="12" y="86" font-size="11" fill="#d1d5db">• OpenFGA / Zanzibar ReBAC Relationship Tuples</text>
+      <text x="12" y="102" font-size="10.5" font-weight="600" fill="#f59e0b">🛡️ Data Owners Directly Govern Approvals</text>
+    </g>
+
+    <!-- Card 3: WORM Audit Logging -->
+    <g transform="translate(16, 284)">
+      <rect width="318" height="102" rx="6" fill="#1c1308" stroke="#92400e" stroke-width="1"/>
+      <text x="12" y="20" font-size="12.5" font-weight="700" fill="#fbbf24">WORM Audit &amp; Compliance</text>
+      <text x="12" y="38" font-size="11" fill="#d1d5db">• Tamper-Evident HMAC-SHA256 Hash Chain</text>
+      <text x="12" y="54" font-size="11" fill="#d1d5db">• Automated Export to AWS S3 WORM Object Lock</text>
+      <text x="12" y="70" font-size="11" fill="#d1d5db">• GDPR Art. 15 Disclosure Reporting (365-Day Log)</text>
+      <text x="12" y="90" font-size="10.5" font-weight="600" fill="#f59e0b">📜 SEC Rule 17a-4 &amp; GDPR Compliant</text>
+    </g>
+  </g>
+
+  <!-- CENTER COLUMN: AUTHERIS CORE (.NET 10 GATEWAY) (Width: 500) -->
+  <g transform="translate(390, 204)" filter="url(#coreGlow)">
+    <rect width="500" height="400" rx="10" fill="url(#coreCardGrad)" stroke="#4f46e5" stroke-width="2"/>
+    
+    <!-- Header Badge -->
+    <rect x="20" y="14" width="460" height="28" rx="6" fill="#312e81" stroke="#818cf8" stroke-width="1.2"/>
+    <text x="250" y="32" font-size="13" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="1.2">AUTHERIS ZERO-TRUST CORE GATEWAY (.NET 10)</text>
+
+    <!-- Step 1: Protocol & SID Resolution -->
+    <g transform="translate(20, 52)">
+      <rect width="460" height="74" rx="6" fill="#181a30" stroke="#3730a3" stroke-width="1"/>
+      <text x="14" y="20" font-size="12" font-weight="700" fill="#c7d2fe">DYNAMIC PROTOCOL &amp; SID RESOLUTION</text>
+      <text x="14" y="38" font-size="11" fill="#e0e7ff">• ClaimsNormalizationMiddleware: Normalizes Tokens to SIDs</text>
+      <text x="14" y="54" font-size="11" fill="#e0e7ff">• Unified RBAC: GatewayRole Hierarchy (Admin, Owner, Consumer)</text>
+      <text x="14" y="68" font-size="10" font-weight="600" fill="#818cf8">⚙️ Canonical Enterprise Identity Across All Channels</text>
+    </g>
+
+    <!-- Step 2: Zero-Trust Consent Engine -->
+    <g transform="translate(20, 134)">
+      <rect width="460" height="74" rx="6" fill="#181a30" stroke="#3730a3" stroke-width="1"/>
+      <text x="14" y="20" font-size="12" font-weight="700" fill="#c7d2fe">ZERO-TRUST CONSENT &amp; POLICY ENGINE</text>
+      <text x="14" y="38" font-size="11" fill="#e0e7ff">• Fail-Closed Default: Denies Any Non-Consented Entity (FORBIDDEN)</text>
+      <text x="14" y="54" font-size="11" fill="#e0e7ff">• Casbin ABAC Engine (sub_rule) + OpenFGA ReBAC Graph Resolution</text>
+      <text x="14" y="68" font-size="10" font-weight="600" fill="#818cf8">🛡️ Ensures Zero Unauthorized Data Ever Leaves Gateway</text>
+    </g>
+
+    <!-- Step 3: Deep AST Security & Dialect Compiler -->
+    <g transform="translate(20, 216)">
+      <rect width="460" height="84" rx="6" fill="#181a30" stroke="#3730a3" stroke-width="1"/>
+      <text x="14" y="20" font-size="12" font-weight="700" fill="#c7d2fe">ANTLR4 AST TARGET DIALECT COMPILER (ADR-017)</text>
+      <text x="14" y="38" font-size="11" fill="#e0e7ff">• AstSecurityVisitor: Injects RLS Filters Directly into SQL WHERE Tree</text>
+      <text x="14" y="54" font-size="11" fill="#e0e7ff">• AstSimplifier: Constant Folding, De Morgan, Tautology Reduction (1=1)</text>
+      <text x="14" y="70" font-size="11" fill="#e0e7ff">• Code Emitters: PostgreSQL ($1), T-SQL ([...]), SQLite, Oracle (:p1)</text>
+      <text x="14" y="82" font-size="10" font-weight="600" fill="#818cf8">⚡ Native DB Pushdown · Total Immunity to SQL Injections</text>
+    </g>
+
+    <!-- Step 4: Execution, Masking & Plan Cache -->
+    <g transform="translate(20, 308)">
+      <rect width="460" height="78" rx="6" fill="#181a30" stroke="#3730a3" stroke-width="1"/>
+      <text x="14" y="20" font-size="12" font-weight="700" fill="#c7d2fe">EXECUTION, MASKING &amp; PLAN CACHING</text>
+      <text x="14" y="38" font-size="11" fill="#e0e7ff">• Compiled SQL Query Plan Cache: Sub-Millisecond Repeat Executions</text>
+      <text x="14" y="54" font-size="11" fill="#e0e7ff">• Format-Preserving Masking: Clear, Mask (Span&lt;char&gt;), Redact, HMAC</text>
+      <text x="14" y="70" font-size="10" font-weight="600" fill="#818cf8">⚡ Sub-Millisecond Latency (&lt;1ms) · Dynamic PII Protection</text>
+    </g>
+  </g>
+
+  <!-- RIGHT COLUMN: ENTERPRISE INTEGRATIONS (Width: 350) -->
+  <g transform="translate(900, 204)">
+    <rect width="350" height="400" rx="10" fill="#041a12" fill-opacity="0.85" stroke="#065f46" stroke-width="1.5" filter="url(#shadow)"/>
+    
+    <!-- Header Badge -->
+    <rect x="16" y="14" width="318" height="26" rx="6" fill="#064e3b" stroke="#10b981" stroke-width="1"/>
+    <text x="175" y="31" font-size="12" font-weight="700" fill="#d1fae5" text-anchor="middle" letter-spacing="1">ENTERPRISE INTEGRATIONS &amp; CLUSTER STATE</text>
+
+    <!-- Card 1: dbt Data Mesh -->
+    <g transform="translate(16, 52)">
+      <rect width="318" height="80" rx="6" fill="#09271d" stroke="#047857" stroke-width="1"/>
+      <text x="12" y="18" font-size="12" font-weight="700" fill="#34d399">dbt Data Mesh Governance</text>
+      <text x="12" y="34" font-size="11" fill="#d1d5db">• Streaming Manifest &amp; Run-Results Ingestion</text>
+      <text x="12" y="50" font-size="11" fill="#d1d5db">• Data Health Circuit Breaker: Quarantines Dirty Data</text>
+      <text x="12" y="70" font-size="10.5" font-weight="600" fill="#10b981">🛡️ Halts Bad Data Before Reaching End Users</text>
+    </g>
+
+    <!-- Card 2: Enterprise Catalogs -->
+    <g transform="translate(16, 138)">
+      <rect width="318" height="80" rx="6" fill="#09271d" stroke="#047857" stroke-width="1"/>
+      <text x="12" y="18" font-size="12" font-weight="700" fill="#34d399">Enterprise Data Catalogs</text>
+      <text x="12" y="34" font-size="11" fill="#d1d5db">• Purview, Collibra, Alation &amp; OpenMetadata Sync</text>
+      <text x="12" y="50" font-size="11" fill="#d1d5db">• Auto GDPR Art. 9 Tagging &amp; PII Masking Maps</text>
+      <text x="12" y="70" font-size="10.5" font-weight="600" fill="#10b981">🚀 Dynamic PII Masking Inherited from Catalogs</text>
+    </g>
+
+    <!-- Card 3: Multi-Node State -->
+    <g transform="translate(16, 224)">
+      <rect width="318" height="80" rx="6" fill="#09271d" stroke="#047857" stroke-width="1"/>
+      <text x="12" y="18" font-size="12" font-weight="700" fill="#34d399">Multi-Node Cluster State (Redis)</text>
+      <text x="12" y="34" font-size="11" fill="#d1d5db">• Redis Pub/Sub: Monotonic Cache Epoch Invalidation</text>
+      <text x="12" y="50" font-size="11" fill="#d1d5db">• Resilient Token-Bucket Limiting &amp; Idempotency</text>
+      <text x="12" y="70" font-size="10.5" font-weight="600" fill="#10b981">⚡ High-Availability Scaling in Kubernetes</text>
+    </g>
+
+    <!-- Card 4: ITSM & AI Triage -->
+    <g transform="translate(16, 310)">
+      <rect width="318" height="76" rx="6" fill="#09271d" stroke="#047857" stroke-width="1"/>
+      <text x="12" y="18" font-size="12" font-weight="700" fill="#34d399">ITSM &amp; Backstage Export</text>
+      <text x="12" y="34" font-size="11" fill="#d1d5db">• ServiceNow &amp; Jira Bi-Directional Webhooks</text>
+      <text x="12" y="50" font-size="11" fill="#d1d5db">• OpenJEV AI Justification Triage &amp; Backstage Catalog</text>
+      <text x="12" y="68" font-size="10.5" font-weight="600" fill="#10b981">🚀 Seamless ITIL Governance Workflow Integration</text>
+    </g>
+  </g>
+
+  <!-- Horizontal Coupling Arrows -->
+  <path d="M 380,310 L 390,310" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrowIndigo)"/>
+  <path d="M 390,470 L 380,470" stroke="#f59e0b" stroke-width="2"/>
+  
+  <path d="M 890,310 L 900,310" stroke="#10b981" stroke-width="2"/>
+  <path d="M 900,470 L 890,470" stroke="#10b981" stroke-width="2" marker-end="url(#arrowIndigo)"/>
+
+  <!-- Flow Arrow: Center Core to Bottom Backends -->
+  <path d="M 640,604 L 640,634" fill="none" stroke="#6366f1" stroke-width="2.5" marker-end="url(#arrowIndigo)"/>
+  <rect x="475" y="608" width="330" height="18" rx="9" fill="#0f172a" stroke="#6366f1" stroke-width="1"/>
+  <text x="640" y="621" font-size="10.5" font-weight="600" fill="#a5b4fc" text-anchor="middle">Parameterized Pushdown Query with Injected RLS</text>
+
+  <!-- ============================================================== -->
+  <!-- BOTTOM SECTION: BACKENDS & DATA SOURCES                        -->
+  <!-- ============================================================== -->
+  <g id="bottom-section" transform="translate(30, 642)">
+    <rect width="1220" height="156" rx="10" fill="#0b1120" fill-opacity="0.9" stroke="#1e293b" stroke-width="1.5" filter="url(#shadow)"/>
+    
+    <text x="24" y="26" font-size="12" font-weight="700" fill="#94a3b8" letter-spacing="1.2">HETEROGENEOUS DATA SOURCES, LAKEHOUSES &amp; BACKENDS</text>
+    
+    <!-- 5 Backend Cards -->
+    <!-- Card 1: Enterprise RDBMS -->
+    <g transform="translate(16, 40)">
+      <rect width="228" height="102" rx="6" fill="#131c31" stroke="#334155" stroke-width="1"/>
+      <text x="12" y="20" font-size="12" font-weight="700" fill="#f8fafc">Enterprise Relational DBs</text>
+      <text x="12" y="38" font-size="11" fill="#94a3b8">• MSSQL (SQL Server) / T-SQL</text>
+      <text x="12" y="54" font-size="11" fill="#94a3b8">• PostgreSQL · SQLite · Oracle</text>
+      <text x="12" y="70" font-size="11" fill="#94a3b8">• Databricks / Spark SQL</text>
+      <text x="12" y="90" font-size="10.5" font-weight="600" fill="#38bdf8">⚡ Native RLS Pushdown</text>
+    </g>
+
+    <!-- Card 2: Modern Lakehouse v2 -->
+    <g transform="translate(258, 40)">
+      <rect width="228" height="102" rx="6" fill="#131c31" stroke="#334155" stroke-width="1"/>
+      <text x="12" y="20" font-size="12" font-weight="700" fill="#f8fafc">Modern Lakehouse v2</text>
+      <text x="12" y="38" font-size="11" fill="#94a3b8">• Apache Iceberg v2 Tables</text>
+      <text x="12" y="54" font-size="11" fill="#94a3b8">• Amazon S3 (SigV4) &amp; Azure Blob</text>
+      <text x="12" y="70" font-size="11" fill="#94a3b8">• Vectorized Partition Pruning</text>
+      <text x="12" y="90" font-size="10.5" font-weight="600" fill="#38bdf8">🚀 Zero Full-Table Scans</text>
+    </g>
+
+    <!-- Card 3: Embedded DuckDB OLAP -->
+    <g transform="translate(500, 40)">
+      <rect width="228" height="102" rx="6" fill="#131c31" stroke="#334155" stroke-width="1"/>
+      <text x="12" y="20" font-size="12" font-weight="700" fill="#f8fafc">Embedded In-Memory OLAP</text>
+      <text x="12" y="38" font-size="11" fill="#94a3b8">• DuckDB.NET High-Speed Engine</text>
+      <text x="12" y="54" font-size="11" fill="#94a3b8">• Ad-Hoc Analytics over Parquet</text>
+      <text x="12" y="70" font-size="11" fill="#94a3b8">• In-Memory Aggregations</text>
+      <text x="12" y="90" font-size="10.5" font-weight="600" fill="#38bdf8">⚡ Analytics without Dedicated DWH</text>
+    </g>
+
+    <!-- Card 4: REST & Subgraphs -->
+    <g transform="translate(742, 40)">
+      <rect width="228" height="102" rx="6" fill="#131c31" stroke="#334155" stroke-width="1"/>
+      <text x="12" y="20" font-size="12" font-weight="700" fill="#f8fafc">REST APIs &amp; Subgraphs</text>
+      <text x="12" y="38" font-size="11" fill="#94a3b8">• Declarative REST Engine</text>
+      <text x="12" y="54" font-size="11" fill="#94a3b8">• Hot Chocolate Fusion Router</text>
+      <text x="12" y="70" font-size="11" fill="#94a3b8">• Isolated C# Plugin Containers</text>
+      <text x="12" y="90" font-size="10.5" font-weight="600" fill="#38bdf8">🛡️ Hardened SSRF Egress Defense</text>
+    </g>
+
+    <!-- Card 5: Realtime Streams & CDC -->
+    <g transform="translate(984, 40)">
+      <rect width="220" height="102" rx="6" fill="#131c31" stroke="#334155" stroke-width="1"/>
+      <text x="12" y="20" font-size="12" font-weight="700" fill="#f8fafc">Realtime Streams &amp; CDC</text>
+      <text x="12" y="38" font-size="11" fill="#94a3b8">• MSSQL Change Tracking</text>
+      <text x="12" y="54" font-size="11" fill="#94a3b8">• PostgreSQL Logical Streaming</text>
+      <text x="12" y="70" font-size="11" fill="#94a3b8">• Debezium / Apache Kafka</text>
+      <text x="12" y="90" font-size="10.5" font-weight="600" fill="#38bdf8">⚡ Zero-Kafka CDC with Stream RLS</text>
+    </g>
+  </g>
+</svg>
