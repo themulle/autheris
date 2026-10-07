@@ -142,4 +142,173 @@ public class CasbinHotReloadTests : IDisposable
         var decisionAfter = await _service.EvaluatePolicyAsync(context);
         decisionAfter.IsAllowed.ShouldBeTrue();
     }
+
+    [Fact]
+    public async Task LoadPolicyFromText_GlobalReload_EmptyOrCommentOnly_RejectsAndPreservesPolicies_FailsClosed()
+    {
+        // Arrange
+        var tenant = new TenantId("tenant-c1");
+        var userSid = new Sid("S-1-5-21-user-c1");
+        var targetTable = new TableIdentifier("sales", "dbo", "orders");
+
+        var initialCsv = $"""
+            p, {userSid.Value}, {tenant.Value}, {targetTable}, read, true, allow
+            """;
+        _service.LoadPolicyFromText(initialCsv);
+
+        _service.HasPolicies(tenant).ShouldBeTrue();
+
+        var context = new SecurityEvaluationContext(
+            userSid,
+            [],
+            tenant,
+            targetTable,
+            [],
+            IPAddress.Loopback,
+            DateTimeOffset.UtcNow,
+            "TEST");
+
+        var decisionBefore = await _service.EvaluatePolicyAsync(context);
+        decisionBefore.IsAllowed.ShouldBeTrue();
+
+        // Act & Assert: Loading empty or comment-only policy text must be rejected fail-closed
+        var ex = Should.Throw<InvalidOperationException>(() =>
+        {
+            _service.LoadPolicyFromText("# only comments\n# no rules");
+        });
+        ex.Message.ShouldContain("empty");
+
+        // Last-known-good policies must remain active
+        _service.HasPolicies(tenant).ShouldBeTrue();
+        var decisionAfter = await _service.EvaluatePolicyAsync(context);
+        decisionAfter.IsAllowed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task EvaluatePolicyAsync_DenyRule_WithMixedCaseTenant_IsEnforced()
+    {
+        // Arrange (C-3): Deny rule configured with uppercase tenant, evaluation request with lowercase
+        var userSid = new Sid("S-1-5-21-user-c3");
+        var targetTable = new TableIdentifier("sales", "dbo", "confidential");
+
+        var csv = $"""
+            p, {userSid.Value}, *, {targetTable}, read, true, allow
+            p, {userSid.Value}, TENANT-C3, {targetTable}, read, true, deny
+            """;
+        _service.LoadPolicyFromText(csv);
+
+        var context = new SecurityEvaluationContext(
+            userSid,
+            [],
+            new TenantId("tenant-c3"),
+            targetTable,
+            [],
+            IPAddress.Loopback,
+            DateTimeOffset.UtcNow,
+            "TEST");
+
+        // Act
+        var decision = await _service.EvaluatePolicyAsync(context);
+
+        // Assert: Deny must match regardless of casing
+        decision.IsAllowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task EvaluatePolicyAsync_UnknownTenant_DoesNotMutateInternalEnforcers()
+    {
+        // Arrange (C-5): Service has no policies for unknown tenant
+        var unknownTenant = new TenantId("unknown-tenant-x");
+        var context = new SecurityEvaluationContext(
+            new Sid("S-1-5-21-nobody"),
+            [],
+            unknownTenant,
+            new TableIdentifier("sales", "dbo", "orders"),
+            [],
+            IPAddress.Loopback,
+            DateTimeOffset.UtcNow,
+            "TEST");
+
+        _service.HasPolicies(unknownTenant).ShouldBeFalse();
+
+        // Act
+        var decision = await _service.EvaluatePolicyAsync(context);
+        decision.IsAllowed.ShouldBeFalse();
+
+        // Assert: Querying unknown tenant should not register policies or enforcer
+        _service.HasPolicies(unknownTenant).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ConcurrentEvaluations_DuringReload_NeverObserveEmptyOrPartialState()
+    {
+        // Arrange (C-4): Multiple reader threads evaluate policy while writer threads continuously reload policies
+        var tenant = new TenantId("tenant-concurrent");
+        var userSid = new Sid("S-1-5-21-concurrent-user");
+        var targetTable = new TableIdentifier("sales", "dbo", "orders");
+
+        var policy1 = $"""
+            p, {userSid.Value}, {tenant.Value}, {targetTable}, read, true, allow
+            """;
+        var policy2 = $"""
+            p, {userSid.Value}, {tenant.Value}, {targetTable}, read, true, allow
+            p, {userSid.Value}, *, {targetTable}, read, true, allow
+            """;
+
+        _service.LoadPolicyFromText(policy1);
+
+        var context = new SecurityEvaluationContext(
+            userSid,
+            [],
+            tenant,
+            targetTable,
+            [],
+            IPAddress.Loopback,
+            DateTimeOffset.UtcNow,
+            "TEST");
+
+        using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(3));
+        var exceptions = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+
+        // Act: 10 parallel reader tasks
+        var readers = Task.Run(() =>
+        {
+            return Parallel.ForAsync(0, 1000, new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = cts.Token }, async (i, token) =>
+            {
+                try
+                {
+                    var decision = await _service.EvaluatePolicyAsync(context, token);
+                    if (!decision.IsAllowed)
+                    {
+                        exceptions.Add(new InvalidOperationException($"Decision was unexpectedly denied at iteration {i}"));
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    exceptions.Add(ex);
+                }
+            });
+        });
+
+        // Concurrently reload policies in writer loop
+        var writer = Task.Run(async () =>
+        {
+            int counter = 0;
+            while (!cts.IsCancellationRequested && counter < 50)
+            {
+                var text = counter % 2 == 0 ? policy2 : policy1;
+                _service.LoadPolicyFromText(text);
+                counter++;
+                await Task.Delay(10);
+            }
+        });
+
+        await Task.WhenAll(readers, writer);
+
+        // Assert: No reader ever observed a denied decision or intermediate corrupted state
+        exceptions.ShouldBeEmpty();
+    }
 }
+
+
