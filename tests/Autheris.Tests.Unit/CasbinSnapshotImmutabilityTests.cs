@@ -12,6 +12,7 @@ using Autheris.Application.Governance;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Casbin;
 using Shouldly;
 using Xunit;
 
@@ -66,9 +67,11 @@ public sealed class CasbinSnapshotImmutabilityTests
         var charlieEval = await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "charlie", HrTable));
         charlieEval.IsAllowed.ShouldBeTrue();
 
-        // Bob MUST NOT have access anymore
+        // Bob MUST NOT have access anymore - verified both through Gateway evaluation and direct Casbin Enforcer
         var bobEval2 = await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "bob", HrTable));
         bobEval2.IsAllowed.ShouldBeFalse();
+        casbin.GetEnforcer(TenantA).Enforce("bob", "tenant-a", "hr.dbo.employees", "read", CreateContext(TenantA, "bob", HrTable)).ShouldBeFalse();
+        casbin.GetEnforcer(TenantA).Enforce("charlie", "tenant-a", "hr.dbo.employees", "read", CreateContext(TenantA, "charlie", HrTable)).ShouldBeTrue();
     }
 
     [Fact]
@@ -138,6 +141,14 @@ public sealed class CasbinSnapshotImmutabilityTests
         // Alice accessing hr.employees for tenant-a should be allowed through global role 'auditor'
         var decision = await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "alice", HrTable));
         decision.IsAllowed.ShouldBeTrue();
+
+        // Counter-test: Reload global file WITHOUT the grouping rule
+        casbin.LoadPolicyFromText("p, dummy, *, dummy.table, read, true, allow\n");
+
+        // Alice is no longer an auditor and must be denied
+        var decisionRevoked = await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "alice", HrTable));
+        decisionRevoked.IsAllowed.ShouldBeFalse();
+        casbin.GetEnforcer(TenantA).Enforce("alice", "tenant-a", "hr.dbo.employees", "read", CreateContext(TenantA, "alice", HrTable)).ShouldBeFalse();
     }
 
     [Fact]
@@ -192,8 +203,12 @@ public sealed class CasbinSnapshotImmutabilityTests
             {
                 try
                 {
+                    long lastEpoch = 0;
                     for (int j = 0; j < 1000; j++)
                     {
+                        var epoch = casbin.CurrentEpoch;
+                        epoch.ShouldBeGreaterThanOrEqualTo(lastEpoch);
+                        lastEpoch = epoch;
                         var dec = await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "alice", HrTable));
                         // Alice should always be allowed
                         dec.IsAllowed.ShouldBeTrue();
@@ -233,9 +248,14 @@ public sealed class CasbinSnapshotImmutabilityTests
     }
 
     [Fact]
-    public void Test07_TenantFileWithForeignTenantOrWildcard_ThrowsFormatException()
+    public async Task Test07_TenantFileWithForeignTenantOrWildcard_ThrowsFormatException_AndPreservesPriorPolicies()
     {
         using var casbin = new CasbinEnforcementService();
+
+        // Valid initial policy
+        casbin.LoadPolicyFromText(TenantA, "p, alice, tenant-a, hr.dbo.employees, read, true, allow\n");
+        var initialEpoch = casbin.CurrentEpoch;
+        (await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "alice", HrTable))).IsAllowed.ShouldBeTrue();
 
         // Tenant file for tenant-a trying to define a rule for tenant-b
         Should.Throw<FormatException>(() =>
@@ -244,6 +264,10 @@ public sealed class CasbinSnapshotImmutabilityTests
         // Tenant file for tenant-a trying to define a wildcard tenant rule
         Should.Throw<FormatException>(() =>
             casbin.LoadPolicyFromText(TenantA, "p, alice, *, hr.dbo.employees, read, true, allow\n"));
+
+        // Existing policy must remain active and epoch must not change
+        casbin.CurrentEpoch.ShouldBe(initialEpoch);
+        (await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "alice", HrTable))).IsAllowed.ShouldBeTrue();
     }
 
     [Fact]

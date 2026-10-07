@@ -29,7 +29,6 @@ public sealed class DemoDataSwitch(bool enabled) : IDemoDataSwitch
             return options.GovernanceDb.SeedDemoData.Value;
         }
 
-        return string.IsNullOrEmpty(environmentName) ||
-               string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase);
+        return string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase);
     }
 }
