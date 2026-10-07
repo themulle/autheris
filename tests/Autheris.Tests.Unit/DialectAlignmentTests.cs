@@ -3,6 +3,7 @@ using Autheris.Api.Extensions;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Configuration;

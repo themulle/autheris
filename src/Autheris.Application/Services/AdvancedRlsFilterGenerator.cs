@@ -169,10 +169,13 @@ public static partial class AdvancedRlsFilterGenerator
                 {
                     foreach (var elem in doc.RootElement.EnumerateArray())
                     {
-                        values.Add(FormatLiteralValue(elem, dialect));
+                        if (elem.ValueKind != JsonValueKind.Null)
+                        {
+                            values.Add(FormatLiteralValue(elem, dialect));
+                        }
                     }
                 }
-                else
+                else if (doc.RootElement.ValueKind != JsonValueKind.Null)
                 {
                     values.Add(FormatLiteralValue(doc.RootElement, dialect));
                 }

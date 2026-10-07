@@ -319,8 +319,8 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         {
             // The configured connection provider decides, with the same rule as SqlConnectionFactory (no provider
             // opens SQLite). The catalog dialect may differ (it defaults to PostgreSQL); set_config exists on PostgreSQL only.
-            var provider = connOptions.Provider?.Trim().ToLowerInvariant() ?? "sqlite";
-            if (provider is "postgres" or "postgresql" or "npgsql")
+            var connProvider = connOptions.Provider?.Trim().ToLowerInvariant() ?? "sqlite";
+            if (connProvider is "postgres" or "postgresql" or "npgsql")
             {
                 tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
                 command.Transaction = tx;
@@ -493,19 +493,8 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
     /// SEC H-13: Derives a tenant-scoped HMAC key id so pseudonyms cannot be correlated across tenants.
     /// The actual key derivation (HMAC over the master secret) happens inside <see cref="IColumnMaskingProvider"/>.
     /// </summary>
-    private static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId)
-    {
-        var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
-        return new MaskingRule
-        {
-            Id = rule.Id,
-            TableColumnId = rule.TableColumnId,
-            RuleType = "HMAC_SHA256",
-            PatternOrFormat = rule.PatternOrFormat,
-            Replacement = rule.Replacement,
-            HmacKeyId = $"{baseKeyId}|tenant:{tenant}"
-        };
-    }
+    private static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId) =>
+        MaskingRule.CreateTenantScopedHmacRule(rule, tenant, defaultKeyId);
 
     public static string BuildColumnProjection(string columnName, string? dataType, DatabaseDialect dialect)
     {

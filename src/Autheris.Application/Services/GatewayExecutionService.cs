@@ -1083,22 +1083,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     internal static MaskingRule ScopeRuleForTenant(MaskingRule rule, string? tenant, string? defaultKeyId) =>
         !string.IsNullOrWhiteSpace(tenant) && IsHmacRule(rule) ? CreateTenantScopedHmacRule(rule, tenant, defaultKeyId) : rule;
 
-    internal static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId)
-    {
-        if (rule.HmacKeyId != null && rule.HmacKeyId.Contains("|tenant:", StringComparison.Ordinal))
-        {
-            return rule;
-        }
-
-        var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
-        return new MaskingRule
-        {
-            Id = rule.Id,
-            TableColumnId = rule.TableColumnId,
-            RuleType = "HMAC_SHA256",
-            PatternOrFormat = rule.PatternOrFormat,
-            Replacement = rule.Replacement,
-            HmacKeyId = $"{baseKeyId}|tenant:{tenant}"
-        };
-    }
+    internal static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId) =>
+        MaskingRule.CreateTenantScopedHmacRule(rule, tenant, defaultKeyId);
 }

@@ -11,6 +11,7 @@ using Autheris.Application.OpenMetadata.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
+using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Kernel;
 using Autheris.Domain.Options;
@@ -446,6 +447,8 @@ public static class GatewayServiceCollectionExtensions
             sp.GetService<Autheris.Application.Connectors.IAutherisConnectorRegistry>(),
             sp.GetService<ITableReadConcurrencyGate>()));
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
+        services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());
+        services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();
         services.AddSingleton<IExecutionGuardrailService, ExecutionGuardrailService>();
         services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
         services.AddSingleton<ISemanticQueryCache, SemanticQueryCacheService>();

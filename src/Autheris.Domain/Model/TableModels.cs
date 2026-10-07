@@ -70,6 +70,30 @@ public sealed class MaskingRule
     public string? PatternOrFormat { get; init; }
     public string? Replacement { get; init; }
     public string? HmacKeyId { get; init; }
+
+    /// <summary>
+    /// SEC H-13 / SEC D-3: Creates a tenant-scoped copy of an HMAC masking rule, keyed as {baseKeyId}|tenant:{tenant}.
+    /// Idempotent: a rule that is already tenant-scoped is never scoped twice.
+    /// </summary>
+    public static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId = null)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        if (rule.HmacKeyId != null && rule.HmacKeyId.Contains("|tenant:", StringComparison.Ordinal))
+        {
+            return rule;
+        }
+
+        var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
+        return new MaskingRule
+        {
+            Id = rule.Id,
+            TableColumnId = rule.TableColumnId,
+            RuleType = "HMAC_SHA256",
+            PatternOrFormat = rule.PatternOrFormat,
+            Replacement = rule.Replacement,
+            HmacKeyId = $"{baseKeyId}|tenant:{tenant}"
+        };
+    }
 }
 
 public sealed class TableMetadata
