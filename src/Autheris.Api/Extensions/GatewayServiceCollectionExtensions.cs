@@ -933,6 +933,7 @@ public static class GatewayServiceCollectionExtensions
             .UseRequest<Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.CdnCacheTagMiddleware>()
             .UseRequest<Autheris.GraphQL.Federation.SubgraphResultMaskingMiddleware>()
+            .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
             .UseOperationCache()
             .UseOperationResolver()
             .UseOperationVariableCoercion()

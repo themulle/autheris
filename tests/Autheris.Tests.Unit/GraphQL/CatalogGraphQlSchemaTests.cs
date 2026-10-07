@@ -104,6 +104,8 @@ public sealed class CatalogGraphQlSchemaTests
         return await services
             .AddGraphQLServer()
             .AddQueryType<Query>()
+            .UseRequest<CatalogOperationCleanupMiddleware>()
+            .UseDefaultPipeline()
             .AddTypeModule(sp => new CatalogGraphQlTypeModule(
                 sp.GetRequiredService<ITableMetadataRepository>(),
                 sp.GetRequiredService<ITableRelationRepository>()))
@@ -138,7 +140,7 @@ public sealed class CatalogGraphQlSchemaTests
                 Arg.Any<ClaimsPrincipal>(),
                 Arg.Do<TreeQueryNode>(node => capturedNode = node),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-                Arg.Any<string?>(),
+                Arg.Any<string>(),
                 Arg.Any<CancellationToken>())
             .Returns(callInfo =>
             {
@@ -236,7 +238,7 @@ public sealed class CatalogGraphQlSchemaTests
                 Arg.Any<ClaimsPrincipal>(),
                 Arg.Any<TreeQueryNode>(),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-                Arg.Any<string?>(),
+                Arg.Any<string>(),
                 Arg.Any<CancellationToken>())
             .Returns<Task<JsonDocument>>(_ => Task.FromException<JsonDocument>(ex));
 
@@ -264,7 +266,7 @@ public sealed class CatalogGraphQlSchemaTests
                     Arg.Any<ClaimsPrincipal>(),
                     Arg.Do<TreeQueryNode>(node => capturedNode = node),
                     Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-                    Arg.Any<string?>(),
+                    Arg.Any<string>(),
                     Arg.Any<CancellationToken>())
                 .Returns(JsonDocument.Parse("[]"));
 
@@ -347,7 +349,7 @@ public sealed class CatalogGraphQlSchemaTests
                 Arg.Any<ClaimsPrincipal>(),
                 Arg.Any<TreeQueryNode>(),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-                Arg.Any<string?>(),
+                Arg.Any<string>(),
                 Arg.Any<CancellationToken>())
             .Returns(JsonDocument.Parse("[]"));
 
@@ -393,7 +395,7 @@ public sealed class CatalogGraphQlSchemaTests
                 Arg.Any<ClaimsPrincipal>(),
                 Arg.Any<TreeQueryNode>(),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-                Arg.Any<string?>(),
+                Arg.Any<string>(),
                 Arg.Any<CancellationToken>())
             .Returns(JsonDocument.Parse("""
                 [
@@ -451,7 +453,7 @@ public sealed class CatalogGraphQlSchemaTests
                 Arg.Any<ClaimsPrincipal>(),
                 Arg.Any<TreeQueryNode>(),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-                Arg.Any<string?>(),
+                Arg.Any<string>(),
                 Arg.Any<CancellationToken>())
             .Returns(JsonDocument.Parse("""
                 [
@@ -509,7 +511,7 @@ public sealed class CatalogGraphQlSchemaTests
                 Arg.Any<ClaimsPrincipal>(),
                 Arg.Any<TreeQueryNode>(),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-                Arg.Any<string?>(),
+                Arg.Any<string>(),
                 Arg.Any<CancellationToken>())
             .Returns(JsonDocument.Parse("""
                 [
@@ -526,5 +528,48 @@ public sealed class CatalogGraphQlSchemaTests
         var user = doc.RootElement.GetProperty("data").GetProperty("crm_dbo_users")[0];
         Assert.Equal("HMAC-HEX-987654", user.GetProperty("account_no").GetString());
     }
-}
 
+    [Fact]
+    public async Task ExecuteQuery_WithMultipleRootFields_SharesSingleOperationId_AndClearsOperationOnCleanup()
+    {
+        var custTable = new TableMetadata
+        {
+            Identifier = _custTableId,
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
+            PrimaryKeyColumns = ["id"]
+        };
+        var orderTable = new TableMetadata
+        {
+            Identifier = _orderTableId,
+            Table = new Table { IsActive = true, SourceType = "PostgreSql", DataSourceType = DataSourceType.Sql },
+            Columns = [new TableColumn { ColumnName = "order_id", DataType = "int" }],
+            PrimaryKeyColumns = ["order_id"]
+        };
+
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([custTable, orderTable]);
+        _relationRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var capturedOpIds = new List<string>();
+        _treeService.ExecuteAsync(
+                Arg.Any<ClaimsPrincipal>(),
+                Arg.Any<TreeQueryNode>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Do<string>(opId => capturedOpIds.Add(opId)),
+                Arg.Any<CancellationToken>())
+            .Returns(_ => JsonDocument.Parse("[]"));
+
+        var executor = await CreateExecutorAsync();
+
+        var query = "query { sales_dbo_customers { id } sales_dbo_orders { order_id } }";
+        var result = await executor.ExecuteAsync(query);
+
+        Assert.DoesNotContain("errors", result.ToJson());
+        Assert.Equal(2, capturedOpIds.Count);
+        Assert.Equal(capturedOpIds[0], capturedOpIds[1]); // Both root fields share single operation ID
+
+        _treeService.Received(1).ClearOperation(capturedOpIds[0]); // Operation was cleared when resolvers completed
+    }
+}

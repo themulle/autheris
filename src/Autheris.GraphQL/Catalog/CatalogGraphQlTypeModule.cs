@@ -421,10 +421,18 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule
             // Fallback to default
         }
 
-        if (!ctx.ContextData.TryGetValue("AutherisOperationId", out var opIdObj) || opIdObj is not string opId)
+        string opId;
+        lock (ctx.ContextData)
         {
-            opId = Guid.NewGuid().ToString("N");
-            ctx.ContextData["AutherisOperationId"] = opId;
+            if (!ctx.ContextData.TryGetValue("AutherisOperationId", out var opIdObj) || opIdObj is not string existingOpId)
+            {
+                opId = Guid.NewGuid().ToString("N");
+                ctx.ContextData["AutherisOperationId"] = opId;
+            }
+            else
+            {
+                opId = existingOpId;
+            }
         }
 
         try

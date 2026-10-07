@@ -195,11 +195,11 @@ Unauffällig in `d58449c`:
 |---|---|---|---|
 | G-1 | ⛔ | `val.ToString()` kulturabhängig: Unter de-DE wird `1.5` für eine Decimal-Spalte zu 15 (`GraphQlTreeBuilder.cs`, `ResolveValue`/`CoerceValue`). | `CultureInfo.InvariantCulture`; Test unter de-DE. |
 | G-2 ✔ | ✅ | Kollisionsauflösung deterministisch mit `StringComparer.Ordinal`; kollidierende Tabellen werden geloggt und ausgelassen, kanonische Tabellen behalten ihren stabilen Namen (`CatalogSchemaModel.cs`). | `StringComparer.Ordinal`; stabile Namenszuordnung; Kollisionen loggen. |
-| G-3 | ⛔ | Memo und Audit-Set wachsen pro Operation über die Lebensdauer des Scopes (`GovernedTreeQueryService.cs:63-64`). | Memo pro Operation in `ContextData` oder nach der Operation entfernen. |
-| G-4 | ⛔ | opId per Check-then-set aus parallelen Root-Resolvern (`CatalogGraphQlTypeModule.cs:392-396`). | opId im Request-Interceptor setzen oder `GetOrAdd`. |
+| G-3 | ✅ | Memo und Audit-Set pro Operation bereinigt (`GovernedTreeQueryService.cs`, `CatalogOperationCleanupMiddleware.cs`). | Memo pro Operation mit `ClearOperation` nach Request-Ende. |
+| G-4 | ✅ | opId threadsicher unter Lock in `CatalogGraphQlTypeModule.cs` gesetzt. | Atomic Check-and-Set mit Request-Lock. |
 | G-5 | ⛔ | Variable in `orderBy` wird nicht aufgelöst. | `ResolveVariableLiteral`. |
 | G-6 | ⛔ | `IsStringType` dupliziert `MapDataType`. | Gemeinsamer Typklassifizierer. |
-| G-7 | 🟡 | Zwei `ExecuteAsync`-Überladungen; ohne opId jetzt Default pro Scope (D-7). | Eine Methode mit Pflicht-`operationId`. |
+| G-7 | ✅ | Pflicht-`operationId` in `ExecuteAsync`; Default pro Scope und parameterlose Überladung entfernt (D-7). | Eine Methode mit Pflicht-`operationId`. |
 | G-8 ✔ | ✅ | HMAC auf Nicht-String-Spalten wird im Schema als String typisiert; `NumberStyles.Any` durch strikte Formate ersetzt; Bool unterstützt Zahlenwerte wie `1.0`; Maskierte Werte auf Nicht-String-Spalten melden Fehlercode `MASKED` und `null`. | `CatalogSchemaModel.cs`, `CatalogGraphQlTypeModule.cs` |
 | G-9 | ⛔ | `isNull: null` wird `IS NOT NULL`; `not: {}` filtert nichts. | Ablehnen bzw. als false. |
 
@@ -300,7 +300,7 @@ Legende: ✅ behoben · 🟡 teilweise · ⛔ offen · 🔻 verschlechtert · �
 | R-API-2 FinOps-Fallback | ✅ | |
 | R-GQL-1 maskierte Typen | ✅ | G-8; HMAC-Spalten im Schema als String typisiert; maskierte Nicht-String-Felder liefern null mit Fehlercode MASKED. |
 | R-GQL-2 Kollisionen | ✅ | G-2; Kollidierende Tabellen ausgelassen, kanonische Tabellen bleiben stabil, Fehler wird geloggt. |
-| R-GQL-3 Memo pro Verbindung | ✅ weitgehend | G-3, G-4, D-7. |
+| R-GQL-3 Memo pro Verbindung | ✅ | G-3, G-4, G-7, D-7; `ClearOperation` im Request-Middleware nach Request-Ende, FIFO-Eviction als Fallback. |
 | R-GQL-4 Budget/Offset | ✅ | D-8; Zeilenbudget und MaxOffset in Optionen und Dienst durchgesetzt. |
 | R-GQL-5 verschachteltes offset | ✅ | |
 | R-GQL-6 Katalog aufzählbar | ⛔ | |
@@ -386,7 +386,7 @@ Den irreführenden Test `DbSessionContextInitializer_RollsBackTransaction_OnErro
 1. **G-2 (R-GQL-2) ✔:** ✅ Stabile Namensvergabe; Fehler pro Tabelle loggen und die Tabelle auslassen; Executor-Test, dass das Schema mit Kollisionen startet.
 2. **D-8 (SQL2-7) ✔:** ✅ Zeilenbudget und `MaxOffset` konfigurierbar und im Dienst prüfen.
 3. **G-8 (R-GQL-1) ✔:** ✅ HMAC-Spalten als String oder Code `MASKED`; Executor-Tests mit maskierter Int- und Bool-Spalte (SQLite).
-4. **G-3, G-4, G-7, D-7:** Memo pro Operation in `ContextData`, opId im Request-Interceptor, eine `ExecuteAsync` mit Pflicht-`operationId`.
+4. **G-3, G-4, G-7, D-7 ✔:** ✅ Memo pro Operation bereinigt, opId thread-safe im Resolver/Interceptor, eine `ExecuteAsync` mit Pflicht-`operationId` und `CatalogOperationCleanupMiddleware`.
 5. **R-GQL-6, R-ERR-1:** Unbekannte und gesperrte Felder einheitlich melden; `EnableSchemaRequests = false`; generischer Text für `INVALID_QUERY`.
 6. **R-GQL-9:** `SecurityPrincipalContext.TenantId` als Quelle in den Mutationen; Admin-Ausnahme einheitlich.
 7. **R-GQL-10, G-9, G-5:** SQLite-Datumsformat, Null-Semantik, Variablen in `orderBy`.
