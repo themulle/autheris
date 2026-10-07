@@ -66,6 +66,20 @@ public static class RebacEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
+            // POL-7: Reject empty tuple fields (User, Relation, Object, TenantId, Namespace)
+            foreach (var t in tuples)
+            {
+                if (t == null ||
+                    string.IsNullOrWhiteSpace(t.User) ||
+                    string.IsNullOrWhiteSpace(t.Relation) ||
+                    string.IsNullOrWhiteSpace(t.Object) ||
+                    string.IsNullOrWhiteSpace(t.TenantId) ||
+                    (t.Object.Contains(':') && (string.IsNullOrWhiteSpace(t.Object.Split(':')[0]) || string.IsNullOrWhiteSpace(t.Object.Split(':')[1]))))
+                {
+                    return Results.BadRequest(new { error = "ReBAC-Tupelfelder (User, Relation, Object, TenantId) dürfen nicht leer sein." });
+                }
+            }
+
             if (!secContext.IsClusterAdmin)
             {
                 if (secContext.TenantId == TenantId.LegacySingleTenant || string.IsNullOrWhiteSpace(secContext.TenantId.Value))
@@ -104,6 +118,17 @@ public static class RebacEndpoints
             if (!secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            // POL-7: Reject empty tuple fields (User, Relation, Object, TenantId, Namespace)
+            if (tuple == null ||
+                string.IsNullOrWhiteSpace(tuple.User) ||
+                string.IsNullOrWhiteSpace(tuple.Relation) ||
+                string.IsNullOrWhiteSpace(tuple.Object) ||
+                string.IsNullOrWhiteSpace(tuple.TenantId) ||
+                (tuple.Object.Contains(':') && (string.IsNullOrWhiteSpace(tuple.Object.Split(':')[0]) || string.IsNullOrWhiteSpace(tuple.Object.Split(':')[1]))))
+            {
+                return Results.BadRequest(new { error = "ReBAC-Tupelfelder (User, Relation, Object, TenantId) dürfen nicht leer sein." });
             }
 
             if (!secContext.IsClusterAdmin)
@@ -169,6 +194,16 @@ public static class RebacEndpoints
             HttpRequest request,
             IRebacEvaluator evaluator) =>
         {
+            // POL-7: Reject empty check fields
+            if (check == null ||
+                string.IsNullOrWhiteSpace(check.User) ||
+                string.IsNullOrWhiteSpace(check.Relation) ||
+                string.IsNullOrWhiteSpace(check.Object) ||
+                string.IsNullOrWhiteSpace(check.TenantId))
+            {
+                return Results.BadRequest(new { error = "ReBAC check fields (User, Relation, Object, TenantId) dürfen nicht leer sein." });
+            }
+
             var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);
 
             if (!secContext.IsClusterAdmin)
@@ -202,6 +237,17 @@ public static class RebacEndpoints
             if (batchCheck.Checks == null || batchCheck.Checks.Count > 100)
             {
                 return Results.BadRequest(new { error = "Batch check count cannot exceed 100 items." });
+            }
+
+            // POL-7: Reject empty fields in batch check
+            if (string.IsNullOrWhiteSpace(batchCheck.TenantId) ||
+                batchCheck.Checks.Any(c => c == null ||
+                    string.IsNullOrWhiteSpace(c.User) ||
+                    string.IsNullOrWhiteSpace(c.Relation) ||
+                    string.IsNullOrWhiteSpace(c.Object) ||
+                    string.IsNullOrWhiteSpace(c.TenantId)))
+            {
+                return Results.BadRequest(new { error = "ReBAC batch check items must not contain empty fields." });
             }
 
             var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);

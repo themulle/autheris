@@ -11,9 +11,11 @@ using Autheris.Application.OpenMetadata.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
+using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Kernel;
 using Autheris.Domain.Options;
+using Autheris.GraphQL.Catalog;
 using Autheris.GraphQL.Filtering;
 using Autheris.GraphQL.Federation;
 using Autheris.GraphQL.Types;
@@ -90,6 +92,9 @@ public static class GatewayServiceCollectionExtensions
         services.AddOptions<GatewayOptions>()
             .Bind(configuration.GetSection(GatewayOptions.SectionName))
             .ValidateDataAnnotations()
+            .Validate(opts =>
+                Enum.IsDefined(opts.RowFilters.SubqueryStrategy),
+                "Gateway:RowFilters:SubqueryStrategy muss Exists, InCorrelated oder In sein.")
             .Validate(opts =>
                 opts.HighAvailability.ShutdownTimeoutSeconds >= opts.HighAvailability.QueryTimeoutSeconds + 10,
                 "NF-HA-01 Verletzung: ShutdownTimeoutSeconds muss mindestens 10s größer als QueryTimeoutSeconds sein.")
@@ -293,7 +298,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
         services.AddSingleton<IDbtHealthCircuitBreaker, DbtHealthCircuitBreaker>();
         services.AddSingleton<IOpenApiCacheManager, OpenApiCacheManager>();
-        services.AddSingleton(new Autheris.Domain.Model.OpenApiDocumentOptions { IncludeStoredProcedureSpec = gatewayOptions.SqlEndpoints.Procedures.Enabled });
+        services.AddSingleton(new Autheris.Domain.Model.OpenApiDocumentOptions { IncludeStoredProcedureSpec = gatewayOptions.SqlEndpoints.Procedures.Enabled, IncludeWebSqlSpec = gatewayOptions.WebSql.Enabled });
         services.AddSingleton<IDynamicOpenApiGenerator, DynamicOpenApiGenerator>();
         services.AddSingleton<IRlsFilterGenerator, RlsFilterGenerator>();
         services.AddSingleton<IRowFilterSqlBuilder, RowFilterSqlBuilder>();
@@ -366,7 +371,18 @@ public static class GatewayServiceCollectionExtensions
         }
 
         // Casbin ABAC Engine
-        services.AddSingleton<IPolicyEnforcementService, CasbinEnforcementService>();
+        services.AddSingleton<IPolicyEnforcementService>(sp =>
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
+            var rlsGen = sp.GetService<Autheris.Application.Interfaces.IRlsFilterGenerator>();
+            var logger = sp.GetService<Microsoft.Extensions.Logging.ILogger<CasbinEnforcementService>>();
+            var service = new CasbinEnforcementService(options.Casbin.ModelPath, rlsGen, logger);
+            if (options.Casbin.Enabled && !string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
+            {
+                service.LoadPolicyFromFile(options.Casbin.PolicyPath, options.Casbin.WatchPolicyFile);
+            }
+            return service;
+        });
 
         // Strategic Enterprise Moats (P10, P11, P12)
         services.AddSingleton<IPolicySimulationService, PolicySimulationService>();
@@ -425,6 +441,10 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.Application.Connectors.Streaming.IStreamingResultPipeline, Autheris.Application.Connectors.Streaming.StreamingResultPipeline>();
 
         services.AddScoped<IClientIpResolver, Autheris.Api.Security.HttpContextClientIpResolver>();
+        // O10: process-wide counter of running table reads per tenant, user and table
+        services.AddSingleton<ITableReadConcurrencyGate, TableReadConcurrencyGate>();
+        // M-1: database session context initializer for PostgreSQL GUCs and SQL Server SESSION_CONTEXT
+        services.AddSingleton<IDbSessionContextInitializer, DbSessionContextInitializer>();
         services.AddScoped<GatewayExecutionService>(sp => new GatewayExecutionService(
             sp.GetRequiredService<ITableMetadataRepository>(),
             sp.GetRequiredService<IConsentRepository>(),
@@ -438,8 +458,11 @@ public static class GatewayServiceCollectionExtensions
             sp.GetServices<IDataSourceExecutor>(),
             sp.GetService<IPolicyEnforcementService>(),
             sp.GetService<IClientIpResolver>(),
-            sp.GetService<Autheris.Application.Connectors.IAutherisConnectorRegistry>()));
+            sp.GetService<Autheris.Application.Connectors.IAutherisConnectorRegistry>(),
+            sp.GetService<ITableReadConcurrencyGate>()));
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
+        services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());
+        services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();
         services.AddSingleton<IExecutionGuardrailService, ExecutionGuardrailService>();
         services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
         services.AddSingleton<ISemanticQueryCache, SemanticQueryCacheService>();
@@ -471,8 +494,7 @@ public static class GatewayServiceCollectionExtensions
         // Canonical System Metadata & Monitoring (F-API-07)
         services.AddSingleton<IGatewaySystemMetricsService, GatewaySystemMetricsService>();
 
-        // Single-Query AST Compiler & Plan Cache (F-PERF-09 / graphql-bench)
-        services.AddSingleton<ISingleQueryAstCompiler, SingleQueryAstCompiler>();
+        // Plan Cache (F-PERF-09 / graphql-bench)
         services.AddSingleton<ICompiledSqlQueryPlanCache, CompiledSqlQueryPlanCache>();
 
         // Human-in-the-Loop Step-Up Approval (F-AI-05)
@@ -839,6 +861,9 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, DevAuthorizationResultHandler>();
             services.AddProblemDetails();
         }
+        // O9: every unhandled exception becomes application/problem+json without details (all environments)
+        services.AddProblemDetails();
+        services.AddExceptionHandler<Autheris.Api.Middleware.GatewayExceptionHandler>();
         services.AddSingleton<Autheris.Application.Interfaces.IGatewayRoleEvaluator, Autheris.Application.Security.GatewayRoleEvaluator>();
         services.AddHttpContextAccessor();
 
@@ -911,6 +936,11 @@ public static class GatewayServiceCollectionExtensions
             .AddApplicationService<IHostEnvironment>()
             .AddApplicationService<ErrorSanitizingFilter>()
             .AddApplicationService<WebSocketAuthInterceptor>()
+            .AddApplicationService<ITableMetadataRepository>()
+            .AddApplicationService<ITableRelationRepository>()
+            .AddTypeModule(sp => new CatalogGraphQlTypeModule(
+                sp.GetRequiredService<ITableMetadataRepository>(),
+                sp.GetRequiredService<ITableRelationRepository>()))
             .AddErrorFilter(sp => sp.GetRequiredService<ErrorSanitizingFilter>())
             .AddQueryType<Query>()
             .AddMutationType<Mutation>()
@@ -961,6 +991,45 @@ public static class GatewayServiceCollectionExtensions
             throw new ValidationException(
                 "Konfigurationsfehler Egress-Allowlist (Gateway:Egress): IPv4-Netze mindestens /8, IPv6 mindestens /32, keine Überlappung mit " +
                 "Loopback/Link-Local/Metadaten/CGNAT/Multicast/IPv4-mapped-Bereichen:\n  - " + string.Join("\n  - ", egressErrors));
+        }
+
+        // POL-1: If Casbin is enabled, ModelPath and PolicyPath must be configured, exist, and not be empty (fail-closed).
+        if (options.Casbin.Enabled)
+        {
+            if (string.IsNullOrWhiteSpace(options.Casbin.ModelPath))
+            {
+                throw new ValidationException("Casbin ist aktiviert (Gateway:Casbin:Enabled = true), aber Casbin:ModelPath ist nicht konfiguriert.");
+            }
+            if (!File.Exists(options.Casbin.ModelPath))
+            {
+                throw new ValidationException($"Casbin ist aktiviert, aber Model-Datei '{options.Casbin.ModelPath}' wurde nicht gefunden.");
+            }
+            if (new FileInfo(options.Casbin.ModelPath).Length == 0)
+            {
+                throw new ValidationException($"Casbin ist aktiviert, aber Model-Datei '{options.Casbin.ModelPath}' ist leer.");
+            }
+
+            try
+            {
+                CasbinModelContract.Verify(File.ReadAllText(options.Casbin.ModelPath));
+            }
+            catch (CasbinModelValidationException ex)
+            {
+                throw new ValidationException($"Casbin-Modell '{options.Casbin.ModelPath}' erfüllt den Gateway-Vertrag nicht: {string.Join("; ", ex.Violations)}", ex);
+            }
+
+            if (string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
+            {
+                throw new ValidationException("Casbin ist aktiviert (Gateway:Casbin:Enabled = true), aber Casbin:PolicyPath ist nicht konfiguriert.");
+            }
+            if (!File.Exists(options.Casbin.PolicyPath))
+            {
+                throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' wurde nicht gefunden.");
+            }
+            if (new FileInfo(options.Casbin.PolicyPath).Length == 0)
+            {
+                throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' ist leer.");
+            }
         }
 
         // RR-L1-01: Validate ReverseProxy.KnownNetworks and KnownProxies against invalid formats and wildcard spoofing
@@ -1101,6 +1170,12 @@ public static class GatewayServiceCollectionExtensions
             if (!hasSecret)
             {
                 throw new ValidationException("Sicherheitsverletzung: Außerhalb von Development erfordert ForwardAuth zwingend ein konfiguriertes SharedSecret oder SharedSecretKeyVaultRef.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(options.Authentication.ForwardAuth.SharedSecret) &&
+                System.Text.Encoding.UTF8.GetByteCount(options.Authentication.ForwardAuth.SharedSecret) < 32)
+            {
+                throw new ValidationException("Sicherheitsverletzung: ForwardAuth.SharedSecret muss außerhalb der Entwicklungsumgebung mindestens 32 Bytes lang sein.");
             }
 
             if (!options.Authentication.ForwardAuth.RequireTrustedProxy)

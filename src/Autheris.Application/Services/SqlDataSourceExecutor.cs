@@ -5,6 +5,7 @@ using System.Security;
 using System.Text;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
     private readonly ILogger<SqlDataSourceExecutor>? _logger;
     private readonly Microsoft.Extensions.Hosting.IHostEnvironment? _environment;
     private readonly IColumnMaskingProvider? _maskingProvider;
+    private readonly IDbSessionContextInitializer _sessionInitializer;
 
     public DataSourceType SupportedType => DataSourceType.Sql;
     public const int MaxAllowedBinaryBytes = 16 * 1024 * 1024; // 16 MB limit per binary column value (SEC-SPEC-05)
@@ -28,13 +30,15 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         IOptions<GatewayOptions>? options = null,
         ILogger<SqlDataSourceExecutor>? logger = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
-        IColumnMaskingProvider? maskingProvider = null)
+        IColumnMaskingProvider? maskingProvider = null,
+        IDbSessionContextInitializer? sessionInitializer = null)
     {
         _connectionFactory = connectionFactory;
         _options = options;
         _logger = logger;
         _environment = environment;
         _maskingProvider = maskingProvider;
+        _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
     }
 
     public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(
@@ -94,12 +98,13 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString) || _connectionFactory == null)
         {
             bool isDevOrTest = _environment == null ||
-                               string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
+                               string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(_environment.EnvironmentName, "Test", StringComparison.OrdinalIgnoreCase);
             bool isExplicitlyAllowed = _options?.Value?.AreExternalSystemsMockedIfUnreachable == true;
 
             if (!isDevOrTest && !isExplicitlyAllowed)
             {
-                throw new InvalidOperationException($"Die SQL-Datenquelle '{context.SourceName}' besitzt keine gültige Datenbankverbindung. Synthetischer Daten-Fallback ist in Produktivumgebungen deaktiviert.");
+                throw new NotSupportedException($"Die SQL-Datenquelle '{context.SourceName}' besitzt keine gültige Datenbankverbindung. Synthetischer Daten-Fallback ist in Produktivumgebungen deaktiviert.");
             }
 
             return GenerateSyntheticRows(context);
@@ -115,6 +120,15 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
     {
         var metadata = context.Metadata;
         var dialect = metadata.Dialect;
+
+        // D-1: Fail-closed dialect alignment between catalog and connection provider. An empty provider is compared as
+        // "sqlite", because that is what SqlConnectionFactory opens for it.
+        var provider = string.IsNullOrWhiteSpace(connOptions.Provider) ? "sqlite" : connOptions.Provider.Trim();
+        if (!DatabaseDialectExtensions.TryParseDialect(provider, out var providerDialect) || dialect != providerDialect)
+        {
+            throw new InvalidOperationException($"Catalog dialect '{dialect}' does not match the provider '{provider}' of data source '{context.SourceName}' for table '{metadata.Identifier.ToQualifiedName()}'.");
+        }
+
         context.Items["RlsPushdownExecuted"] = true;
 
         ArgumentNullException.ThrowIfNull(_connectionFactory);
@@ -277,8 +291,10 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         {
             case DatabaseDialect.SqlServer:
                 // SQL Server requires an ORDER BY clause for OFFSET-FETCH.
-                var orderCol = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "id", StringComparison.OrdinalIgnoreCase))?.ColumnName
-                               ?? (metadata.Columns.Count > 0 ? metadata.Columns[0].ColumnName : null);
+                // If a primary key or 'id' column exists, prefer it to leverage clustered index order.
+                // Otherwise fall back to (SELECT 1) to avoid an expensive full-table sort on an arbitrary first column.
+                var pkCol = metadata.PrimaryKeyColumns.FirstOrDefault(pk => metadata.HasColumn(pk));
+                var orderCol = pkCol ?? metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "id", StringComparison.OrdinalIgnoreCase))?.ColumnName;
                 var orderClause = orderCol != null ? dialect.QuoteIdentifier(orderCol) : "(SELECT 1)";
                 sqlBuilder.Append($" ORDER BY {orderClause} OFFSET @gql_offset ROWS FETCH NEXT @gql_limit ROWS ONLY");
                 break;
@@ -296,56 +312,42 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         }
 
         command.CommandText = sqlBuilder.ToString();
+        if (_options?.Value?.Logging?.LogGeneratedSql == true)
+        {
+            _logger?.LogDebug("SqlDataSourceExecutor: Generated SQL: {Sql}", command.CommandText);
+        }
         _logger?.LogDebug("Executing SQL Backend query for table '{Table}' with {ParamCount} parameters", context.Metadata.Identifier.ToQualifiedName(), command.Parameters.Count);
 
-        // Stufe 2: Native PostgreSQL Transaktions-Scoped Session RLS (SET LOCAL app.tenant_id = @p)
+        // Stufe 2: Native Session Context & Transaction RLS
         DbTransaction? tx = null;
         try
         {
-            // The configured connection provider decides, with the same rule as SqlConnectionFactory (no provider
-            // opens SQLite). The catalog dialect may differ (it defaults to PostgreSQL); set_config exists on PostgreSQL only.
-            var provider = connOptions.Provider?.Trim().ToLowerInvariant() ?? "sqlite";
-            if (provider is "postgres" or "postgresql" or "npgsql")
-            {
-                tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-                command.Transaction = tx;
+            var userSid = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.PrimarySid)?.Value
+                          ?? context.Principal?.FindFirst("sub")?.Value;
 
-                await using var setCmd = connection.CreateCommand();
-                setCmd.Transaction = tx;
-                setCmd.CommandText = "SELECT set_config('app.tenant_id', @p_tenant, true), set_config('TimeZone', 'UTC', true);";
-                var pTenant = setCmd.CreateParameter();
-                pTenant.ParameterName = "@p_tenant";
-                pTenant.Value = tenantVal;
-                setCmd.Parameters.Add(pTenant);
-                await setCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            if (!TenantId.TryParse(tenantVal, out var validatedTenantId))
+            {
+                throw new GatewayForbiddenException($"Invalid tenant identity '{tenantVal}'.");
             }
 
-            var results = new List<IReadOnlyDictionary<string, object?>>(Math.Min(Math.Max(context.Limit, 16), 1024));
+            tx = await _sessionInitializer.InitializeSessionAsync(
+                connection,
+                connOptions.Provider,
+                validatedTenantId,
+                userSid: userSid,
+                purpose: null,
+                requireTransaction: true,
+                ct: ct).ConfigureAwait(false);
 
+            if (tx != null)
+            {
+                command.Transaction = tx;
+            }
+
+            IReadOnlyList<IReadOnlyDictionary<string, object?>> results;
             await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess | CommandBehavior.SingleResult, ct).ConfigureAwait(false))
             {
-                int fieldCount = reader.FieldCount;
-                var columnNames = new string[fieldCount];
-                for (int i = 0; i < fieldCount; i++)
-                {
-                    columnNames[i] = reader.GetName(i);
-                }
-
-                while (await reader.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    var row = new Dictionary<string, object?>(fieldCount, StringComparer.OrdinalIgnoreCase);
-                    for (int i = 0; i < fieldCount; i++)
-                    {
-                        var rawVal = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                        var normalized = NormalizeReadValue(rawVal, columnNames[i]);
-                        if (_maskingProvider != null && gatewayHmacColumns.TryGetValue(columnNames[i], out var hmacRule))
-                        {
-                            normalized = _maskingProvider.MaskValue(columnNames[i], normalized, hmacRule);
-                        }
-                        row[columnNames[i]] = normalized;
-                    }
-                    results.Add(row);
-                }
+                results = await ReadRowsAsync(reader, gatewayHmacColumns, context.Limit, ct).ConfigureAwait(false);
             }
 
             if (tx != null)
@@ -355,11 +357,18 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
             return results;
         }
-        catch
+        catch (Exception)
         {
             if (tx != null)
             {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception rbEx)
+                {
+                    _logger?.LogWarning(rbEx, "Failed to rollback transaction after error in SqlDataSourceExecutor");
+                }
             }
             throw;
         }
@@ -371,6 +380,90 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             }
         }
     }
+
+    /// <summary>
+    /// Reads all rows of <paramref name="reader"/>, applying gateway-side HMAC pseudonymization.
+    /// O11: stops as soon as the estimated response exceeds <c>GraphQL.MaxResponseBytes</c> (same limit and error code
+    /// as the final check in GatewayExecutionService, but before the whole result sits in memory).
+    /// O12: a value the driver cannot materialize ends in <see cref="GatewayUnsupportedColumnTypeException"/>.
+    /// </summary>
+    public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadRowsAsync(
+        DbDataReader reader,
+        IReadOnlyDictionary<string, MaskingRule> gatewayHmacColumns,
+        int expectedRows,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(gatewayHmacColumns);
+
+        var maxBytes = _options?.Value?.GraphQL?.MaxResponseBytes > 0 ? _options.Value.GraphQL.MaxResponseBytes : 10 * 1024 * 1024;
+        var results = new List<IReadOnlyDictionary<string, object?>>(Math.Min(Math.Max(expectedRows, 16), 1024));
+
+        int fieldCount = reader.FieldCount;
+        var columnNames = new string[fieldCount];
+        for (int i = 0; i < fieldCount; i++)
+        {
+            columnNames[i] = reader.GetName(i);
+        }
+
+        long estimatedBytes = 0;
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var row = new Dictionary<string, object?>(fieldCount, StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < fieldCount; i++)
+            {
+                var rawVal = ReadValue(reader, i, columnNames[i]);
+                var normalized = NormalizeReadValue(rawVal, columnNames[i]);
+                if (_maskingProvider != null && gatewayHmacColumns.TryGetValue(columnNames[i], out var hmacRule))
+                {
+                    normalized = _maskingProvider.MaskValue(columnNames[i], normalized, hmacRule);
+                }
+                row[columnNames[i]] = normalized;
+                estimatedBytes += EstimateSerializedBytes(columnNames[i], normalized);
+            }
+
+            if (estimatedBytes > maxBytes)
+            {
+                throw new Autheris.Domain.Exceptions.GatewaySecurityException(
+                    $"Antwortgröße überschreitet das konfigurierte Limit von {maxBytes} Bytes.", "RESPONSE_TOO_LARGE");
+            }
+            results.Add(row);
+        }
+
+        return results;
+    }
+
+    private static object? ReadValue(DbDataReader reader, int ordinal, string columnName)
+    {
+        try
+        {
+            return reader.IsDBNull(ordinal) ? null : reader.GetValue(ordinal);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or FileLoadException or TypeLoadException or InvalidCastException or NotSupportedException)
+        {
+            // SqlClient throws these for UDT columns (geography, geometry, hierarchyid) when Microsoft.SqlServer.Types is missing.
+            string typeName;
+            try
+            {
+                typeName = reader.GetDataTypeName(ordinal);
+            }
+            catch (Exception)
+            {
+                typeName = "unknown";
+            }
+            throw new Autheris.Domain.Exceptions.GatewayUnsupportedColumnTypeException(columnName, typeName, ex);
+        }
+    }
+
+    /// <summary>Same estimate as the final size check in GatewayExecutionService (UTF-16 lengths, 16 bytes per scalar).</summary>
+    private static long EstimateSerializedBytes(string columnName, object? value) =>
+        columnName.Length * 2L + value switch
+        {
+            null => 0,
+            string s => s.Length * 2L,
+            byte[] b => b.Length,
+            _ => 16
+        };
 
     public static string BuildMaskedColumnProjection(string columnName, string? dataType, DatabaseDialect dialect, TableMetadata tableMeta)
     {
@@ -416,19 +509,8 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
     /// SEC H-13: Derives a tenant-scoped HMAC key id so pseudonyms cannot be correlated across tenants.
     /// The actual key derivation (HMAC over the master secret) happens inside <see cref="IColumnMaskingProvider"/>.
     /// </summary>
-    private static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId)
-    {
-        var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
-        return new MaskingRule
-        {
-            Id = rule.Id,
-            TableColumnId = rule.TableColumnId,
-            RuleType = "HMAC_SHA256",
-            PatternOrFormat = rule.PatternOrFormat,
-            Replacement = rule.Replacement,
-            HmacKeyId = $"{baseKeyId}|tenant:{tenant}"
-        };
-    }
+    private static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId) =>
+        MaskingRule.CreateTenantScopedHmacRule(rule, tenant, defaultKeyId);
 
     public static string BuildColumnProjection(string columnName, string? dataType, DatabaseDialect dialect)
     {

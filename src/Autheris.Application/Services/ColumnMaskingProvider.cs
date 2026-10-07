@@ -43,6 +43,13 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
         {
             throw new InvalidOperationException("HMAC key cannot be empty.");
         }
+
+        // DEP-6 / POL-14: Enforce minimum key length of 32 bytes outside Development
+        if (environment != null && !environment.IsDevelopment() && _hmacKey.Length < 32)
+        {
+            throw new InvalidOperationException(
+                $"Sicherheitsfehler: Der HMAC-Schlüssel muss außerhalb der Entwicklungsumgebung mindestens 32 Bytes lang sein (aktuelle Länge: {_hmacKey.Length}).");
+        }
     }
 
     public object? MaskValue(string columnName, object? rawValue, MaskingRule rule)

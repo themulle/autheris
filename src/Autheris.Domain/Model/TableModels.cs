@@ -34,10 +34,30 @@ public sealed class Table
     public HttpEndpointDescriptor? HttpEndpoint { get; init; }
     public string? PluginName { get; init; }
 
-    public bool IsHighlySensitive =>
-        string.Equals(Sensitivity, "HIGH", StringComparison.OrdinalIgnoreCase) || RequiresFourEyes;
+    public static bool IsSensitivityHigh(string? sensitivity)
+    {
+        if (string.IsNullOrWhiteSpace(sensitivity)) return false;
+        var s = sensitivity.Trim();
+        if (string.Equals(s, "PUBLIC", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(s, "INTERNAL", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(s, "NORMAL", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(s, "LOW", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        return true;
+    }
 
-    public DatabaseDialect Dialect => DatabaseDialectExtensions.ParseDialect(SourceType);
+    public bool IsHighlySensitive =>
+        RequiresFourEyes || IsSensitivityHigh(Sensitivity);
+
+    /// <summary>
+    /// D-1: SQL tables fail closed on an unknown source type. Other sources (HTTP, plugins, lakehouse) never send SQL to a
+    /// database; their dialect only shapes the in-memory row filter, so they keep the neutral PostgreSQL default.
+    /// </summary>
+    public DatabaseDialect Dialect => DataSourceType == DataSourceType.Sql
+        ? DatabaseDialectExtensions.ParseDialect(SourceType)
+        : DatabaseDialectExtensions.TryParseDialect(SourceType, out var dialect) ? dialect : DatabaseDialect.PostgreSql;
 
     public TableIdentifier ToIdentifier(string domain) =>
         new(domain, SchemaName, TableName);
@@ -64,9 +84,46 @@ public sealed class MaskingRule
     public string? PatternOrFormat { get; init; }
     public string? Replacement { get; init; }
     public string? HmacKeyId { get; init; }
+
+    /// <summary>
+    /// SEC H-13 / SEC D-3: Creates a tenant-scoped copy of an HMAC masking rule, keyed as {baseKeyId}|tenant:{tenant}.
+    /// Idempotent: a rule that is already scoped to the requested tenant is returned unchanged.
+    /// Rejects rules that are already scoped to a DIFFERENT tenant (prevents cross-tenant correlation).
+    /// </summary>
+    public static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId = null)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenant);
+
+        var expectedSuffix = $"|tenant:{tenant}";
+        if (rule.HmacKeyId != null)
+        {
+            if (rule.HmacKeyId.EndsWith(expectedSuffix, StringComparison.Ordinal))
+            {
+                return rule;
+            }
+
+            if (rule.HmacKeyId.Contains("|tenant:", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Die Maskierungsregel ist bereits an einen anderen Mandanten gebunden ('{rule.HmacKeyId}'). Mandantenübergreifende Verwendung für Mandant '{tenant}' ist unzulässig.");
+            }
+        }
+
+        var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
+        return new MaskingRule
+        {
+            Id = rule.Id,
+            TableColumnId = rule.TableColumnId,
+            RuleType = "HMAC_SHA256",
+            PatternOrFormat = rule.PatternOrFormat,
+            Replacement = rule.Replacement,
+            HmacKeyId = $"{baseKeyId}{expectedSuffix}"
+        };
+    }
 }
 
-public sealed class TableMetadata
+public sealed record TableMetadata
 {
     public Table Table { get; init; } = new();
     public TableIdentifier Identifier { get; init; }

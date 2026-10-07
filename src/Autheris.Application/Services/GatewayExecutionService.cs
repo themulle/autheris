@@ -12,7 +12,7 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.Application.Services;
 
-public sealed partial class GatewayExecutionService : IGatewayExecutionService
+public sealed partial class GatewayExecutionService : IGatewayExecutionService, ITableAccessResolver
 {
     [GeneratedRegex(@"(?:\[[a-zA-Z0-9_]+\]|[a-zA-Z_][a-zA-Z0-9_]*)\.(\[?[a-zA-Z_][a-zA-Z0-9_]*\]?)", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 1000)]
     private static partial Regex TablePrefixRegex();
@@ -36,7 +36,14 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
     private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly Autheris.Application.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
+    private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly IDataSourceExecutor _defaultSqlExecutor = new SqlDataSourceExecutor();
+
+    /// <summary>O10: Retry-After for a throttled read; the typical duration of a slow read is the query timeout.</summary>
+    private const int ThrottledRetryAfterSeconds = 2;
+
+    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
+    private static partial Regex EchoableColumnNameRegex();
 
     public int LastDispatchedChildQueryCount { get; private set; }
 
@@ -54,7 +61,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
         IEnumerable<IDataSourceExecutor>? dataSourceExecutors = null,
         IPolicyEnforcementService? policyEnforcementService = null,
         IClientIpResolver? clientIpResolver = null,
-        Autheris.Application.Connectors.IAutherisConnectorRegistry? connectorRegistry = null)
+        Autheris.Application.Connectors.IAutherisConnectorRegistry? connectorRegistry = null,
+        ITableReadConcurrencyGate? concurrencyGate = null)
     {
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
@@ -69,6 +77,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
         _policyEnforcementService = policyEnforcementService;
         _clientIpResolver = clientIpResolver;
         _connectorRegistry = connectorRegistry;
+        _concurrencyGate = concurrencyGate;
     }
 
     public GatewayExecutionService(
@@ -114,136 +123,12 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
         CancellationToken ct = default)
     {
         using var _ = _drainController?.TrackQuery();
-        if (principal == null || principal.Identity?.IsAuthenticated != true)
-        {
-            if (_options?.IsAnonymousAccessAllowed == true)
-            {
-                var anonSid = new Sid("S-1-5-21-DEV-ANONYMOUS");
-                principal = new ClaimsPrincipal(new ClaimsIdentity(
-                [
-                    new Claim(ClaimTypes.PrimarySid, anonSid.Value),
-                    new Claim(ClaimTypes.Name, "DEV_ANONYMOUS"),
-                    new Claim(ClaimTypes.Role, "AnonymousUser")
-                ], "InsecureAnonymousAuth"));
-            }
-            else
-            {
-                throw new GatewayUnauthorizedException("Authentication is required to query tables.");
-            }
-        }
-
-        var userSidNullable = principal.GetUserSid();
-        if (userSidNullable == null)
-        {
-            throw new GatewayUnauthorizedException("Keine gültige Benutzer-SID im Authentifizierungstoken vorhanden.");
-        }
-        var userSid = userSidNullable.Value;
-
-        var groupSids = principal.GetGroupSids();
-        var roles = principal.GetUserRoles();
-
-        // Resolve TenantId upfront for cache and consent isolation
-        // RR-L4-02: identical semantics to SecurityContextFactory (single source of truth for HTTP ingress):
-        // a tenant header may only select a tenant for canonical cluster admins whose identity was not asserted
-        // via ForwardAuth headers, or for the development-only anonymous principal (danger_allow_anonymous_access).
-        var tenantId = principal.GetTenantId();
-        if (requestHeaders != null &&
-            (requestHeaders.TryGetValue("X-Tenant-ID", out var tHeaders) || requestHeaders.TryGetValue("X-Tenant-Id", out tHeaders)) &&
-            tHeaders.Length > 0 && TenantId.TryParse(tHeaders[0], out var parsedFromHeader) &&
-            !string.Equals(parsedFromHeader.Value, tenantId.Value, StringComparison.OrdinalIgnoreCase))
-        {
-            var isAnonymousDev = principal.Identity?.IsAuthenticated != true;
-            if (isAnonymousDev || Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
-            {
-                tenantId = parsedFromHeader;
-            }
-            // Non-admins keep the tenant from their token (header ignored, fail-safe). HTTP ingress already rejects
-            // such mismatches with 403 in SecurityContextResolutionMiddleware.
-        }
-
-        // Verify table existence in metadata catalog
-        var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct);
-        if (metadata == null)
-        {
-            throw new TableNotFoundException(table);
-        }
-
-        TableAccessDecision decision;
-        if (_options?.IsConsentBypassed == true)
-        {
-            decision = TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
-        }
-        else
-        {
-            // Check Consent Cache (L1/L2 with Epoch Validation & Group/Role Context Hash, strictly tenant-isolated)
-            var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles);
-            var cached = await _cacheService.GetCachedDecisionAsync(tenantId, userSid, table, contextHash, ct);
-            if (cached == null)
-            {
-                // Cache Miss -> Load from Governance DB
-                var allSubjects = groupSids.Append(userSid).ToList();
-                // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
-                var epochAtLoad = await _cacheService.GetEpochSnapshotAsync(table, ct);
-                var activeConsents = await _consentRepository.GetActiveConsentsForSubjectsAsync(allSubjects, table, DateTimeOffset.UtcNow, tenantId, ct);
-
-                // Multi-Tenancy Isolation: Filter active consents strictly for current tenant
-                activeConsents = activeConsents
-                    .Where(c => c.TenantId == tenantId)
-                    .ToList();
-
-                decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, activeConsents, metadata.Dialect);
-
-                // Cache decision (SEC: TTL bounded by the earliest consent ValidTo, as in CheckTableAccessAsync)
-                var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(metadata.Table.IsHighlySensitive, activeConsents, DateTimeOffset.UtcNow);
-                await _cacheService.SetCachedDecisionAsync(tenantId, userSid, table, decision, ttl, contextHash, epochAtLoad, ct);
-            }
-            else
-            {
-                decision = cached;
-            }
-        }
-
-        // Casbin ABAC & Row-Level Security (RLS) Pushdown Evaluation
-        if (_policyEnforcementService != null && _policyEnforcementService.HasPolicies(tenantId) && _options?.IsConsentBypassed != true)
-        {
-            var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var claim in principal.Claims)
-            {
-                attributes[claim.Type] = claim.Value;
-            }
-
-            // SEC H-4: Fail closed to IPAddress.None; never trust 'ip' claims from tokens or loopback fallback
-            var clientIp = _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
-
-            var purpose = principal.FindFirst("purpose")?.Value ?? principal.FindFirst("purpose_id")?.Value;
-
-            var secContext = new SecurityEvaluationContext(
-                UserSid: userSid,
-                GroupSids: groupSids,
-                Tenant: tenantId,
-                TargetTable: table,
-                RequestedColumns: requestedFields ?? metadata.Columns.Select(c => c.ColumnName).ToList(),
-                ClientIp: clientIp,
-                Timestamp: DateTimeOffset.UtcNow,
-                PurposeId: purpose,
-                Attributes: attributes,
-                TargetDialect: metadata.Dialect
-            );
-
-            var casbinDecision = await _policyEnforcementService.EvaluatePolicyAsync(secContext, ct);
-            if (!casbinDecision.IsAllowed)
-            {
-                decision = TableAccessDecision.Denied(table, $"Casbin ABAC Policy Denial: Access denied for subject '{userSid.Value}' in tenant '{tenantId.Value}'.");
-            }
-            else if (!string.IsNullOrWhiteSpace(casbinDecision.CombinedRowFilterSql))
-            {
-                var mergedFilter = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)
-                    ? $"({decision.CombinedRowFilterSql}) AND ({casbinDecision.CombinedRowFilterSql})"
-                    : casbinDecision.CombinedRowFilterSql;
-
-                decision = decision with { CombinedRowFilterSql = mergedFilter };
-            }
-        }
+        var resolved = await ResolveTableAccessAsync(principal, table, requestedFields, requestHeaders, ct);
+        principal = resolved.Principal;
+        var metadata = resolved.Metadata;
+        var decision = resolved.Decision;
+        var tenantId = resolved.Tenant;
+        var userSid = resolved.UserSid;
 
         // Audit evaluation (F-OPS-02: W3C Trace Correlation)
         var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
@@ -268,8 +153,18 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
         var maxRows = _options?.GraphQL?.MaxResponseRows > 0 ? _options.GraphQL.MaxResponseRows : 1000;
         var rowLimit = Math.Clamp(first ?? 50, 1, maxRows);
 
-        var executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType)
-                       ?? _defaultSqlExecutor;
+        var executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
+        if (executor == null)
+        {
+            if (metadata.Table.DataSourceType == DataSourceType.Sql)
+            {
+                executor = _defaultSqlExecutor;
+            }
+            else
+            {
+                throw new NotSupportedException($"Für den DataSourceType '{metadata.Table.DataSourceType}' ist kein Executor registriert.");
+            }
+        }
 
         var execArgs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -290,15 +185,15 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
             .Select(c => c.ColumnName)
             .ToList();
 
+        // O1/O2/O13: requested columns are validated, never dropped silently (a dropped column used to widen the
+        // projection to all columns). Unknown and denied columns are rejected with the same message.
         var effectiveRequestedFields = (requestedFields != null && requestedFields.Count > 0)
-            ? requestedFields.Where(f => authorizedColumns.Contains(f, StringComparer.OrdinalIgnoreCase)).ToList()
+            ? ResolveRequestedFields(requestedFields, authorizedColumns)
             : authorizedColumns;
 
-        if (effectiveRequestedFields.Count == 0 && authorizedColumns.Count > 0)
-        {
-            effectiveRequestedFields = authorizedColumns;
-        }
-
+        // O10: bound concurrent reads of the same table by the same user (each slow read holds a database worker).
+        var maxConcurrentReads = _options?.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
+        using var readLease = AcquireReadLease(tenantId, userSid, table, maxConcurrentReads);
 
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rawRows;
         bool rlsPushdownAlreadyOccurred = false;
@@ -453,6 +348,188 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
         }
 
         return (processedRows, decision);
+    }
+
+    /// <summary>
+    /// G5: Resolves catalog metadata and the effective access decision (consents, cache, Casbin ABAC and row filters)
+    /// for one table, without auditing and without reading data. A denied decision is returned, not thrown.
+    /// Used by ExecuteTableQueryAsync and by the GraphQL tree queries, so both apply the same decision.
+    /// </summary>
+    public async Task<ResolvedTableAccess> ResolveTableAccessAsync(
+        ClaimsPrincipal? principal,
+        TableIdentifier table,
+        IReadOnlyList<string>? requestedFields,
+        IReadOnlyDictionary<string, string[]>? requestHeaders,
+        CancellationToken ct = default)
+    {
+        if (principal == null || principal.Identity?.IsAuthenticated != true)
+        {
+            if (_options?.IsAnonymousAccessAllowed == true)
+            {
+                var anonSid = new Sid("S-1-5-21-DEV-ANONYMOUS");
+                principal = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(ClaimTypes.PrimarySid, anonSid.Value),
+                    new Claim(ClaimTypes.Name, "DEV_ANONYMOUS"),
+                    new Claim(ClaimTypes.Role, "AnonymousUser")
+                ], "InsecureAnonymousAuth"));
+            }
+            else
+            {
+                throw new GatewayUnauthorizedException("Authentication is required to query tables.");
+            }
+        }
+
+        var userSidNullable = principal.GetUserSid();
+        if (userSidNullable == null)
+        {
+            throw new GatewayUnauthorizedException("Keine gültige Benutzer-SID im Authentifizierungstoken vorhanden.");
+        }
+        var userSid = userSidNullable.Value;
+
+        var groupSids = principal.GetGroupSids();
+        var roles = principal.GetUserRoles();
+
+        // Resolve TenantId upfront for cache and consent isolation
+        // RR-L4-02: identical semantics to SecurityContextFactory (single source of truth for HTTP ingress):
+        // a tenant header may only select a tenant for canonical cluster admins whose identity was not asserted
+        // via ForwardAuth headers, or for the development-only anonymous principal (danger_allow_anonymous_access).
+        var tenantId = principal.GetTenantId();
+        if (requestHeaders != null &&
+            (requestHeaders.TryGetValue("X-Tenant-ID", out var tHeaders) || requestHeaders.TryGetValue("X-Tenant-Id", out tHeaders)) &&
+            tHeaders.Length > 0 && TenantId.TryParse(tHeaders[0], out var parsedFromHeader) &&
+            !string.Equals(parsedFromHeader.Value, tenantId.Value, StringComparison.OrdinalIgnoreCase))
+        {
+            var isAnonymousDev = principal.Identity?.IsAuthenticated != true;
+            if (isAnonymousDev || Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
+            {
+                tenantId = parsedFromHeader;
+            }
+            // Non-admins keep the tenant from their token (header ignored, fail-safe). HTTP ingress already rejects
+            // such mismatches with 403 in SecurityContextResolutionMiddleware.
+        }
+
+        // Verify table existence in metadata catalog
+        var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct);
+        if (metadata == null)
+        {
+            throw new TableNotFoundException(table);
+        }
+
+        TableAccessDecision decision;
+        if (_options?.IsConsentBypassed == true)
+        {
+            decision = TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
+        }
+        else
+        {
+            // Check Consent Cache (L1/L2 with Epoch Validation & Group/Role Context Hash, strictly tenant-isolated)
+            var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles);
+            var cached = await _cacheService.GetCachedDecisionAsync(tenantId, userSid, table, contextHash, ct);
+            if (cached == null)
+            {
+                // Cache Miss -> Load from Governance DB
+                var allSubjects = groupSids.Append(userSid).ToList();
+                // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
+                var epochAtLoad = await _cacheService.GetEpochSnapshotAsync(table, ct);
+                var activeConsents = await _consentRepository.GetActiveConsentsForSubjectsAsync(allSubjects, table, DateTimeOffset.UtcNow, tenantId, ct);
+
+                // Multi-Tenancy Isolation: Filter active consents strictly for current tenant
+                activeConsents = activeConsents
+                    .Where(c => c.TenantId == tenantId)
+                    .ToList();
+
+                decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, activeConsents, metadata.Dialect);
+
+                // Cache decision (SEC: TTL bounded by the earliest consent ValidTo, as in CheckTableAccessAsync)
+                var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(metadata.Table.IsHighlySensitive, activeConsents, DateTimeOffset.UtcNow);
+                await _cacheService.SetCachedDecisionAsync(tenantId, userSid, table, decision, ttl, contextHash, epochAtLoad, ct);
+            }
+            else
+            {
+                decision = cached;
+            }
+        }
+
+        // Casbin ABAC & Row-Level Security (RLS) Pushdown Evaluation
+        if (_policyEnforcementService != null && _policyEnforcementService.HasPolicies(tenantId) && _options?.IsConsentBypassed != true)
+        {
+            var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var claim in principal.Claims)
+            {
+                attributes[claim.Type] = claim.Value;
+            }
+
+            // SEC H-4: Fail closed to IPAddress.None; never trust 'ip' claims from tokens or loopback fallback
+            var clientIp = _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
+
+            var purpose = principal.FindFirst("purpose")?.Value ?? principal.FindFirst("purpose_id")?.Value;
+
+            var secContext = new SecurityEvaluationContext(
+                UserSid: userSid,
+                GroupSids: groupSids,
+                Tenant: tenantId,
+                TargetTable: table,
+                RequestedColumns: requestedFields ?? metadata.Columns.Select(c => c.ColumnName).ToList(),
+                ClientIp: clientIp,
+                Timestamp: DateTimeOffset.UtcNow,
+                PurposeId: purpose,
+                Attributes: attributes,
+                TargetDialect: metadata.Dialect
+            );
+
+            var casbinDecision = await _policyEnforcementService.EvaluatePolicyAsync(secContext, ct);
+            if (!casbinDecision.IsAllowed)
+            {
+                decision = TableAccessDecision.Denied(table, $"Casbin ABAC Policy Denial: Access denied for subject '{userSid.Value}' in tenant '{tenantId.Value}'.");
+            }
+            else if (!string.IsNullOrWhiteSpace(casbinDecision.CombinedRowFilterSql))
+            {
+                var mergedFilter = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)
+                    ? $"({decision.CombinedRowFilterSql}) AND ({casbinDecision.CombinedRowFilterSql})"
+                    : casbinDecision.CombinedRowFilterSql;
+
+                decision = decision with { CombinedRowFilterSql = mergedFilter };
+            }
+        }
+
+        return new ResolvedTableAccess(metadata, decision, tenantId, userSid, principal);
+    }
+
+    /// <summary>
+    /// O1/O2/O13: maps requested columns to their catalog spelling (deduplicated, request order). Throws for any column
+    /// that is unknown or denied; the message is identical for both cases.
+    /// </summary>
+    private static List<string> ResolveRequestedFields(IReadOnlyList<string> requestedFields, IReadOnlyList<string> authorizedColumns)
+    {
+        var resolved = new List<string>(requestedFields.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var requested in requestedFields)
+        {
+            var catalogName = authorizedColumns.FirstOrDefault(c => string.Equals(c, requested?.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (catalogName == null)
+            {
+                var echo = requested != null && EchoableColumnNameRegex().IsMatch(requested.Trim()) ? requested.Trim() : "(invalid name)";
+                throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
+            }
+            if (seen.Add(catalogName))
+            {
+                resolved.Add(catalogName);
+            }
+        }
+        return resolved;
+    }
+
+    private IDisposable? AcquireReadLease(TenantId tenantId, Sid userSid, TableIdentifier table, int maxConcurrentReads)
+    {
+        if (_concurrencyGate == null || maxConcurrentReads <= 0)
+        {
+            return null;
+        }
+
+        var key = $"{tenantId.Value}|{userSid.Value}|{table.ToQualifiedName()}".ToLowerInvariant();
+        return _concurrencyGate.TryEnter(key, maxConcurrentReads)
+               ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
     }
 
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
@@ -1016,22 +1093,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService
     internal static MaskingRule ScopeRuleForTenant(MaskingRule rule, string? tenant, string? defaultKeyId) =>
         !string.IsNullOrWhiteSpace(tenant) && IsHmacRule(rule) ? CreateTenantScopedHmacRule(rule, tenant, defaultKeyId) : rule;
 
-    internal static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId)
-    {
-        if (rule.HmacKeyId != null && rule.HmacKeyId.Contains("|tenant:", StringComparison.Ordinal))
-        {
-            return rule;
-        }
-
-        var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
-        return new MaskingRule
-        {
-            Id = rule.Id,
-            TableColumnId = rule.TableColumnId,
-            RuleType = "HMAC_SHA256",
-            PatternOrFormat = rule.PatternOrFormat,
-            Replacement = rule.Replacement,
-            HmacKeyId = $"{baseKeyId}|tenant:{tenant}"
-        };
-    }
+    internal static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId) =>
+        MaskingRule.CreateTenantScopedHmacRule(rule, tenant, defaultKeyId);
 }

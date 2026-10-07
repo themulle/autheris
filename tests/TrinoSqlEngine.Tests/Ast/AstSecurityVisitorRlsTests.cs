@@ -59,6 +59,38 @@ public sealed class AstSecurityVisitorRlsTests
     }
 
     [Fact]
+    public void Rls_InCorrelatedFilter_BindsAutherisTargetAlias()
+    {
+        var options = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("autheris_target.dep_id IN (SELECT d.dep_id FROM tenant_dep d WHERE d.dep_id = autheris_target.dep_id)"),
+            TargetDialect = TargetSqlDialect.SqlServer
+        };
+
+        string sql = "SELECT id FROM orders";
+        string result = SecureAndGenerate(sql, options);
+
+        Assert.Contains(RowFilterAliases.Target, result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orders", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Rls_InFilter_BindsAutherisTargetAlias()
+    {
+        var options = new RlsOptions
+        {
+            PolicyProvider = new DefaultRlsPolicyProvider("autheris_target.dep_id IN (SELECT d.dep_id FROM tenant_dep d WHERE d.active = 1)"),
+            TargetDialect = TargetSqlDialect.SqlServer
+        };
+
+        string sql = "SELECT id FROM orders";
+        string result = SecureAndGenerate(sql, options);
+
+        Assert.Contains(RowFilterAliases.Target, result, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orders", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void Rls_PolicyProvider_SelectiveFiltering()
     {
         var options = new RlsOptions

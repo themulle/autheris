@@ -18,22 +18,7 @@ public sealed partial class PolicySimulationService(
     IAuditLogRepository auditLogRepository,
     ILogger<PolicySimulationService>? logger = null) : IPolicySimulationService
 {
-    private const string CasbinModelDefinition = @"
-[request_definition]
-r = sub, tenant, obj, act, ctx
-
-[policy_definition]
-p = sub, tenant, obj, act, sub_rule, eft
-
-[role_definition]
-g = _, _
-
-[policy_effect]
-e = some(where (p.eft == allow)) && !some(where (p.eft == deny))
-
-[matchers]
-m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act == p.act || p.act == ""*"") && eval(p.sub_rule)
-";
+    private static readonly string CasbinModelDefinition = CasbinEnforcementService.DefaultModelText;
 
     private static readonly string[] DangerousSubRuleTokens =
     [

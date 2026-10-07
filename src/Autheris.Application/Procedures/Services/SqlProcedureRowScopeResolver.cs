@@ -11,10 +11,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Procedures.Interfaces;
+using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -36,12 +38,20 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
 
     private readonly ISqlConnectionFactory _connectionFactory;
     private readonly IOptions<GatewayOptions> _options;
+    private readonly ILogger<SqlProcedureRowScopeResolver>? _logger;
+    private readonly IDbSessionContextInitializer _sessionInitializer;
     private readonly ConcurrentDictionary<string, (bool Unique, DateTimeOffset CheckedAt)> _uniquenessCache = new(StringComparer.Ordinal);
 
-    public SqlProcedureRowScopeResolver(ISqlConnectionFactory connectionFactory, IOptions<GatewayOptions> options)
+    public SqlProcedureRowScopeResolver(
+        ISqlConnectionFactory connectionFactory,
+        IOptions<GatewayOptions> options,
+        ILogger<SqlProcedureRowScopeResolver>? logger = null,
+        IDbSessionContextInitializer? sessionInitializer = null)
     {
         _connectionFactory = connectionFactory ?? throw new ArgumentNullException(nameof(connectionFactory));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _logger = logger;
+        _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
     }
 
     public async Task<IReadOnlySet<string>> GetAllowedKeysAsync(
@@ -136,7 +146,14 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
             ? await connection.BeginTransactionAsync(ct).ConfigureAwait(false)
             : null;
 
-        await InitSessionAsync(connection, tx, dialect, security, ct).ConfigureAwait(false);
+        await _sessionInitializer.InitializeSessionAsync(
+            connection,
+            tx,
+            dialect,
+            new TenantId(security.TenantId),
+            userSid: security.UserSid,
+            purpose: security.Purpose,
+            ct: ct).ConfigureAwait(false);
 
         for (int offset = 0; offset < tuples.Count; offset += tuplesPerBatch)
         {
@@ -147,6 +164,10 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
             cmd.CommandType = CommandType.Text;
             cmd.CommandTimeout = timeout;
             cmd.CommandText = BuildKeyQuery(dialect, table, keyColumns, tenantColumn, filterSql, batch.Count);
+            if (_options.Value.Logging?.LogGeneratedSql == true)
+            {
+                _logger?.LogDebug("SqlProcedureRowScopeResolver: Generated SQL: {Sql}", cmd.CommandText);
+            }
 
             if (tenantColumn != null)
             {
@@ -188,7 +209,7 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
 
         if (tx != null)
         {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
+            await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
         }
 
         return allowed;
@@ -346,41 +367,6 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
 
     private static InvalidOperationException NotUnique(TableMetadata table, IReadOnlyList<string> keyColumns) =>
         new($"row_scope_key ({string.Join(", ", keyColumns)}) is not a primary key or unique index of '{table.Identifier}'.");
-
-    /// <summary>
-    /// Same security context as the procedure call (ADR-018), so database-side row-level security sees the same caller:
-    /// read-only SESSION_CONTEXT on SQL Server, transaction-local settings on PostgreSQL, nothing on SQLite.
-    /// </summary>
-    private static async Task InitSessionAsync(DbConnection connection, DbTransaction? tx, DatabaseDialect dialect, ProcedureSecurityContext security, CancellationToken ct)
-    {
-        string? sql = dialect switch
-        {
-            DatabaseDialect.SqlServer =>
-                "EXEC sys.sp_set_session_context @key = N'autheris.tenant_id', @value = @tenant, @read_only = 1; " +
-                "EXEC sys.sp_set_session_context @key = N'autheris.user_sid', @value = @sid, @read_only = 1; " +
-                "EXEC sys.sp_set_session_context @key = N'autheris.purpose', @value = @purpose, @read_only = 1;",
-            DatabaseDialect.PostgreSql =>
-                "SET TRANSACTION READ ONLY; " +
-                "SELECT set_config('autheris.tenant_id', @tenant, true), set_config('autheris.user_sid', @sid, true), " +
-                "set_config('autheris.purpose', @purpose, true), set_config('app.tenant_id', @tenant, true);",
-            _ => null
-        };
-
-        if (sql == null)
-        {
-            return;
-        }
-
-        await using var init = connection.CreateCommand();
-        init.Transaction = tx;
-        init.CommandType = CommandType.Text;
-        init.CommandTimeout = 30;
-        init.CommandText = sql;
-        AddParameter(init, "@tenant", security.TenantId);
-        AddParameter(init, "@sid", security.UserSid);
-        AddParameter(init, "@purpose", security.Purpose ?? string.Empty);
-        await init.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-    }
 
     private static void AddParameter(DbCommand cmd, string name, object? value)
     {

@@ -118,6 +118,14 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             return RebacCheckResult.Permitted;
         }
 
+        // POL-7: Empty tuple fields must never act as wildcard or allow
+        if (string.IsNullOrWhiteSpace(request.User) ||
+            string.IsNullOrWhiteSpace(request.Relation) ||
+            string.IsNullOrWhiteSpace(request.Object))
+        {
+            return RebacCheckResult.Denied;
+        }
+
         var tenant = string.IsNullOrWhiteSpace(request.TenantId) ? "default" : request.TenantId.Trim();
         var cacheKey = $"{request.User}#{request.Relation}@{request.Object}";
 
@@ -216,6 +224,14 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
     {
         if (ct.IsCancellationRequested) return false;
 
+        // POL-7: Reject empty fields in evaluation
+        if (string.IsNullOrWhiteSpace(user) ||
+            string.IsNullOrWhiteSpace(relation) ||
+            string.IsNullOrWhiteSpace(obj))
+        {
+            return false;
+        }
+
         // Cyclic recursion guard (SEC-REBAC-01)
         if (depth > maxDepth)
         {
@@ -235,7 +251,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
 
         // 1. Direct check: Is there an exact tuple (tenant, user, relation, obj)?
         var directTuples = await _store.GetTuplesAsync(tenantId, user, relation, obj, ct).ConfigureAwait(false);
-        if (directTuples.Count > 0)
+        if (directTuples.Count > 0 && directTuples.Any(t => !string.IsNullOrWhiteSpace(t.User) && string.Equals(t.User, user, StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }
@@ -263,11 +279,17 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         var objectTuples = await _store.GetTuplesAsync(tenantId, user: null, relation: relation, obj: obj, ct).ConfigureAwait(false);
         foreach (var t in objectTuples)
         {
+            if (string.IsNullOrWhiteSpace(t.User))
+            {
+                // POL-7: Empty User in tuple must never be treated as wildcard or allow!
+                continue;
+            }
+
             if (t.User.Contains('#'))
             {
                 // User-set: e.g. "group:engineering#member"
                 var parts = t.User.Split('#');
-                if (parts.Length == 2)
+                if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[0]) && !string.IsNullOrWhiteSpace(parts[1]))
                 {
                     var groupObj = parts[0];
                     var groupRel = parts[1];
@@ -286,6 +308,12 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         foreach (var pt in parentTuples)
         {
             var parentEntity = pt.User; // In parent relation, User column stores the parent entity identifier
+            if (string.IsNullOrWhiteSpace(parentEntity))
+            {
+                // POL-7: Empty User in parent relation must never be treated as wildcard or parent!
+                continue;
+            }
+
             if (await TraverseAndEvaluateAsync(tenantId, user, relation, parentEntity, depth + 1, maxDepth, visited, ct).ConfigureAwait(false))
             {
                 return true;

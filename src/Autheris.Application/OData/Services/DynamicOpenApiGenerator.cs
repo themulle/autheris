@@ -93,6 +93,11 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             apis.Add(new("Stored Procedures", "/api/v1/procedures/openapi.json"));
         }
 
+        if (_options.IncludeWebSqlSpec)
+        {
+            apis.Add(new("WebSQL (ad-hoc SQL)", "/api/v1/sql/openapi.json"));
+        }
+
         foreach (var group in domainGroups)
         {
             var domain = group.Key;
@@ -183,17 +188,16 @@ public sealed class DynamicOpenApiGenerator : IDynamicOpenApiGenerator
             var getOperation = new JsonObject
             {
                 ["summary"] = $"Query {domain}.{tableName}",
-                ["description"] = $"OData v4 entity set query endpoint for table '{domain}.{schema}.{tableName}'. Supports $select, $filter, $top, $skip, $count.",
+                ["description"] = $"OData v4 entity set query endpoint for table '{domain}.{schema}.{tableName}'. Supports $select, $top, $skip. Other system query options are rejected (400/501), never ignored.",
                 ["tags"] = new JsonArray { domain }
             };
 
             var parameters = new JsonArray
             {
-                CreateQueryParam("$select", "string", "Comma-separated list of properties to select (e.g. id,amount,customer)."),
-                CreateQueryParam("$filter", "string", "OData filter expression (e.g. amount gt 1000 and status eq 'Active')."),
+                // O3: only implemented options are advertised; unknown properties in $select are rejected with 400.
+                CreateQueryParam("$select", "string", "Comma-separated list of properties of this entity set to select."),
                 CreateQueryParam("$top", "integer", "Maximum number of records to return (max 1000)."),
-                CreateQueryParam("$skip", "integer", "Number of records to skip for pagination."),
-                CreateQueryParam("$count", "boolean", "Whether to include the total inline record count (@odata.count).")
+                CreateQueryParam("$skip", "integer", "Number of records to skip for pagination (max 100000).")
             };
             getOperation["parameters"] = parameters;
 

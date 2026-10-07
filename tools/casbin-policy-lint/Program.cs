@@ -25,15 +25,22 @@ public static class Program
         string searchDir = args.Length > 0 ? args[0] : Directory.GetCurrentDirectory();
         Console.WriteLine($"Scanning directory: {searchDir}");
 
-        var confFiles = Directory.GetFiles(searchDir, "*.conf", SearchOption.AllDirectories);
-        var csvFiles = Directory.GetFiles(searchDir, "*.csv", SearchOption.AllDirectories);
+        var confFiles = EnumerateRepositoryFiles(searchDir, "*.conf");
+        var csvFiles = EnumerateRepositoryFiles(searchDir, "*.csv");
 
         int errors = 0;
 
         foreach (var conf in confFiles)
         {
-            Console.WriteLine($"Linting model config: {conf}");
             var content = File.ReadAllText(conf);
+            // *.conf is also used by nginx and others; only files with a Casbin request definition are models.
+            if (!IsCasbinModel(content))
+            {
+                Console.WriteLine($"Skipping non-Casbin config: {conf}");
+                continue;
+            }
+
+            Console.WriteLine($"Linting model config: {conf}");
             try
             {
                 var model = DefaultModel.CreateFromText(content);
@@ -51,8 +58,15 @@ public static class Program
 
         foreach (var csv in csvFiles)
         {
-            Console.WriteLine($"Linting policy CSV: {csv}");
             var lines = File.ReadAllLines(csv);
+            // Only CSV files with Casbin policy ('p') or grouping ('g') lines are policies (not e.g. benchmark results).
+            if (!IsCasbinPolicy(lines))
+            {
+                Console.WriteLine($"Skipping non-policy CSV: {csv}");
+                continue;
+            }
+
+            Console.WriteLine($"Linting policy CSV: {csv}");
             int lineNo = 0;
             foreach (var line in lines)
             {
@@ -120,4 +134,21 @@ public static class Program
         Console.ResetColor();
         return 0;
     }
+
+    private static readonly string[] ExcludedDirectories = ["bin", "obj", ".git", "node_modules"];
+
+    private static string[] EnumerateRepositoryFiles(string root, string pattern) =>
+        Directory.GetFiles(root, pattern, SearchOption.AllDirectories)
+            .Where(path => !Path.GetRelativePath(root, path)
+                .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                .Any(segment => ExcludedDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase)))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+
+    private static bool IsCasbinModel(string content) =>
+        content.Contains("[request_definition]", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsCasbinPolicy(string[] lines) =>
+        lines.Select(l => l.TrimStart())
+            .Any(l => Regex.IsMatch(l, @"^[pg]\d*\s*,", RegexOptions.IgnoreCase));
 }

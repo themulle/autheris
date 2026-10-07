@@ -31,4 +31,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Autheris.Tests.Unit" />
+  </ItemGroup>
+
 </Project>

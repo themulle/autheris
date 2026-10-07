@@ -293,7 +293,7 @@ public sealed class ItsmWebhookHandler(
                 if (request != null)
                 {
                     logger.LogWarning(
-                        "[INSECURE GETTING STARTED] Bypassing cross-tenant mismatch for ticket {TicketId}. Request tenant: {ReqTenant}, callback instance: {InstanceId}",
+                        "[DANGER] Bypassing cross-tenant mismatch for ticket {TicketId}. Request tenant: {ReqTenant}, callback instance: {InstanceId}. Prohibited outside Development.",
                         payload.TicketId, request.TenantId, instanceId);
                 }
             }
@@ -304,7 +304,7 @@ public sealed class ItsmWebhookHandler(
             if (request != null)
             {
                 logger.LogWarning(
-                    "[INSECURE GETTING STARTED] Bypassing tenant binding for unmapped ITSM instance {InstanceId} (ticket {TicketId}, request tenant {ReqTenant}).",
+                    "[DANGER] Bypassing tenant binding for unmapped ITSM instance {InstanceId} (ticket {TicketId}, request tenant {ReqTenant}). Prohibited outside Development.",
                     instanceId, payload.TicketId, request.TenantId);
             }
         }
@@ -432,7 +432,7 @@ public sealed class ItsmWebhookHandler(
 
         if (_itsmOptions.LegacyGlobalWebhookSecret && globalSecret is { Length: > 0 } && !IsPlaceholder(globalSecret, GlobalWebhookSecretRef))
         {
-            logger.LogWarning("ITSM webhook for instance '{InstanceId}' verified with the legacy global secret (Itsm:LegacyGlobalWebhookSecret=true).", instanceId);
+            logger.LogWarning("[DANGER] ITSM webhook for instance '{InstanceId}' verified with the legacy global secret (Itsm:LegacyGlobalWebhookSecret=true). Prohibited outside Development.", instanceId);
             return globalSecret;
         }
 

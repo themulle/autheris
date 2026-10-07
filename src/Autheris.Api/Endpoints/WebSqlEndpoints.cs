@@ -15,6 +15,7 @@ using Autheris.Application.Serialization;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -28,7 +29,9 @@ public static class WebSqlEndpoints
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
 
     public const string GenericForbiddenMessage = "The SQL statement was rejected by the gateway security policy.";
-    public const string GenericBadRequestMessage = "The SQL request is invalid (syntax error, empty statement or size limit exceeded).";
+    public const string GenericBadRequestMessage = "The SQL request is invalid (syntax error, empty statement, invalid parameter or size limit exceeded). " +
+        "WebSQL accepts ANSI/Trino-style SELECT statements: use LIMIT n instead of TOP n and name tables as <dataSource>.<schema>.<table> or <schema>.<table>.";
+    public const string GenericTimeoutMessage = "The SQL statement exceeded the execution time limit. Narrow the query (filter, fewer columns, LIMIT) or contact support with the trace id.";
     public const string GenericServerErrorMessage = "The SQL statement could not be executed. Contact support with the trace id.";
 
     public sealed record WebSqlRequestDto(
@@ -36,8 +39,21 @@ public static class WebSqlEndpoints
         Dictionary<string, object?>? Parameters,
         string? DataSource);
 
-    public static IEndpointRouteBuilder MapWebSqlEndpoints(this IEndpointRouteBuilder app)
+    public static IEndpointRouteBuilder MapWebSqlEndpoints(this IEndpointRouteBuilder app, GatewayOptions? gatewayOptions = null)
     {
+        // OpenAPI description of the endpoint (documentation only, no data). Like the other specs it is anonymous only
+        // in OpenSchema mode.
+        var openApi = app.MapGet("/api/v1/sql/openapi.json", () => Results.Json(BuildOpenApiSpec(gatewayOptions)))
+            .WithName("GetWebSqlOpenApiSpec");
+        if (gatewayOptions?.IsOpenSchemaAllowed == true)
+        {
+            openApi.AllowAnonymous();
+        }
+        else
+        {
+            openApi.RequireAuthorization();
+        }
+
         app.MapPost("/api/v1/sql", HandleWebSqlRequest)
            .WithName("ExecuteGovernedWebSqlV1")
            .WithMetadata(new ParquetOutputSupportedMetadata())
@@ -313,6 +329,32 @@ public static class WebSqlEndpoints
 
         switch (ex)
         {
+            case GatewayThrottledException throttledEx:
+                logger.LogWarning(throttledEx, "WebSQL concurrency limit reached. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                httpContext.Response.Headers.RetryAfter = throttledEx.RetryAfterSeconds.ToString();
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "TooManyRequests",
+                    message = "Too many concurrent requests. Retry later.",
+                    retryAfterSeconds = throttledEx.RetryAfterSeconds,
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
+            case NotSupportedException notSuppEx:
+                logger.LogWarning(notSuppEx, "WebSQL Not Supported. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status501NotImplemented;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "NotImplemented",
+                    message = notSuppEx.Message,
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
             case SecurityException secEx:
                 logger.LogWarning(secEx, "WebSQL Security Violation. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -321,6 +363,18 @@ public static class WebSqlEndpoints
                 {
                     error = "Forbidden",
                     message = secEx is WebSqlPolicyException ? secEx.Message : GenericForbiddenMessage,
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
+            case Exception timeoutEx when IsExecutionTimeout(timeoutEx):
+                logger.LogWarning(timeoutEx, "WebSQL execution timed out. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "GatewayTimeout",
+                    message = GenericTimeoutMessage,
                     traceId = httpContext.TraceIdentifier
                 }, ct);
                 break;
@@ -350,6 +404,167 @@ public static class WebSqlEndpoints
                 }, ct);
                 break;
         }
+    }
+
+    /// <summary>Database command timeouts (e.g. SqlException "Execution Timeout Expired") and TimeoutExceptions.</summary>
+    private static bool IsExecutionTimeout(Exception ex)
+    {
+        for (var e = ex; e != null; e = e.InnerException)
+        {
+            if (e is TimeoutException ||
+                (e is DbException && e.Message.Contains("Timeout", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>OpenAPI 3.0 description of POST /api/v1/sql (request, result shape, dialect notes).</summary>
+    private static Dictionary<string, object> BuildOpenApiSpec(GatewayOptions? gatewayOptions)
+    {
+        var webSql = gatewayOptions?.WebSql;
+        var dataSource = webSql?.DefaultDataSourceName ?? "default";
+        var maxRows = webSql?.DefaultMaxRows ?? 1000;
+        var timeout = webSql?.ExecutionTimeoutSeconds ?? 30;
+
+        Dictionary<string, object> Response(string description) => new() { ["description"] = description };
+
+        var requestSchema = new Dictionary<string, object>
+        {
+            ["type"] = "object",
+            ["required"] = new[] { "sql" },
+            ["properties"] = new Dictionary<string, object>
+            {
+                ["sql"] = new Dictionary<string, object>
+                {
+                    ["type"] = "string",
+                    ["description"] = "A single SELECT statement.",
+                    ["example"] = $"SELECT client_id, ts FROM {dataSource}.tem.crane_state WHERE client_id = @id ORDER BY ts DESC LIMIT 10"
+                },
+                ["parameters"] = new Dictionary<string, object>
+                {
+                    ["type"] = "object",
+                    ["description"] = "Named scalar parameters (string, number, boolean, null) bound to @name placeholders.",
+                    ["additionalProperties"] = true,
+                    ["example"] = new Dictionary<string, object> { ["id"] = 27110722 }
+                },
+                ["dataSource"] = new Dictionary<string, object>
+                {
+                    ["type"] = "string",
+                    ["description"] = $"Data source to run on. Default: {dataSource}."
+                }
+            }
+        };
+
+        var resultSchema = new Dictionary<string, object>
+        {
+            ["type"] = "object",
+            ["properties"] = new Dictionary<string, object>
+            {
+                ["columns"] = new Dictionary<string, object> { ["type"] = "array", ["items"] = new Dictionary<string, object> { ["type"] = "string" } },
+                ["rows"] = new Dictionary<string, object>
+                {
+                    ["type"] = "array",
+                    ["description"] = "Objects (column -> value), or arrays with ?format=arrays.",
+                    ["items"] = new Dictionary<string, object> { ["type"] = "object", ["additionalProperties"] = true }
+                },
+                ["rowCount"] = new Dictionary<string, object> { ["type"] = "integer" }
+            }
+        };
+
+        var errorSchema = new Dictionary<string, object>
+        {
+            ["type"] = "object",
+            ["properties"] = new Dictionary<string, object>
+            {
+                ["error"] = new Dictionary<string, object> { ["type"] = "string" },
+                ["message"] = new Dictionary<string, object> { ["type"] = "string" },
+                ["traceId"] = new Dictionary<string, object> { ["type"] = "string" }
+            }
+        };
+
+        Dictionary<string, object> Error(string description) => new()
+        {
+            ["description"] = description,
+            ["content"] = new Dictionary<string, object>
+            {
+                ["application/json"] = new Dictionary<string, object> { ["schema"] = errorSchema }
+            }
+        };
+
+        var post = new Dictionary<string, object>
+        {
+            ["summary"] = "Run a governed, read-only SQL statement",
+            ["operationId"] = "executeGovernedWebSql",
+            ["description"] =
+                "Ad-hoc SELECT on the governed catalog. Consent, row filters and masking of the caller are applied to every table. " +
+                "Dialect: ANSI/Trino-style (use LIMIT n, not TOP n or FETCH). Tables: <dataSource>.<schema>.<table>, or <schema>.<table> " +
+                $"in the data source '{dataSource}'. Only SELECT is allowed (DML is off by default), at least one catalog table is required. " +
+                $"At most {maxRows} rows are returned; statements running longer than {timeout} s are aborted (504). " +
+                "The body is JSON, or plain text (Content-Type text/plain or application/sql) with the statement only.",
+            ["parameters"] = new[]
+            {
+                new Dictionary<string, object>
+                {
+                    ["name"] = "format",
+                    ["in"] = "query",
+                    ["required"] = false,
+                    ["schema"] = new Dictionary<string, object> { ["type"] = "string", ["enum"] = new[] { "objects", "arrays" } }
+                }
+            },
+            ["requestBody"] = new Dictionary<string, object>
+            {
+                ["required"] = true,
+                ["content"] = new Dictionary<string, object>
+                {
+                    ["application/json"] = new Dictionary<string, object> { ["schema"] = requestSchema },
+                    ["text/plain"] = new Dictionary<string, object>
+                    {
+                        ["schema"] = new Dictionary<string, object> { ["type"] = "string" },
+                        ["example"] = $"SELECT serial_number, crane_type FROM {dataSource}.md.crane LIMIT 5"
+                    }
+                }
+            },
+            ["responses"] = new Dictionary<string, object>
+            {
+                ["200"] = new Dictionary<string, object>
+                {
+                    ["description"] = "Result set",
+                    ["content"] = new Dictionary<string, object>
+                    {
+                        ["application/json"] = new Dictionary<string, object> { ["schema"] = resultSchema }
+                    }
+                },
+                ["400"] = Error("Invalid request (syntax, parameter, size)"),
+                ["401"] = Response("Not authenticated"),
+                ["403"] = Error("Rejected by the security policy (table not permitted, DML, ...)"),
+                ["504"] = Error("Execution time limit exceeded")
+            },
+            ["security"] = new[] { new Dictionary<string, object> { ["basicAuth"] = Array.Empty<string>() } }
+        };
+
+        return new Dictionary<string, object>
+        {
+            ["openapi"] = "3.0.3",
+            ["info"] = new Dictionary<string, object>
+            {
+                ["title"] = "Autheris WebSQL (ad-hoc SQL)",
+                ["version"] = "v1"
+            },
+            ["paths"] = new Dictionary<string, object>
+            {
+                ["/api/v1/sql"] = new Dictionary<string, object> { ["post"] = post }
+            },
+            ["components"] = new Dictionary<string, object>
+            {
+                ["securitySchemes"] = new Dictionary<string, object>
+                {
+                    ["basicAuth"] = new Dictionary<string, object> { ["type"] = "http", ["scheme"] = "basic" }
+                }
+            }
+        };
     }
 
     private static string[] BuildUniqueColumnNames(DbDataReader reader)

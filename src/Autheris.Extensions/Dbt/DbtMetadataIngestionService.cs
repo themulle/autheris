@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.DataCatalog.Services;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
@@ -435,6 +436,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
 
         var updated = await _proposalRepository.UpdateProposalStatusAsync(proposalId, DbtProposalStatus.Approved, reviewedBy, ct).ConfigureAwait(false);
 
+        // EXT-1: RLS filter and Casbin role proposals must NOT be saved as column masking rules.
+        bool isPolicyOrRls = proposal.SuggestedRuleType.StartsWith("RLS_FILTER:", StringComparison.OrdinalIgnoreCase)
+            || proposal.SuggestedRuleType.StartsWith("CASBIN_ROLES:", StringComparison.OrdinalIgnoreCase);
+
+        if (isPolicyOrRls)
+        {
+            _logger.LogInformation(
+                "Dbt proposal {Id} ({Type}) approved for table {Table}. Policy/RLS proposals are not saved as column masking rules.",
+                proposalId, proposal.SuggestedRuleType, proposal.Table);
+            return updated;
+        }
+
         var tableMeta = await _metadataRepository.GetTableMetadataAsync(proposal.Table, ct).ConfigureAwait(false);
         if (tableMeta != null)
         {
@@ -444,17 +457,25 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 Replacement = proposal.SuggestedRuleType == "REDACT" ? "[REDACTED]" : null
             };
 
+            // EXT-1: Ratchet enforcement – approve must never weaken existing stronger masking rules
+            if (tableMeta.ColumnMaskingRules.TryGetValue(proposal.ColumnName, out var existingRule))
+            {
+                if (CatalogGovernanceRatchet.MaskingRuleStrength(existingRule) > CatalogGovernanceRatchet.MaskingRuleStrength(newRule))
+                {
+                    _logger.LogWarning(
+                        "Dbt proposal {Id} suggests rule {SuggestedRule} for {Table}.{Column}, but existing masking rule {ExistingRule} is stronger. Preserving stronger rule via Ratchet.",
+                        proposalId, proposal.SuggestedRuleType, proposal.Table, proposal.ColumnName, existingRule.RuleType);
+                    return updated;
+                }
+            }
+
             var updatedRules = new Dictionary<string, MaskingRule>(tableMeta.ColumnMaskingRules, StringComparer.OrdinalIgnoreCase)
             {
                 [proposal.ColumnName] = newRule
             };
 
-            var newTableMeta = new TableMetadata
+            var newTableMeta = tableMeta with
             {
-                Table = tableMeta.Table,
-                Identifier = tableMeta.Identifier,
-                Columns = tableMeta.Columns,
-                PrimaryKeyColumns = tableMeta.PrimaryKeyColumns,
                 ColumnMaskingRules = updatedRules
             };
 

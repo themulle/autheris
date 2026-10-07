@@ -151,7 +151,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", userSid.Value);
 
-        var response = await client.GetAsync("/odata/v4/finance/dbo/finance_table_1?$top=5&$skip=0&$count=true");
+        var response = await client.GetAsync("/odata/v4/finance/dbo/finance_table_1?$top=5&$skip=0");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         response.Headers.GetValues("OData-Version").ShouldContain("4.0");
 

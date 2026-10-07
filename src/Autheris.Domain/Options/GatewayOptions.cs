@@ -49,6 +49,8 @@ public sealed class GatewayOptions
     [Required] public RebacOptions Rebac { get; init; } = new();
     [Required] public ArrowExportOptions Arrow { get; init; } = new();
     [Required] public DuckDbOlapOptions DuckDbOlap { get; init; } = new();
+    [Required] public RowFilterOptions RowFilters { get; init; } = new();
+    [Required] public LoggingOptions Logging { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".
@@ -210,6 +212,9 @@ public sealed class GatewayOptions
         if (AreUnsignedS3RequestsAllowed) list.Add("DANGER:warn_allow_unsigned_s3_requests");
         if (IsWebhookTimestampToleranceIgnored) list.Add("DANGER:warn_ignore_webhook_timestamp_tolerance");
         if (IsOpenMetadataAutoCreateConsentsEnabled) list.Add("DANGER:openmetadata_auto_create_consents (OpenMetadata.AutoCreateConsents)");
+        // API-1: Webhook tenant fallback and legacy global webhook secret allow cross-tenant spoofing and are prohibited outside Development
+        if (IsWebhookTenantFallbackAllowed) list.Add("DANGER:warn_fallback_default_tenant_for_webhooks");
+        if (IsLegacyGlobalItsmWebhookSecretAllowed) list.Add("DANGER:itsm_legacy_global_webhook_secret (Itsm.LegacyGlobalWebhookSecret)");
         // SQ-15: DML without an affected-rows limit (WebSql.MaxAffectedRows <= 0 means unlimited)
         if (IsWebSqlDmlAllowed && WebSql.MaxAffectedRows <= 0) list.Add(DangerPrefix + "websql_unlimited_affected_rows (WebSql.MaxAffectedRows = 0 with DML enabled)");
 
@@ -217,9 +222,7 @@ public sealed class GatewayOptions
         if (IsAllCorsAllowed) list.Add("WARN:warn_allow_all_cors_origins");
         if (AreQueryLimitsRelaxed) list.Add("WARN:warn_relaxed_query_limits");
         if (IsIntrospectionForced) list.Add("WARN:warn_enable_introspection");
-        if (IsWebhookTenantFallbackAllowed) list.Add("WARN:warn_fallback_default_tenant_for_webhooks");
         if (IsLegacyCatalogPayloadOnlySignatureAllowed) list.Add("WARN:catalog_legacy_payload_only_signature (Catalog.AllowLegacyPayloadOnlySignature)");
-        if (IsLegacyGlobalItsmWebhookSecretAllowed) list.Add("WARN:itsm_legacy_global_webhook_secret (Itsm.LegacyGlobalWebhookSecret)");
         if (AllowDevelopmentInContainer) list.Add("WARN:allow_development_in_container (AllowDevelopmentInContainer)");
         if (IsLegacyWebSqlDmlSwitchActive) list.Add("WARN:warn_allow_websql_dml (legacy alias, use WebSql.AllowDml)");
         if (IsEgressAllowlistActive) list.Add("WARN:egress_trusted_internal_allowlist (Egress.TrustedInternalHosts / Egress.TrustedInternalNetworks)");
@@ -874,6 +877,13 @@ public sealed class SqlDataSourceOptions
     /// <summary>Tables (<c>schema.table</c> or <c>table</c>, case-insensitive) that are deliberately shared across tenants.</summary>
     public List<string> TenantColumnExemptTables { get; init; } = new();
 
+    /// <summary>
+    /// O10: Maximum number of concurrent table reads (OData, GraphQL, MCP, kernel) per tenant, user and table. Further
+    /// requests get 429 with Retry-After instead of occupying another database worker and pool connection.
+    /// 0 disables the limit.
+    /// </summary>
+    [Range(0, 1000)] public int MaxConcurrentReadsPerUserAndTable { get; init; } = 4;
+
     public Dictionary<string, DataSourceConnectionOptions> Connections { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
@@ -882,6 +892,14 @@ public sealed class DataSourceConnectionOptions
     public string Provider { get; init; } = "Sqlite"; // "Sqlite", "SqlServer", "PostgreSql"
     public string ConnectionString { get; init; } = string.Empty;
     [Range(1, 300)] public int CommandTimeoutSeconds { get; init; } = 30;
+
+    /// <summary>
+    /// SQL Server only: every session of this data source runs <c>SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED</c>
+    /// ("dirty read"). Reads then neither wait for nor block writers (no shared locks), at the price of seeing uncommitted,
+    /// possibly rolled back rows and occasionally missing or duplicating rows during page splits. Meant for analytical reads
+    /// on busy operational databases; default false. Ignored by other providers (PostgreSQL has no dirty reads).
+    /// </summary>
+    public bool ReadUncommitted { get; init; }
 }
 
 public sealed class ItsmOptions
@@ -1092,10 +1110,11 @@ public sealed class ExtensibilityOptions
 
 public sealed class CasbinOptions
 {
-    public bool Enabled { get; init; } = true;
+    public bool Enabled { get; init; } = false;
     public bool EnforceInQueryPipeline { get; init; } = true;
     public string? ModelPath { get; init; }
     public string? PolicyPath { get; init; }
+    public bool WatchPolicyFile { get; init; } = true;
 }
 
 public sealed class DbtOptions
@@ -1483,6 +1502,22 @@ public sealed class DuckDbOlapOptions
     public int QueryTimeoutSeconds { get; init; } = 60;
     public int MaxThreads { get; init; } = 2;
     public bool EnableCrossDomainJoinOptimization { get; init; } = true;
+}
+
+/// <summary>
+/// Row-Level Security row filter generation strategy options.
+/// </summary>
+public sealed class RowFilterOptions
+{
+    public RowFilterSubqueryStrategy SubqueryStrategy { get; set; } = RowFilterSubqueryStrategy.Exists;
+}
+
+/// <summary>
+/// Diagnostics and logging options for generated SQL queries.
+/// </summary>
+public sealed class LoggingOptions
+{
+    public bool LogGeneratedSql { get; set; } = false;
 }
 
 

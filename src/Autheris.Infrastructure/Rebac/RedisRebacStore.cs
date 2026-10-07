@@ -33,7 +33,7 @@ public sealed class RedisRebacStore : IRebacStore
 
     public async ValueTask AddTupleAsync(RebacTuple tuple, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(tuple);
+        ValidateTuple(tuple);
         var db = _multiplexer.GetDatabase();
         var normalized = tuple with { TenantId = NormalizeTenant(tuple.TenantId) };
         await db.HashSetAsync(TenantKey(normalized.TenantId), BuildField(normalized), JsonSerializer.Serialize(normalized, JsonOptions)).ConfigureAwait(false);
@@ -52,7 +52,7 @@ public sealed class RedisRebacStore : IRebacStore
 
     public async ValueTask<bool> DeleteTupleAsync(RebacTuple tuple, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(tuple);
+        ValidateTuple(tuple);
         var db = _multiplexer.GetDatabase();
         var tenant = NormalizeTenant(tuple.TenantId);
         var removed = await db.HashDeleteAsync(TenantKey(tenant), BuildField(tuple with { TenantId = tenant })).ConfigureAwait(false);
@@ -83,13 +83,41 @@ public sealed class RedisRebacStore : IRebacStore
 
             // Defense in depth: never return a tuple whose embedded tenant differs from the partition.
             if (!string.Equals(NormalizeTenant(t.TenantId), tenant, StringComparison.OrdinalIgnoreCase)) continue;
-            if (!string.IsNullOrWhiteSpace(user) && !string.Equals(t.User, user, StringComparison.OrdinalIgnoreCase)) continue;
-            if (!string.IsNullOrWhiteSpace(relation) && !string.Equals(t.Relation, relation, StringComparison.OrdinalIgnoreCase)) continue;
-            if (!string.IsNullOrWhiteSpace(obj) && !string.Equals(t.Object, obj, StringComparison.OrdinalIgnoreCase)) continue;
+            if (user != null)
+            {
+                if (string.IsNullOrWhiteSpace(user) || !string.Equals(t.User, user, StringComparison.OrdinalIgnoreCase)) continue;
+            }
+            if (relation != null)
+            {
+                if (string.IsNullOrWhiteSpace(relation) || !string.Equals(t.Relation, relation, StringComparison.OrdinalIgnoreCase)) continue;
+            }
+            if (obj != null)
+            {
+                if (string.IsNullOrWhiteSpace(obj) || !string.Equals(t.Object, obj, StringComparison.OrdinalIgnoreCase)) continue;
+            }
             result.Add(t);
         }
 
         return result;
+    }
+
+    private static void ValidateTuple(RebacTuple tuple)
+    {
+        ArgumentNullException.ThrowIfNull(tuple);
+        if (string.IsNullOrWhiteSpace(tuple.User))
+            throw new ArgumentException("ReBAC tuple 'User' must not be null or whitespace.", nameof(tuple));
+        if (string.IsNullOrWhiteSpace(tuple.Relation))
+            throw new ArgumentException("ReBAC tuple 'Relation' must not be null or whitespace.", nameof(tuple));
+        if (string.IsNullOrWhiteSpace(tuple.Object))
+            throw new ArgumentException("ReBAC tuple 'Object' must not be null or whitespace.", nameof(tuple));
+        if (string.IsNullOrWhiteSpace(tuple.TenantId))
+            throw new ArgumentException("ReBAC tuple 'TenantId' must not be null or whitespace.", nameof(tuple));
+        if (tuple.Object.Contains(':'))
+        {
+            var parts = tuple.Object.Split(':', 2);
+            if (string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
+                throw new ArgumentException("ReBAC tuple 'Object' contains an empty namespace or entity id.", nameof(tuple));
+        }
     }
 
     public async ValueTask ClearTenantTuplesAsync(string tenantId, CancellationToken ct = default)

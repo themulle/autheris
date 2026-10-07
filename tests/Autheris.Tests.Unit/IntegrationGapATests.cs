@@ -171,10 +171,10 @@ public sealed class IntegrationGapATests
     [Fact]
     public void GAP04_ProductionWarnings_AndRegularDml_DoNotAbortStartup()
     {
-        // WARN entries (e.g. Itsm.LegacyGlobalWebhookSecret) and the regular option WebSql.AllowDml + DmlWriterRoles are allowed in Production.
+        // WARN entries (e.g. Catalog.AllowLegacyPayloadOnlySignature) and the regular option WebSql.AllowDml + DmlWriterRoles are allowed in Production.
         var options = new GatewayOptions
         {
-            Itsm = new ItsmOptions { LegacyGlobalWebhookSecret = true },
+            Catalog = new DataCatalogOptions { AllowLegacyPayloadOnlySignature = true },
             WebSql = new WebSqlOptions { AllowDml = true, DmlWriterRoles = ["WebSqlWriter"] },
             DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "vault://keys/prod-hmac" }
         };
@@ -227,9 +227,9 @@ public sealed class IntegrationGapATests
         };
 
         options.HasAnySecurityBypassActive.ShouldBeTrue();
-        options.HasAnyDangerBypassActive.ShouldBeFalse();
+        options.HasAnyDangerBypassActive.ShouldBeTrue();
         var bypasses = options.GetAllActiveBypasses();
-        bypasses.ShouldContain(b => b.StartsWith("WARN:itsm_legacy_global_webhook_secret", StringComparison.Ordinal));
+        bypasses.ShouldContain(b => b.StartsWith("DANGER:itsm_legacy_global_webhook_secret", StringComparison.Ordinal));
         bypasses.ShouldContain(b => b.StartsWith("WARN:catalog_legacy_payload_only_signature", StringComparison.Ordinal));
         bypasses.ShouldContain(b => b.StartsWith("WARN:allow_development_in_container", StringComparison.Ordinal));
     }

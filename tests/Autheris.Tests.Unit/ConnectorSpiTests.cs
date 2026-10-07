@@ -21,7 +21,7 @@ namespace Autheris.Tests.Unit;
 
 public class ConnectorSpiTests
 {
-    private static TableMetadata CreateSampleMetadata(string domain = "finance", string schema = "dbo", string table = "Invoices", string sourceName = "test-sql")
+    private static TableMetadata CreateSampleMetadata(string domain = "finance", string schema = "dbo", string table = "Invoices", string sourceName = "test-sql", string sourceType = "PostgreSQL")
     {
         var identifier = new TableIdentifier(domain, schema, table);
         return new TableMetadata
@@ -32,7 +32,8 @@ public class ConnectorSpiTests
                 SchemaName = schema,
                 TableName = table,
                 DisplayName = "Customer Invoices",
-                DataSourceType = DataSourceType.Sql
+                DataSourceType = DataSourceType.Sql,
+                SourceType = sourceType
             },
             Columns =
             [
@@ -248,7 +249,7 @@ public class ConnectorSpiTests
     public async Task SqlConnector_ResolvesConnectionByTableSourceName_NotByConnectorId()
     {
         // Connection is configured under the table's data source ("lwetem_prod"), the connector is registered as "default-sql".
-        var meta = CreateSampleMetadata(sourceName: "lwetem_prod");
+        var meta = CreateSampleMetadata(sourceName: "lwetem_prod", sourceType: "SqlServer");
         var decision = TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
 
         var options = Options.Create(new GatewayOptions
