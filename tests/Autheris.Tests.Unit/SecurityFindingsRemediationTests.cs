@@ -1114,6 +1114,104 @@ public class SecurityFindingsRemediationTests
         maxSchemaRegistryPayloadBytes.ShouldBe(10485760);
     }
 
+    [Fact]
+    public void F7_ValidateGatewayOptions_InvalidModelPath_WhenCasbinDisabled_ThrowsValidationException()
+    {
+        var options = new GatewayOptions
+        {
+            Casbin = new CasbinOptions
+            {
+                Enabled = false,
+                ModelPath = "non_existent_model_file.conf"
+            }
+        };
+
+        var devEnv = Substitute.For<IHostEnvironment>();
+        devEnv.EnvironmentName.Returns(Environments.Development);
+
+        var ex = Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
+        ex.Message.ShouldContain("Casbin Model-Datei");
+        ex.Message.ShouldContain("wurde nicht gefunden");
+    }
+
+    [Fact]
+    public void RPOL5_ValidateGatewayOptions_PolicyFileWithOnlyComments_ThrowsValidationException()
+    {
+        var tempModel = Path.GetTempFileName();
+        var tempPolicy = Path.GetTempFileName();
+        try
+        {
+            // Valid model from CasbinEnforcementService
+            File.WriteAllText(tempModel, Autheris.Application.Governance.CasbinEnforcementService.DefaultModelText);
+
+            // Policy with only comments
+            File.WriteAllText(tempPolicy, """
+                # This file contains only comments
+                # No p-rules are declared
+                """);
+
+            var options = new GatewayOptions
+            {
+                Casbin = new CasbinOptions
+                {
+                    Enabled = true,
+                    ModelPath = tempModel,
+                    PolicyPath = tempPolicy
+                }
+            };
+
+            var devEnv = Substitute.For<IHostEnvironment>();
+            devEnv.EnvironmentName.Returns(Environments.Development);
+
+            var ex = Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
+                GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
+            ex.Message.ShouldContain("enthält keine gültigen 'p'-Regeln");
+        }
+        finally
+        {
+            if (File.Exists(tempModel)) File.Delete(tempModel);
+            if (File.Exists(tempPolicy)) File.Delete(tempPolicy);
+        }
+    }
+
+    [Fact]
+    public void RPOL5_ValidateGatewayOptions_ValidPolicyFile_Succeeds()
+    {
+        var tempModel = Path.GetTempFileName();
+        var tempPolicy = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(tempModel, Autheris.Application.Governance.CasbinEnforcementService.DefaultModelText);
+
+            File.WriteAllText(tempPolicy, """
+                # Valid rule
+                p, alice, tenant-a, hr.employees, read, true, allow
+                """);
+
+            var options = new GatewayOptions
+            {
+                Casbin = new CasbinOptions
+                {
+                    Enabled = true,
+                    ModelPath = tempModel,
+                    PolicyPath = tempPolicy
+                }
+            };
+
+            var devEnv = Substitute.For<IHostEnvironment>();
+            devEnv.EnvironmentName.Returns(Environments.Development);
+
+            Should.NotThrow(() =>
+                GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
+        }
+        finally
+        {
+            if (File.Exists(tempModel)) File.Delete(tempModel);
+            if (File.Exists(tempPolicy)) File.Delete(tempPolicy);
+        }
+    }
+
     private sealed class TestPolicyEnforcementService : IPolicyEnforcementService
     {
         private readonly Func<SecurityEvaluationContext, TableAccessDecision> _decider;

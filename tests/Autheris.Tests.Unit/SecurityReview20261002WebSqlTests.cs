@@ -806,6 +806,7 @@ public sealed class SecurityReview20261002WebSqlTests
         rowsObserved.ShouldBeTrue();
         fakeConnection.CurrentTransaction.ShouldNotBeNull();
         fakeConnection.CurrentTransaction.WasCommitted.ShouldBeTrue();
+        fakeConnection.CurrentTransaction.WasDisposed.ShouldBeTrue();
     }
 
     [Fact]
@@ -872,6 +873,7 @@ public sealed class SecurityReview20261002WebSqlTests
 
         fakeConnection.CurrentTransaction.ShouldNotBeNull();
         fakeConnection.CurrentTransaction.WasRolledBack.ShouldBeTrue();
+        fakeConnection.CurrentTransaction.WasDisposed.ShouldBeTrue();
     }
 
     private sealed class StrictDriverDbConnection : DbConnection
@@ -905,9 +907,22 @@ public sealed class SecurityReview20261002WebSqlTests
         public StrictDriverDbDataReader? ActiveReader { get; set; }
         public bool WasCommitted { get; private set; }
         public bool WasRolledBack { get; private set; }
+        public bool WasDisposed { get; private set; }
         private readonly DbConnection _connection;
 
         public StrictDriverDbTransaction(DbConnection connection) => _connection = connection;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) WasDisposed = true;
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            WasDisposed = true;
+            await base.DisposeAsync();
+        }
 
         public override void Commit()
         {
@@ -1097,6 +1112,75 @@ public sealed class SecurityReview20261002WebSqlTests
         msg.ShouldNotBeNull();
         msg.ShouldBe("Invalid SQL syntax.");
         msg.ShouldNotContain("unexpected token");
+    }
+
+    #endregion
+
+    #region D-6 Tenant Identity Sanitization Tests
+
+    [Fact]
+    public async Task SqlDataSourceExecutor_InvalidTenantClaim_ThrowsForbiddenWithGenericMessage()
+    {
+        var connFactory = Substitute.For<ISqlConnectionFactory>();
+        var conn = Substitute.For<DbConnection>();
+        var cmd = Substitute.For<DbCommand>();
+        var paramCol = Substitute.For<DbParameterCollection>();
+        conn.CreateCommand().Returns(cmd);
+        cmd.Parameters.Returns(paramCol);
+        cmd.CreateParameter().Returns(Substitute.For<DbParameter>());
+        connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(conn));
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["test_ds"] = new() { ConnectionString = "Data Source=test.db;", Provider = "sqlite" }
+                }
+            }
+        });
+
+        var executor = new SqlDataSourceExecutor(
+            connectionFactory: connFactory,
+            sessionInitializer: Substitute.For<IDbSessionContextInitializer>(),
+            options: options,
+            logger: NullLogger<SqlDataSourceExecutor>.Instance,
+            environment: CreateDevEnvironment());
+
+        var table = new Table
+        {
+            SourceName = "test_ds",
+            SchemaName = "main",
+            TableName = "users",
+            DataSourceType = DataSourceType.Sql,
+            SourceType = "sqlite"
+        };
+        var metadata = new TableMetadata
+        {
+            Table = table,
+            Identifier = table.ToIdentifier("test_ds"),
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+
+        var invalidTenantClaim = "malicious_tenant; DROP TABLE users;--";
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim("sub", "attacker"),
+            new Claim("tenant_id", invalidTenantClaim)
+        ]));
+
+        var context = new DataSourceExecutionContext(
+            SourceName: "test_ds",
+            Metadata: metadata,
+            Principal: principal,
+            AccessDecision: TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear }),
+            Arguments: new Dictionary<string, object?>(),
+            RequestedFields: ["id"]);
+
+        var ex = await Should.ThrowAsync<GatewayForbiddenException>(() => executor.ExecuteAsync(context));
+        ex.Message.ShouldBe("Invalid tenant identity.");
+        ex.Message.ShouldNotContain(invalidTenantClaim);
     }
 
     #endregion

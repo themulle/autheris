@@ -1252,4 +1252,48 @@ public class ProcedureEndpointTests
         var paths = (Dictionary<string, object>)ok.Value!["paths"];
         paths.ShouldContainKey("/api/v1/procedures/get_orders");
     }
+
+    [Fact]
+    public async Task MssqlProcedureInvoker_InvalidTenantIdentity_ThrowsGatewayForbiddenException()
+    {
+        var connFactory = Substitute.For<ISqlConnectionFactory>();
+        var conn = Substitute.For<System.Data.Common.DbConnection>();
+        connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(conn));
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["mssql_ds"] = new() { ConnectionString = "Data Source=mssql;", Provider = "SqlServer" }
+                }
+            },
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, ConnectionName = "mssql_ds" }
+            }
+        });
+
+        var provider = new ProcedureConnectionProvider(connFactory, options);
+        var invoker = new MssqlProcedureInvoker(provider, options);
+
+        const string yaml = """
+            name: get_orders
+            procedure: api.usp_GetOrders
+            kind: procedure
+            rls: session_context
+            parameters: []
+            outputs: []
+            """;
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "mssql_ds", allowRlsNone: false, maxTimeoutSeconds: 30);
+
+        // Security context with invalid characters for TenantId (e.g., spaces or semicolons)
+        var security = new ProcedureSecurityContext("invalid tenant id; DROP TABLE", "S-1-5-21-ALICE", "AUDIT");
+
+        var ex = await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayForbiddenException>(() =>
+            invoker.ExecuteReadAsync(def, new Dictionary<string, object?>(), security, CancellationToken.None));
+        ex.Message.ShouldBe("Invalid tenant identity.");
+    }
 }

@@ -25,7 +25,7 @@ using Microsoft.Extensions.Logging;
 
 public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDisposable
 {
-    private sealed record GroupingRule(string User, string Role);
+    internal sealed record GroupingRule(string User, string Role);
 
     private sealed record PolicySources(
         ImmutableDictionary<string, ImmutableArray<CasbinRuleMetadata>> GlobalRules,
@@ -189,7 +189,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         return Volatile.Read(ref _currentSnapshot).HasPolicies(tenant.Value);
     }
 
-    public Enforcer GetOrCreateEnforcer(TenantId tenant)
+    internal Enforcer GetEnforcer(TenantId tenant)
     {
         var snapshot = Volatile.Read(ref _currentSnapshot);
         if (snapshot.Enforcers.TryGetValue(tenant.Value, out var existing))
@@ -559,67 +559,71 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
         try
         {
-            // First check if any deny policy matches for the user or their groups (Deny takes absolute precedence)
-            bool denied = false;
-            foreach (var rule in tenantRulesSnapshot)
+            // F-4: Synchronize access to the shared enforcer across concurrent request threads.
+            lock (enforcer)
             {
-                // Deny rules are matched conservatively (any action, wildcard tenant or current tenant).
-                if (!string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase) ||
-                    (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
-                    !MatchObjectPattern(rule.Obj, tableStr))
+                // First check if any deny policy matches for the user or their groups (Deny takes absolute precedence)
+                bool denied = false;
+                foreach (var rule in tenantRulesSnapshot)
                 {
-                    continue;
-                }
-
-                foreach (var subject in subjects)
-                {
-                    if (!IsSubjectMatch(rule.Sub, subject, enforcer))
+                    // Deny rules are matched conservatively (any action, wildcard tenant or current tenant).
+                    if (!string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase) ||
+                        (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
+                        !MatchObjectPattern(rule.Obj, tableStr))
                     {
                         continue;
                     }
 
-                    // Fail-closed: a deny rule whose condition cannot be evaluated is treated as matching.
-                    if (EvaluateSubRule(rule.SubRule, context, subject, tableStr, RequestedAction) != false)
+                    foreach (var subject in subjects)
                     {
-                        denied = true;
+                        if (!IsSubjectMatch(rule.Sub, subject, enforcer))
+                        {
+                            continue;
+                        }
+
+                        // Fail-closed: a deny rule whose condition cannot be evaluated is treated as matching.
+                        if (EvaluateSubRule(rule.SubRule, context, subject, tableStr, RequestedAction) != false)
+                        {
+                            denied = true;
+                            break;
+                        }
+                    }
+
+                    if (denied)
+                    {
                         break;
                     }
                 }
 
-                if (denied)
+                if (!denied)
                 {
-                    break;
-                }
-            }
-
-            if (!denied)
-            {
-                // SEC H-12: The allow decision and the RLS filter collection use ONE matcher. The set of matching allow
-                // rules determined here is both the authorization basis and the source of the RLS filters.
-                foreach (var rule in tenantRulesSnapshot)
-                {
-                    if (IsAllowRuleMatch(rule, context, subjects, tableStr, enforcer))
+                    // SEC H-12: The allow decision and the RLS filter collection use ONE matcher. The set of matching allow
+                    // rules determined here is both the authorization basis and the source of the RLS filters.
+                    foreach (var rule in tenantRulesSnapshot)
                     {
-                        matchedAllowRules.Add(rule);
+                        if (IsAllowRuleMatch(rule, context, subjects, tableStr, enforcer))
+                        {
+                            matchedAllowRules.Add(rule);
+                        }
                     }
-                }
 
-                // Casbin itself remains an additional (AND) gate: if Casbin denies (e.g. Casbin-only deny semantics,
-                // role hierarchies), access is denied. If Casbin allows but no allow rule matched in the gateway
-                // matcher (e.g. keyMatch2 treating '.' as regex wildcard, see M-18), access is denied as well,
-                // because the RLS filters of the Casbin-matched rule could not be collected (fail-closed).
-                bool casbinAllowed = false;
-                foreach (var subject in subjects)
-                {
-                    // r = sub, tenant, obj, act, ctx
-                    if (enforcer.Enforce(subject, context.Tenant.Value, tableStr, RequestedAction, context))
+                    // Casbin itself remains an additional (AND) gate: if Casbin denies (e.g. Casbin-only deny semantics,
+                    // role hierarchies), access is denied. If Casbin allows but no allow rule matched in the gateway
+                    // matcher (e.g. keyMatch2 treating '.' as regex wildcard, see M-18), access is denied as well,
+                    // because the RLS filters of the Casbin-matched rule could not be collected (fail-closed).
+                    bool casbinAllowed = false;
+                    foreach (var subject in subjects)
                     {
-                        casbinAllowed = true;
-                        break;
+                        // r = sub, tenant, obj, act, ctx
+                        if (enforcer.Enforce(subject, context.Tenant.Value, tableStr, RequestedAction, context))
+                        {
+                            casbinAllowed = true;
+                            break;
+                        }
                     }
-                }
 
-                allowed = casbinAllowed && matchedAllowRules.Count > 0;
+                    allowed = casbinAllowed && matchedAllowRules.Count > 0;
+                }
             }
         }
         catch (Exception)
@@ -668,7 +672,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 $"Access to table '{tableStr}' denied by ABAC policy for tenant '{context.Tenant.Value}'.");
         }
 
-        if (cacheable)
+        // E-5: Do not cache decision if the snapshot epoch has changed while evaluating
+        if (cacheable && Volatile.Read(ref _currentSnapshot).Epoch == snapshot.Epoch)
         {
             _decisionCache.TryAdd(cacheKey, new CachedDecision(decision, Stopwatch.GetTimestamp()));
         }
@@ -1138,9 +1143,21 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         throw new FormatException("Casbin policy effect must be 'allow' or 'deny'.");
     }
 
+    public static int ValidatePolicyFile(string policyText, bool modelSupportsWildcardTenant = true)
+    {
+        var (rules, _) = ParsePolicyText(policyText, defaultTenant: null, modelSupportsWildcardTenant);
+        return rules.Values.Sum(r => r.Length);
+    }
+
     private (ImmutableDictionary<string, ImmutableArray<CasbinRuleMetadata>> Rules, ImmutableArray<GroupingRule> Grouping) ParsePolicyText(
         string policyText,
-        string? defaultTenant = null)
+        string? defaultTenant = null) =>
+        ParsePolicyText(policyText, defaultTenant, _modelSupportsWildcardTenant);
+
+    internal static (ImmutableDictionary<string, ImmutableArray<CasbinRuleMetadata>> Rules, ImmutableArray<GroupingRule> Grouping) ParsePolicyText(
+        string policyText,
+        string? defaultTenant,
+        bool modelSupportsWildcardTenant)
     {
         ArgumentNullException.ThrowIfNull(policyText);
 
@@ -1221,7 +1238,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                         ruleTenant = specifiedTenant ?? "*";
                     }
 
-                    if (ruleTenant == "*" && !_modelSupportsWildcardTenant)
+                    if (ruleTenant == "*" && !modelSupportsWildcardTenant)
                     {
                         throw new InvalidOperationException("Das Casbin-Modell unterstützt keine Wildcard-Mandanten (Probe W1). `*`-Regeln sind nicht erlaubt.");
                     }

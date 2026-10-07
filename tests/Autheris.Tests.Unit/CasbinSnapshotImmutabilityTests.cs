@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Shouldly;
 using Xunit;
@@ -338,5 +339,47 @@ public sealed class CasbinSnapshotImmutabilityTests
         // Both alice and bob should now be allowed for tenant-a
         (await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "alice", HrTable))).IsAllowed.ShouldBeTrue();
         (await casbin.EvaluatePolicyAsync(CreateContext(TenantA, "bob", HrTable))).IsAllowed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Test13_F4_ConcurrentEvaluations_WithRoleInheritance_ThreadSafe()
+    {
+        using var casbin = new CasbinEnforcementService();
+
+        // Configure roles and rules
+        casbin.LoadPolicyFromText(TenantA,
+            "g, alice, role:viewer\n" +
+            "g, bob, role:editor\n" +
+            "p, role:viewer, tenant-a, hr.dbo.employees, read, true, allow\n" +
+            "p, role:editor, tenant-a, hr.dbo.salaries, read, true, allow\n");
+
+        // Run 50 parallel evaluations on the same enforcer
+        var tasks = new List<Task<TableAccessDecision>>();
+        for (int i = 0; i < 50; i++)
+        {
+            var user = (i % 2 == 0) ? "alice" : "bob";
+            var table = (i % 2 == 0) ? HrTable : SalariesTable;
+            tasks.Add(Task.Run(async () => await casbin.EvaluatePolicyAsync(CreateContext(TenantA, user, table))));
+        }
+
+        var results = await Task.WhenAll(tasks);
+        foreach (var r in results)
+        {
+            r.IsAllowed.ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    public void Test14_E4_GetEnforcer_Internal_ReturnsCorrectEnforcer()
+    {
+        using var casbin = new CasbinEnforcementService();
+        casbin.LoadPolicyFromText(TenantA, "p, alice, tenant-a, hr.dbo.employees, read, true, allow\n");
+
+        var enforcerA = casbin.GetEnforcer(TenantA);
+        enforcerA.ShouldNotBeNull();
+
+        // Unknown tenant returns the shared fallback enforcer without mutation
+        var unknownEnforcer = casbin.GetEnforcer(new TenantId("unknown-tenant"));
+        unknownEnforcer.ShouldNotBeNull();
     }
 }

@@ -376,6 +376,10 @@ public static class GatewayServiceCollectionExtensions
             var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
             var rlsGen = sp.GetService<Autheris.Application.Interfaces.IRlsFilterGenerator>();
             var logger = sp.GetService<Microsoft.Extensions.Logging.ILogger<CasbinEnforcementService>>();
+            if (!options.Casbin.Enabled)
+            {
+                logger?.LogWarning("Casbin ABAC engine is DISABLED (Gateway:Casbin:Enabled = false). Access control via Casbin policies is inactive.");
+            }
             var service = new CasbinEnforcementService(options.Casbin.ModelPath, rlsGen, logger);
             if (options.Casbin.Enabled && !string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
@@ -993,20 +997,16 @@ public static class GatewayServiceCollectionExtensions
                 "Loopback/Link-Local/Metadaten/CGNAT/Multicast/IPv4-mapped-Bereichen:\n  - " + string.Join("\n  - ", egressErrors));
         }
 
-        // POL-1: If Casbin is enabled, ModelPath and PolicyPath must be configured, exist, and not be empty (fail-closed).
-        if (options.Casbin.Enabled)
+        // POL-1 / F-7: Validate Casbin ModelPath whenever configured, or require it when Enabled
+        if (!string.IsNullOrWhiteSpace(options.Casbin.ModelPath))
         {
-            if (string.IsNullOrWhiteSpace(options.Casbin.ModelPath))
-            {
-                throw new ValidationException("Casbin ist aktiviert (Gateway:Casbin:Enabled = true), aber Casbin:ModelPath ist nicht konfiguriert.");
-            }
             if (!File.Exists(options.Casbin.ModelPath))
             {
-                throw new ValidationException($"Casbin ist aktiviert, aber Model-Datei '{options.Casbin.ModelPath}' wurde nicht gefunden.");
+                throw new ValidationException($"Casbin Model-Datei '{options.Casbin.ModelPath}' wurde nicht gefunden.");
             }
             if (new FileInfo(options.Casbin.ModelPath).Length == 0)
             {
-                throw new ValidationException($"Casbin ist aktiviert, aber Model-Datei '{options.Casbin.ModelPath}' ist leer.");
+                throw new ValidationException($"Casbin Model-Datei '{options.Casbin.ModelPath}' ist leer.");
             }
 
             try
@@ -1017,7 +1017,15 @@ public static class GatewayServiceCollectionExtensions
             {
                 throw new ValidationException($"Casbin-Modell '{options.Casbin.ModelPath}' erfüllt den Gateway-Vertrag nicht: {string.Join("; ", ex.Violations)}", ex);
             }
+        }
+        else if (options.Casbin.Enabled)
+        {
+            throw new ValidationException("Casbin ist aktiviert (Gateway:Casbin:Enabled = true), aber Casbin:ModelPath ist nicht konfiguriert.");
+        }
 
+        // POL-1 / R-POL-5: If Casbin is enabled, PolicyPath must exist, not be empty, and contain valid 'p' rules
+        if (options.Casbin.Enabled)
+        {
             if (string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
                 throw new ValidationException("Casbin ist aktiviert (Gateway:Casbin:Enabled = true), aber Casbin:PolicyPath ist nicht konfiguriert.");
@@ -1029,6 +1037,25 @@ public static class GatewayServiceCollectionExtensions
             if (new FileInfo(options.Casbin.PolicyPath).Length == 0)
             {
                 throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' ist leer.");
+            }
+
+            // R-POL-5: Test-parse policy file at startup and verify that at least one 'p' rule exists (fail-closed)
+            try
+            {
+                var policyText = File.ReadAllText(options.Casbin.PolicyPath);
+                int totalPRules = Autheris.Application.Governance.CasbinEnforcementService.ValidatePolicyFile(policyText, modelSupportsWildcardTenant: true);
+                if (totalPRules == 0)
+                {
+                    throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' enthält keine gültigen 'p'-Regeln.");
+                }
+            }
+            catch (ValidationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' ist ungültig: {ex.Message}", ex);
             }
         }
 

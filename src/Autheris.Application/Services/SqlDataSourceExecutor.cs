@@ -150,7 +150,10 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
         // SEC H-13: HMAC pseudonymization is computed in the gateway after reading (keyed with the resolved secret),
         // never in SQL with a secret (or secret name) embedded in the statement text.
-        var tenantVal = context.Tenant?.Value ?? context.Principal.FindFirst("tenant")?.Value ?? TenantId.LegacySingleTenant.Value;
+        var tenantVal = context.Tenant?.Value
+            ?? context.Principal?.FindFirst("tenant_id")?.Value
+            ?? context.Principal?.FindFirst("tenant")?.Value
+            ?? TenantId.LegacySingleTenant.Value;
         var gatewayHmacColumns = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var col in authorizedColumns)
@@ -326,7 +329,8 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
             if (!TenantId.TryParse(tenantVal, out var validatedTenantId))
             {
-                throw new GatewayForbiddenException($"Invalid tenant identity '{tenantVal}'.");
+                _logger?.LogWarning("Invalid tenant identity claim rejected: {TenantVal}", tenantVal);
+                throw new GatewayForbiddenException("Invalid tenant identity.");
             }
 
             tx = await _sessionInitializer.InitializeSessionAsync(
