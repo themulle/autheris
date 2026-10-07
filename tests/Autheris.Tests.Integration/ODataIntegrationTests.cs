@@ -34,6 +34,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
         var response = await client.GetAsync("/odata/v4");
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        response.Headers.GetValues("OData-Version").ShouldContain("4.0");
     }
 
     [Fact]
@@ -68,11 +69,24 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
 
         var response = await client.GetAsync("/odata/v4");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.GetValues("OData-Version").ShouldContain("4.0");
         response.Content.Headers.ContentType?.MediaType.ShouldBe("application/json");
 
         var body = await response.Content.ReadAsStringAsync();
         body.ShouldContain("$metadata");
         body.ShouldContain("EntitySet");
+    }
+
+    [Fact]
+    public async Task ODataServiceDocument_WithTrailingSlash_Returns200AndODataVersionHeader()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-USER-1");
+
+        var response = await client.GetAsync("/odata/v4/");
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.GetValues("OData-Version").ShouldContain("4.0");
+        response.Content.Headers.ContentType?.MediaType.ShouldBe("application/json");
     }
 
     [Fact]
@@ -83,6 +97,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
 
         var response = await client.GetAsync("/odata/v4/$metadata");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.GetValues("OData-Version").ShouldContain("4.0");
         response.Content.Headers.ContentType?.MediaType.ShouldBe("application/xml");
 
         var xml = await response.Content.ReadAsStringAsync();
@@ -99,6 +114,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
 
         var response = await client.GetAsync("/odata/v4/finance/dbo/finance_table_1?$top=10");
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        response.Headers.GetValues("OData-Version").ShouldContain("4.0");
 
         var body = await response.Content.ReadAsStringAsync();
         body.ShouldContain("ACCESS_DENIED");
@@ -137,6 +153,7 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
 
         var response = await client.GetAsync("/odata/v4/finance/dbo/finance_table_1?$top=5&$skip=0&$count=true");
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.GetValues("OData-Version").ShouldContain("4.0");
 
         var body = await response.Content.ReadAsStringAsync();
         body.ShouldContain("$metadata#finance_dbo_finance_table_1");
