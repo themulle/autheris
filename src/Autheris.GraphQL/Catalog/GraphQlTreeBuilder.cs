@@ -71,7 +71,7 @@ public static class GraphQlTreeBuilder
             var firstVal = ResolveValue(firstArg.ValueLiteral, context);
             if (firstVal is int fInt) limit = fInt;
             else if (firstVal is long fLng) limit = (int)fLng;
-            else if (int.TryParse(firstVal?.ToString(), out var parsedFirst)) limit = parsedFirst;
+            else if (int.TryParse(Convert.ToString(firstVal, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedFirst)) limit = parsedFirst;
         }
 
         if (limit < 1 || limit > maxAllowedLimit)
@@ -84,7 +84,7 @@ public static class GraphQlTreeBuilder
             var offsetVal = ResolveValue(offsetArg.ValueLiteral, context);
             if (offsetVal is int oInt) offset = oInt;
             else if (offsetVal is long oLng) offset = (int)oLng;
-            else if (int.TryParse(offsetVal?.ToString(), out var parsedOffset)) offset = parsedOffset;
+            else if (int.TryParse(Convert.ToString(offsetVal, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedOffset)) offset = parsedOffset;
         }
 
         if (offset < 0)
@@ -427,14 +427,17 @@ public static class GraphQlTreeBuilder
         };
     }
 
-    private static object? CoerceValue(object? rawVal, CatalogFieldType type, TreeFilterOperator op)
+    private const NumberStyles StrictDecimalStyles =
+        NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent;
+
+    internal static object? CoerceValue(object? rawVal, CatalogFieldType type, TreeFilterOperator op)
     {
         if (rawVal == null) return null;
 
         if (op == TreeFilterOperator.IsNull)
         {
             if (rawVal is bool b) return b;
-            if (bool.TryParse(rawVal.ToString(), out var pb)) return pb;
+            if (bool.TryParse(Convert.ToString(rawVal, CultureInfo.InvariantCulture), out var pb)) return pb;
             throw new GatewayInvalidQueryException("The 'isNull' filter value must be a boolean (true or false).");
         }
 
@@ -450,10 +453,64 @@ public static class GraphQlTreeBuilder
         return CoerceSingleValue(rawVal, type);
     }
 
-    private static object? CoerceSingleValue(object? val, CatalogFieldType type)
+    internal static object? CoerceSingleValue(object? val, CatalogFieldType type)
     {
         if (val == null) return null;
-        var str = val.ToString()!;
+
+        switch (type)
+        {
+            case CatalogFieldType.Int:
+                if (val is int iVal) return iVal;
+                if (val is long lVal)
+                {
+                    if (lVal is < int.MinValue or > int.MaxValue)
+                    {
+                        throw new GatewayInvalidQueryException($"Integer value '{lVal}' is out of range.");
+                    }
+                    return (int)lVal;
+                }
+                if (val is short sVal) return (int)sVal;
+                if (val is byte bVal) return (int)bVal;
+                break;
+
+            case CatalogFieldType.Long:
+                if (val is long lVal2) return lVal2;
+                if (val is int iVal2) return (long)iVal2;
+                if (val is short sVal2) return (long)sVal2;
+                if (val is byte bVal2) return (long)bVal2;
+                break;
+
+            case CatalogFieldType.Decimal:
+                if (val is decimal decVal) return decVal;
+                if (val is int iDec) return (decimal)iDec;
+                if (val is long lDec) return (decimal)lDec;
+                if (val is double dDec) return (decimal)dDec;
+                if (val is float fDec) return (decimal)fDec;
+                break;
+
+            case CatalogFieldType.Float:
+                if (val is double dVal) return dVal;
+                if (val is float fVal) return (double)fVal;
+                if (val is decimal decF) return (double)decF;
+                if (val is int iF) return (double)iF;
+                if (val is long lF) return (double)lF;
+                break;
+
+            case CatalogFieldType.Boolean:
+                if (val is bool bVal3) return bVal3;
+                break;
+
+            case CatalogFieldType.DateTime:
+                if (val is DateTimeOffset dtoVal) return dtoVal;
+                if (val is DateTime dtVal) return new DateTimeOffset(dtVal.ToUniversalTime(), TimeSpan.Zero);
+                break;
+
+            default:
+                if (val is string sVal3) return sVal3;
+                break;
+        }
+
+        var str = Convert.ToString(val, CultureInfo.InvariantCulture) ?? string.Empty;
 
         return type switch
         {
@@ -463,15 +520,17 @@ public static class GraphQlTreeBuilder
             CatalogFieldType.Long => long.TryParse(str, NumberStyles.Integer, CultureInfo.InvariantCulture, out var l)
                 ? (object)l
                 : throw new GatewayInvalidQueryException($"Invalid long integer value '{str}'."),
-            CatalogFieldType.Decimal => decimal.TryParse(str, NumberStyles.Number | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out var d)
+            CatalogFieldType.Decimal => decimal.TryParse(str, StrictDecimalStyles, CultureInfo.InvariantCulture, out var d)
                 ? (object)d
                 : throw new GatewayInvalidQueryException($"Invalid decimal value '{str}'."),
             CatalogFieldType.Float => double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out var f)
                 ? (object)f
                 : throw new GatewayInvalidQueryException($"Invalid float value '{str}'."),
-            CatalogFieldType.Boolean => val is bool b ? b : (bool.TryParse(str, out var pb) ? pb : throw new GatewayInvalidQueryException($"Invalid boolean value '{str}'.")),
+            CatalogFieldType.Boolean => bool.TryParse(str, out var pb)
+                ? (object)pb
+                : throw new GatewayInvalidQueryException($"Invalid boolean value '{str}'."),
             CatalogFieldType.DateTime => DateTimeOffset.TryParse(str, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var dto)
-                ? dto
+                ? (object)dto
                 : throw new GatewayInvalidQueryException($"Invalid datetime value '{str}'."),
             _ => str
         };
