@@ -67,9 +67,6 @@ public sealed class Query
         }
     }
 
-    public FinanceQuery GetFinance() => new();
-    public HrQuery GetHr() => new();
-
     [GraphQLIgnore]
     public Task<IReadOnlyList<TableMetadataDto>> GetCatalogAsync(
         [Service] IGovernanceRepository repository,
@@ -395,6 +392,14 @@ public sealed class Query
             isGovAdmin,
             isClusterAdmin);
     }
+}
+
+/// <summary>Demo root fields (<c>finance</c>, <c>hr</c>); registered only when demo data is enabled (<see cref="IDemoDataSwitch"/>).</summary>
+[ExtendObjectType(typeof(Query))]
+public sealed class DemoQueryExtensions
+{
+    public FinanceQuery GetFinance() => new();
+    public HrQuery GetHr() => new();
 }
 
 public sealed class FinanceQuery
