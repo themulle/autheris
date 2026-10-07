@@ -19,6 +19,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
     private readonly ILogger<SqlDataSourceExecutor>? _logger;
     private readonly Microsoft.Extensions.Hosting.IHostEnvironment? _environment;
     private readonly IColumnMaskingProvider? _maskingProvider;
+    private readonly IDbSessionContextInitializer _sessionInitializer;
 
     public DataSourceType SupportedType => DataSourceType.Sql;
     public const int MaxAllowedBinaryBytes = 16 * 1024 * 1024; // 16 MB limit per binary column value (SEC-SPEC-05)
@@ -28,13 +29,15 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         IOptions<GatewayOptions>? options = null,
         ILogger<SqlDataSourceExecutor>? logger = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
-        IColumnMaskingProvider? maskingProvider = null)
+        IColumnMaskingProvider? maskingProvider = null,
+        IDbSessionContextInitializer? sessionInitializer = null)
     {
         _connectionFactory = connectionFactory;
         _options = options;
         _logger = logger;
         _environment = environment;
         _maskingProvider = maskingProvider;
+        _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
     }
 
     public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(
@@ -93,13 +96,13 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         // If no real connection is configured, or connection factory is missing, execute synthetic demo data generator (fallback for dev & unit tests)
         if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString) || _connectionFactory == null)
         {
-            bool isDevOrTest = _environment == null ||
-                               string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
+            bool isDev = _environment != null &&
+                         string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
             bool isExplicitlyAllowed = _options?.Value?.AreExternalSystemsMockedIfUnreachable == true;
 
-            if (!isDevOrTest && !isExplicitlyAllowed)
+            if (!isDev && !isExplicitlyAllowed)
             {
-                throw new InvalidOperationException($"Die SQL-Datenquelle '{context.SourceName}' besitzt keine gültige Datenbankverbindung. Synthetischer Daten-Fallback ist in Produktivumgebungen deaktiviert.");
+                throw new NotSupportedException($"Die SQL-Datenquelle '{context.SourceName}' besitzt keine gültige Datenbankverbindung. Synthetischer Daten-Fallback ist in Produktivumgebungen deaktiviert.");
             }
 
             return GenerateSyntheticRows(context);
@@ -313,26 +316,25 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         }
         _logger?.LogDebug("Executing SQL Backend query for table '{Table}' with {ParamCount} parameters", context.Metadata.Identifier.ToQualifiedName(), command.Parameters.Count);
 
-        // Stufe 2: Native PostgreSQL Transaktions-Scoped Session RLS (SET LOCAL app.tenant_id = @p)
+        // Stufe 2: Native Session Context & Transaction RLS
         DbTransaction? tx = null;
         try
         {
-            // The configured connection provider decides, with the same rule as SqlConnectionFactory (no provider
-            // opens SQLite). The catalog dialect may differ (it defaults to PostgreSQL); set_config exists on PostgreSQL only.
-            var connProvider = connOptions.Provider?.Trim().ToLowerInvariant() ?? "sqlite";
-            if (connProvider is "postgres" or "postgresql" or "npgsql")
-            {
-                tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-                command.Transaction = tx;
+            var userSid = context.Principal?.FindFirst(System.Security.Claims.ClaimTypes.PrimarySid)?.Value
+                          ?? context.Principal?.FindFirst("sub")?.Value;
 
-                await using var setCmd = connection.CreateCommand();
-                setCmd.Transaction = tx;
-                setCmd.CommandText = "SELECT set_config('app.tenant_id', @p_tenant, true), set_config('TimeZone', 'UTC', true);";
-                var pTenant = setCmd.CreateParameter();
-                pTenant.ParameterName = "@p_tenant";
-                pTenant.Value = tenantVal;
-                setCmd.Parameters.Add(pTenant);
-                await setCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            tx = await _sessionInitializer.InitializeSessionAsync(
+                connection,
+                connOptions.Provider,
+                new TenantId(tenantVal),
+                userSid: userSid,
+                purpose: null,
+                requireTransaction: true,
+                ct: ct).ConfigureAwait(false);
+
+            if (tx != null)
+            {
+                command.Transaction = tx;
             }
 
             IReadOnlyList<IReadOnlyDictionary<string, object?>> results;
@@ -352,7 +354,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         {
             if (tx != null)
             {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
+                await tx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
             }
             throw;
         }

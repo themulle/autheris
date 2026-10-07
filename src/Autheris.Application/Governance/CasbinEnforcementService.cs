@@ -30,6 +30,9 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
     private readonly ConcurrentDictionary<string, string> _tenantPolicyFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FileSystemWatcher> _fileWatchers = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, System.Timers.Timer> _debounceTimers = new(StringComparer.OrdinalIgnoreCase);
+    private string? _globalPolicyFilePath;
+    private FileSystemWatcher? _globalFileWatcher;
+    private System.Timers.Timer? _globalDebounceTimer;
     private readonly IRlsFilterGenerator _rlsFilterGenerator;
     private readonly string _modelText;
     private long _policyEpoch = 1;
@@ -93,11 +96,31 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
             return true;
         }
 
+        if (_tenantRules.TryGetValue("*", out var wildcardRules) && wildcardRules.Count > 0)
+        {
+            return true;
+        }
+
+        if (_tenantEnforcers.TryGetValue("*", out var wildcardEnforcer) && wildcardEnforcer.GetPolicy().Any())
+        {
+            return true;
+        }
+
         return false;
     }
 
     public Enforcer GetOrCreateEnforcer(TenantId tenant)
     {
+        if (_tenantEnforcers.TryGetValue(tenant.Value, out var existing))
+        {
+            return existing;
+        }
+
+        if (_tenantEnforcers.TryGetValue("*", out var wildcardEnforcer))
+        {
+            return wildcardEnforcer;
+        }
+
         return _tenantEnforcers.GetOrAdd(tenant.Value, _ =>
         {
             var model = DefaultModel.CreateFromText(_modelText);
@@ -262,6 +285,13 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
             lock (tenantRulesList)
             {
                 tenantRulesSnapshot = tenantRulesList.ToList();
+            }
+        }
+        else if (_tenantRules.TryGetValue("*", out var wildcardRulesList))
+        {
+            lock (wildcardRulesList)
+            {
+                tenantRulesSnapshot = wildcardRulesList.ToList();
             }
         }
         else
@@ -977,6 +1007,193 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
         }
     }
 
+    public void LoadPolicyFromFile(string filePath, bool watchFile = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException($"Casbin policy file not found: {filePath}", filePath);
+        }
+
+        _globalPolicyFilePath = Path.GetFullPath(filePath);
+        var content = File.ReadAllText(filePath);
+        LoadPolicyFromText(content);
+
+        if (watchFile)
+        {
+            EnableGlobalFileWatcher(filePath);
+        }
+    }
+
+    public void LoadPolicyFromText(string policyText)
+    {
+        ArgumentNullException.ThrowIfNull(policyText);
+
+        var lines = policyText.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var rulesByTenant = new Dictionary<string, (Enforcer Enforcer, List<CasbinRuleMetadata> Rules)>(StringComparer.OrdinalIgnoreCase);
+        var globalGroupingRules = new List<(string User, string Role)>();
+
+        var lineNumber = 0;
+        foreach (var rawLine in lines)
+        {
+            lineNumber++;
+            var line = rawLine.Trim();
+            if (line.StartsWith('#') || string.IsNullOrWhiteSpace(line)) continue;
+
+            List<string> parts;
+            try
+            {
+                parts = SplitPolicyLine(line);
+            }
+            catch (FormatException ex)
+            {
+                throw new FormatException($"Casbin policy line {lineNumber}: {ex.Message}", ex);
+            }
+
+            var type = parts[0].ToLowerInvariant();
+            if (type == "p")
+            {
+                if (parts.Count < 4 || parts.Count > 8)
+                {
+                    throw new FormatException($"Casbin policy line {lineNumber}: 'p' rules require 4 to 8 fields.");
+                }
+
+                var sub = parts[1];
+                if (string.IsNullOrWhiteSpace(sub))
+                {
+                    throw new FormatException($"Casbin policy line {lineNumber}: subject must not be empty.");
+                }
+
+                var ruleTenant = parts.Count > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2] : "*";
+                var obj = parts.Count > 3 ? parts[3] : "*";
+                var act = parts.Count > 4 ? parts[4] : "read";
+                var subRule = parts.Count > 5 && !string.IsNullOrWhiteSpace(parts[5]) ? parts[5] : "true";
+                string eft;
+                try
+                {
+                    eft = NormalizeEffect(parts.Count > 6 ? parts[6] : null);
+                }
+                catch (FormatException ex)
+                {
+                    throw new FormatException($"Casbin policy line {lineNumber}: {ex.Message}", ex);
+                }
+
+                var rlsFilter = parts.Count > 7 && !string.IsNullOrWhiteSpace(parts[7]) ? parts[7] : null;
+
+                ValidateSubRuleTokens(subRule, rlsFilter);
+                var normalizedSubRule = Regex.Replace(subRule, @"'([^']{2,})'", "\"$1\"");
+
+                if (!rulesByTenant.TryGetValue(ruleTenant, out var entry))
+                {
+                    var model = DefaultModel.CreateFromText(_modelText);
+                    entry = (new Enforcer(model), new List<CasbinRuleMetadata>());
+                    rulesByTenant[ruleTenant] = entry;
+                }
+
+                entry.Enforcer.AddPolicy(sub, ruleTenant, obj, act, normalizedSubRule, eft);
+                entry.Rules.Add(new CasbinRuleMetadata(sub, ruleTenant, obj, act, subRule, eft, rlsFilter, null));
+            }
+            else if (type == "g")
+            {
+                if (parts.Count != 3 || string.IsNullOrWhiteSpace(parts[1]) || string.IsNullOrWhiteSpace(parts[2]))
+                {
+                    throw new FormatException($"Casbin policy line {lineNumber}: 'g' rules require exactly 3 fields.");
+                }
+
+                globalGroupingRules.Add((parts[1], parts[2]));
+            }
+            else
+            {
+                throw new FormatException($"Casbin policy line {lineNumber}: unknown rule type.");
+            }
+        }
+
+        if (rulesByTenant.Count == 0 && globalGroupingRules.Count > 0)
+        {
+            var model = DefaultModel.CreateFromText(_modelText);
+            rulesByTenant["*"] = (new Enforcer(model), new List<CasbinRuleMetadata>());
+        }
+
+        foreach (var (tName, (enforcer, rules)) in rulesByTenant)
+        {
+            foreach (var (u, r) in globalGroupingRules)
+            {
+                enforcer.AddGroupingPolicy(u, r);
+            }
+
+            _tenantEnforcers[tName] = enforcer;
+            _tenantRules[tName] = rules;
+        }
+
+        _decisionCache.Clear();
+        Interlocked.Increment(ref _policyEpoch);
+        foreach (var tName in rulesByTenant.Keys)
+        {
+            OnPolicyReloaded?.Invoke(new TenantId(tName));
+        }
+    }
+
+    private void EnableGlobalFileWatcher(string filePath)
+    {
+        var fullPath = Path.GetFullPath(filePath);
+        var dir = Path.GetDirectoryName(fullPath) ?? Directory.GetCurrentDirectory();
+        var fileName = Path.GetFileName(fullPath);
+
+        if (_globalFileWatcher != null)
+        {
+            _globalFileWatcher.Dispose();
+        }
+
+        if (_globalDebounceTimer != null)
+        {
+            _globalDebounceTimer.Dispose();
+        }
+
+        var watcher = new FileSystemWatcher(dir, fileName)
+        {
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName | NotifyFilters.CreationTime,
+            EnableRaisingEvents = true
+        };
+
+        var debounceTimer = new System.Timers.Timer(100) { AutoReset = false };
+        debounceTimer.Elapsed += (_, _) =>
+        {
+            try
+            {
+                if (File.Exists(fullPath))
+                {
+                    var text = File.ReadAllText(fullPath);
+                    LoadPolicyFromText(text);
+                }
+                else
+                {
+                    OnPolicyReloadFailed?.Invoke(new TenantId("*"), new FileNotFoundException("Casbin policy file not found during hot reload.", fullPath));
+                }
+            }
+            catch (Exception ex)
+            {
+                OnPolicyReloadFailed?.Invoke(new TenantId("*"), ex);
+            }
+        };
+
+        void OnFileEvent(object sender, FileSystemEventArgs e)
+        {
+            debounceTimer.Stop();
+            debounceTimer.Start();
+        }
+
+        watcher.Changed += OnFileEvent;
+        watcher.Created += OnFileEvent;
+        watcher.Renamed += (_, _) =>
+        {
+            debounceTimer.Stop();
+            debounceTimer.Start();
+        };
+
+        _globalFileWatcher = watcher;
+        _globalDebounceTimer = debounceTimer;
+    }
+
     private void EnableFileWatcher(TenantId tenant, string filePath)
     {
         var fullPath = Path.GetFullPath(filePath);
@@ -1055,6 +1272,11 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
             var text = File.ReadAllText(filePath);
             LoadPolicyFromText(tenant, text);
         }
+        else if (!string.IsNullOrWhiteSpace(_globalPolicyFilePath) && File.Exists(_globalPolicyFilePath))
+        {
+            var text = File.ReadAllText(_globalPolicyFilePath);
+            LoadPolicyFromText(text);
+        }
         else
         {
             Interlocked.Increment(ref _policyEpoch);
@@ -1069,6 +1291,9 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
 
     public void Dispose()
     {
+        _globalDebounceTimer?.Dispose();
+        _globalFileWatcher?.Dispose();
+
         foreach (var timer in _debounceTimers.Values)
         {
             timer.Dispose();

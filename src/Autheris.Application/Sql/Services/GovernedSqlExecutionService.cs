@@ -14,8 +14,10 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -66,6 +68,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     private readonly ILogger<GovernedSqlExecutionService>? _logger;
     private readonly IConsentRepository? _consentRepository;
     private readonly IKeyVaultSecretProvider? _secretProvider;
+    private readonly ITableReadConcurrencyGate? _concurrencyGate;
+    private readonly IDbSessionContextInitializer _sessionInitializer;
+
+    private const int ThrottledRetryAfterSeconds = 2;
 
     private byte[]? _masterHmacKey;
     private bool _masterHmacKeyResolved;
@@ -84,7 +90,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         IKeyVaultSecretProvider? secretProvider = null,
         ISqlEngine? sqlEngine = null,
         ICompiledSqlQueryPlanCache? planCache = null,
-        ISqlSecurityValidator? sqlSecurityValidator = null)
+        ISqlSecurityValidator? sqlSecurityValidator = null,
+        ITableReadConcurrencyGate? concurrencyGate = null,
+        IDbSessionContextInitializer? sessionInitializer = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement;
@@ -100,6 +108,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         _sqlEngine = sqlEngine ?? FastSqlEngine.Default;
         _planCache = planCache;
         _sqlSecurityValidator = sqlSecurityValidator ?? new DefaultSqlSecurityValidator();
+        _concurrencyGate = concurrencyGate;
+        _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
     }
 
     public async Task<string> RewriteSqlAsync(
@@ -220,7 +230,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         if (_options.Value.IsWebSqlGovernanceBypassed)
         {
             _logger?.LogWarning("[DANGER] WebSQL governance bypass is active! Query will be executed without RLS or AST masking.");
-            return new GovernedRewrite(rawSql, new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase));
+            return new GovernedRewrite(rawSql, new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase), Array.Empty<TableIdentifier>());
         }
 
         // SEC C-01: RLS, masking and policies attach to physical table nodes. A statement without any governed table
@@ -279,8 +289,12 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         var tableColumnsMap = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var tablesWithConsentRowFilter = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var tablesWithMaskedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var tableTenantColumns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string? primaryTenantColumn = null;
         var internalParameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         var hmacKeyParameterNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        var accessedTables = new List<TableIdentifier>();
+        var accessedTableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // SEC P-05: The SQL dialect comes from the data source configuration (the provider the connection factory will
         // actually use). Without a configured connection (synthetic dev/test path) the catalog dialect of the first table
@@ -391,6 +405,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 tableColumnsMap[target.TableName] = colList;
             }
 
+            if (accessedTableSet.Add(resolvedId.ToQualifiedName()))
+            {
+                accessedTables.Add(resolvedId);
+            }
+
             // SEC C-03: Consent model (same truth table as the GraphQL path)
             TableAccessDecision decision;
             if (consentBypassed)
@@ -453,6 +472,13 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 if (!System.Text.RegularExpressions.Regex.IsMatch(tenantColumn, "^[A-Za-z_][A-Za-z0-9_]{0,127}$"))
                 {
                     throw new InvalidOperationException($"The tenant column '{tenantColumn}' of {target.FullName} is not a plain identifier; the query is refused (fail-closed).");
+                }
+
+                primaryTenantColumn ??= tenantColumn;
+                tableTenantColumns[target.FullName] = tenantColumn;
+                if (string.Equals(target.FullName, target.TableName, StringComparison.OrdinalIgnoreCase))
+                {
+                    tableTenantColumns[target.TableName] = tenantColumn;
                 }
 
                 rlsParts.Add($"{tenantColumn} = '{tenantId.Value.Replace("'", "''")}'");
@@ -600,6 +626,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             TablesWithMaskedColumns = tablesWithMaskedColumns,
             // SEC M-20: WITH CHECK against the caller's tenant (not the library default) and explicit tenant column on INSERT
             ExpectedTenantValue = tenantId.Value,
+            TenantColumnName = primaryTenantColumn ?? "tenant_id",
+            TableTenantColumns = tableTenantColumns,
             RequireTenantColumnInInsert = true,
             // SEC C-01/H-14/H-15: Function denylist, no table functions / inline functions, no masked columns in DML
             EnforceFunctionPolicy = true,
@@ -637,7 +665,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
             {
-                return new GovernedRewrite(cachedSql, internalParameters);
+                return new GovernedRewrite(cachedSql, internalParameters, accessedTables);
             }
         }
 
@@ -678,7 +706,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             _logger?.LogDebug("GovernedSqlExecutionService: Generated secured SQL: {SecuredSql}", securedSql);
         }
 
-        return new GovernedRewrite(securedSql, internalParameters);
+        return new GovernedRewrite(securedSql, internalParameters, accessedTables);
     }
 
     public async Task ExecuteGovernedQueryAsync(
@@ -789,68 +817,113 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             return securedSql;
         }
 
-        // Real Database Execution
-        await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
-
-        // SEC P-05 / SQ-01: PostgreSQL sessions are forced to standard-conforming strings (backslash is a literal character),
-        // matching the gateway lexer even if the server or role default was changed.
-        string? sessionInitializationSql = TryMapProviderToDialect(connOptions.Provider, out var connectionDialect)
-            ? GetSessionInitializationSql(connectionDialect)
-            : null;
-        if (sessionInitializationSql != null)
+        // O10 / H-3: Process-wide read concurrency gating per user and table
+        var maxConcurrentReads = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
+        List<IDisposable>? leases = null;
+        if (_concurrencyGate != null && maxConcurrentReads > 0 && rewrite.AccessedTables.Count > 0)
         {
-            await using var initCommand = connection.CreateCommand();
-            initCommand.CommandText = sessionInitializationSql;
-            initCommand.CommandTimeout = Math.Max(1, _options.Value.WebSql.ExecutionTimeoutSeconds);
-            await initCommand.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-
-        await using var command = connection.CreateCommand();
-        command.CommandText = securedSql;
-        command.CommandTimeout = Math.Max(1, _options.Value.WebSql.ExecutionTimeoutSeconds);
-
-        // Gateway-internal parameters (masking keys, row-filter parameters) are bound as parameters, never inlined
-        foreach (var (paramName, paramVal) in rewrite.InternalParameters)
-        {
-            var p = command.CreateParameter();
-            p.ParameterName = paramName.StartsWith('@') ? paramName : "@" + paramName;
-            p.Value = paramVal ?? DBNull.Value;
-            command.Parameters.Add(p);
-        }
-
-        if (request.Parameters != null)
-        {
-            // "name" and "@name" denote the same parameter; bind it once.
-            var boundNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (paramName, paramVal) in request.Parameters)
+            var userSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
+                          ?? user.FindFirst("sub")?.Value
+                          ?? "anonymous";
+            leases = new List<IDisposable>(rewrite.AccessedTables.Count);
+            try
             {
-                string normalizedName = paramName.StartsWith('@') ? paramName : "@" + paramName;
-                if (!boundNames.Add(normalizedName))
+                foreach (var table in rewrite.AccessedTables)
                 {
-                    continue;
+                    var key = $"{tenantId.Value}|{userSid}|{table.ToQualifiedName()}".ToLowerInvariant();
+                    var lease = _concurrencyGate.TryEnter(key, maxConcurrentReads)
+                                ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
+                    leases.Add(lease);
                 }
-
-                var p = command.CreateParameter();
-                p.ParameterName = normalizedName;
-                p.Value = WebSqlParameterValues.Normalize(paramVal) ?? DBNull.Value;
-                command.Parameters.Add(p);
+            }
+            catch
+            {
+                foreach (var lease in leases)
+                {
+                    lease.Dispose();
+                }
+                throw;
             }
         }
 
-        if (dmlContext.IsDml)
+        try
         {
-            await ExecuteDmlInTransactionAsync(connection, command, tenantId, user, dsName, dmlContext, securedSql, ct).ConfigureAwait(false);
+            // Real Database Execution
+            await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
 
-            // DML produces no result set; hand an empty reader to the writer (same shape as before).
-            using var emptyTable = new DataTable();
-            using var emptyReader = emptyTable.CreateDataReader();
-            await rowWriter(emptyReader, ct).ConfigureAwait(false);
+            // SEC P-05 / SQ-01 & M-1: Initialize session context (PostgreSQL GUCs, standard-conforming strings, SQL Server SESSION_CONTEXT)
+            if (TryMapProviderToDialect(connOptions.Provider, out var connectionDialect))
+            {
+                var userSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
+                              ?? user.FindFirst("sub")?.Value;
+
+                await _sessionInitializer.InitializeSessionAsync(
+                    connection,
+                    connectionDialect,
+                    tenantId,
+                    userSid: userSid,
+                    purpose: null,
+                    requireTransaction: false,
+                    ct: ct).ConfigureAwait(false);
+            }
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = securedSql;
+            command.CommandTimeout = Math.Max(1, _options.Value.WebSql.ExecutionTimeoutSeconds);
+
+            // Gateway-internal parameters (masking keys, row-filter parameters) are bound as parameters, never inlined
+            foreach (var (paramName, paramVal) in rewrite.InternalParameters)
+            {
+                var p = command.CreateParameter();
+                p.ParameterName = paramName.StartsWith('@') ? paramName : "@" + paramName;
+                p.Value = paramVal ?? DBNull.Value;
+                command.Parameters.Add(p);
+            }
+
+            if (request.Parameters != null)
+            {
+                // "name" and "@name" denote the same parameter; bind it once.
+                var boundNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (paramName, paramVal) in request.Parameters)
+                {
+                    string normalizedName = paramName.StartsWith('@') ? paramName : "@" + paramName;
+                    if (!boundNames.Add(normalizedName))
+                    {
+                        continue;
+                    }
+
+                    var p = command.CreateParameter();
+                    p.ParameterName = normalizedName;
+                    p.Value = WebSqlParameterValues.Normalize(paramVal) ?? DBNull.Value;
+                    command.Parameters.Add(p);
+                }
+            }
+
+            if (dmlContext.IsDml)
+            {
+                await ExecuteDmlInTransactionAsync(connection, command, tenantId, user, dsName, dmlContext, securedSql, ct).ConfigureAwait(false);
+
+                // DML produces no result set; hand an empty reader to the writer (same shape as before).
+                using var emptyTable = new DataTable();
+                using var emptyReader = emptyTable.CreateDataReader();
+                await rowWriter(emptyReader, ct).ConfigureAwait(false);
+                return securedSql;
+            }
+
+            await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false);
+            await rowWriter(reader, ct).ConfigureAwait(false);
             return securedSql;
         }
-
-        await using var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false);
-        await rowWriter(reader, ct).ConfigureAwait(false);
-        return securedSql;
+        finally
+        {
+            if (leases != null)
+            {
+                foreach (var lease in leases)
+                {
+                    lease.Dispose();
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -1494,7 +1567,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         return _masterHmacKey;
     }
 
-    private sealed record GovernedRewrite(string Sql, IReadOnlyDictionary<string, object?> InternalParameters);
+    private sealed record GovernedRewrite(string Sql, IReadOnlyDictionary<string, object?> InternalParameters, IReadOnlyList<TableIdentifier> AccessedTables);
 
     /// <summary>
     /// Collects the DML classification during governance so that executed AND rejected DML can be audited.

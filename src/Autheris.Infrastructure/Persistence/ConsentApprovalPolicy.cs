@@ -116,9 +116,20 @@ internal static class ConsentApprovalPolicy
         string.Equals(status, PendingSecond, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, PendingExternal, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// ADR-008: HIGH, RESTRICTED, and SECRET sensitivity classifications mandate four-eyes approval by default.
+    /// </summary>
+    public static bool IsHighSensitivity(string? sensitivity) =>
+        string.Equals(sensitivity, "HIGH", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(sensitivity, "RESTRICTED", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(sensitivity, "SECRET", StringComparison.OrdinalIgnoreCase);
+
+    public static bool RequiresFourEyesApproval(bool requiresFourEyes, string? sensitivity = null) =>
+        requiresFourEyes || IsHighSensitivity(sensitivity);
+
     /// <summary>Review E-9: an ITSM-governed request stays with the change board for its second step as well.</summary>
-    public static string StatusAfterApproval(bool requiresFourEyes, int stepNumber, bool isExternalItsmApproval) =>
-        requiresFourEyes && stepNumber < 2
+    public static string StatusAfterApproval(bool requiresFourEyes, int stepNumber, bool isExternalItsmApproval, string? sensitivity = null) =>
+        RequiresFourEyesApproval(requiresFourEyes, sensitivity) && stepNumber < 2
             ? (isExternalItsmApproval ? PendingExternal : PendingSecond)
             : Approved;
 

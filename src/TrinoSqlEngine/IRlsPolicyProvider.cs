@@ -156,6 +156,31 @@ public sealed class RlsOptions
     public string TenantColumnName { get; set; } = "tenant_id";
 
     /// <summary>
+    /// Optional map of table name to tenant column name for heterogeneous schemas.
+    /// When specified and returning a match, overrides <see cref="TenantColumnName"/> for that table.
+    /// </summary>
+    public Dictionary<string, string> TableTenantColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolves the tenant column name for a given table name, falling back to <see cref="TenantColumnName"/>.
+    /// </summary>
+    public string GetTenantColumnName(string? tableName = null)
+    {
+        if (!string.IsNullOrEmpty(tableName))
+        {
+            if (TableTenantColumns.TryGetValue(tableName, out var col) && !string.IsNullOrWhiteSpace(col))
+                return col;
+
+            string simpleName = SqlIdentifierHelper.GetSimpleName(tableName);
+            if (!string.Equals(simpleName, tableName, StringComparison.OrdinalIgnoreCase) &&
+                TableTenantColumns.TryGetValue(simpleName, out col) && !string.IsNullOrWhiteSpace(col))
+                return col;
+        }
+
+        return TenantColumnName;
+    }
+
+    /// <summary>
     /// Expected tenant value for WITH CHECK OPTION verification. Null by default (must be explicitly set when WITH CHECK OPTION is active).
     /// </summary>
     public string? ExpectedTenantValue { get; set; } = null;

@@ -130,9 +130,7 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     [Theory]
     [InlineData("warn_allow_all_cors_origins")]
     [InlineData("warn_relaxed_query_limits")]
-    [InlineData("warn_fallback_default_tenant_for_webhooks")]
     [InlineData("catalog_legacy_payload_only_signature")]
-    [InlineData("itsm_legacy_global_webhook_secret")]
     [InlineData("allow_development_in_container")]
     [InlineData("warn_allow_websql_dml")]
     public void SEM_WarnSwitches_AreWarn_AndStartInProduction(string name)
@@ -171,12 +169,16 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(optInOptions, Env(Environments.Production), NoEnvironmentVariables));
     }
 
-    [Fact]
-    public void SEM_ItsmLegacyGlobalWebhookSecret_IsNoLongerDanger()
+    [Theory]
+    [InlineData("warn_fallback_default_tenant_for_webhooks")]
+    [InlineData("itsm_legacy_global_webhook_secret")]
+    public void SEM_WebhookTenantFallbackAndLegacySecret_AreDanger_AndBlockedInProduction(string name)
     {
-        var options = WithWarnSwitch("itsm_legacy_global_webhook_secret");
+        var options = WithWarnSwitch(name);
 
-        options.GetAllActiveBypasses().ShouldNotContain(b => b.StartsWith("DANGER:itsm", StringComparison.Ordinal));
+        options.GetActiveDangerBypasses().ShouldContain(b => b.StartsWith("DANGER:" + name, StringComparison.Ordinal));
+        Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), NoEnvironmentVariables));
     }
 
     [Fact]
