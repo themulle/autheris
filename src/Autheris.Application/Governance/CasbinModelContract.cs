@@ -92,6 +92,8 @@ public static class CasbinModelContract
                 [UserA, TenantA, Obj, Act, "true", "allow"]
             ],
             [], [UserA, TenantA, Obj, Act], false),
+        // W6: Request with tenant '*' does not match tenant-specific rule
+        new("W6", true, [[UserA, TenantA, Obj, Act, "true", "allow"]], [], [UserA, "*", Obj, Act], false),
     ];
 
     public static CasbinModelCapabilities Verify(string modelText)
