@@ -162,61 +162,16 @@ public sealed class Query
         var tenantId = principal.GetTenantId();
         var allSubjects = groupSids.Append(userSid).ToList();
         var activeConsents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(allSubjects, roles, DateTimeOffset.UtcNow, tenantId, ct);
-        var allowedTableIds = activeConsents
-            .Where(c => c.Effect == ConsentEffect.Allow)
-            .Select(c => c.TableIdentifier)
-            .ToHashSet();
-
-        var unconditionallyDeniedTableIds = activeConsents
-            .Where(c => c.Effect == ConsentEffect.Deny && c.RowFilters.Count == 0 && c.ColumnRules.Count == 0)
-            .Select(c => c.TableIdentifier)
-            .ToHashSet();
-
-        var consentsByTable = activeConsents
-            .GroupBy(c => c.TableIdentifier)
-            .ToDictionary(g => g.Key, g => g.ToList());
-
-        var visibleTables = allTables
-            .Where(t => allowedTableIds.Contains(t.Identifier) && !unconditionallyDeniedTableIds.Contains(t.Identifier))
-            .Select(t =>
+        var visibleTables = Autheris.Application.Services.CatalogVisibility.FilterForSubject(allTables, activeConsents, tenantId)
+            .Select(t => new TableMetadataDto
             {
-                var tableConsents = consentsByTable.TryGetValue(t.Identifier, out var tc) ? tc : (List<Consent>)[];
-                var tableAllows = tableConsents.Where(c => c.Effect == ConsentEffect.Allow).ToList();
-                var tableDenies = tableConsents.Where(c => c.Effect == ConsentEffect.Deny).ToList();
-
-                var hasUnconstrainedAllow = tableAllows.Any(c => c.ColumnRules.Count == 0);
-                var explicitlyGrantedColumns = tableAllows
-                    .SelectMany(c => c.ColumnRules)
-                    .Where(cr => cr.AccessLevel != ColumnAccessLevel.Deny)
-                    .Select(cr => cr.ColumnName)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                var deniedColumns = tableDenies
-                    .SelectMany(c => c.ColumnRules)
-                    .Where(cr => cr.AccessLevel == ColumnAccessLevel.Deny)
-                    .Select(cr => cr.ColumnName)
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                var visibleColumns = t.Columns
-                    .Where(c =>
-                    {
-                        if (deniedColumns.Contains(c.ColumnName)) return false;
-                        if (hasUnconstrainedAllow) return true;
-                        return explicitlyGrantedColumns.Contains(c.ColumnName);
-                    })
-                    .Select(c => c.ColumnName)
-                    .ToList();
-
-                return new TableMetadataDto
-                {
-                    Domain = t.Identifier.Domain,
-                    Schema = t.Table.SchemaName,
-                    TableName = t.Table.TableName,
-                    DisplayName = t.Table.DisplayName,
-                    Sensitivity = t.Table.Sensitivity,
-                    Description = t.Table.Description,
-                    Columns = visibleColumns
-                };
+                Domain = t.Identifier.Domain,
+                Schema = t.Table.SchemaName,
+                TableName = t.Table.TableName,
+                DisplayName = t.Table.DisplayName,
+                Sensitivity = t.Table.Sensitivity,
+                Description = t.Table.Description,
+                Columns = t.Columns.Select(c => c.ColumnName).ToList()
             });
 
         return FilterAndPaginateCatalog(visibleTables, domain, search, first, after);

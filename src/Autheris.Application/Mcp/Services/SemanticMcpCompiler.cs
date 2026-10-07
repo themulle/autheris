@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -293,12 +294,8 @@ public sealed class SemanticMcpCompiler(
         var activeConsents = await _consentRepo.GetAllActiveConsentsForSubjectsAsync(
             allSubjects, roles, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
 
-        var allowedTableIds = activeConsents
-            .Where(c => c.Effect == ConsentEffect.Allow && c.TenantId == tenantId)
-            .Select(c => c.TableIdentifier)
-            .ToHashSet();
-
-        return allTables.Where(t => allowedTableIds.Contains(t.Identifier)).ToList();
+        // MCP-1: same table and column visibility as the GraphQL catalog (Deny consents, column grants).
+        return CatalogVisibility.FilterForSubject(allTables, activeConsents, tenantId);
     }
 
     private static string MapDataTypeToJsonType(string? dataType)
