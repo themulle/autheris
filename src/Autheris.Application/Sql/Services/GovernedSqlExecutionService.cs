@@ -14,6 +14,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
@@ -66,6 +67,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IHostEnvironment? _environment;
     private readonly ILogger<GovernedSqlExecutionService>? _logger;
+    private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly IConsentRepository? _consentRepository;
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
@@ -92,7 +94,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         ICompiledSqlQueryPlanCache? planCache = null,
         ISqlSecurityValidator? sqlSecurityValidator = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
-        IDbSessionContextInitializer? sessionInitializer = null)
+        IDbSessionContextInitializer? sessionInitializer = null,
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement;
@@ -110,6 +113,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         _sqlSecurityValidator = sqlSecurityValidator ?? new DefaultSqlSecurityValidator();
         _concurrencyGate = concurrencyGate;
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
+        _rebacEvaluator = rebacEvaluator;
     }
 
     public async Task<string> RewriteSqlAsync(
@@ -447,6 +451,14 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             if (!decision.IsAllowed)
             {
                 _logger?.LogWarning("WebSQL access to table {Table} denied by consent model.", target.FullName);
+                throw TableDenied(target);
+            }
+
+            // POL-6: optional ReBAC gate on the query paths.
+            if (RebacTableGate.IsEnforcedOnQueryPaths(_options.Value) &&
+                !await RebacTableGate.IsAllowedAsync(_rebacEvaluator, tenantId, userSid, resolvedId, ct).ConfigureAwait(false))
+            {
+                _logger?.LogWarning("WebSQL access to table {Table} denied by ReBAC.", target.FullName);
                 throw TableDenied(target);
             }
 

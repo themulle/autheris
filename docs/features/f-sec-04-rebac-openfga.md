@@ -7,7 +7,7 @@
 
 ## 1. Overview & Problem Statement
 
-Traditional Role-Based Access Control (RBAC) and Attribute-Based Access Control (ABAC) struggle with complex organizational hierarchies, nested resource ownership, and delegated tenant relationships (e.g. 'can user X edit document Y because they are an editor of team Z?'). F-SEC-04 introduces fine-grained Relationship-Based Access Control (ReBAC) modeled after Google Zanzibar and OpenFGA. Every query checks resource relationships in sub-millisecond memory structures before authorization.
+Traditional Role-Based Access Control (RBAC) and Attribute-Based Access Control (ABAC) struggle with complex organizational hierarchies, nested resource ownership, and delegated tenant relationships (e.g. 'can user X edit document Y because they are an editor of team Z?'). F-SEC-04 introduces fine-grained Relationship-Based Access Control (ReBAC) modeled after Google Zanzibar and OpenFGA. Relationships are resolved in sub-millisecond memory structures before authorization.
 
 ---
 
@@ -24,6 +24,20 @@ Traditional Role-Based Access Control (RBAC) and Attribute-Based Access Control 
 - High-throughput OpenFGA client with local L1 relationship caching.
 - Support for transitive relationship resolution (tuples like `user:alice is member of group:finance`).
 - Transparent integration into GraphQL query resolver authorization filters.
+
+### Where ReBAC is enforced (POL-6)
+
+Table access is checked with the relation `can_query` on the object `table:<domain>.<table>`. The evaluator denies a
+table for which no tuple grants the relation.
+
+| Path | Checked when |
+|---|---|
+| MCP-RAG, DuckDB OLAP (unified PDP) | `Rebac.Enabled = true` (default) |
+| Streaming subscriptions (relation `subscriber`) | `Rebac.Enabled` and `Rebac.EnforceOnStreaming` |
+| OData, GraphQL, WebSQL, stored procedures | `Rebac.Enabled` and `Rebac.EnforceOnQueryPaths` (default `false`) |
+
+Enable `EnforceOnQueryPaths` only once `can_query` tuples are maintained for every table; otherwise every query on
+these paths is denied. Consent, Casbin and row filters apply in addition, ReBAC only ever restricts.
 
 ---
 
@@ -53,6 +67,7 @@ curl -X POST http://localhost:8080/api/v1/rebac/check \
   "Gateway": {
     "Rebac": {
       "Enabled": true,
+      "EnforceOnQueryPaths": false,
       "Provider": "OpenFga",
       "OpenFga": {
         "ApiUrl": "http://openfga.internal.corp:8080",

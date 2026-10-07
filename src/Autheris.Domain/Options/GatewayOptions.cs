@@ -1472,6 +1472,13 @@ public sealed class RebacOptions
     public int CacheTtlSeconds { get; init; } = 60;
     public int MaxCachedDecisions { get; init; } = 50000;
     public bool EnforceOnStreaming { get; init; } = false;
+
+    /// <summary>
+    /// POL-6: also require the ReBAC relation <c>can_query</c> on OData, GraphQL, WebSQL and stored procedures.
+    /// Off by default: the evaluator denies every table without tuples, so enable it only once tuples are maintained.
+    /// The unified PDP (MCP-RAG, DuckDB OLAP) checks ReBAC whenever <see cref="Enabled"/> is true.
+    /// </summary>
+    public bool EnforceOnQueryPaths { get; init; } = false;
     public string? OpenFgaApiUrl { get; init; }
     public string? OpenFgaStoreId { get; init; }
 }
