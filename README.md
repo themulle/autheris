@@ -363,9 +363,10 @@ A turnkey container image featuring the integrated **Microsoft Garnet .NET Cache
 > interface only (`127.0.0.1`), as shown below. Never bind them to `0.0.0.0` or a public address.
 
 ```bash
-# Direct Docker run (Ports 8080 HTTP / 8081 HTTPS) – local getting-started mode
-docker run -d -p 127.0.0.1:8080:8080 -p 127.0.0.1:8081:8081 \
+# Direct Docker run (Port 8080 HTTP) – local getting-started mode
+docker run -d -p 127.0.0.1:8080:8080 \
   -e ASPNETCORE_ENVIRONMENT=Development -e AUTHERIS_ALLOW_DEV_IN_CONTAINER=true \
+  -v autheris-data:/app/data \
   --name gql-gateway ghcr.io/themulle/gql:getting-started
 
 # Or via Docker Compose (Base = Production, Override = local Dev mode)

@@ -36,7 +36,7 @@ Branch `feat/ast-target-dialect-generator`, Stand `db3aef1`.
 
 **Gesamt-Review, nie angefasst:**
 - mittel: EXT-1-Rest, INF-1, MCP-1, POL-5, POL-6, GQL-3, GQL-4, EXT-3, EXT-5, API-2, API-3, DEP-5, DEP-7, DEP-8, R-DEP-1;
-- alle Laufzeitfehler, zuerst **DEP-4: das Docker-Image startet nicht**;
+- alle Laufzeitfehler, **DEP-4: ✅ behoben** (Container startet mit /app/data Volume, chown $APP_UID, HTTP 8080);
 - alle niedrigen Befunde und die Architekturpunkte.
 
 **Erledigt seit d77d650:**
@@ -255,7 +255,7 @@ Legende: ✅ behoben · 🟡 teilweise · ⛔ offen · 🔻 verschlechtert · �
 | SQL2-11 Parameter-Präfix | ⛔ (fail-closed) |
 | SQL2-12 HMAC-Normalisierung | ⛔ |
 | SQL2-13 Memo pro Tabelle | ✅ weitgehend (G-3, G-4, D-7) |
-| Laufzeit: DEP-4 Image startet nicht, SQL2-2, SQL-4, GQL-2, SQL2-4, MCP-2/-3, EXT-4, API-7, -14, -15, INF-4, -5, EXT-8, GQL-8, -11, SQL2-17, SQL-7, -8 | ⛔ alle offen |
+| Laufzeit: DEP-4 (✅ behoben), SQL2-2, SQL-4, GQL-2, SQL2-4, MCP-2/-3, EXT-4, API-7, -14, -15, INF-4, -5, EXT-8, GQL-8, -11, SQL2-17, SQL-7, -8 | 🟡 DEP-4 behoben, Rest offen |
 | Arch 1 zentrale Zugriffsentscheidung | ⛔ |
 | Arch 2 gemeinsamer Konnektor-Lesepfad | ⛔ |
 | Arch 3 toter Code | 🟡 `SingleQueryAstCompiler` entfernt; R-SQL-12 offen |
@@ -425,7 +425,7 @@ Den irreführenden Test `DbSessionContextInitializer_RollsBackTransaction_OnErro
 
 ### Phase 6 – Laufzeitfehler (M–L)
 
-1. **DEP-4:** `HTTPS_PORTS` weg, `/app/data` mit `chown` und als VOLUME (das Image startet sonst nicht).
+1. **DEP-4:** ✅ behoben (`HTTPS_PORTS` weg, `/app/data` mit `chown` und als VOLUME, Startvalidierung & automatische Verzeichniserstellung).
 2. **SQL2-2:** OLAP-Kapazität.
 3. **GQL-2:** WebSocket-Header.
 4. **SQL2-4:** keine Doppelmaskierung.
