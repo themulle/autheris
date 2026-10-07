@@ -22,6 +22,7 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -1055,5 +1056,49 @@ public sealed class SecurityReview20261002WebSqlTests
         public override Task<bool> ReadAsync(CancellationToken cancellationToken) => _inner.ReadAsync(cancellationToken);
         public override System.Collections.IEnumerator GetEnumerator() => _inner.GetEnumerator();
     }
+
+    #region S-2 WebSql Error Mapping Tests
+
+    [Fact]
+    public async Task WriteWebSqlErrorAsync_GatewayNotImplementedException_Returns501_WithGenericMessage()
+    {
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+        context.TraceIdentifier = "trace-501";
+
+        var ex = new GatewayNotImplementedException("Confidential internal connection string missing for ds 'secret'");
+        await WebSqlEndpoints.WriteWebSqlErrorAsync(context, ex, NullLogger.Instance, CancellationToken.None);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status501NotImplemented);
+        context.Response.Body.Position = 0;
+        using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("error").GetString().ShouldBe("NotImplemented");
+        var msg = doc.RootElement.GetProperty("message").GetString();
+        msg.ShouldNotBeNull();
+        msg.ShouldBe("The requested feature or data source capability is not implemented.");
+        msg.ShouldNotContain("Confidential");
+    }
+
+    [Fact]
+    public async Task WriteWebSqlErrorAsync_ParseCanceledException_Returns400_WithGenericMessage()
+    {
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+        context.TraceIdentifier = "trace-400";
+
+        var ex = new Antlr4.Runtime.Misc.ParseCanceledException("line 1:10 unexpected token");
+        await WebSqlEndpoints.WriteWebSqlErrorAsync(context, ex, NullLogger.Instance, CancellationToken.None);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        context.Response.Body.Position = 0;
+        using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("error").GetString().ShouldBe("BadRequest");
+        var msg = doc.RootElement.GetProperty("message").GetString();
+        msg.ShouldNotBeNull();
+        msg.ShouldBe("Invalid SQL syntax.");
+        msg.ShouldNotContain("unexpected token");
+    }
+
+    #endregion
 }
 

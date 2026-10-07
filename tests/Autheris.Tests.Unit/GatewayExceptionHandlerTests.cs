@@ -125,6 +125,46 @@ public sealed class GatewayExceptionHandlerTests
         handled.ShouldBeFalse();
     }
 
+    [Fact]
+    public async Task GatewayNotImplementedException_Returns501_WithGenericTitle_WithoutInternalDetails()
+    {
+        // S-2: No internal configuration or datasource details leaked to client
+        var (status, contentType, body) = await HandleAsync(
+            new GatewayNotImplementedException("No active database connection configured for data source 'secret_ds_internal'. Synthetic fallback is disabled."));
+
+        status.ShouldBe(StatusCodes.Status501NotImplemented);
+        contentType.ShouldStartWith("application/problem+json");
+        body.ShouldNotContain("secret_ds_internal");
+        body.ShouldNotContain("Synthetic fallback");
+        body.ShouldContain("The requested feature or data source capability is not implemented.");
+    }
+
+    [Fact]
+    public async Task GatewayUnsupportedColumnTypeException_Returns501_WithGenericTitle_WithoutInternalDetails()
+    {
+        // S-2: No raw column name or internal geometry type leaked
+        var (status, contentType, body) = await HandleAsync(
+            new GatewayUnsupportedColumnTypeException("secret_col", "geometry"));
+
+        status.ShouldBe(StatusCodes.Status501NotImplemented);
+        contentType.ShouldStartWith("application/problem+json");
+        body.ShouldNotContain("secret_col");
+        body.ShouldContain("The requested column type is not supported.");
+    }
+
+    [Fact]
+    public async Task ParseCanceledException_Returns400_WithGenericTitle()
+    {
+        // S-2: SQL syntax / parsing errors must return 400 Bad Request instead of 500
+        var (status, contentType, body) = await HandleAsync(
+            new Antlr4.Runtime.Misc.ParseCanceledException("line 1:15 no viable alternative at input 'SELECT * FROM WHERE'"));
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        contentType.ShouldStartWith("application/problem+json");
+        body.ShouldNotContain("no viable alternative");
+        body.ShouldContain("Invalid SQL syntax.");
+    }
+
     private sealed class StartedResponseFeature : Microsoft.AspNetCore.Http.Features.HttpResponseFeature
     {
         public override bool HasStarted => true;
