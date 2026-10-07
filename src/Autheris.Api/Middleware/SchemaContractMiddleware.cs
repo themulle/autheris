@@ -35,25 +35,28 @@ public sealed class SchemaContractMiddleware
             return;
         }
 
-        string? contractName = null;
-
-        // 1. Check HTTP header X-Gateway-Contract
+        // API-3: a contract bound to the identity (claim) takes precedence. Header and query string may only select a
+        // contract when the identity carries none, or repeat the bound one; they can never widen a partner's view.
+        string? claimContract = context.User.FindFirst("contract")?.Value?.Trim();
+        string? requestedContract = null;
         if (context.Request.Headers.TryGetValue("X-Gateway-Contract", out var headerVal) && !string.IsNullOrWhiteSpace(headerVal))
         {
-            contractName = headerVal.ToString().Trim();
+            requestedContract = headerVal.ToString().Trim();
+        }
+        else if (context.Request.Query.TryGetValue("contract", out var queryVal) && !string.IsNullOrWhiteSpace(queryVal))
+        {
+            requestedContract = queryVal.ToString().Trim();
         }
 
-        // 2. Check query string parameter ?contract=...
-        if (string.IsNullOrWhiteSpace(contractName) && context.Request.Query.TryGetValue("contract", out var queryVal) && !string.IsNullOrWhiteSpace(queryVal))
+        if (!string.IsNullOrWhiteSpace(claimContract) && !string.IsNullOrWhiteSpace(requestedContract) &&
+            !string.Equals(claimContract, requestedContract, StringComparison.OrdinalIgnoreCase))
         {
-            contractName = queryVal.ToString().Trim();
+            _logger.LogWarning("F-GOV-08 Request rejected: requested contract '{Requested}' differs from the contract bound to the identity.", requestedContract);
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
         }
 
-        // 3. Check claims
-        if (string.IsNullOrWhiteSpace(contractName))
-        {
-            contractName = context.User.FindFirst("contract")?.Value;
-        }
+        string? contractName = !string.IsNullOrWhiteSpace(claimContract) ? claimContract : requestedContract;
 
         // 4. Default contract
         if (string.IsNullOrWhiteSpace(contractName))

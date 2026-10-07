@@ -197,4 +197,43 @@ public sealed class DynamicSchemaContractTests
         context.Items[SchemaContractMiddleware.ContractItemKey].ShouldBe("partner");
         context.Response.Headers["X-Gateway-Contract"].ToString().ShouldBe("partner");
     }
+    [Theory]
+    [InlineData("internal", null, StatusCodes.Status403Forbidden, null)]
+    [InlineData(null, "internal", StatusCodes.Status403Forbidden, null)]
+    [InlineData("partner", null, StatusCodes.Status200OK, "partner")]
+    [InlineData(null, null, StatusCodes.Status200OK, "partner")]
+    public async Task SchemaContractMiddleware_ClaimContract_CannotBeOverriddenByHeaderOrQuery(string? header, string? query, int expectedStatus, string? expectedContract)
+    {
+        // API-3: a partner bound to "partner" via claim must not switch to "internal" through header or query string.
+        var options = new GatewayOptions
+        {
+            SchemaContracts = new SchemaContractsOptions
+            {
+                Enabled = true,
+                Contracts = new Dictionary<string, SchemaContractDefinitionOptions>
+                {
+                    ["partner"] = new() { IncludedTags = ["partner"] },
+                    ["internal"] = new() { IncludedTags = ["internal"] }
+                }
+            }
+        };
+        var manager = new SchemaContractManager(Options.Create(options), NullLogger<SchemaContractManager>.Instance);
+        var middleware = new SchemaContractMiddleware(next: _ => Task.CompletedTask, NullLogger<SchemaContractMiddleware>.Instance);
+
+        var context = new DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                [new System.Security.Claims.Claim("contract", "partner")], "Test"))
+        };
+        if (header != null) context.Request.Headers["X-Gateway-Contract"] = header;
+        if (query != null) context.Request.QueryString = new QueryString($"?contract={query}");
+
+        await middleware.InvokeAsync(context, manager);
+
+        context.Response.StatusCode.ShouldBe(expectedStatus);
+        if (expectedContract != null)
+        {
+            context.Items[SchemaContractMiddleware.ContractItemKey].ShouldBe(expectedContract);
+        }
+    }
 }
