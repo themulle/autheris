@@ -390,3 +390,84 @@ Messung (nicht automatisierbar, gegen LWETEM_PROD): die Tabelle aus Abschnitt 1 
   - Indizes durch die DBAs: `conf.client(client_id) INCLUDE (crane_serial_number)` und `md.crane(serial_number) INCLUDE (is_delivered)`. `conf.client.crane_serial_number` ist `NVARCHAR(MAX)` und kein Indexschlüssel; als `INCLUDE`-Spalte ist es möglich.
 - **Plan-Cache und Auditspuren** enthalten bei geänderter Strategie neuen SQL-Text; Auswertungen, die auf `EXISTS (SELECT 1` suchen, müssen angepasst werden.
 - **Aufwand** grob: Schritt 0 klein, Schritte 1 bis 5 mittel (Generator ist kompakt, aufwendig sind Validator, AST und die Tests), Schritt 6 klein bis mittel je nach Katalogaufnahme. Es gibt keinen .NET-SDK-Zugriff auf dem Arbeitsrechner des Assistenten, gebaut und getestet wird in der CLI.
+
+## 8. Relationsbasierte Zeilenfilter (`RelationScope`)
+
+Ergänzung vom 07.10.2026. Anlass: Die Kette `fms.air1 → conf.client → md.crane` steht bisher nur in `CONSENT_ROW_FILTERS.additional_hops_json` (je Tabelle von Hand), obwohl dieselben Verknüpfungen im Katalog (`TABLE_RELATIONS`) stehen.
+
+### 8.1 Ausgangslage
+
+- `TABLE_RELATIONS` (`parent_table_id`, `child_table_id`, `join_key_parent`, `join_key_child`, `cardinality`) wird nur vom GraphQL-Schema genutzt (`CatalogGraphQlTypeModule`, Repository: `IGovernanceRepository`). Zeilenfilter lesen die Beziehungen nicht.
+- Ein Filter vom Typ `SubqueryCorrelated` trägt `dependent_table`, `foreign_key_column`, `primary_key_column`, `subquery_predicate_json` und `additional_hops_json`. Für `david` ist das je Tabelle dieselbe Kette, über 100 Tabellen hängen an `conf.client.client_id`.
+- Nichts prüft, dass die handgeschriebenen Schlüssel zu den Katalog-Beziehungen passen.
+
+### 8.2 Ziel
+
+Ein neuer Filtertyp `RelationScope` gibt nur **Anker und Prädikat** an, z. B. Anker `md.crane`, Prädikat `is_delivered IS NULL`. Autheris löst den Pfad von der Zieltabelle zum Anker aus `TABLE_RELATIONS` auf und erzeugt daraus den Filter. Eine Definition gilt für alle Tabellen, die über Beziehungen am Anker hängen.
+
+Nicht Ziel: Zeitbedingungen (`valid_from`/`valid_to`) und Filter ohne Beziehung im Katalog (bleiben `SubqueryCorrelated`).
+
+### 8.3 Entwurf
+
+**Datenmodell** (`ConsentRowFilter`, `RowFilterType`, `CONSENT_ROW_FILTERS`)
+
+| Feld | Inhalt |
+|---|---|
+| `filter_type` | neuer Wert `RelationScope` (2) |
+| `relation_anchor_table` | `lwetem_prod.md.crane` |
+| `subquery_predicate_json` | wie bisher, z. B. `{"is_delivered": null}`, bezogen auf den Anker |
+| `resolved_path_json` | **aufgelöster Pfad**, bei der Vergabe gespeichert: Liste der Schritte (`table`, `left_column`, `right_column`, `relation_id`) |
+| `relations_hash` | Hash der verwendeten Beziehungszeilen (zum Erkennen von Änderungen) |
+
+**Pfadsuche** (neuer Dienst `IRelationPathResolver`, Application)
+
+1. Graph aus `TABLE_RELATIONS` der Domäne aufbauen. Kanten laufen vom Kind zum Elternteil (`child → parent`), das ist je Schritt eine N:1-Beziehung.
+2. Breitensuche von der Zieltabelle zum Anker, nur über Kanten, die der Datenverantwortliche gepflegt hat (`TABLE_RELATIONS`, keine Ableitung aus Namen).
+3. Genau ein kürzester Pfad: Gibt es mehrere gleich kurze, **Fehler (fail-closed)** mit Liste der Kandidaten. Die Auswahl trifft die Person bei der Vergabe und wird als `resolved_path_json` gespeichert.
+4. Kein Pfad: Der Filter erzeugt `1 = 0` (kein Zugriff), nie einen offenen Filter. Die Vergabe wird abgelehnt.
+5. Zyklen und Pfade über 4 Schritte werden abgelehnt.
+
+**Festlegen und Prüfen**
+- Der Pfad wird **bei der Vergabe** aufgelöst und gespeichert, nicht bei jeder Abfrage. Bei einer Änderung der Beziehungen (Hash weicht ab) wird der Filter nicht stillschweigend neu aufgelöst, sondern der Zugriff fail-closed verweigert und im Audit vermerkt, bis die Vergabe bestätigt wurde. Dadurch kann eine neue Beziehung den Zugriff nicht erweitern.
+- Alle Tabellen auf dem Pfad (hier `conf.client`) müssen im Katalog stehen, und die Spalten der Schlüssel müssen existieren. Die Verknüpfungsspalten müssen vom Typ her vergleichbar sein.
+
+**Erzeugtes SQL** (`AdvancedRlsFilterGenerator.BuildRelationScope`)
+- Standard wie heute: korrelierter Semi-Join (`EXISTS`/`IN` nach `SubqueryStrategy`) über die aufgelöste Kette.
+- Verschachtelt statt verknüpft ist ebenfalls möglich: `autheris_target.client_id IN (SELECT client_id FROM conf.client WHERE crane_serial_number IN (SELECT serial_number FROM md.crane WHERE is_delivered IS NULL))`. Beide Formen vervielfachen keine Zeilen.
+- DENY-Filter bleiben bei `EXISTS`, aus den Gründen in Abschnitt 3.2.
+
+### 8.4 Effizienz: Schlüsselmenge je Nutzer und Anker
+
+Weil alle Tabellen über denselben Zwischenschritt laufen, lässt sich die erlaubte Schlüsselmenge **einmal** bestimmen und für alle Tabellen wiederverwenden. Das ist der Trino-Weg aus Abschnitt 7 und der eigentliche Effizienzgewinn dieses Abschnitts.
+
+1. `IAllowedKeySetProvider` löst je (Nutzer/Rolle, Mandant, Anker, Prädikat, Schlüsselspalte `conf.client.client_id`) einmal `SELECT DISTINCT c.client_id FROM conf.client c JOIN md.crane cr ON ... WHERE cr.is_delivered IS NULL` aus (im Test 0,4 s).
+2. Die Menge geht als Parameterliste in die Abfrage, oberhalb einer Grenze (SQL Server: höchstens 2100 Parameter) als temporäre Tabelle oder `OPENJSON`.
+3. Cache mit kurzer Gültigkeit (z. B. 60 s, einstellbar) und festem Schlüssel aus Nutzer-SID, Mandant, Anker, Prädikat-Hash, `relations_hash` und Consent-Version. Er wird bei Widerruf, Änderung der Einwilligung und Wechsel von `relations_hash` verworfen. Der Cache gehört dem Prozess und darf keine Daten zwischen Mandanten oder Nutzern teilen.
+4. Ist die Menge größer als eine einstellbare Grenze (z. B. 50 000), bleibt es beim korrelierten Semi-Join.
+5. Gilt für alle Pfade, die über die Engine laufen (Abschnitt 0).
+
+### 8.5 Umsetzungsschritte
+
+| Nr | Schritt | Stelle |
+|---|---|---|
+| R1 | Enum `RowFilterType.RelationScope`, Felder in `ConsentRowFilter` und `CONSENT_ROW_FILTERS` (Migration SQLite/PostgreSQL) | `ConsentModels.cs`, `*GovernanceRepository.Schema.cs` |
+| R2 | `IRelationPathResolver` mit Breitensuche, Fehlerfälle (kein Pfad, mehrdeutig, Zyklus, Tiefe) | `Autheris.Application/Services` |
+| R3 | `AdvancedRlsFilterGenerator.BuildRelationScope` auf Basis des gespeicherten `resolved_path_json` (nutzt die vorhandene Hop-Erzeugung) | `AdvancedRlsFilterGenerator.cs`, `RowFilterSqlBuilder.cs` |
+| R4 | Vergabe: Pfad auflösen, bei Mehrdeutigkeit Auswahl verlangen, `resolved_path_json` und `relations_hash` speichern; Typen prüfen; Audit | Consent-Anlage, PoC-Skript für Freigaben |
+| R5 | Laufzeitprüfung `relations_hash` gegen aktuelle `TABLE_RELATIONS`; Abweichung = Verweigerung und Audit-Eintrag `ROW_FILTER_RELATIONS_CHANGED` | Consent-Auswertung, `GovernedSqlExecutionService` |
+| R6 | `IAllowedKeySetProvider` mit Cache und Verwerfen bei Widerruf; Anbindung an Engine und Reader | neu, `IGovernedTableReader` aus Abschnitt 0 |
+| R7 | Migration des PoC-Bestands: der Filter von `david` auf `fms.*` wird zu einem `RelationScope`-Eintrag je Tabelle oder, besser, zu einem Eintrag je Anker mit Geltung für eine Tabellengruppe | `autheris/scripts`, `governance.db` |
+
+### 8.6 Tests
+
+- Pfadsuche: eindeutiger Pfad (`air1 → conf.client → md.crane`), kein Pfad, mehrdeutig (zwei Wege zum Anker), Zyklus, Tiefe, Verhalten bei Änderung der Beziehungen (`relations_hash`).
+- Generator: erzeugtes SQL entspricht dem heutigen Handfilter (Zeilenmenge gleich) für `air1`, `tem.crane_state` und eine Tabelle mit zwei Hops.
+- Sicherheit: Beziehungsänderung weitet keinen Zugriff aus (verweigert statt erweitert), DENY bleibt `EXISTS`, Cache teilt nichts zwischen Nutzern und Mandanten, Widerruf verwirft Cache-Einträge.
+- Äquivalenz: `RelationScope` und der Handfilter liefern auf SQLite (Stand-in) und in der PoC-Messung dieselbe Zeilenzahl für `david`.
+
+### 8.7 Offene Entscheidungen
+
+1. **Granularität:** ein `RelationScope`-Eintrag je Tabelle (einfach, wie heute, aber viele Zeilen) oder je Anker und Tabellengruppe (kompakt, braucht ein neues Modell für die Gruppe, z. B. alle Tabellen mit Beziehung zu `conf.client`).
+2. **Auswahl bei Mehrdeutigkeit:** Pflicht bei der Vergabe, oder Voreinstellung über eine Rangfolge der Beziehungen (nicht empfohlen: weniger transparent).
+3. **Gültigkeit des Schlüsselmengen-Caches** und Obergrenze der Mengengröße.
+4. **Pflege der Beziehungen:** Wer darf `TABLE_RELATIONS` ändern, und braucht eine Änderung ein Vier-Augen-Verfahren (sie beeinflusst Zugriffe über `RelationScope`)?
