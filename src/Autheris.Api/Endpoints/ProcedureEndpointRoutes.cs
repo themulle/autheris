@@ -36,7 +36,13 @@ public static class ProcedureEndpointRoutes
 
         group.MapGet("/", HandleList).WithName("ListProcedureEndpoints").RequireAuthorization();
 
-        var openApi = group.MapGet("/openapi.json", HandleOpenApi).WithName("GetProcedureEndpointsOpenApiSpec");
+        // OpenSchema (documentation mode): anonymous callers see all active procedures in the spec. This is documentation
+        // only; every execution endpoint still requires authorization and the full governance checks.
+        var documentAllForAnonymous = gatewayOptions.IsOpenSchemaAllowed;
+        var openApi = group.MapGet("/openapi.json",
+                (HttpContext http, Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry) =>
+                    HandleOpenApi(http, registry, documentAllForAnonymous))
+            .WithName("GetProcedureEndpointsOpenApiSpec");
         if (gatewayOptions.IsOpenSchemaAllowed != true)
         {
             openApi.RequireAuthorization();
@@ -66,13 +72,14 @@ public static class ProcedureEndpointRoutes
         return Results.Ok(items);
     }
 
-    private static IResult HandleOpenApi(HttpContext http, Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry)
+    internal static IResult HandleOpenApi(HttpContext http, Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry, bool documentAllForAnonymous = false)
     {
+        var anonymousDocumentation = documentAllForAnonymous && http.User.Identity?.IsAuthenticated != true;
         var paths = new Dictionary<string, object>();
         foreach (var reg in registry.GetAll().Where(r => r.State == ProcedureState.Active))
         {
             var def = reg.Definition;
-            if (!IsVisibleTo(http, def))
+            if (!anonymousDocumentation && !IsVisibleTo(http, def))
             {
                 continue;
             }

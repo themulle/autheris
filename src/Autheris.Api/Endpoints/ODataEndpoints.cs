@@ -23,19 +23,21 @@ public static class ODataEndpoints
     public static IEndpointRouteBuilder MapODataEndpoints(this IEndpointRouteBuilder app, GatewayOptions gatewayOptions)
     {
         // OData v4 / Power BI & Excel Direct Adapter Endpoints
-        app.MapGet("/odata/v4", async (
-            IODataHandler odataHandler,
-            HttpContext context) =>
+        async Task<IResult> HandleServiceDocumentAsync(IODataHandler odataHandler, HttpContext context)
         {
+            context.Response.Headers["OData-Version"] = "4.0";
             var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
             var doc = await odataHandler.GetServiceDocumentAsync(serviceRoot, context.User, context.RequestAborted);
             return Results.Json(doc, contentType: "application/json;odata.metadata=minimal;charset=utf-8");
-        }).RequireAuthorization();
+        }
+
+        app.MapGet("/odata/v4", HandleServiceDocumentAsync).RequireAuthorization();
 
         app.MapGet("/odata/v4/$metadata", async (
             IODataHandler odataHandler,
             HttpContext context) =>
         {
+            context.Response.Headers["OData-Version"] = "4.0";
             var xml = await odataHandler.GetMetadataCsdlAsync(context.User, context.RequestAborted);
             return Results.Content(xml, "application/xml;charset=utf-8");
         }).RequireAuthorization();
@@ -256,6 +258,7 @@ public static class ODataEndpoints
         IODataHandler odataHandler,
         HttpContext context)
     {
+        context.Response.Headers["OData-Version"] = "4.0";
         var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
         var tableId = new TableIdentifier(domain, schema, tableName);
 
