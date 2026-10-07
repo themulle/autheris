@@ -73,14 +73,27 @@ public sealed class MaskingRule
 
     /// <summary>
     /// SEC H-13 / SEC D-3: Creates a tenant-scoped copy of an HMAC masking rule, keyed as {baseKeyId}|tenant:{tenant}.
-    /// Idempotent: a rule that is already tenant-scoped is never scoped twice.
+    /// Idempotent: a rule that is already scoped to the requested tenant is returned unchanged.
+    /// Rejects rules that are already scoped to a DIFFERENT tenant (prevents cross-tenant correlation).
     /// </summary>
     public static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId = null)
     {
         ArgumentNullException.ThrowIfNull(rule);
-        if (rule.HmacKeyId != null && rule.HmacKeyId.Contains("|tenant:", StringComparison.Ordinal))
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenant);
+
+        var expectedSuffix = $"|tenant:{tenant}";
+        if (rule.HmacKeyId != null)
         {
-            return rule;
+            if (rule.HmacKeyId.EndsWith(expectedSuffix, StringComparison.Ordinal))
+            {
+                return rule;
+            }
+
+            if (rule.HmacKeyId.Contains("|tenant:", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Die Maskierungsregel ist bereits an einen anderen Mandanten gebunden ('{rule.HmacKeyId}'). Mandantenübergreifende Verwendung für Mandant '{tenant}' ist unzulässig.");
+            }
         }
 
         var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
@@ -91,7 +104,7 @@ public sealed class MaskingRule
             RuleType = "HMAC_SHA256",
             PatternOrFormat = rule.PatternOrFormat,
             Replacement = rule.Replacement,
-            HmacKeyId = $"{baseKeyId}|tenant:{tenant}"
+            HmacKeyId = $"{baseKeyId}{expectedSuffix}"
         };
     }
 }
