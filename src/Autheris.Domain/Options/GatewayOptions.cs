@@ -876,6 +876,13 @@ public sealed class SqlDataSourceOptions
     /// <summary>Tables (<c>schema.table</c> or <c>table</c>, case-insensitive) that are deliberately shared across tenants.</summary>
     public List<string> TenantColumnExemptTables { get; init; } = new();
 
+    /// <summary>
+    /// O10: Maximum number of concurrent table reads (OData, GraphQL, MCP, kernel) per tenant, user and table. Further
+    /// requests get 429 with Retry-After instead of occupying another database worker and pool connection.
+    /// 0 disables the limit.
+    /// </summary>
+    [Range(0, 1000)] public int MaxConcurrentReadsPerUserAndTable { get; init; } = 4;
+
     public Dictionary<string, DataSourceConnectionOptions> Connections { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
 

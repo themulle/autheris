@@ -1,7 +1,9 @@
 namespace Autheris.Api.Endpoints;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -262,6 +264,12 @@ public static class ODataEndpoints
         var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
         var tableId = new TableIdentifier(domain, schema, tableName);
 
+        var optionError = ValidateSystemQueryOptions(context.Request.Query);
+        if (optionError != null)
+        {
+            return optionError;
+        }
+
         int? top = null;
         if (context.Request.Query.TryGetValue("$top", out var topVal))
         {
@@ -291,7 +299,14 @@ public static class ODataEndpoints
         }
 
         string? select = context.Request.Query["$select"].FirstOrDefault();
-        bool includeCount = context.Request.Query.TryGetValue("$count", out var countVal) && bool.TryParse(countVal, out var c) && c;
+        bool includeCount = false;
+        if (context.Request.Query.TryGetValue("$count", out var countVal))
+        {
+            if (!bool.TryParse(countVal, out includeCount))
+            {
+                return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", "The query parameter '$count' must be 'true' or 'false'.");
+            }
+        }
 
         // F-DATA-01: a Parquet request that cannot be served is rejected before the query is executed
         bool parquetRequested = ParquetContentNegotiation.IsParquetRequested(context.Request);
@@ -319,6 +334,11 @@ public static class ODataEndpoints
             ct: context.RequestAborted
         );
 
+        if (result.RetryAfterSeconds is int retryAfter)
+        {
+            context.Response.Headers.RetryAfter = retryAfter.ToString(CultureInfo.InvariantCulture);
+        }
+
         if (parquetRequested && parquetService != null && result.StatusCode == StatusCodes.Status200OK)
         {
             var rows = ExtractEntitySetRows(result.Payload);
@@ -328,6 +348,58 @@ public static class ODataEndpoints
 
         return Results.Json(result.Payload, statusCode: result.StatusCode, contentType: "application/json;odata.metadata=minimal;charset=utf-8");
     }
+
+    /// <summary>System query options the entity set endpoint implements.</summary>
+    private static readonly FrozenSet<string> SupportedSystemQueryOptions =
+        new[] { "$top", "$skip", "$select", "$count", "$format" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>OData v4 system query options that exist but are not implemented yet (answered with 501, never ignored).</summary>
+    private static readonly FrozenSet<string> NotImplementedSystemQueryOptions =
+        new[] { "$filter", "$orderby", "$expand", "$search", "$apply", "$compute", "$skiptoken", "$deltatoken", "$levels", "$index", "$schemaversion", "$id" }
+            .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// O3/O4 (docs/plans/rls-subquery-in-strategy.md): a system query option is either applied or rejected. Ignoring
+    /// $filter would hand the client unfiltered rows it believes to be filtered. Custom options (without '$') pass.
+    /// </summary>
+    internal static IResult? ValidateSystemQueryOptions(IQueryCollection query)
+    {
+        foreach (var (key, values) in query)
+        {
+            if (!key.StartsWith('$'))
+            {
+                continue;
+            }
+
+            var shownKey = key.Length > 64 ? key[..64] : key;
+            if (NotImplementedSystemQueryOptions.Contains(key))
+            {
+                return ODataError(StatusCodes.Status501NotImplemented, "NotImplemented", $"The query option '{shownKey}' is not supported by this service.");
+            }
+            if (!SupportedSystemQueryOptions.Contains(key))
+            {
+                return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", $"The query option '{shownKey}' is unknown.");
+            }
+            if (values.Count > 1)
+            {
+                return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", $"The query option '{shownKey}' must not be specified more than once.");
+            }
+            if (string.Equals(key, "$format", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(values.ToString(), "json", StringComparison.OrdinalIgnoreCase) &&
+                !values.ToString().StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
+            {
+                return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", "The query option '$format' supports 'json' only.");
+            }
+        }
+
+        return null;
+    }
+
+    private static IResult ODataError(int statusCode, string code, string message) =>
+        Results.Json(
+            new { error = new { code, message } },
+            statusCode: statusCode,
+            contentType: "application/json;odata.metadata=minimal;charset=utf-8");
 
     /// <summary>
     /// Extracts the governed rows ("value") of an OData entity set payload without @odata annotations.

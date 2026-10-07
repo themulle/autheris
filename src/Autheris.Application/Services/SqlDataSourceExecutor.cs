@@ -115,6 +115,15 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
     {
         var metadata = context.Metadata;
         var dialect = metadata.Dialect;
+
+        // D-1: Fail-closed dialect alignment between catalog and connection provider. An empty provider is compared as
+        // "sqlite", because that is what SqlConnectionFactory opens for it.
+        var provider = string.IsNullOrWhiteSpace(connOptions.Provider) ? "sqlite" : connOptions.Provider.Trim();
+        if (!DatabaseDialectExtensions.TryParseDialect(provider, out var providerDialect) || dialect != providerDialect)
+        {
+            throw new InvalidOperationException($"Catalog dialect '{dialect}' does not match the provider '{provider}' of data source '{context.SourceName}' for table '{metadata.Identifier.ToQualifiedName()}'.");
+        }
+
         context.Items["RlsPushdownExecuted"] = true;
 
         ArgumentNullException.ThrowIfNull(_connectionFactory);
@@ -326,32 +335,10 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 await setCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            var results = new List<IReadOnlyDictionary<string, object?>>(Math.Min(Math.Max(context.Limit, 16), 1024));
-
+            IReadOnlyList<IReadOnlyDictionary<string, object?>> results;
             await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess | CommandBehavior.SingleResult, ct).ConfigureAwait(false))
             {
-                int fieldCount = reader.FieldCount;
-                var columnNames = new string[fieldCount];
-                for (int i = 0; i < fieldCount; i++)
-                {
-                    columnNames[i] = reader.GetName(i);
-                }
-
-                while (await reader.ReadAsync(ct).ConfigureAwait(false))
-                {
-                    var row = new Dictionary<string, object?>(fieldCount, StringComparer.OrdinalIgnoreCase);
-                    for (int i = 0; i < fieldCount; i++)
-                    {
-                        var rawVal = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                        var normalized = NormalizeReadValue(rawVal, columnNames[i]);
-                        if (_maskingProvider != null && gatewayHmacColumns.TryGetValue(columnNames[i], out var hmacRule))
-                        {
-                            normalized = _maskingProvider.MaskValue(columnNames[i], normalized, hmacRule);
-                        }
-                        row[columnNames[i]] = normalized;
-                    }
-                    results.Add(row);
-                }
+                results = await ReadRowsAsync(reader, gatewayHmacColumns, context.Limit, ct).ConfigureAwait(false);
             }
 
             if (tx != null)
@@ -377,6 +364,90 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             }
         }
     }
+
+    /// <summary>
+    /// Reads all rows of <paramref name="reader"/>, applying gateway-side HMAC pseudonymization.
+    /// O11: stops as soon as the estimated response exceeds <c>GraphQL.MaxResponseBytes</c> (same limit and error code
+    /// as the final check in GatewayExecutionService, but before the whole result sits in memory).
+    /// O12: a value the driver cannot materialize ends in <see cref="GatewayUnsupportedColumnTypeException"/>.
+    /// </summary>
+    public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ReadRowsAsync(
+        DbDataReader reader,
+        IReadOnlyDictionary<string, MaskingRule> gatewayHmacColumns,
+        int expectedRows,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+        ArgumentNullException.ThrowIfNull(gatewayHmacColumns);
+
+        var maxBytes = _options?.Value?.GraphQL?.MaxResponseBytes > 0 ? _options.Value.GraphQL.MaxResponseBytes : 10 * 1024 * 1024;
+        var results = new List<IReadOnlyDictionary<string, object?>>(Math.Min(Math.Max(expectedRows, 16), 1024));
+
+        int fieldCount = reader.FieldCount;
+        var columnNames = new string[fieldCount];
+        for (int i = 0; i < fieldCount; i++)
+        {
+            columnNames[i] = reader.GetName(i);
+        }
+
+        long estimatedBytes = 0;
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var row = new Dictionary<string, object?>(fieldCount, StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < fieldCount; i++)
+            {
+                var rawVal = ReadValue(reader, i, columnNames[i]);
+                var normalized = NormalizeReadValue(rawVal, columnNames[i]);
+                if (_maskingProvider != null && gatewayHmacColumns.TryGetValue(columnNames[i], out var hmacRule))
+                {
+                    normalized = _maskingProvider.MaskValue(columnNames[i], normalized, hmacRule);
+                }
+                row[columnNames[i]] = normalized;
+                estimatedBytes += EstimateSerializedBytes(columnNames[i], normalized);
+            }
+
+            if (estimatedBytes > maxBytes)
+            {
+                throw new Autheris.Domain.Exceptions.GatewaySecurityException(
+                    $"Antwortgröße überschreitet das konfigurierte Limit von {maxBytes} Bytes.", "RESPONSE_TOO_LARGE");
+            }
+            results.Add(row);
+        }
+
+        return results;
+    }
+
+    private static object? ReadValue(DbDataReader reader, int ordinal, string columnName)
+    {
+        try
+        {
+            return reader.IsDBNull(ordinal) ? null : reader.GetValue(ordinal);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or FileLoadException or TypeLoadException or InvalidCastException or NotSupportedException)
+        {
+            // SqlClient throws these for UDT columns (geography, geometry, hierarchyid) when Microsoft.SqlServer.Types is missing.
+            string typeName;
+            try
+            {
+                typeName = reader.GetDataTypeName(ordinal);
+            }
+            catch (Exception)
+            {
+                typeName = "unknown";
+            }
+            throw new Autheris.Domain.Exceptions.GatewayUnsupportedColumnTypeException(columnName, typeName, ex);
+        }
+    }
+
+    /// <summary>Same estimate as the final size check in GatewayExecutionService (UTF-16 lengths, 16 bytes per scalar).</summary>
+    private static long EstimateSerializedBytes(string columnName, object? value) =>
+        columnName.Length * 2L + value switch
+        {
+            null => 0,
+            string s => s.Length * 2L,
+            byte[] b => b.Length,
+            _ => 16
+        };
 
     public static string BuildMaskedColumnProjection(string columnName, string? dataType, DatabaseDialect dialect, TableMetadata tableMeta)
     {

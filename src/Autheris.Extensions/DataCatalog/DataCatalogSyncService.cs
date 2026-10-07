@@ -134,6 +134,14 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
             bool finalRequiresFourEyes = isArt9 || (existing?.Table?.RequiresFourEyes == true);
             var finalDataSourceType = existing?.Table?.DataSourceType ?? DataSourceType.Sql;
 
+            // D-1: catalogs such as Alation, Collibra or Purview report themselves as source type. A supported dialect on
+            // the table is kept; a SQL table without one stays unqueryable (fail-closed) until an administrator sets it.
+            var finalSourceType = DatabaseDialectExtensions.ResolveCatalogSourceType(tableAsset.SourceType, existing?.Table?.SourceType, out var dialectSupported);
+            if (!dialectSupported && finalDataSourceType == DataSourceType.Sql)
+            {
+                warnings.Add($"Table '{tableAsset.Identifier}': source type '{finalSourceType}' is not a supported SQL dialect; the table cannot be queried until its source type is set.");
+            }
+
             var metadata = new TableMetadata
             {
                 Identifier = tableAsset.Identifier,
@@ -146,7 +154,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                     Description = tableAsset.Description,
                     DocumentationSource = "DataCatalog",
                     DataSourceType = finalDataSourceType,
-                    SourceType = tableAsset.SourceType,
+                    SourceType = finalSourceType,
                     Sensitivity = finalSensitivity,
                     RequiresFourEyes = finalRequiresFourEyes,
                     IsActive = existing != null || activateNewTables

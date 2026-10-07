@@ -37,7 +37,13 @@ public sealed class Table
     public bool IsHighlySensitive =>
         string.Equals(Sensitivity, "HIGH", StringComparison.OrdinalIgnoreCase) || RequiresFourEyes;
 
-    public DatabaseDialect Dialect => DatabaseDialectExtensions.ParseDialect(SourceType);
+    /// <summary>
+    /// D-1: SQL tables fail closed on an unknown source type. Other sources (HTTP, plugins, lakehouse) never send SQL to a
+    /// database; their dialect only shapes the in-memory row filter, so they keep the neutral PostgreSQL default.
+    /// </summary>
+    public DatabaseDialect Dialect => DataSourceType == DataSourceType.Sql
+        ? DatabaseDialectExtensions.ParseDialect(SourceType)
+        : DatabaseDialectExtensions.TryParseDialect(SourceType, out var dialect) ? dialect : DatabaseDialect.PostgreSql;
 
     public TableIdentifier ToIdentifier(string domain) =>
         new(domain, SchemaName, TableName);

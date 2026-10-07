@@ -101,7 +101,7 @@ public sealed class ODataTests
             top: 50,
             skip: 0,
             select: "id,customer,amount",
-            includeCount: true,
+            includeCount: false,
             headers: null
         );
 
@@ -750,6 +750,142 @@ public sealed class ODataTests
             Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
             Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
             requestHeaders: headers, Arg.Any<CancellationToken>());
+    }
+
+    // ---- OData-Härtung (docs/plans/rls-subquery-in-strategy.md, O1-O12) ----
+
+    private sealed class FakeSqlException(int number, string message) : System.Data.Common.DbException(message)
+    {
+        public int Number { get; } = number;
+    }
+
+    private static ODataHandler CreateHandlerThrowing(Exception exception, IGatewayExecutionService? execService = null)
+    {
+        execService ??= Substitute.For<IGatewayExecutionService>();
+        execService.ExecuteTableQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
+            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
+            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(_ => throw exception);
+        return new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance, DevEnv("Production"));
+    }
+
+    private static Task<ODataQueryResult> QueryAsync(ODataHandler handler, int? skip = 0, bool includeCount = false, CancellationToken ct = default) =>
+        handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("lwetem_prod", "fms", "air1"), 10, skip, null, includeCount, null, ct);
+
+    [Fact]
+    public async Task ODataHandler_InvalidQueryException_Returns400InvalidQueryOption()
+    {
+        var handler = CreateHandlerThrowing(new Autheris.Domain.Exceptions.GatewayInvalidQueryException("The property 'amount' does not exist or is not accessible."));
+
+        var result = await QueryAsync(handler);
+
+        result.StatusCode.ShouldBe(400);
+        result.ErrorCode.ShouldBe("InvalidQueryOption");
+        result.ErrorMessage.ShouldNotBeNull().ShouldContain("amount");
+    }
+
+    [Fact]
+    public async Task ODataHandler_CountTrue_Returns501_InsteadOfPageCount()
+    {
+        var execService = Substitute.For<IGatewayExecutionService>();
+        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+
+        var result = await QueryAsync(handler, includeCount: true);
+
+        result.StatusCode.ShouldBe(501);
+        result.ErrorCode.ShouldBe("NotImplemented");
+        await execService.DidNotReceiveWithAnyArgs().ExecuteTableQueryAsync(default, default, default, default, default, default, default, default);
+    }
+
+    [Fact]
+    public async Task ODataHandler_SkipAboveMaximum_Returns400()
+    {
+        var execService = Substitute.For<IGatewayExecutionService>();
+        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+
+        var result = await QueryAsync(handler, skip: ODataHandler.MaxSkip + 1);
+
+        result.StatusCode.ShouldBe(400);
+        result.ErrorCode.ShouldBe("InvalidQueryOption");
+        result.ErrorMessage.ShouldNotBeNull().ShouldContain("$skip");
+        await execService.DidNotReceiveWithAnyArgs().ExecuteTableQueryAsync(default, default, default, default, default, default, default, default);
+    }
+
+    [Fact]
+    public async Task ODataHandler_Throttled_Returns429WithRetryAfter()
+    {
+        var handler = CreateHandlerThrowing(new Autheris.Domain.Exceptions.GatewayThrottledException(2));
+
+        var result = await QueryAsync(handler);
+
+        result.StatusCode.ShouldBe(429);
+        result.ErrorCode.ShouldBe("TooManyRequests");
+        result.RetryAfterSeconds.ShouldBe(2);
+    }
+
+    [Theory]
+    [InlineData(1205)]
+    [InlineData(40613)]
+    public async Task ODataHandler_TransientDatabaseError_Returns503WithRetryAfter(int number)
+    {
+        var handler = CreateHandlerThrowing(new FakeSqlException(number, "transient"));
+
+        var result = await QueryAsync(handler);
+
+        result.StatusCode.ShouldBe(503);
+        result.ErrorCode.ShouldBe("ServiceUnavailable");
+        result.RetryAfterSeconds.ShouldNotBeNull();
+        result.ErrorMessage.ShouldNotBeNull().ShouldNotContain("transient");
+    }
+
+    [Fact]
+    public async Task ODataHandler_SqlTimeoutByNumber_Returns504()
+    {
+        var handler = CreateHandlerThrowing(new FakeSqlException(-2, "anything"));
+
+        var result = await QueryAsync(handler);
+
+        result.StatusCode.ShouldBe(504);
+        result.ErrorCode.ShouldBe("ExecutionTimeout");
+    }
+
+    [Fact]
+    public async Task ODataHandler_ClientAbort_Returns499_NotAnError()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        // SqlClient reports a cancelled command as SqlException, not OperationCanceledException.
+        var handler = CreateHandlerThrowing(new FakeSqlException(0, "Operation cancelled by user."));
+
+        var result = await QueryAsync(handler, ct: cts.Token);
+
+        result.StatusCode.ShouldBe(499);
+        result.ErrorCode.ShouldBe("ClientClosedRequest");
+    }
+
+    [Fact]
+    public async Task ODataHandler_ResponseTooLarge_Returns400_NotAccessDenied()
+    {
+        var handler = CreateHandlerThrowing(new Autheris.Domain.Exceptions.GatewaySecurityException("Antwortgröße überschreitet das Limit.", "RESPONSE_TOO_LARGE"));
+
+        var result = await QueryAsync(handler);
+
+        result.StatusCode.ShouldBe(400);
+        result.ErrorCode.ShouldBe("ResponseTooLarge");
+        result.ErrorMessage.ShouldNotBeNull().ShouldContain("$select");
+    }
+
+    [Fact]
+    public async Task ODataHandler_UnsupportedColumnType_Returns501NamingTheColumn()
+    {
+        var handler = CreateHandlerThrowing(new Autheris.Domain.Exceptions.GatewayUnsupportedColumnTypeException("location", "geography"));
+
+        var result = await QueryAsync(handler);
+
+        result.StatusCode.ShouldBe(501);
+        result.ErrorCode.ShouldBe("UnsupportedColumnType");
+        result.ErrorMessage.ShouldNotBeNull().ShouldContain("location");
     }
 
     private static ClaimsPrincipal CreateAuthenticatedUser(string tenant = "sales")

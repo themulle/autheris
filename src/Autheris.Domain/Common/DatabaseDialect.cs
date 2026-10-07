@@ -68,22 +68,67 @@ public static class DatabaseDialectExtensions
         return $"{schemaQuoted}.{tableQuoted}";
     }
 
-    public static DatabaseDialect ParseDialect(string? sourceType)
+    /// <summary>
+    /// D-1: Maps a catalog source type or connection provider to a dialect. Fail-closed: empty, unknown and undefined
+    /// numeric values throw instead of falling back to a default dialect (the dialect decides quoting and filter syntax).
+    /// </summary>
+    public static DatabaseDialect ParseDialect(string? sourceType) =>
+        TryParseDialect(sourceType, out var dialect)
+            ? dialect
+            : throw new NotSupportedException($"Unsupported database dialect/source type: '{sourceType}'.");
+
+    public static bool TryParseDialect(string? sourceType, out DatabaseDialect dialect)
     {
+        dialect = default;
         if (string.IsNullOrWhiteSpace(sourceType))
         {
-            return DatabaseDialect.PostgreSql;
+            return false;
         }
 
-        return sourceType.Trim().ToLowerInvariant() switch
+        var normalized = sourceType.Trim().ToLowerInvariant();
+        DatabaseDialect? mapped = normalized switch
         {
             "mssql" or "sqlserver" or "sql_server" or "microsoft sql server" => DatabaseDialect.SqlServer,
             "sqlite" or "sqlite3" => DatabaseDialect.Sqlite,
             "postgres" or "postgresql" or "pgsql" or "npgsql" => DatabaseDialect.PostgreSql,
             "databricks" or "spark" or "sparksql" => DatabaseDialect.Databricks,
             "oracle" or "oracledb" or "odp" => DatabaseDialect.Oracle,
-            _ => Enum.TryParse<DatabaseDialect>(sourceType, true, out var d) ? d : DatabaseDialect.PostgreSql
+            _ => null
         };
+        if (mapped.HasValue)
+        {
+            dialect = mapped.Value;
+            return true;
+        }
+
+        // Enum names or numbers, but no flag combinations ("SqlServer, Sqlite") and no undefined numbers ("99").
+        if (!normalized.Contains(',') &&
+            Enum.TryParse<DatabaseDialect>(normalized, true, out var parsed) &&
+            Enum.IsDefined(parsed))
+        {
+            dialect = parsed;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// D-1: Source type to store for a table imported from an external catalog (Alation, Collibra, Purview, OpenMetadata).
+    /// A supported dialect already on the table is kept (a catalog sync never switches the dialect); otherwise the catalog
+    /// value is used. <paramref name="isSupported"/> is false when the result is not a database dialect, so the table stays
+    /// unqueryable (fail-closed) until an administrator sets the source type.
+    /// </summary>
+    public static string ResolveCatalogSourceType(string? catalogSourceType, string? existingSourceType, out bool isSupported)
+    {
+        if (TryParseDialect(existingSourceType, out _))
+        {
+            isSupported = true;
+            return existingSourceType!.Trim();
+        }
+
+        isSupported = TryParseDialect(catalogSourceType, out _);
+        return catalogSourceType?.Trim() ?? existingSourceType?.Trim() ?? string.Empty;
     }
 
     public static string EscapeSqlLiteral(this DatabaseDialect dialect, string value)
