@@ -357,6 +357,113 @@ public sealed class McpServerTests
     }
 
     [Fact]
+    public async Task AiDataGuardrailService_WhenTableRequiresFourEyes_ButCallerHasNoConsent_ShouldDenyWithoutTriggeringStepUpOrLeakingFourEyes()
+    {
+        var registry = new McpToolRegistry();
+        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
+        {
+            Mcp = new McpOptions { Enabled = true },
+            HitLStepUp = new HitLStepUpOptions { Enabled = true }
+        });
+        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var stepUpService = Substitute.For<IHitLStepUpApprovalService>();
+        var consentRepo = Substitute.For<IConsentRepository>();
+
+        var tableId = new TableIdentifier("finance", "dbo", "customers");
+        var meta = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table
+            {
+                SourceName = "finance",
+                SchemaName = "dbo",
+                TableName = "customers",
+                RequiresFourEyes = true,
+                IsActive = true
+            }
+        };
+
+        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<System.Threading.CancellationToken>())
+            .Returns(meta);
+
+        // No active consents returned for caller
+        consentRepo.GetAllActiveConsentsForSubjectsAsync(
+            Arg.Any<System.Collections.Generic.IReadOnlyList<Sid>>(),
+            Arg.Any<System.Collections.Generic.IReadOnlyList<string>>(),
+            Arg.Any<DateTimeOffset>(),
+            Arg.Any<TenantId>(),
+            Arg.Any<System.Threading.CancellationToken>())
+            .Returns(Task.FromResult((System.Collections.Generic.IReadOnlyList<Consent>)new System.Collections.Generic.List<Consent>()));
+
+        var guardrail = new AiDataGuardrailService(
+            registry,
+            options,
+            NullLogger<AiDataGuardrailService>.Instance,
+            auditLogRepository: auditRepo,
+            tableMetadataRepository: metadataRepo,
+            stepUpApprovalService: stepUpService,
+            consentRepository: consentRepo);
+
+        var session = new McpSessionContext("sess-1", "sp-analyst", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "user-analyst");
+        var request = new McpToolCallRequest("query_customers", "{}");
+
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(request, session);
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage.ShouldNotBeNull();
+        result.ErrorMessage.ShouldNotContain("Four-Eyes");
+        result.ErrorMessage.ShouldContain("not accessible");
+
+        // Step-up approval must NOT be requested!
+        await stepUpService.DidNotReceiveWithAnyArgs().RequestStepUpApprovalAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(), Arg.Any<string?>(), Arg.Any<System.Threading.CancellationToken>());
+
+        // Audit log must NOT leak Four-Eyes
+        await auditRepo.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e =>
+                e.EventType == "MCP_TOOL_EXECUTION" &&
+                e.Decision == "DENY" &&
+                !e.DetailsJson.Contains("Four-Eyes")),
+            Arg.Any<System.Threading.CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AiDataGuardrailService_WhenTargetTableInactiveOrMissing_ShouldDenyFailClosed()
+    {
+        var registry = new McpToolRegistry();
+        var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
+        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+
+        // Return null (missing table)
+        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<System.Threading.CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(null));
+
+        var guardrail = new AiDataGuardrailService(
+            registry,
+            options,
+            NullLogger<AiDataGuardrailService>.Instance,
+            auditLogRepository: auditRepo,
+            tableMetadataRepository: metadataRepo);
+
+        var session = new McpSessionContext("sess-1", "sp-analyst", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "user-analyst");
+        var request = new McpToolCallRequest("query_customers", "{}");
+
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(request, session);
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage.ShouldNotBeNull();
+        result.ErrorMessage.ShouldContain("not accessible");
+
+        await auditRepo.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e =>
+                e.EventType == "MCP_TOOL_EXECUTION" &&
+                e.Decision == "DENY"),
+            Arg.Any<System.Threading.CancellationToken>());
+    }
+
+    [Fact]
     public async Task McpSessionStore_RegisterAndSendSseEvent_ShouldDispatchEventToActiveStream()
     {
         var store = new McpSessionStore(NullLogger<McpSessionStore>.Instance);

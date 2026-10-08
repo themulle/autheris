@@ -299,7 +299,72 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             }
 
             var meta = await _tableMetadataRepository.GetTableMetadataAsync(resolvedTable.Value, cancellationToken).ConfigureAwait(false);
-            if (meta?.Table.RequiresFourEyes == true)
+            if (meta == null || !meta.Table.IsActive)
+            {
+                activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+
+                _logger.LogWarning("Tool '{ToolName}' targets inactive or missing table '{Table}'. Denying execution.", tool.Name, resolvedTable);
+
+                await RecordAuditEventAsync(
+                    tool.Name,
+                    sessionContext,
+                    decision: "DENY",
+                    details: $"Tool execution denied: target table {resolvedTable} does not exist or is inactive.",
+                    isMasked: false,
+                    truncated: false,
+                    estimatedTokens: 0,
+                    cancellationToken).ConfigureAwait(false);
+
+                return new McpToolCallResult(
+                    IsSuccess: false,
+                    ContentJson: "{}",
+                    ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible."
+                );
+            }
+
+            // SEC-MCP-02 / SR-P2-07: Verify catalog visibility BEFORE checking RequiresFourEyes or requesting step-up.
+            // This prevents leaking secret table names and flooding approvers with unconsented step-up tickets.
+            var roles = sessionContext.Roles ?? [];
+            bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
+                           roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+
+            if (_consentRepository != null && !_options.Value.IsMcpAuthBypassed && !isAdmin)
+            {
+                var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync([meta], principal, _consentRepository, cancellationToken).ConfigureAwait(false);
+                bool isVisible = visibleTables.Any(t =>
+                    t.Identifier.Equals(resolvedTable.Value) ||
+                    (string.Equals(t.Identifier.Domain, resolvedTable.Value.Domain, StringComparison.OrdinalIgnoreCase) &&
+                     string.Equals(t.Identifier.TableName, resolvedTable.Value.TableName, StringComparison.OrdinalIgnoreCase)));
+
+                if (!isVisible)
+                {
+                    activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                    McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+
+                    _logger.LogWarning("Tool '{ToolName}' targets dataset '{Table}' which is not visible or consented to caller '{Caller}'. Denying execution before Four-Eyes gate.",
+                        tool.Name, resolvedTable, sessionContext.ServicePrincipalId);
+
+                    await RecordAuditEventAsync(
+                        tool.Name,
+                        sessionContext,
+                        decision: "DENY",
+                        details: $"Tool execution denied: target dataset {resolvedTable} is not visible or consented to caller.",
+                        isMasked: false,
+                        truncated: false,
+                        estimatedTokens: 0,
+                        cancellationToken).ConfigureAwait(false);
+
+                    return new McpToolCallResult(
+                        IsSuccess: false,
+                        ContentJson: "{}",
+                        ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible."
+                    );
+                }
+            }
+
+            if (meta.Table.RequiresFourEyes == true)
             {
                 if (_stepUpApprovalService != null && _options.Value.HitLStepUp.Enabled)
                 {
