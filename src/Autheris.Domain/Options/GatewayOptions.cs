@@ -1615,6 +1615,12 @@ public sealed class VirtualFilterOptions
     /// binding widens what its grantee sees. 0 disables the check.
     /// </summary>
     public int MaxRemovals { get; init; } = 10;
+
+    /// <summary>
+    /// How often (seconds) an instance compares the virtual filter generation with the governance database; changes made
+    /// on another instance take effect within this time. 0 compares on every access.
+    /// </summary>
+    public int GenerationCheckSeconds { get; init; } = 5;
 }
 
 /// <summary>

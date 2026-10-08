@@ -236,30 +236,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         Consent consent,
         Sid userSid,
         IReadOnlySet<Sid> subjectGroupSids,
-        IReadOnlySet<string> userRoles)
-    {
-        switch (consent.GranteeType)
-        {
-            case GranteeType.User:
-            case GranteeType.ServicePrincipal:
-                return consent.GranteeSid.HasValue && consent.GranteeSid.Value == userSid;
-
-            case GranteeType.Group:
-                return consent.GranteeSid.HasValue && subjectGroupSids.Contains(consent.GranteeSid.Value);
-
-            case GranteeType.Role:
-                if (!string.IsNullOrEmpty(consent.RoleName) && userRoles.Contains(consent.RoleName))
-                {
-                    return true;
-                }
-                if (consent.RoleId.HasValue && userRoles.Contains(consent.RoleId.Value.ToString()))
-                {
-                    return true;
-                }
-                return false;
-
-            default:
-                return false;
-        }
-    }
+        IReadOnlySet<string> userRoles) =>
+        Autheris.Application.Policy.GranteeMatcher.Matches(
+            consent.GranteeType, consent.GranteeSid, consent.RoleName, consent.RoleId, userSid, subjectGroupSids, userRoles);
 }

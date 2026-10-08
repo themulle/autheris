@@ -46,6 +46,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly IProcedureRowScopeResolver? _rowScope;
     private readonly ILogger<GovernedProcedureExecutionService>? _logger;
 
+    private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
+
     public GovernedProcedureExecutionService(
         IProcedureRegistry registry,
         IProcedureInvoker invoker,
@@ -60,8 +62,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         ILogger<GovernedProcedureExecutionService>? logger = null,
         IProcedureRowScopeResolver? rowScope = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
-        IConsentCacheService? consentCache = null)
+        IConsentCacheService? consentCache = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
     {
+        _mandatoryFilters = mandatoryFilters;
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -329,7 +333,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         // call unless the result table's filter is enforced by the row scope after the call.
         var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
             ? TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
-            : await new Autheris.Application.Policy.TableAccessPolicy(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value)
+            : await new Autheris.Application.Policy.TableAccessPolicy(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value, _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance)
                 .DecideAsync(
                     new Autheris.Application.Policy.TableAccessQuery(
                         userSid,

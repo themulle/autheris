@@ -55,12 +55,25 @@ public sealed class VirtualFilterAdministrationService
     private readonly IVirtualFilterRepository _repository;
     private readonly IAuditLogRepository _audit;
     private readonly VirtualFilterOptions _options;
+    private readonly IVirtualFilterSnapshotProvider? _snapshots;
 
-    public VirtualFilterAdministrationService(IVirtualFilterRepository repository, IAuditLogRepository audit, IOptions<GatewayOptions>? options = null)
+    public VirtualFilterAdministrationService(
+        IVirtualFilterRepository repository,
+        IAuditLogRepository audit,
+        IOptions<GatewayOptions>? options = null,
+        IVirtualFilterSnapshotProvider? snapshots = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _options = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
+        _snapshots = snapshots;
+    }
+
+    /// <summary>Writes and makes the change visible to enforcement on this instance at once.</summary>
+    private async Task ApplyAsync(VirtualFilterChangeSet changes, CancellationToken ct)
+    {
+        await _repository.ApplyAsync(changes, ct).ConfigureAwait(false);
+        _snapshots?.Invalidate();
     }
 
     public Task<VirtualFilterSnapshot> GetSnapshotAsync(CancellationToken ct = default) => _repository.LoadSnapshotAsync(ct);
@@ -77,7 +90,7 @@ public sealed class VirtualFilterAdministrationService
         ValidateSupersedes(snapshot.Filters.Where(f => f.TenantId == filter.TenantId && f.Name != filter.Name).Append(filter).ToList());
 
         var toStore = filter with { Id = existing?.Id ?? filter.Id, UpdatedBy = actor.Sid.Value, UpdatedAt = DateTimeOffset.UtcNow };
-        await _repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [toStore] }, ct).ConfigureAwait(false);
+        await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [toStore] }, ct).ConfigureAwait(false);
         await AuditAsync(filter.TenantId, actor, existing == null ? "VIRTUAL_FILTER_CREATED" : "VIRTUAL_FILTER_UPDATED",
             $"virtual_filter:{filter.Name}", new { name = filter.Name, before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
         return toStore;
@@ -101,7 +114,7 @@ public sealed class VirtualFilterAdministrationService
             throw new VirtualFilterConflictException($"The virtual filter '{name}' is superseded by another filter.");
         }
 
-        await _repository.ApplyAsync(new VirtualFilterChangeSet { DeleteFilters = [(tenantId, name)] }, ct).ConfigureAwait(false);
+        await ApplyAsync(new VirtualFilterChangeSet { DeleteFilters = [(tenantId, name)] }, ct).ConfigureAwait(false);
         await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_DELETED", $"virtual_filter:{name}", new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
     }
 
@@ -117,7 +130,7 @@ public sealed class VirtualFilterAdministrationService
         EnsureWritable(existing?.ManagedBy, profile.ManagedBy, actor, $"access profile '{profile.Name}'");
 
         var toStore = profile with { Id = existing?.Id ?? profile.Id, UpdatedBy = actor.Sid.Value, UpdatedAt = DateTimeOffset.UtcNow };
-        await _repository.ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [toStore] }, ct).ConfigureAwait(false);
+        await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [toStore] }, ct).ConfigureAwait(false);
         await AuditAsync(profile.TenantId, actor, existing == null ? "ACCESS_PROFILE_CREATED" : "ACCESS_PROFILE_UPDATED",
             $"access_profile:{profile.Name}", new { name = profile.Name, before = existing?.ComputeDefinitionHash(), after = profile.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
         return toStore;
@@ -130,7 +143,7 @@ public sealed class VirtualFilterAdministrationService
         var existing = FindProfile(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The access profile '{name}' does not exist.");
         EnsureWritable(existing.ManagedBy, null, actor, $"access profile '{name}'");
 
-        await _repository.ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)] }, ct).ConfigureAwait(false);
+        await ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)] }, ct).ConfigureAwait(false);
         await AuditAsync(tenantId, actor, "ACCESS_PROFILE_DELETED", $"access_profile:{name}", new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
     }
 
@@ -165,7 +178,7 @@ public sealed class VirtualFilterAdministrationService
         }
 
         var stamp = DateTimeOffset.UtcNow;
-        await _repository.ApplyAsync(changes with
+        await ApplyAsync(changes with
         {
             SaveFilters = changes.SaveFilters.Select(f => f with { UpdatedBy = actor.Sid.Value, UpdatedAt = stamp }).ToList(),
             SaveProfiles = changes.SaveProfiles.Select(p => p with { UpdatedBy = actor.Sid.Value, UpdatedAt = stamp }).ToList()

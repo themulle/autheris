@@ -94,8 +94,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
-        IConsentCacheService? consentCache = null)
+        IConsentCacheService? consentCache = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
     {
+        _mandatoryFilters = mandatoryFilters;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement;
         _consentResolution = consentResolution;
@@ -1383,8 +1385,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     }
 
     /// <summary>Architecture 1: the shared table access decision; only called with consent services present.</summary>
+    private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
+
     private TableAccessPolicy AccessPolicy() =>
-        new(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value);
+        new(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value,
+            _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
 
     /// <summary>
     /// SEC P-05: Dialect of the configured connection for <paramref name="dataSourceName"/>, or null when no connection

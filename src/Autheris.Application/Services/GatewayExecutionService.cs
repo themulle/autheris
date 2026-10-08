@@ -64,8 +64,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IClientIpResolver? clientIpResolver = null,
         Autheris.Application.Connectors.IAutherisConnectorRegistry? connectorRegistry = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
-        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null)
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
     {
+        _mandatoryFilters = mandatoryFilters;
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
         _auditLogRepository = auditLogRepository;
@@ -514,8 +516,11 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
     }
 
+    private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
+
     private TableAccessPolicy AccessPolicy() =>
-        new(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, _clientIpResolver, _options);
+        new(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, _clientIpResolver, _options,
+            _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
 
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
         List<IReadOnlyDictionary<string, object?>> rows,

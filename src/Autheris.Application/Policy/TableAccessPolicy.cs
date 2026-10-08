@@ -39,7 +39,8 @@ public sealed record TableAccessQuery(
     IReadOnlyList<string>? RequestedColumns = null,
     RebacEnforcement Rebac = RebacEnforcement.QueryPaths,
     IPAddress? ClientIp = null,
-    IReadOnlyDictionary<string, object?>? ExtraAttributes = null)
+    IReadOnlyDictionary<string, object?>? ExtraAttributes = null,
+    FilterObjectKinds ObjectKind = FilterObjectKinds.Relation)
 {
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,
@@ -88,7 +89,12 @@ public sealed class TableAccessPolicy
     private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly GatewayOptions? _options;
+    private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
 
+    /// <param name="mandatoryFilters">
+    /// Virtual filters; required on purpose: a decision point without it would silently skip them. Use
+    /// <see cref="Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver"/> only where there are none by design.
+    /// </param>
     public TableAccessPolicy(
         IConsentRepository consentRepository,
         IConsentResolutionService resolutionService,
@@ -96,8 +102,10 @@ public sealed class TableAccessPolicy
         IPolicyEnforcementService? policyEnforcementService,
         IRebacEvaluator? rebacEvaluator,
         IClientIpResolver? clientIpResolver,
-        GatewayOptions? options)
+        GatewayOptions? options,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver mandatoryFilters)
     {
+        _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
         _cacheService = cacheService;
@@ -121,6 +129,24 @@ public sealed class TableAccessPolicy
         var decision = consentBypassed
             ? TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
             : await ResolveConsentAsync(query, ct).ConfigureAwait(false);
+
+        // Virtual filters: restrictive, AND with the consent decision (after the consent cache, which stays free of them;
+        // also with the consent bypass, decision 1). They never turn a denial into an allow.
+        if (decision.IsAllowed)
+        {
+            var mandatory = await _mandatoryFilters.ResolveAsync(
+                new Autheris.Application.VirtualFilters.MandatoryFilterQuery(query.UserSid, query.GroupSids, query.Roles, query.Tenant, query.Metadata, query.ObjectKind),
+                ct).ConfigureAwait(false);
+            if (mandatory.IsDenied)
+            {
+                return TableAccessDecision.Denied(table, mandatory.DenyReason ?? "Denied by virtual filters.");
+            }
+
+            if (mandatory.PredicateSql != null)
+            {
+                decision = decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters);
+            }
+        }
 
         if (!decision.IsAllowed || consentBypassed ||
             _policyEnforcementService == null || !_policyEnforcementService.HasPolicies(query.Tenant))

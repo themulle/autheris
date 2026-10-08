@@ -33,6 +33,8 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
     private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly IClientIpResolver? _clientIpResolver;
 
+    private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
+
     public IcebergRestCatalogFederationService(
         IIcebergMetadataReader metadataReader,
         ITableMetadataRepository metadataRepo,
@@ -41,8 +43,10 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         IConsentResolutionService? consentService = null,
         IConsentRepository? consentRepo = null,
         IPolicyEnforcementService? policyEnforcementService = null,
-        IClientIpResolver? clientIpResolver = null)
+        IClientIpResolver? clientIpResolver = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
     {
+        _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -208,6 +212,15 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         {
             _logger.LogWarning("Consent denied for user {User} accessing Iceberg table {TableId}", userSid, tableId);
             throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
+        }
+
+        // Virtual filters restrict rows; raw metadata vending cannot enforce that (same as any row filter below).
+        var mandatory = await _mandatoryFilters.ResolveAsync(
+            new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, groupSids, roles, tenant, tableMeta), ct).ConfigureAwait(false);
+        if (mandatory.IsDenied || mandatory.PredicateSql != null)
+        {
+            _logger.LogWarning("Virtual filters apply to user {User} on Iceberg table {TableId}; raw access refused", userSid, tableId);
+            throw new SecurityException($"Direct Iceberg catalog access not permitted: Table '{@namespace}.{table}' is restricted by virtual filters.");
         }
 
         // Review G5: Casbin ABAC applies to raw access as well; an ABAC row filter cannot be enforced on raw metadata.
