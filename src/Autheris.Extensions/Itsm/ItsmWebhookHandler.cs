@@ -280,6 +280,9 @@ public sealed class ItsmWebhookHandler(
 
     private async Task<bool> ProcessStatusChangeAsync(ItsmStatusChangeDto payload, string instanceId, CancellationToken ct)
     {
+        // Sanitize untrusted data before writing it to logs (prevent log forging via CR/LF).
+        var logInstanceId = instanceId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+
         // 5. Strikte Tenant-Bindung (umgehbar via warn_fallback_default_tenant_for_webhooks).
         // SEC H-06: Ticket-Lookup erfolgt mit Tenant-Filter (WHERE itsm_ticket_id = @t AND tenant_id = @tenant).
         var expectedTenant = _itsmOptions.GetTenantForInstance(instanceId);
@@ -294,7 +297,7 @@ public sealed class ItsmWebhookHandler(
                 {
                     logger.LogWarning(
                         "[DANGER] Bypassing cross-tenant mismatch for ticket {TicketId}. Request tenant: {ReqTenant}, callback instance: {InstanceId}. Prohibited outside Development.",
-                        payload.TicketId, request.TenantId, instanceId);
+                        payload.TicketId, request.TenantId, logInstanceId);
                 }
             }
         }
@@ -305,7 +308,7 @@ public sealed class ItsmWebhookHandler(
             {
                 logger.LogWarning(
                     "[DANGER] Bypassing tenant binding for unmapped ITSM instance {InstanceId} (ticket {TicketId}, request tenant {ReqTenant}). Prohibited outside Development.",
-                    instanceId, payload.TicketId, request.TenantId);
+                    logInstanceId, payload.TicketId, request.TenantId);
             }
         }
         else
@@ -313,13 +316,13 @@ public sealed class ItsmWebhookHandler(
             GatewayDiagnostics.CrossTenantMismatchCounter.Add(1);
             logger.LogError(
                 "CROSS_TENANT_WEBHOOK_MISMATCH: Callback for ticket {TicketId} came from an unassigned instance {InstanceId}.",
-                payload.TicketId, instanceId);
+                payload.TicketId, logInstanceId);
             return false; // Streng verweigern!
         }
 
         if (request == null)
         {
-            logger.LogWarning("Webhook discarded: Unknown TicketId '{TicketId}' for instance '{InstanceId}'.", payload.TicketId, instanceId);
+            logger.LogWarning("Webhook discarded: Unknown TicketId '{TicketId}' for instance '{InstanceId}'.", payload.TicketId, logInstanceId);
             return false;
         }
 
