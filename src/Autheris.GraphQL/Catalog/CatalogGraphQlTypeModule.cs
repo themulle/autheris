@@ -344,7 +344,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
         }));
     }
 
-    private static string GetScalarName(CatalogFieldType type) => type switch
+    internal static string GetScalarName(CatalogFieldType type) => type switch
     {
         CatalogFieldType.String => "String",
         CatalogFieldType.Int => "Int",

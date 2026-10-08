@@ -17,6 +17,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using HotChocolate.Execution;
+using HotChocolate.Language;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -152,7 +153,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         // Dataset tools: catalog discovery and governed sample rows
         if (McpDatasetTools.IsDatasetTool(tool.Name))
         {
-            return await ExecuteDatasetToolAsync(tool, principal, sessionContext, variables, cancellationToken).ConfigureAwait(false);
+            return await ExecuteDatasetToolAsync(tool, principal, sessionContext, variables, argumentsJson, cancellationToken).ConfigureAwait(false);
         }
 
         // Fast-path / Specialized execution for registered tables if operation is standard table query
@@ -242,8 +243,14 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         ClaimsPrincipal principal,
         McpSessionContext sessionContext,
         Dictionary<string, object?> variables,
+        string? argumentsJson,
         CancellationToken cancellationToken)
     {
+        if (string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExecuteGraphQlQueryAsync(tool, principal, sessionContext, argumentsJson, cancellationToken).ConfigureAwait(false);
+        }
+
         if (_datasetCatalog == null)
         {
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "The dataset catalog is not available.");
@@ -286,6 +293,98 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "Tool execution failed.");
         }
     }
+
+    /// <summary>
+    /// query_graphql: one read-only GraphQL query against the gateway schema. The catalog resolvers authorize every
+    /// table with the caller's identity (consent, ReBAC, Casbin, row filters, masking), as for POST /graphql.
+    /// </summary>
+    private async Task<string> ExecuteGraphQlQueryAsync(
+        McpToolDefinition tool,
+        ClaimsPrincipal principal,
+        McpSessionContext sessionContext,
+        string? argumentsJson,
+        CancellationToken cancellationToken)
+    {
+        string Invalid(string message) => CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, message);
+
+        if (!McpDatasetTools.TryGetStringArgument(argumentsJson, "query", out var query) || string.IsNullOrWhiteSpace(query))
+        {
+            return Invalid("The 'query' argument (one GraphQL query) is required.");
+        }
+
+        Dictionary<string, object?>? variableValues = null;
+        using (var args = JsonDocument.Parse(argumentsJson!))
+        {
+            foreach (var property in args.RootElement.EnumerateObject())
+            {
+                if (!string.Equals(property.Name, "variables", StringComparison.OrdinalIgnoreCase) || property.Value.ValueKind == JsonValueKind.Null)
+                {
+                    continue;
+                }
+
+                if (property.Value.ValueKind != JsonValueKind.Object)
+                {
+                    return Invalid("'variables' must be an object.");
+                }
+
+                variableValues = (Dictionary<string, object?>)ToVariableValue(property.Value)!;
+            }
+        }
+
+        DocumentNode document;
+        try
+        {
+            document = Utf8GraphQLParser.Parse(query);
+        }
+        catch (SyntaxException ex)
+        {
+            return Invalid($"The query could not be parsed: {ex.Message}");
+        }
+
+        var operations = document.Definitions.OfType<OperationDefinitionNode>().ToList();
+        if (operations.Count != 1)
+        {
+            return Invalid("Send exactly one operation per call.");
+        }
+
+        if (operations[0].Operation != OperationType.Query)
+        {
+            return Invalid("Only queries are allowed over MCP; mutations and subscriptions are not available.");
+        }
+
+        var executor = await _executorProvider.GetExecutorAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        var requestBuilder = OperationRequestBuilder.New()
+            .SetDocument(query)
+            .AddGlobalState("ClaimsPrincipal", principal);
+        if (variableValues != null)
+        {
+            requestBuilder.SetVariableValues(variableValues);
+        }
+
+        var executionResult = await executor.ExecuteAsync(requestBuilder.Build(), cancellationToken).ConfigureAwait(false);
+        if (executionResult is not OperationResult result)
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "Unsupported GraphQL execution result.");
+        }
+
+        var json = FormatOperationResult(result);
+        return result.Errors is null || result.Errors.Count == 0
+            ? json
+            : CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "GraphQL execution returned errors.", json);
+    }
+
+    private static object? ToVariableValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Object => value.EnumerateObject().ToDictionary(p => p.Name, p => ToVariableValue(p.Value), StringComparer.Ordinal),
+        JsonValueKind.Array => value.EnumerateArray().Select(ToVariableValue).ToList(),
+        JsonValueKind.String => value.GetString(),
+        JsonValueKind.Number when value.TryGetInt32(out var i) => i,
+        JsonValueKind.Number when value.TryGetInt64(out var l) => l,
+        JsonValueKind.Number => value.GetDecimal(),
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        _ => null
+    };
 
     private static int? ToCount(Dictionary<string, object?> variables) =>
         variables.TryGetValue("count", out var v) ? v switch

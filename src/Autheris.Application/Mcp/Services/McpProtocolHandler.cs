@@ -125,6 +125,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
               "name": "Autheris.McpServer",
               "version": "1.4.0"
             },
+            "instructions": "{{EscapeJson(McpDatasetTools.ServerInstructions)}}",
             "capabilities": {
               "tools": { "listChanged": false },
               "resources": { "subscribe": false, "listChanged": false }

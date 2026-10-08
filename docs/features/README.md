@@ -15,7 +15,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-AI-08** | FOCUS FinOps Accounting for Token & Compute | [f-ai-08-focus-finops-accounting.md](f-ai-08-focus-finops-accounting.md) |
 | **F-AI-09** | Native Vector Database & RAG Egress (pgvector, Qdrant, Milvus) (not implemented) | [f-ai-09-native-vector-database-rag-egress.md](f-ai-09-native-vector-database-rag-egress.md) |
 | **F-AI-10** | Semantic Query Cache & Autonomous Policy Recommendation (not implemented) | [f-ai-10-semantic-cache-policy-recommendation.md](f-ai-10-semantic-cache-policy-recommendation.md) |
-| **F-AI-11** | MCP Dataset Tools (Catalog Discovery for AI Agents) | [f-ai-11-mcp-dataset-tools.md](f-ai-11-mcp-dataset-tools.md) |
+| **F-AI-11** | MCP Dataset Tools (Catalog Discovery and GraphQL Queries for AI Agents) | [f-ai-11-mcp-dataset-tools.md](f-ai-11-mcp-dataset-tools.md) |
 | **F-API-03** | Dual-Access Exposure (OData v4 & Dynamic OpenAPI 3.1) | [f-api-03-odata-openapi.md](f-api-03-odata-openapi.md) |
 | **F-API-04** | Upstream Web API & Microservice Ingestion via OpenAPI | [f-api-04-openapi-ingestion.md](f-api-04-openapi-ingestion.md) |
 | **F-API-07** | Canonical System Metadata & Monitoring Schema ($system) | [f-api-07-system-metadata-monitoring.md](f-api-07-system-metadata-monitoring.md) |

@@ -466,6 +466,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IGoldenQueryService, GoldenQueryService>();
         services.AddSingleton<ISemanticMcpCompiler, SemanticMcpCompiler>();
         services.AddScoped<IMcpDatasetCatalog, McpDatasetCatalog>();
+        services.AddSingleton<IGraphQlCatalogMap, Autheris.GraphQL.Mcp.CatalogGraphQlMap>();
         services.AddTransient<IPreFlightQuerySimulator, PreFlightQuerySimulator>();
         services.AddSingleton<IMcpProvenanceEnricher, McpProvenanceEnricher>();
         services.AddSingleton<IMcpSessionStore, McpSessionStore>();
