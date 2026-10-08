@@ -188,12 +188,36 @@ public sealed class DevExperienceTests
     // ---------- Banner ----------
 
     [Fact]
-    public void Banner_ListsLinksAndPersonas_PasswordsOnlyWhenPlaintext()
+    public void Banner_ListsLinksAndPersonas_PasswordsHiddenByDefault_AndAllHashesMasked()
     {
-        var banner = DevStartupBanner.Build(["http://localhost:5031", "https://localhost:7214"], CreateOptions(), Env("Development"));
+        var options = CreateOptions();
+        options.Authentication.BasicAuth.Users.Add(
+            new BasicAuthUserConfig { Username = "argon-user", Password = "$argon2id$v=19$m=65536,t=3,p=1$abc$xyz", Roles = ["Analyst"] });
+
+        var banner = DevStartupBanner.Build(["http://localhost:5031", "https://localhost:7214"], options, Env("Development"));
 
         banner.ShouldContain("https://localhost:7214/graphql");
         banner.ShouldContain("https://localhost:7214/api/dev/login/owner?redirect=/graphql");
+        banner.ShouldNotContain("s3cret-pw");
+        banner.ShouldContain("<hidden>");
+        banner.ShouldContain("<hashed>");
+        banner.ShouldNotContain("pbkdf2");
+        banner.ShouldNotContain("argon2id");
+    }
+
+    [Fact]
+    public void Banner_ListsLinksAndPersonas_ShowsPlaintextWhenExplicitlyEnabled()
+    {
+        var options = CreateOptions();
+        options = new GatewayOptions
+        {
+            GovernanceDb = options.GovernanceDb,
+            Authentication = options.Authentication,
+            Dev = new DevOptions { ShowPasswords = true }
+        };
+
+        var banner = DevStartupBanner.Build(["http://localhost:5031", "https://localhost:7214"], options, Env("Development"));
+
         banner.ShouldContain("s3cret-pw");
         banner.ShouldContain("<hashed>");
         banner.ShouldNotContain("pbkdf2");

@@ -1,0 +1,12 @@
+# Auto detect text files and perform LF normalization
+* text=auto eol=lf
+
+# Explicit LF for shell scripts and SQL files
+*.sh text eol=lf
+*.sql text eol=lf
+*.py text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.cs text eol=lf
+*.csproj text eol=lf
+*.sln text eol=crlf

@@ -59,8 +59,16 @@ public static class DevStartupBanner
             : "  Personas (Basic login; session cookie inactive):");
         foreach (var user in basic.Users)
         {
-            // Plaintext passwords are only accepted in Development; hashed ones are never printed.
-            var password = user.Password.StartsWith("$pbkdf2$", StringComparison.Ordinal) ? "<hashed>" : user.Password;
+            // Hashes (any recognized format starting with '$', e.g. $pbkdf2$, $argon2id$, bcrypt) are never printed.
+            // Plaintext passwords are masked as <hidden> by default and only printed when ShowPasswords is enabled.
+            var isHashed = user.Password.StartsWith('$') ||
+                           user.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase) ||
+                           user.Password.StartsWith("$argon2id$", StringComparison.OrdinalIgnoreCase);
+
+            var password = isHashed
+                ? "<hashed>"
+                : (options.Dev.ShowPasswords ? user.Password : "<hidden>");
+
             var roles = user.Roles.Count == 0 ? "-" : string.Join(",", user.Roles);
             sb.Append($"    {user.Username,-12} pw {password,-8} {roles,-14} tenant {BasicAuthPrincipalFactory.ResolveTenant(user)}");
             if (sessionActive)

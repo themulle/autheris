@@ -345,13 +345,16 @@ public partial class SqliteGovernanceRepository
         using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
+            var rawLevel = reader.GetInt32(4);
             rules.Add(new ConsentColumnRule
             {
                 Id = Guid.Parse(reader.GetString(0)),
                 ConsentId = Guid.Parse(reader.GetString(1)),
                 TableColumnId = Guid.Parse(reader.GetString(2)),
                 ColumnName = reader.GetString(3),
-                AccessLevel = (ColumnAccessLevel)reader.GetInt32(4)
+                AccessLevel = Enum.IsDefined((ColumnAccessLevel)rawLevel)
+                    ? (ColumnAccessLevel)rawLevel
+                    : ColumnAccessLevel.Deny
             });
         }
         return rules;
@@ -462,13 +465,16 @@ public partial class SqliteGovernanceRepository
                     var cid = Guid.Parse(reader.GetString(1));
                     if (rulesMap.TryGetValue(cid, out var list))
                     {
+                        var rawLevel = reader.GetInt32(4);
                         list.Add(new ConsentColumnRule
                         {
                             Id = Guid.Parse(reader.GetString(0)),
                             ConsentId = cid,
                             TableColumnId = Guid.Parse(reader.GetString(2)),
                             ColumnName = reader.GetString(3),
-                            AccessLevel = (ColumnAccessLevel)reader.GetInt32(4)
+                            AccessLevel = Enum.IsDefined((ColumnAccessLevel)rawLevel)
+                                ? (ColumnAccessLevel)rawLevel
+                                : ColumnAccessLevel.Deny
                         });
                     }
                 }

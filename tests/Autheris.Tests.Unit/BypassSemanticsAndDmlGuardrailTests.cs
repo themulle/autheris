@@ -169,6 +169,30 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     }
 
     [Fact]
+    public void SEM_EnableIntrospection_InProduction_RequiresExplicitOptIn()
+    {
+        var options = new GatewayOptions
+        {
+            GraphQL = new GraphQLOptions { EnableIntrospection = true },
+            DataMasking = ProdMasking()
+        };
+
+        // Prohibited in production without explicit opt-in
+        Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), NoEnvironmentVariables));
+
+        // Allowed with explicit opt-in
+        var optInOptions = new GatewayOptions
+        {
+            GraphQL = new GraphQLOptions { EnableIntrospection = true },
+            AllowInsecureWarnFlagsInProduction = true,
+            DataMasking = ProdMasking()
+        };
+        Should.NotThrow(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(optInOptions, Env(Environments.Production), NoEnvironmentVariables));
+    }
+
+    [Fact]
     public void SEM_WarnAllowAllCorsOrigins_InProduction_RequiresExplicitOptIn()
     {
         var options = WithWarnSwitch("warn_allow_all_cors_origins");

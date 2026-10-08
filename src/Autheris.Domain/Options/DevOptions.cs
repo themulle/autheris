@@ -21,6 +21,9 @@ public sealed class DevOptions
     /// <summary>Class A: startup banner with links and personas.</summary>
     public bool Banner { get; init; } = true;
 
+    /// <summary>Class A: print plaintext passwords in the startup banner (default: false).</summary>
+    public bool ShowPasswords { get; init; } = false;
+
     /// <summary>Class A: diagnostic problem+json for 403 responses and unhandled exceptions.</summary>
     public bool VerboseErrors { get; init; } = true;
 
@@ -68,9 +71,10 @@ public sealed record DevFeatures(
     bool PersonaLogin,
     bool Info,
     bool PersistDb,
-    IReadOnlyList<string> DevSecurity)
+    IReadOnlyList<string> DevSecurity,
+    bool ShowPasswords = false)
 {
-    public static DevFeatures Off { get; } = new(false, false, false, false, false, []);
+    public static DevFeatures Off { get; } = new(false, false, false, false, false, [], false);
 
     /// <summary>
     /// Class B switches that are active (they change who can access what, development only).
@@ -93,7 +97,8 @@ public sealed record DevFeatures(
             options.Dev.PersonaLogin,
             options.Dev.Info,
             options.Dev.Persist.Enabled,
-            devSecurity);
+            devSecurity,
+            options.Dev.ShowPasswords);
     }
 }
 
