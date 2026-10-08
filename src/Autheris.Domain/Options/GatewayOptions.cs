@@ -1303,6 +1303,11 @@ public sealed class WebSqlOptions
     public List<string> AllowedDataSources { get; init; } = [];
 
     /// <summary>
+    /// Logical-to-physical data source connection mappings (e.g. catalog/domain name -> connection key in DataSources.Connections).
+    /// </summary>
+    public Dictionary<string, string> DataSourceMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// SEC C-03: Optional per-tenant data source allowlist (tenant id -> data sources). If the tenant has an
     /// entry, only these data sources are allowed, intersected with the global allowlist
     /// (DefaultDataSourceName + AllowedDataSources). Tenants without an entry keep the global allowlist.
