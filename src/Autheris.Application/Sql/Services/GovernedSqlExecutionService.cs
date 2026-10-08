@@ -133,7 +133,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         string? dataSourceName,
         DmlAuditContext? dmlContext,
         CancellationToken ct,
-        SqlRowLimit? rowLimit = null)
+        SqlRowLimit? rowLimit = null,
+        bool probeExtraRow = false)
     {
         if (string.IsNullOrWhiteSpace(rawSql))
         {
@@ -609,6 +610,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         long maxRows = (rowLimit ?? SqlRowLimit.For(webSqlOptions))
             .Effective(metadata.HasExplicitLimit ? metadata.ExplicitLimitValue : null);
 
+        // WebSQL findings 2.4: executions read one probe row beyond the limit; RowLimitedDataReader drops it and reports
+        // whether rows were cut. A client's own LIMIT up to the maximum stays below the probe and is never "truncated".
+        long deliveredRowLimit = probeExtraRow && !isDml && maxRows > 0 ? maxRows : 0;
+        long enforcedMaxRows = deliveredRowLimit > 0 ? maxRows + 1 : maxRows;
+
         // SEC C-03: Any table name the rewriter encounters that was not resolved above is filtered to the empty set (fail-closed).
         const string denyAllFilter = "1 = 0";
 
@@ -654,7 +660,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         var rlsOptions = new RlsOptions
         {
             AppendTableAlias = true,
-            EnforcedMaxRows = maxRows,
+            EnforcedMaxRows = enforcedMaxRows,
             EnforceReadOnlyQueries = !isDml,
             TargetDialect = targetSqlDialect,
             // SQ-01 & SQ-02: Strict parser / lexer checks for governed execution
@@ -709,7 +715,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 tableRlsFilters,
                 tableMaskingExpressions,
                 tablesWithoutRls,
-                maxRows,
+                enforcedMaxRows,
                 isDml,
                 webSqlOptions.SqlRewriterEngine ?? "LegacyTokenStream",
                 tablesWithConsentRowFilter,
@@ -718,7 +724,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
             {
-                return new GovernedRewrite(cachedSql, internalParameters, accessedTables, effectiveDataSourceName);
+                return new GovernedRewrite(cachedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit);
             }
         }
 
@@ -764,7 +770,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             _logger?.LogDebug("GovernedSqlExecutionService: Generated secured SQL: {SecuredSql}", securedSql);
         }
 
-        return new GovernedRewrite(securedSql, internalParameters, accessedTables, effectiveDataSourceName);
+        return new GovernedRewrite(securedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit);
     }
 
     public async Task ExecuteGovernedQueryAsync(
@@ -813,7 +819,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         GovernedRewrite rewrite;
         try
         {
-            rewrite = await RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit).ConfigureAwait(false);
+            rewrite = await RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true).ConfigureAwait(false);
         }
         catch (SecurityException policyEx) when (dmlContext.IsDml)
         {
@@ -981,7 +987,14 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
             {
-                await rowWriter(reader, ct).ConfigureAwait(false);
+                if (rewrite.DeliveredRowLimit > 0)
+                {
+                    await rowWriter(new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit), ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await rowWriter(reader, ct).ConfigureAwait(false);
+                }
             }
 
             if (tx != null)
@@ -1152,6 +1165,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         var rows = new List<IReadOnlyDictionary<string, object?>>();
         var columns = new List<string>();
         IReadOnlyList<SqlResultColumn> columnDescriptions = Array.Empty<SqlResultColumn>();
+        bool isTruncated = false;
         var sw = Stopwatch.StartNew();
 
         string securedSql = await ExecuteCoreAsync(
@@ -1176,17 +1190,12 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                     }
                     rows.Add(row);
                 }
+
+                isTruncated = reader is RowLimitedDataReader { HasMoreRows: true };
             },
             ct).ConfigureAwait(false);
 
         sw.Stop();
-
-        bool isTruncated = false;
-        var limitMatch = System.Text.RegularExpressions.Regex.Match(securedSql, @"\bLIMIT\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-        if (limitMatch.Success && long.TryParse(limitMatch.Groups[1].ValueSpan, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var limitVal) && limitVal > 0)
-        {
-            isTruncated = rows.Count >= limitVal;
-        }
 
         return new GovernedSqlResult(
             OriginalSql: request.Sql,
@@ -1752,7 +1761,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         return _masterHmacKey;
     }
 
-    private sealed record GovernedRewrite(string Sql, IReadOnlyDictionary<string, object?> InternalParameters, IReadOnlyList<TableIdentifier> AccessedTables, string DataSourceName);
+    /// <param name="DeliveredRowLimit">Rows handed to the caller; the statement reads one more as probe (0 = no probe).</param>
+    private sealed record GovernedRewrite(string Sql, IReadOnlyDictionary<string, object?> InternalParameters, IReadOnlyList<TableIdentifier> AccessedTables, string DataSourceName, long DeliveredRowLimit = 0);
 
     /// <summary>
     /// Collects the DML classification during governance so that executed AND rejected DML can be audited.

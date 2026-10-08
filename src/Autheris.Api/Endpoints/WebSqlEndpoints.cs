@@ -223,16 +223,13 @@ public static class WebSqlEndpoints
             return;
         }
 
-        var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
-        var sqlEngine = httpContext.RequestServices?.GetService<TrinoSqlEngine.ISqlEngine>();
-        long effectiveLimit = DetermineEffectiveLimit(sql, SqlRowLimit.For(webSqlOptions), sqlEngine);
-
         // SEC M-10: The JSON writer is created lazily when the first result arrives. Policy/parse errors raised while the
         // statement is governed therefore never start the response, so the 4xx/5xx status and the curated body can still be sent.
         Utf8JsonWriter? writer = null;
         try
         {
             int rowCount = 0;
+            bool truncated = false;
             string[] columnNames = Array.Empty<string>();
 
             await sqlService.ExecuteGovernedQueryAsync(
@@ -294,6 +291,9 @@ public static class WebSqlEndpoints
                     }
 
                     w.WriteEndArray();
+
+                    // WebSQL findings 2.4: rows were cut only when the probe row beyond the limit existed.
+                    truncated = reader is RowLimitedDataReader { HasMoreRows: true };
                 },
                 ct);
 
@@ -310,7 +310,6 @@ public static class WebSqlEndpoints
                 writer.WriteEndArray();
             }
 
-            bool truncated = rowCount >= effectiveLimit;
             writer.WriteNumber("rowCount", rowCount);
             writer.WriteBoolean("truncated", truncated);
             writer.WriteEndObject();
@@ -358,13 +357,10 @@ public static class WebSqlEndpoints
         var configuredMaxRows = gatewayOptions.Value.ParquetEgress.MaxRowsPerFile;
         var maxRows = configuredMaxRows > 0 ? configuredMaxRows : 100000;
 
-        // WebSQL findings 4.2: the WebSQL row limit cuts the result in the rewritten SQL, before the Parquet file limit
-        // applies. Reaching it is reported as truncated, exactly like the JSON path.
         // Row limits of the Parquet transport (Gateway:RowLimits:Parquet, falling back to WebSql).
         var rowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Parquet);
         governedRequest = governedRequest with { RowLimit = rowLimit };
-        var sqlEngine = httpContext.RequestServices?.GetService<TrinoSqlEngine.ISqlEngine>();
-        long effectiveLimit = DetermineEffectiveLimit(governedRequest.Sql, rowLimit, sqlEngine);
+        bool rowLimitCut = false;
 
         var rows = new List<IReadOnlyDictionary<string, object?>>();
         string[] columnNames = Array.Empty<string>();
@@ -391,12 +387,14 @@ public static class WebSqlEndpoints
                         }
                         rows.Add(row);
                     }
+
+                    // WebSQL findings 2.4/4.2: the row limit cut the result (probe row existed) before the file limit.
+                    rowLimitCut = reader is RowLimitedDataReader { HasMoreRows: true };
                 },
                 ct);
 
             // An empty result (or no result set) is a Parquet file with zero rows and the result columns.
-            bool limitReached = rows.Count >= effectiveLimit;
-            await ParquetResponseWriter.WriteAsync(httpContext, parquetService!, "websql", rows, columnNames, ct, limitReached);
+            await ParquetResponseWriter.WriteAsync(httpContext, parquetService!, "websql", rows, columnNames, ct, rowLimitCut);
         }
         catch (Exception ex)
         {
@@ -947,36 +945,5 @@ public static class WebSqlEndpoints
         }
 
         await httpContext.Response.WriteAsJsonAsync(responseObj, ct);
-    }
-
-    private static long DetermineEffectiveLimit(string sql, SqlRowLimit rowLimit, TrinoSqlEngine.ISqlEngine? sqlEngine)
-    {
-        long? explicitLimit = null;
-        if (sqlEngine != null)
-        {
-            try
-            {
-                var meta = sqlEngine.Analyze(sql.AsMemory());
-                if (meta.HasExplicitLimit && meta.ExplicitLimitValue is > 0)
-                {
-                    explicitLimit = meta.ExplicitLimitValue;
-                }
-            }
-            catch
-            {
-                // Fallback to regex if parse fails or engine throws
-            }
-        }
-
-        if (explicitLimit == null)
-        {
-            var match = System.Text.RegularExpressions.Regex.Match(sql, @"\bLIMIT\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-            if (match.Success && long.TryParse(match.Groups[1].ValueSpan, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsedLimit))
-            {
-                explicitLimit = parsedLimit;
-            }
-        }
-
-        return rowLimit.Effective(explicitLimit);
     }
 }

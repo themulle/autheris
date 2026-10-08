@@ -83,6 +83,7 @@ Der PoC läuft mit `Gateway__RowFilters__SubqueryStrategy=InCorrelated`. Aggrega
 
 ### 2.4 Ungenau, kein Fehler: `truncated` bei `LIMIT n`
 
+- **Status:** Behoben. Ausführungen lesen eine Prüfzeile über das Limit hinaus (`LIMIT n+1`); `RowLimitedDataReader` liefert höchstens `n` Zeilen und setzt `truncated` nur, wenn die Prüfzeile existierte. Ein eigenes `LIMIT` bis zur Obergrenze gilt nicht als gekürzt. Gilt für JSON, Parquet, Trino, SQL-Endpunkte, Arrow und Flight SQL. `RewriteSqlAsync` (Anzeige des umgeschriebenen SQL) bleibt ohne Prüfzeile. Tests: `ExactTruncationTests`.
 - **Ort:** `GovernedSqlExecutionService.cs:1189-1194` (Regex auf `LIMIT n` im umgeschriebenen SQL) und `WebSqlEndpoints.cs:312` (`rowCount >= effectiveLimit`).
 - **Verhalten:** `truncated` heißt „das Limit wurde erreicht“, nicht „es gibt weitere Zeilen“. Hat eine Tabelle genau `n` Zeilen, steht `truncated: true`, obwohl nichts fehlt. Bei größeren Tabellen ist das Feld richtig.
 - **Optional:** Eine Zeile mehr lesen (`limit + 1`) und sie verwerfen; dann ist `truncated` exakt. Kostet eine zusätzliche Zeile je Abfrage. Die Aussage sollte in der WebSQL-Dokumentation stehen, falls es bei der Heuristik bleibt.

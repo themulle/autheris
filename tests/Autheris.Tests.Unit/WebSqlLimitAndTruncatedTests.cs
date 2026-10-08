@@ -179,8 +179,9 @@ public sealed class WebSqlLimitAndTruncatedTests
             .Returns(async callInfo =>
             {
                 var writer = callInfo.Arg<Func<DbDataReader, CancellationToken, Task>>();
-                using var reader = CreateDataTableReader(100);
-                await writer(reader, CancellationToken.None);
+                // The governed service delivers the limit (100) and reads one probe row beyond it.
+                using var reader = CreateDataTableReader(101);
+                await writer(new RowLimitedDataReader(reader, 100), CancellationToken.None);
             });
 
         await WebSqlEndpoints.HandleWebSqlRequest(context, sqlService, Options.Create(options), NullLoggerFactory.Instance);
@@ -191,6 +192,35 @@ public sealed class WebSqlLimitAndTruncatedTests
         json.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(100);
         json.RootElement.GetProperty("truncated").GetBoolean().ShouldBeTrue();
         context.Response.Headers.ContainsKey("X-Autheris-Truncated").ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task WebSqlEndpoint_WhenRowsExactlyAtLimit_EmitsTruncatedFalse()
+    {
+        // WebSQL findings 2.4: a table with exactly the limit is complete.
+        var context = new DefaultHttpContext();
+        context.Request.ContentType = "application/json";
+        context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("{\"sql\":\"SELECT id, amount FROM sales.dbo.orders\"}"));
+        context.Response.Body = new MemoryStream();
+        context.User = CreateUser();
+        var options = new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 1000 } };
+
+        var sqlService = Substitute.For<IGovernedSqlExecutionService>();
+        sqlService.ExecuteGovernedQueryAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<Func<DbDataReader, CancellationToken, Task>>(), Arg.Any<CancellationToken>())
+            .Returns(async callInfo =>
+            {
+                var writer = callInfo.Arg<Func<DbDataReader, CancellationToken, Task>>();
+                using var reader = CreateDataTableReader(100);
+                await writer(new RowLimitedDataReader(reader, 100), CancellationToken.None);
+            });
+
+        await WebSqlEndpoints.HandleWebSqlRequest(context, sqlService, Options.Create(options), NullLoggerFactory.Instance);
+
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        var json = await JsonDocument.ParseAsync(context.Response.Body);
+        json.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(100);
+        json.RootElement.GetProperty("truncated").GetBoolean().ShouldBeFalse();
+        context.Response.Headers.ContainsKey("X-Autheris-Truncated").ShouldBeFalse();
     }
 
     [Fact]

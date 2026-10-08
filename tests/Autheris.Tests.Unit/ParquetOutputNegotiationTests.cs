@@ -737,8 +737,10 @@ public sealed class ParquetOutputNegotiationTests
                 throw toThrow;
             }
 
+            // Like the governed service: the row limit is delivered, one probe row beyond it marks the cut.
             using var reader = table.CreateDataReader();
-            await rowWriter(reader, ct);
+            long limit = request.RowLimit?.Effective(null) ?? 0;
+            await rowWriter(limit > 0 ? new RowLimitedDataReader(reader, limit) : reader, ct);
         }
 
         public Task<GovernedSqlResult> ExecuteQueryBufferedAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
@@ -850,7 +852,7 @@ public sealed class ParquetOutputNegotiationTests
         using var services = BuildServices(options);
         var context = CreateWebSqlContext(services, ParquetAccept);
 
-        await WebSqlEndpoints.HandleWebSqlRequest(context, new DataTableSqlService(CreateEmployeeTable(5)), Options.Create(options), NullLoggerFactory.Instance);
+        await WebSqlEndpoints.HandleWebSqlRequest(context, new DataTableSqlService(CreateEmployeeTable(6)), Options.Create(options), NullLoggerFactory.Instance);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
         context.Response.Headers["X-Row-Count"].ToString().ShouldBe("5");
@@ -875,6 +877,24 @@ public sealed class ParquetOutputNegotiationTests
         await WebSqlEndpoints.HandleWebSqlRequest(context, sqlService, Options.Create(options), NullLoggerFactory.Instance);
 
         sqlService.LastRequest!.RowLimit.ShouldBe(new SqlRowLimit(50, 50));
+        context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("false");
+    }
+
+    [Fact]
+    public async Task PARQ_WebSql_ResultExactlyAtWebSqlRowLimit_IsNotTruncated()
+    {
+        // WebSQL findings 2.4: exactly the limit, no further row -> nothing was cut.
+        var options = new GatewayOptions
+        {
+            ParquetEgress = CreateOptions(maxRows: 100).ParquetEgress,
+            WebSql = new WebSqlOptions { Enabled = true, MaxAllowedRows = 5, DefaultMaxRows = 5 }
+        };
+        using var services = BuildServices(options);
+        var context = CreateWebSqlContext(services, ParquetAccept);
+
+        await WebSqlEndpoints.HandleWebSqlRequest(context, new DataTableSqlService(CreateEmployeeTable(5)), Options.Create(options), NullLoggerFactory.Instance);
+
+        context.Response.Headers["X-Row-Count"].ToString().ShouldBe("5");
         context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("false");
     }
 

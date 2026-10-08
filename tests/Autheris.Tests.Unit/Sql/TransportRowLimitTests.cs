@@ -45,9 +45,10 @@ public sealed class TransportRowLimitTests
     }
 
     [Theory]
-    [InlineData("SELECT id FROM lwetem_prod.md.crane LIMIT 60000", false, "10000")]
-    [InlineData("SELECT id FROM lwetem_prod.md.crane LIMIT 60000", true, "50000")]
-    [InlineData("SELECT id FROM lwetem_prod.md.crane", true, "20")]
+    // The executed statement reads one probe row beyond the limit (WebSQL findings 2.4).
+    [InlineData("SELECT id FROM lwetem_prod.md.crane LIMIT 60000", false, "10001")]
+    [InlineData("SELECT id FROM lwetem_prod.md.crane LIMIT 60000", true, "50001")]
+    [InlineData("SELECT id FROM lwetem_prod.md.crane", true, "21")]
     public async Task GovernedExecution_UsesTheRowLimitOfTheRequest(string sql, bool withChannelLimit, string expectedLimit)
     {
         var (service, _, command) = WebSqlTwoPartNameDataSourceTests.CreateServiceWithCommand(WebSqlTwoPartNameDataSourceTests.CraneId);
