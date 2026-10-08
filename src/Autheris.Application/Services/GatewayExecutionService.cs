@@ -184,7 +184,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         // O1/O2/O13: requested columns are validated, never dropped silently (a dropped column used to widen the
         // projection to all columns). Unknown and denied columns are rejected with the same message.
         var effectiveRequestedFields = (requestedFields != null && requestedFields.Count > 0)
-            ? ResolveRequestedFields(requestedFields, authorizedColumns)
+            ? await ResolveRequestedFieldsAsync(requestedFields, metadata, decision, authorizedColumns, tenantId, userSid, table, traceId, ct).ConfigureAwait(false)
             : authorizedColumns;
 
         // O10: bound concurrent reads of the same table by the same user (each slow read holds a database worker).
@@ -333,18 +333,51 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
     /// <summary>
     /// O1/O2/O13: maps requested columns to their catalog spelling (deduplicated, request order). Throws for any column
-    /// that is unknown or denied; the message is identical for both cases.
+    /// that is unknown or denied; the message is identical for both cases (no existence oracle). Denied columns are audited.
     /// </summary>
-    private static List<string> ResolveRequestedFields(IReadOnlyList<string> requestedFields, IReadOnlyList<string> authorizedColumns)
+    private async Task<List<string>> ResolveRequestedFieldsAsync(
+        IReadOnlyList<string> requestedFields,
+        TableMetadata metadata,
+        TableAccessDecision decision,
+        IReadOnlyList<string> authorizedColumns,
+        TenantId tenantId,
+        Sid userSid,
+        TableIdentifier table,
+        string? traceId,
+        CancellationToken ct)
     {
         var resolved = new List<string>(requestedFields.Count);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var requested in requestedFields)
         {
-            var catalogName = authorizedColumns.FirstOrDefault(c => string.Equals(c, requested?.Trim(), StringComparison.OrdinalIgnoreCase));
+            var trimmed = requested?.Trim();
+            var catalogCol = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, trimmed, StringComparison.OrdinalIgnoreCase));
+            if (catalogCol != null && decision.GetColumnAccess(catalogCol.ColumnName) == ColumnAccessLevel.Deny)
+            {
+                // O1: Gesperrte (Deny) Spalte: dieselbe Antwort wie unbekannt (kein Existenz-Orakel), Audit-Eintrag mit dem echten Grund.
+                await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    TenantId = tenantId,
+                    EventType = "COLUMN_ACCESS_DENIED",
+                    ActorSid = userSid,
+                    TargetTable = table.ToString(),
+                    Decision = "DENY",
+                    TraceId = traceId ?? string.Empty,
+                    DetailsJson = JsonSerializer.Serialize(new
+                    {
+                        column = catalogCol.ColumnName,
+                        reason = $"Column '{catalogCol.ColumnName}' access is denied by governance policy."
+                    })
+                }, ct).ConfigureAwait(false);
+
+                var echo = trimmed != null && EchoableColumnNameRegex().IsMatch(trimmed) ? trimmed : "(invalid name)";
+                throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
+            }
+
+            var catalogName = authorizedColumns.FirstOrDefault(c => string.Equals(c, trimmed, StringComparison.OrdinalIgnoreCase));
             if (catalogName == null)
             {
-                var echo = requested != null && EchoableColumnNameRegex().IsMatch(requested.Trim()) ? requested.Trim() : "(invalid name)";
+                var echo = trimmed != null && EchoableColumnNameRegex().IsMatch(trimmed) ? trimmed : "(invalid name)";
                 throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
             }
             if (seen.Add(catalogName))

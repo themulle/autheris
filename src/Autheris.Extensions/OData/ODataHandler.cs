@@ -161,9 +161,17 @@ public sealed partial class ODataHandler(
         var effectiveSkip = skip.HasValue ? Math.Max(0, skip.Value) : 0;
 
         IReadOnlyList<string>? requestedFields = null;
-        if (!string.IsNullOrWhiteSpace(select))
+        if (select != null)
         {
+            if (string.IsNullOrWhiteSpace(select))
+            {
+                return Error(400, "InvalidQueryOption", "The query parameter '$select' must specify at least one property.");
+            }
             var fields = select.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (fields.Length == 0)
+            {
+                return Error(400, "InvalidQueryOption", "The query parameter '$select' must specify at least one property.");
+            }
             foreach (var field in fields)
             {
                 if (!SafeIdentifierRegex().IsMatch(field))
