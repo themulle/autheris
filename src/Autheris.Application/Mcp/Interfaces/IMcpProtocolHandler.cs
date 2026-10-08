@@ -18,7 +18,9 @@ public interface IMcpProtocolHandler
         string? userSid = null,
         System.Collections.Generic.IReadOnlyList<string>? roles = null,
         System.Collections.Generic.IReadOnlyList<string>? groupSids = null,
-        string? clientIp = null);
+        string? clientIp = null,
+        bool isReadOnly = false,
+        System.Collections.Generic.IReadOnlyDictionary<string, string>? additionalClaims = null);
 
     /// <summary>
     /// Gets an existing active session by ID.

@@ -39,7 +39,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
     }
 
     public McpSessionContext CreateSession(string servicePrincipalId, string tenantId)
-        => CreateSession(servicePrincipalId, tenantId, null, null, null, null);
+        => CreateSession(servicePrincipalId, tenantId, null, null, null, null, false, null);
 
     public McpSessionContext CreateSession(
         string servicePrincipalId,
@@ -47,9 +47,11 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         string? userSid = null,
         IReadOnlyList<string>? roles = null,
         IReadOnlyList<string>? groupSids = null,
-        string? clientIp = null)
+        string? clientIp = null,
+        bool isReadOnly = false,
+        IReadOnlyDictionary<string, string>? additionalClaims = null)
     {
-        return _sessionStore.CreateSession(servicePrincipalId, tenantId, userSid, roles, groupSids, clientIp);
+        return _sessionStore.CreateSession(servicePrincipalId, tenantId, userSid, roles, groupSids, clientIp, isReadOnly, additionalClaims);
     }
 
     public McpSessionContext? GetSession(string sessionId)
@@ -347,6 +349,17 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
             {
                 identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.GroupSid, g));
             }
+        }
+        if (session.AdditionalClaims != null)
+        {
+            foreach (var (k, v) in session.AdditionalClaims)
+            {
+                identity.AddClaim(new System.Security.Claims.Claim(k, v));
+            }
+        }
+        if (session.IsReadOnly)
+        {
+            Autheris.Domain.Security.TokenAccessScope.MarkReadOnly(identity);
         }
         return new System.Security.Claims.ClaimsPrincipal(identity);
     }

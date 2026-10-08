@@ -16,7 +16,9 @@ public interface IMcpSessionStore
         string? userSid = null,
         System.Collections.Generic.IReadOnlyList<string>? roles = null,
         System.Collections.Generic.IReadOnlyList<string>? groupSids = null,
-        string? clientIp = null);
+        string? clientIp = null,
+        bool isReadOnly = false,
+        System.Collections.Generic.IReadOnlyDictionary<string, string>? additionalClaims = null);
 
     /// <summary>
     /// Retrieves an active session of this node by ID (no remote lookup).

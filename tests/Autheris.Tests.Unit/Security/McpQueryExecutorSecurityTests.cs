@@ -1,4 +1,4 @@
-﻿namespace Autheris.Tests.Unit.Security;
+namespace Autheris.Tests.Unit.Security;
 
 using System;
 using System.Collections.Generic;
@@ -75,5 +75,88 @@ public sealed class McpQueryExecutorSecurityTests
 
         capturedPrincipal.ShouldNotBeNull();
         capturedPrincipal.FindAll(ClaimTypes.Role).Select(c => c.Value).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task MCP_Principal_Preserves_ReadOnly_Marker_And_AdditionalClaims()
+    {
+        var executorProvider = Substitute.For<IRequestExecutorProvider>();
+        var gatewayExec = Substitute.For<IGatewayExecutionService>();
+
+        ClaimsPrincipal? capturedPrincipal = null;
+        gatewayExec.ExecuteTableQueryAsync(
+            Arg.Do((ClaimsPrincipal p) => capturedPrincipal = p),
+            Arg.Any<TableIdentifier>(),
+            Arg.Any<int?>(),
+            Arg.Any<int?>(),
+            Arg.Any<IReadOnlyDictionary<string, object?>>(),
+            Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<System.Threading.CancellationToken>())
+            .Returns(Task.FromResult((
+                (IReadOnlyList<IReadOnlyDictionary<string, object?>>)new List<IReadOnlyDictionary<string, object?>>(),
+                TableAccessDecision.Allowed(new TableIdentifier("finance", "dbo", "customers"), new Dictionary<string, ColumnAccessLevel>())
+            )));
+
+        var mcpExecutor = new GatewayMcpQueryExecutor(
+            executorProvider,
+            gatewayExec,
+            NullLogger<GatewayMcpQueryExecutor>.Instance);
+
+        var tool = new McpToolDefinition("query_customers", "Query customers", "{}", "");
+        var session = new McpSessionContext(
+            "s1", "spn-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            Roles: null,
+            IsReadOnly: true,
+            AdditionalClaims: new Dictionary<string, string> { ["department"] = "finance", ["clearance"] = "confidential" });
+
+        await mcpExecutor.ExecuteOperationAsync(tool, "{}", session);
+
+        capturedPrincipal.ShouldNotBeNull();
+        Autheris.Domain.Security.TokenAccessScope.IsReadOnly(capturedPrincipal).ShouldBeTrue();
+        capturedPrincipal.FindFirst("department")?.Value.ShouldBe("finance");
+        capturedPrincipal.FindFirst("clearance")?.Value.ShouldBe("confidential");
+    }
+
+    [Fact]
+    public async Task MCP_CuratedTool_With_Mutation_Rejects_ReadOnly_Principal()
+    {
+        var executorProvider = Substitute.For<IRequestExecutorProvider>();
+        var gatewayExec = Substitute.For<IGatewayExecutionService>();
+
+        var mcpExecutor = new GatewayMcpQueryExecutor(
+            executorProvider,
+            gatewayExec,
+            NullLogger<GatewayMcpQueryExecutor>.Instance);
+
+        var mutationDoc = "mutation CreateUser { createUser(name: \"Alice\") { id } }";
+        var tool = new McpToolDefinition("create_user", "Create a user", "{}", mutationDoc);
+        var session = new McpSessionContext(
+            "s1", "spn-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            Roles: null,
+            IsReadOnly: true);
+
+        var resultJson = await mcpExecutor.ExecuteOperationAsync(tool, "{}", session);
+
+        resultJson.ShouldContain("isError\":true");
+        resultJson.ShouldContain("This token only permits read access; mutations are rejected.");
+        await executorProvider.DidNotReceiveWithAnyArgs().GetExecutorAsync(default, default);
+    }
+
+    [Fact]
+    public void McpProtocolHandler_BuildPrincipalFromSession_Preserves_ReadOnly_And_AdditionalClaims()
+    {
+        var session = new McpSessionContext(
+            "s1", "spn-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            Roles: ["Analyst"],
+            IsReadOnly: true,
+            AdditionalClaims: new Dictionary<string, string> { ["project"] = "Apollo" });
+
+        var principal = Autheris.Application.Mcp.Services.McpProtocolHandler.BuildPrincipalFromSession(session);
+
+        principal.ShouldNotBeNull();
+        Autheris.Domain.Security.TokenAccessScope.IsReadOnly(principal).ShouldBeTrue();
+        principal.FindFirst("project")?.Value.ShouldBe("Apollo");
+        principal.IsInRole("Analyst").ShouldBeTrue();
     }
 }

@@ -10,6 +10,7 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Autheris.Api.Mcp;
@@ -31,7 +32,9 @@ public static class McpEndpoints
         string TenantId,
         IReadOnlyList<string> Roles,
         IReadOnlyList<string> GroupSids,
-        string? ClientIp = null);
+        string? ClientIp = null,
+        bool IsReadOnly = false,
+        IReadOnlyDictionary<string, string>? AdditionalClaims = null);
 
     public static IEndpointRouteBuilder MapMcpEndpoints(
         this IEndpointRouteBuilder app,
@@ -163,6 +166,20 @@ public static class McpEndpoints
                         ?? (context.RequestServices?.GetService<Autheris.Application.Interfaces.IClientIpResolver>()?.ResolveClientIp()
                             ?? context.Connection.RemoteIpAddress)?.ToString();
 
-        return new McpCaller(principalId, userSid, tenantId, roles, groupSids, clientIp);
+        var isReadOnly = principal.IsReadOnly();
+        var additionalClaims = isAuthenticated
+            ? principal.Claims
+                .Where(c => c.Type != ClaimTypes.NameIdentifier &&
+                            c.Type != "sub" &&
+                            c.Type != "tenant_id" &&
+                            c.Type != ClaimTypes.PrimarySid &&
+                            c.Type != ClaimTypes.Role &&
+                            c.Type != ClaimTypes.GroupSid &&
+                            c.Type != Autheris.Domain.Security.TokenAccessScope.ClaimType)
+                .GroupBy(c => c.Type, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.Ordinal)
+            : null;
+
+        return new McpCaller(principalId, userSid, tenantId, roles, groupSids, clientIp, isReadOnly, additionalClaims);
     }
 }

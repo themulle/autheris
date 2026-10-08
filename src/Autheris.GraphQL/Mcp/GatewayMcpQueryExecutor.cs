@@ -99,7 +99,19 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             }
         }
 
+        if (sessionContext.AdditionalClaims != null)
+        {
+            foreach (var (k, v) in sessionContext.AdditionalClaims)
+            {
+                claims.Add(new Claim(k, v));
+            }
+        }
+
         var identity = new ClaimsIdentity(claims, "McpAuth");
+        if (sessionContext.IsReadOnly)
+        {
+            Autheris.Domain.Security.TokenAccessScope.MarkReadOnly(identity);
+        }
         var principal = new ClaimsPrincipal(identity);
 
         // Parse input arguments if provided
@@ -179,6 +191,24 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         // die den GlobalState auswerten; Resolver-Umstellung ist als Folgearbeit dokumentiert.
         if (!string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation))
         {
+            if (principal.IsReadOnly())
+            {
+                try
+                {
+                    var doc = HotChocolate.Language.Utf8GraphQLParser.Parse(tool.TargetGraphQLOperation);
+                    if (Autheris.GraphQL.Interceptors.ReadOnlyOperationMiddleware.IsMutation(doc, null))
+                    {
+                        _logger.LogWarning("MCP tool '{ToolName}' rejected: read-only principal attempted mutation.", tool.Name);
+                        return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "This token only permits read access; mutations are rejected.");
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "Failed to parse target GraphQL operation for tool '{ToolName}'.", tool.Name);
+                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Invalid target operation for curated tool.");
+                }
+            }
+
             try
             {
                 var effectiveCallerSid = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
