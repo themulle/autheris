@@ -273,4 +273,32 @@ public sealed class McpDatasetCatalogTests
 
         await _gateway.DidNotReceiveWithAnyArgs().ExecuteTableQueryAsync(default, default, default, default, default, default, default, default);
     }
+
+    [Fact]
+    public async Task ListDatasets_SupportsPaging_WithOffsetAndLimit()
+    {
+        var t1 = Table(new TableIdentifier("sales", "public", "t1"), "Table 1");
+        var t2 = Table(new TableIdentifier("sales", "public", "t2"), "Table 2");
+        var t3 = Table(new TableIdentifier("sales", "public", "t3"), "Table 3");
+
+        _metadata.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([t1, t2, t3]));
+
+        var admin = User("ClusterAdmin");
+        var resultPage1 = await Catalog().ListDatasetsAsync(admin, search: null, domain: null, offset: 0, limit: 2);
+
+        resultPage1.Datasets.Count.ShouldBe(2);
+        resultPage1.Total.ShouldBe(3);
+        resultPage1.Truncated.ShouldBeTrue();
+        resultPage1.Offset.ShouldBe(0);
+        resultPage1.Limit.ShouldBe(2);
+        resultPage1.NextOffset.ShouldBe(2);
+
+        var resultPage2 = await Catalog().ListDatasetsAsync(admin, search: null, domain: null, offset: 2, limit: 2);
+        resultPage2.Datasets.Count.ShouldBe(1);
+        resultPage2.Total.ShouldBe(3);
+        resultPage2.Truncated.ShouldBeFalse();
+        resultPage2.Offset.ShouldBe(2);
+        resultPage2.NextOffset.ShouldBeNull();
+    }
 }

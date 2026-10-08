@@ -86,7 +86,9 @@ public static class McpDatasetTools
               "type": "object",
               "properties": {
                 "search": { "type": "string", "description": "Optional text matched against dataset ids, descriptions and column names." },
-                "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales')." }
+                "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales')." },
+                "offset": { "type": "integer", "minimum": 0, "description": "Optional pagination offset (default 0)." },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Optional maximum datasets to return per page (default 50, max 100)." }
               }
             }
             """,

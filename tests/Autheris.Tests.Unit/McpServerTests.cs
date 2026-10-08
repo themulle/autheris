@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit;
 
 using System;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
@@ -11,6 +12,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Mcp;
+using HotChocolate.Execution;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -144,6 +146,57 @@ public sealed class McpServerTests
         result.IsSuccess.ShouldBeTrue();
         result.TruncatedDueToBudget.ShouldBeTrue();
         result.ContentJson.ShouldContain("[TRUNCATED DUE TO MCP TOKEN BUDGET]");
+        using var parsed = JsonDocument.Parse(result.ContentJson);
+        parsed.RootElement.GetProperty("_meta").GetProperty("truncated").GetBoolean().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task AiDataGuardrailService_DescribeDataset_WithoutDatasetArg_ReturnsClearError()
+    {
+        // Arrange
+        var registry = new McpToolRegistry();
+        var options = Options.Create(new GatewayOptions());
+        var guardrail = new AiDataGuardrailService(registry, options, NullLogger<AiDataGuardrailService>.Instance);
+        var session = new McpSessionContext("sess-invalid-ds", "agent-principal", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        var request = new McpToolCallRequest("describe_dataset", "{}");
+
+        // Act
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(request, session);
+
+        // Assert
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage.ShouldNotBeNull();
+        result.ErrorMessage.ShouldContain("dataset");
+        result.ErrorMessage.ShouldNotContain("Access denied");
+    }
+
+    [Fact]
+    public async Task GatewayMcpQueryExecutor_QueryDataCatalog_ReturnsCatalogAssets()
+    {
+        // Arrange
+        var datasetCatalog = Substitute.For<IMcpDatasetCatalog>();
+        var summary = new McpDatasetSummary("sales.public.orders", "Orders table", "Confidential", 10);
+        datasetCatalog.ListDatasetsAsync(Arg.Any<ClaimsPrincipal>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new McpDatasetList([summary], 1, false, Offset: 0, Limit: 50, NextOffset: null)));
+
+        var executor = new GatewayMcpQueryExecutor(
+            Substitute.For<IRequestExecutorProvider>(),
+            Substitute.For<IGatewayExecutionService>(),
+            NullLogger<GatewayMcpQueryExecutor>.Instance,
+            datasetCatalog: datasetCatalog);
+
+        var tool = new McpToolDefinition("query_data_catalog", "Query data catalog", "{}", "query_data_catalog");
+        var session = new McpSessionContext("sess-cat", "agent-principal", "tenant-alpha", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
+        // Act
+        var json = await executor.ExecuteOperationAsync(tool, """{"tableName":"orders"}""", session);
+
+        // Assert
+        using var doc = JsonDocument.Parse(json);
+        var assets = doc.RootElement.GetProperty("assets");
+        assets.GetArrayLength().ShouldBe(1);
+        assets[0].GetProperty("tableName").GetString().ShouldBe("sales.public.orders");
+        assets[0].GetProperty("classification").GetString().ShouldBe("Confidential");
     }
 
     [Fact]

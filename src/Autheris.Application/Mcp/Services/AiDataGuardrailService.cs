@@ -181,6 +181,20 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             ? await ResolveGraphQlTablesAsync(request.ArgumentsJson, cancellationToken).ConfigureAwait(false)
             : ParseTablesFromTool(tool, request.ArgumentsJson);
 
+        // 4b.4: For dataset tools requiring a dataset argument, validate argument before fail-closed ABAC.
+        if (string.Equals(tool.Name, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tool.Name, McpDatasetTools.SampleRows, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "dataset", out var dsArg) || string.IsNullOrWhiteSpace(dsArg))
+            {
+                return new McpToolCallResult(
+                    IsSuccess: false,
+                    ContentJson: "{}",
+                    ErrorMessage: $"Missing or invalid required argument 'dataset' for tool '{tool.Name}'."
+                );
+            }
+        }
+
         // Security Hardening: For data access tools, target table must be resolvable.
         // If unresolvable, fail-closed to prevent bypassing Casbin ABAC and Four-Eyes gates.
         if (resolvedTables == null && (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation)))
@@ -471,8 +485,18 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             int maxChars = maxTokens * 4;
             if (scrubbedJson.Length > maxChars)
             {
-                scrubbedJson = scrubbedJson[..maxChars] + " ... [TRUNCATED DUE TO MCP TOKEN BUDGET]";
-                estimatedTokens = maxTokens;
+                scrubbedJson = JsonSerializer.Serialize(new
+                {
+                    _meta = new
+                    {
+                        truncated = true,
+                        reason = "TOKEN_BUDGET_EXCEEDED",
+                        warning = "[TRUNCATED DUE TO MCP TOKEN BUDGET]",
+                        maxTokens = maxTokens,
+                        note = "Result exceeded token budget. Use pagination (offset/limit) or filters to narrow the result."
+                    }
+                });
+                estimatedTokens = Math.Max(1, scrubbedJson.Length / 4);
                 truncated = true;
             }
         }

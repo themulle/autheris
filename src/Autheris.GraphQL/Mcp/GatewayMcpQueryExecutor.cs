@@ -167,6 +167,12 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             }
         }
 
+        // 4b.2: Query Data Catalog Metadata using dataset catalog
+        if (tool.Name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExecuteQueryDataCatalogAsync(tool, principal, sessionContext, variables, cancellationToken).ConfigureAwait(false);
+        }
+
         // Standard GraphQL execution via HotChocolate IRequestExecutor
         // Hinweis (SEC M-17): Die Resolver lesen den Principal derzeit aus IHttpContextAccessor (HTTP-Aufrufer der MCP-Session),
         // nicht aus dem GlobalState "ClaimsPrincipal". Die hier aufgebaute MCP-Identität wirkt daher nur für Komponenten,
@@ -257,12 +263,21 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         }
 
         string? Text(string name) => variables.TryGetValue(name, out var v) ? v as string : null;
+        int? Number(string name) => variables.TryGetValue(name, out var v) ? v switch
+        {
+            int i => i,
+            long l => (int)l,
+            double d => (int)d,
+            _ => null
+        } : null;
 
         try
         {
             object result = tool.Name.ToLowerInvariant() switch
             {
-                McpDatasetTools.ListDatasets => await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), cancellationToken).ConfigureAwait(false),
+                McpDatasetTools.ListDatasets => (Number("offset") != null || Number("limit") != null)
+                    ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), cancellationToken).ConfigureAwait(false)
+                    : await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), cancellationToken).ConfigureAwait(false),
                 McpDatasetTools.DescribeDataset => await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, cancellationToken).ConfigureAwait(false),
                 _ => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables), cancellationToken).ConfigureAwait(false)
             };
@@ -292,6 +307,34 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             _logger.LogWarning(ex, "Dataset tool '{ToolName}' failed.", tool.Name);
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "Tool execution failed.");
         }
+    }
+
+    private async Task<string> ExecuteQueryDataCatalogAsync(
+        McpToolDefinition tool,
+        ClaimsPrincipal principal,
+        McpSessionContext sessionContext,
+        Dictionary<string, object?> variables,
+        CancellationToken cancellationToken)
+    {
+        if (_datasetCatalog == null)
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "The dataset catalog is not available.");
+        }
+
+        string? tableName = variables.TryGetValue("tableName", out var tn) ? tn as string : null;
+        var list = await _datasetCatalog.ListDatasetsAsync(principal, search: tableName, domain: null, ct: cancellationToken).ConfigureAwait(false);
+
+        var datasets = list?.Datasets ?? Array.Empty<McpDatasetSummary>();
+        var assets = datasets.Select(d => new
+        {
+            tableName = d.Id,
+            sensitivity = d.Sensitivity,
+            classification = d.Sensitivity,
+            owner = "data-governance@autheris.local",
+            tags = new string[] { "catalog", d.Sensitivity.ToLowerInvariant() }
+        }).ToList();
+
+        return JsonSerializer.Serialize(new { tenantId = sessionContext.TenantId, assets }, CamelCaseJsonOptions);
     }
 
     /// <summary>

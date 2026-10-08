@@ -43,7 +43,20 @@ public sealed class McpDatasetCatalog(
     private readonly IConsentRepository _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
     private readonly IGatewayExecutionService _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
 
-    public async Task<McpDatasetList> ListDatasetsAsync(ClaimsPrincipal principal, string? search, string? domain, CancellationToken ct = default)
+    public Task<McpDatasetList> ListDatasetsAsync(
+        ClaimsPrincipal principal,
+        string? search,
+        string? domain,
+        CancellationToken ct) =>
+        ListDatasetsAsync(principal, search, domain, offset: null, limit: null, ct);
+
+    public async Task<McpDatasetList> ListDatasetsAsync(
+        ClaimsPrincipal principal,
+        string? search,
+        string? domain,
+        int? offset = null,
+        int? limit = null,
+        CancellationToken ct = default)
     {
         var visible = await VisibleTablesAsync(principal, ct).ConfigureAwait(false);
 
@@ -53,14 +66,32 @@ public sealed class McpDatasetCatalog(
             .OrderBy(t => DatasetId(t.Identifier), StringComparer.Ordinal)
             .ToList();
 
-        var datasets = new List<McpDatasetSummary>();
-        foreach (var t in matches.Take(MaxListedDatasets))
+        var effectiveOffset = Math.Max(0, offset ?? 0);
+        var effectiveLimit = Math.Clamp(limit ?? 50, 1, MaxListedDatasets);
+
+        var pagedMatches = matches.Skip(effectiveOffset).Take(effectiveLimit).ToList();
+        var datasets = new List<McpDatasetSummary>(pagedMatches.Count);
+
+        foreach (var t in pagedMatches)
         {
             var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
+            // 4b.1: Only short description in summary; long description only in describe_dataset
             datasets.Add(new McpDatasetSummary(DatasetId(t.Identifier), t.Table.Description, t.Table.Sensitivity, t.Columns.Count, graphQl?.QueryField));
         }
 
-        return new McpDatasetList(datasets, matches.Count, matches.Count > datasets.Count, Guidance, Endpoints());
+        var total = matches.Count;
+        var hasMore = effectiveOffset + datasets.Count < total;
+        int? nextOffset = hasMore ? effectiveOffset + datasets.Count : null;
+
+        return new McpDatasetList(
+            datasets,
+            total,
+            hasMore,
+            Guidance,
+            Endpoints(),
+            effectiveOffset,
+            effectiveLimit,
+            nextOffset);
     }
 
     public async Task<McpDatasetDescription> DescribeDatasetAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default)
