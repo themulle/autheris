@@ -137,7 +137,7 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
         ConsentRowFilter? CorrelatedRowFilter = null
     );
 
-    internal const string DefaultModelText = @"
+    public const string DefaultModelText = @"
 [request_definition]
 r = sub, tenant, obj, act, ctx
 

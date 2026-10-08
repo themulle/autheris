@@ -94,11 +94,14 @@ public static class GatewayServiceCollectionExtensions
                 Enum.IsDefined(opts.RowFilters.SubqueryStrategy),
                 "Gateway:RowFilters:SubqueryStrategy must be Exists, InCorrelated or In.")
             .Validate(opts =>
-                !opts.Casbin.Enabled || !string.IsNullOrWhiteSpace(opts.Casbin.ModelPath),
-                "Gateway:Casbin is enabled, but ModelPath is not configured. Failing closed.")
+                !opts.Casbin.Enabled || string.IsNullOrWhiteSpace(opts.Casbin.ModelPath) || System.IO.File.Exists(System.IO.Path.GetFullPath(opts.Casbin.ModelPath)),
+                "Gateway:Casbin is enabled, but the configured ModelPath file was not found.")
             .Validate(opts =>
                 !opts.Casbin.Enabled || !string.IsNullOrWhiteSpace(opts.Casbin.PolicyPath),
                 "Gateway:Casbin is enabled, but PolicyPath is not configured. Failing closed.")
+            .Validate(opts =>
+                !opts.Casbin.Enabled || string.IsNullOrWhiteSpace(opts.Casbin.PolicyPath) || System.IO.File.Exists(System.IO.Path.GetFullPath(opts.Casbin.PolicyPath)),
+                "Gateway:Casbin is enabled, but the configured PolicyPath file was not found.")
             .Validate(opts =>
                 opts.HighAvailability.ShutdownTimeoutSeconds >= opts.HighAvailability.QueryTimeoutSeconds + 10,
                 "NF-HA-01 violation: ShutdownTimeoutSeconds must be at least 10s greater than QueryTimeoutSeconds.")
@@ -394,27 +397,28 @@ public static class GatewayServiceCollectionExtensions
             }
             else
             {
-                if (string.IsNullOrWhiteSpace(options.Casbin.ModelPath))
+                if (!string.IsNullOrWhiteSpace(options.Casbin.ModelPath))
                 {
-                    throw new InvalidOperationException("Gateway:Casbin is enabled, but ModelPath is not configured. Failing closed.");
+                    var fullModelPath = System.IO.Path.GetFullPath(options.Casbin.ModelPath);
+                    if (!System.IO.File.Exists(fullModelPath))
+                    {
+                        throw new FileNotFoundException($"Gateway:Casbin is enabled, but model file '{fullModelPath}' was not found. Failing closed.");
+                    }
                 }
-                var fullModelPath = System.IO.Path.GetFullPath(options.Casbin.ModelPath);
-                if (!System.IO.File.Exists(fullModelPath))
+                if (!string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
                 {
-                    throw new FileNotFoundException($"Gateway:Casbin is enabled, but model file '{fullModelPath}' was not found. Failing closed.");
-                }
-                if (string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
-                {
-                    throw new InvalidOperationException("Gateway:Casbin is enabled, but PolicyPath is not configured. Failing closed.");
-                }
-                var fullPolicyPath = System.IO.Path.GetFullPath(options.Casbin.PolicyPath);
-                if (!System.IO.File.Exists(fullPolicyPath))
-                {
-                    throw new FileNotFoundException($"Gateway:Casbin is enabled, but policy file '{fullPolicyPath}' was not found. Failing closed.");
+                    var fullPolicyPath = System.IO.Path.GetFullPath(options.Casbin.PolicyPath);
+                    if (!System.IO.File.Exists(fullPolicyPath))
+                    {
+                        throw new FileNotFoundException($"Gateway:Casbin is enabled, but policy file '{fullPolicyPath}' was not found. Failing closed.");
+                    }
                 }
             }
 
-            var service = new CasbinEnforcementService(options.Casbin.ModelPath, rlsGen, logger);
+            var service = new CasbinEnforcementService(
+                string.IsNullOrWhiteSpace(options.Casbin.ModelPath) ? null : options.Casbin.ModelPath,
+                rlsGen,
+                logger);
             if (options.Casbin.Enabled && !string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
                 service.LoadPolicyFromFile(options.Casbin.PolicyPath, options.Casbin.WatchPolicyFile);
@@ -1133,7 +1137,15 @@ public static class GatewayServiceCollectionExtensions
         }
         else if (options.Casbin.Enabled)
         {
-            throw new ValidationException("Casbin is enabled (Gateway:Casbin:Enabled = true), but Casbin:ModelPath is not configured.");
+            // SR15-50: Embedded default model is verified and allowed when ModelPath is not configured
+            try
+            {
+                CasbinModelContract.Verify(CasbinEnforcementService.DefaultModelText);
+            }
+            catch (CasbinModelValidationException ex)
+            {
+                throw new ValidationException($"Embedded default Casbin model does not satisfy the gateway contract: {string.Join("; ", ex.Violations)}", ex);
+            }
         }
 
         // POL-1 / R-POL-5: If Casbin is enabled, PolicyPath must exist, not be empty, and contain valid 'p' rules
