@@ -667,4 +667,28 @@ public sealed class VectorAndSemanticSecurityExpertTests
         responseJson.ShouldNotContain("combinedRowFilterSql");
         responseJson.ShouldContain("Public knowledge chunk");
     }
+
+    [Fact]
+    public async Task MCP_07_ExecuteOperationAsync_FailsClosed_On_Unexpected_Parsing_Exception()
+    {
+        var executorProvider = Substitute.For<IRequestExecutorProvider>();
+        var gatewayExec = Substitute.For<IGatewayExecutionService>();
+        var toolValidator = Substitute.For<Autheris.Application.Mcp.Interfaces.IPersistedToolValidator>();
+        toolValidator.When(v => v.ValidateToolInvocation(Arg.Any<McpToolDefinition>(), Arg.Any<System.Text.Json.JsonElement>(), out Arg.Any<string?>()))
+            .Do(_ => throw new InvalidOperationException("Simulated validator crash"));
+
+        var mcpExecutor = new GatewayMcpQueryExecutor(
+            executorProvider,
+            gatewayExec,
+            NullLogger<GatewayMcpQueryExecutor>.Instance,
+            persistedToolValidator: toolValidator);
+
+        var tool = new McpToolDefinition("search_rag_context", "Search RAG", "{}", "");
+        var session = new McpSessionContext("s1", "spn-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Roles: ["Reader"]);
+
+        var json = await mcpExecutor.ExecuteOperationAsync(tool, "{\"query\":\"test\"}", session);
+
+        json.ShouldContain("isError\":true");
+        json.ShouldContain("Invalid arguments JSON payload.");
+    }
 }
