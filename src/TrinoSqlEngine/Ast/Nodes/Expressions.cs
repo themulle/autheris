@@ -205,6 +205,29 @@ public enum TypedLiteralKind
     Timestamp
 }
 
+/// <summary>
+/// Virtual filters (phase 7b): Trino <c>date_add(unit, Amount, Source)</c> (also <c>Source ± INTERVAL</c>) and
+/// <c>date_trunc(unit, Source)</c>; only built with <c>TranslateTrinoDateFunctions</c>. <c>Amount</c> is 0 for Trunc.
+/// </summary>
+public sealed record DateFunctionExpression(DateFunctionKind Kind, DateUnit Unit, long Amount, Expression Source) : Expression;
+
+public enum DateFunctionKind
+{
+    Add,
+    Trunc
+}
+
+public enum DateUnit
+{
+    Second,
+    Minute,
+    Hour,
+    Day,
+    Week,
+    Month,
+    Year
+}
+
 /// <summary>Wunsch 4: <c>INTERVAL '<Value>' <Field></c> with a single unsigned field.</summary>
 public sealed record IntervalLiteralExpression(string Value, string Field) : Expression;
 

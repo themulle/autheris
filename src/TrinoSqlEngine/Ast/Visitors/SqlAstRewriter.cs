@@ -65,6 +65,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             PositionExpression position => VisitPosition(position),
             GroupingOperationExpression grouping => VisitGroupingOperation(grouping),
             IntervalLiteralExpression interval => interval,
+            DateFunctionExpression date => VisitDateFunction(date),
             OrderByClause ord => VisitOrderByClause(ord),
             OrderByElement el => VisitOrderByElement(el),
             PaginationClause pag => VisitPaginationClause(pag),
@@ -516,6 +517,12 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
         var needle = (Expression)Visit(node.Needle);
         var haystack = (Expression)Visit(node.Haystack);
         return needle == node.Needle && haystack == node.Haystack ? node : node with { Needle = needle, Haystack = haystack };
+    }
+
+    public virtual SqlNode VisitDateFunction(DateFunctionExpression node)
+    {
+        var source = (Expression)Visit(node.Source);
+        return source == node.Source ? node : node with { Source = source };
     }
 
     public virtual SqlNode VisitGroupingOperation(GroupingOperationExpression node)

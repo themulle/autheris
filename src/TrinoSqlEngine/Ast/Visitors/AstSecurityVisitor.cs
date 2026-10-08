@@ -628,6 +628,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 stack.Push(trim.Source);
                 if (trim.Characters != null) stack.Push(trim.Characters);
                 break;
+            case DateFunctionExpression date:
+                stack.Push(date.Source);
+                break;
             case PositionExpression pos:
                 stack.Push(pos.Needle);
                 stack.Push(pos.Haystack);

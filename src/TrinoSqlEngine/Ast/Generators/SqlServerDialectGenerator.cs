@@ -159,6 +159,49 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 
     public override int MaxParameterBudget => 2100;
 
+    /// <summary>Virtual filters (phase 7b): <c>DATEADD(unit, n, x)</c>.</summary>
+    protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
+    {
+        builder.Append("DATEADD(");
+        builder.Append(DateUnitName(unit));
+        builder.Append(", ");
+        builder.Append(amount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.Append(", ");
+        GenerateExpression(source, ref builder, context);
+        builder.Append(')');
+    }
+
+    /// <summary>
+    /// Virtual filters (phase 7b): SQL Server before 2022 has no DATETRUNC. Day, month and year are rebuilt from the date
+    /// parts as <c>datetimeoffset</c> (comparable with the <c>datetimeoffset</c> columns and SYSDATETIMEOFFSET()); other
+    /// units are rejected.
+    /// </summary>
+    protected override void FormatDateTrunc(ref ValueStringBuilder builder, DateUnit unit, Expression source, SqlEmitterContext context)
+    {
+        switch (unit)
+        {
+            case DateUnit.Day:
+                builder.Append("CAST(CAST(");
+                GenerateExpression(source, ref builder, context);
+                builder.Append(" AS date) AS datetimeoffset)");
+                return;
+            case DateUnit.Month:
+                builder.Append("CAST(DATEFROMPARTS(YEAR(");
+                GenerateExpression(source, ref builder, context);
+                builder.Append("), MONTH(");
+                GenerateExpression(source, ref builder, context);
+                builder.Append("), 1) AS datetimeoffset)");
+                return;
+            case DateUnit.Year:
+                builder.Append("CAST(DATEFROMPARTS(YEAR(");
+                GenerateExpression(source, ref builder, context);
+                builder.Append("), 1, 1) AS datetimeoffset)");
+                return;
+            default:
+                throw UnsupportedDateFunction("date_trunc", unit, TargetDialect);
+        }
+    }
+
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
     {
         builder.Append('[');

@@ -93,6 +93,58 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
 
     public override int MaxParameterBudget => 999;
 
+    /// <summary>Virtual filters (phase 7b): <c>datetime(x, '±n units')</c>; a week is seven days.</summary>
+    protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
+    {
+        (long value, string name) = unit == DateUnit.Week ? (amount * 7, "day") : (amount, DateUnitName(unit));
+        builder.Append("datetime(");
+        GenerateExpression(source, ref builder, context);
+        builder.Append(", '");
+        builder.Append(value < 0 ? "-" : "+");
+        builder.Append(Math.Abs(value).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.Append(' ');
+        builder.Append(name);
+        builder.Append(Math.Abs(value) == 1 && unit != DateUnit.Week ? "'" : "s'");
+        builder.Append(')');
+    }
+
+    /// <summary>
+    /// Virtual filters (phase 7b): <c>datetime(x, 'start of day|month|year')</c>, <c>strftime</c> for hour, minute and
+    /// second. SQLite has no week start modifier, so week is rejected.
+    /// </summary>
+    protected override void FormatDateTrunc(ref ValueStringBuilder builder, DateUnit unit, Expression source, SqlEmitterContext context)
+    {
+        string? start = unit switch
+        {
+            DateUnit.Day => "start of day",
+            DateUnit.Month => "start of month",
+            DateUnit.Year => "start of year",
+            _ => null
+        };
+        if (start != null)
+        {
+            builder.Append("datetime(");
+            GenerateExpression(source, ref builder, context);
+            builder.Append(", '");
+            builder.Append(start);
+            builder.Append("')");
+            return;
+        }
+
+        string format = unit switch
+        {
+            DateUnit.Hour => "%Y-%m-%d %H:00:00",
+            DateUnit.Minute => "%Y-%m-%d %H:%M:00",
+            DateUnit.Second => "%Y-%m-%d %H:%M:%S",
+            _ => throw UnsupportedDateFunction("date_trunc", unit, TargetDialect)
+        };
+        builder.Append("strftime('");
+        builder.Append(format);
+        builder.Append("', ");
+        GenerateExpression(source, ref builder, context);
+        builder.Append(')');
+    }
+
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
     {
         builder.Append('"');

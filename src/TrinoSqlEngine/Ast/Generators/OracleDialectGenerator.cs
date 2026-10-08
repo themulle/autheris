@@ -103,6 +103,52 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
     }
     public override int MaxParameterBudget => 1000;
 
+    /// <summary>
+    /// Virtual filters (phase 7b): <c>ADD_MONTHS</c> for month and year (calendar months), otherwise
+    /// <c>(x + NUMTODSINTERVAL(n, 'UNIT'))</c>; a week is seven days.
+    /// </summary>
+    protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
+    {
+        if (unit is DateUnit.Month or DateUnit.Year)
+        {
+            builder.Append("ADD_MONTHS(");
+            GenerateExpression(source, ref builder, context);
+            builder.Append(", ");
+            builder.Append((unit == DateUnit.Year ? amount * 12 : amount).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            builder.Append(')');
+            return;
+        }
+
+        (long value, string field) = unit == DateUnit.Week ? (amount * 7, "DAY") : (amount, DateUnitName(unit).ToUpperInvariant());
+        builder.Append('(');
+        GenerateExpression(source, ref builder, context);
+        builder.Append(" + NUMTODSINTERVAL(");
+        builder.Append(value.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.Append(", '");
+        builder.Append(field);
+        builder.Append("'))");
+    }
+
+    /// <summary>Virtual filters (phase 7b): <c>TRUNC(x, 'format')</c>; Oracle cannot truncate to the second.</summary>
+    protected override void FormatDateTrunc(ref ValueStringBuilder builder, DateUnit unit, Expression source, SqlEmitterContext context)
+    {
+        string format = unit switch
+        {
+            DateUnit.Minute => "MI",
+            DateUnit.Hour => "HH24",
+            DateUnit.Day => "DD",
+            DateUnit.Week => "IW",
+            DateUnit.Month => "MM",
+            DateUnit.Year => "YYYY",
+            _ => throw UnsupportedDateFunction("date_trunc", unit, TargetDialect)
+        };
+        builder.Append("TRUNC(");
+        GenerateExpression(source, ref builder, context);
+        builder.Append(", '");
+        builder.Append(format);
+        builder.Append("')");
+    }
+
     protected override string TableAliasKeyword => " ";
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)

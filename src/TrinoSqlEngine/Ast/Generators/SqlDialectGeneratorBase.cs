@@ -520,6 +520,12 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             case IntervalLiteralExpression interval:
                 FormatIntervalLiteral(ref builder, interval, context);
                 break;
+            case DateFunctionExpression date when date.Kind == DateFunctionKind.Add:
+                FormatDateAdd(ref builder, date.Unit, date.Amount, date.Source, context);
+                break;
+            case DateFunctionExpression date:
+                FormatDateTrunc(ref builder, date.Unit, date.Source, context);
+                break;
             case CastExpression cast:
                 if (cast.IsTryCast && !SupportsTryCast)
                 {
@@ -1100,6 +1106,46 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             _ => "TIMESTAMP "
         });
         FormatStringLiteral(ref builder, literal.Value, context);
+    }
+
+    protected static TrinoSqlEngine.Ast.Builder.AstBuildException UnsupportedDateFunction(string function, DateUnit unit, TargetSqlDialect dialect) =>
+        new($"SQL construct {function}('{DateUnitName(unit)}', …) is not supported for {dialect}.");
+
+    /// <summary>Lower-case Trino name of <paramref name="unit"/> (<c>day</c>).</summary>
+    protected static string DateUnitName(DateUnit unit) => unit switch
+    {
+        DateUnit.Second => "second",
+        DateUnit.Minute => "minute",
+        DateUnit.Hour => "hour",
+        DateUnit.Day => "day",
+        DateUnit.Week => "week",
+        DateUnit.Month => "month",
+        _ => "year"
+    };
+
+    /// <summary>
+    /// Virtual filters (phase 7b): ANSI <c>(x ± INTERVAL 'n' UNIT)</c>; a week is seven days (ANSI has no WEEK field).
+    /// </summary>
+    protected virtual void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
+    {
+        (long value, string field) = unit == DateUnit.Week ? (amount * 7, "DAY") : (amount, DateUnitName(unit).ToUpperInvariant());
+        builder.Append('(');
+        GenerateExpression(source, ref builder, context);
+        builder.Append(value < 0 ? " - INTERVAL '" : " + INTERVAL '");
+        builder.Append(Math.Abs(value).ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.Append("' ");
+        builder.Append(field);
+        builder.Append(')');
+    }
+
+    /// <summary>Virtual filters (phase 7b): <c>DATE_TRUNC('unit', x)</c> (PostgreSQL, DuckDB, Snowflake, ANSI fallback).</summary>
+    protected virtual void FormatDateTrunc(ref ValueStringBuilder builder, DateUnit unit, Expression source, SqlEmitterContext context)
+    {
+        builder.Append("DATE_TRUNC('");
+        builder.Append(DateUnitName(unit));
+        builder.Append("', ");
+        GenerateExpression(source, ref builder, context);
+        builder.Append(')');
     }
 
     /// <summary>Wunsch 4: ANSI <c>INTERVAL '…' FIELD</c>.</summary>

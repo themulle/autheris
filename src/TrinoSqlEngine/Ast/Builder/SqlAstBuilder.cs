@@ -782,8 +782,93 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
             SqlBaseLexer.PERCENT => BinaryOperator.Modulo,
             _ => throw new AstBuildException($"Unknown binary operator: {context.@operator.Text}")
         };
+
+        if (_options.TranslateTrinoDateFunctions && (left is IntervalLiteralExpression || right is IntervalLiteralExpression))
+        {
+            return BuildIntervalArithmetic(left, op, right);
+        }
+
         return new BinaryExpression(left, op, right);
     }
+
+    /// <summary>Virtual filters (phase 7b): <c>x ± INTERVAL 'n' unit</c> and <c>INTERVAL 'n' unit + x</c> become date_add.</summary>
+    private static DateFunctionExpression BuildIntervalArithmetic(Expression left, BinaryOperator op, Expression right)
+    {
+        if (op == BinaryOperator.Add && left is IntervalLiteralExpression leading && right is not IntervalLiteralExpression)
+        {
+            return new DateFunctionExpression(DateFunctionKind.Add, ParseDateUnit(leading.Field, "INTERVAL"), ParseIntervalAmount(leading), right);
+        }
+
+        if (op is BinaryOperator.Add or BinaryOperator.Subtract && right is IntervalLiteralExpression interval && left is not IntervalLiteralExpression)
+        {
+            long amount = ParseIntervalAmount(interval);
+            return new DateFunctionExpression(DateFunctionKind.Add, ParseDateUnit(interval.Field, "INTERVAL"), op == BinaryOperator.Subtract ? -amount : amount, left);
+        }
+
+        throw Unsupported("INTERVAL arithmetic other than 'x + INTERVAL', 'x - INTERVAL' or 'INTERVAL + x'");
+    }
+
+    private static long ParseIntervalAmount(IntervalLiteralExpression interval) =>
+        long.Parse(interval.Value, NumberStyles.None, CultureInfo.InvariantCulture);
+
+    private static DateUnit ParseDateUnit(string unit, string function) => unit.ToLowerInvariant() switch
+    {
+        "second" => DateUnit.Second,
+        "minute" => DateUnit.Minute,
+        "hour" => DateUnit.Hour,
+        "day" => DateUnit.Day,
+        "week" => DateUnit.Week,
+        "month" => DateUnit.Month,
+        "year" => DateUnit.Year,
+        _ => throw Unsupported($"{function} unit '{unit}' (expected second, minute, hour, day, week, month or year)")
+    };
+
+    /// <summary>
+    /// Virtual filters (phase 7b): Trino date functions as dialect-neutral nodes. The unit must be a string literal and the
+    /// amount of date_add an integer literal, so the translation never depends on data. date_diff is not translated
+    /// (SQL Server's DATEDIFF counts boundaries, Trino counts whole units) and is rejected.
+    /// </summary>
+    private Expression? TryBuildDateFunction(string name, SqlBaseParser.FunctionCallContext context, IReadOnlyList<Expression> args)
+    {
+        string function = name.ToLowerInvariant();
+        if (function is not ("date_add" or "date_trunc" or "now" or "date_diff"))
+        {
+            return null;
+        }
+
+        if (context.setQuantifier() != null || context.over() != null || context.filter() != null || context.orderBy() != null ||
+            context.ASTERISK() != null || context.argument().Any(a => a is SqlBaseParser.NamedArgumentContext))
+        {
+            throw Unsupported($"{function} with DISTINCT, OVER, FILTER, ORDER BY or named arguments");
+        }
+
+        switch (function)
+        {
+            case "date_diff":
+                throw Unsupported("date_diff (its meaning differs between Trino and SQL Server)");
+            case "now":
+                if (args.Count != 0) throw Unsupported("now with arguments");
+                return new CurrentDateTimeExpression(CurrentDateTimeKind.CurrentTimestamp);
+            case "date_trunc":
+                if (args.Count != 2) throw Unsupported("date_trunc without exactly (unit, value)");
+                return new DateFunctionExpression(DateFunctionKind.Trunc, DateUnitArgument(args[0], function), 0, args[1]);
+            default:
+                if (args.Count != 3) throw Unsupported("date_add without exactly (unit, amount, value)");
+                return new DateFunctionExpression(DateFunctionKind.Add, DateUnitArgument(args[0], function), IntegerArgument(args[1], function), args[2]);
+        }
+    }
+
+    private static DateUnit DateUnitArgument(Expression argument, string function) =>
+        argument is LiteralExpression { Type: LiteralType.String, Value: string unit }
+            ? ParseDateUnit(unit, function)
+            : throw Unsupported($"{function} unit that is not a string literal");
+
+    private static long IntegerArgument(Expression argument, string function) => argument switch
+    {
+        LiteralExpression { Type: LiteralType.Integer, Value: long value } => value,
+        UnaryExpression { Operator: UnaryOperator.Negate, Operand: LiteralExpression { Type: LiteralType.Integer, Value: long value } } => -value,
+        _ => throw Unsupported($"{function} amount that is not an integer literal")
+    };
 
     public override SqlNode VisitConcatenation(SqlBaseParser.ConcatenationContext context)
     {
@@ -1057,6 +1142,12 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         var filter = context.filter() != null ? (Expression)Visit(context.filter().booleanExpression()) : null;
         var orderWithin = context.orderBy() != null ? BuildOrderBy(context.orderBy()) : null;
+
+        if (_options.TranslateTrinoDateFunctions && qName.IsSimple && !qName.Parts[0].IsQuoted &&
+            TryBuildDateFunction(name, context, args) is { } dateFunction)
+        {
+            return dateFunction;
+        }
 
         bool distinct = context.setQuantifier()?.DISTINCT() != null;
         return new FunctionCallExpression(qName, args, distinct, window, isStar, filter, orderWithin);

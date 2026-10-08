@@ -148,6 +148,13 @@ public sealed class RlsOptions
     public bool PolicyFiltersAreTargetDialectSql { get; set; }
 
     /// <summary>
+    /// Virtual filters (phase 7b): translate the Trino date functions <c>date_add</c>, <c>date_trunc</c>, <c>now()</c> and
+    /// <c>x ± INTERVAL</c> into the date arithmetic of <see cref="TargetDialect"/>. Off for WebSQL, which keeps passing
+    /// function calls through unchanged.
+    /// </summary>
+    public bool TranslateTrinoDateFunctions { get; set; }
+
+    /// <summary>
     /// SEC-02: When true, automatically appends "AS {tableName}" if the rewritten subquery does not already have an alias.
     /// Default is false to maintain backward-compatibility with step-8 simple rewrite format.
     /// </summary>

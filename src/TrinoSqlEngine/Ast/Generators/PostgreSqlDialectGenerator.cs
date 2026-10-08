@@ -27,6 +27,18 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
     };
     public override int MaxParameterBudget => 65535;
 
+    /// <summary>Virtual filters (phase 7b): <c>(x + (n) * INTERVAL '1 unit')</c>.</summary>
+    protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
+    {
+        builder.Append('(');
+        GenerateExpression(source, ref builder, context);
+        builder.Append(" + (");
+        builder.Append(amount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.Append(") * INTERVAL '1 ");
+        builder.Append(DateUnitName(unit));
+        builder.Append("')");
+    }
+
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
     {
         builder.Append('"');
