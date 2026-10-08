@@ -136,6 +136,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Unexpected error parsing arguments JSON for tool '{ToolName}'.", tool.Name);
+                return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "Invalid arguments JSON payload.");
             }
         }
 
