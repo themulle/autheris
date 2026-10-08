@@ -516,7 +516,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
             {
-                _sqlSecurityValidator.ValidatePredicateSql(decision.CombinedRowFilterSql, "CombinedRowFilterSql");
+                _sqlSecurityValidator.ValidateRowFilter(decision);
                 rlsParts.Add($"({decision.CombinedRowFilterSql})");
                 AddInternalRowFilterParameters(decision.RowFilterParameters, internalParameters);
                 tablesWithConsentRowFilter.Add(target.FullName);

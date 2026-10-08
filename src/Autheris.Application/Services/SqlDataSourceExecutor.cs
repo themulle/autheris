@@ -59,9 +59,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         // SEC-AC-02: Zero-Trust: Validate RLS filter early before any connection or query execution
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {
-            Autheris.Application.Sql.SqlSecurityValidator.ValidatePredicateSql(
-                context.AccessDecision.CombinedRowFilterSql,
-                "CombinedRowFilterSql");
+            Autheris.Application.Sql.SqlSecurityValidator.ValidateRowFilter(context.AccessDecision);
         }
 
         // SEC-01: Side-channel inference protection: verify column filters target only Clear columns
@@ -218,9 +216,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {
-            Autheris.Application.Sql.SqlSecurityValidator.ValidatePredicateSql(
-                context.AccessDecision.CombinedRowFilterSql,
-                "CombinedRowFilterSql");
+            Autheris.Application.Sql.SqlSecurityValidator.ValidateRowFilter(context.AccessDecision);
             whereParts.Add($"({context.AccessDecision.CombinedRowFilterSql})");
 
             if (context.AccessDecision.RowFilterParameters != null)

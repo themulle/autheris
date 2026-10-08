@@ -262,7 +262,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IEpochValidationService, EpochValidationService>();
         services.AddSingleton<Autheris.Application.VirtualFilters.VirtualFilterAdministrationService>();
         services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider, Autheris.Application.VirtualFilters.VirtualFilterSnapshotProvider>();
-        services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterPredicateBuilder, Autheris.Application.VirtualFilters.UnavailablePredicateBuilder>();
+        services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterPredicateBuilder, Autheris.Application.VirtualFilters.StructuredFilterSqlBuilder>();
         services.AddSingleton<Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver, Autheris.Application.VirtualFilters.MandatoryRowFilterResolver>();
         services.AddSingleton<IConsentCacheService, ConsentCacheService>();
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();

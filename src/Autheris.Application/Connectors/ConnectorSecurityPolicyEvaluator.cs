@@ -40,7 +40,9 @@ public static class ConnectorSecurityPolicyEvaluator
         {
             SqlSecurityValidator.ValidatePredicateSql(
                 session.PushdownFilterSql,
-                "PushdownFilterSql");
+                "PushdownFilterSql",
+                allowSubqueries: true,
+                SqlSecurityValidator.MaxLengthFor(session.AccessDecision));
         }
 
         // SEC-01: Side-channel inference protection: verify column filters target only Clear columns
