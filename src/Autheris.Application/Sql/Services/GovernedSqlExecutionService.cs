@@ -287,7 +287,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         var clientIp = ResolveClientIp(user);
 
         // SEC M-20: Make the requested action visible to ABAC sub-rules (applied after claims so it cannot be spoofed).
-        var actionAttribute = new Dictionary<string, object?> { ["gql.action"] = isDml ? "write" : "read" };
+        var actionAttribute = new Dictionary<string, object?>
+        {
+            ["gql.action"] = isDml ? "write" : "read",
+            ["action"] = isDml ? "write" : "read"
+        };
 
         // SQ-09 / Trino Compatibility: In Trino queries, 3-part names (catalog.schema.table) are canonical.
         // Catalog auto-inference and cross-catalog validation:
@@ -355,6 +359,28 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
 
             referenceSpellings[target.FullName] = target.FullName;
+        }
+
+        static void RegisterTableLookup<T>(IDictionary<string, T> dict, TableAccessTarget target, TableIdentifier resolvedId, T value)
+        {
+            dict[target.FullName] = value;
+            dict[target.TableName] = value;
+            if (!string.IsNullOrWhiteSpace(target.Schema))
+            {
+                dict[$"{target.Schema}.{target.TableName}"] = value;
+            }
+            dict[resolvedId.ToQualifiedName()] = value;
+        }
+
+        static void RegisterTableSet(ISet<string> set, TableAccessTarget target, TableIdentifier resolvedId)
+        {
+            set.Add(target.FullName);
+            set.Add(target.TableName);
+            if (!string.IsNullOrWhiteSpace(target.Schema))
+            {
+                set.Add($"{target.Schema}.{target.TableName}");
+            }
+            set.Add(resolvedId.ToQualifiedName());
         }
 
         foreach (var target in metadata.ReferencedTables)
@@ -460,11 +486,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
 
             var colList = tableMeta.Columns.Select(c => c.ColumnName).ToList();
-            tableColumnsMap[target.FullName] = colList;
-            if (string.Equals(target.FullName, target.TableName, StringComparison.OrdinalIgnoreCase))
-            {
-                tableColumnsMap[target.TableName] = colList;
-            }
+            RegisterTableLookup(tableColumnsMap, target, resolvedId, colList);
 
             if (accessedTableSet.Add(resolvedId.ToQualifiedName()))
             {
@@ -506,18 +528,14 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 }
 
                 primaryTenantColumn ??= tenantColumn;
-                tableTenantColumns[target.FullName] = tenantColumn;
-                if (string.Equals(target.FullName, target.TableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    tableTenantColumns[target.TableName] = tenantColumn;
-                }
+                RegisterTableLookup(tableTenantColumns, target, resolvedId, tenantColumn);
 
                 rlsParts.Add($"{tenantColumn} = '{tenantId.Value.Replace("'", "''")}'");
             }
 
             if (decision.AppliedVirtualFilters is { Count: > 0 } applied)
             {
-                virtualFilters[target.FullName] = applied;
+                RegisterTableLookup(virtualFilters, target, resolvedId, applied);
             }
 
             if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
@@ -525,26 +543,17 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 _sqlSecurityValidator.ValidateRowFilter(decision);
                 rlsParts.Add($"({decision.CombinedRowFilterSql})");
                 AddInternalRowFilterParameters(decision.RowFilterParameters, internalParameters);
-                tablesWithConsentRowFilter.Add(target.FullName);
-                tablesWithConsentRowFilter.Add(target.TableName);
+                RegisterTableSet(tablesWithConsentRowFilter, target, resolvedId);
             }
 
             if (rlsParts.Count > 0)
             {
                 var rlsFilter = string.Join(" AND ", rlsParts);
-                tableRlsFilters[target.FullName] = rlsFilter;
-                if (string.Equals(target.FullName, target.TableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    tableRlsFilters[target.TableName] = rlsFilter;
-                }
+                RegisterTableLookup(tableRlsFilters, target, resolvedId, rlsFilter);
             }
             else
             {
-                tablesWithoutRls.Add(target.FullName);
-                if (string.Equals(target.FullName, target.TableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    tablesWithoutRls.Add(target.TableName);
-                }
+                RegisterTableSet(tablesWithoutRls, target, resolvedId);
             }
 
             // Column projection / masking (SEC C-03/H-10: shared effective access function, catalog-sensitive -> Mask unless explicit Clear)
@@ -603,13 +612,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (columnMasks.Count > 0)
             {
-                tableMaskingExpressions[target.FullName] = columnMasks;
-                if (string.Equals(target.FullName, target.TableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    tableMaskingExpressions[target.TableName] = columnMasks;
-                }
-                tablesWithMaskedColumns.Add(target.FullName);
-                tablesWithMaskedColumns.Add(target.TableName);
+                RegisterTableLookup(tableMaskingExpressions, target, resolvedId, columnMasks);
+                RegisterTableSet(tablesWithMaskedColumns, target, resolvedId);
             }
         }
 
