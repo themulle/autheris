@@ -19,9 +19,14 @@ public interface IMcpSessionStore
         string? clientIp = null);
 
     /// <summary>
-    /// Retrieves an active session by ID.
+    /// Retrieves an active session of this node by ID (no remote lookup).
     /// </summary>
     McpSessionContext? GetSession(string sessionId);
+
+    /// <summary>
+    /// MCP-2: retrieves an active session by ID, including sessions created on another cluster node (awaited remote read).
+    /// </summary>
+    System.Threading.Tasks.ValueTask<McpSessionContext?> GetSessionAsync(string sessionId, System.Threading.CancellationToken ct = default);
 
     /// <summary>
     /// Removes and terminates an active session.
