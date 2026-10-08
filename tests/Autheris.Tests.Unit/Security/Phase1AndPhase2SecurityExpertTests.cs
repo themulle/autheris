@@ -317,6 +317,63 @@ public sealed class Phase1AndPhase2SecurityExpertTests
         ex.Message.ShouldContain("Wildcard-Netzwerk (/0)");
     }
 
+    [Theory]
+    [InlineData("0.0.0.0/0")]
+    [InlineData("::/0")]
+    [InlineData("invalid-cidr-network")]
+    public void API_08_ForwardAuth_TrustedNetworks_WildcardOrInvalid_Rejected(string network)
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "https://vault.azure.net/secrets/hmac-secret" },
+            Authentication = new Autheris.Domain.Options.AuthenticationOptions
+            {
+                ForwardAuth = new ForwardAuthOptions
+                {
+                    Enabled = true,
+                    SharedSecret = "01234567890123456789012345678901",
+                    RequireTrustedProxy = true,
+                    TrustedNetworks = [network]
+                }
+            }
+        };
+
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+
+        var ex = Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+
+        ex.Message.ShouldContain("TrustedNetworks");
+    }
+
+    [Fact]
+    public void API_08_ForwardAuth_TrustedProxies_InvalidIp_Rejected()
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "https://vault.azure.net/secrets/hmac-secret" },
+            Authentication = new Autheris.Domain.Options.AuthenticationOptions
+            {
+                ForwardAuth = new ForwardAuthOptions
+                {
+                    Enabled = true,
+                    SharedSecret = "01234567890123456789012345678901",
+                    RequireTrustedProxy = true,
+                    TrustedProxies = ["not-an-ip-address"]
+                }
+            }
+        };
+
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+
+        var ex = Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+
+        ex.Message.ShouldContain("TrustedProxies");
+    }
+
     [Fact]
     public void SEC_EXP_HA_01_Rebac_MultiNode_Requires_Redis()
     {
