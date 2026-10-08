@@ -395,9 +395,39 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return Invalid("Only queries are allowed over MCP; mutations and subscriptions are not available.");
         }
 
+        var op = operations[0];
+        if (variableValues != null && variableValues.Count > 0 && op.VariableDefinitions.Count > 0)
+        {
+            // 4b.3: If query uses variables for limits without explicit defaults in the AST,
+            // augment the operation's variable definitions with default values from the provided runtime variables
+            // so that QueryCostAnalyzerRule can evaluate the actual requested limit instead of assuming worst-case rows.
+            bool modified = false;
+            var newVarDefs = new List<VariableDefinitionNode>();
+            foreach (var vDef in op.VariableDefinitions)
+            {
+                if (vDef.DefaultValue == null && variableValues.TryGetValue(vDef.Variable.Name.Value, out var val) && val is int or long)
+                {
+                    long numVal = val is int i ? i : (long)val;
+                    if (numVal > 0 && numVal <= 100_000)
+                    {
+                        newVarDefs.Add(vDef.WithDefaultValue(new IntValueNode((int)numVal)));
+                        modified = true;
+                        continue;
+                    }
+                }
+                newVarDefs.Add(vDef);
+            }
+
+            if (modified)
+            {
+                var newOp = op.WithVariableDefinitions(newVarDefs);
+                document = document.WithDefinitions(document.Definitions.Select(d => ReferenceEquals(d, op) ? (IDefinitionNode)newOp : d).ToList());
+            }
+        }
+
         var executor = await _executorProvider.GetExecutorAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         var requestBuilder = OperationRequestBuilder.New()
-            .SetDocument(query)
+            .SetDocument(document)
             .AddGlobalState("ClaimsPrincipal", principal);
         if (variableValues != null)
         {

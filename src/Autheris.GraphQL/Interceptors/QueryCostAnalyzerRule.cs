@@ -66,7 +66,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
             _onQueryTooComplex?.Invoke();
             context.ReportError(
                 ErrorBuilder.New()
-                    .SetMessage($"The query exceeds the complexity budget of {_maxAllowedCost} (calculated cost: {totalCost}).")
+                    .SetMessage($"The query exceeds the complexity budget of {_maxAllowedCost} (calculated cost: {totalCost}). If using variables for pagination limits, declare a default value (e.g. $first: Int = 20) or specify a lower limit.")
                     .SetCode("QUERY_TOO_COMPLEX")
                     .SetExtension("calculatedCost", totalCost)
                     .SetExtension("maxAllowedCost", _maxAllowedCost)
@@ -178,7 +178,8 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     maskingCostCache,
                     schema,
                     ref spreadCounter,
-                    maxSpreadExpansions));
+                    maxSpreadExpansions,
+                    operation.VariableDefinitions));
             }
         }
 
@@ -194,7 +195,8 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         Dictionary<string, int> maskingCostCache,
         ISchemaDefinition schema,
         ref int spreadCounter,
-        int maxSpreadExpansions)
+        int maxSpreadExpansions,
+        IReadOnlyList<VariableDefinitionNode>? variableDefinitions = null)
     {
         if (selectionSet == null || selectionSet.Selections.Count == 0)
         {
@@ -255,7 +257,19 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                                 break;
                             }
 
-                            limitIsVariable = true;
+                            if (arg.Value is VariableNode varNode)
+                            {
+                                limitIsVariable = true;
+                                if (variableDefinitions != null)
+                                {
+                                    var varDef = variableDefinitions.FirstOrDefault(v => string.Equals(v.Variable.Name.Value, varNode.Name.Value, StringComparison.Ordinal));
+                                    if (varDef?.DefaultValue is IntValueNode defInt && int.TryParse(defInt.Value, out var defParsed) && defParsed > 0)
+                                    {
+                                        requestedLimit = defParsed;
+                                        break;
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -285,7 +299,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     {
                         // SEC M-9: Multiply nested list selection costs by effectiveRows using saturating arithmetic
                         var maskingCost = CalculateMaskingCost(field.SelectionSet, fragments, activeFragments, maskingCostCache);
-                        var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions);
+                        var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions);
                         var totalChild = SafeAdd(maskingCost, childCost);
                         if (isList)
                         {
@@ -307,7 +321,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     cost = SafeAdd(cost, isList ? assumedRows : 1);
                     if (field.SelectionSet != null)
                     {
-                        var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions);
+                        var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions);
                         if (isList)
                         {
                             var nestedCost = (int)Math.Min((long)int.MaxValue, (long)childCost * assumedRows);

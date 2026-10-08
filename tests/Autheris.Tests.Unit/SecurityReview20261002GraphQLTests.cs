@@ -123,6 +123,17 @@ public sealed class SecurityReview20261002GraphQLTests
     }
 
     [Fact]
+    public async Task M13_VariableRowLimit_WithDefaultValue_UsesDefaultLimit()
+    {
+        var schema = await BuildQuerySchemaAsync();
+        var rule = new QueryCostAnalyzerRule(maxAllowedCost: 500, maxResponseRows: 5000);
+        var doc = Utf8GraphQLParser.Parse("query($n: Int = 10) { table(domain: \"hr\", name: \"hr_table_1\", first: $n) { tableName } }");
+
+        var cost = rule.ComputeCost(doc, schema);
+        cost.ShouldBeLessThanOrEqualTo(500);
+    }
+
+    [Fact]
     public async Task M13_DefaultTableQuery_StaysWithinDefaultBudget()
     {
         var schema = await BuildQuerySchemaAsync();
