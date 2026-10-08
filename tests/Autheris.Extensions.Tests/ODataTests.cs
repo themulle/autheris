@@ -55,6 +55,77 @@ public sealed class ODataTests
     }
 
     [Fact]
+    public void ODataCsdlGenerator_IncludesCoreVocabularyReference_ForExcelCompatibility()
+    {
+        var tables = new List<TableMetadata> { CreateSampleTable() };
+        var xml = ODataCsdlGenerator.GenerateMetadataXml(tables);
+
+        xml.ShouldContain("<edmx:Reference Uri=\"https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Core.V1.xml\">");
+        xml.ShouldContain("<edmx:Include Namespace=\"Org.OData.Core.V1\" Alias=\"Core\" />");
+    }
+
+    [Fact]
+    public void ODataCsdlGenerator_WhenTableHasNoPrimaryKeyAndNoIdColumn_UsesExistingColumnsAsKeyWithNullableFalse()
+    {
+        var table = new TableMetadata
+        {
+            Identifier = new TableIdentifier("lwetem_prod", "fms", "air1"),
+            Table = new Table { SchemaName = "fms", TableName = "air1" },
+            PrimaryKeyColumns = [],
+            Columns =
+            [
+                new TableColumn { ColumnName = "timestamp", DataType = "timestamp" },
+                new TableColumn { ColumnName = "vehicle_id", DataType = "varchar" },
+                new TableColumn { ColumnName = "pressure", DataType = "double" }
+            ]
+        };
+
+        var xml = ODataCsdlGenerator.GenerateMetadataXml([table]);
+
+        xml.ShouldNotContain("<PropertyRef Name=\"id\" />");
+        xml.ShouldContain("<PropertyRef Name=\"timestamp\" />");
+        xml.ShouldContain("<PropertyRef Name=\"vehicle_id\" />");
+        xml.ShouldContain("<PropertyRef Name=\"pressure\" />");
+        xml.ShouldContain("<Property Name=\"timestamp\" Type=\"Edm.DateTimeOffset\" Nullable=\"false\" />");
+        xml.ShouldContain("<Property Name=\"vehicle_id\" Type=\"Edm.String\" Nullable=\"false\" />");
+        xml.ShouldContain("<Property Name=\"pressure\" Type=\"Edm.Double\" Nullable=\"false\" />");
+
+        var doc = System.Xml.Linq.XDocument.Parse(xml);
+        var edmNs = System.Xml.Linq.XNamespace.Get("http://docs.oasis-open.org/odata/ns/edm");
+        var entityType = doc.Descendants(edmNs + "EntityType").First();
+        var keyPropertyRefs = entityType.Element(edmNs + "Key")!.Elements(edmNs + "PropertyRef").Select(p => p.Attribute("Name")!.Value).ToList();
+        var definedProperties = entityType.Elements(edmNs + "Property").Select(p => p.Attribute("Name")!.Value).ToHashSet();
+
+        foreach (var keyRef in keyPropertyRefs)
+        {
+            definedProperties.ShouldContain(keyRef);
+        }
+    }
+
+    [Fact]
+    public void ODataCsdlGenerator_WhenPrimaryKeyColumnDoesNotExistInTable_FallsBackSafelyToIdOrAllColumns()
+    {
+        var table = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "dbo", "records"),
+            Table = new Table { SchemaName = "dbo", TableName = "records" },
+            PrimaryKeyColumns = ["ghost_col"], // declared PK that does not exist in Columns
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "integer" },
+                new TableColumn { ColumnName = "name", DataType = "varchar" }
+            ]
+        };
+
+        var xml = ODataCsdlGenerator.GenerateMetadataXml([table]);
+
+        xml.ShouldNotContain("<PropertyRef Name=\"ghost_col\" />");
+        xml.ShouldContain("<PropertyRef Name=\"id\" />");
+        xml.ShouldContain("<Property Name=\"id\" Type=\"Edm.Int32\" Nullable=\"false\" />");
+        xml.ShouldContain("<Property Name=\"name\" Type=\"Edm.String\" />");
+    }
+
+    [Fact]
     public void ODataResponseFormatter_FormatsServiceDocumentCorrectly()
     {
         var tables = new List<TableMetadata> { CreateSampleTable() };
