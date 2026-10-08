@@ -167,32 +167,27 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
         // Audit evaluation (F-OPS-02: W3C Trace Correlation)
         var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
-        await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
-        {
-            TenantId = tenantId,
-            EventType = "TABLE_QUERY",
-            ActorSid = userSid,
-            TargetTable = table.ToString(),
-            Decision = decision.IsAllowed ? "ALLOW" : "DENY",
-            TraceId = traceId,
-            DetailsJson = JsonSerializer.Serialize(new { is_allowed = decision.IsAllowed, reasons = decision.DeniedReasons, virtual_filters = decision.AppliedVirtualFilters })
-        }, ct);
 
         // Enforce Access
         if (!decision.IsAllowed)
         {
+            await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+            {
+                TenantId = tenantId,
+                EventType = "TABLE_QUERY",
+                ActorSid = userSid,
+                TargetTable = table.ToString(),
+                Decision = "DENY",
+                TraceId = traceId,
+                DetailsJson = JsonSerializer.Serialize(new { is_allowed = false, reasons = decision.DeniedReasons, virtual_filters = decision.AppliedVirtualFilters })
+            }, ct).ConfigureAwait(false);
+
             throw new GatewayForbiddenException($"Access to table '{table}' denied: {string.Join("; ", decision.DeniedReasons)}");
         }
 
         // Generate/Fetch query result via IDataSourceExecutor (SQL, Declarative HTTP, or Plugin)
         var maxRows = _options?.GraphQL?.MaxResponseRows > 0 ? _options.GraphQL.MaxResponseRows : 1000;
         var rowLimit = Math.Clamp(first ?? 50, 1, maxRows);
-
-        var executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
-        if (executor == null)
-        {
-            throw new GatewayNotImplementedException($"No executor is registered for DataSourceType '{metadata.Table.DataSourceType}'.");
-        }
 
         var execArgs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -215,35 +210,87 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
         // O1/O2/O13: requested columns are validated, never dropped silently (a dropped column used to widen the
         // projection to all columns). Unknown and denied columns are rejected with the same message.
-        var effectiveRequestedFields = (requestedFields != null && requestedFields.Count > 0)
-            ? await ResolveRequestedFieldsAsync(requestedFields, metadata, decision, authorizedColumns, tenantId, userSid, table, traceId, ct).ConfigureAwait(false)
-            : authorizedColumns;
-
-        // 4a.3 / 2.1: ordering, filtering and counting are pushed into the SQL statement; other data sources cannot do it (never ignored).
+        List<string> effectiveRequestedFields;
         var pageItems = new Dictionary<string, object?>(StringComparer.Ordinal);
-        if (orderBy is { Count: > 0 } || countTotal || filter != null)
+        IDataSourceExecutor? executor;
+        try
         {
-            if (metadata.Table.DataSourceType != DataSourceType.Sql)
+            executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
+            if (executor == null)
             {
-                throw new GatewayNotImplementedException("Filtering, ordering and counting are only supported for SQL data sources.");
+                throw new GatewayNotImplementedException($"No executor is registered for DataSourceType '{metadata.Table.DataSourceType}'.");
             }
 
-            if (orderBy is { Count: > 0 })
-            {
-                pageItems[TableQueryItems.OrderBy] = ValidateOrderBy(orderBy, metadata, decision);
-            }
+            effectiveRequestedFields = (requestedFields != null && requestedFields.Count > 0)
+                ? await ResolveRequestedFieldsAsync(requestedFields, metadata, decision, authorizedColumns, tenantId, userSid, table, traceId, ct).ConfigureAwait(false)
+                : authorizedColumns;
 
-            if (filter != null)
+            // 4a.3 / 2.1: ordering, filtering and counting are pushed into the SQL statement; other data sources cannot do it (never ignored).
+            if (orderBy is { Count: > 0 } || countTotal || filter != null)
             {
-                ValidateFilter(filter, metadata, decision);
-                pageItems[TableQueryItems.Filter] = filter;
-            }
+                if (metadata.Table.DataSourceType != DataSourceType.Sql)
+                {
+                    throw new GatewayNotImplementedException("Filtering, ordering and counting are only supported for SQL data sources.");
+                }
 
-            if (countTotal)
-            {
-                pageItems[TableQueryItems.CountTotal] = true;
+                if (orderBy is { Count: > 0 })
+                {
+                    pageItems[TableQueryItems.OrderBy] = ValidateOrderBy(orderBy, metadata, decision);
+                }
+
+                if (filter != null)
+                {
+                    ValidateFilter(filter, metadata, decision);
+                    pageItems[TableQueryItems.Filter] = filter;
+                }
+
+                if (countTotal)
+                {
+                    pageItems[TableQueryItems.CountTotal] = true;
+                }
             }
         }
+        catch (Exception ex)
+        {
+            // SR15-32: Validation/preparation failures are audited as DENY with predicate details
+            await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+            {
+                TenantId = tenantId,
+                EventType = "TABLE_QUERY",
+                ActorSid = userSid,
+                TargetTable = table.ToString(),
+                Decision = "DENY",
+                TraceId = traceId,
+                DetailsJson = JsonSerializer.Serialize(new
+                {
+                    is_allowed = false,
+                    reasons = new[] { ex.Message },
+                    virtual_filters = decision.AppliedVirtualFilters,
+                    filter = filter?.SqlPredicate,
+                    order_by = orderBy?.Select(o => $"{o.Column} {(o.Descending ? "DESC" : "ASC")}").ToArray()
+                })
+            }, ct).ConfigureAwait(false);
+            throw;
+        }
+
+        // SR15-32: ALLOW audit is recorded only after successful validation of all query parameters
+        await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+        {
+            TenantId = tenantId,
+            EventType = "TABLE_QUERY",
+            ActorSid = userSid,
+            TargetTable = table.ToString(),
+            Decision = "ALLOW",
+            TraceId = traceId,
+            DetailsJson = JsonSerializer.Serialize(new
+            {
+                is_allowed = true,
+                reasons = decision.DeniedReasons,
+                virtual_filters = decision.AppliedVirtualFilters,
+                filter = filter?.SqlPredicate,
+                order_by = orderBy?.Select(o => $"{o.Column} {(o.Descending ? "DESC" : "ASC")}").ToArray()
+            })
+        }, ct).ConfigureAwait(false);
 
         // O10: bound concurrent reads of the same table by the same user (each slow read holds a database worker).
         var maxConcurrentReads = _options?.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
