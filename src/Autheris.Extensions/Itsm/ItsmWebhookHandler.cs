@@ -252,7 +252,10 @@ public sealed class ItsmWebhookHandler(
                     _replayCache.Remove(registered);
                 }
 
-                logger.LogWarning("Webhook replay detected (instance '{InstanceId}', ticket '{TicketId}'). Delivery is acknowledged without effect.", instanceId, payload.TicketId);
+                logger.LogWarning(
+                    "Webhook replay detected (instance '{InstanceId}', ticket '{TicketId}'). Delivery is acknowledged without effect.",
+                    SanitizeForLog(instanceId),
+                    SanitizeForLog(payload.TicketId));
                 return true;
             }
 
@@ -389,6 +392,28 @@ public sealed class ItsmWebhookHandler(
     /// SEC H-06: The instance comes from the signed payload only. An (unsigned) header instance must match it.
     /// Only in signature-bypass mode (insecure getting started) the header is accepted as fallback.
     /// </summary>
+    private static string SanitizeForLog(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var sanitized = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            if (ch == '\r' || ch == '\n')
+            {
+                sanitized.Append(' ');
+                continue;
+            }
+
+            sanitized.Append(char.IsControl(ch) ? ' ' : ch);
+        }
+
+        return sanitized.ToString();
+    }
+
     private string? ResolveInstanceId(string? payloadInstanceId, string? headerInstanceId, bool bypassSignature)
     {
         var fromPayload = string.IsNullOrWhiteSpace(payloadInstanceId) ? null : payloadInstanceId.Trim();
@@ -398,7 +423,10 @@ public sealed class ItsmWebhookHandler(
             !string.Equals(fromPayload, fromHeader, StringComparison.OrdinalIgnoreCase))
         {
             GatewayDiagnostics.CrossTenantMismatchCounter.Add(1);
-            logger.LogWarning("Webhook abgelehnt: Instanz-Header '{HeaderInstance}' widerspricht der signierten Payload-Instanz '{PayloadInstance}'.", fromHeader, fromPayload);
+            logger.LogWarning(
+                "Webhook abgelehnt: Instanz-Header '{HeaderInstance}' widerspricht der signierten Payload-Instanz '{PayloadInstance}'.",
+                SanitizeForLog(fromHeader),
+                SanitizeForLog(fromPayload));
             return null;
         }
 
