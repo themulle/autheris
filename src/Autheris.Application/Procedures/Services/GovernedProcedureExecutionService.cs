@@ -335,7 +335,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         // an additional restriction). Row filters (consent or Casbin) cannot be pushed into a procedure: they deny the
         // call unless the result table's filter is enforced by the row scope after the call.
         var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
-            ? TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
+            ? await WithVirtualFiltersAsync(
+                TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true),
+                user, userSid, tenantId, meta, ct).ConfigureAwait(false)
             : await new Autheris.Application.Policy.TableAccessPolicy(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value, _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance)
                 .DecideAsync(
                     new Autheris.Application.Policy.TableAccessQuery(
@@ -346,7 +348,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                         meta,
                         user.Claims,
                         ClientIp: ResolveClientIp(user),
-                        ExtraAttributes: new Dictionary<string, object?> { ["gql.action"] = "read" }),
+                        ExtraAttributes: new Dictionary<string, object?> { ["gql.action"] = "read" },
+                        ObjectKind: FilterObjectKinds.ProcedureResult),
                     ct).ConfigureAwait(false);
 
         if (!decision.IsAllowed || (!allowRowFilter && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)))
@@ -636,6 +639,24 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     }
 
     // SEC (Low): no fallback to the caller-influenced token "ip" claim; unknown client -> IPAddress.None (fail closed).
+    /// <summary>
+    /// Virtual filters also apply with the consent bypass (decision 1), including this path without consent services
+    /// where <c>TableAccessPolicy</c> is not used.
+    /// </summary>
+    private async Task<TableAccessDecision> WithVirtualFiltersAsync(
+        TableAccessDecision decision, ClaimsPrincipal user, Sid userSid, TenantId tenantId, TableMetadata meta, CancellationToken ct)
+    {
+        var mandatory = await (_mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance).ResolveAsync(
+            new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, user.GetGroupSids(), user.GetUserRoles(), tenantId, meta, FilterObjectKinds.ProcedureResult),
+            ct).ConfigureAwait(false);
+        if (mandatory.IsDenied)
+        {
+            return TableAccessDecision.Denied(decision.Table, mandatory.DenyReason ?? "Denied by virtual filters.");
+        }
+
+        return mandatory.PredicateSql != null ? decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters) : decision;
+    }
+
     private System.Net.IPAddress ResolveClientIp(ClaimsPrincipal user)
     {
         return _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
