@@ -256,7 +256,8 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             throw new ArgumentException("SQL query cannot be empty.", nameof(sql));
         }
 
-        var trimmed = sql.Trim();
+        var stripped = StripSqlComments(sql);
+        var trimmed = stripped.Trim();
 
         // 1. Single statement check: reject semicolons outside quotes
         bool inQuotes = false;
@@ -385,6 +386,68 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         }
 
         return list;
+    }
+
+    private static string StripSqlComments(string sql)
+    {
+        var sb = new System.Text.StringBuilder(sql.Length);
+        bool inQuotes = false;
+        char quoteChar = '\0';
+        int i = 0;
+
+        while (i < sql.Length)
+        {
+            char c = sql[i];
+            if (c == '\'' || c == '"')
+            {
+                if (!inQuotes)
+                {
+                    inQuotes = true;
+                    quoteChar = c;
+                }
+                else if (c == quoteChar)
+                {
+                    inQuotes = false;
+                }
+                sb.Append(c);
+                i++;
+            }
+            else if (!inQuotes && c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+            {
+                // Line comment: skip until newline or end
+                i += 2;
+                while (i < sql.Length && sql[i] != '\n' && sql[i] != '\r')
+                {
+                    i++;
+                }
+                sb.Append(' ');
+            }
+            else if (!inQuotes && c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+            {
+                // Block comment: skip until */ or end
+                i += 2;
+                while (i + 1 < sql.Length && !(sql[i] == '*' && sql[i + 1] == '/'))
+                {
+                    i++;
+                }
+                if (i + 1 < sql.Length)
+                {
+                    i += 2; // skip */
+                }
+                else
+                {
+                    i = sql.Length;
+                }
+                sb.Append(' ');
+            }
+            else
+            {
+                sb.Append(c);
+                i++;
+            }
+        }
+
+        return sb.ToString();
     }
 }
 
