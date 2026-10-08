@@ -16,7 +16,11 @@ public static class RebacTableGate
 {
     public const string Relation = "can_query";
 
-    public static string ObjectId(TableIdentifier table) => $"table:{table.Domain}.{table.TableName}";
+    /// <summary>
+    /// Architecture 1 / POL-11: the one ReBAC object id of a catalog table, fully qualified so equal schema and table
+    /// names in two domains never share tuples. Used by every path (query paths, OLAP, unified PDP, streaming).
+    /// </summary>
+    public static string ObjectId(TableIdentifier table) => $"table:{table.Domain}.{table.Schema}.{table.TableName}";
 
     /// <summary>True when the query paths must check ReBAC for this configuration.</summary>
     public static bool IsEnforcedOnQueryPaths(GatewayOptions? options) =>

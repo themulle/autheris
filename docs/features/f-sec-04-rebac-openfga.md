@@ -27,8 +27,14 @@ Traditional Role-Based Access Control (RBAC) and Attribute-Based Access Control 
 
 ### Where ReBAC is enforced (POL-6)
 
-Table access is checked with the relation `can_query` on the object `table:<domain>.<table>`. The evaluator denies a
-table for which no tuple grants the relation.
+Every path uses the same object id for a catalog table: `table:<domain>.<schema>.<table>` (for example
+`table:sales.public.orders`). Table access is checked with the relation `can_query`, streaming with `subscriber`. The
+evaluator denies a table for which no tuple grants the relation. All paths take this decision in one place
+(`TableAccessPolicy`, together with consents and Casbin).
+
+> **Migration (2026-10):** Earlier versions used `table:<domain>.<table>` (unified PDP, MCP) and `table:<schema>.<table>`
+> (DuckDB OLAP, streaming). Rewrite existing `can_query` and `subscriber` tuples to `table:<domain>.<schema>.<table>`;
+> tuples in the old formats no longer match.
 
 | Path | Checked when |
 |---|---|

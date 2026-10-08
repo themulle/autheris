@@ -9,7 +9,6 @@ using Autheris.Application.Connectors;
 using Autheris.Application.Connectors.CrossDomain;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
@@ -51,7 +50,6 @@ public static class DuckDbOlapEndpoints
         IAutherisConnectorRegistry connectorRegistry,
         ICrossDomainAccessResolver accessResolver,
         IColumnMaskingProvider maskingProvider,
-        IRebacEvaluator rebacEvaluator,
         IOptions<GatewayOptions> gatewayOptions,
         ILoggerFactory loggerFactory)
     {
@@ -178,26 +176,8 @@ public static class DuckDbOlapEndpoints
 
                 var effectiveUser = user ?? new ClaimsPrincipal(new ClaimsIdentity());
 
-                // SEC-OLAP-05 / RR-L3-02: ReBAC Check with canonical qualified table object
-                if (rebacEvaluator != null && rebacEvaluator.IsEnabled)
-                {
-                    var rebacReq = new RebacCheckRequest(
-                        secContext.TenantId.Value,
-                        secContext.UserSid.Value,
-                        "can_query",
-                        $"table:{meta.Identifier.ToQualifiedName()}");
-
-                    var rebacDecision = await rebacEvaluator.CheckAsync(rebacReq, ct).ConfigureAwait(false);
-                    if (!rebacDecision.Allowed)
-                    {
-                        logger.LogWarning("ReBAC denied query access to table {Table} for user {User}", meta.Identifier, secContext.UserSid);
-                        httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        await httpContext.Response.WriteAsJsonAsync(new { error = isDev ? $"Forbidden: Insufficient relationship permissions on table '{meta.Identifier}'." : $"Access denied to table '{rawTableName}'." }, ct);
-                        return;
-                    }
-                }
-
-                // SEC-OLAP-05 / RR-L3-04: ABAC & RLS Resolution without leaking internal policy details
+                // SEC-OLAP-05 / RR-L3-04 / Architecture 1: one access decision (ReBAC whenever enabled, consents, Casbin, RLS)
+                // without leaking internal policy details.
                 var decision = await accessResolver.ResolveAccessAsync(effectiveUser, meta.Identifier, meta, tenantId, ct).ConfigureAwait(false);
 
                 if (!decision.IsAllowed)

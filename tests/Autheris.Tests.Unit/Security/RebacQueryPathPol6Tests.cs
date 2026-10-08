@@ -131,7 +131,7 @@ public sealed class RebacQueryPathPol6Tests
 
         access.Decision.IsAllowed.ShouldBeTrue();
         await evaluator.Received(1).CheckAsync(
-            Arg.Is<RebacCheckRequest>(r => r.Relation == "can_query" && r.Object == "table:default.orders" && r.TenantId == Tenant),
+            Arg.Is<RebacCheckRequest>(r => r.Relation == "can_query" && r.Object == "table:default.public.orders" && r.TenantId == Tenant),
             Arg.Any<CancellationToken>());
     }
 
