@@ -2,17 +2,23 @@ namespace Autheris.Application.Mcp.Services;
 
 using System;
 using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// Thread-safe in-memory session store for active MCP connections.
+/// MCP-2: cluster state (Redis) is never awaited synchronously and never inside a lock. Writes run in the background
+/// (they were already best effort); the only remote read is <see cref="GetSessionAsync"/>.
+/// MCP-3: the cross-node SSE subscription of a session is disposed when the session ends.
 /// </summary>
 public sealed class McpSessionStore : IMcpSessionStore
 {
     private readonly ConcurrentDictionary<string, McpSessionContext> _sessions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Func<string, string, Task>> _sseSenders = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, IAsyncDisposable> _sseSubscriptions = new(StringComparer.Ordinal);
     private readonly ILogger<McpSessionStore> _logger;
     private readonly Autheris.Application.State.IDistributedClusterStateProvider? _clusterState;
 
@@ -86,17 +92,7 @@ public sealed class McpSessionStore : IMcpSessionStore
             _sessions[sessionId] = session;
         }
 
-        if (_clusterState != null)
-        {
-            try
-            {
-                _clusterState.SetAsync($"mcp:session:{sessionId}", session, DefaultSessionTtl).AsTask().GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to persist MCP session {SessionId} in cluster state.", sessionId);
-            }
-        }
+        PersistInBackground(sessionId, session);
 
         _logger.LogInformation("Created new MCP session {SessionId} for principal {PrincipalId} (UserSid: {UserSid}) in tenant {TenantId}.",
             sessionId, servicePrincipalId, userSid ?? "none", validatedTenant.Value);
@@ -104,31 +100,49 @@ public sealed class McpSessionStore : IMcpSessionStore
         return session;
     }
 
+    /// <summary>Local lookup only (no blocking remote read); sessions of other nodes are found by <see cref="GetSessionAsync"/>.</summary>
     public McpSessionContext? GetSession(string sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId) || !_sessions.TryGetValue(sessionId, out var session))
+        {
+            return null;
+        }
+
+        return Touch(sessionId, session);
+    }
+
+    public async ValueTask<McpSessionContext?> GetSessionAsync(string sessionId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(sessionId)) return null;
         if (!_sessions.TryGetValue(sessionId, out var session))
         {
-            if (_clusterState != null)
+            if (_clusterState == null)
             {
-                try
-                {
-                    var remote = _clusterState.GetAsync<McpSessionContext>($"mcp:session:{sessionId}").AsTask().GetAwaiter().GetResult();
-                    if (remote != null)
-                    {
-                        session = remote;
-                        _sessions[sessionId] = session;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to retrieve remote MCP session {SessionId} from cluster state.", sessionId);
-                }
+                return null;
             }
 
-            if (session == null) return null;
+            try
+            {
+                session = await _clusterState.GetAsync<McpSessionContext>($"mcp:session:{sessionId}", ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Failed to retrieve remote MCP session {SessionId} from cluster state.", sessionId);
+            }
+
+            if (session == null)
+            {
+                return null;
+            }
+
+            _sessions[sessionId] = session;
         }
 
+        return Touch(sessionId, session);
+    }
+
+    private McpSessionContext? Touch(string sessionId, McpSessionContext session)
+    {
         var now = DateTimeOffset.UtcNow;
         if (now - session.LastActiveAt > DefaultSessionTtl)
         {
@@ -139,15 +153,31 @@ public sealed class McpSessionStore : IMcpSessionStore
 
         var updated = session with { LastActiveAt = now };
         _sessions[sessionId] = updated;
-        if (_clusterState != null)
-        {
-            try
-            {
-                _clusterState.SetAsync($"mcp:session:{sessionId}", updated, DefaultSessionTtl).AsTask().GetAwaiter().GetResult();
-            }
-            catch { /* non-critical */ }
-        }
+        PersistInBackground(sessionId, updated);
         return updated;
+    }
+
+    /// <summary>MCP-2: best-effort write to the cluster state without blocking the caller (and never inside a lock).</summary>
+    private void PersistInBackground(string sessionId, McpSessionContext session)
+    {
+        if (_clusterState == null)
+        {
+            return;
+        }
+
+        _ = PersistAsync(sessionId, session);
+    }
+
+    private async Task PersistAsync(string sessionId, McpSessionContext session)
+    {
+        try
+        {
+            await _clusterState!.SetAsync($"mcp:session:{sessionId}", session, DefaultSessionTtl).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to persist MCP session {SessionId} in cluster state.", sessionId);
+        }
     }
 
     public McpSessionContext? RefreshPrincipalContext(string sessionId, IReadOnlyList<string> roles, IReadOnlyList<string> groupSids, string? clientIp = null)
@@ -162,14 +192,7 @@ public sealed class McpSessionStore : IMcpSessionStore
             var updated = current with { Roles = roles, GroupSids = groupSids, ClientIp = string.IsNullOrWhiteSpace(clientIp) ? current.ClientIp : clientIp };
             if (_sessions.TryUpdate(sessionId, updated, current))
             {
-                if (_clusterState != null)
-                {
-                    try
-                    {
-                        _clusterState.SetAsync($"mcp:session:{sessionId}", updated, DefaultSessionTtl).AsTask().GetAwaiter().GetResult();
-                    }
-                    catch { /* non-critical */ }
-                }
+                PersistInBackground(sessionId, updated);
                 return updated;
             }
         }
@@ -220,21 +243,44 @@ public sealed class McpSessionStore : IMcpSessionStore
     {
         if (string.IsNullOrWhiteSpace(sessionId)) return false;
         _sseSenders.TryRemove(sessionId, out _);
-        if (_clusterState != null)
-        {
-            try
-            {
-                _clusterState.RemoveAsync($"mcp:session:{sessionId}").AsTask().GetAwaiter().GetResult();
-            }
-            catch { /* non-critical */ }
-        }
         var removed = _sessions.TryRemove(sessionId, out _);
+
+        // MCP-2 / MCP-3: remote cleanup (cluster entry, cross-node SSE subscription) runs in the background, so this
+        // method never blocks - it is also called while _createLock is held.
+        _sseSubscriptions.TryRemove(sessionId, out var subscription);
+        if (_clusterState != null || subscription != null)
+        {
+            _ = CleanupRemoteAsync(sessionId, subscription);
+        }
+
         if (removed)
         {
             _logger.LogInformation("Terminated MCP session {SessionId}.", sessionId);
         }
         return removed;
     }
+
+    private async Task CleanupRemoteAsync(string sessionId, IAsyncDisposable? subscription)
+    {
+        try
+        {
+            if (subscription != null)
+            {
+                await subscription.DisposeAsync().ConfigureAwait(false);
+            }
+
+            if (_clusterState != null)
+            {
+                await _clusterState.RemoveAsync($"mcp:session:{sessionId}").ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to clean up cluster state of MCP session {SessionId}.", sessionId);
+        }
+    }
+
+    internal int SseSubscriptionCount => _sseSubscriptions.Count;
 
     public void RegisterSseSender(string sessionId, Func<string, string, Task> sendEventAsync)
     {
@@ -247,7 +293,7 @@ public sealed class McpSessionStore : IMcpSessionStore
         {
             try
             {
-                _clusterState.SubscribeAsync<McpSsePayload>($"mcp:sse:{sessionId}", async payload =>
+                var subscription = _clusterState.SubscribeAsync<McpSsePayload>($"mcp:sse:{sessionId}", async payload =>
                 {
                     if (_sseSenders.TryGetValue(payload.SessionId, out var localSender))
                     {
@@ -261,6 +307,14 @@ public sealed class McpSessionStore : IMcpSessionStore
                         }
                     }
                 });
+
+                // MCP-3: keep the subscription so it is released with the session (it leaked before).
+                if (_sseSubscriptions.TryGetValue(sessionId, out var previous))
+                {
+                    _ = previous.DisposeAsync().AsTask();
+                }
+
+                _sseSubscriptions[sessionId] = subscription;
             }
             catch (Exception ex)
             {

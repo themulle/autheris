@@ -16,21 +16,22 @@ public interface IHitLStepUpApprovalService
         string? justification = null,
         CancellationToken ct = default);
 
-    HitLApprovalResult ApproveStepUpRequest(string approvalId, string approverSid);
+    Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, string approverSid, CancellationToken ct = default);
 
-    HitLApprovalResult RejectStepUpRequest(string approvalId, string approverSid, string? reason = null);
+    Task<HitLApprovalResult> RejectStepUpRequestAsync(string approvalId, string approverSid, string? reason = null, CancellationToken ct = default);
 
     /// <summary>
     /// SEC C-05: Approves a ticket with full approver context (all identifiers + tenant binding).
+    /// MCP-2: asynchronous, the cluster state is never awaited synchronously.
     /// </summary>
-    HitLApprovalResult ApproveStepUpRequest(string approvalId, HitLApproverContext approver);
+    Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, HitLApproverContext approver, CancellationToken ct = default);
 
     /// <summary>
     /// SEC C-05: Rejects a ticket with full approver context (tenant binding).
     /// </summary>
-    HitLApprovalResult RejectStepUpRequest(string approvalId, HitLApproverContext approver, string? reason = null);
+    Task<HitLApprovalResult> RejectStepUpRequestAsync(string approvalId, HitLApproverContext approver, string? reason = null, CancellationToken ct = default);
 
-    HitLApprovalTicket? GetTicket(string approvalId);
+    Task<HitLApprovalTicket?> GetTicketAsync(string approvalId, CancellationToken ct = default);
 
     IReadOnlyList<HitLApprovalTicket> GetPendingTickets(string? tenantId = null);
 }

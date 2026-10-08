@@ -25,6 +25,9 @@ public interface IMcpProtocolHandler
     /// </summary>
     McpSessionContext? GetSession(string sessionId);
 
+    /// <summary>MCP-2: session lookup including other cluster nodes (awaited, never blocking).</summary>
+    ValueTask<McpSessionContext?> GetSessionAsync(string sessionId, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Closes and removes an active session.
     /// </summary>

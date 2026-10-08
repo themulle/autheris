@@ -240,15 +240,19 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
 
     internal int TicketCount => _tickets.Count;
 
-    public HitLApprovalResult ApproveStepUpRequest(string approvalId, string approverSid)
+    public Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, string approverSid, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(approverSid))
             throw new ArgumentException("Approver SID cannot be null or whitespace.", nameof(approverSid));
 
-        return ApproveStepUpRequest(approvalId, new HitLApproverContext(approverSid, new[] { approverSid }, TenantId: null, IsCrossTenantAdmin: true));
+        return ApproveStepUpRequestAsync(approvalId, new HitLApproverContext(approverSid, new[] { approverSid }, TenantId: null, IsCrossTenantAdmin: true), ct);
     }
 
-    public HitLApprovalResult ApproveStepUpRequest(string approvalId, HitLApproverContext approver)
+    /// <summary>
+    /// MCP-2: the decision itself happens under the ticket lock without I/O; the distributed lock, the cluster write
+    /// and the broadcast are awaited outside of it (no sync-over-async, no Redis call inside a lock).
+    /// </summary>
+    public async Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, HitLApproverContext approver, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(approvalId))
             throw new ArgumentException("Approval ID cannot be null or whitespace.", nameof(approvalId));
@@ -258,30 +262,21 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         if (string.IsNullOrWhiteSpace(approver.ApproverSid))
             throw new ArgumentException("Approver SID cannot be null or whitespace.", nameof(approver));
 
-        if (!TryGetEntryForApprover(approvalId, approver, out var entry))
+        var entry = await GetEntryForApproverAsync(approvalId, approver, ct).ConfigureAwait(false);
+        if (entry == null)
         {
             return NotFoundResult(approvalId);
         }
 
-        IAsyncDisposable? distLock = null;
-        if (_clusterState != null)
+        var (acquired, distLock) = await AcquireDistributedLockAsync(approvalId, ct).ConfigureAwait(false);
+        if (!acquired)
         {
-            try
-            {
-                distLock = _clusterState.TryAcquireLockAsync($"hitl:lock:{approvalId}", TimeSpan.FromSeconds(5)).AsTask().GetAwaiter().GetResult();
-                if (distLock == null)
-                {
-                    return new HitLApprovalResult(false, entry.Ticket, "Ticket is currently being decided on another cluster node. Please retry.");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to acquire distributed lock for ticket '{ApprovalId}'.", approvalId);
-            }
+            return new HitLApprovalResult(false, entry.Ticket, "Ticket is currently being decided on another cluster node. Please retry.");
         }
 
         try
         {
+            HitLApprovalResult approvedResult;
             lock (entry.Lock)
             {
                 // VULN-05: Replay & Race condition prevention
@@ -315,75 +310,52 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                 };
                 entry.CompletedAt = DateTimeOffset.UtcNow;
 
-                if (_clusterState != null)
-                {
-                    try
-                    {
-                        _clusterState.SetAsync($"hitl:ticket:{approvalId}", entry.Ticket, CompletedTicketRetention).AsTask().GetAwaiter().GetResult();
-                        _clusterState.PublishEventAsync($"hitl:events:{approvalId}", new HitLApprovalBroadcast(approvalId, approver.ApproverSid, true)).AsTask().GetAwaiter().GetResult();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to broadcast HitL approval for ticket '{ApprovalId}' to cluster.", approvalId);
-                    }
-                }
-
-                var approvedResult = new HitLApprovalResult(true, entry.Ticket, "Approval granted.");
+                approvedResult = new HitLApprovalResult(true, entry.Ticket, "Approval granted.");
                 entry.Tcs.TrySetResult(approvedResult);
-
-                _logger.LogInformation("HitL ticket '{ApprovalId}' approved by '{ApproverSid}'.", approvalId, approver.ApproverSid);
-                return approvedResult;
             }
+
+            await BroadcastDecisionAsync(approvalId, approvedResult.Ticket, new HitLApprovalBroadcast(approvalId, approver.ApproverSid, true), ct).ConfigureAwait(false);
+            _logger.LogInformation("HitL ticket '{ApprovalId}' approved by '{ApproverSid}'.", approvalId, approver.ApproverSid);
+            return approvedResult;
         }
         finally
         {
-            if (distLock != null)
-            {
-                try { distLock.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* ignore */ }
-            }
+            await ReleaseDistributedLockAsync(distLock).ConfigureAwait(false);
         }
     }
 
-    public HitLApprovalResult RejectStepUpRequest(string approvalId, string approverSid, string? reason = null)
+    public Task<HitLApprovalResult> RejectStepUpRequestAsync(string approvalId, string approverSid, string? reason = null, CancellationToken ct = default)
     {
         IReadOnlyCollection<string> identifiers = string.IsNullOrWhiteSpace(approverSid) ? Array.Empty<string>() : new[] { approverSid };
-        return RejectStepUpRequest(
+        return RejectStepUpRequestAsync(
             approvalId,
             new HitLApproverContext(approverSid, identifiers, TenantId: null, IsCrossTenantAdmin: true),
-            reason);
+            reason,
+            ct);
     }
 
-    public HitLApprovalResult RejectStepUpRequest(string approvalId, HitLApproverContext approver, string? reason = null)
+    public async Task<HitLApprovalResult> RejectStepUpRequestAsync(string approvalId, HitLApproverContext approver, string? reason = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(approvalId))
             throw new ArgumentException("Approval ID cannot be null or whitespace.", nameof(approvalId));
 
         ArgumentNullException.ThrowIfNull(approver);
 
-        if (!TryGetEntryForApprover(approvalId, approver, out var entry))
+        var entry = await GetEntryForApproverAsync(approvalId, approver, ct).ConfigureAwait(false);
+        if (entry == null)
         {
             return NotFoundResult(approvalId);
         }
 
-        IAsyncDisposable? distLock = null;
-        if (_clusterState != null)
+        var (acquired, distLock) = await AcquireDistributedLockAsync(approvalId, ct).ConfigureAwait(false);
+        if (!acquired)
         {
-            try
-            {
-                distLock = _clusterState.TryAcquireLockAsync($"hitl:lock:{approvalId}", TimeSpan.FromSeconds(5)).AsTask().GetAwaiter().GetResult();
-                if (distLock == null)
-                {
-                    return new HitLApprovalResult(false, entry.Ticket, "Ticket is currently being decided on another cluster node. Please retry.");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to acquire distributed lock for ticket '{ApprovalId}'.", approvalId);
-            }
+            return new HitLApprovalResult(false, entry.Ticket, "Ticket is currently being decided on another cluster node. Please retry.");
         }
 
         try
         {
+            HitLApprovalResult rejectedResult;
             lock (entry.Lock)
             {
                 if (entry.Ticket.Status != HitLApprovalStatus.Pending)
@@ -403,50 +375,91 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                 };
                 entry.CompletedAt = DateTimeOffset.UtcNow;
 
-                if (_clusterState != null)
-                {
-                    try
-                    {
-                        _clusterState.SetAsync($"hitl:ticket:{approvalId}", entry.Ticket, CompletedTicketRetention).AsTask().GetAwaiter().GetResult();
-                        _clusterState.PublishEventAsync($"hitl:events:{approvalId}", new HitLApprovalBroadcast(approvalId, approver.ApproverSid, false, entry.Ticket.RejectionReason)).AsTask().GetAwaiter().GetResult();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to broadcast HitL rejection for ticket '{ApprovalId}' to cluster.", approvalId);
-                    }
-                }
-
-                var rejectedResult = new HitLApprovalResult(false, entry.Ticket, entry.Ticket.RejectionReason);
+                rejectedResult = new HitLApprovalResult(false, entry.Ticket, entry.Ticket.RejectionReason);
                 entry.Tcs.TrySetResult(rejectedResult);
-
-                _logger.LogInformation("HitL ticket '{ApprovalId}' rejected by '{ApproverSid}'. Reason: {Reason}",
-                    approvalId, approver.ApproverSid, entry.Ticket.RejectionReason);
-                return rejectedResult;
             }
+
+            await BroadcastDecisionAsync(approvalId, rejectedResult.Ticket,
+                new HitLApprovalBroadcast(approvalId, approver.ApproverSid, false, rejectedResult.Ticket.RejectionReason), ct).ConfigureAwait(false);
+            _logger.LogInformation("HitL ticket '{ApprovalId}' rejected by '{ApproverSid}'. Reason: {Reason}",
+                approvalId, approver.ApproverSid, rejectedResult.Ticket.RejectionReason);
+            return rejectedResult;
         }
         finally
         {
-            if (distLock != null)
-            {
-                try { distLock.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* ignore */ }
-            }
+            await ReleaseDistributedLockAsync(distLock).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Acquired is false only when another node holds the lock; an unavailable cluster state does not block.</summary>
+    private async Task<(bool Acquired, IAsyncDisposable? Lock)> AcquireDistributedLockAsync(string approvalId, CancellationToken ct)
+    {
+        if (_clusterState == null)
+        {
+            return (true, null);
+        }
+
+        try
+        {
+            var distLock = await _clusterState.TryAcquireLockAsync($"hitl:lock:{approvalId}", TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+            return (distLock != null, distLock);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to acquire distributed lock for ticket '{ApprovalId}'.", approvalId);
+            return (true, null);
+        }
+    }
+
+    private static async Task ReleaseDistributedLockAsync(IAsyncDisposable? distLock)
+    {
+        if (distLock == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await distLock.DisposeAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // ignore
+        }
+    }
+
+    private async Task BroadcastDecisionAsync(string approvalId, HitLApprovalTicket ticket, HitLApprovalBroadcast broadcast, CancellationToken ct)
+    {
+        if (_clusterState == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _clusterState.SetAsync($"hitl:ticket:{approvalId}", ticket, CompletedTicketRetention, ct).ConfigureAwait(false);
+            await _clusterState.PublishEventAsync($"hitl:events:{approvalId}", broadcast, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to broadcast HitL decision for ticket '{ApprovalId}' to cluster.", approvalId);
         }
     }
 
     /// <summary>
     /// SEC C-05: Tickets of foreign tenants are reported as "not found" (no existence oracle) unless the approver is a cross-tenant admin.
     /// </summary>
-    private bool TryGetEntryForApprover(string approvalId, HitLApproverContext approver, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out TicketEntry? entry)
+    private async Task<TicketEntry?> GetEntryForApproverAsync(string approvalId, HitLApproverContext approver, CancellationToken ct)
     {
         PurgeStaleTickets(DateTimeOffset.UtcNow);
 
-        if (!_tickets.TryGetValue(approvalId, out entry))
+        if (!_tickets.TryGetValue(approvalId, out var entry))
         {
             if (_clusterState != null)
             {
                 try
                 {
-                    var remoteTicket = _clusterState.GetAsync<HitLApprovalTicket>($"hitl:ticket:{approvalId}").AsTask().GetAwaiter().GetResult();
+                    var remoteTicket = await _clusterState.GetAsync<HitLApprovalTicket>($"hitl:ticket:{approvalId}", ct).ConfigureAwait(false);
                     if (remoteTicket != null)
                     {
                         entry = _tickets.GetOrAdd(approvalId, _ => new TicketEntry(remoteTicket));
@@ -461,7 +474,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
 
         if (entry == null)
         {
-            return false;
+            return null;
         }
 
         if (!approver.IsCrossTenantAdmin &&
@@ -469,11 +482,10 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         {
             _logger.LogWarning("Cross-tenant HitL decision blocked: approver '{ApproverSid}' (tenant '{ApproverTenant}') attempted to act on ticket '{ApprovalId}' of another tenant.",
                 approver.ApproverSid, approver.TenantId ?? "none", approvalId);
-            entry = null;
-            return false;
+            return null;
         }
 
-        return true;
+        return entry;
     }
 
     internal static bool IsSameIdentity(string requesterSid, HitLApproverContext approver)
@@ -510,7 +522,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         );
     }
 
-    public HitLApprovalTicket? GetTicket(string approvalId)
+    public async Task<HitLApprovalTicket?> GetTicketAsync(string approvalId, CancellationToken ct = default)
     {
         if (_tickets.TryGetValue(approvalId, out var entry))
         {
@@ -521,7 +533,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         {
             try
             {
-                return _clusterState.GetAsync<HitLApprovalTicket>($"hitl:ticket:{approvalId}").AsTask().GetAwaiter().GetResult();
+                return await _clusterState.GetAsync<HitLApprovalTicket>($"hitl:ticket:{approvalId}", ct).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
