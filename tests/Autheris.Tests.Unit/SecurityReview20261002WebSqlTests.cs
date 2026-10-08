@@ -22,6 +22,7 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -39,6 +40,13 @@ using Xunit;
 /// </summary>
 public sealed class SecurityReview20261002WebSqlTests
 {
+    private static Microsoft.Extensions.Hosting.IHostEnvironment CreateDevEnvironment()
+    {
+        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        return env;
+    }
+
     private const string Tenant = "tenant_a";
     private const string HmacSecretRef = "GQL-HMAC-SECRET-KEY";
     private const string HmacSecretValue = "super-secret-hmac-value-0123456789";
@@ -213,7 +221,7 @@ public sealed class SecurityReview20261002WebSqlTests
             auditLogRepository: auditLog,
             connectionFactory: null,
             clientIpResolver: null,
-            environment: null,
+            environment: CreateDevEnvironment(),
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: withConsentServices ? (consentRepository ?? CreateConsentRepository()) : null,
             secretProvider: secretProvider);
@@ -468,7 +476,7 @@ public sealed class SecurityReview20261002WebSqlTests
             Arguments: new Dictionary<string, object?> { ["name"] = "Alice" },
             RequestedFields: ["id", "name"]);
 
-        var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance);
+        var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance, environment: CreateDevEnvironment());
 
         var rows = await executor.ExecuteAsync(context);
         rows.ShouldNotBeNull();
@@ -798,6 +806,7 @@ public sealed class SecurityReview20261002WebSqlTests
         rowsObserved.ShouldBeTrue();
         fakeConnection.CurrentTransaction.ShouldNotBeNull();
         fakeConnection.CurrentTransaction.WasCommitted.ShouldBeTrue();
+        fakeConnection.CurrentTransaction.WasDisposed.ShouldBeTrue();
     }
 
     [Fact]
@@ -864,6 +873,7 @@ public sealed class SecurityReview20261002WebSqlTests
 
         fakeConnection.CurrentTransaction.ShouldNotBeNull();
         fakeConnection.CurrentTransaction.WasRolledBack.ShouldBeTrue();
+        fakeConnection.CurrentTransaction.WasDisposed.ShouldBeTrue();
     }
 
     private sealed class StrictDriverDbConnection : DbConnection
@@ -897,9 +907,22 @@ public sealed class SecurityReview20261002WebSqlTests
         public StrictDriverDbDataReader? ActiveReader { get; set; }
         public bool WasCommitted { get; private set; }
         public bool WasRolledBack { get; private set; }
+        public bool WasDisposed { get; private set; }
         private readonly DbConnection _connection;
 
         public StrictDriverDbTransaction(DbConnection connection) => _connection = connection;
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) WasDisposed = true;
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            WasDisposed = true;
+            await base.DisposeAsync();
+        }
 
         public override void Commit()
         {
@@ -1048,5 +1071,144 @@ public sealed class SecurityReview20261002WebSqlTests
         public override Task<bool> ReadAsync(CancellationToken cancellationToken) => _inner.ReadAsync(cancellationToken);
         public override System.Collections.IEnumerator GetEnumerator() => _inner.GetEnumerator();
     }
+
+    #region S-2 WebSql Error Mapping Tests
+
+    [Fact]
+    public async Task WriteWebSqlErrorAsync_GatewayNotImplementedException_Returns501_WithGenericMessage()
+    {
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+        context.TraceIdentifier = "trace-501";
+
+        var ex = new GatewayNotImplementedException("Confidential internal connection string missing for ds 'secret'");
+        await WebSqlEndpoints.WriteWebSqlErrorAsync(context, ex, NullLogger.Instance, CancellationToken.None);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status501NotImplemented);
+        context.Response.Body.Position = 0;
+        using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("error").GetString().ShouldBe("NotImplemented");
+        var msg = doc.RootElement.GetProperty("message").GetString();
+        msg.ShouldNotBeNull();
+        msg.ShouldBe("The requested feature or data source capability is not implemented.");
+        msg.ShouldNotContain("Confidential");
+    }
+
+    [Fact]
+    public async Task WriteWebSqlErrorAsync_ParseCanceledException_Returns400_WithGenericMessage()
+    {
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+        context.TraceIdentifier = "trace-400";
+
+        var ex = new Antlr4.Runtime.Misc.ParseCanceledException("line 1:10 unexpected token");
+        await WebSqlEndpoints.WriteWebSqlErrorAsync(context, ex, NullLogger.Instance, CancellationToken.None);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        context.Response.Body.Position = 0;
+        using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("error").GetString().ShouldBe("BadRequest");
+        var msg = doc.RootElement.GetProperty("message").GetString();
+        msg.ShouldNotBeNull();
+        msg.ShouldBe("Invalid SQL syntax.");
+        msg.ShouldNotContain("unexpected token");
+    }
+
+    [Fact]
+    public async Task API_11_WriteWebSqlErrorAsync_PolicyException_InProduction_SanitizesMessage()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var env = NSubstitute.Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+        services.AddSingleton(env);
+        var sp = services.BuildServiceProvider();
+
+        var context = new DefaultHttpContext { RequestServices = sp };
+        context.Response.Body = new MemoryStream();
+        context.TraceIdentifier = "trace-403";
+
+        var ex = new WebSqlPolicyException("Confidential table schema leak in policy denial");
+        await WebSqlEndpoints.WriteWebSqlErrorAsync(context, ex, NullLogger.Instance, CancellationToken.None);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        context.Response.Body.Position = 0;
+        using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("error").GetString().ShouldBe("Forbidden");
+        var msg = doc.RootElement.GetProperty("message").GetString();
+        msg.ShouldNotBeNull();
+        msg.ShouldBe(WebSqlEndpoints.GenericForbiddenMessage);
+        msg.ShouldNotContain("Confidential table schema leak");
+    }
+
+    #endregion
+
+    #region D-6 Tenant Identity Sanitization Tests
+
+    [Fact]
+    public async Task SqlDataSourceExecutor_InvalidTenantClaim_ThrowsForbiddenWithGenericMessage()
+    {
+        var connFactory = Substitute.For<ISqlConnectionFactory>();
+        var conn = Substitute.For<DbConnection>();
+        var cmd = Substitute.For<DbCommand>();
+        var paramCol = Substitute.For<DbParameterCollection>();
+        conn.CreateCommand().Returns(cmd);
+        cmd.Parameters.Returns(paramCol);
+        cmd.CreateParameter().Returns(Substitute.For<DbParameter>());
+        connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(conn));
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["test_ds"] = new() { ConnectionString = "Data Source=test.db;", Provider = "sqlite" }
+                }
+            }
+        });
+
+        var executor = new SqlDataSourceExecutor(
+            connectionFactory: connFactory,
+            sessionInitializer: Substitute.For<IDbSessionContextInitializer>(),
+            options: options,
+            logger: NullLogger<SqlDataSourceExecutor>.Instance,
+            environment: CreateDevEnvironment());
+
+        var table = new Table
+        {
+            SourceName = "test_ds",
+            SchemaName = "main",
+            TableName = "users",
+            DataSourceType = DataSourceType.Sql,
+            SourceType = "sqlite"
+        };
+        var metadata = new TableMetadata
+        {
+            Table = table,
+            Identifier = table.ToIdentifier("test_ds"),
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+
+        var invalidTenantClaim = "malicious_tenant; DROP TABLE users;--";
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim("sub", "attacker"),
+            new Claim("tenant_id", invalidTenantClaim)
+        ]));
+
+        var context = new DataSourceExecutionContext(
+            SourceName: "test_ds",
+            Metadata: metadata,
+            Principal: principal,
+            AccessDecision: TableAccessDecision.Allowed(metadata.Identifier, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear }),
+            Arguments: new Dictionary<string, object?>(),
+            RequestedFields: ["id"]);
+
+        var ex = await Should.ThrowAsync<GatewayForbiddenException>(() => executor.ExecuteAsync(context));
+        ex.Message.ShouldBe("Invalid tenant identity.");
+        ex.Message.ShouldNotContain(invalidTenantClaim);
+    }
+
+    #endregion
 }
 

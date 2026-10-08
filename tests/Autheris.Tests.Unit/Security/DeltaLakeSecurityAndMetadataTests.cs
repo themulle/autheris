@@ -178,7 +178,7 @@ public sealed class DeltaLakeSecurityAndMetadataTests
         var masking = Substitute.For<IColumnMaskingProvider>();
         var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions());
 
-        var executor = new DeltaLakeDataSourceExecutor(metaReader, pruner, masking, options, NullLogger<DeltaLakeDataSourceExecutor>.Instance);
+        var executor = new DeltaLakeDataSourceExecutor(metaReader, pruner, masking, options, NullLogger<DeltaLakeDataSourceExecutor>.Instance, new DemoDataSwitch(true));
 
         var tableId = new TableIdentifier("lake", "default", "delta_table");
         var metadata = new TableMetadata
@@ -217,7 +217,7 @@ public sealed class DeltaLakeSecurityAndMetadataTests
         var masking = Substitute.For<IColumnMaskingProvider>();
         var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions());
 
-        var executor = new DeltaLakeDataSourceExecutor(metaReader, pruner, masking, options, NullLogger<DeltaLakeDataSourceExecutor>.Instance);
+        var executor = new DeltaLakeDataSourceExecutor(metaReader, pruner, masking, options, NullLogger<DeltaLakeDataSourceExecutor>.Instance, new DemoDataSwitch(true));
 
         var tableId = new TableIdentifier("lake", "default", "delta_table");
         var metadata = new TableMetadata

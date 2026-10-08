@@ -85,7 +85,7 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
             throw new InvalidOperationException($"No governed read connection is configured for data source '{connectionName}'.");
         }
 
-        if (!ProcedureConnectionProvider.TryResolveDialect(connOptions.Provider ?? "sqlite", out var dialect) ||
+        if (!ProcedureConnectionProvider.TryResolveDialect(connOptions.Provider, out var dialect) ||
             dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite))
         {
             throw new InvalidOperationException("Row scope filtering of procedure results supports SQL Server, PostgreSQL and SQLite only.");
@@ -145,6 +145,16 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
         await using DbTransaction? tx = dialect == DatabaseDialect.PostgreSql
             ? await connection.BeginTransactionAsync(ct).ConfigureAwait(false)
             : null;
+
+        if (tx != null)
+        {
+            // R-SQL-4: the lookup must not change data, also not through a function in a consent filter. SET TRANSACTION
+            // must precede every query of the transaction, so it runs before the session initializer.
+            await using var readOnly = connection.CreateCommand();
+            readOnly.Transaction = tx;
+            readOnly.CommandText = "SET TRANSACTION READ ONLY";
+            await readOnly.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
 
         await _sessionInitializer.InitializeSessionAsync(
             connection,

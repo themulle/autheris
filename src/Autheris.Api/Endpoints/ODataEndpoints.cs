@@ -22,6 +22,10 @@ using Microsoft.Extensions.DependencyInjection;
 
 public static class ODataEndpoints
 {
+    /// <summary>API-15: Swagger UI outside Development needs an authenticated caller unless OpenSchema is enabled.</summary>
+    internal static bool RequiresSwaggerChallenge(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context) =>
+        !gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true;
+
     public static IEndpointRouteBuilder MapODataEndpoints(this IEndpointRouteBuilder app, GatewayOptions gatewayOptions)
     {
         // OData v4 / Power BI & Excel Direct Adapter Endpoints
@@ -66,7 +70,8 @@ public static class ODataEndpoints
             {
                 return null;
             }
-            return context.User?.Identity?.IsAuthenticated == true ? Results.Forbid() : Results.Unauthorized();
+            // API-15: challenge (WWW-Authenticate) instead of a bare 401, so Kerberos/Negotiate clients can authenticate.
+            return context.User?.Identity?.IsAuthenticated == true ? Results.Forbid() : Results.Challenge();
         }
 
         RouteHandlerBuilder ConfigureOpenApiAuth(RouteHandlerBuilder builder)
@@ -209,9 +214,11 @@ public static class ODataEndpoints
         // Die UI-Assets werden aus dem Assembly ausgeliefert (kein CDN, offline-faehig).
         IResult ServeSwaggerUi(HttpContext context, IWebHostEnvironment env)
         {
-            if (!gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true)
+            if (RequiresSwaggerChallenge(gatewayOptions, env, context))
             {
-                return Results.Unauthorized();
+                // API-15: a bare 401 carries no WWW-Authenticate header, so browsers never start Kerberos/Negotiate.
+                // A challenge lets the default scheme answer with the proper header.
+                return Results.Challenge();
             }
             var nonce = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
             context.Response.Headers.ContentSecurityPolicy = $"default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";

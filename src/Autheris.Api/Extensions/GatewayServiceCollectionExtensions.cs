@@ -6,17 +6,15 @@ using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Hosting;
 using Autheris.Api.Middleware;
 using Autheris.Application.Interfaces;
-using Autheris.Application.Kernel;
 using Autheris.Application.OpenMetadata.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Tree;
+using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
-using Autheris.Domain.Kernel;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Catalog;
-using Autheris.GraphQL.Filtering;
 using Autheris.GraphQL.Federation;
 using Autheris.GraphQL.Types;
 using Autheris.Infrastructure.Cache;
@@ -134,14 +132,11 @@ public static class GatewayServiceCollectionExtensions
                 ) || opts.IsInsecureTransportAllowed || opts.IsColumnMaskingDisabled,
                 "NF-SEC-03 Verletzung: HmacSecretKeyVaultRef muss außerhalb von Development eine gültige Key Vault Secret-Referenz sein!")
             .Validate(opts =>
-                string.Equals(opts.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(opts.GovernanceDb.Provider, "PostgreSql", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(opts.GovernanceDb.Provider, "Postgres", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(opts.GovernanceDb.Provider, "PgSql", StringComparison.OrdinalIgnoreCase),
+                IsSupportedGovernanceDbProvider(opts.GovernanceDb.Provider),
                 "GovernanceDb Provider wird aktuell nur als 'Sqlite' oder 'PostgreSql' unterstützt.")
             .Validate(opts =>
                 !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) ||
-                !string.Equals(opts.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase),
+                !DataSourceProvider.Is(opts.GovernanceDb.Provider, DatabaseDialect.Sqlite),
                 "Sicherheitsverletzung (E-2): Multi-Node Cluster Mode und mehr als 1 Replika sind mit SQLite nicht zulässig, da SQLite lokale Datenbankdateien pro Instanz verwendet. Bitte konfigurieren Sie GovernanceDb.Provider = 'PostgreSql' für Cluster-Betrieb.")
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.OpenMetadata.Enabled ||
@@ -206,8 +201,11 @@ public static class GatewayServiceCollectionExtensions
 
     public static IServiceCollection AddGatewayInfrastructure(
         this IServiceCollection services,
-        GatewayOptions gatewayOptions)
+        GatewayOptions gatewayOptions,
+        IHostEnvironment? environment = null)
     {
+        var hostEnv = environment ?? (services.FirstOrDefault(d => d.ServiceType == typeof(IHostEnvironment))?.ImplementationInstance as IHostEnvironment);
+        var isDev = hostEnv?.IsDevelopment() ?? false;
         services.AddMemoryCache(options =>
         {
             options.SizeLimit = (long)gatewayOptions.Caching.L1MemoryCache.SizeLimitMb * 1024 * 1024;
@@ -264,10 +262,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IEpochValidationService, EpochValidationService>();
         services.AddSingleton<IConsentCacheService, ConsentCacheService>();
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();
-        var dbProvider = gatewayOptions.GovernanceDb.Provider?.Trim() ?? "Sqlite";
-        if (string.Equals(dbProvider, "PostgreSql", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(dbProvider, "Postgres", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(dbProvider, "PgSql", StringComparison.OrdinalIgnoreCase))
+        if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
         {
             services.AddSingleton<PostgreSqlGovernanceRepository>();
             services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
@@ -309,7 +304,6 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IChunkedQueryExecutor>(sp => new ChunkedQueryExecutor(
             gatewayOptions.GraphQL.MaxInClauseBatchSize,
             sp.GetRequiredService<IParameterBudgetProvider>()));
-        services.AddSingleton<ISqlFilterProvider>(new SqlFilterProvider(gatewayOptions.GraphQL.MaxInClauseBatchSize));
 
         // Outbound SSRF protection (HIGH-03 / SEC-02) & OpenAPI ingestion (P1).
         // Data catalog clients, factory and sync are registered by AddGatewayExtensions (Autheris.Extensions/DataCatalog).
@@ -376,6 +370,10 @@ public static class GatewayServiceCollectionExtensions
             var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
             var rlsGen = sp.GetService<Autheris.Application.Interfaces.IRlsFilterGenerator>();
             var logger = sp.GetService<Microsoft.Extensions.Logging.ILogger<CasbinEnforcementService>>();
+            if (!options.Casbin.Enabled)
+            {
+                logger?.LogWarning("Casbin ABAC engine is DISABLED (Gateway:Casbin:Enabled = false). Access control via Casbin policies is inactive.");
+            }
             var service = new CasbinEnforcementService(options.Casbin.ModelPath, rlsGen, logger);
             if (options.Casbin.Enabled && !string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
@@ -435,10 +433,7 @@ public static class GatewayServiceCollectionExtensions
             return registry;
         });
 
-        services.AddSingleton<Autheris.Application.Connectors.Pushdown.IPushdownPlanner, Autheris.Application.Connectors.Pushdown.PushdownPlanner>();
         services.AddScoped<Autheris.Application.Connectors.CrossDomain.ICrossDomainAccessResolver, Autheris.Application.Connectors.CrossDomain.DefaultCrossDomainAccessResolver>();
-        services.AddScoped<Autheris.Application.Connectors.CrossDomain.ICrossDomainJoinEngine, Autheris.Application.Connectors.CrossDomain.CrossDomainJoinEngine>();
-        services.AddSingleton<Autheris.Application.Connectors.Streaming.IStreamingResultPipeline, Autheris.Application.Connectors.Streaming.StreamingResultPipeline>();
 
         services.AddScoped<IClientIpResolver, Autheris.Api.Security.HttpContextClientIpResolver>();
         // O10: process-wide counter of running table reads per tenant, user and table
@@ -459,20 +454,19 @@ public static class GatewayServiceCollectionExtensions
             sp.GetService<IPolicyEnforcementService>(),
             sp.GetService<IClientIpResolver>(),
             sp.GetService<Autheris.Application.Connectors.IAutherisConnectorRegistry>(),
-            sp.GetService<ITableReadConcurrencyGate>()));
+            sp.GetService<ITableReadConcurrencyGate>(),
+            sp.GetService<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator>()));
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();
-        services.AddSingleton<IExecutionGuardrailService, ExecutionGuardrailService>();
         services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
-        services.AddSingleton<ISemanticQueryCache, SemanticQueryCacheService>();
-        services.AddSingleton<PolicyRecommendationService>();
-        services.AddScoped<IGovernedExecutionKernel, GovernedExecutionKernel>();
 
         // Model Context Protocol (MCP) Server & AI Data Guardrails
         services.AddSingleton<ISemanticPromptGuardrail, SemanticPromptGuardrail>();
         services.AddSingleton<IGoldenQueryService, GoldenQueryService>();
         services.AddSingleton<ISemanticMcpCompiler, SemanticMcpCompiler>();
+        services.AddScoped<IMcpDatasetCatalog, McpDatasetCatalog>();
+        services.AddSingleton<IGraphQlCatalogMap, Autheris.GraphQL.Mcp.CatalogGraphQlMap>();
         services.AddTransient<IPreFlightQuerySimulator, PreFlightQuerySimulator>();
         services.AddSingleton<IMcpProvenanceEnricher, McpProvenanceEnricher>();
         services.AddSingleton<IMcpSessionStore, McpSessionStore>();
@@ -525,6 +519,7 @@ public static class GatewayServiceCollectionExtensions
 
         // Realtime Event Subscriptions & In-Stream RLS (P5 & F-CDC-03)
         services.AddSingleton<ICdcEventChannel, InMemoryCdcEventChannel>();
+        services.AddSingleton<Autheris.GraphQL.Subscriptions.CdcSubscriptionGovernor>();
         services.AddSingleton<ICdcEventIngestionService, CdcEventIngestionService>();
         services.AddScoped<IStreamRlsPolicyEnforcer, StreamRlsPolicyEnforcer>();
         services.AddSingleton<Autheris.Infrastructure.Streaming.PostgreSqlLogicalReplicationService>();
@@ -599,7 +594,7 @@ public static class GatewayServiceCollectionExtensions
                               .AllowCredentials();
                     }
                 }
-                else
+                else if (isDev)
                 {
                     policy.WithOrigins("http://localhost:5000", "https://localhost:5001")
                           .AllowAnyHeader()
@@ -678,6 +673,7 @@ public static class GatewayServiceCollectionExtensions
         // 2. Traefik / Kubernetes Ingress ForwardAuth
         authBuilder.AddScheme<AuthenticationSchemeOptions, ForwardAuthAuthenticationHandler>(
             GatewayAuthSchemes.ForwardAuth, _ => { });
+        services.AddHostedService<ForwardAuthSecretStartupValidator>();
 
         // 3. Windows Negotiate (Kerberos / NTLM) or TestAuthHandler
         bool isTestAuthAllowed = environment.IsDevelopment() &&
@@ -700,21 +696,31 @@ public static class GatewayServiceCollectionExtensions
         var entraConfig = gatewayOptions.Authentication.EntraId;
         var adfsConfig = gatewayOptions.Authentication.Adfs;
 
-        authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearer, options =>
+        // API-14: with Entra ID and AD FS both enabled a single JwtBearer scheme could only load the signing keys of one
+        // authority (Entra), so every AD FS token failed. Each IdP then gets its own scheme with its own metadata;
+        // Bearer tokens are routed by their (unverified) issuer and fully validated by the selected scheme.
+        bool splitJwtSchemes = entraConfig.Enabled && adfsConfig.Enabled;
+        authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearer, options => ConfigureJwtBearer(options, useEntra: entraConfig.Enabled, useAdfs: adfsConfig.Enabled && !splitJwtSchemes));
+        if (splitJwtSchemes)
+        {
+            authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearerAdfs, options => ConfigureJwtBearer(options, useEntra: false, useAdfs: true));
+        }
+
+        void ConfigureJwtBearer(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions options, bool useEntra, bool useAdfs)
         {
             // Review E-1: JwtBearer keeps the default inbound claim mapping (sub -> NameIdentifier, oid -> objectidentifier
             // URI); revocation lookups (GetLookupKeys) accept both spellings.
-            options.RequireHttpsMetadata = (entraConfig.Enabled && entraConfig.RequireHttpsMetadata) ||
-                                           (adfsConfig.Enabled && adfsConfig.RequireHttpsMetadata);
+            options.RequireHttpsMetadata = (useEntra && entraConfig.RequireHttpsMetadata) ||
+                                           (useAdfs && adfsConfig.RequireHttpsMetadata);
 
-            if (entraConfig.Enabled && !string.IsNullOrWhiteSpace(entraConfig.TenantId))
+            if (useEntra && !string.IsNullOrWhiteSpace(entraConfig.TenantId))
             {
                 var instance = string.IsNullOrWhiteSpace(entraConfig.Instance)
                     ? "https://login.microsoftonline.com/"
                     : entraConfig.Instance.TrimEnd('/') + "/";
                 options.Authority = $"{instance}{entraConfig.TenantId}/v2.0";
             }
-            else if (adfsConfig.Enabled && !string.IsNullOrWhiteSpace(adfsConfig.Authority))
+            else if (useAdfs && !string.IsNullOrWhiteSpace(adfsConfig.Authority))
             {
                 options.Authority = adfsConfig.Authority.TrimEnd('/');
                 if (!string.IsNullOrWhiteSpace(adfsConfig.MetadataAddress))
@@ -726,7 +732,7 @@ public static class GatewayServiceCollectionExtensions
             var validIssuers = new List<string>();
             var validAudiences = new List<string>();
 
-            if (entraConfig.Enabled)
+            if (useEntra)
             {
                 if (!string.IsNullOrWhiteSpace(entraConfig.TenantId))
                 {
@@ -740,7 +746,7 @@ public static class GatewayServiceCollectionExtensions
                 if (!string.IsNullOrWhiteSpace(entraConfig.ClientId)) validAudiences.Add(entraConfig.ClientId);
             }
 
-            if (adfsConfig.Enabled)
+            if (useAdfs)
             {
                 if (!string.IsNullOrWhiteSpace(adfsConfig.Authority))
                 {
@@ -762,7 +768,7 @@ public static class GatewayServiceCollectionExtensions
                 ValidateIssuerSigningKey = true,
                 ClockSkew = TimeSpan.FromMinutes(2)
             };
-        });
+        }
 
         // 5. Smart Dynamic Policy Scheme: Route requests based on Authorization header or ForwardAuth
         authBuilder.AddPolicyScheme(GatewayAuthSchemes.DefaultScheme, "Gateway Smart Authentication", options =>
@@ -774,7 +780,7 @@ public static class GatewayServiceCollectionExtensions
                 // 1. Explicit Authorization headers have top priority (prevents ForwardAuth Header-Preemption DoS)
                 if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                 {
-                    return GatewayAuthSchemes.JwtBearer;
+                    return GatewayAuthSchemes.SelectJwtScheme(authHeader["Bearer ".Length..], gatewayOptions);
                 }
 
                 if (authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
@@ -892,6 +898,12 @@ public static class GatewayServiceCollectionExtensions
         services.AddFusionFederationServices(gatewayOptions);
 
         services.AddSingleton<ErrorSanitizingFilter>();
+        // R-GQL-12: one module instance (and change-detection timer) for the application, also across schema rebuilds.
+        services.AddSingleton(sp => new CatalogGraphQlTypeModule(
+            sp.GetRequiredService<ITableMetadataRepository>(),
+            sp.GetRequiredService<ITableRelationRepository>(),
+            sp.GetService<ILogger<CatalogGraphQlTypeModule>>(),
+            TimeSpan.FromSeconds(gatewayOptions.GraphQL.CatalogSchemaRefreshSeconds)));
         services.AddSingleton<ISocketTokenValidator, JwtSocketTokenValidator>();
         services.AddSingleton<WebSocketAuthInterceptor>();
 
@@ -899,6 +911,8 @@ public static class GatewayServiceCollectionExtensions
             .AddGraphQLServer()
             .UseInstrumentation()
             .UseExceptions()
+            // R-GQL-6: wraps validation and execution so unknown and denied fields yield the same result.
+            .UseRequest<GraphQlEnumerationShieldMiddleware>()
             .UseTimeout()
             .UseDocumentCache();
 
@@ -929,6 +943,7 @@ public static class GatewayServiceCollectionExtensions
             .UseRequest<Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.CdnCacheTagMiddleware>()
             .UseRequest<Autheris.GraphQL.Federation.SubgraphResultMaskingMiddleware>()
+            .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
             .UseOperationCache()
             .UseOperationResolver()
             .UseOperationVariableCoercion()
@@ -938,9 +953,8 @@ public static class GatewayServiceCollectionExtensions
             .AddApplicationService<WebSocketAuthInterceptor>()
             .AddApplicationService<ITableMetadataRepository>()
             .AddApplicationService<ITableRelationRepository>()
-            .AddTypeModule(sp => new CatalogGraphQlTypeModule(
-                sp.GetRequiredService<ITableMetadataRepository>(),
-                sp.GetRequiredService<ITableRelationRepository>()))
+            .AddApplicationService<CatalogGraphQlTypeModule>()
+            .AddTypeModule(sp => sp.GetRequiredService<CatalogGraphQlTypeModule>())
             .AddErrorFilter(sp => sp.GetRequiredService<ErrorSanitizingFilter>())
             .AddQueryType<Query>()
             .AddMutationType<Mutation>()
@@ -971,6 +985,9 @@ public static class GatewayServiceCollectionExtensions
         if (!gatewayOptions.GraphQL.EnableIntrospection && !gatewayOptions.IsIntrospectionForced)
         {
             gqlBuilder.DisableIntrospection();
+
+            // R-GQL-6: GET /graphql?sdl and /graphql/schema.graphql serve the SDL independently of introspection.
+            gqlBuilder.ModifyServerOptions(opt => opt.EnableSchemaRequests = false);
         }
 
         return services;
@@ -993,20 +1010,16 @@ public static class GatewayServiceCollectionExtensions
                 "Loopback/Link-Local/Metadaten/CGNAT/Multicast/IPv4-mapped-Bereichen:\n  - " + string.Join("\n  - ", egressErrors));
         }
 
-        // POL-1: If Casbin is enabled, ModelPath and PolicyPath must be configured, exist, and not be empty (fail-closed).
-        if (options.Casbin.Enabled)
+        // POL-1 / F-7: Validate Casbin ModelPath whenever configured, or require it when Enabled
+        if (!string.IsNullOrWhiteSpace(options.Casbin.ModelPath))
         {
-            if (string.IsNullOrWhiteSpace(options.Casbin.ModelPath))
-            {
-                throw new ValidationException("Casbin ist aktiviert (Gateway:Casbin:Enabled = true), aber Casbin:ModelPath ist nicht konfiguriert.");
-            }
             if (!File.Exists(options.Casbin.ModelPath))
             {
-                throw new ValidationException($"Casbin ist aktiviert, aber Model-Datei '{options.Casbin.ModelPath}' wurde nicht gefunden.");
+                throw new ValidationException($"Casbin Model-Datei '{options.Casbin.ModelPath}' wurde nicht gefunden.");
             }
             if (new FileInfo(options.Casbin.ModelPath).Length == 0)
             {
-                throw new ValidationException($"Casbin ist aktiviert, aber Model-Datei '{options.Casbin.ModelPath}' ist leer.");
+                throw new ValidationException($"Casbin Model-Datei '{options.Casbin.ModelPath}' ist leer.");
             }
 
             try
@@ -1017,7 +1030,15 @@ public static class GatewayServiceCollectionExtensions
             {
                 throw new ValidationException($"Casbin-Modell '{options.Casbin.ModelPath}' erfüllt den Gateway-Vertrag nicht: {string.Join("; ", ex.Violations)}", ex);
             }
+        }
+        else if (options.Casbin.Enabled)
+        {
+            throw new ValidationException("Casbin ist aktiviert (Gateway:Casbin:Enabled = true), aber Casbin:ModelPath ist nicht konfiguriert.");
+        }
 
+        // POL-1 / R-POL-5: If Casbin is enabled, PolicyPath must exist, not be empty, and contain valid 'p' rules
+        if (options.Casbin.Enabled)
+        {
             if (string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
                 throw new ValidationException("Casbin ist aktiviert (Gateway:Casbin:Enabled = true), aber Casbin:PolicyPath ist nicht konfiguriert.");
@@ -1029,6 +1050,25 @@ public static class GatewayServiceCollectionExtensions
             if (new FileInfo(options.Casbin.PolicyPath).Length == 0)
             {
                 throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' ist leer.");
+            }
+
+            // R-POL-5: Test-parse policy file at startup and verify that at least one 'p' rule exists (fail-closed)
+            try
+            {
+                var policyText = File.ReadAllText(options.Casbin.PolicyPath);
+                int totalPRules = Autheris.Application.Governance.CasbinEnforcementService.ValidatePolicyFile(policyText, modelSupportsWildcardTenant: true);
+                if (totalPRules == 0)
+                {
+                    throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' enthält keine gültigen 'p'-Regeln.");
+                }
+            }
+            catch (ValidationException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' ist ungültig: {ex.Message}", ex);
             }
         }
 
@@ -1182,6 +1222,33 @@ public static class GatewayServiceCollectionExtensions
             {
                 throw new ValidationException("Sicherheitsverletzung: RequireTrustedProxy darf bei aktivem ForwardAuth außerhalb von Development nicht auf false gesetzt sein!");
             }
+
+            if (options.Authentication.ForwardAuth.TrustedNetworks != null)
+            {
+                foreach (var netStr in options.Authentication.ForwardAuth.TrustedNetworks)
+                {
+                    if (!System.Net.IPNetwork.TryParse(netStr, out var network))
+                    {
+                        throw new ValidationException($"Konfigurationsfehler ForwardAuth.TrustedNetworks: Ungültiges IP-Netzwerk '{netStr}'.");
+                    }
+
+                    if (network.PrefixLength == 0)
+                    {
+                        throw new ValidationException($"Sicherheitsverletzung (API-8): ForwardAuth.TrustedNetworks '{netStr}' ist ein Wildcard-Netzwerk (/0). Wildcard-Netzwerke sind verboten!");
+                    }
+                }
+            }
+
+            if (options.Authentication.ForwardAuth.TrustedProxies != null)
+            {
+                foreach (var proxyStr in options.Authentication.ForwardAuth.TrustedProxies)
+                {
+                    if (!System.Net.IPAddress.TryParse(proxyStr, out _))
+                    {
+                        throw new ValidationException($"Konfigurationsfehler ForwardAuth.TrustedProxies: Ungültige IP-Adresse '{proxyStr}'.");
+                    }
+                }
+            }
         }
 
         if (!environment.IsDevelopment())
@@ -1220,6 +1287,14 @@ public static class GatewayServiceCollectionExtensions
                     "Opt-in (AllowInsecureWarnFlagsInProduction = true) aktiv sein!");
             }
 
+            // API-16: warn_allow_all_cors_origins is prohibited outside Development without explicit opt-in
+            if (options.IsAllCorsAllowed && !options.AllowInsecureWarnFlagsInProduction)
+            {
+                throw new ValidationException(
+                    "Sicherheitsverletzung (API-16): warn_allow_all_cors_origins darf außerhalb von Development nur mit explizitem " +
+                    "Opt-in (AllowInsecureWarnFlagsInProduction = true) aktiv sein!");
+            }
+
             if (!options.IsInsecureTransportAllowed && !options.IsColumnMaskingDisabled &&
                 (string.IsNullOrWhiteSpace(options.DataMasking.HmacSecretKeyVaultRef) ||
                 options.DataMasking.HmacSecretKeyVaultRef == "DEV_INSECURE_TEST_KEY_ONLY" ||
@@ -1238,6 +1313,15 @@ public static class GatewayServiceCollectionExtensions
             if (options.AreUntrustedCertificatesAllowed)
             {
                 throw new ValidationException("Sicherheitsverletzung: danger_allow_untrusted_certificates darf AUSSCHLIESSLICH in der Development-Umgebung true sein!");
+            }
+
+            // DEP-7 / INF-6: data source connections must encrypt and verify the server certificate outside Development.
+            foreach (var (name, connection) in options.DataSources.Connections)
+            {
+                if (Autheris.Infrastructure.Persistence.ConnectionTlsPolicy.Validate(connection.Provider, connection.ConnectionString) is { } tlsError)
+                {
+                    throw new ValidationException($"Sicherheitsverletzung: DataSources:Connections:{name}: {tlsError}");
+                }
             }
 
             if (options.GraphQL.TrustedOrigins.Contains("*"))
@@ -1269,17 +1353,18 @@ public static class GatewayServiceCollectionExtensions
 
             if (options.Authentication.BasicAuth.Enabled)
             {
-                if (options.Authentication.BasicAuth.Users.Any(u => string.IsNullOrWhiteSpace(u.Password) || !u.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase)))
+                if (options.Authentication.BasicAuth.Users.Any(u => string.IsNullOrWhiteSpace(u.Password) || (!u.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase) && !u.Password.StartsWith("$argon2id$", StringComparison.OrdinalIgnoreCase))))
                 {
-                    throw new ValidationException("Sicherheitsverletzung: Außerhalb von Development müssen BasicAuth-Passwörter zwingend als PBKDF2-Hash ($pbkdf2$...) gespeichert sein!");
+                    throw new ValidationException("Sicherheitsverletzung (DEP-14): Außerhalb von Development müssen BasicAuth-Passwörter zwingend als Hash ($argon2id$... oder $pbkdf2$...) gespeichert sein. Klartext-Passwörter sind verboten!");
                 }
 
                 // RR-L2-03: weak work factors (e.g. $pbkdf2$1$...) are rejected at boot.
                 var minIterations = Math.Max(210_000, options.Authentication.BasicAuth.MinimumPbkdf2Iterations);
                 if (options.Authentication.BasicAuth.Users.Any(u =>
-                        u.Password.Split('$') is not { Length: 5 } parts ||
-                        !int.TryParse(parts[2], out var iterations) ||
-                        iterations < minIterations))
+                        u.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase) &&
+                        (u.Password.Split('$') is not { Length: 5 } parts ||
+                         !int.TryParse(parts[2], out var iterations) ||
+                         iterations < minIterations)))
                 {
                     throw new ValidationException($"Sicherheitsverletzung: Außerhalb von Development müssen BasicAuth-PBKDF2-Hashes mindestens {minIterations} Iterationen verwenden!");
                 }
@@ -1304,29 +1389,62 @@ public static class GatewayServiceCollectionExtensions
                 throw new ValidationException("Sicherheitsverletzung: Außerhalb von Development müssen für S3-WORM mit EnforceObjectLock zwingend S3AccessKey und S3SecretKey konfiguriert sein!");
             }
 
-            if (string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase) &&
+            if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
                 !string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString) &&
                 (options.GovernanceDb.ConnectionString.Contains(":memory:", StringComparison.OrdinalIgnoreCase) ||
                  options.GovernanceDb.ConnectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase)))
             {
                 throw new ValidationException("Sicherheitsverletzung: In-Memory SQLite-Datenbanken (GovernanceDb.ConnectionString) sind außerhalb von Development streng verboten!");
             }
+
+            // DEP-4: In container environments, a relative SQLite database path in /app is unwritable for non-root APP_UID
+            if (IsTruthy(getEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER")) &&
+                DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite))
+            {
+                try
+                {
+                    var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(options.GovernanceDb.ConnectionString);
+                    if (!string.IsNullOrWhiteSpace(builder.DataSource) &&
+                        !builder.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) &&
+                        builder.Mode != Microsoft.Data.Sqlite.SqliteOpenMode.Memory)
+                    {
+                        var isDirectRootFile = !builder.DataSource.Contains('/') && !builder.DataSource.Contains('\\');
+                        var isAppRoot = builder.DataSource.Equals("/app/governance.db", StringComparison.OrdinalIgnoreCase);
+                        if (isDirectRootFile || isAppRoot)
+                        {
+                            throw new ValidationException(
+                                "Sicherheits- und Konfigurationsfehler (DEP-4): Im Container läuft der Prozess als non-root User ($APP_UID). " +
+                                $"Der SQLite-Pfad '{builder.DataSource}' liegt direkt im nicht-beschreibbaren Anwendungsverzeichnis (/app). " +
+                                "Bitte verwenden Sie das beschreibbare Datenverzeichnis '/app/data' (z. B. 'Data Source=/app/data/governance.db;Cache=Shared').");
+                        }
+                    }
+                }
+                catch (ValidationException)
+                {
+                    throw;
+                }
+                catch
+                {
+                    // Ignore parse errors here; SqliteConnection will handle them
+                }
+            }
         }
 
-        if (!string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(options.GovernanceDb.Provider, "PostgreSql", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(options.GovernanceDb.Provider, "Postgres", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(options.GovernanceDb.Provider, "PgSql", StringComparison.OrdinalIgnoreCase))
+        if (!IsSupportedGovernanceDbProvider(options.GovernanceDb.Provider))
         {
             throw new ValidationException($"GovernanceDb Provider '{options.GovernanceDb.Provider}' wird aktuell nicht unterstützt. Erlaubt sind 'Sqlite' oder 'PostgreSql'.");
         }
 
         if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) &&
-            string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+            DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite))
         {
             throw new ValidationException("Sicherheitsverletzung (E-2): Multi-Node Cluster Mode und mehr als 1 Replika sind mit SQLite nicht zulässig, da SQLite lokale Datenbankdateien pro Instanz verwendet. Bitte konfigurieren Sie GovernanceDb.Provider = 'PostgreSql' für Cluster-Betrieb.");
         }
     }
+
+    /// <summary>Architecture 5: the governance store runs on SQLite or PostgreSQL, under any provider alias.</summary>
+    private static bool IsSupportedGovernanceDbProvider(string? provider) =>
+        DataSourceProvider.Is(provider, DatabaseDialect.Sqlite) || DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql);
 
     private static bool IsTruthy(string? value)
     {

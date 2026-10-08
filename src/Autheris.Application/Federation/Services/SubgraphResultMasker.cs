@@ -18,20 +18,30 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
     private readonly IColumnMaskingProvider _maskingProvider;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<SubgraphResultMasker> _logger;
+    private readonly IGatewayRoleEvaluator _roleEvaluator;
 
     private static readonly MaskingRule EmailMaskRule = new() { RuleType = "MASK_EMAIL" };
     private static readonly MaskingRule IbanMaskRule = new() { RuleType = "MASK_IBAN" };
     private static readonly MaskingRule PhoneMaskRule = new() { RuleType = "MASK_PHONE" };
     private static readonly MaskingRule RedactMaskRule = new() { RuleType = "REDACT", Replacement = "[REDACTED]" };
+    private static readonly Autheris.Domain.Security.GatewayRole[] AdminRoles = [Autheris.Domain.Security.GatewayRole.GovernanceAdmin, Autheris.Domain.Security.GatewayRole.ClusterAdmin];
 
     public SubgraphResultMasker(
         IColumnMaskingProvider maskingProvider,
         IOptions<GatewayOptions> options,
-        ILogger<SubgraphResultMasker> logger)
+        ILogger<SubgraphResultMasker> logger,
+        IGatewayRoleEvaluator? roleEvaluator = null)
     {
         _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _roleEvaluator = roleEvaluator ?? new Autheris.Application.Security.GatewayRoleEvaluator();
+    }
+
+    private bool IsAdmin(ClaimsPrincipal? principal)
+    {
+        if (principal == null) return false;
+        return _roleEvaluator.HasAnyRole(principal, AdminRoles);
     }
 
     public object? MaskResultData(object? data, ClaimsPrincipal? principal)
@@ -45,13 +55,9 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         }
 
         // Privileged governance roles with full cleartext access
-        if (principal != null)
+        if (IsAdmin(principal))
         {
-            var roles = principal.GetUserRoles();
-            if (roles.Contains("GovernanceAdmin") || roles.Contains("ClusterAdmin"))
-            {
-                return data;
-            }
+            return data;
         }
 
         return MaskResultData(data, principal, null);
@@ -67,13 +73,9 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
             return data;
         }
 
-        if (principal != null)
+        if (IsAdmin(principal))
         {
-            var roles = principal.GetUserRoles();
-            if (roles.Contains("GovernanceAdmin") || roles.Contains("ClusterAdmin"))
-            {
-                return data;
-            }
+            return data;
         }
 
         return MaskRecursive(data, aliasToFieldMap, null);

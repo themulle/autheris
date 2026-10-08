@@ -117,7 +117,7 @@ public sealed class MediumsGroupBTests
 
         var executor = new DeltaLakeDataSourceExecutor(
             reader, pruner, Substitute.For<IColumnMaskingProvider>(),
-            Options.Create(new GatewayOptions()), NullLogger<DeltaLakeDataSourceExecutor>.Instance);
+            Options.Create(new GatewayOptions()), NullLogger<DeltaLakeDataSourceExecutor>.Instance, new DemoDataSwitch(true));
 
         var tableId = new TableIdentifier("lake", "default", "delta_table");
         var metadata = new TableMetadata

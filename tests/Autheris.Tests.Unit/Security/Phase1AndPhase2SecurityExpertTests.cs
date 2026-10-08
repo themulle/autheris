@@ -12,18 +12,18 @@ using Autheris.Api.Endpoints;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Interfaces;
-using Autheris.Application.Kernel;
 using Autheris.Application.Olap;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
-using Autheris.Domain.Kernel;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -141,80 +141,6 @@ public sealed class Phase1AndPhase2SecurityExpertTests
         normalized.TableName.ShouldBe("invoices");
     }
 
-    [Fact]
-    public void SEC_EXP_KERNEL_03_SingleStatement_Enforcement_Blocks_StackedQueries()
-    {
-        var guardrail = new ExecutionGuardrailService();
-
-        // Legitimate semicolon inside string literal is allowed
-        Should.NotThrow(() => guardrail.ValidateSingleStatement("SELECT * FROM audit WHERE message = 'semicolon; here'"));
-
-        // Multi-statement injection is blocked
-        var ex = Should.Throw<ArgumentException>(() =>
-            guardrail.ValidateSingleStatement("SELECT * FROM users; DROP TABLE audit_log;"));
-        ex.Message.ShouldContain("Multiple SQL statements detected");
-    }
-
-    [Theory]
-    [InlineData(10_000_000, 100_000)]
-    [InlineData(int.MaxValue, 100_000)]
-    [InlineData(500, 500)]
-    [InlineData(null, 50_000)]
-    public void SEC_EXP_KERNEL_04_RowLimit_Capping_Prevents_OOM(int? requested, int expected)
-    {
-        var guardrail = new ExecutionGuardrailService();
-        var capped = guardrail.EnforceRowLimit(requested, defaultLimit: 50_000, maxLimit: 100_000);
-        capped.ShouldBe(expected);
-    }
-
-    [Fact]
-    public async Task SEC_EXP_KERNEL_05_CatalogValidation_UnknownTable_FailsClosed()
-    {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        var guardrail = new ExecutionGuardrailService();
-        var masking = Substitute.For<IColumnMaskingProvider>();
-        var execService = Substitute.For<IGatewayExecutionService>();
-
-        var kernel = new GovernedExecutionKernel(metaRepo, pdp, guardrail, masking, execService, NullLogger<GovernedExecutionKernel>.Instance);
-        var secCtx = CreateTestSecurityContext("tenant-a", "user-1");
-
-        var req = new GovernedExecutionRequest(
-            new TableIdentifier("default", "public", "nonexistent_table"),
-            null, null, 100, ExecutionEngineType.RelationalSql);
-
-        metaRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns((TableMetadata?)null);
-        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Array.Empty<TableMetadata>());
-
-        await Should.ThrowAsync<TableNotFoundException>(() => kernel.ExecuteAsync(req, secCtx, CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task SEC_EXP_KERNEL_06_UnifiedPDP_Denial_FailsClosed()
-    {
-        var metaRepo = Substitute.For<ITableMetadataRepository>();
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        var guardrail = new ExecutionGuardrailService();
-        var masking = Substitute.For<IColumnMaskingProvider>();
-        var execService = Substitute.For<IGatewayExecutionService>();
-
-        var kernel = new GovernedExecutionKernel(metaRepo, pdp, guardrail, masking, execService, NullLogger<GovernedExecutionKernel>.Instance);
-        var secCtx = CreateTestSecurityContext("tenant-a", "user-1");
-        var table = new TableIdentifier("sales", "public", "confidential_orders");
-        var meta = new TableMetadata { Identifier = table, Columns = new[] { new TableColumn { ColumnName = "id", DataType = "int" } } };
-
-        metaRepo.GetTableMetadataAsync(table, Arg.Any<CancellationToken>()).Returns(meta);
-        pdp.EvaluateAccessAsync(table, meta, secCtx, Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(TableAccessDecision.Denied(table, "Tenant policy rejection"));
-
-        var req = new GovernedExecutionRequest(table, null, null, 100, ExecutionEngineType.RelationalSql);
-
-        var ex = await Should.ThrowAsync<SecurityException>(() => kernel.ExecuteAsync(req, secCtx, CancellationToken.None));
-        ex.Message.ShouldContain("Tenant policy rejection");
-    }
-
     // =========================================================================
     // Domain 3: Row Filter Polarity & Consent Engine (RR-L4-01)
     // =========================================================================
@@ -315,6 +241,151 @@ public sealed class Phase1AndPhase2SecurityExpertTests
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
 
         ex.Message.ShouldContain("Wildcard-Netzwerk (/0)");
+    }
+
+    [Theory]
+    [InlineData("0.0.0.0/0")]
+    [InlineData("::/0")]
+    [InlineData("invalid-cidr-network")]
+    public void API_08_ForwardAuth_TrustedNetworks_WildcardOrInvalid_Rejected(string network)
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "https://vault.azure.net/secrets/hmac-secret" },
+            Authentication = new Autheris.Domain.Options.AuthenticationOptions
+            {
+                ForwardAuth = new ForwardAuthOptions
+                {
+                    Enabled = true,
+                    SharedSecret = "01234567890123456789012345678901",
+                    RequireTrustedProxy = true,
+                    TrustedNetworks = [network]
+                }
+            }
+        };
+
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+
+        var ex = Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+
+        ex.Message.ShouldContain("TrustedNetworks");
+    }
+
+    [Fact]
+    public void API_08_ForwardAuth_TrustedProxies_InvalidIp_Rejected()
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "https://vault.azure.net/secrets/hmac-secret" },
+            Authentication = new Autheris.Domain.Options.AuthenticationOptions
+            {
+                ForwardAuth = new ForwardAuthOptions
+                {
+                    Enabled = true,
+                    SharedSecret = "01234567890123456789012345678901",
+                    RequireTrustedProxy = true,
+                    TrustedProxies = ["not-an-ip-address"]
+                }
+            }
+        };
+
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+
+        var ex = Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+
+        ex.Message.ShouldContain("TrustedProxies");
+    }
+
+    [Fact]
+    public void DEP_14_StartupValidation_RejectsPlaintextBasicAuthPasswordOutsideDevelopment()
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "https://vault.azure.net/secrets/hmac-secret" },
+            Authentication = new Autheris.Domain.Options.AuthenticationOptions
+            {
+                RequireKerberosOnly = false,
+                BasicAuth = new BasicAuthOptions
+                {
+                    Enabled = true,
+                    Users = [new BasicAuthUserConfig { Username = "admin", Password = "PlainTextPassword123!" }]
+                }
+            }
+        };
+
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+
+        var ex = Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+
+        ex.Message.ShouldContain("Klartext-Passwörter sind verboten");
+    }
+
+    [Fact]
+    public void DEP_14_StartupValidation_AcceptsArgon2idBasicAuthPasswordOutsideDevelopment()
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "https://vault.azure.net/secrets/hmac-secret" },
+            Authentication = new Autheris.Domain.Options.AuthenticationOptions
+            {
+                RequireKerberosOnly = false,
+                BasicAuth = new BasicAuthOptions
+                {
+                    Enabled = true,
+                    Users = [new BasicAuthUserConfig { Username = "admin", Password = "$argon2id$v=19$m=65536,t=3,p=1$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNo" }]
+                }
+            }
+        };
+
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+
+        Should.NotThrow(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+    }
+
+    [Fact]
+    public async Task DEP_16_Cors_LocalhostFallback_PresentInDevelopmentWhenTrustedOriginsEmpty()
+    {
+        var services = new ServiceCollection();
+        var options = new GatewayOptions();
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        services.AddSingleton<IHostEnvironment>(env);
+
+        services.AddGatewayInfrastructure(options);
+        using var sp = services.BuildServiceProvider();
+        var policyProvider = sp.GetRequiredService<ICorsPolicyProvider>();
+        var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), null);
+
+        policy.ShouldNotBeNull();
+        policy.Origins.ShouldContain("http://localhost:5000");
+        policy.Origins.ShouldContain("https://localhost:5001");
+    }
+
+    [Fact]
+    public async Task DEP_16_Cors_LocalhostFallback_RemovedInProductionWhenTrustedOriginsEmpty()
+    {
+        var services = new ServiceCollection();
+        var options = new GatewayOptions();
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+        services.AddSingleton<IHostEnvironment>(env);
+
+        services.AddGatewayInfrastructure(options);
+        using var sp = services.BuildServiceProvider();
+        var policyProvider = sp.GetRequiredService<ICorsPolicyProvider>();
+        var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), null);
+
+        policy.ShouldNotBeNull();
+        policy.Origins.ShouldNotContain("http://localhost:5000");
+        policy.Origins.ShouldNotContain("https://localhost:5001");
     }
 
     [Fact]

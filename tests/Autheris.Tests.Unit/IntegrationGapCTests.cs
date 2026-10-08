@@ -626,6 +626,9 @@ public sealed class IntegrationGapCTests
                 null,
                 hasUnconstrainedColumnAllow: true));
 
+        var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        devEnv.EnvironmentName.Returns("Development");
+
         return new GovernedSqlExecutionService(
             Options.Create(options),
             policyEnforcement: null,
@@ -634,7 +637,7 @@ public sealed class IntegrationGapCTests
             auditLogRepository: null,
             connectionFactory: null,
             clientIpResolver: null,
-            environment: null,
+            environment: devEnv,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consentRepository,
             secretProvider: null);

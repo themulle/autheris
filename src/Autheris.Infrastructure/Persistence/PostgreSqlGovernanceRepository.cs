@@ -76,11 +76,10 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
             foreach (var (name, candidate) in new[] { ("ConnectionString", connStr), ("MigrationConnectionString", options?.Value?.GovernanceDb?.MigrationConnectionString) })
             {
                 if (string.IsNullOrWhiteSpace(candidate)) continue;
-                var csb = new NpgsqlConnectionStringBuilder(candidate);
-                if (csb.SslMode is not (SslMode.Require or SslMode.VerifyCA or SslMode.VerifyFull))
+                // DEP-7: 'Require' encrypts without verifying the server certificate (MITM) -> VerifyCA/VerifyFull only.
+                if (ConnectionTlsPolicy.Validate("postgresql", candidate) is { } tlsError)
                 {
-                    throw new InvalidOperationException(
-                        $"Security critical: GovernanceDb:{name} must use 'SSL Mode=Require', 'VerifyCA' or 'VerifyFull' outside Development.");
+                    throw new InvalidOperationException($"Security critical: GovernanceDb:{name}: {tlsError}");
                 }
             }
         }
@@ -125,11 +124,37 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
             }
         }
 
+        // R-DEP-1: the length is checked here, where the key is used, not by its reference name.
+        var envName = environment?.EnvironmentName ??
+                      Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
+                      Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        bool isDevOrTest = string.IsNullOrEmpty(envName) ||
+                           string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase);
+        if (key != null)
+        {
+            Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(key, "Der Audit-HMAC-Schlüssel (AuditHmacKeyVaultRef)", isDevOrTest);
+        }
+
         if (key == null && secretProvider != null && !string.IsNullOrWhiteSpace(options?.Value?.DataMasking?.HmacSecretKeyVaultRef))
         {
+            byte[]? masterKey = null;
             try
             {
-                var masterKey = secretProvider.GetSecretBytes(options.Value.DataMasking.HmacSecretKeyVaultRef);
+                masterKey = secretProvider.GetSecretBytes(options.Value.DataMasking.HmacSecretKeyVaultRef);
+            }
+            catch
+            {
+                // Fallback below
+            }
+
+            if (masterKey != null && masterKey.Length > 0)
+            {
+                // R-DEP-1: HKDF does not add entropy; a short master key yields a weak audit key.
+                Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(masterKey, "Der HMAC-Masterschlüssel (HmacSecretKeyVaultRef)", isDevOrTest);
+            }
+
+            try
+            {
                 if (masterKey != null && masterKey.Length > 0)
                 {
                     key = HKDF.DeriveKey(
@@ -145,11 +170,6 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
             }
         }
 
-        var envName = environment?.EnvironmentName ??
-                      Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
-                      Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
-        bool isDevOrTest = string.IsNullOrEmpty(envName) ||
-                           string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase);
 
         if (key == null || key.Length == 0)
         {

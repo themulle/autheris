@@ -434,63 +434,54 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 $"Dbt proposal '{proposalId}' cannot be approved because its status is '{proposal.Status}' (expected '{DbtProposalStatus.PendingReview}').");
         }
 
-        var updated = await _proposalRepository.UpdateProposalStatusAsync(proposalId, DbtProposalStatus.Approved, reviewedBy, ct).ConfigureAwait(false);
-
-        // EXT-1: RLS filter and Casbin role proposals must NOT be saved as column masking rules.
+        // R-EXT-1: every check runs before the status changes, so "Approved" always means "applied".
+        // RLS filter and Casbin role proposals have no column masking equivalent; they must be implemented through
+        // consent row filters or the Casbin policy file and are rejected here instead of being marked Approved.
         bool isPolicyOrRls = proposal.SuggestedRuleType.StartsWith("RLS_FILTER:", StringComparison.OrdinalIgnoreCase)
             || proposal.SuggestedRuleType.StartsWith("CASBIN_ROLES:", StringComparison.OrdinalIgnoreCase);
-
         if (isPolicyOrRls)
         {
-            _logger.LogInformation(
-                "Dbt proposal {Id} ({Type}) approved for table {Table}. Policy/RLS proposals are not saved as column masking rules.",
-                proposalId, proposal.SuggestedRuleType, proposal.Table);
-            return updated;
+            throw new InvalidOperationException(
+                $"Dbt proposal '{proposalId}' ({proposal.SuggestedRuleType.Split(':')[0]}) cannot be applied automatically. " +
+                "Implement it as a consent row filter or Casbin policy and reject the proposal.");
         }
 
-        var tableMeta = await _metadataRepository.GetTableMetadataAsync(proposal.Table, ct).ConfigureAwait(false);
-        if (tableMeta != null)
+        var tableMeta = await _metadataRepository.GetTableMetadataAsync(proposal.Table, ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"Dbt proposal '{proposalId}' targets table '{proposal.Table}', which is not in the catalog.");
+
+        var newRule = new MaskingRule
         {
-            var newRule = new MaskingRule
-            {
-                RuleType = proposal.SuggestedRuleType,
-                Replacement = proposal.SuggestedRuleType == "REDACT" ? "[REDACTED]" : null
-            };
+            RuleType = proposal.SuggestedRuleType,
+            Replacement = proposal.SuggestedRuleType == "REDACT" ? "[REDACTED]" : null
+        };
 
-            // EXT-1: Ratchet enforcement – approve must never weaken existing stronger masking rules
-            if (tableMeta.ColumnMaskingRules.TryGetValue(proposal.ColumnName, out var existingRule))
-            {
-                if (CatalogGovernanceRatchet.MaskingRuleStrength(existingRule) > CatalogGovernanceRatchet.MaskingRuleStrength(newRule))
-                {
-                    _logger.LogWarning(
-                        "Dbt proposal {Id} suggests rule {SuggestedRule} for {Table}.{Column}, but existing masking rule {ExistingRule} is stronger. Preserving stronger rule via Ratchet.",
-                        proposalId, proposal.SuggestedRuleType, proposal.Table, proposal.ColumnName, existingRule.RuleType);
-                    return updated;
-                }
-            }
-
-            var updatedRules = new Dictionary<string, MaskingRule>(tableMeta.ColumnMaskingRules, StringComparer.OrdinalIgnoreCase)
-            {
-                [proposal.ColumnName] = newRule
-            };
-
-            var newTableMeta = tableMeta with
-            {
-                ColumnMaskingRules = updatedRules
-            };
-
-            await _metadataRepository.UpsertTableMetadataAsync(newTableMeta, ct).ConfigureAwait(false);
-
-            if (_epochRepository != null)
-            {
-                await _epochRepository.IncrementTableEpochAsync(proposal.Table, ct).ConfigureAwait(false);
-            }
-
-            _logger.LogInformation("Applied approved dbt proposal {Id} to table {Table} column {Column} with rule {Rule}.",
-                proposalId, proposal.Table, proposal.ColumnName, proposal.SuggestedRuleType);
+        // EXT-1: Ratchet enforcement – approve must never weaken existing stronger masking rules
+        if (tableMeta.ColumnMaskingRules.TryGetValue(proposal.ColumnName, out var existingRule) &&
+            CatalogGovernanceRatchet.MaskingRuleStrength(existingRule) > CatalogGovernanceRatchet.MaskingRuleStrength(newRule))
+        {
+            _logger.LogWarning(
+                "Dbt proposal {Id} suggests rule {SuggestedRule} for {Table}.{Column}, but existing masking rule {ExistingRule} is stronger.",
+                proposalId, proposal.SuggestedRuleType, proposal.Table, proposal.ColumnName, existingRule.RuleType);
+            throw new InvalidOperationException(
+                $"Dbt proposal '{proposalId}' would weaken the existing masking rule '{existingRule.RuleType}' of column '{proposal.ColumnName}'; reject the proposal.");
         }
 
-        return updated;
+        var updatedRules = new Dictionary<string, MaskingRule>(tableMeta.ColumnMaskingRules, StringComparer.OrdinalIgnoreCase)
+        {
+            [proposal.ColumnName] = newRule
+        };
+
+        await _metadataRepository.UpsertTableMetadataAsync(tableMeta with { ColumnMaskingRules = updatedRules }, ct).ConfigureAwait(false);
+
+        if (_epochRepository != null)
+        {
+            await _epochRepository.IncrementTableEpochAsync(proposal.Table, ct).ConfigureAwait(false);
+        }
+
+        _logger.LogInformation("Applied approved dbt proposal {Id} to table {Table} column {Column} with rule {Rule}.",
+            proposalId, proposal.Table, proposal.ColumnName, proposal.SuggestedRuleType);
+
+        return await _proposalRepository.UpdateProposalStatusAsync(proposalId, DbtProposalStatus.Approved, reviewedBy, ct).ConfigureAwait(false);
     }
 
     public async Task<DbtMetadataProposal> RejectProposalAsync(Guid proposalId, string reviewedBy, CancellationToken ct = default)

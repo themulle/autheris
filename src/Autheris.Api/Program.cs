@@ -34,7 +34,8 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 
 // 1. Serilog Setup
-builder.Host.UseSerilog((ctx, lc) => lc
+// DEP-8: code defaults first (Microsoft.AspNetCore at Warning, query strings redacted), then the Serilog section.
+builder.Host.UseSerilog((ctx, lc) => Autheris.Api.Logging.SensitiveLogPropertyEnricher.ApplyDefaults(lc)
     .ReadFrom.Configuration(ctx.Configuration)
     .Enrich.FromLogContext()
     .WriteTo.Console());
@@ -53,7 +54,7 @@ builder.Services.AddSingleton(devReport);
 
 // 3. Modular Service Registrations
 var gatewayOptions = builder.Services.AddGatewayOptions(builder.Configuration, builder.Environment);
-builder.Services.AddGatewayInfrastructure(gatewayOptions);
+builder.Services.AddGatewayInfrastructure(gatewayOptions, builder.Environment);
 builder.Services.AddGatewayAuth(gatewayOptions, builder.Environment);
 // One switch for all sample content (demo catalog, finance/hr GraphQL types, demo MCP tools, golden queries)
 var demoDataEnabled = Autheris.Domain.Options.DemoDataSwitch.Resolve(gatewayOptions, builder.Environment.EnvironmentName);

@@ -131,11 +131,36 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
         string justification,
         CancellationToken ct = default)
     {
+        if (consentId == Guid.Empty)
+        {
+            throw new ArgumentException("ConsentId must not be empty.", nameof(consentId));
+        }
+
+        if (extensionDuration <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(extensionDuration), "Extension duration must be positive.");
+        }
+
+        if (string.IsNullOrWhiteSpace(approverSid.Value))
+        {
+            throw new ArgumentException("Approver SID must be specified.", nameof(approverSid));
+        }
+
+        if (string.IsNullOrWhiteSpace(justification))
+        {
+            throw new ArgumentException("Justification must be provided.", nameof(justification));
+        }
+
         var consent = await _consentRepo.GetConsentByIdAsync(consentId, ct).ConfigureAwait(false);
         if (consent == null)
         {
             _logger.LogWarning("Cannot extend non-existent consent '{ConsentId}'.", consentId);
             return false;
+        }
+
+        if (consent.IsRevoked)
+        {
+            throw new InvalidOperationException($"Cannot extend revoked consent '{consentId}'.");
         }
 
         var newValidTo = (consent.ValidTo > DateTimeOffset.UtcNow ? consent.ValidTo : DateTimeOffset.UtcNow).Add(extensionDuration);

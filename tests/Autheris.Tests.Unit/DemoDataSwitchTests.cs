@@ -16,9 +16,11 @@ public class DemoDataSwitchTests
     [InlineData(true, "Production", true)]       // explicit wins
     [InlineData(false, "Development", false)]    // explicit wins
     [InlineData(null, "Development", true)]      // default: Development as before
-    [InlineData(null, "", true)]
+    [InlineData(null, "", false)]                // fail-closed: empty environment is not Development (S-1/D-2)
+    [InlineData(null, null, false)]              // fail-closed: null environment is not Development (S-1/D-2)
+    [InlineData(null, "Test", false)]            // fail-closed: Test environment is not Development (S-1/D-2)
     [InlineData(null, "Production", false)]
-    public void Resolve_ExplicitSettingWinsOtherwiseDevelopment(bool? seed, string env, bool expected)
+    public void Resolve_ExplicitSettingWinsOtherwiseDevelopment(bool? seed, string? env, bool expected)
     {
         DemoDataSwitch.Resolve(Options(seed), env).ShouldBe(expected);
     }

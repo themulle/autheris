@@ -256,4 +256,17 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         secContext.HasRole(GatewayRole.GovernanceAdmin).ShouldBeFalse();
         secContext.HasAnyRole(GatewayRole.ClusterAdmin, GatewayRole.GovernanceAdmin).ShouldBeFalse();
     }
+    [Fact]
+    public void API7_InvalidTenantClaim_DoesNotThrowDuringNormalization()
+    {
+        // API-7: an invalid tenant claim must not fail authentication with 500; the request is rejected later with 403.
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-API7"), new Claim("tid", "evil<script>tenant")], "Bearer"));
+
+        var normalized = Should.NotThrow(() => ClaimsNormalizer.Normalize(principal));
+
+        normalized.FindFirst("tenant_id").ShouldBeNull();
+        var ex = Should.Throw<System.Security.SecurityException>(() => normalized.GetTenantId());
+        ex.Message.ShouldNotContain("evil");
+    }
 }

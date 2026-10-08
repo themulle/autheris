@@ -130,7 +130,16 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
 
                     var upgradeSid = httpUser?.GetUserSid();
                     var tokenSid = validatedPrincipal.GetUserSid();
-                    if (isHttpAuthenticated && upgradeSid != null && tokenSid != null && upgradeSid.Value != tokenSid.Value && upgradeTenant != tokenTenant)
+
+                    // R-GQL-8: Every WebSocket token must contain a valid user SID (fail-closed)
+                    if (tokenSid == null || string.IsNullOrWhiteSpace(tokenSid.Value.Value))
+                    {
+                        _logger.LogWarning("WebSocket connection_init rejected: Token does not contain a valid SID claim.");
+                        return ConnectionStatus.Reject("Token missing subject identifier (SID)");
+                    }
+
+                    // R-GQL-8: If HTTP upgrade was authenticated, token subject must match upgrade subject (regardless of tenant)
+                    if (isHttpAuthenticated && upgradeSid != null && !string.Equals(upgradeSid.Value.Value, tokenSid.Value.Value, StringComparison.OrdinalIgnoreCase))
                     {
                         _logger.LogWarning(
                             "WebSocket connection_init rejected: Token subject '{TokenSubject}' does not match upgrade subject '{UpgradeSubject}'.",

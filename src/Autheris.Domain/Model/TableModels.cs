@@ -34,19 +34,26 @@ public sealed class Table
     public HttpEndpointDescriptor? HttpEndpoint { get; init; }
     public string? PluginName { get; init; }
 
-    public static bool IsSensitivityHigh(string? sensitivity)
+    /// <summary>Rank of a sensitivity class; unknown classes rank like HIGH (fail-closed). Empty means NORMAL.</summary>
+    public static int SensitivityRank(string? sensitivity) => (sensitivity ?? "NORMAL").Trim().ToUpperInvariant() switch
     {
-        if (string.IsNullOrWhiteSpace(sensitivity)) return false;
-        var s = sensitivity.Trim();
-        if (string.Equals(s, "PUBLIC", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(s, "INTERNAL", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(s, "NORMAL", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(s, "LOW", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-        return true;
-    }
+        "" => 1,
+        "LOW" or "PUBLIC" => 0,
+        "NORMAL" or "INTERNAL" => 1,
+        "MEDIUM" => 2,
+        "CONFIDENTIAL" => 3,
+        "HIGH" => 4,
+        "RESTRICTED" or "SECRET" => 5,
+        _ => 4
+    };
+
+    /// <summary>
+    /// D-4 (ADR-010): CONFIDENTIAL and above count as highly sensitive (four eyes, shorter consent TTL, degraded mode,
+    /// Backstage): CONFIDENTIAL, HIGH, RESTRICTED, SECRET and every unknown value (e.g. PII). PUBLIC, LOW, INTERNAL,
+    /// NORMAL and MEDIUM do not. Same ranking as the catalog governance ratchet.
+    /// </summary>
+    public static bool IsSensitivityHigh(string? sensitivity) =>
+        !string.IsNullOrWhiteSpace(sensitivity) && SensitivityRank(sensitivity) >= 3;
 
     public bool IsHighlySensitive =>
         RequiresFourEyes || IsSensitivityHigh(Sensitivity);
@@ -84,6 +91,9 @@ public sealed class MaskingRule
     public string? PatternOrFormat { get; init; }
     public string? Replacement { get; init; }
     public string? HmacKeyId { get; init; }
+
+    /// <summary>R-POL-12: the one definition of a keyed pseudonymization rule (HMAC, HMAC_SHA256 and the HASH alias).</summary>
+    public bool IsHmac => (RuleType ?? string.Empty).Trim().ToUpperInvariant() is "HMAC" or "HMAC_SHA256" or "HASH";
 
     /// <summary>
     /// SEC H-13 / SEC D-3: Creates a tenant-scoped copy of an HMAC masking rule, keyed as {baseKeyId}|tenant:{tenant}.
@@ -132,6 +142,16 @@ public sealed record TableMetadata
     public IReadOnlyList<string> PrimaryKeyColumns { get; init; } = new[] { "id" };
 
     public bool IsCompositePrimaryKey => PrimaryKeyColumns.Count > 1;
+
+    /// <summary>
+    /// D-5: the record's generated ToString() printed every property, including masking rules with their HMAC key ids.
+    /// Only the identifier is printed, so logging a metadata object cannot disclose masking configuration.
+    /// </summary>
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Identifier = ").Append(Identifier.ToString());
+        return true;
+    }
 
     public DataSourceType DataSourceType => Table.DataSourceType;
     public HttpEndpointDescriptor? HttpEndpoint => Table.HttpEndpoint;

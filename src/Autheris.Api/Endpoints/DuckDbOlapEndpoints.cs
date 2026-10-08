@@ -7,10 +7,8 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Application.Connectors;
 using Autheris.Application.Connectors.CrossDomain;
-using Autheris.Application.Connectors.Pushdown;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
-using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
@@ -52,7 +50,6 @@ public static class DuckDbOlapEndpoints
         IAutherisConnectorRegistry connectorRegistry,
         ICrossDomainAccessResolver accessResolver,
         IColumnMaskingProvider maskingProvider,
-        IRebacEvaluator rebacEvaluator,
         IOptions<GatewayOptions> gatewayOptions,
         ILoggerFactory loggerFactory)
     {
@@ -179,26 +176,8 @@ public static class DuckDbOlapEndpoints
 
                 var effectiveUser = user ?? new ClaimsPrincipal(new ClaimsIdentity());
 
-                // SEC-OLAP-05 / RR-L3-02: ReBAC Check with canonical qualified table object
-                if (rebacEvaluator != null && rebacEvaluator.IsEnabled)
-                {
-                    var rebacReq = new RebacCheckRequest(
-                        secContext.TenantId.Value,
-                        secContext.UserSid.Value,
-                        "can_query",
-                        $"table:{meta.Identifier.ToQualifiedName()}");
-
-                    var rebacDecision = await rebacEvaluator.CheckAsync(rebacReq, ct).ConfigureAwait(false);
-                    if (!rebacDecision.Allowed)
-                    {
-                        logger.LogWarning("ReBAC denied query access to table {Table} for user {User}", meta.Identifier, secContext.UserSid);
-                        httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        await httpContext.Response.WriteAsJsonAsync(new { error = isDev ? $"Forbidden: Insufficient relationship permissions on table '{meta.Identifier}'." : $"Access denied to table '{rawTableName}'." }, ct);
-                        return;
-                    }
-                }
-
-                // SEC-OLAP-05 / RR-L3-04: ABAC & RLS Resolution without leaking internal policy details
+                // SEC-OLAP-05 / RR-L3-04 / Architecture 1: one access decision (ReBAC whenever enabled, consents, Casbin, RLS)
+                // without leaking internal policy details.
                 var decision = await accessResolver.ResolveAccessAsync(effectiveUser, meta.Identifier, meta, tenantId, ct).ConfigureAwait(false);
 
                 if (!decision.IsAllowed)
@@ -222,30 +201,35 @@ public static class DuckDbOlapEndpoints
                     Tenant: tenantId,
                     AccessDecision: decision,
                     ProjectedColumns: meta.Columns.Select(c => c.ColumnName).ToList(),
-                    Arguments: new Dictionary<string, object?> { ["limit"] = options.MaxStagedRowsPerTable },
+                    Arguments: new Dictionary<string, object?> { ["limit"] = options.MaxStagedRowsPerTable + 1 },
                     PushdownFilterSql: decision.CombinedRowFilterSql,
-                    Limit: options.MaxStagedRowsPerTable,
+                    Limit: options.MaxStagedRowsPerTable + 1,
                     Offset: 0);
 
-                session.Items["TableMetadata"] = meta;
-
-                var splits = await connector.SplitManager.GetSplitsAsync(meta, session, ct).ConfigureAwait(false);
-                var rawRows = new List<IReadOnlyDictionary<string, object?>>();
-                foreach (var split in splits)
+                // Architecture 2 / SQL2-5: the governed reader applies the row filter when the connector did not push it
+                // down, masks exactly once (SQL2-4) and checks the staging capacity before rows are kept (SQL2-2).
+                List<IReadOnlyDictionary<string, object?>> maskedRows;
+                try
                 {
-                    var batch = await connector.RecordSource.ReadBatchAsync(split, session, ct).ConfigureAwait(false);
-                    // RR-L3-01: verify staging capacity BEFORE adding batch
-                    if (rawRows.Count + batch.Count > options.MaxStagedRowsPerTable)
-                    {
-                        httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                        await httpContext.Response.WriteAsJsonAsync(new { error = $"Table '{meta.Identifier}' exceeds maximum allowed staging rows ({options.MaxStagedRowsPerTable})." }, ct);
-                        return;
-                    }
-                    rawRows.AddRange(batch);
+                    var read = await GovernedConnectorReader.ReadAsync(
+                        connector,
+                        session,
+                        meta,
+                        new GovernedRowPolicy(
+                            maskingProvider,
+                            gatewayOptions.Value.DataMasking?.HmacKeyId,
+                            MaskingDisabled: gatewayOptions.Value.IsColumnMaskingDisabled,
+                            MaxRows: options.MaxStagedRowsPerTable),
+                        ct).ConfigureAwait(false);
+                    maskedRows = read.Rows.ToList();
+                }
+                catch (ConnectorRowLimitExceededException)
+                {
+                    httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    await httpContext.Response.WriteAsJsonAsync(new { error = $"Table '{meta.Identifier}' exceeds maximum allowed staging rows ({options.MaxStagedRowsPerTable})." }, ct);
+                    return;
                 }
 
-                // Dynamic Column Masking preservation (SEC-OLAP-04)
-                var maskedRows = rawRows.Select(r => ConnectorRowMasker.MaskRow(r, meta, decision, maskingProvider, tenantId.Value, gatewayOptions.Value.DataMasking?.HmacKeyId)).ToList();
                 if (!await TryAuditAsync("OLAP_TABLE_STAGED", meta.Identifier.ToQualifiedName(), new
                 {
                     tenant = tenantId.Value,

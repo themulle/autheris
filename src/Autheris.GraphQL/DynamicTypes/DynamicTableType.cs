@@ -76,13 +76,9 @@ public sealed class DynamicTableType : ObjectType
         }
     }
 
-    private static bool IsStringType(string dataType)
-    {
-        var lower = dataType.ToLowerInvariant();
-        return lower.Contains("char") || lower.Contains("text") || lower.Contains("string") || lower.Contains("clob") ||
-               lower.Contains("geo") || lower.Contains("point") || lower.Contains("polygon") || lower.Contains("spatial") ||
-               lower.Contains("byte") || lower.Contains("bin") || lower.Contains("blob");
-    }
+    // G-6: one type classifier for schema and resolvers.
+    private static bool IsStringType(string dataType) =>
+        Autheris.GraphQL.Catalog.CatalogSchemaModel.MapDataType(dataType) == Autheris.GraphQL.Catalog.CatalogFieldType.String;
 
     private static void ConfigureType(IObjectFieldDescriptor field, string dataType, DatabaseDialect dialect = DatabaseDialect.PostgreSql)
     {

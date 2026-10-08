@@ -14,13 +14,22 @@ Wir etablieren eine generische Multi-Catalog-Abstraktion:
    - `Reference`: Ermöglicht On-Demand-Lookups ohne persistente Duplikation.
 3. **Automatisierte DSGVO-Art.-9-Klassifizierung**: Erkennung besonderer Kategorien personenbezogener Daten (Gesundheit, Biometrie, Genetik, Religion, Sexualleben) erzwingt automatisch `Sensitivity = "HIGH"`, Vier-Augen-Freigabe (`RequiresFourEyes = true`) und Maskierung (`REDACT` mit `[REDACTED-GDPR-ART9]`).
 4. **PII-Tag-Mapping**: Dynamische Abbildung von Katalog-Tags auf Maskierungsregeln (`TagToMaskingRuleMap`).
-5. **Zero-Trust-Invariante**: Externe Kataloge liefern Metadaten und Schutzvorschläge, erteilen aber **keine eigenständigen Zugriffsrechte**. Zugriffsberechtigungen verbleiben strikt unter Hoheit der Data Owner Consents im Gateway.
+5. **Schutzklassen-Rangfolge (D-4)**: Eine Rangfolge gilt für den Katalog-Ratchet und für „hochsensibel“ (`Table.IsSensitivityHigh`):
+   `PUBLIC`/`LOW` < `NORMAL`/`INTERNAL` < `MEDIUM` < `CONFIDENTIAL` < `HIGH` < `RESTRICTED`/`SECRET`.
+   Hochsensibel sind `CONFIDENTIAL` und höher sowie jeder unbekannte Wert (z. B. `PII`, fail-closed). Hochsensibel bedeutet:
+   Vier-Augen-Freigabe, kürzere Consent-Cache-TTL, Fail-closed im Degraded-Mode und weitere Schutzpfade. `MEDIUM` ist nicht hochsensibel.
+6. **Zero-Trust-Invariante**: Externe Kataloge liefern Metadaten und Schutzvorschläge, erteilen aber **keine eigenständigen Zugriffsrechte**. Zugriffsberechtigungen verbleiben strikt unter Hoheit der Data Owner Consents im Gateway.
 
 ## Konsequenzen
 ### Positiv
 - Nahtlose Integration in bestehende Enterprise-Data-Governance-Ökosysteme.
 - Keine redundante Metadaten- und Klassifizierungspflege.
 - Garantierte Einhaltung der strengen Schutzanforderungen für DSGVO Art. 9 Daten.
+
+### Migrationshinweis (D-4)
+Mit `d58449c` galt jeder Wert außer `PUBLIC`, `INTERNAL`, `NORMAL` und `LOW` als hochsensibel, also auch `MEDIUM`. Seit D-4 ist
+`MEDIUM` wieder nicht hochsensibel (wie in der Ratchet-Rangfolge); `CONFIDENTIAL` und unbekannte Werte bleiben hochsensibel.
+Tabellen mit `MEDIUM`, die Vier-Augen-Freigabe brauchen, setzen `RequiresFourEyes = true` oder werden auf `HIGH` gehoben.
 
 ### Negativ / Risiken
 - Abhängigkeit von Verfügbarkeit und API-Ratenbegrenzungen externer Kataloge. Gegenmaßnahme: Lokaler Cache, Resilienz-Puffer, Mirror-Modus.

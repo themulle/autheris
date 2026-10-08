@@ -10,16 +10,20 @@
 # ==============================================================================
 services:
   gql-gateway:
-    image: ghcr.io/themulle/gql:getting-started
+    image: ghcr.io/themulle/autheris:getting-started
     container_name: gql-gateway
     ports:
       # Loopback only. Publish on other interfaces only behind a TLS-terminating, authenticating proxy.
       - "127.0.0.1:8080:8080"
-      - "127.0.0.1:8081:8081"
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_HTTP_PORTS=8080
-      - ASPNETCORE_HTTPS_PORTS=8081
       # Integrierter Microsoft Garnet .NET L2-Cache
       - Gateway__Caching__Garnet__EnableEmbeddedServer=true
+      - Gateway__GovernanceDb__ConnectionString=Data Source=/app/data/governance.db;Cache=Shared
+    volumes:
+      - autheris-data:/app/data
     restart: unless-stopped
+
+volumes:
+  autheris-data:

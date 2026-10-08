@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -66,6 +67,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
         _logger = logger;
         _options = options?.Value;
         var connStr = options?.Value?.GovernanceDb?.ConnectionString ?? $"Data Source=governance_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        EnsureSqliteDirectoryExists(connStr);
         _connection = new SqliteConnection(connStr);
         _connection.Open();
 
@@ -101,11 +103,37 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
             }
         }
 
+        // R-DEP-1: the length is checked here, where the key is used, not by its reference name.
+        var envName = environment?.EnvironmentName ??
+                      Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
+                      Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        bool isDevOrTest = string.IsNullOrEmpty(envName) ||
+                           string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase);
+        if (key != null)
+        {
+            Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(key, "Der Audit-HMAC-Schlüssel (AuditHmacKeyVaultRef)", isDevOrTest);
+        }
+
         if (key == null && secretProvider != null && !string.IsNullOrWhiteSpace(options?.Value?.DataMasking?.HmacSecretKeyVaultRef))
         {
+            byte[]? masterKey = null;
             try
             {
-                var masterKey = secretProvider.GetSecretBytes(options.Value.DataMasking.HmacSecretKeyVaultRef);
+                masterKey = secretProvider.GetSecretBytes(options.Value.DataMasking.HmacSecretKeyVaultRef);
+            }
+            catch
+            {
+                // Fallback below
+            }
+
+            if (masterKey != null && masterKey.Length > 0)
+            {
+                // R-DEP-1: HKDF does not add entropy; a short master key yields a weak audit key.
+                Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(masterKey, "Der HMAC-Masterschlüssel (HmacSecretKeyVaultRef)", isDevOrTest);
+            }
+
+            try
+            {
                 if (masterKey != null && masterKey.Length > 0)
                 {
                     // HKDF key separation: ensure audit HMAC key is cryptographically isolated from column masking
@@ -133,11 +161,6 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
             isMemory = false;
         }
 
-        var envName = environment?.EnvironmentName ??
-                      Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
-                      Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
-        bool isDevOrTest = string.IsNullOrEmpty(envName) ||
-                           string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase);
 
         if (!isDevOrTest)
         {
@@ -223,5 +246,27 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
             _lock.Dispose();
         }
         catch { }
+    }
+
+    private static void EnsureSqliteDirectoryExists(string connectionString)
+    {
+        try
+        {
+            var builder = new SqliteConnectionStringBuilder(connectionString);
+            if (!string.IsNullOrWhiteSpace(builder.DataSource) &&
+                !builder.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) &&
+                builder.Mode != SqliteOpenMode.Memory)
+            {
+                var dir = Path.GetDirectoryName(builder.DataSource);
+                if (!string.IsNullOrWhiteSpace(dir) && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+            }
+        }
+        catch
+        {
+            // Ignore parse errors; SqliteConnection will validate
+        }
     }
 }

@@ -8,7 +8,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Messaging;
 using Autheris.Application.Services;
-using Autheris.GraphQL.Filtering;
 using HotChocolate.Language;
 using NSubstitute;
 using Shouldly;
@@ -123,13 +122,19 @@ public class PipelineAndInfrastructureSecurityTests
             Arg.Any<DatabaseDialect>())
             .Returns(decision);
 
+        var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        devEnv.EnvironmentName.Returns("Development");
+        var sqlExecutor = new SqlDataSourceExecutor(environment: devEnv);
+
         var executionService = new GatewayExecutionService(
             repository,
             resolutionService,
             cacheService,
             maskingProvider,
             null,
-            null);
+            null,
+            null,
+            dataSourceExecutors: [sqlExecutor]);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
@@ -259,32 +264,6 @@ public class PipelineAndInfrastructureSecurityTests
         condition.ShouldBe("1 = 0");
     }
 
-    [Fact]
-    public void SqlFilterProvider_NullValue_GeneratesIsNullAndIsNotNull()
-    {
-        var provider = new SqlFilterProvider();
-        var metadata = new TableMetadata
-        {
-            Identifier = new TableIdentifier("sales", "dbo", "orders"),
-            Columns = [new() { ColumnName = "notes", DataType = "varchar" }]
-        };
-
-        // eq: null -> notes IS NULL
-        var eqFilter = new ObjectValueNode(
-            new ObjectFieldNode("notes", new ObjectValueNode(new ObjectFieldNode("eq", NullValueNode.Default)))
-        );
-        var (sqlEq, pEq) = provider.TranslateObjectValue(eqFilter, metadata, DatabaseDialect.SqlServer, SqlFilterProvider.UnrestrictedAccess(metadata));
-        sqlEq.ShouldBe("[notes] IS NULL");
-        pEq.ShouldBeEmpty();
-
-        // neq: null -> notes IS NOT NULL
-        var neqFilter = new ObjectValueNode(
-            new ObjectFieldNode("notes", new ObjectValueNode(new ObjectFieldNode("neq", NullValueNode.Default)))
-        );
-        var (sqlNeq, pNeq) = provider.TranslateObjectValue(neqFilter, metadata, DatabaseDialect.SqlServer, SqlFilterProvider.UnrestrictedAccess(metadata));
-        sqlNeq.ShouldBe("[notes] IS NOT NULL");
-        pNeq.ShouldBeEmpty();
-    }
 
     [Fact]
     public void CompositeKey_NaN_GeneratesConsistentHashCodeAndEquality()

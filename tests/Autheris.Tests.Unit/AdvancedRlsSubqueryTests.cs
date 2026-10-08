@@ -492,5 +492,46 @@ public class AdvancedRlsSubqueryTests
         decision.CombinedRowFilterSql.ShouldNotBeNull();
         decision.CombinedRowFilterSql.ShouldContain("[autheris_target].[customer_id] IN (SELECT [c].[id] FROM [dbo].[customers] AS [c] WHERE [c].[id] = [autheris_target].[customer_id] AND [c].[country] = 'CH')");
     }
+
+    [Fact]
+    public void SQL2_19_BuildCorrelatedSubquery_WithUnqualifiedColumnInPredicate_QualifiesWithDependentTableAlias()
+    {
+        var filter = new ConsentRowFilter
+        {
+            FilterType = RowFilterType.SubqueryCorrelated,
+            TargetTableAlias = "i",
+            DependentTable = new TableIdentifier("erp", "dbo", "customers"),
+            DependentTableAlias = "c",
+            ForeignKeyColumn = "customer_id",
+            PrimaryKeyColumn = "id",
+            SubqueryFilterPredicateJson = "{\"status\": \"ACTIVE\"}"
+        };
+
+        var sqlServer = AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, DatabaseDialect.SqlServer);
+        var postgres = AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, DatabaseDialect.PostgreSql);
+
+        sqlServer.ShouldContain("[c].[status] = 'ACTIVE'");
+        postgres.ShouldContain("\"c\".\"status\" = 'ACTIVE'");
+    }
+
+    [Fact]
+    public void SQL2_19_BuildCorrelatedSubquery_WithUnqualifiedColumnInArrayPredicate_QualifiesWithDependentTableAlias()
+    {
+        var filter = new ConsentRowFilter
+        {
+            FilterType = RowFilterType.SubqueryCorrelated,
+            TargetTableAlias = "i",
+            DependentTable = new TableIdentifier("erp", "dbo", "customers"),
+            DependentTableAlias = "c",
+            ForeignKeyColumn = "customer_id",
+            PrimaryKeyColumn = "id",
+            SubqueryFilterPredicateJson = "[{\"column\": \"status\", \"op\": \"EQ\", \"value\": \"ACTIVE\"}]"
+        };
+
+        var sqlServer = AdvancedRlsFilterGenerator.BuildCorrelatedSubquery(filter, DatabaseDialect.SqlServer);
+
+        sqlServer.ShouldContain("[c].[status] = 'ACTIVE'");
+    }
 }
+
 

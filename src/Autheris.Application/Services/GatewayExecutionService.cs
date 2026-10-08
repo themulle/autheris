@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -34,10 +35,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly ITrafficDrainController? _drainController;
     private readonly IEnumerable<IDataSourceExecutor>? _dataSourceExecutors;
     private readonly IPolicyEnforcementService? _policyEnforcementService;
+    private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly Autheris.Application.Connectors.IAutherisConnectorRegistry? _connectorRegistry;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
-    private readonly IDataSourceExecutor _defaultSqlExecutor = new SqlDataSourceExecutor();
 
     /// <summary>O10: Retry-After for a throttled read; the typical duration of a slow read is the query timeout.</summary>
     private const int ThrottledRetryAfterSeconds = 2;
@@ -62,7 +63,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IPolicyEnforcementService? policyEnforcementService = null,
         IClientIpResolver? clientIpResolver = null,
         Autheris.Application.Connectors.IAutherisConnectorRegistry? connectorRegistry = null,
-        ITableReadConcurrencyGate? concurrencyGate = null)
+        ITableReadConcurrencyGate? concurrencyGate = null,
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null)
     {
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
@@ -78,6 +80,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _clientIpResolver = clientIpResolver;
         _connectorRegistry = connectorRegistry;
         _concurrencyGate = concurrencyGate;
+        _rebacEvaluator = rebacEvaluator;
     }
 
     public GatewayExecutionService(
@@ -156,14 +159,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         var executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
         if (executor == null)
         {
-            if (metadata.Table.DataSourceType == DataSourceType.Sql)
-            {
-                executor = _defaultSqlExecutor;
-            }
-            else
-            {
-                throw new NotSupportedException($"Für den DataSourceType '{metadata.Table.DataSourceType}' ist kein Executor registriert.");
-            }
+            throw new GatewayNotImplementedException($"Für den DataSourceType '{metadata.Table.DataSourceType}' ist kein Executor registriert.");
         }
 
         var execArgs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
@@ -220,26 +216,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 Offset: after ?? 0,
                 RequestHeaders: requestHeaders);
 
-            session.Items["TableMetadata"] = metadata;
+            rawRows = await Autheris.Application.Connectors.GovernedConnectorReader.ReadRawAsync(connector, session, metadata, maxRows: null, ct).ConfigureAwait(false);
 
-            var splits = await connector.SplitManager.GetSplitsAsync(metadata, session, ct).ConfigureAwait(false);
-            if (splits.Count == 0)
-            {
-                rawRows = Array.Empty<IReadOnlyDictionary<string, object?>>();
-            }
-            else
-            {
-                var combinedRows = new List<IReadOnlyDictionary<string, object?>>();
-                foreach (var split in splits)
-                {
-                    var splitRows = await connector.RecordSource.ReadBatchAsync(split, session, ct).ConfigureAwait(false);
-                    combinedRows.AddRange(splitRows);
-                }
-                rawRows = combinedRows;
-            }
-
-            rlsPushdownAlreadyOccurred = session.Items.TryGetValue("RlsPushdownExecuted", out var p1) && p1 is true;
-            inDbMaskingAlreadyOccurred = session.Items.TryGetValue("InDbColumnMaskingExecuted", out var m1) && m1 is true;
+            rlsPushdownAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.Connectors.GovernedConnectorReader.RlsPushdownExecutedKey, out var p1) && p1 is true;
+            inDbMaskingAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.Connectors.GovernedConnectorReader.InDbColumnMaskingExecutedKey, out var m1) && m1 is true;
         }
         else
         {
@@ -262,90 +242,21 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             inDbMaskingAlreadyOccurred = execContext.Items.TryGetValue("InDbColumnMaskingExecuted", out var m2) && m2 is true;
         }
 
-        // Central Zero-Trust Pipeline: Step 1: In-Memory RLS Post-Filtering
-        // For SQL data sources where RLS pushdown has already been executed in the DB engine via WHERE clause,
-        // redundant in-memory DataTable filtering is skipped.
-        // For non-SQL data sources (REST, Plugins) or synthetic dev/test mock fallback without DB pushdown,
-        // in-memory evaluation is enforced.
-        var filteredRows = rawRows.ToList();
-
-        if (!rlsPushdownAlreadyOccurred && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
-        {
-            filteredRows = FilterRows(filteredRows, decision.CombinedRowFilterSql, metadata);
-        }
-
-        // Central Zero-Trust Pipeline: Step 2: Column Masking & Deny Stripping
-        var processedRows = new List<IReadOnlyDictionary<string, object?>>(filteredRows.Count);
-        foreach (var r in filteredRows)
-        {
-            var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var col in metadata.Columns)
-            {
-                var access = decision.GetColumnAccess(col.ColumnName);
-                if (access == ColumnAccessLevel.Deny)
-                {
-                    continue; // Strip denied columns completely
-                }
-
-                // Zero-Trust Hardening: Sensitive columns in catalog NEVER output cleartext without explicit Clear rule
-                bool isSensitiveInCatalog = col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName);
-                if (isSensitiveInCatalog && !decision.HasExplicitClear(col.ColumnName))
-                {
-                    access = ColumnAccessLevel.Mask;
-                }
-
-                if (r.TryGetValue(col.ColumnName, out var rawVal))
-                {
-                    if (access == ColumnAccessLevel.Mask && _options?.IsColumnMaskingDisabled != true)
-                    {
-                        if (!inDbMaskingAlreadyOccurred)
-                        {
-                            var rule = metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule) ? mRule : new MaskingRule { RuleType = "REDACT" };
-                            if (IsHmacRule(rule))
-                            {
-                                rule = CreateTenantScopedHmacRule(rule, tenantId.Value, _options?.DataMasking?.HmacKeyId);
-                            }
-                            rawVal = _maskingProvider.MaskValue(col.ColumnName, rawVal, rule);
-                        }
-                    }
-                    dict[col.ColumnName] = rawVal;
-                }
-                else
-                {
-                    dict[col.ColumnName] = null;
-                }
-            }
-            processedRows.Add(dict);
-        }
-
-        // Central Zero-Trust Pipeline: Step 3: Hard Response Size Cap Enforcement
+        // Architecture 2: row filter (unless pushed down), masking exactly once and the response byte cap are the
+        // same steps for connector and executor rows, and for every other connector caller (OLAP).
         var maxBytes = _options?.GraphQL?.MaxResponseBytes > 0 ? _options.GraphQL.MaxResponseBytes : 10 * 1024 * 1024;
-        long estimatedBytes = 0;
-
-        foreach (var row in processedRows)
-        {
-            foreach (var (key, val) in row)
-            {
-                estimatedBytes += key.Length * 2;
-                if (val is string s)
-                {
-                    estimatedBytes += s.Length * 2;
-                }
-                else if (val is byte[] b)
-                {
-                    estimatedBytes += b.Length;
-                }
-                else if (val != null)
-                {
-                    estimatedBytes += 16;
-                }
-            }
-        }
-
-        if (estimatedBytes > maxBytes)
-        {
-            throw new GatewaySecurityException($"Antwortgröße ({estimatedBytes} Bytes) überschreitet das konfigurierte Limit von {maxBytes} Bytes.", "RESPONSE_TOO_LARGE");
-        }
+        var processedRows = Autheris.Application.Connectors.GovernedConnectorReader.Apply(
+            rawRows,
+            metadata,
+            decision,
+            tenantId.Value,
+            rlsPushdownAlreadyOccurred,
+            inDbMaskingAlreadyOccurred,
+            new Autheris.Application.Connectors.GovernedRowPolicy(
+                _maskingProvider,
+                _options?.DataMasking?.HmacKeyId,
+                MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
+                MaxBytes: maxBytes));
 
         return (processedRows, decision);
     }
@@ -387,9 +298,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
         var userSid = userSidNullable.Value;
 
-        var groupSids = principal.GetGroupSids();
-        var roles = principal.GetUserRoles();
-
         // Resolve TenantId upfront for cache and consent isolation
         // RR-L4-02: identical semantics to SecurityContextFactory (single source of truth for HTTP ingress):
         // a tenant header may only select a tenant for canonical cluster admins whose identity was not asserted
@@ -416,82 +324,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             throw new TableNotFoundException(table);
         }
 
-        TableAccessDecision decision;
-        if (_options?.IsConsentBypassed == true)
-        {
-            decision = TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
-        }
-        else
-        {
-            // Check Consent Cache (L1/L2 with Epoch Validation & Group/Role Context Hash, strictly tenant-isolated)
-            var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles);
-            var cached = await _cacheService.GetCachedDecisionAsync(tenantId, userSid, table, contextHash, ct);
-            if (cached == null)
-            {
-                // Cache Miss -> Load from Governance DB
-                var allSubjects = groupSids.Append(userSid).ToList();
-                // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
-                var epochAtLoad = await _cacheService.GetEpochSnapshotAsync(table, ct);
-                var activeConsents = await _consentRepository.GetActiveConsentsForSubjectsAsync(allSubjects, table, DateTimeOffset.UtcNow, tenantId, ct);
-
-                // Multi-Tenancy Isolation: Filter active consents strictly for current tenant
-                activeConsents = activeConsents
-                    .Where(c => c.TenantId == tenantId)
-                    .ToList();
-
-                decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, activeConsents, metadata.Dialect);
-
-                // Cache decision (SEC: TTL bounded by the earliest consent ValidTo, as in CheckTableAccessAsync)
-                var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(metadata.Table.IsHighlySensitive, activeConsents, DateTimeOffset.UtcNow);
-                await _cacheService.SetCachedDecisionAsync(tenantId, userSid, table, decision, ttl, contextHash, epochAtLoad, ct);
-            }
-            else
-            {
-                decision = cached;
-            }
-        }
-
-        // Casbin ABAC & Row-Level Security (RLS) Pushdown Evaluation
-        if (_policyEnforcementService != null && _policyEnforcementService.HasPolicies(tenantId) && _options?.IsConsentBypassed != true)
-        {
-            var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var claim in principal.Claims)
-            {
-                attributes[claim.Type] = claim.Value;
-            }
-
-            // SEC H-4: Fail closed to IPAddress.None; never trust 'ip' claims from tokens or loopback fallback
-            var clientIp = _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
-
-            var purpose = principal.FindFirst("purpose")?.Value ?? principal.FindFirst("purpose_id")?.Value;
-
-            var secContext = new SecurityEvaluationContext(
-                UserSid: userSid,
-                GroupSids: groupSids,
-                Tenant: tenantId,
-                TargetTable: table,
-                RequestedColumns: requestedFields ?? metadata.Columns.Select(c => c.ColumnName).ToList(),
-                ClientIp: clientIp,
-                Timestamp: DateTimeOffset.UtcNow,
-                PurposeId: purpose,
-                Attributes: attributes,
-                TargetDialect: metadata.Dialect
-            );
-
-            var casbinDecision = await _policyEnforcementService.EvaluatePolicyAsync(secContext, ct);
-            if (!casbinDecision.IsAllowed)
-            {
-                decision = TableAccessDecision.Denied(table, $"Casbin ABAC Policy Denial: Access denied for subject '{userSid.Value}' in tenant '{tenantId.Value}'.");
-            }
-            else if (!string.IsNullOrWhiteSpace(casbinDecision.CombinedRowFilterSql))
-            {
-                var mergedFilter = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)
-                    ? $"({decision.CombinedRowFilterSql}) AND ({casbinDecision.CombinedRowFilterSql})"
-                    : casbinDecision.CombinedRowFilterSql;
-
-                decision = decision with { CombinedRowFilterSql = mergedFilter };
-            }
-        }
+        // Architecture 1: the shared access decision (ReBAC on query paths, consents with the decision cache, Casbin).
+        var decision = await AccessPolicy().DecideAsync(
+            TableAccessQuery.ForPrincipal(principal, userSid, tenantId, metadata, requestedFields), ct).ConfigureAwait(false);
 
         return new ResolvedTableAccess(metadata, decision, tenantId, userSid, principal);
     }
@@ -531,6 +366,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         return _concurrencyGate.TryEnter(key, maxConcurrentReads)
                ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
     }
+
+    private TableAccessPolicy AccessPolicy() =>
+        new(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, _clientIpResolver, _options);
 
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
         List<IReadOnlyDictionary<string, object?>> rows,
@@ -868,9 +706,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
         var userSid = userSidNullable.Value;
 
-        var groupSids = principal.GetGroupSids();
-        var roles = principal.GetUserRoles();
-
         var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct);
         if (metadata == null)
         {
@@ -879,84 +714,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
         var tenantId = principal.GetTenantId();
 
-        var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles);
-        var decision = await _cacheService.GetCachedDecisionAsync(tenantId, userSid, table, contextHash, ct);
-        if (decision == null)
-        {
-            var allSubjects = groupSids.Append(userSid).ToList();
-            // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
-            var epochAtLoad = await _cacheService.GetEpochSnapshotAsync(table, ct);
-            var activeConsents = await _consentRepository.GetActiveConsentsForSubjectsAsync(allSubjects, table, DateTimeOffset.UtcNow, tenantId, ct);
-
-            activeConsents = activeConsents
-                .Where(c => c.TenantId == tenantId)
-                .ToList();
-
-            decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, activeConsents, metadata.Dialect);
-
-            var ttl = metadata.Table.IsHighlySensitive
-                ? TimeSpan.FromSeconds(60)
-                : TimeSpan.FromMinutes(10);
-
-            var now = DateTimeOffset.UtcNow;
-            if (activeConsents.Count > 0)
-            {
-                var earliestExpiry = activeConsents
-                    .Where(c => c.ValidTo > now)
-                    .Select(c => c.ValidTo - now)
-                    .DefaultIfEmpty(ttl)
-                    .Min();
-
-                if (earliestExpiry < ttl)
-                {
-                    ttl = earliestExpiry > TimeSpan.FromSeconds(1) ? earliestExpiry : TimeSpan.FromSeconds(1);
-                }
-            }
-
-            await _cacheService.SetCachedDecisionAsync(tenantId, userSid, table, decision, ttl, contextHash, epochAtLoad, ct);
-        }
-
-        // Casbin ABAC & Row-Level Security (RLS) Pushdown Evaluation for Child/Relation Access
-        if (_policyEnforcementService != null && _policyEnforcementService.HasPolicies(tenantId) && _options?.IsConsentBypassed != true)
-        {
-            var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var claim in principal.Claims)
-            {
-                attributes[claim.Type] = claim.Value;
-            }
-
-            // SEC H-4: Fail closed to IPAddress.None; never trust 'ip' claims from tokens or loopback fallback
-            var clientIp = _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
-
-            var purpose = principal.FindFirst("purpose")?.Value ?? principal.FindFirst("purpose_id")?.Value;
-
-            var secContext = new SecurityEvaluationContext(
-                UserSid: userSid,
-                GroupSids: groupSids,
-                Tenant: tenantId,
-                TargetTable: table,
-                RequestedColumns: metadata.Columns.Select(c => c.ColumnName).ToList(),
-                ClientIp: clientIp,
-                Timestamp: DateTimeOffset.UtcNow,
-                PurposeId: purpose,
-                Attributes: attributes,
-                TargetDialect: metadata.Dialect
-            );
-
-            var casbinDecision = await _policyEnforcementService.EvaluatePolicyAsync(secContext, ct);
-            if (!casbinDecision.IsAllowed)
-            {
-                decision = TableAccessDecision.Denied(table, $"Casbin ABAC Policy Denial: Access denied for subject '{userSid.Value}' in tenant '{tenantId.Value}'.");
-            }
-            else if (!string.IsNullOrWhiteSpace(casbinDecision.CombinedRowFilterSql))
-            {
-                var mergedFilter = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)
-                    ? $"({decision.CombinedRowFilterSql}) AND ({casbinDecision.CombinedRowFilterSql})"
-                    : casbinDecision.CombinedRowFilterSql;
-
-                decision = decision with { CombinedRowFilterSql = mergedFilter };
-            }
-        }
+        // Architecture 1: same decision as ResolveTableAccessAsync (OData metadata must not show more than a query returns).
+        var decision = await AccessPolicy().DecideAsync(TableAccessQuery.ForPrincipal(principal, userSid, tenantId, metadata), ct).ConfigureAwait(false);
 
         // F-OPS-02: W3C Trace Correlation
         var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
@@ -1083,8 +842,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         return result;
     }
 
-    internal static bool IsHmacRule(MaskingRule rule) =>
-        rule.RuleType?.ToUpperInvariant() is "HMAC" or "HMAC_SHA256" or "HASH";
+    internal static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;
 
     /// <summary>
     /// SEC D-3: returns a tenant-scoped copy of HMAC rules and the rule itself for every other rule type.

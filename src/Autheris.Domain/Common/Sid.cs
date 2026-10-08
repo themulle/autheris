@@ -138,6 +138,7 @@ public static class ClaimsPrincipalExtensions
             return parsed;
         }
 
-        throw new System.Security.SecurityException($"Invalid tenant claim value '{val}'. Tenant identifier contains illegal characters or does not meet format requirements.");
+        // API-7 / D-6: the raw claim value is never echoed (it reaches logs and, via the security context middleware, clients).
+        throw new System.Security.SecurityException("Invalid tenant claim value. The tenant identifier contains illegal characters or does not meet format requirements.");
     }
 }

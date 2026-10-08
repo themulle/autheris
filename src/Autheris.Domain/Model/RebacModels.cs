@@ -62,10 +62,3 @@ public sealed record RebacBatchCheckResult(
     IReadOnlyDictionary<RebacCheckRequest, bool> Decisions
 );
 
-/// <summary>
-/// Definition of relation inheritance rules (e.g. "owner" implies "editor", "editor" implies "viewer").
-/// </summary>
-public sealed record RebacRelationRule(
-    string Relation,
-    IReadOnlyList<string> InheritedBy
-);

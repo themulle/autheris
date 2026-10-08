@@ -1025,7 +1025,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
     public async Task Low_McpToolsList_EscapesToolNamesAndSchemas()
     {
         var sessionStore = Substitute.For<IMcpSessionStore>();
-        sessionStore.GetSession("s1").Returns(new McpSessionContext("s1", "sp", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+        sessionStore.GetSessionAsync("s1", Arg.Any<CancellationToken>()).Returns(new ValueTask<McpSessionContext?>(new McpSessionContext("s1", "sp", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
         var registry = Substitute.For<IMcpToolRegistry>();
         const string evilName = "tool\",\"injected\":\"x";
         registry.GetAvailableTools().Returns(new List<McpToolDefinition>

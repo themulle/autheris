@@ -16,7 +16,7 @@ using Autheris.Application.Caching.Interfaces;
 using Autheris.Application.Connectors;
 using Autheris.Application.Connectors.CrossDomain;
 using Autheris.Application.Interfaces;
-using Autheris.Application.Kernel;
+using Autheris.Domain.Connectors;
 using Autheris.Application.Olap;
 using Autheris.Application.Policy;
 using Autheris.Application.Procedures.Interfaces;
@@ -27,7 +27,6 @@ using Autheris.Application.Serialization;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
-using Autheris.Domain.Kernel;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
@@ -89,7 +88,7 @@ public sealed class GovernedDataPathsG4Tests
     }
 
     private static (DeltaLakeDataSourceExecutor Executor, DataSourceExecutionContext Context) NewDelta(
-        string tenantColumn, IReadOnlyList<DeltaDataFile> files)
+        string tenantColumn, IReadOnlyList<DeltaDataFile> files, bool demoData = true)
     {
         var reader = Substitute.For<IDeltaMetadataReader>();
         var snapshot = new DeltaSnapshot(
@@ -104,7 +103,7 @@ public sealed class GovernedDataPathsG4Tests
 
         var executor = new DeltaLakeDataSourceExecutor(
             reader, new DeltaPartitionPruner(NullLogger<DeltaPartitionPruner>.Instance), Substitute.For<IColumnMaskingProvider>(),
-            Options.Create(new GatewayOptions()), NullLogger<DeltaLakeDataSourceExecutor>.Instance);
+            Options.Create(new GatewayOptions()), NullLogger<DeltaLakeDataSourceExecutor>.Instance, new DemoDataSwitch(demoData));
 
         var tableId = new TableIdentifier("lake", "default", "delta_table");
         var metadata = new TableMetadata
@@ -122,6 +121,18 @@ public sealed class GovernedDataPathsG4Tests
             }),
             new Dictionary<string, object?>(), new List<string> { "id", tenantColumn }, null, 1000, 0, Tenant1);
         return (executor, context);
+    }
+
+    [Fact]
+    public async Task EXT4_DeltaExecutor_WithoutDemoData_RefusesSyntheticRows()
+    {
+        // EXT-4: rows are synthesized from file metadata; outside demo mode the executor answers 501 instead.
+        var (executor, context) = NewDelta("tenantId",
+        [
+            DFile("owned.parquet", min: new Dictionary<string, string> { ["tenantId"] = "tenant-1" }, max: new Dictionary<string, string> { ["tenantId"] = "tenant-1" })
+        ], demoData: false);
+
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayNotImplementedException>(() => executor.ExecuteAsync(context));
     }
 
     [Fact]
@@ -157,55 +168,6 @@ public sealed class GovernedDataPathsG4Tests
     }
 
     // ------------------------------------------------------------------ D-1 (semantic cache hit)
-
-    [Fact]
-    public async Task D1_SemanticCacheHit_ReappliesTheCurrentRowFilter()
-    {
-        var collection = new TableIdentifier("ai", "public", "docs");
-        var metadata = new TableMetadata
-        {
-            Identifier = collection,
-            Table = new Table { TableName = "docs", SchemaName = "public", DataSourceType = DataSourceType.VectorPgVector },
-            Columns = [new TableColumn { ColumnName = "content_text" }, new TableColumn { ColumnName = "region" }]
-        };
-
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(metadata));
-
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(collection, new Dictionary<string, ColumnAccessLevel>
-            {
-                ["content_text"] = ColumnAccessLevel.Clear,
-                ["region"] = ColumnAccessLevel.Clear
-            }, "region = 'EU'", hasUnconstrainedColumnAllow: true)));
-
-        VectorDocumentChunk Chunk(string id, string region) => new(id, "doc", 0, "text " + id, 0.9f, Tenant1,
-            new Dictionary<string, object?> { ["region"] = region });
-
-        var cache = Substitute.For<ISemanticQueryCache>();
-        cache.TryGetAsync(Arg.Any<SemanticCacheKey>(), Arg.Any<float[]>(), Arg.Any<float>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new SemanticMatchResult(true, 1f, [Chunk("eu", "EU"), Chunk("us", "US")])));
-
-        var kernel = new GovernedExecutionKernel(
-            repo, pdp, Substitute.For<IExecutionGuardrailService>(), Substitute.For<IColumnMaskingProvider>(),
-            Substitute.For<IGatewayExecutionService>(), NullLogger<GovernedExecutionKernel>.Instance, semanticCache: cache);
-
-        var sec = new SecurityPrincipalContext
-        {
-            UserSid = new Sid("S-1-USER-1"),
-            TenantId = Tenant1,
-            GroupSids = new HashSet<Sid>(),
-            TenantRoles = new HashSet<string>(),
-            ClusterRoles = new HashSet<string>(),
-            AuthenticationScheme = "Bearer"
-        };
-
-        var result = await kernel.ExecuteVectorQueryAsync(
-            new VectorSearchRequest(collection, QueryVector: new[] { 0.1f, 0.2f }, RawQueryText: "find docs"), sec);
-
-        result.Chunks.Select(c => c.ChunkId).ShouldBe(["eu"]);
-    }
 
     // ------------------------------------------------------------------ D-2 (result column sources)
 
@@ -401,7 +363,7 @@ public sealed class GovernedDataPathsG4Tests
     };
 
     [Fact]
-    public void D3_ConnectorRowMasker_ScopesHmacRulesToTheTenant()
+    public void D3_GovernedRowProjection_ScopesHmacRulesToTheTenant()
     {
         var id = new TableIdentifier("d", "s", "t");
         var meta = HmacMeta(id);
@@ -410,33 +372,27 @@ public sealed class GovernedDataPathsG4Tests
         MaskingRule? seen = null;
         provider.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Do<MaskingRule>(r => seen = r)).Returns("pseudo");
 
-        ConnectorRowMasker.MaskRow(new Dictionary<string, object?> { ["email"] = "a@b.c" }, meta, decision, provider, "tenant-1");
+        GovernedConnectorReader.ProjectRow(new Dictionary<string, object?> { ["email"] = "a@b.c" }, meta, decision, "tenant-1", new GovernedRowPolicy(provider, HmacKeyId: null), alreadyMasked: false);
 
         seen!.HmacKeyId.ShouldBe("default|tenant:tenant-1");
     }
 
     [Fact]
-    public void D3_ChunkPiiRedactor_ScopesHmacRulesToTheChunkTenant()
+    public void SQL204_GovernedRowProjection_WhenAlreadyMasked_DoesNotDoubleMask()
     {
-        var id = new TableIdentifier("ai", "p", "docs");
-        var meta = new TableMetadata
-        {
-            Identifier = id,
-            Columns = [new TableColumn { ColumnName = "content_text" }],
-            ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["content_text"] = new MaskingRule { RuleType = "HMAC_SHA256", HmacKeyId = "k" }
-            }
-        };
-        var decision = TableAccessDecision.Allowed(id, new Dictionary<string, ColumnAccessLevel> { ["content_text"] = ColumnAccessLevel.Mask });
+        var id = new TableIdentifier("d", "s", "t");
+        var meta = HmacMeta(id);
+        var decision = TableAccessDecision.Allowed(id, new Dictionary<string, ColumnAccessLevel> { ["email"] = ColumnAccessLevel.Mask });
         var provider = Substitute.For<IColumnMaskingProvider>();
-        MaskingRule? seen = null;
-        provider.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Do<MaskingRule>(r => seen = r)).Returns("pseudo");
+        provider.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("SECOND_MASK");
 
-        ChunkPiiRedactor.RedactChunk(
-            new VectorDocumentChunk("c", "d", 0, "secret", 1f, Tenant1, new Dictionary<string, object?>()), meta, provider, decision);
+        var row = new Dictionary<string, object?> { ["email"] = "ALREADY_MASKED_PSEUDO" };
 
-        seen!.HmacKeyId.ShouldBe("k|tenant:tenant-1");
+        var result = GovernedConnectorReader.ProjectRow(row, meta, decision, "tenant-1", new GovernedRowPolicy(provider, HmacKeyId: null), alreadyMasked: true);
+
+        // Value must remain the first pseudonym, MaskValue must not be invoked again
+        result["email"].ShouldBe("ALREADY_MASKED_PSEUDO");
+        provider.DidNotReceive().MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>());
     }
 
     // ------------------------------------------------------------------ D-4 (OLAP audit)
@@ -466,7 +422,7 @@ public sealed class GovernedDataPathsG4Tests
 
         await DuckDbOlapEndpoints.HandleOlapQueryAsync(
             context, engine, Substitute.For<ITableMetadataRepository>(), Substitute.For<IAutherisConnectorRegistry>(),
-            Substitute.For<ICrossDomainAccessResolver>(), Substitute.For<IColumnMaskingProvider>(), Substitute.For<IRebacEvaluator>(),
+            Substitute.For<ICrossDomainAccessResolver>(), Substitute.For<IColumnMaskingProvider>(),
             Options.Create(new GatewayOptions { DuckDbOlap = new DuckDbOlapOptions { Enabled = true } }), NullLoggerFactory.Instance);
         return (context, engine);
     }

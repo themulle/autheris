@@ -62,7 +62,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
         var isInstanceSpecificItsmRef = secretRef.StartsWith("itsm:", StringComparison.OrdinalIgnoreCase) && IsInstanceSpecificReference(secretRef);
         if (isInstanceSpecificItsmRef)
         {
-            _logger?.LogDebug("Secret reference '{SecretRef}' is instance-specific; no global alias fallback is applied.", secretRef);
+            _logger?.LogDebug("Secret reference '{SecretRef}' is instance-specific; no global alias fallback is applied.", DescribeReference(secretRef));
         }
         else if (secretRef.StartsWith("itsm:", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(secretRef, "itsm-webhook-secret", StringComparison.OrdinalIgnoreCase) ||
@@ -72,8 +72,9 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             candidates.Add("ITSM_WEBHOOK_SECRET");
             candidates.Add("Gateway:Itsm:WebhookSecret");
         }
-        else if (secretRef.StartsWith("hmac:", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(secretRef, "hmac-masking-secret", StringComparison.OrdinalIgnoreCase) ||
+        // R-DEP-1: well-known aliases apply to exact reference names only. A prefix match ("audit:tenant-x") would
+        // silently resolve a missing, specific secret to the global one.
+        else if (string.Equals(secretRef, "hmac-masking-secret", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(secretRef, "HMAC_SECRET", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(secretRef, "HMAC_SECRET_KEY", StringComparison.OrdinalIgnoreCase))
         {
@@ -82,16 +83,14 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             candidates.Add("Gateway:DataMasking:HmacSecret");
             candidates.Add("Gateway__DataMasking__HmacSecret");
         }
-        else if (secretRef.StartsWith("audit:", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(secretRef, "audit-hmac-key", StringComparison.OrdinalIgnoreCase) ||
+        else if (string.Equals(secretRef, "audit-hmac-key", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(secretRef, "AUDIT_HMAC_KEY", StringComparison.OrdinalIgnoreCase))
         {
             candidates.Add("AUDIT_HMAC_KEY");
             candidates.Add("Gateway:GovernanceDb:AuditHmacKey");
             candidates.Add("Gateway__GovernanceDb__AuditHmacKey");
         }
-        else if (secretRef.StartsWith("forwardauth:", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(secretRef, "forwardauth-secret", StringComparison.OrdinalIgnoreCase) ||
+        else if (string.Equals(secretRef, "forwardauth-secret", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(secretRef, "FORWARDAUTH_SHARED_SECRET", StringComparison.OrdinalIgnoreCase))
         {
             candidates.Add("FORWARDAUTH_SHARED_SECRET");
@@ -104,7 +103,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             var secretVal = _configuration[key];
             if (!string.IsNullOrWhiteSpace(secretVal))
             {
-                _logger?.LogWarning("Secret reference '{SecretRef}' resolved from configuration key '{CandidateKey}'. In production, ensure sensitive secrets are stored securely in Azure Key Vault or environment variables rather than configuration files.", secretRef, key);
+                _logger?.LogWarning("Secret reference '{SecretRef}' resolved from configuration key '{CandidateKey}'. In production, ensure sensitive secrets are stored securely in Azure Key Vault or environment variables rather than configuration files.", SanitizeForLog(DescribeReference(secretRef)), SanitizeForLog(key));
                 var bytes = Encoding.UTF8.GetBytes(secretVal);
                 ValidateSecretLength(bytes, secretRef);
                 return bytes;
@@ -113,7 +112,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             var envVal = Environment.GetEnvironmentVariable(key.Replace(":", "__").Replace("-", "_"));
             if (!string.IsNullOrWhiteSpace(envVal))
             {
-                _logger?.LogDebug("Resolved secret reference '{SecretRef}' using environment variable '{CandidateKey}'.", secretRef, key);
+                _logger?.LogDebug("Resolved secret reference '{SecretRef}' using environment variable '{CandidateKey}'.", SanitizeForLog(DescribeReference(secretRef)), SanitizeForLog(key));
                 var bytes = Encoding.UTF8.GetBytes(envVal);
                 ValidateSecretLength(bytes, secretRef);
                 return bytes;
@@ -122,7 +121,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             envVal = Environment.GetEnvironmentVariable(key);
             if (!string.IsNullOrWhiteSpace(envVal))
             {
-                _logger?.LogDebug("Resolved secret reference '{SecretRef}' using direct environment variable '{CandidateKey}'.", secretRef, key);
+                _logger?.LogDebug("Resolved secret reference '{SecretRef}' using direct environment variable '{CandidateKey}'.", SanitizeForLog(DescribeReference(secretRef)), SanitizeForLog(key));
                 var bytes = Encoding.UTF8.GetBytes(envVal);
                 ValidateSecretLength(bytes, secretRef);
                 return bytes;
@@ -182,5 +181,16 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
                secretRef.StartsWith("forwardauth", StringComparison.OrdinalIgnoreCase) ||
                secretRef.Contains("forwardauth", StringComparison.OrdinalIgnoreCase) ||
                secretRef.Contains("forward-auth", StringComparison.OrdinalIgnoreCase);
+    }
+    private static string SanitizeForLog(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return value
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", string.Empty, StringComparison.Ordinal);
     }
 }

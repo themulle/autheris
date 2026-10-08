@@ -212,6 +212,7 @@ public class PureYamlProcedureGovernanceTests
             }
         });
 
+        var audit = Substitute.For<IAuditLogRepository>();
         var executionService = new GovernedProcedureExecutionService(
             registry,
             invoker,
@@ -219,7 +220,8 @@ public class PureYamlProcedureGovernanceTests
             tables,
             consents,
             resolution,
-            masking);
+            masking,
+            audit: audit);
 
         var result = await executionService.ExecuteAsync("get_orders", null, User("Reader"), Tenant);
 

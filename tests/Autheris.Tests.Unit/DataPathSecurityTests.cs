@@ -44,13 +44,17 @@ public class DataPathSecurityTests : IDisposable
             DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "Test-Key-Vault-Ref-12345" }
         });
         _maskingProvider = new ColumnMaskingProvider(gatewayOptions);
+        var devEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        devEnv.EnvironmentName.Returns("Development");
+        var sqlExecutor = new SqlDataSourceExecutor(options: gatewayOptions, environment: devEnv);
         _executionService = new GatewayExecutionService(
             _repository,
             _resolutionService,
             _cacheService,
             _maskingProvider,
             new ChunkedQueryExecutor(500),
-            gatewayOptions);
+            gatewayOptions,
+            dataSourceExecutors: [sqlExecutor]);
         _query = new Query();
     }
 

@@ -138,7 +138,7 @@ public sealed class LakehouseDataSourceExecutorTests
             }
         });
 
-        var executor = new LakehouseDataSourceExecutor(metaReader, pruner, masking, options, NullLogger<LakehouseDataSourceExecutor>.Instance);
+        var executor = new LakehouseDataSourceExecutor(metaReader, pruner, masking, options, NullLogger<LakehouseDataSourceExecutor>.Instance, new DemoDataSwitch(true));
 
         var request = new LakehouseScanRequest(
             TableName: "orders",

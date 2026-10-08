@@ -2,6 +2,9 @@ namespace Autheris.Application.Governance.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.IO;
+using System.Net;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -10,29 +13,50 @@ using Casbin.Model;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
-public sealed partial class PolicySimulationService(
-    IAuditLogRepository auditLogRepository,
-    ILogger<PolicySimulationService>? logger = null) : IPolicySimulationService
+public sealed partial class PolicySimulationService : IPolicySimulationService
 {
-    private static readonly string CasbinModelDefinition = CasbinEnforcementService.DefaultModelText;
-
-    private static readonly string[] DangerousSubRuleTokens =
-    [
-        "System.", "System;", "Process", "File.", "Directory.", "Assembly", "GetType", "Activator",
-        "Environment.", "AppDomain", "MethodInfo", "Invoke", "Type.", "TypeName", "Reflection",
-        "DllImport", "Marshal", "Socket", "WebClient", "HttpClient", "Net.", "Unsafe", "Pointer",
-        "Diagnostics.", "Compiler", "IO.", "Security.", "Microsoft.", "Configuration", "Registry"
-    ];
-
     [GeneratedRegex(@"'([^']{2,})'")]
     private static partial Regex SubRuleQuoteRegex();
 
-    private readonly IAuditLogRepository _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
-    private readonly ILogger<PolicySimulationService> _logger = logger ?? NullLogger<PolicySimulationService>.Instance;
+    private readonly IAuditLogRepository _auditLogRepository;
+    private readonly ILogger<PolicySimulationService> _logger;
+    private readonly string _modelText;
+    private readonly bool _modelSupportsWildcardTenant;
+
+    public PolicySimulationService(
+        IAuditLogRepository auditLogRepository,
+        IPolicyEnforcementService? policyEnforcementService = null,
+        IOptions<GatewayOptions>? options = null,
+        ILogger<PolicySimulationService>? logger = null)
+    {
+        _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
+        _logger = logger ?? NullLogger<PolicySimulationService>.Instance;
+
+        if (policyEnforcementService is CasbinEnforcementService casbin)
+        {
+            _modelText = casbin.ModelText;
+            _modelSupportsWildcardTenant = casbin.ModelSupportsWildcardTenant;
+        }
+        else if (options?.Value?.Casbin?.ModelPath is { Length: > 0 } modelPath && File.Exists(modelPath))
+        {
+            _modelText = File.ReadAllText(modelPath);
+            var contract = CasbinModelContract.Verify(_modelText);
+            _modelSupportsWildcardTenant = contract.SupportsWildcardTenant;
+        }
+        else
+        {
+            _modelText = CasbinEnforcementService.DefaultModelText;
+            var contract = CasbinModelContract.Verify(_modelText);
+            _modelSupportsWildcardTenant = contract.SupportsWildcardTenant;
+        }
+    }
 
     public async Task<PolicySimulationResult> SimulateAsync(
         PolicySimulationRequest request,
@@ -93,10 +117,27 @@ public sealed partial class PolicySimulationService(
             var table = string.IsNullOrWhiteSpace(entry.TargetTable) ? "*" : entry.TargetTable;
             var action = entry.EventType?.Contains("write", StringComparison.OrdinalIgnoreCase) == true ? "write" : "read";
 
+            var targetTableId = TableIdentifier.TryParse(table, out var tid) ? tid : new TableIdentifier("default", "public", table);
+            var evalContext = new SecurityEvaluationContext(
+                UserSid: entry.ActorSid,
+                GroupSids: Array.Empty<Sid>(),
+                Tenant: effectiveTenant,
+                TargetTable: targetTableId,
+                RequestedColumns: Array.Empty<string>(),
+                ClientIp: IPAddress.Loopback,
+                Timestamp: entry.OccurredAt,
+                PurposeId: null,
+                Attributes: new Dictionary<string, object?>
+                {
+                    ["tenant"] = tenantStr,
+                    ["user_sid"] = actor
+                }
+            );
+
             bool isAllowed = false;
             try
             {
-                isAllowed = enforcer.Enforce(actor, tenantStr, table, action, new { Tenant = tenantStr, UserSid = actor });
+                isAllowed = enforcer.Enforce(actor, tenantStr, table, action, evalContext);
             }
             catch (Exception ex)
             {
@@ -178,74 +219,46 @@ public sealed partial class PolicySimulationService(
         );
     }
 
-    private static Enforcer CreateSimulationEnforcer(string policyCsv, string defaultTenant)
+    private Enforcer CreateSimulationEnforcer(string policyCsv, string defaultTenant)
     {
-        var model = DefaultModel.CreateFromText(CasbinModelDefinition);
+        var (parsedRules, parsedGrouping) = ParseDraftPolicy(policyCsv, defaultTenant);
+
+        var model = DefaultModel.CreateFromText(_modelText);
         var enforcer = new Enforcer(model);
 
-        var lines = policyCsv.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var rawLine in lines)
+        foreach (var tenantRules in parsedRules.Values)
         {
-            var line = rawLine.Trim();
-            if (line.StartsWith('#') || string.IsNullOrWhiteSpace(line)) continue;
-
-            var parts = line.Split(',', StringSplitOptions.TrimEntries);
-            if (parts.Length == 0) continue;
-
-            var type = parts[0].ToLowerInvariant();
-            if (type == "p")
+            foreach (var rule in tenantRules)
             {
-                // p, sub, tenant, obj, act, [subRule], [eft]
-                if (parts.Length >= 4)
-                {
-                    var sub = parts[1];
-                    var tenant = parts.Length > 2 && !string.IsNullOrWhiteSpace(parts[2]) ? parts[2] : defaultTenant;
-                    var obj = parts.Length > 3 ? parts[3] : "*";
-                    var act = parts.Length > 4 ? parts[4] : "read";
-                    var subRule = parts.Length > 5 && !string.IsNullOrWhiteSpace(parts[5]) ? parts[5] : "true";
-                    var eft = parts.Length > 6 && !string.IsNullOrWhiteSpace(parts[6]) ? parts[6] : "allow";
+                var normalizedSubRule = SubRuleQuoteRegex().Replace(rule.SubRule, "\"$1\"");
+                enforcer.AddPolicy(rule.Sub, rule.Tenant, rule.Obj, rule.Act, normalizedSubRule, rule.Eft);
+            }
+        }
 
-                    ValidateSubRule(subRule);
-                    var normalizedSubRule = SubRuleQuoteRegex().Replace(subRule, "\"$1\"");
-                    enforcer.AddPolicy(sub, tenant, obj, act, normalizedSubRule, eft);
-                }
-            }
-            else if (type == "g")
-            {
-                // g, user, role
-                if (parts.Length >= 3)
-                {
-                    enforcer.AddGroupingPolicy(parts[1], parts[2]);
-                }
-            }
+        foreach (var g in parsedGrouping)
+        {
+            enforcer.AddGroupingPolicy(g.User, g.Role);
         }
 
         return enforcer;
     }
 
-    [GeneratedRegex(@"^[a-zA-Z0-9_.\s()=<>!,'""+\-*/%:]+$", RegexOptions.Compiled)]
-    private static partial Regex SafeSubRulePattern();
-
-    private static void ValidateSubRule(string subRule)
+    private (ImmutableDictionary<string, ImmutableArray<CasbinEnforcementService.CasbinRuleMetadata>> Rules, ImmutableArray<CasbinEnforcementService.GroupingRule> Grouping) ParseDraftPolicy(
+        string policyCsv,
+        string defaultTenant)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(subRule);
-
-        if (subRule.Length > 500)
+        try
         {
-            throw new ArgumentException("Security validation error: Casbin sub_rule exceeds maximum length of 500 characters.", nameof(subRule));
+            return CasbinEnforcementService.ParsePolicyText(
+                policyCsv,
+                defaultTenant,
+                _modelSupportsWildcardTenant,
+                allowWildcardForDefaultTenant: true);
         }
-
-        if (!SafeSubRulePattern().IsMatch(subRule))
+        catch (FormatException ex)
         {
-            throw new ArgumentException("Security validation error: Casbin sub_rule contains disallowed characters.", nameof(subRule));
-        }
-
-        foreach (var token in DangerousSubRuleTokens)
-        {
-            if (subRule.Contains(token, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new ArgumentException($"Security validation error: Casbin sub_rule in draft policy contains forbidden token '{token}'.", nameof(subRule));
-            }
+            // The draft is client input: a malformed or cross-tenant draft is a 400, not a 500.
+            throw new GatewayInvalidQueryException($"Invalid draft policy: {ex.Message}");
         }
     }
 

@@ -130,6 +130,117 @@ public sealed class SecurityReview20261002HostingTests
         composeDev.ShouldContain("AUTHERIS_ALLOW_DEV_IN_CONTAINER=true");
     }
 
+    // =========================================================================
+    // DEP-4: Container startup hardening (no unconfigured HTTPS, /app/data permissions)
+    // =========================================================================
+
+    [Fact]
+    public void DEP04_Dockerfile_DoesNotExposeOrBindHttpsWithoutCert()
+    {
+        var root = FindRepoRoot();
+        root.ShouldNotBeNull("Repository root (Autheris.sln) not found");
+
+        var dockerfile = File.ReadAllText(Path.Combine(root!, "Dockerfile"));
+        dockerfile.ShouldNotContain("ASPNETCORE_HTTPS_PORTS");
+        dockerfile.ShouldNotContain("EXPOSE 8080 8081");
+        dockerfile.ShouldContain("EXPOSE 8080");
+
+        var compose = File.ReadAllText(Path.Combine(root!, "docker-compose.yml"));
+        compose.ShouldNotContain("ASPNETCORE_HTTPS_PORTS");
+        compose.ShouldNotContain("8081:8081");
+    }
+
+    [Fact]
+    public void DEP04_Dockerfile_ConfiguresDataVolumeAndPermissions()
+    {
+        var root = FindRepoRoot();
+        root.ShouldNotBeNull("Repository root (Autheris.sln) not found");
+
+        var dockerfile = File.ReadAllText(Path.Combine(root!, "Dockerfile"));
+        dockerfile.ShouldContain("mkdir -p /app/data && chown -R $APP_UID:$APP_UID /app/data");
+        dockerfile.ShouldContain("VOLUME /app/data");
+        dockerfile.ShouldContain("Gateway__GovernanceDb__ConnectionString=\"Data Source=/app/data/governance.db;Cache=Shared\"");
+
+        var compose = File.ReadAllText(Path.Combine(root!, "docker-compose.yml"));
+        compose.ShouldContain("/app/data");
+    }
+
+    [Fact]
+    public void DEP04_ValidateGatewayOptions_InContainer_RelativeSqlitePath_AbortsStartup()
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = ProdMasking(),
+            GovernanceDb = new GovernanceDbOptions
+            {
+                Provider = "Sqlite",
+                ConnectionString = "Data Source=governance.db;Cache=Shared"
+            }
+        };
+        Func<string, string?> env = name => name == "DOTNET_RUNNING_IN_CONTAINER" ? "true" : null;
+
+        var ex = Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), env));
+
+        ex.Message.ShouldContain("DEP-4");
+        ex.Message.ShouldContain("/app/data");
+    }
+
+    [Fact]
+    public void DEP04_ValidateGatewayOptions_InContainer_AppDataSqlitePath_IsAllowed()
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = ProdMasking(),
+            GovernanceDb = new GovernanceDbOptions
+            {
+                Provider = "Sqlite",
+                ConnectionString = "Data Source=/app/data/governance.db;Cache=Shared"
+            }
+        };
+        Func<string, string?> env = name => name == "DOTNET_RUNNING_IN_CONTAINER" ? "true" : null;
+
+        Should.NotThrow(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), env));
+    }
+
+    [Fact]
+    public void DEP04_SqliteGovernanceRepository_CreatesDirectoryIfMissing()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "autheris_dep4_" + Guid.NewGuid().ToString("N"));
+        var dbPath = Path.Combine(tempDir, "sub", "governance.db");
+        var connStr = $"Data Source={dbPath};Cache=Shared";
+
+        Directory.Exists(Path.GetDirectoryName(dbPath)!).ShouldBeFalse();
+
+        var options = Options.Create(new GatewayOptions
+        {
+            GovernanceDb = new GovernanceDbOptions
+            {
+                Provider = "Sqlite",
+                ConnectionString = connStr
+            }
+        });
+
+        try
+        {
+            using var repo = new Autheris.Infrastructure.Persistence.SqliteGovernanceRepository(
+                Substitute.For<IEpochValidationService>(),
+                options,
+                Env(Environments.Development));
+
+            Directory.Exists(Path.GetDirectoryName(dbPath)!).ShouldBeTrue();
+            File.Exists(dbPath).ShouldBeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                try { Directory.Delete(tempDir, recursive: true); } catch { }
+            }
+        }
+    }
+
     private static string? FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

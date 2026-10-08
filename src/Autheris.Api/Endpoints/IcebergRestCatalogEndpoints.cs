@@ -63,11 +63,11 @@ public static class IcebergRestCatalogEndpoints
             }
             catch (System.Collections.Generic.KeyNotFoundException ex)
             {
-                return Results.NotFound(new { error = ex.Message });
+                return HandleIcebergError(context, ex);
             }
             catch (SecurityException ex)
             {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status403Forbidden);
+                return HandleIcebergError(context, ex);
             }
         }).RequireAuthorization();
 
@@ -89,14 +89,26 @@ public static class IcebergRestCatalogEndpoints
             }
             catch (NotSupportedException ex)
             {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status501NotImplemented);
+                return HandleIcebergError(context, ex);
             }
             catch (SecurityException ex)
             {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status403Forbidden);
+                return HandleIcebergError(context, ex);
             }
         }).RequireAuthorization();
 
         return app;
+    }
+
+    private static IResult HandleIcebergError(HttpContext context, Exception ex)
+    {
+        var isProduction = context.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
+        return ex switch
+        {
+            System.Collections.Generic.KeyNotFoundException => Results.NotFound(new { error = isProduction ? "Resource not found." : ex.Message }),
+            SecurityException => Results.Problem(detail: isProduction ? "Access denied." : ex.Message, statusCode: StatusCodes.Status403Forbidden),
+            NotSupportedException => Results.Problem(detail: isProduction ? "Not implemented." : ex.Message, statusCode: StatusCodes.Status501NotImplemented),
+            _ => Results.Problem(detail: isProduction ? "An unexpected error occurred." : ex.Message, statusCode: StatusCodes.Status500InternalServerError)
+        };
     }
 }

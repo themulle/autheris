@@ -1,7 +1,7 @@
 # F-PERF-10: Split-Engine & Zero-LOH Streaming Result Pipelining
 
-**Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`StreamingResultPipeline.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Performance/StreamingResultPipeline.cs), [`ZeroLohJsonWriter.cs`](file:///root/lis-git/autheris/src/Autheris.Infrastructure/Serialization/ZeroLohJsonWriter.cs)
+**Status:** [Not implemented] – The `StreamingResultPipeline` prototype was never wired and was removed (Architecture 3, 2026-10-08); `ZeroLohJsonWriter` does not exist.  
+**Components:** none. The rest of this document describes the target design.
 
 ---
 

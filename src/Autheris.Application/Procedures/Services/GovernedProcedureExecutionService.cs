@@ -31,6 +31,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
 {
     private const string DeniedMessage = "Access to the procedure is denied.";
 
+    private readonly IConsentCacheService? _consentCache;
     private readonly IProcedureRegistry _registry;
     private readonly IProcedureInvoker _invoker;
     private readonly IOptions<GatewayOptions> _options;
@@ -39,6 +40,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly IConsentResolutionService? _consentResolution;
     private readonly IColumnMaskingProvider? _masking;
     private readonly IPolicyEnforcementService? _policyEnforcement;
+    private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
     private readonly IAuditLogRepository? _audit;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IProcedureRowScopeResolver? _rowScope;
@@ -56,7 +58,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IAuditLogRepository? audit = null,
         IClientIpResolver? clientIpResolver = null,
         ILogger<GovernedProcedureExecutionService>? logger = null,
-        IProcedureRowScopeResolver? rowScope = null)
+        IProcedureRowScopeResolver? rowScope = null,
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
+        IConsentCacheService? consentCache = null)
     {
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
@@ -70,6 +74,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         _clientIpResolver = clientIpResolver;
         _logger = logger;
         _rowScope = rowScope;
+        _rebacEvaluator = rebacEvaluator;
+        _consentCache = consentCache;
     }
 
     public async Task<GovernedProcedureResult> ExecuteAsync(
@@ -81,6 +87,11 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(user);
+
+        if (_audit == null)
+        {
+            throw new SecurityException("Procedure execution rejected: audit repository is required but unavailable (SQL2-16).");
+        }
 
         if (!_registry.TryGet(name, out var registered) || registered == null)
         {
@@ -308,29 +319,28 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             return null;
         }
 
-        TableAccessDecision decision;
-        if (consentBypassed)
+        if (!consentBypassed && (_consentRepository == null || _consentResolution == null))
         {
-            decision = TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
+            return null;
         }
-        else
-        {
-            if (_consentRepository == null || _consentResolution == null)
-            {
-                return null;
-            }
 
-            var groupSids = user.GetGroupSids();
-            var subjects = groupSids.Append(userSid).ToList();
-            var consents = await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, tableId, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
-            decision = _consentResolution.ResolveAccess(
-                userSid,
-                groupSids,
-                user.GetUserRoles(),
-                tableId,
-                consents.Where(c => c.TenantId == tenantId).ToList(),
-                meta.Dialect);
-        }
+        // Architecture 1: the shared access decision (ReBAC on query paths, consents with the decision cache, Casbin as
+        // an additional restriction). Row filters (consent or Casbin) cannot be pushed into a procedure: they deny the
+        // call unless the result table's filter is enforced by the row scope after the call.
+        var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
+            ? TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
+            : await new Autheris.Application.Policy.TableAccessPolicy(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value)
+                .DecideAsync(
+                    new Autheris.Application.Policy.TableAccessQuery(
+                        userSid,
+                        tenantId,
+                        user.GetGroupSids(),
+                        user.GetUserRoles(),
+                        meta,
+                        user.Claims,
+                        ClientIp: ResolveClientIp(user),
+                        ExtraAttributes: new Dictionary<string, object?> { ["gql.action"] = "read" }),
+                    ct).ConfigureAwait(false);
 
         if (!decision.IsAllowed || (!allowRowFilter && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)))
         {
@@ -339,41 +349,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
 
         if (!consentBypassed && _policyEnforcement != null && _policyEnforcement.HasPolicies(tenantId))
         {
-            var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var claim in user.Claims)
-            {
-                attributes[claim.Type] = claim.Value;
-            }
-
-            attributes["gql.action"] = "read";
-
-            var ctx = new SecurityEvaluationContext(
-                UserSid: userSid,
-                GroupSids: user.GetGroupSids(),
-                Tenant: tenantId,
-                TargetTable: tableId,
-                RequestedColumns: meta.Columns.Select(c => c.ColumnName).ToList(),
-                ClientIp: ResolveClientIp(user),
-                Timestamp: DateTimeOffset.UtcNow,
-                PurposeId: user.FindFirst("purpose")?.Value ?? user.FindFirst("purpose_id")?.Value,
-                Attributes: attributes);
-
-            var policy = await _policyEnforcement.EvaluatePolicyAsync(ctx, ct).ConfigureAwait(false);
-            if (!policy.IsAllowed || !string.IsNullOrWhiteSpace(policy.CombinedRowFilterSql))
-            {
-                return null;
-            }
-
-            // The ABAC decision can only lower column access (Clear -> Mask -> Deny), never raise it.
-            var merged = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
-            foreach (var col in meta.Columns)
-            {
-                var consentLevel = decision.GetColumnAccess(col.ColumnName);
-                var policyLevel = policy.GetColumnAccess(col.ColumnName);
-                merged[col.ColumnName] = consentLevel < policyLevel ? consentLevel : policyLevel;
-            }
-
-            decision = decision with { ColumnAccess = merged, HasUnconstrainedColumnAllow = false };
+            // With ABAC active every catalog column carries an explicit level; columns outside the catalog are denied.
+            var explicitLevels = meta.Columns.ToDictionary(c => c.ColumnName, c => decision.GetColumnAccess(c.ColumnName), StringComparer.OrdinalIgnoreCase);
+            decision = decision with { ColumnAccess = explicitLevels, HasUnconstrainedColumnAllow = false };
         }
 
         return (decision, meta);
@@ -633,8 +611,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     {
         if (_audit == null)
         {
-            _logger?.LogWarning("No audit repository available; {EventType} for '{Endpoint}' was not recorded.", eventType, definition.Name);
-            return;
+            throw new SecurityException("Procedure execution rejected: audit repository is required but unavailable (SQL2-16).");
         }
 
         await _audit.RecordAuditEventAsync(

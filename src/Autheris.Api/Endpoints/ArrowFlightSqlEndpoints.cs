@@ -33,7 +33,7 @@ public static class ArrowFlightSqlEndpoints
             }
             catch (SecurityException ex)
             {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status403Forbidden);
+                return ForbidResult(context, ex);
             }
         }).RequireAuthorization();
 
@@ -50,7 +50,7 @@ public static class ArrowFlightSqlEndpoints
             }
             catch (SecurityException ex)
             {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status403Forbidden);
+                return ForbidResult(context, ex);
             }
         }).RequireAuthorization();
 
@@ -75,10 +75,16 @@ public static class ArrowFlightSqlEndpoints
             }
             catch (SecurityException ex)
             {
-                return Results.Problem(detail: ex.Message, statusCode: StatusCodes.Status403Forbidden);
+                return ForbidResult(context, ex);
             }
         }).RequireAuthorization();
 
         return app;
+    }
+
+    private static IResult ForbidResult(HttpContext context, SecurityException ex)
+    {
+        var isProduction = context.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
+        return Results.Problem(detail: isProduction ? "Access denied." : ex.Message, statusCode: StatusCodes.Status403Forbidden);
     }
 }

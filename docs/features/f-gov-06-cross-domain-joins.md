@@ -1,7 +1,7 @@
 # F-GOV-06: Multi-Stage Pushdown Cascades & Cross-Domain Joins
 
-**Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`CrossDomainJoinEngine.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Connectors/CrossDomain/CrossDomainJoinEngine.cs), [`MultiDialectRlsPushdownFilter.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Security/MultiDialectRlsPushdownFilter.cs)
+**Status:** [Not implemented] – The `CrossDomainJoinEngine` prototype was never wired to an endpoint and was removed (Architecture 3, 2026-10-08). Joins across data sources run through the DuckDB OLAP endpoint ([F-DATA-03](f-data-03-duckdb-olap.md)).  
+**Components:** none. The rest of this document describes the original target design.
 
 ---
 

@@ -25,6 +25,15 @@ Beim Hochfahren des Hosts (`Program.cs`) führt `GatewayServiceCollectionExtensi
 | **NF-SEC-01** | `environment.IsDevelopment() \|\| !Authentication.EnableTestAuthHandler` | Der `TestAuthHandler` (Header-basiertes SID-Impersonation) ist außerhalb von `Development` **strikt verboten**. |
 | **NF-SEC-03** | Außerhalb von Development: `!string.IsNullOrWhiteSpace(HmacSecretKeyVaultRef)` und nicht gleich Test-Defaults | HMAC-Salts müssen in Staging/Produktion aus einem sicheren Secret-Store stammen. |
 | **NF-SEC-04** | Außerhalb von Development: BasicAuth Benutzer müssen zwingend das gesalzene PBKDF2-Format (`$pbkdf2$...`) verwenden | Klartext- und ungesalzene SHA-256-Passwörter sind in Staging/Produktion verboten und werden zur Laufzeit mit `401 Unauthorized` abgewiesen. |
+| **R-DEP-2** | Outside Development: Secret keys (`DataMasking.HmacSecretKeyVaultRef`, `GovernanceDb.AuditHmacKeyVaultRef`, `Authentication.ForwardAuth.SharedSecret`) must be at least 32 bytes in UTF-8 representation | Cryptographic keys shorter than 32 UTF-8 bytes are rejected fail-closed during startup validation. |
+| **R-API-1** | Outside Development: `Itsm.LegacyGlobalWebhookSecret = true` and all `DANGER:` bypass flags strictly prohibited | Setting `Itsm.LegacyGlobalWebhookSecret = true` or any `DANGER:` flags causes an immediate `ValidationException` process startup crash outside `Development`. |
+| **F-6 / POL-1** | When `Casbin:Enabled = true`: `Casbin:ModelPath` and `Casbin:PolicyPath` are mandatory and must satisfy `CasbinModelContract` | Missing configuration or failure of mandatory probes (M1–M8) or wildcard safety probes (W2–W6) causes immediate startup failure. |
+
+> [!IMPORTANT]
+> **Secret Key Format and Requirements (R-DEP-2 & Arch 6)**:
+> Startup and runtime validation checks the **UTF-8 byte count** of the resolved secret text string (`byteCount >= 32`).
+> - **Entropy Warning**: A string of 32 hexadecimal characters (`[0-9a-fA-F]{32}`) occupies 32 ASCII/UTF-8 bytes, but represents only **16 bytes (128 bits) of cryptographic entropy**, which is insufficient for production HMAC master and audit keys.
+> - **Recommended Practice**: Provide secrets as Base64-encoded strings representing at least **32 cryptographically random bytes** (256 bits of raw entropy, yielding >= 44 Base64 ASCII characters) or generate at least 32 raw random characters.
 
 ---
 
@@ -78,7 +87,7 @@ Wird das Gateway in Kubernetes betrieben, kann die Authentifizierung an den vorg
 | `GroupsHeader` | `string` | Header-Name | `"X-Forwarded-Groups"` | Kommagetrennte Liste von Gruppen-SIDs oder Gruppennamen. |
 | `RolesHeader` | `string` | Header-Name | `"X-Forwarded-Roles"` | Kommagetrennte Liste von Rollen (z. B. `GovernanceAdmin,DataOwner`). |
 | `SharedSecretHeader` | `string` | Header-Name | `"X-Forwarded-Secret"` | Header für das Pre-Shared Secret zwischen Ingress und Gateway. |
-| `SharedSecret` | `string` | Geheimes Token | `""` | Optionales direktes Shared Secret für Test- oder Staging-Umgebungen. |
+| `SharedSecret` | `string` | Geheimes Token | `""` | Pre-Shared Secret for ForwardAuth validation. Outside Development, mandatory if `SharedSecretKeyVaultRef` is unset, and must be at least 32 UTF-8 bytes long (`Encoding.UTF8.GetByteCount >= 32`). Recommended: Base64 string of >= 32 cryptographically random bytes (256 bits). |
 | `SharedSecretKeyVaultRef` | `string` | Secret-Name | `""` | Name des Secrets in Azure Key Vault / HashiCorp Vault. |
 | `RequireTrustedProxy` | `bool` | `true \| false` | `true` | **Zero-Trust**: Erzwingt, dass Anfragen zwingend von einer IP aus `TrustedNetworks` oder `TrustedProxies` stammen müssen. |
 | `TrustedProxies` | `List<string>` | IP-Adressen | `[]` | Feste IP-Adressen der vertrauenswürdigen Traefik-Pods / Proxies. |
@@ -190,26 +199,28 @@ Speicherort für Metadaten, Freigaben, Delegationen, Vier-Augen-Genehmigungen un
 
 ### 2.4 `DataSources` (Backend-Fachdatenbanken & RLS-Pushdown)
 
-Konfiguriert echte relationale Datenbank-Backends für die abgefragten Fachdaten. Das Gateway unterstützt über `ISqlConnectionFactory` die Provider `"SqlServer"`, `"PostgreSql"`, `"Sqlite"`, `"Oracle"` und `"Databricks"`. 
+Konfiguriert echte relationale Datenbank-Backends für die abgefragten Fachdaten. Das Gateway unterstützt über `ISqlConnectionFactory` die Provider `"SqlServer"`, `"PostgreSql"` und `"Sqlite"`. 
 
 Im Gegensatz zu synthetischen Stubs führt der `SqlDataSourceExecutor` echte SQL-Queries aus und **pushed Row-Level Security (RLS) Filter direkt als WHERE-Klausel in die Datenbank**:
 
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
-| `DataSources:{sourceName}:Provider` | `string` | `"SqlServer"`, `"PostgreSql"`, `"Sqlite"` | `"SqlServer"` | Datenbank-Treiber für die Ziel-Datenquelle. |
-| `DataSources:{sourceName}:ConnectionString` | `string` | ADO.NET ConnStr | `""` | Verbindungszeichenfolge zur Zieldatenbank. |
+| `DataSources:Connections:{sourceName}:Provider` | `string` | `"SqlServer"`, `"PostgreSql"`, `"Sqlite"` | `"Sqlite"` | Datenbank-Treiber für die Ziel-Datenquelle. |
+| `DataSources:Connections:{sourceName}:ConnectionString` | `string` | ADO.NET ConnStr | `""` | Verbindungszeichenfolge zur Zieldatenbank. DEP-7: außerhalb von Development verlangt der Start bei PostgreSQL `SSL Mode=VerifyFull` (oder `VerifyCA`), bei SQL Server `Encrypt=Mandatory`/`Strict` ohne `TrustServerCertificate=true`. |
 | `DataSources:RequireTenantColumn` | `bool` | `true`, `false` | `false` | Review E-5: when `true`, a table without a tenant column (`tenant_id`, `TenantId`, ...) is refused fail-closed instead of being read unscoped. |
 | `DataSources:TenantColumnExemptTables` | `string[]` | `schema.table` or `table` | `[]` | Tables that are deliberately shared across tenants and therefore exempt from `RequireTenantColumn`. |
 
 ```json
 "DataSources": {
-  "finance": {
-    "Provider": "SqlServer",
-    "ConnectionString": "Server=sql-finance.corp.local;Database=FinanceDb;Integrated Security=SSPI;TrustServerCertificate=true;"
-  },
-  "hr": {
-    "Provider": "PostgreSql",
-    "ConnectionString": "Host=pg-hr.corp.local;Port=5432;Database=HrDb;Username=gql_app;Password=SuperSecretPass!;SSL Mode=Require;"
+  "Connections": {
+    "finance": {
+      "Provider": "SqlServer",
+      "ConnectionString": "Server=sql-finance.corp.local;Database=FinanceDb;Integrated Security=SSPI;Encrypt=Mandatory;TrustServerCertificate=false;"
+    },
+    "hr": {
+      "Provider": "PostgreSql",
+      "ConnectionString": "Host=pg-hr.corp.local;Port=5432;Database=HrDb;Username=gql_app;Password=<secret>;SSL Mode=VerifyFull;"
+    }
   }
 }
 ```
@@ -357,8 +368,11 @@ Konfiguriert die deterministische Pseudonymisierung (`HMAC_SHA256`) sowie Maskie
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
 | `HmacKeyId` | `string` | Bezeichner | `"key-2026-q1"` | Schlüssel-ID zur Unterstützung von Key-Rotationen. |
-| `HmacSecretKeyVaultRef` | `string` | Secret-Name | `"DEV_INSECURE_...` | Name des Secrets in Azure Key Vault / HashiCorp Vault. |
+| `HmacSecretKeyVaultRef` | `string` | Secret-Name | `"DEV_INSECURE_...` | Name of the secret in Azure Key Vault / HashiCorp Vault or environment fallback. Outside Development, must resolve to at least 32 UTF-8 bytes. |
 | `MaskingCacheTtlHours` | `int` | `1 .. 168` | `24` | Gültigkeitsdauer des Caches für vorberechnete Maskierungsregeln. |
+
+> [!NOTE]
+> **Key Entropy & Length (R-DEP-2)**: The HMAC masking master key must contain >= 32 UTF-8 bytes outside Development. 32 hexadecimal characters encode only 16 bytes of entropy and are only 32 ASCII bytes, which could be weak. Recommended practice is a Base64-encoded string derived from at least 32 cryptographically secure random bytes (256 bits of entropy).
 
 ```json
 "DataMasking": {
@@ -380,7 +394,7 @@ Protokolliert Datenzugriffe manipulationssicher in einer kryptografisch verkette
 | `TierBAggregationWindowSeconds` | `int` | `1 .. 3600` | `60` | Aggregationsintervall für unkritische Tier-B Massenzugriffe. |
 | `AuditLogRetentionDays` | `int` | `1 .. 7300` | `3650` (10 Jahre) | Gesetzliche Aufbewahrungsfrist für Prüfprotokolle. |
 | `VerifyHashChainIntervalHours` | `int` | `1 .. 168` | `24` | Zyklische Integritätsprüfung der gesamten Prüfkette im Hintergrund mit timing-sicherem `FixedTimeEquals`. |
-| `HmacSecretKeyVaultRef` | `string` | Secret-Name | `"GQL-GATEWAY-AUDIT-HMAC-SECRET"` | Key Vault Referenz für den geheimen HMAC-Schlüssel der Audit-Kette. |
+| `HmacSecretKeyVaultRef` | `string` | Secret-Name | `"GQL-GATEWAY-AUDIT-HMAC-SECRET"` | Key Vault Referenz für den geheimen HMAC-Schlüssel der Audit-Kette. Outside Development, must resolve to at least 32 UTF-8 bytes (recommended: Base64 of >= 32 random bytes). |
 | `ElasticsearchSinkUrl` | `string` | URL | `""` | Optionaler sekundärer Sink für SIEM-Systeme (Splunk / Elasticsearch). |
 
 ```json
@@ -512,6 +526,14 @@ Ermöglicht die zentrale Anbindung an externe Unternehmens-Datenkataloge (**Micr
 | `GdprArticle9Tags` | `List<string>` | Tag-Namen | *(Art. 9 Tags)* | Tags für besondere Kategorien (Gesundheit, Biometrie, Genetik, Religion). Erzwingt `HIGH`, Four-Eyes und `REDACT`. |
 | `PiiTags` | `List<string>` | Tag-Namen | *(PII Tags)* | Tags für personenbezogene Daten. |
 
+> [!NOTE]
+> **Sensitivity Classification Ranking (D-4 & ADR-010)**:
+> The gateway evaluates table sensitivity across a defined ratchet ranking:
+> `PUBLIC` / `LOW` (rank 0) < `NORMAL` / `INTERNAL` (rank 1) < `MEDIUM` (rank 2) < `CONFIDENTIAL` (rank 3) < `HIGH` (rank 4) < `RESTRICTED` / `SECRET` (rank 5).
+> - **High-Sensitivity Threshold**: A table is treated as highly sensitive (`Table.IsSensitivityHigh = true` / `IsHighlySensitive`) if its sensitivity is **`CONFIDENTIAL` or higher** (rank >= 3), or if it has an unknown classification (fail-closed, e.g. `PII`).
+> - Tables classified as `MEDIUM` are **not** treated as high-sensitivity.
+> - High-sensitivity triggers mandatory Four-Eyes approval (`RequiresFourEyes = true`), shorter consent cache TTL, and fail-closed behavior in degraded mode.
+
 #### Provider-Konfigurationen:
 - **`Catalog.Purview`**: Azure Purview / Apache Atlas (`Endpoint`, `TenantId`, `ClientId`, `ClientSecretKeyVaultRef`).
 - **`Catalog.Collibra`**: Collibra Data Intelligence Cloud Core API v2 (`BaseUrl`, `Username`, `PasswordKeyVaultRef`).
@@ -551,7 +573,11 @@ Für schnelle PoCs, Integrationstests, externe Webhook-Systeme oder Third-Party-
 - **`danger_` (Kritischer Impact)**: Deaktiviert Authentifizierung, Autorisierung oder Zertifikatsprüfungen vollständig.
 
 > [!CAUTION]
-> **Produktions-Warnung**: Alle `danger_`- und `warn_`-Flags müssen in Produktionsumgebungen auf `false` stehen. Bei aktiviertem `danger_`-Flag loggt das Gateway auffällige `CRITICAL`-Sicherheitswarnungen.
+> **Production & Staging Warning (DANGER Switches & R-API-1 Migration Notice)**:
+> All `danger_`-prefixed switches, as well as flags reclassified as `DANGER:` (such as `warn_fallback_default_tenant_for_webhooks`, `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_ignore_webhook_timestamp_tolerance`, `Catalog.OpenSchema`, `OpenMetadata.AutoCreateConsents`, and `WebSql.MaxAffectedRows <= 0` with DML enabled), **strictly abort application startup outside of the `Development` environment** (`ValidationException` fail-fast).
+> 
+> **Migration Notice (R-API-1 / API-1)**:
+> Setting `Itsm.LegacyGlobalWebhookSecret = true` is classified as `DANGER:` and strictly prevents application startup outside `Development`. Deployments relying on the legacy shared global ITSM webhook secret will not boot in Staging or Production. Operators must configure instance-specific webhook secrets (`itsm:webhook-secret:<instanceId>`) via Key Vault or environment variables.
 
 | Eigenschaft | Typ | Standard | Sicherheits-Level | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
@@ -622,6 +648,8 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 
 > `warn_allow_unmasked_ai_access` und `danger_bypass_mcp_auth` liegen ausschließlich unter `Insecure` (ADR-012, Phase 4).
 
+Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `sample_rows` ([F-AI-11](features/f-ai-11-mcp-dataset-tools.md)) sind immer registriert und brauchen keinen Eintrag in `AllowedOperations`. Agenten fragen Daten bevorzugt mit `query_graphql` ab. Ist `Casbin:Enabled` gesetzt, prüft Casbin die MCP-Tools zusätzlich: `list_datasets` auf dem Objekt `governance.catalog.datasets`, `describe_dataset` und `sample_rows` auf der angefragten Tabelle, `query_graphql` auf jeder Tabelle der Abfrage. Ohne aktives Casbin entfällt diese Prüfung; Consent, Zeilenfilter und Maskierung gelten in jedem Fall.
+
 ```json
 "Mcp": {
   "Enabled": true,
@@ -637,80 +665,7 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 }
 ```
 
-### 2.17 `VectorSearch` (Native Vector Database & RAG Egress)
-
-| Schlüssel | Typ | Wertebereich | Standard | Beschreibung |
-| :--- | :--- | :--- | :--- | :--- |
-| `VectorSearch:Enabled` | `bool` | `true \| false` | `false` | Aktiviert die native Vektor- und RAG-Egress-Engine (`F-AI-09`). |
-| `VectorSearch:MaxTopK` | `int` | `1 .. 1000` | `50` | Obergrenze für zurückgegebene Vektor-Treiber-Chunks pro Abfrage. |
-| `VectorSearch:EnablePiiRedaction` | `bool` | `true \| false` | `true` | Automatisches In-Stream Scrubbing von PII-Daten (E-Mails, IBANs, Telefone) in Chunks. |
-| `VectorSearch:DefaultDistanceMetric` | `string` | `Cosine \| Euclidean \| DotProduct` | `"Cosine"` | Standard-Distanzmetrik für Ähnlichkeitssuchen. |
-| `VectorSearch:Sources` | `dict` | Vektor-Datenquellen | `{}` | Konfigurierte Quellen (`PgVector`, `Qdrant`, `Milvus`). |
-
-```json
-"VectorSearch": {
-  "Enabled": true,
-  "MaxTopK": 50,
-  "EnablePiiRedaction": true,
-  "DefaultDistanceMetric": "Cosine",
-  "Sources": {
-    "pgvector-kb": {
-      "Provider": "PgVector",
-      "ConnectionString": "Host=postgres;Database=vectordb;Username=rag;Password=secret;",
-      "DefaultCollection": "knowledge_chunks"
-    },
-    "qdrant-docs": {
-      "Provider": "Qdrant",
-      "Endpoint": "http://qdrant:6333",
-      "ApiKey": "secret-qdrant-key"
-    },
-    "milvus-archive": {
-      "Provider": "Milvus",
-      "Endpoint": "http://milvus:19530"
-    }
-  }
-}
-```
-
-### 2.18 `SemanticCache` (Semantischer Embedding-Cache)
-
-| Schlüssel | Typ | Wertebereich | Standard | Beschreibung |
-| :--- | :--- | :--- | :--- | :--- |
-| `SemanticCache:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den semantischen Cache für Prompt- und Vektorabfragen (`F-AI-10`). |
-| `SemanticCache:MinSimilarityScore` | `double` | `0.0 .. 1.0` | `0.85` | Mindest-Cosinus-Ähnlichkeit für einen semantischen Cache-Hit. |
-| `SemanticCache:TtlMinutes` | `int` | `1 .. 10080` | `60` | Gültigkeitsdauer (TTL) von Cache-Einträgen in Minuten. |
-| `SemanticCache:MaxEntriesPerPartition` | `int` | `1 .. 10000` | `100` | Maximale Einträge pro isolierter Mandanten-/Benutzer-Partition (LRU). |
-| `SemanticCache:MaxPartitions` | `int` | `1 .. 50000` | `1000` | Obergrenze aktiver Cache-Partitionen (DoS-Schutz). |
-
-```json
-"SemanticCache": {
-  "Enabled": true,
-  "MinSimilarityScore": 0.85,
-  "TtlMinutes": 60,
-  "MaxEntriesPerPartition": 100,
-  "MaxPartitions": 1000
-}
-```
-
-### 2.19 `PolicyRecommendation` (Autonome Least-Privilege Empfehlungen)
-
-| Schlüssel | Typ | Wertebereich | Standard | Beschreibung |
-| :--- | :--- | :--- | :--- | :--- |
-| `PolicyRecommendation:Enabled` | `bool` | `true \| false` | `false` | Aktiviert die Analyse von 403-Mustern und Consent-Vorschlägen (`F-AI-10`). |
-| `PolicyRecommendation:MaxQueueCapacity` | `int` | `10 .. 5000` | `500` | Maximale Anzahl gepufferter Empfehlungsvorschläge. |
-| `PolicyRecommendation:MinDenialCountThreshold` | `int` | `1 .. 50` | `3` | Mindestanzahl an Zugriffsverweigerungen vor Auslösung einer Empfehlung. |
-| `PolicyRecommendation:ProposalExpiryMinutes` | `int` | `1 .. 43200` | `1440` | Gültigkeitsdauer eines Vorschlags im Triage-Postfach. |
-
-```json
-"PolicyRecommendation": {
-  "Enabled": true,
-  "MaxQueueCapacity": 500,
-  "MinDenialCountThreshold": 3,
-  "ProposalExpiryMinutes": 1440
-}
-```
-
-### 2.20 `DuckDbOlap` & `ArrowExport` (In-Memory OLAP & Arrow IPC Streaming)
+### 2.17 `DuckDbOlap` & `ArrowExport` (In-Memory OLAP & Arrow IPC Streaming)
 
 | Schlüssel | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
@@ -739,16 +694,16 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 ```
 
 
-### 2.21 `Casbin` (ABAC/RBAC Policy Engine & Model-Contract)
+### 2.18 `Casbin` (ABAC/RBAC Policy Engine & Model-Contract)
 
 Das Gateway integriert Casbin für feingranulare Autorisierungs- und Row-Level-Security-Regeln (ABAC/RBAC). Richtlinien und Modell können als Dateien hinterlegt oder mit dem integrierten Standardmodell betrieben werden.
 
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
-| `Casbin:Enabled` | `bool` | `true \| false` | `false` | Aktiviert das Casbin-Enforcement im Gateway. |
+| `Casbin:Enabled` | `bool` | `true \| false` | `false` | Aktiviert das Casbin-Enforcement im Gateway. Standard ist `false`. |
 | `Casbin:EnforceInQueryPipeline` | `bool` | `true \| false` | `true` | Führt Casbin-Prüfungen in der Query-Pipeline aus. |
-| `Casbin:ModelPath` | `string?` | Dateipfad | `null` | Pfad zu einer benutzerdefinierten Casbin-Modell-Datei (`.conf`). Wenn `null`, wird das integrierte Standardmodell genutzt. |
-| `Casbin:PolicyPath` | `string?` | Dateipfad | `null` | Pfad zur globalen Casbin-Policy-Datei (`.csv`). |
+| `Casbin:ModelPath` | `string?` | Dateipfad | `null` | Pfad zur Casbin-Modell-Datei (`.conf`). **Mandatory whenever `Casbin:Enabled = true`**. Wird gegen den Model Contract validiert, sobald gesetzt (auch wenn `Enabled = false`). |
+| `Casbin:PolicyPath` | `string?` | Dateipfad | `null` | Pfad zur globalen Casbin-Policy-Datei (`.csv`). Mandatory when `Casbin:Enabled = true`; must exist, not be empty, and contain at least one valid `p` rule. |
 | `Casbin:WatchPolicyFile` | `bool` | `true \| false` | `true` | Überwacht die Policy-Datei auf Änderungen zur Laufzeit (Hot Reload). |
 
 ```json
@@ -761,29 +716,36 @@ Das Gateway integriert Casbin für feingranulare Autorisierungs- und Row-Level-S
 }
 ```
 
-#### Startup-Validierung & Model Contract (Probes M1–M8, W1–W5)
+#### Startup Validation & Model Contract (Probes M1–M8, W1–W6)
 
-Um Fehlkonfigurationen (z. B. unbemerkte Syntaxfehler, falsche Klammerung / Operator-Präzedenz wie `g(...) && r.tenant == p.tenant || p.tenant == "*"` oder fehlende `sub_rule`-Auswertung) auszuschließen, prüft das Gateway benutzerdefinierte und eingebaute Casbin-Modelle **nicht über Textsuche**, sondern führt beim Start (**Fail-Fast**) automatische Verhaltens-Probes auf einem isolierten Enforcer aus:
+To prevent security vulnerabilities from model misconfigurations (such as syntax errors, parentheses/operator precedence bugs like `g(r.sub, p.sub) && r.tenant == p.tenant || p.tenant == "*"` bypassing subject and object checks, or missing `sub_rule` evaluation), the gateway validates Casbin models **by behavior on an isolated throw-away enforcer** rather than superficial text matching (`CasbinModelContract.Verify`):
 
-1. **Pflicht-Eigenschaften (Mandatory Probes M1–M8):**
-   - **M1 (Basis-Allow):** Eine passende Allow-Regel für Subjekt, Mandant, Objekt und Aktion muss `true` ergeben.
-   - **M2 (Aktions-Mismatch):** Falsche Aktion muss `false` ergeben.
-   - **M3 (Rollen-Auflösung `g`):** Ein Benutzer mit passender Rolle `g(r.sub, p.sub)` muss autorisiert werden.
-   - **M4 (Mandanten-Isolation):** Eine Regel für `tenant_a` darf **niemals** Zugriff für `tenant_b` gewähren.
-   - **M5 (Unbekannter Mandant):** Zugriff mit nicht gematchtem Mandanten muss fail-closed abgewiesen werden (`false`).
-   - **M6 (`sub_rule` ABAC-Auswertung):** Dynamische ABAC-Ausdrücke via `eval(p.sub_rule)` müssen ausgewertet werden (z. B. `ctx.Classification != 'RESTRICTED'`).
-   - **M7 (Deny-Priorität):** Bei gleichzeitigem Vorliegen einer Allow- und einer Deny-Regel muss Deny gewinnen (`policy_effect: !some(where (p.eft == deny))`).
-   - **M8 (Arität & Syntax):** Modell-Parser und Request-Arität (`r = sub, tenant, obj, act, ctx`, `p = sub, tenant, obj, act, sub_rule, eft`) müssen fehlerfrei initialisierbar sein.
+1. **Mandatory Probes (M1–M8)**:
+   - **M1: Basic allow and arity of r and p** – Validates that a standard allow rule authorizes matching `(sub, tenant, obj, act)` requests and confirms that `r` and `p` parameter arity align.
+   - **M2: Tenant separation** – Ensures a rule defined for `TenantA` never grants access to `TenantB`.
+   - **M3: Subject check** – Ensures a rule defined for `UserA` never grants access to `UserB`.
+   - **M4: Object check** – Ensures a rule defined for `Obj` never grants access to `OtherObj`.
+   - **M5: Deny overrides allow (policy_effect: deny wins)** – Validates that `policy_effect` enforces deny-overrides-allow when matching allow and deny rules coincide.
+   - **M6: `sub_rule` evaluation (`eval(p.sub_rule)`)** – Validates dynamic evaluation of ABAC expressions (e.g. `eval(p.sub_rule)` evaluating to false rejects access).
+   - **M7: Role resolution via `g(r.sub, p.sub)`** – Confirms RBAC role inheritance resolves permissions granted to roles via grouping rules `g`.
+   - **M8: Role does not grant access to unauthorized users** – Verifies that role-based permissions do not leak to non-member users.
 
-2. **Wildcard-Mandanten-Fähigkeit & Sicherheit (Probes W1, W2–W5):**
-   - **W1 (Wildcard-Capability):** Eine globale Regel mit Mandant `*` wird für einen spezifischen Mandanten getestet. Ergibt sie `true`, gilt `SupportsWildcardTenant = true`. Ergibt sie `false`, wird das Modell als mandantenspezifisch akzeptiert, aber `*`-Regeln werden in Policies abgewiesen.
-   - **W2–W5 (Wildcard-Safety – nur wenn W1 `true`):**
-     - **W2:** Eine `*`-Regel für eine fremde Rolle darf fremde Nutzer **nicht** autorisieren (Schutz vor fehlenden Klammern bei `||`).
-     - **W3:** Eine `*`-Regel für eine fremde Tabelle/Objekt darf andere Tabellen **nicht** öffnen.
-     - **W4:** Eine `*`-Regel für eine fremde Aktion darf andere Aktionen **nicht** freigeben.
-     - **W5:** Eine `*`-Regel mit einschränkender `sub_rule` darf bei Nichterfüllung der Bedingung **nicht** autorisieren.
+2. **Wildcard Tenant Probes (W1 capability, W2–W6 safety when W1 is true)**:
+   - **W1: Wildcard tenant capability** – Tests whether a rule with tenant `*` matches a specific tenant request. If true, `SupportsWildcardTenant` is set to `true`. If false, wildcard tenant rules are disallowed.
+   - **W2: `*` does not bypass subject check** – Verifies that a wildcard tenant rule does not authorize unauthorized subjects (guards against operator precedence / parentheses bugs).
+   - **W3: `*` does not bypass object check** – Verifies that a wildcard tenant rule does not authorize access to unauthorized objects.
+   - **W4: Tenant-specific deny overrides `*` allow** – Ensures that a tenant-specific deny rule overrides a global `*` allow rule.
+   - **W5: Global `*` deny overrides tenant-specific allow** – Confirms that a global `*` deny rule overrides a tenant-specific allow rule (deny wins across files).
+   - **W6: Request with tenant `*` does not match tenant-specific rules** – Ensures that an incoming request specifying tenant `*` cannot match tenant-specific policy rules.
 
-Schlägt ein Pflicht-Test (M1–M8) oder bei Wildcard-Modellen einer der Sicherheitstests (W2–W5) fehl, bricht der Start mit einer `ValidationException` bzw. `CasbinModelValidationException` sofort ab.
+If any mandatory probe (M1–M8) or, when W1 is supported, any wildcard safety probe (W2–W6) fails, process startup immediately aborts fail-fast with a `ValidationException` (wrapping `CasbinModelValidationException`).
+
+#### Policy Semantics & Tenant Policy Invariants
+
+- **Global Wildcard (`*`) Scope**: Rules defined with tenant `*` in the global policy file apply across all tenants.
+- **Cross-File Deny Precedence**: Deny decisions take precedence file-wide and across files. If any rule (global wildcard or tenant-specific) produces a deny effect, the access is rejected regardless of allows in other files.
+- **Tenant Policy File Requirement (F-1)**: Each tenant policy file must contain at least one valid `p` rule. Files containing only comments, whitespace, or grouping-only rules without `p` rules are rejected fail-closed.
+- **Empty Tenant Policy File Rejection (E-6)**: An empty tenant policy file is rejected whenever global `*` rules are active. The gateway preserves the last-known-good policy set to prevent fail-open wildcard inheritance.
 
 ---
 
@@ -810,8 +772,8 @@ Gateway__Authentication__RequireKerberosOnly=true
 Gateway__Authentication__EnableTestAuthHandler=false
 
 # Governance-Datenbank
-Gateway__GovernanceDb__Provider=SqlServer
-Gateway__GovernanceDb__ConnectionString="Server=sql-ha.corp.local;Database=Governance;Integrated Security=SSPI;TrustServerCertificate=True;"
+Gateway__GovernanceDb__Provider=PostgreSql
+Gateway__GovernanceDb__ConnectionString="Host=pg-ha.corp.local;Database=governance;Username=autheris_app;Password=<secret>;SSL Mode=VerifyFull"
 
 # Caching & Redis Cluster
 Gateway__Caching__Redis__Configuration="redis-ha.corp.local:6379,abortConnect=false,ssl=true,password=SecretRedisPass!"

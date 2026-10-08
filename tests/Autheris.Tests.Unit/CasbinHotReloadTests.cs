@@ -75,7 +75,7 @@ public class CasbinHotReloadTests : IDisposable
         bool reloadedFired = false;
         _service.OnPolicyReloaded += t =>
         {
-            if (t == tenant) reloadedFired = true;
+            if (t == tenant.Value) reloadedFired = true;
         };
 
         // Act
@@ -126,7 +126,7 @@ public class CasbinHotReloadTests : IDisposable
         var reloadTcs = new TaskCompletionSource<bool>();
         _service.OnPolicyReloaded += t =>
         {
-            if (t == tenant) reloadTcs.TrySetResult(true);
+            if (t == tenant.Value) reloadTcs.TrySetResult(true);
         };
 
         // Act: Update policy file on disk (simulate Kubernetes ConfigMap update)

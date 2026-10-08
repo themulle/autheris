@@ -64,6 +64,7 @@ public sealed class ComprehensiveSecurityAttackVectorTests
     [InlineData("tenant\twithtab")]
     [InlineData("mändant_öäü")]
     [InlineData("12345678901234567890123456789012345678901234567890123456789012345")] // 65 chars (> 64)
+    [InlineData("*")]
     [InlineData("")]
     [InlineData("   ")]
     public void TenantId_DangerousInjectionsAndMalformedInputs_ShouldThrowArgumentException(string maliciousTenantId)

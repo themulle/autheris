@@ -280,6 +280,40 @@ public sealed class DbtTests
     }
 
     [Fact]
+    public async Task DbtMetadataIngestionService_ApproveWeakerRule_IsRefused_AndStatusUnchanged()
+    {
+        // R-EXT-1: an approve blocked by the ratchet must not mark the proposal Approved.
+        var proposalRepo = Substitute.For<IDbtProposalRepository>();
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var tableId = new TableIdentifier("postgres", "raw", "stg_customers");
+        var proposalId = Guid.NewGuid();
+        proposalRepo.GetProposalByIdAsync(proposalId, Arg.Any<CancellationToken>()).Returns(new DbtMetadataProposal(
+            Id: proposalId,
+            Table: tableId,
+            ColumnName: "email_address",
+            SuggestedRuleType: "MASK_EMAIL",
+            SuggestedSensitivity: "HIGH",
+            SuggestedOwnerTeam: "FinanceTeam",
+            SourceDbtTag: "pii",
+            Status: DbtProposalStatus.PendingReview,
+            CreatedAt: DateTimeOffset.UtcNow));
+        metadataRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { SchemaName = "raw", TableName = "stg_customers" },
+            Columns = [new TableColumn { ColumnName = "email_address", DataType = "varchar" }],
+            ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["email_address"] = new MaskingRule { RuleType = "REDACT" } }
+        });
+
+        var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, Substitute.For<ILineageGraphStore>(), Substitute.For<IPolicyEpochRepository>(), NullLogger<DbtMetadataIngestionService>.Instance);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => service.ApproveProposalAsync(proposalId, "admin"));
+
+        await proposalRepo.DidNotReceive().UpdateProposalStatusAsync(Arg.Any<Guid>(), Arg.Any<DbtProposalStatus>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+        await metadataRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task DbtMetadataIngestionService_DeduplicatesPendingProposals()
     {
         var proposalRepo = Substitute.For<IDbtProposalRepository>();

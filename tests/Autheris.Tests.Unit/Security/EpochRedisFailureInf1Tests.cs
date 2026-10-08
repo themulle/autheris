@@ -1,0 +1,56 @@
+namespace Autheris.Tests.Unit.Security;
+
+using System;
+using System.Threading.Tasks;
+using Autheris.Domain.Common;
+using Autheris.Infrastructure.Cache;
+using NSubstitute;
+using NSubstitute.ExceptionExtensions;
+using Shouldly;
+using StackExchange.Redis;
+using Xunit;
+
+/// <summary>
+/// INF-1: a Redis error on an established connection must not silently fall back to the node-local epoch. Otherwise a
+/// revocation published by another node is ignored until the L1 TTL expires; the cached decision must be re-evaluated.
+/// </summary>
+public sealed class EpochRedisFailureInf1Tests
+{
+    private static readonly TableIdentifier Table = new("corp", "public", "orders");
+
+    private static (EpochValidationService Service, IDatabase Db) Create()
+    {
+        var db = Substitute.For<IDatabase>();
+        var multiplexer = Substitute.For<IConnectionMultiplexer>();
+        multiplexer.IsConnected.Returns(true);
+        multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
+        return (new EpochValidationService(multiplexer: multiplexer), db);
+    }
+
+    [Fact]
+    public async Task RedisReadFailure_OnConnectedMultiplexer_InvalidatesCachedEpoch()
+    {
+        var (service, db) = Create();
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(Task.FromResult((RedisValue)"7"));
+        var epoch = await service.GetCurrentEpochAsync(Table);
+        epoch.ShouldBe(7);
+
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .ThrowsAsync(new TimeoutException("redis timeout"));
+
+        (await service.IsEpochValidAsync(Table, epoch)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task RedisRecovers_CachedEpochIsValidAgain()
+    {
+        var (service, db) = Create();
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>())
+            .ThrowsAsync(new InvalidOperationException("redis down"));
+        (await service.IsEpochValidAsync(Table, 1)).ShouldBeFalse();
+
+        db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(Task.FromResult((RedisValue)"3"));
+
+        (await service.IsEpochValidAsync(Table, 3)).ShouldBeTrue();
+    }
+}

@@ -70,6 +70,23 @@ public static class McpEndpoints
                 return SessionLimitResult();
             }
 
+            // MCP-3: tool progress events, the endpoint event and keep-alive pings write to the same response from
+            // different tasks; HTTP response writes are not thread-safe, so every write goes through one gate.
+            using var writeGate = new SemaphoreSlim(1, 1);
+            async Task WriteSseAsync(string text)
+            {
+                await writeGate.WaitAsync(context.RequestAborted).ConfigureAwait(false);
+                try
+                {
+                    await context.Response.WriteAsync(text, context.RequestAborted).ConfigureAwait(false);
+                    await context.Response.Body.FlushAsync(context.RequestAborted).ConfigureAwait(false);
+                }
+                finally
+                {
+                    writeGate.Release();
+                }
+            }
+
             sessionStore.RegisterSseSender(session.SessionId, async (evt, data) =>
             {
                 var cleanEvt = string.IsNullOrWhiteSpace(evt) ? "message" : Regex.Replace(evt, @"[\r\n]", string.Empty);
@@ -82,8 +99,7 @@ public static class McpEndpoints
                     sb.Append("data: ").Append(line).Append('\n');
                 }
                 sb.Append('\n');
-                await context.Response.WriteAsync(sb.ToString(), context.RequestAborted).ConfigureAwait(false);
-                await context.Response.Body.FlushAsync(context.RequestAborted).ConfigureAwait(false);
+                await WriteSseAsync(sb.ToString()).ConfigureAwait(false);
             });
 
             context.Response.Headers.ContentType = "text/event-stream";
@@ -94,16 +110,14 @@ public static class McpEndpoints
             // The query parameter is kept for SSE client compatibility; the session is bound to the caller (SEC H-16),
             // so a leaked id cannot be used by anybody else. Clients should prefer the Mcp-Session-Id header.
             var messageUri = $"{mcpBasePath}/message?sessionId={session.SessionId}";
-            await context.Response.WriteAsync($"event: endpoint\r\ndata: {messageUri}\r\n\r\n", context.RequestAborted).ConfigureAwait(false);
-            await context.Response.Body.FlushAsync(context.RequestAborted).ConfigureAwait(false);
+            await WriteSseAsync($"event: endpoint\r\ndata: {messageUri}\r\n\r\n").ConfigureAwait(false);
 
             try
             {
                 while (!context.RequestAborted.IsCancellationRequested)
                 {
                     await Task.Delay(15000, context.RequestAborted).ConfigureAwait(false);
-                    await context.Response.WriteAsync(": ping\r\n\r\n", context.RequestAborted).ConfigureAwait(false);
-                    await context.Response.Body.FlushAsync(context.RequestAborted).ConfigureAwait(false);
+                    await WriteSseAsync(": ping\r\n\r\n").ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException)
@@ -138,7 +152,7 @@ public static class McpEndpoints
                 return Results.BadRequest(new { error = "Missing 'Mcp-Session-Id' header (or 'sessionId' query parameter)." });
             }
 
-            var session = mcpHandler.GetSession(sessionId);
+            var session = await mcpHandler.GetSessionAsync(sessionId, context.RequestAborted);
             if (session == null)
             {
                 return Results.NotFound(new { error = "Invalid or expired MCP session." });
@@ -193,7 +207,7 @@ public static class McpEndpoints
             McpSessionContext? session = null;
             if (!string.IsNullOrWhiteSpace(sessionId))
             {
-                session = mcpHandler.GetSession(sessionId);
+                session = await mcpHandler.GetSessionAsync(sessionId, context.RequestAborted);
 
                 // SEC H-16: Always enforce the subject + tenant binding.
                 if (session != null && !McpSessionBinding.IsOwnedBy(session, caller.UserSid, caller.TenantId))
@@ -244,7 +258,7 @@ public static class McpEndpoints
         ApplyAuthorization(streamableHttpEndpoint, allowOpenMcp);
 
         // 3. Session Teardown
-        var sessionEndpoint = app.MapDelete($"{mcpBasePath}/session/{{id}}", (
+        var sessionEndpoint = app.MapDelete($"{mcpBasePath}/session/{{id}}", async (
             string id,
             IMcpProtocolHandler mcpHandler,
             HttpContext context) =>
@@ -254,7 +268,7 @@ public static class McpEndpoints
                 return Results.Unauthorized();
             }
 
-            var session = mcpHandler.GetSession(id);
+            var session = await mcpHandler.GetSessionAsync(id, context.RequestAborted);
             if (session == null)
             {
                 return Results.NotFound(new { error = "Session not found." });
