@@ -10,8 +10,8 @@ using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// JSON-RPC 2.0 Protocol Handler implementing the Model Context Protocol (MCP) specification (2024-11-05).
-/// Scoped service executing within individual HTTP request contexts.
+/// JSON-RPC 2.0 Protocol Handler implementing the Model Context Protocol (MCP) specification (2024-11-05), used by the
+/// standard I/O runner (<see cref="McpStdioRunner"/>). The HTTP endpoint runs on the official MCP SDK (Autheris.Api.Mcp.GatewayMcpServer).
 /// </summary>
 public sealed class McpProtocolHandler : IMcpProtocolHandler
 {
@@ -319,7 +319,8 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
             : serialized;
     }
 
-    private static System.Security.Claims.ClaimsPrincipal? BuildPrincipalFromSession(McpSessionContext? session)
+    /// <summary>The principal of an MCP caller as the catalog and resource services expect it (SID, tenant, roles, groups).</summary>
+    public static System.Security.Claims.ClaimsPrincipal? BuildPrincipalFromSession(McpSessionContext? session)
     {
         if (session == null) return null;
         var identity = new System.Security.Claims.ClaimsIdentity("MCP");

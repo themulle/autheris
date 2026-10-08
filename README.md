@@ -129,7 +129,7 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
 ### Pillar 3: Agentic AI & Model Context Protocol (MCP)
 
 - **Enterprise MCP Server Gateway ([`ADR-014`](docs/adr/ADR-014-enterprise-model-context-protocol-and-ai-data-guardrails.md))**:
-  - Standard I/O runner (`McpStdioRunner`) and streaming HTTP/SSE endpoints (`/mcp`, `/mcp/sse`) for AI agents (Claude, Cursor, LangChain).
+  - Streamable HTTP endpoint `/mcp` on the official MCP C# SDK (current protocol revisions, stateless, OAuth protected resource metadata for Entra ID / AD FS) and a standard I/O runner (`McpStdioRunner`) for AI agents (Claude, Cursor, LangChain).
 - **MCP Dataset Tools ([`F-AI-11`](docs/features/f-ai-11-mcp-dataset-tools.md))**:
   - `list_datasets` and `describe_dataset` let agents discover every dataset they may use; `query_graphql` queries it through GraphQL, the preferred path. The other protocols (OData, OpenAPI, WebSQL, procedures, OLAP, Arrow) are listed too. Consent, row filters and masking apply as for the HTTP APIs.
 - **Semantic MCP Compiler & Schema Grounding ([`F-AI-02`](docs/features/f-ai-02-semantic-mcp-compiler.md))**:
@@ -380,7 +380,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 - **Governed WebSQL Execution**: `POST http://localhost:8080/api/v1/sql` & `/api/sql`
 - **OData v4 Data Access (REST / Excel / Power BI)**: `GET http://localhost:8080/odata/v4/{domain}/{schema}/{table}`
 - **OpenAPI 3.1 Specification (OData)**: [`http://localhost:8080/odata/v4/$openapi`](http://localhost:8080/odata/v4/$openapi)
-- **Model Context Protocol (MCP for AI Agents)**: `POST http://localhost:8080/mcp`, SSE: `/mcp/sse`
+- **Model Context Protocol (MCP for AI Agents)**: `http://localhost:8080/mcp` (Streamable HTTP)
 - **Apache Arrow Flight SQL & Export**: `POST http://localhost:8080/api/v1/flight/sql/*`, `POST http://localhost:8080/api/v1/export/arrow`
 - **DuckDB In-Memory OLAP**: `POST http://localhost:8080/api/v1/olap/query`
 - **ReBAC Relationship Tuples & Check**: `POST http://localhost:8080/api/v1/rebac/tuples`, `/check`

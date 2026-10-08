@@ -75,31 +75,3 @@ public sealed class McpSessionLimitExceededException : System.InvalidOperationEx
     }
 }
 
-/// <summary>
-/// SEC H-16: Binding of an MCP session to the subject (<c>GetUserSid()</c>: sub/oid/SID) and tenant that created it.
-/// </summary>
-public static class McpSessionBinding
-{
-    /// <summary>
-    /// True if the caller (identified by its user SID and resolved tenant) owns the session.
-    /// Sessions created without a user SID (anonymous MCP in insecure dev mode) are only usable by callers without a user SID.
-    /// </summary>
-    public static bool IsOwnedBy(McpSessionContext session, string? callerUserSid, string? callerTenantId)
-    {
-        System.ArgumentNullException.ThrowIfNull(session);
-
-        if (string.IsNullOrWhiteSpace(callerTenantId) ||
-            !string.Equals(session.TenantId, callerTenantId, System.StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(session.UserSid))
-        {
-            return string.IsNullOrWhiteSpace(callerUserSid);
-        }
-
-        return !string.IsNullOrWhiteSpace(callerUserSid) &&
-               string.Equals(session.UserSid, callerUserSid, System.StringComparison.OrdinalIgnoreCase);
-    }
-}

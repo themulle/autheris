@@ -218,7 +218,7 @@ public static class DevPortalEndpoints
                   <p>Streamable HTTP & SSE Endpunkt für autonome KI-Agenten (Cursor, Windsurf, Claude Desktop).</p>
                 </div>
                 <div>
-                  <a href="/mcp/sse" target="_blank" class="btn">MCP SSE Endpoint</a>
+                  <a href="/mcp" target="_blank" class="btn">MCP Endpoint</a>
                 </div>
               </div>
 
@@ -286,7 +286,7 @@ public static class DevPortalEndpoints
                 {
                   "mcpServers": {
                     "gql-gateway": {
-                      "url": "http://localhost:5000/mcp/sse"
+                      "url": "http://localhost:5000/mcp"
                     }
                   }
                 }

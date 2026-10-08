@@ -639,14 +639,16 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
-| `Mcp:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den nativen MCP-Server (`/mcp/sse`, `/mcp/message`). |
-| `Mcp:EndpointPath` | `string` | URL-Pfad | `"/mcp"` | Basis-Endpunkt für den MCP SSE-Handshake und Message-Endpunkt. |
+| `Mcp:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den MCP-Server (Streamable HTTP unter `Mcp:EndpointPath`, offizielles MCP-C#-SDK, zustandslos). |
+| `Mcp:EndpointPath` | `string` | URL-Pfad | `"/mcp"` | Pfad des MCP-Endpunkts (Streamable HTTP). |
 | `Mcp:MaxTokensPerCall` | `int` | `256 .. 128000` | `4096` | Maximales Token-Budget pro Tool-Aufruf; verhindert Context-Window-Overflows. |
 | `Mcp:MaxResultRows` | `int` | `1 .. 10000` | `100` | Maximale Ergebniszeilen pro Datenabfrage. |
 | `Mcp:RequirePiiMasking` | `bool` | `true \| false` | `true` | Automatisches Scrubbing von PII- (E-Mail, IBAN) und DSGVO-Art.-9-Daten vor Übermittlung an LLMs. |
 | `Mcp:AllowedOperations` | `string[]` | GraphQL Operationen | `[]` | Whitelist freigegebener Abfragen. |
 
 > `warn_allow_unmasked_ai_access` und `danger_bypass_mcp_auth` liegen ausschließlich unter `Insecure` (ADR-012, Phase 4).
+
+Der Server arbeitet zustandslos: Jede Anfrage wird mit der Identität ihrer eigenen HTTP-Anfrage ausgeführt, es gibt keine MCP-Sitzungen und keinen alten SSE-Transport (`/mcp/sse`, `/mcp/message`) mehr. Sind Entra ID oder AD FS aktiviert, veröffentlicht das Gateway unter `/.well-known/oauth-protected-resource<EndpointPath>` die OAuth-Metadaten (RFC 9728) mit diesen Ausstellern als Autorisierungsserver; 401-Antworten des MCP-Endpunkts verweisen per `WWW-Authenticate: Bearer resource_metadata=…` darauf. MCP-Clients finden so ohne weitere Konfiguration heraus, wo sie ein Token bekommen.
 
 Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `sample_rows` ([F-AI-11](features/f-ai-11-mcp-dataset-tools.md)) sind immer registriert und brauchen keinen Eintrag in `AllowedOperations`. Agenten fragen Daten bevorzugt mit `query_graphql` ab. Ist `Casbin:Enabled` gesetzt, prüft Casbin die MCP-Tools zusätzlich: `list_datasets` auf dem Objekt `governance.catalog.datasets`, `describe_dataset` und `sample_rows` auf der angefragten Tabelle, `query_graphql` auf jeder Tabelle der Abfrage. Ohne aktives Casbin entfällt diese Prüfung; Consent, Zeilenfilter und Maskierung gelten in jedem Fall.
 

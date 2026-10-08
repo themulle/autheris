@@ -31,21 +31,10 @@ public class McpDatasetToolsIntegrationTests : IClassFixture<WebApplicationFacto
         });
     }
 
-    private static async Task<JsonElement> RpcAsync(HttpClient client, string method, object? parameters = null)
-    {
-        var payload = JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 1, method, @params = parameters ?? new { } });
-        var response = await client.PostAsync("/mcp", new StringContent(payload, Encoding.UTF8, "application/json"));
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        return doc.RootElement.GetProperty("result").Clone();
-    }
-
     private static async Task<(bool IsError, JsonElement Payload)> CallAsync(HttpClient client, string tool, object arguments)
     {
-        var result = await RpcAsync(client, "tools/call", new { name = tool, arguments });
-        var text = result.GetProperty("content")[0].GetProperty("text").GetString()!;
-        using var doc = JsonDocument.Parse(text);
-        return (result.GetProperty("isError").GetBoolean(), doc.RootElement.Clone());
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+        return await McpTestClient.CallJsonAsync(mcp, tool, arguments);
     }
 
     [Fact]
@@ -53,9 +42,10 @@ public class McpDatasetToolsIntegrationTests : IClassFixture<WebApplicationFacto
     {
         var client = _factory.CreateClient();
 
-        var tools = await RpcAsync(client, "tools/list");
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+        var tools = await mcp.ListToolsAsync();
 
-        var names = tools.GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("name").GetString()).ToList();
+        var names = tools.Select(t => t.Name).ToList();
         names.ShouldContain("list_datasets");
         names.ShouldContain("describe_dataset");
         names.ShouldContain("sample_rows");
