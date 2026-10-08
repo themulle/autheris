@@ -109,10 +109,20 @@ public static class ClaimsNormalizer
         // 3. Ensure canonical tenant_id claim is populated
         if (identity.FindFirst("tenant_id") == null)
         {
-            var resolvedTenant = clonedPrincipal.GetTenantId();
-            if (resolvedTenant != TenantId.LegacySingleTenant)
+            // API-7: an invalid tenant claim must not fail the authentication pipeline with 500; the claim is left as is
+            // and SecurityContextResolutionMiddleware rejects the request with 403.
+            TenantId? resolvedTenant = null;
+            try
             {
-                identity.AddClaim(new Claim("tenant_id", resolvedTenant.Value));
+                resolvedTenant = clonedPrincipal.GetTenantId();
+            }
+            catch (System.Security.SecurityException)
+            {
+            }
+
+            if (resolvedTenant is { } tenant && tenant != TenantId.LegacySingleTenant)
+            {
+                identity.AddClaim(new Claim("tenant_id", tenant.Value));
             }
         }
 
