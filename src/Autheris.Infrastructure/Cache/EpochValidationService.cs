@@ -154,7 +154,9 @@ public sealed class EpochValidationService : IEpochValidationService
                         var metadata = await repo.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
                         if (metadata?.Table != null)
                         {
-                            isSensitive = metadata.Table.IsHighlySensitive;
+                            isSensitive = metadata.Table.IsHighlySensitive
+                                || (metadata.Columns != null && metadata.Columns.Any(c => c.IsSensitive))
+                                || (metadata.ColumnMaskingRules != null && metadata.ColumnMaskingRules.Count > 0);
                         }
                     }
                     catch (Exception ex)
