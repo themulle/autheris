@@ -208,6 +208,41 @@ public sealed class VectorAndSemanticSecurityExpertTests
         sanitized.ContentText.ShouldContain("[SANITIZED_PROMPT_DELIMITER]");
     }
 
+    [Fact]
+    public void SEC_POL_19_ChunkPiiRedactor_IsFailClosed_WhenCatalogColumnsAreEmptyOrUnmapped()
+    {
+        var rawChunk = new VectorDocumentChunk(
+            ChunkId: "chunk-pol-19",
+            DocumentId: "doc-medical",
+            ChunkIndex: 0,
+            ContentText: "General medical record notes",
+            SimilarityScore: 0.95f,
+            TenantId: new TenantId("tenant-medical"),
+            Metadata: new Dictionary<string, object?>
+            {
+                ["patient_diagnosis"] = "ICD-10-F43",
+                ["salary"] = 120000,
+                ["public_note"] = "General consultation"
+            }
+        );
+
+        // Metadata with EMPTY catalog columns (unpopulated or not yet indexed catalog table)
+        var tableId = new TableIdentifier("health", "public", "records");
+        var emptyColumnsMeta = new TableMetadata
+        {
+            Identifier = tableId,
+            Columns = []
+        };
+        var decision = TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+
+        var sanitized = ChunkPiiRedactor.RedactChunk(rawChunk, emptyColumnsMeta, null, decision);
+
+        // Fail-closed: uncataloged metadata must NOT be retained
+        sanitized.Metadata.ContainsKey("patient_diagnosis").ShouldBeFalse();
+        sanitized.Metadata.ContainsKey("salary").ShouldBeFalse();
+        sanitized.Metadata.ContainsKey("public_note").ShouldBeFalse();
+    }
+
     // =========================================================================
     // Domain 3: Semantic Cache Multi-Tenant Isolation & Epoch Expiry (F-AI-10)
     // =========================================================================
