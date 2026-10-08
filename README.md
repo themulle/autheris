@@ -144,10 +144,6 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
   - Minimizes LLM token context by filtering schemas down to task-relevant entities and attributes.
 - **FOCUS FinOps Token & Compute Accounting ([`F-AI-08`](docs/features/f-ai-08-focus-finops-accounting.md))**:
   - FinOps Open Cost and Usage Specification accounting (`/api/v1/finops/*`) with tenant- and user-level budget tracking for LLM tokens and compute latency.
-- **Native Vector Database & RAG Egress ([`F-AI-09`](docs/features/f-ai-09-native-vector-database-rag-egress.md))**:
-  - Direct vector search execution and egress pipelines targeting pgvector, Qdrant, and Milvus.
-- **Semantic Query Cache & Autonomous Policy Recommendation ([`F-AI-10`](docs/features/f-ai-10-semantic-cache-policy-recommendation.md))**:
-  - Vector similarity caching and ML-driven policy recommendations derived from live access patterns.
 
 ---
 

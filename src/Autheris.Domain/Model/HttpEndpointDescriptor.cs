@@ -9,9 +9,6 @@ public enum DataSourceType
     HttpDeclarative = 1,
     HttpPlugin = 2,
     LakehouseIceberg = 3,
-    VectorPgVector = 4,
-    VectorQdrant = 5,
-    VectorMilvus = 6,
     LakehouseDelta = 7
 }
 

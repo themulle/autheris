@@ -14,8 +14,7 @@ This guide helps engineers run the gateway locally with zero external dependenci
 8. [Testing Data Catalog Synchronization](#8-testing-data-catalog-synchronization)
 9. [Testing Lineage & GDPR Disclosure Queries](#9-testing-lineage--gdpr-disclosure-queries)
 10. [Validating Casbin Governance Policies](#10-validating-casbin-governance-policies)
-11. [Testing Vector Databases, RAG Egress & Semantic Cache](#11-testing-vector-databases-rag-egress--semantic-cache-f-ai-09--f-ai-10)
-12. [Testing In-Memory OLAP & Arrow Export](#12-testing-in-memory-olap--arrow-export-f-data-03--f-data-04)
+11. [Testing In-Memory OLAP & Arrow Export](#11-testing-in-memory-olap--arrow-export-f-data-03--f-data-04)
 
 ---
 
@@ -377,35 +376,7 @@ dotnet run --project tools/casbin-policy-lint/casbin-policy-lint.csproj
 
 ---
 
-## 11. Testing Vector Databases, RAG Egress & Semantic Cache (`F-AI-09` / `F-AI-10`)
-
-Developers can verify RAG search, chunk PII redaction, and semantic caching locally:
-
-```bash
-# Run dedicated security & vector integration tests
-dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj --filter "FullyQualifiedName~Vector|FullyQualifiedName~Semantic"
-```
-
-To invoke RAG search through the Model Context Protocol (MCP) tool:
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "search_rag_context",
-    "arguments": {
-      "collection": "public.documents",
-      "query_vector": [0.12, 0.45, -0.22, 0.89],
-      "top_k": 5
-    }
-  }
-}
-```
-
----
-
-## 12. Testing In-Memory OLAP & Arrow Export (`F-DATA-03` / `F-DATA-04`)
+## 11. Testing In-Memory OLAP & Arrow Export (`F-DATA-03` / `F-DATA-04`)
 
 Test fast vector analytical queries and Arrow Flight/IPC endpoints:
 

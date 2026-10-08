@@ -147,22 +147,7 @@ public sealed class SemanticMcpCompiler(
                 Text: glossaryText
             ));
 
-            // 2. dbt Lineage Resource
-            var lineageText = $"# dbt Lineage & Contract: {table}\n\n" +
-                              $"* **Model**: models/marts/{domain}/{table}.sql\n" +
-                              $"* **Primary Keys**: {string.Join(", ", t.PrimaryKeyColumns)}\n" +
-                              $"* **Upstream**: sources.{domain}.raw_{table}\n" +
-                              $"* **Governance Contract**: Enforced fail-closed Zero-Trust policy.";
-
-            resources.Add(new McpResourceItem(
-                Uri: $"dbt://models/{table}/lineage",
-                Name: $"{table}_dbt_lineage",
-                Description: $"dbt lineage graph and schema contracts for {table}",
-                MimeType: "text/markdown",
-                Text: lineageText
-            ));
-
-            // 3. Column-level Docs Resources on Demand
+            // 2. Column-level Docs Resources on Demand
             foreach (var col in t.Columns)
             {
                 var hasDesc = !string.IsNullOrWhiteSpace(col.Description);
@@ -214,7 +199,7 @@ public sealed class SemanticMcpCompiler(
                 }
             }
 
-            // 4. Golden Queries / Few-Shot Examples Resource (examples://{domain}/{table})
+            // 3. Golden Queries / Few-Shot Examples Resource (examples://{domain}/{table})
             if (_goldenQueryService != null)
             {
                 var goldens = await _goldenQueryService.GetGoldenQueriesAsync(domain, table, ct).ConfigureAwait(false);

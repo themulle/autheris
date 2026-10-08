@@ -17,7 +17,6 @@ using Autheris.Application.Connectors;
 using Autheris.Application.Connectors.CrossDomain;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Connectors;
-using Autheris.Application.Kernel;
 using Autheris.Application.Olap;
 using Autheris.Application.Policy;
 using Autheris.Application.Procedures.Interfaces;
@@ -28,7 +27,6 @@ using Autheris.Application.Serialization;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
-using Autheris.Domain.Kernel;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
@@ -170,55 +168,6 @@ public sealed class GovernedDataPathsG4Tests
     }
 
     // ------------------------------------------------------------------ D-1 (semantic cache hit)
-
-    [Fact]
-    public async Task D1_SemanticCacheHit_ReappliesTheCurrentRowFilter()
-    {
-        var collection = new TableIdentifier("ai", "public", "docs");
-        var metadata = new TableMetadata
-        {
-            Identifier = collection,
-            Table = new Table { TableName = "docs", SchemaName = "public", DataSourceType = DataSourceType.VectorPgVector },
-            Columns = [new TableColumn { ColumnName = "content_text" }, new TableColumn { ColumnName = "region" }]
-        };
-
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(metadata));
-
-        var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(collection, new Dictionary<string, ColumnAccessLevel>
-            {
-                ["content_text"] = ColumnAccessLevel.Clear,
-                ["region"] = ColumnAccessLevel.Clear
-            }, "region = 'EU'", hasUnconstrainedColumnAllow: true)));
-
-        VectorDocumentChunk Chunk(string id, string region) => new(id, "doc", 0, "text " + id, 0.9f, Tenant1,
-            new Dictionary<string, object?> { ["region"] = region });
-
-        var cache = Substitute.For<ISemanticQueryCache>();
-        cache.TryGetAsync(Arg.Any<SemanticCacheKey>(), Arg.Any<float[]>(), Arg.Any<float>(), Arg.Any<long>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new SemanticMatchResult(true, 1f, [Chunk("eu", "EU"), Chunk("us", "US")])));
-
-        var kernel = new GovernedExecutionKernel(
-            repo, pdp, Substitute.For<IColumnMaskingProvider>(),
-            NullLogger<GovernedExecutionKernel>.Instance, semanticCache: cache);
-
-        var sec = new SecurityPrincipalContext
-        {
-            UserSid = new Sid("S-1-USER-1"),
-            TenantId = Tenant1,
-            GroupSids = new HashSet<Sid>(),
-            TenantRoles = new HashSet<string>(),
-            ClusterRoles = new HashSet<string>(),
-            AuthenticationScheme = "Bearer"
-        };
-
-        var result = await kernel.ExecuteVectorQueryAsync(
-            new VectorSearchRequest(collection, QueryVector: new[] { 0.1f, 0.2f }, RawQueryText: "find docs"), sec);
-
-        result.Chunks.Select(c => c.ChunkId).ShouldBe(["eu"]);
-    }
 
     // ------------------------------------------------------------------ D-2 (result column sources)
 
@@ -444,30 +393,6 @@ public sealed class GovernedDataPathsG4Tests
         // Value must remain the first pseudonym, MaskValue must not be invoked again
         result["email"].ShouldBe("ALREADY_MASKED_PSEUDO");
         provider.DidNotReceive().MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>());
-    }
-
-    [Fact]
-    public void D3_ChunkPiiRedactor_ScopesHmacRulesToTheChunkTenant()
-    {
-        var id = new TableIdentifier("ai", "p", "docs");
-        var meta = new TableMetadata
-        {
-            Identifier = id,
-            Columns = [new TableColumn { ColumnName = "content_text" }],
-            ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["content_text"] = new MaskingRule { RuleType = "HMAC_SHA256", HmacKeyId = "k" }
-            }
-        };
-        var decision = TableAccessDecision.Allowed(id, new Dictionary<string, ColumnAccessLevel> { ["content_text"] = ColumnAccessLevel.Mask });
-        var provider = Substitute.For<IColumnMaskingProvider>();
-        MaskingRule? seen = null;
-        provider.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Do<MaskingRule>(r => seen = r)).Returns("pseudo");
-
-        ChunkPiiRedactor.RedactChunk(
-            new VectorDocumentChunk("c", "d", 0, "secret", 1f, Tenant1, new Dictionary<string, object?>()), meta, provider, decision);
-
-        seen!.HmacKeyId.ShouldBe("k|tenant:tenant-1");
     }
 
     // ------------------------------------------------------------------ D-4 (OLAP audit)

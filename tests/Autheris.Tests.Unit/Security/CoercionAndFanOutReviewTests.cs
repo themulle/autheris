@@ -95,19 +95,6 @@ public sealed class CoercionAndFanOutReviewTests
 
     // ---------------------------------------------------------------- E-6 vector filters
 
-    [Fact]
-    public void MilvusFilter_BackslashInValue_CannotEscapeTheQuote()
-    {
-        var request = new VectorSearchRequest(
-            Table,
-            MetadataFilters: new Dictionary<string, object?> { ["owner"] = "x\\" });
-
-        var filter = VectorPushdownSecurityHelper.BuildMilvusFilter(request, new TenantId("t1"));
-
-        // The backslash is doubled, so the closing quote of the literal stays a closing quote.
-        filter.ShouldEndWith("owner == \"x\\\\\"");
-    }
-
     // ---------------------------------------------------------------- E-5 mandatory tenant column
 
     [Fact]

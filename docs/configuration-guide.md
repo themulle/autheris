@@ -663,80 +663,7 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 }
 ```
 
-### 2.17 `VectorSearch` (Native Vector Database & RAG Egress)
-
-| Schlüssel | Typ | Wertebereich | Standard | Beschreibung |
-| :--- | :--- | :--- | :--- | :--- |
-| `VectorSearch:Enabled` | `bool` | `true \| false` | `false` | Aktiviert die native Vektor- und RAG-Egress-Engine (`F-AI-09`). |
-| `VectorSearch:MaxTopK` | `int` | `1 .. 1000` | `50` | Obergrenze für zurückgegebene Vektor-Treiber-Chunks pro Abfrage. |
-| `VectorSearch:EnablePiiRedaction` | `bool` | `true \| false` | `true` | Automatisches In-Stream Scrubbing von PII-Daten (E-Mails, IBANs, Telefone) in Chunks. |
-| `VectorSearch:DefaultDistanceMetric` | `string` | `Cosine \| Euclidean \| DotProduct` | `"Cosine"` | Standard-Distanzmetrik für Ähnlichkeitssuchen. |
-| `VectorSearch:Sources` | `dict` | Vektor-Datenquellen | `{}` | Konfigurierte Quellen (`PgVector`, `Qdrant`, `Milvus`). |
-
-```json
-"VectorSearch": {
-  "Enabled": true,
-  "MaxTopK": 50,
-  "EnablePiiRedaction": true,
-  "DefaultDistanceMetric": "Cosine",
-  "Sources": {
-    "pgvector-kb": {
-      "Provider": "PgVector",
-      "ConnectionString": "Host=postgres;Database=vectordb;Username=rag;Password=secret;",
-      "DefaultCollection": "knowledge_chunks"
-    },
-    "qdrant-docs": {
-      "Provider": "Qdrant",
-      "Endpoint": "http://qdrant:6333",
-      "ApiKey": "secret-qdrant-key"
-    },
-    "milvus-archive": {
-      "Provider": "Milvus",
-      "Endpoint": "http://milvus:19530"
-    }
-  }
-}
-```
-
-### 2.18 `SemanticCache` (Semantischer Embedding-Cache)
-
-| Schlüssel | Typ | Wertebereich | Standard | Beschreibung |
-| :--- | :--- | :--- | :--- | :--- |
-| `SemanticCache:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den semantischen Cache für Prompt- und Vektorabfragen (`F-AI-10`). |
-| `SemanticCache:MinSimilarityScore` | `double` | `0.0 .. 1.0` | `0.85` | Mindest-Cosinus-Ähnlichkeit für einen semantischen Cache-Hit. |
-| `SemanticCache:TtlMinutes` | `int` | `1 .. 10080` | `60` | Gültigkeitsdauer (TTL) von Cache-Einträgen in Minuten. |
-| `SemanticCache:MaxEntriesPerPartition` | `int` | `1 .. 10000` | `100` | Maximale Einträge pro isolierter Mandanten-/Benutzer-Partition (LRU). |
-| `SemanticCache:MaxPartitions` | `int` | `1 .. 50000` | `1000` | Obergrenze aktiver Cache-Partitionen (DoS-Schutz). |
-
-```json
-"SemanticCache": {
-  "Enabled": true,
-  "MinSimilarityScore": 0.85,
-  "TtlMinutes": 60,
-  "MaxEntriesPerPartition": 100,
-  "MaxPartitions": 1000
-}
-```
-
-### 2.19 `PolicyRecommendation` (Autonome Least-Privilege Empfehlungen)
-
-| Schlüssel | Typ | Wertebereich | Standard | Beschreibung |
-| :--- | :--- | :--- | :--- | :--- |
-| `PolicyRecommendation:Enabled` | `bool` | `true \| false` | `false` | Aktiviert die Analyse von 403-Mustern und Consent-Vorschlägen (`F-AI-10`). |
-| `PolicyRecommendation:MaxQueueCapacity` | `int` | `10 .. 5000` | `500` | Maximale Anzahl gepufferter Empfehlungsvorschläge. |
-| `PolicyRecommendation:MinDenialCountThreshold` | `int` | `1 .. 50` | `3` | Mindestanzahl an Zugriffsverweigerungen vor Auslösung einer Empfehlung. |
-| `PolicyRecommendation:ProposalExpiryMinutes` | `int` | `1 .. 43200` | `1440` | Gültigkeitsdauer eines Vorschlags im Triage-Postfach. |
-
-```json
-"PolicyRecommendation": {
-  "Enabled": true,
-  "MaxQueueCapacity": 500,
-  "MinDenialCountThreshold": 3,
-  "ProposalExpiryMinutes": 1440
-}
-```
-
-### 2.20 `DuckDbOlap` & `ArrowExport` (In-Memory OLAP & Arrow IPC Streaming)
+### 2.17 `DuckDbOlap` & `ArrowExport` (In-Memory OLAP & Arrow IPC Streaming)
 
 | Schlüssel | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
@@ -765,7 +692,7 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 ```
 
 
-### 2.21 `Casbin` (ABAC/RBAC Policy Engine & Model-Contract)
+### 2.18 `Casbin` (ABAC/RBAC Policy Engine & Model-Contract)
 
 Das Gateway integriert Casbin für feingranulare Autorisierungs- und Row-Level-Security-Regeln (ABAC/RBAC). Richtlinien und Modell können als Dateien hinterlegt oder mit dem integrierten Standardmodell betrieben werden.
 
