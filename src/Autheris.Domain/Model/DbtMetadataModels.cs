@@ -50,16 +50,6 @@ public sealed record DbtMetadataProposal(
     string? ReviewedBy = null
 );
 
-public sealed record DbtExposureDefinition(
-    string Name,
-    string Type, // e.g. "application", "dashboard", "ml"
-    string Url,
-    string? Description,
-    string OwnerName,
-    string OwnerEmail,
-    IReadOnlyList<string> DependsOnTableIds
-);
-
 public sealed record DbtSyncResult(
     bool Success,
     int ParsedModelsCount,

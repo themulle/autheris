@@ -35,41 +35,6 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async ValueTask<EnvoyCheckResponse> CheckAsync(
-        EnvoyCheckRequest request,
-        System.Security.Claims.ClaimsPrincipal? caller = null,
-        CancellationToken ct = default)
-    {
-        try
-        {
-            if (request?.Attributes?.Request?.Http == null)
-            {
-                _logger.LogWarning("Envoy ext_authz check rejected: missing HTTP request attributes.");
-                return EnvoyCheckResponse.Deny(400, "Bad Request: Missing HTTP attributes in Envoy check payload.");
-            }
-
-            var http = request.Attributes.Request.Http;
-            var contextExtensions = request.Attributes.ContextExtensions ?? new Dictionary<string, string>();
-            var clientIpStr = request.Attributes.Source?.Address?.SocketAddress?.Address;
-            var sourcePrincipal = request.Attributes.Source?.Principal;
-
-            return await EvaluateInternalAsync(
-                http.Method,
-                http.Path,
-                http.Headers,
-                contextExtensions,
-                clientIpStr,
-                sourcePrincipal,
-                caller,
-                ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Fail-closed: unexpected error during Envoy ext_authz evaluation.");
-            return EnvoyCheckResponse.Deny(500, "Internal Server Error: Authorization check failed.");
-        }
-    }
-
     public async ValueTask<EnvoyCheckResponse> CheckHttpAsync(
         string method,
         string path,

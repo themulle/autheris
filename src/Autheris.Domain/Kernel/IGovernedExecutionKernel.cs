@@ -11,11 +11,6 @@ using Autheris.Domain.Security;
 /// </summary>
 public interface IGovernedExecutionKernel
 {
-    Task<GovernedExecutionResult> ExecuteAsync(
-        GovernedExecutionRequest request,
-        SecurityPrincipalContext securityContext,
-        CancellationToken ct);
-
     Task<Autheris.Domain.Model.GovernedVectorResult> ExecuteVectorQueryAsync(
         Autheris.Domain.Model.VectorSearchRequest request,
         SecurityPrincipalContext securityContext,

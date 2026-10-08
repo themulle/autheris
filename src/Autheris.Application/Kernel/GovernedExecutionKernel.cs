@@ -32,9 +32,7 @@ public sealed class GovernedExecutionKernel : IGovernedExecutionKernel
 {
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IUnifiedPolicyDecisionPoint _pdp;
-    private readonly IExecutionGuardrailService _guardrailService;
     private readonly IColumnMaskingProvider _maskingProvider;
-    private readonly IGatewayExecutionService _gatewayExecutionService;
     private readonly ILogger<GovernedExecutionKernel> _logger;
     private readonly IAutherisConnectorRegistry? _connectorRegistry;
     private readonly ISemanticQueryCache? _semanticCache;
@@ -45,9 +43,7 @@ public sealed class GovernedExecutionKernel : IGovernedExecutionKernel
     public GovernedExecutionKernel(
         ITableMetadataRepository metadataRepository,
         IUnifiedPolicyDecisionPoint pdp,
-        IExecutionGuardrailService guardrailService,
         IColumnMaskingProvider maskingProvider,
-        IGatewayExecutionService gatewayExecutionService,
         ILogger<GovernedExecutionKernel> logger,
         IAutherisConnectorRegistry? connectorRegistry = null,
         ISemanticQueryCache? semanticCache = null,
@@ -57,150 +53,13 @@ public sealed class GovernedExecutionKernel : IGovernedExecutionKernel
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _pdp = pdp ?? throw new ArgumentNullException(nameof(pdp));
-        _guardrailService = guardrailService ?? throw new ArgumentNullException(nameof(guardrailService));
         _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
-        _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _connectorRegistry = connectorRegistry;
         _semanticCache = semanticCache;
         _policyRecommendationService = policyRecommendationService;
         _consentCacheService = consentCacheService;
         _embeddingGenerator = embeddingGenerator;
-    }
-
-    public async Task<GovernedExecutionResult> ExecuteAsync(
-        GovernedExecutionRequest request,
-        SecurityPrincipalContext securityContext,
-        CancellationToken ct)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentNullException.ThrowIfNull(securityContext);
-
-        var stopwatch = Stopwatch.StartNew();
-
-        // 1. Canonical Normalization (WP 2.1)
-        var normalizedTable = TableIdentifierNormalizer.Normalize(
-            request.TargetTable.ToString(),
-            request.TargetTable.Domain,
-            request.TargetTable.Schema);
-
-        // 2. Metadata Catalog Validation (RR-L3-06)
-        var metadata = await _metadataRepository.GetTableMetadataAsync(normalizedTable, ct).ConfigureAwait(false);
-        if (metadata == null)
-        {
-            var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-            metadata = allTables.FirstOrDefault(t =>
-                t.Identifier.Equals(normalizedTable) ||
-                string.Equals(t.Identifier.TableName, normalizedTable.TableName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(t.Identifier.ToQualifiedName(), normalizedTable.ToQualifiedName(), StringComparison.OrdinalIgnoreCase));
-        }
-
-        if (metadata == null)
-        {
-            _logger.LogWarning("Execution rejected: Table {Table} not found in catalog.", normalizedTable);
-            throw new TableNotFoundException(normalizedTable);
-        }
-
-        // 3. Execution Guardrails (WP 2.3)
-        _guardrailService.ValidateSingleStatement(request.SqlPredicate);
-        var effectiveLimit = _guardrailService.EnforceRowLimit(request.RequestedLimit);
-
-        // 4. Unified PDP Evaluation (WP 2.2)
-        var decision = await _pdp.EvaluateAccessAsync(
-            metadata.Identifier,
-            metadata,
-            securityContext,
-            request.RequestedColumns,
-            ct).ConfigureAwait(false);
-
-        if (!decision.IsAllowed)
-        {
-            var reason = string.Join("; ", decision.DeniedReasons);
-            _logger.LogWarning(
-                "Access to table {Table} denied for subject {Subject}: {Reason}",
-                metadata.Identifier, securityContext.UserSid.Value, reason);
-
-            throw new SecurityException($"Access to table '{metadata.Identifier}' was rejected: {reason}");
-        }
-
-        // 5. Build Principal & Execute Query
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, securityContext.UserSid.Value),
-            new("tenant_id", securityContext.TenantId.Value)
-        };
-        foreach (var role in securityContext.TenantRoles.Concat(securityContext.ClusterRoles))
-        {
-            claims.Add(new Claim(ClaimTypes.Role, role));
-        }
-        foreach (var grp in securityContext.GroupSids)
-        {
-            claims.Add(new Claim("groupsid", grp.Value));
-        }
-
-        var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, securityContext.AuthenticationScheme));
-
-        var (rawRows, executionDecision) = await _gatewayExecutionService.ExecuteTableQueryAsync(
-            principal,
-            metadata.Identifier,
-            first: effectiveLimit,
-            after: null,
-            queryArguments: null,
-            requestedFields: request.RequestedColumns,
-            requestHeaders: null,
-            ct: ct).ConfigureAwait(false);
-
-        // 6. Universal Post-Execution Masking (WP 2.4, RR-L6-01, RR-L6-03)
-        var effectiveDecision = executionDecision ?? decision;
-        var maskedRows = new List<IReadOnlyDictionary<string, object?>>(rawRows.Count);
-
-        foreach (var row in rawRows)
-        {
-            var maskedRow = new Dictionary<string, object?>(row.Count, StringComparer.OrdinalIgnoreCase);
-            foreach (var (colName, val) in row)
-            {
-                var accessLevel = effectiveDecision.GetEffectiveColumnAccess(colName, metadata);
-                if (accessLevel == ColumnAccessLevel.Deny)
-                {
-                    // Omit or nullify denied columns
-                    continue;
-                }
-
-                if (accessLevel == ColumnAccessLevel.Mask)
-                {
-                    var rule = metadata.ColumnMaskingRules.TryGetValue(colName, out var foundRule)
-                        ? foundRule
-                        : new MaskingRule { RuleType = "REDACT" };
-
-                    maskedRow[colName] = _maskingProvider.MaskValue(colName, val, rule);
-                }
-                else
-                {
-                    maskedRow[colName] = val;
-                }
-            }
-            maskedRows.Add(maskedRow);
-        }
-
-        stopwatch.Stop();
-
-        var projectedColumns = maskedRows.Count > 0
-            ? maskedRows[0].Keys.ToList()
-            : (request.RequestedColumns ?? metadata.Columns.Select(c => c.ColumnName).ToList());
-
-        var metrics = new ExecutionMetrics(
-            Duration: stopwatch.Elapsed,
-            RowCount: maskedRows.Count,
-            EstimatedBytes: maskedRows.Count * 64 // Approximate
-        );
-
-        return new GovernedExecutionResult(
-            NormalizedTable: metadata.Identifier,
-            Columns: projectedColumns,
-            Rows: maskedRows,
-            AccessDecision: effectiveDecision,
-            Metrics: metrics
-        );
     }
 
     public async Task<GovernedVectorResult> ExecuteVectorQueryAsync(

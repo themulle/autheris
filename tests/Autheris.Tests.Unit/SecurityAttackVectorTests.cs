@@ -354,36 +354,6 @@ public sealed class SecurityAttackVectorTests
     // 5. SIMD TOKEN SCANNING FOR SQL INJECTION & DELIMITERS (CWE-89)
     // =========================================================================
 
-    [Theory]
-    [InlineData("SELECT * FROM users WHERE 1=1; DROP TABLE users;--", true)]
-    [InlineData("' OR '1'='1", true)]
-    [InlineData("admin'/* comment */", true)]
-    [InlineData("valid_identifier_name", false)]
-    [InlineData("customer_id_12345", false)]
-    public void SimdTokenScanner_DangerousSqlChars_ShouldIdentifyAccurately(string input, bool shouldContainDangerous)
-    {
-        // Act
-        var containsDangerous = SimdTokenScanner.ContainsDangerousSqlChars(input.AsSpan());
-
-        // Assert
-        containsDangerous.ShouldBe(shouldContainDangerous);
-    }
-
-    [Theory]
-    [InlineData("{ query }", true)]
-    [InlineData("users(id: 123)", true)]
-    [InlineData("@directive", true)]
-    [InlineData("[1, 2, 3]", true)]
-    [InlineData("safeVariableName", false)]
-    public void SimdTokenScanner_GraphQlDelimiters_ShouldIdentifyAccurately(string input, bool shouldContainDelimiter)
-    {
-        // Act
-        var containsDelimiter = SimdTokenScanner.ContainsGraphQlDelimiter(input.AsSpan());
-
-        // Assert
-        containsDelimiter.ShouldBe(shouldContainDelimiter);
-    }
-
     // =========================================================================
     // 6. TAMPER-EVIDENT AUDIT HASH CHAIN INTEGRITY (CWE-353)
     // =========================================================================

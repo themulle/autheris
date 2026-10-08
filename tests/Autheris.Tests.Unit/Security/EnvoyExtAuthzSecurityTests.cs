@@ -27,7 +27,7 @@ public sealed class EnvoyExtAuthzSecurityTests
     }
 
     [Fact]
-    public async Task CheckAsync_AuthorizedSubject_ReturnsOkWithSecurityHeaders()
+    public async Task CheckHttpAsync_AuthorizedSubject_ReturnsOkWithSecurityHeaders()
     {
         // Arrange
         var table = new TableIdentifier("default", "public", "customers");
@@ -42,21 +42,9 @@ public sealed class EnvoyExtAuthzSecurityTests
             .EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
             .Returns(allowedDecision);
 
-        var request = new EnvoyCheckRequest
-        {
-            Attributes = new EnvoyAttributeContext
-            {
-                Request = new EnvoyRequest
-                {
-                    Http = new EnvoyHttpRequest
-                    {
-                        Method = "GET",
-                        Path = "/api/v1/customers",
-                        Headers = new Dictionary<string, string>()
-                    }
-                }
-            }
-        };
+        const string method = "GET";
+        const string path = "/api/v1/customers";
+        var headers = new Dictionary<string, string>();
 
         var caller = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
             new[]
@@ -67,22 +55,22 @@ public sealed class EnvoyExtAuthzSecurityTests
             "MeshTls"));
 
         // Act
-        var response = await _service.CheckAsync(request, caller);
+        var response = await _service.CheckHttpAsync(method, path, headers, caller);
 
         // Assert
         Assert.Equal(0, response.Status.Code);
         Assert.NotNull(response.HttpResponse.OkResponse);
 
-        var headers = response.HttpResponse.OkResponse.Headers;
-        Assert.Contains(headers, h => h.Header.Key == "x-autheris-decision" && h.Header.Value == "allowed");
-        Assert.Contains(headers, h => h.Header.Key == "x-autheris-principal" && h.Header.Value == "alice");
-        Assert.Contains(headers, h => h.Header.Key == "x-autheris-tenant" && h.Header.Value == "corp");
+        var responseHeaders = response.HttpResponse.OkResponse.Headers;
+        Assert.Contains(responseHeaders, h => h.Header.Key == "x-autheris-decision" && h.Header.Value == "allowed");
+        Assert.Contains(responseHeaders, h => h.Header.Key == "x-autheris-principal" && h.Header.Value == "alice");
+        Assert.Contains(responseHeaders, h => h.Header.Key == "x-autheris-tenant" && h.Header.Value == "corp");
         // SEC C-1: Never return RLS SQL filter to caller/proxy
-        Assert.DoesNotContain(headers, h => h.Header.Key == "x-autheris-rls-filter");
+        Assert.DoesNotContain(responseHeaders, h => h.Header.Key == "x-autheris-rls-filter");
     }
 
     [Fact]
-    public async Task CheckAsync_DeniedSubject_ReturnsPermissionDenied403()
+    public async Task CheckHttpAsync_DeniedSubject_ReturnsPermissionDenied403()
     {
         // Arrange
         var table = new TableIdentifier("default", "public", "salaries");
@@ -97,21 +85,9 @@ public sealed class EnvoyExtAuthzSecurityTests
             .EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
             .Returns(deniedDecision);
 
-        var request = new EnvoyCheckRequest
-        {
-            Attributes = new EnvoyAttributeContext
-            {
-                Request = new EnvoyRequest
-                {
-                    Http = new EnvoyHttpRequest
-                    {
-                        Method = "GET",
-                        Path = "/api/v1/salaries",
-                        Headers = new Dictionary<string, string>()
-                    }
-                }
-            }
-        };
+        const string method = "GET";
+        const string path = "/api/v1/salaries";
+        var headers = new Dictionary<string, string>();
 
         var caller = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
             new[]
@@ -122,31 +98,13 @@ public sealed class EnvoyExtAuthzSecurityTests
             "MeshTls"));
 
         // Act
-        var response = await _service.CheckAsync(request, caller);
+        var response = await _service.CheckHttpAsync(method, path, headers, caller);
 
         // Assert
         Assert.Equal(7, response.Status.Code); // PERMISSION_DENIED
         Assert.NotNull(response.HttpResponse.DeniedResponse);
         Assert.Equal(403, response.HttpResponse.DeniedResponse.Status.Code);
         Assert.Contains("insufficient clearance level", response.HttpResponse.DeniedResponse.Body);
-    }
-
-    [Fact]
-    public async Task CheckAsync_MissingHttpAttributes_FailsClosedWithBadRequest()
-    {
-        // Arrange: Missing HTTP request attributes
-        var request = new EnvoyCheckRequest
-        {
-            Attributes = new EnvoyAttributeContext()
-        };
-
-        // Act
-        var response = await _service.CheckAsync(request);
-
-        // Assert
-        Assert.Equal(7, response.Status.Code);
-        Assert.NotNull(response.HttpResponse.DeniedResponse);
-        Assert.Equal(400, response.HttpResponse.DeniedResponse.Status.Code);
     }
 
     [Fact]
@@ -169,7 +127,7 @@ public sealed class EnvoyExtAuthzSecurityTests
     }
 
     [Fact]
-    public async Task CheckAsync_PathTraversal_NormalizesProperly()
+    public async Task CheckHttpAsync_PathTraversal_NormalizesProperly()
     {
         // Arrange
         var allowedDecision = new TableAccessDecision(
@@ -186,21 +144,9 @@ public sealed class EnvoyExtAuthzSecurityTests
                 Arg.Any<CancellationToken>())
             .Returns(allowedDecision);
 
-        var request = new EnvoyCheckRequest
-        {
-            Attributes = new EnvoyAttributeContext
-            {
-                Request = new EnvoyRequest
-                {
-                    Http = new EnvoyHttpRequest
-                    {
-                        Method = "GET",
-                        Path = "/api/v1/public/../../admin/orders",
-                        Headers = new Dictionary<string, string>()
-                    }
-                }
-            }
-        };
+        const string method = "GET";
+        const string path = "/api/v1/public/../../admin/orders";
+        var headers = new Dictionary<string, string>();
 
         var caller = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
             new[]
@@ -211,7 +157,7 @@ public sealed class EnvoyExtAuthzSecurityTests
             "MeshTls"));
 
         // Act
-        var response = await _service.CheckAsync(request, caller);
+        var response = await _service.CheckHttpAsync(method, path, headers, caller);
 
         // Assert
         Assert.Equal(0, response.Status.Code);
@@ -222,7 +168,7 @@ public sealed class EnvoyExtAuthzSecurityTests
     }
 
     [Fact]
-    public async Task CheckAsync_ClientIdentityHeaders_WithoutCaller_DoesNotTrustUntrustedHeaders()
+    public async Task CheckHttpAsync_ClientIdentityHeaders_WithoutCaller_DoesNotTrustUntrustedHeaders()
     {
         // SEC C-1: Headers like x-autheris-principal, x-tenant-id must NEVER be trusted from untrusted clients
         var table = new TableIdentifier("default", "public", "orders");
@@ -240,29 +186,17 @@ public sealed class EnvoyExtAuthzSecurityTests
                 Arg.Any<CancellationToken>())
             .Returns(allowedDecision);
 
-        var request = new EnvoyCheckRequest
+        const string method = "GET";
+        const string path = "/api/v1/orders";
+        var headers = new Dictionary<string, string>
         {
-            Attributes = new EnvoyAttributeContext
-            {
-                Request = new EnvoyRequest
-                {
-                    Http = new EnvoyHttpRequest
-                    {
-                        Method = "GET",
-                        Path = "/api/v1/orders",
-                        Headers = new Dictionary<string, string>
-                        {
-                            ["x-autheris-principal"] = "spoofed-admin",
-                            ["x-roles"] = "ClusterAdmin",
-                            ["x-tenant-id"] = "evil-tenant"
-                        }
-                    }
-                }
-            }
+            ["x-autheris-principal"] = "spoofed-admin",
+            ["x-roles"] = "ClusterAdmin",
+            ["x-tenant-id"] = "evil-tenant"
         };
 
         // Act: Caller is null (unauthenticated client attempting header forgery)
-        var response = await _service.CheckAsync(request, caller: null);
+        var response = await _service.CheckHttpAsync(method, path, headers, caller: null);
 
         // Assert: Principal should be anonymous and tenant should be default; forged headers ignored
         Assert.NotNull(capturedContext);

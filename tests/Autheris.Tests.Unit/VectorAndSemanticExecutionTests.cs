@@ -185,9 +185,7 @@ public sealed class VectorAndSemanticExecutionTests
         pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(TableAccessDecision.Allowed(collection, new Dictionary<string, ColumnAccessLevel>(), "1=1", true)));
 
-        var guardrail = Substitute.For<IExecutionGuardrailService>();
         var masking = Substitute.For<IColumnMaskingProvider>();
-        var gatewayExec = Substitute.For<IGatewayExecutionService>();
 
         var registry = new InMemoryConnectorRegistry();
         var rawChunks = new List<VectorDocumentChunk>
@@ -202,7 +200,7 @@ public sealed class VectorAndSemanticExecutionTests
         var recommendation = new PolicyRecommendationService();
 
         var kernel = new GovernedExecutionKernel(
-            metaRepo, pdp, guardrail, masking, gatewayExec,
+            metaRepo, pdp, masking,
             NullLogger<GovernedExecutionKernel>.Instance,
             connectorRegistry: registry,
             semanticCache: cache,
@@ -256,14 +254,12 @@ public sealed class VectorAndSemanticExecutionTests
         pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(TableAccessDecision.Denied(collection, "No consent grant for table restricted_docs")));
 
-        var guardrail = Substitute.For<IExecutionGuardrailService>();
         var masking = Substitute.For<IColumnMaskingProvider>();
-        var gatewayExec = Substitute.For<IGatewayExecutionService>();
 
         var recommendation = new PolicyRecommendationService();
 
         var kernel = new GovernedExecutionKernel(
-            metaRepo, pdp, guardrail, masking, gatewayExec,
+            metaRepo, pdp, masking,
             NullLogger<GovernedExecutionKernel>.Instance,
             policyRecommendationService: recommendation);
 
@@ -370,9 +366,7 @@ public sealed class VectorAndSemanticExecutionTests
         pdp.EvaluateAccessAsync(Arg.Any<TableIdentifier>(), Arg.Any<TableMetadata>(), Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(TableAccessDecision.Allowed(collection, new Dictionary<string, ColumnAccessLevel>(), "department = 'Engineering'", true)));
 
-        var guardrail = Substitute.For<IExecutionGuardrailService>();
         var masking = Substitute.For<IColumnMaskingProvider>();
-        var gatewayExec = Substitute.For<IGatewayExecutionService>();
 
         var registry = new InMemoryConnectorRegistry();
         var rawChunks = new List<VectorDocumentChunk>
@@ -385,7 +379,7 @@ public sealed class VectorAndSemanticExecutionTests
         registry.RegisterConnector("pgvector-default", pgConnector);
 
         var kernel = new GovernedExecutionKernel(
-            metaRepo, pdp, guardrail, masking, gatewayExec,
+            metaRepo, pdp, masking,
             NullLogger<GovernedExecutionKernel>.Instance,
             connectorRegistry: registry);
 
