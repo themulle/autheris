@@ -15,6 +15,39 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.SqlServer;
 
+    /// <summary>Wunsch 4: T-SQL has no EXTRACT; DATEPART, with the ISO day of week independent of @@DATEFIRST.</summary>
+    protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
+    {
+        if (field == "DAY_OF_WEEK")
+        {
+            builder.Append("((DATEPART(weekday, ");
+            GenerateExpression(source, ref builder, context);
+            builder.Append(") + @@DATEFIRST + 5) % 7 + 1)");
+            return;
+        }
+
+        string datepart = field switch
+        {
+            "YEAR" => "year",
+            "QUARTER" => "quarter",
+            "MONTH" => "month",
+            "WEEK" => "iso_week",
+            "DAY" => "day",
+            "DAY_OF_YEAR" => "dayofyear",
+            "HOUR" => "hour",
+            "MINUTE" => "minute",
+            "SECOND" => "second",
+            "MILLISECOND" => "millisecond",
+            "MICROSECOND" => "microsecond",
+            _ => throw UnsupportedExtract(field, TargetDialect)
+        };
+        builder.Append("DATEPART(");
+        builder.Append(datepart);
+        builder.Append(", ");
+        GenerateExpression(source, ref builder, context);
+        builder.Append(')');
+    }
+
     /// <summary>Wunsch 4: T-SQL GROUPING() takes one column; the multi-column bitmask is GROUPING_ID().</summary>
     protected override void FormatGroupingOperation(ref ValueStringBuilder builder, GroupingOperationExpression grouping, SqlEmitterContext context)
     {

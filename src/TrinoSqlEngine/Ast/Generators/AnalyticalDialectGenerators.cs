@@ -104,6 +104,23 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
 public sealed class SnowflakeDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Snowflake;
+
+    /// <summary>Wunsch 4: Snowflake names the ISO fields DAYOFWEEKISO, WEEKISO, YEAROFWEEKISO.</summary>
+    protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
+    {
+        builder.Append("EXTRACT(");
+        builder.Append(field switch
+        {
+            "DAY_OF_WEEK" => "DAYOFWEEKISO",
+            "WEEK" => "WEEKISO",
+            "YEAR_OF_WEEK" => "YEAROFWEEKISO",
+            "DAY_OF_YEAR" => "DAYOFYEAR",
+            var f => f
+        });
+        builder.Append(" FROM ");
+        GenerateExpression(source, ref builder, context);
+        builder.Append(')');
+    }
     public override int MaxParameterBudget => 65535;
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)

@@ -16,6 +16,31 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     protected override bool SupportsAggregateFilter => true;
     protected override bool SupportsGroupingSets => false;
 
+    /// <summary>Wunsch 4: SQLite has no EXTRACT; strftime on ISO text, with the ISO day of week (%w counts Sunday = 0).</summary>
+    protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
+    {
+        (string format, string prefix, string suffix) = field switch
+        {
+            "YEAR" => ("%Y", "", ""),
+            "MONTH" => ("%m", "", ""),
+            "DAY" => ("%d", "", ""),
+            "HOUR" => ("%H", "", ""),
+            "MINUTE" => ("%M", "", ""),
+            "SECOND" => ("%S", "", ""),
+            "DAY_OF_YEAR" => ("%j", "", ""),
+            "DAY_OF_WEEK" => ("%w", "((", " + 6) % 7 + 1)"),
+            "QUARTER" => ("%m", "((", " + 2) / 3)"),
+            _ => throw UnsupportedExtract(field, TargetDialect)
+        };
+        builder.Append(prefix);
+        builder.Append("CAST(strftime('");
+        builder.Append(format);
+        builder.Append("', ");
+        GenerateExpression(source, ref builder, context);
+        builder.Append(") AS INTEGER)");
+        builder.Append(suffix);
+    }
+
     /// <summary>Wunsch 4: SQLite stores dates as ISO text and has no typed literals; the ISO string compares correctly.</summary>
     protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context) =>
         FormatStringLiteral(ref builder, literal.Value, context);

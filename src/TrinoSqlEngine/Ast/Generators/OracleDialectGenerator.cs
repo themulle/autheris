@@ -15,6 +15,38 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Oracle;
 
+    /// <summary>
+    /// Wunsch 4: Oracle EXTRACT knows YEAR…SECOND (time fields only from TIMESTAMP); quarter, ISO week and day of year via
+    /// TO_CHAR. The day of week depends on NLS settings and is rejected.
+    /// </summary>
+    protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
+    {
+        switch (field)
+        {
+            case "YEAR" or "MONTH" or "DAY":
+                builder.Append("EXTRACT(");
+                builder.Append(field);
+                builder.Append(" FROM ");
+                GenerateExpression(source, ref builder, context);
+                builder.Append(')');
+                return;
+            case "HOUR" or "MINUTE" or "SECOND":
+                builder.Append("EXTRACT(");
+                builder.Append(field);
+                builder.Append(" FROM CAST(");
+                GenerateExpression(source, ref builder, context);
+                builder.Append(" AS TIMESTAMP))");
+                return;
+            case "QUARTER" or "WEEK" or "DAY_OF_YEAR":
+                builder.Append("TO_NUMBER(TO_CHAR(");
+                GenerateExpression(source, ref builder, context);
+                builder.Append(field switch { "QUARTER" => ", 'Q'))", "WEEK" => ", 'IW'))", _ => ", 'DDD'))" });
+                return;
+            default:
+                throw UnsupportedExtract(field, TargetDialect);
+        }
+    }
+
     /// <summary>Wunsch 4: Oracle has DATE and TIMESTAMP literals but no TIME type.</summary>
     protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context)
     {

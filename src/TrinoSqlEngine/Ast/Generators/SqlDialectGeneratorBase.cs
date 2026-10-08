@@ -530,11 +530,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(trusted.Sql);
                 break;
             case ExtractExpression ext:
-                builder.Append("EXTRACT(");
-                builder.Append(TrinoSqlEngine.Ast.SqlSafeTokens.EnsureExtractField(ext.Field));
-                builder.Append(" FROM ");
-                GenerateExpression(ext.Source, ref builder, context);
-                builder.Append(')');
+                FormatExtract(ref builder, CanonicalExtractField(ext.Field), ext.Source, context);
                 break;
             default:
                 throw new NotSupportedException($"Unsupported expression: {expression.GetType().Name}");
@@ -710,6 +706,41 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
     };
 
     public abstract void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context);
+
+    /// <summary>
+    /// Wunsch 4: Trino EXTRACT field in canonical form (DOW/ISODOW → DAY_OF_WEEK, DOY → DAY_OF_YEAR,
+    /// YOW/ISOYEAR → YEAR_OF_WEEK, DAY_OF_MONTH → DAY). Trino's DAY_OF_WEEK is ISO: Monday = 1 … Sunday = 7.
+    /// </summary>
+    protected static string CanonicalExtractField(string field) =>
+        TrinoSqlEngine.Ast.SqlSafeTokens.EnsureExtractField(field) switch
+        {
+            "DOW" or "ISODOW" => "DAY_OF_WEEK",
+            "DOY" => "DAY_OF_YEAR",
+            "YOW" or "ISOYEAR" => "YEAR_OF_WEEK",
+            "DAY_OF_MONTH" => "DAY",
+            var f => f
+        };
+
+    protected static TrinoSqlEngine.Ast.Builder.AstBuildException UnsupportedExtract(string field, TargetSqlDialect dialect) =>
+        new($"SQL construct EXTRACT({field} FROM …) is not supported for {dialect}.");
+
+    /// <summary>
+    /// Wunsch 4: EXTRACT in PostgreSQL/DuckDB naming (ISODOW, DOY, ISOYEAR); PostgreSQL's DOW would count Sunday = 0.
+    /// </summary>
+    protected virtual void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
+    {
+        builder.Append("EXTRACT(");
+        builder.Append(field switch
+        {
+            "DAY_OF_WEEK" => "ISODOW",
+            "DAY_OF_YEAR" => "DOY",
+            "YEAR_OF_WEEK" => "ISOYEAR",
+            var f => f
+        });
+        builder.Append(" FROM ");
+        GenerateExpression(source, ref builder, context);
+        builder.Append(')');
+    }
 
     /// <summary>Wunsch 4: the dialect supports ROLLUP, CUBE and GROUPING SETS.</summary>
     protected virtual bool SupportsGroupingSets => true;
