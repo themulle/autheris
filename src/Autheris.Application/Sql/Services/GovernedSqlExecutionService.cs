@@ -508,16 +508,47 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                     columnMasks[col.ColumnName] = GetMaskExpressionForRule(col.ColumnName, tableMeta, tenantId, internalParameters, hmacKeyParameterNames, out isEffectiveHmac);
                 }
 
-                // SEC-JOIN-01: Zero-Trust Guardrail: Check if any statically redacted column is used as a JOIN predicate
-                if (lvl != ColumnAccessLevel.Clear && !isEffectiveHmac &&
-                    metadata.JoinConditionColumns != null && metadata.JoinConditionColumns.Contains(col.ColumnName))
+                // SEC-JOIN-01 / SQL-6: Zero-Trust Guardrail: Check if any statically redacted column is used as a JOIN predicate for this table
+                if (lvl != ColumnAccessLevel.Clear && !isEffectiveHmac)
                 {
-                    string ruleDesc = tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
-                        ? mRule.RuleType ?? "REDACT"
-                        : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
+                    bool isUsedInJoin = false;
+                    if (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Count > 0)
+                    {
+                        foreach (var jc in metadata.JoinColumnReferences)
+                        {
+                            if (string.Equals(jc.ColumnName, col.ColumnName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (jc.TableOrAlias == null)
+                                {
+                                    // Unqualified reference: applies if this column matches
+                                    isUsedInJoin = true;
+                                    break;
+                                }
+                                else if (string.Equals(jc.TableOrAlias, target.Alias, StringComparison.OrdinalIgnoreCase) ||
+                                         string.Equals(jc.TableOrAlias, target.TableName, StringComparison.OrdinalIgnoreCase) ||
+                                         string.Equals(jc.TableOrAlias, target.FullName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    // Qualified reference matches this specific table or alias
+                                    isUsedInJoin = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    else if (metadata.JoinConditionColumns != null && metadata.JoinConditionColumns.Contains(col.ColumnName))
+                    {
+                        isUsedInJoin = true;
+                    }
 
-                    throw new WebSqlPolicyException(
-                        $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
+                    if (isUsedInJoin)
+                    {
+                        string ruleDesc = tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
+                            ? mRule.RuleType ?? "REDACT"
+                            : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
+
+                        throw new WebSqlPolicyException(
+                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
+                    }
                 }
             }
 
