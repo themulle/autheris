@@ -375,6 +375,50 @@ public sealed class ODataHardeningTests
         var statusResult = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
         statusResult!.StatusCode.ShouldBe(StatusCodes.Status504GatewayTimeout);
     }
+
+    // ==============================================================
+    // API-15: Swagger UI & Metadata challenge outside Development
+    // ==============================================================
+
+    [Fact]
+    public void Api15_SwaggerAuth_RequiresChallengeForAnonymousOutsideDev()
+    {
+        var env = Substitute.For<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+        env.EnvironmentName.Returns(Microsoft.Extensions.Hosting.Environments.Production);
+        var anonymous = new DefaultHttpContext();
+
+        var result = ODataEndpoints.CheckSwaggerAuth(new GatewayOptions(), env, anonymous);
+
+        result.ShouldNotBeNull();
+        result.GetType().Name.ShouldContain("Challenge");
+    }
+
+    [Fact]
+    public void Api15_SwaggerAuth_ForbidsAuthenticatedNonAdminOutsideDev()
+    {
+        var env = Substitute.For<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+        env.EnvironmentName.Returns(Microsoft.Extensions.Hosting.Environments.Production);
+        var nonAdmin = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "CatalogReader")], "TestAuth"))
+        };
+
+        var result = ODataEndpoints.CheckSwaggerAuth(new GatewayOptions(), env, nonAdmin);
+
+        result.ShouldNotBeNull();
+        result.GetType().Name.ShouldContain("Forbid");
+    }
+
+    [Fact]
+    public void Api15_MetadataChallenge_RequiresChallengeForAnonymousOutsideDev()
+    {
+        var env = Substitute.For<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+        env.EnvironmentName.Returns(Microsoft.Extensions.Hosting.Environments.Production);
+        var anonymous = new DefaultHttpContext();
+
+        ODataEndpoints.RequiresMetadataChallenge(new GatewayOptions(), env, anonymous).ShouldBeTrue();
+    }
 }
+
 
 

@@ -26,11 +26,37 @@ public static class ODataEndpoints
     internal static bool RequiresSwaggerChallenge(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context) =>
         !gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true;
 
+    /// <summary>API-15: Evaluates Swagger UI authorization: challenge if unauthenticated outside Dev, forbid if authenticated non-admin.</summary>
+    internal static IResult? CheckSwaggerAuth(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context)
+    {
+        if (gatewayOptions.IsOpenSchemaAllowed || env.IsDevelopment())
+        {
+            return null;
+        }
+        if (context.User?.Identity?.IsAuthenticated != true)
+        {
+            return Results.Challenge();
+        }
+        if (!IsOpenApiAdmin(context.User))
+        {
+            return Results.Forbid();
+        }
+        return null;
+    }
+
+    /// <summary>API-15: Metadata and service document outside Development require an authenticated caller (challenge).</summary>
+    internal static bool RequiresMetadataChallenge(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context) =>
+        !gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true;
+
     public static IEndpointRouteBuilder MapODataEndpoints(this IEndpointRouteBuilder app, GatewayOptions gatewayOptions)
     {
         // OData v4 / Power BI & Excel Direct Adapter Endpoints
-        async Task<IResult> HandleServiceDocumentAsync(IODataHandler odataHandler, HttpContext context)
+        async Task<IResult> HandleServiceDocumentAsync(IODataHandler odataHandler, HttpContext context, IWebHostEnvironment env)
         {
+            if (RequiresMetadataChallenge(gatewayOptions, env, context))
+            {
+                return Results.Challenge();
+            }
             context.Response.Headers["OData-Version"] = "4.0";
             var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
             var doc = await odataHandler.GetServiceDocumentAsync(serviceRoot, context.User, context.RequestAborted);
@@ -41,8 +67,13 @@ public static class ODataEndpoints
 
         app.MapGet("/odata/v4/$metadata", async (
             IODataHandler odataHandler,
-            HttpContext context) =>
+            HttpContext context,
+            IWebHostEnvironment env) =>
         {
+            if (RequiresMetadataChallenge(gatewayOptions, env, context))
+            {
+                return Results.Challenge();
+            }
             context.Response.Headers["OData-Version"] = "4.0";
             var xml = await odataHandler.GetMetadataCsdlAsync(context.User, context.RequestAborted);
             return Results.Content(xml, "application/xml;charset=utf-8");
@@ -214,11 +245,10 @@ public static class ODataEndpoints
         // Die UI-Assets werden aus dem Assembly ausgeliefert (kein CDN, offline-faehig).
         IResult ServeSwaggerUi(HttpContext context, IWebHostEnvironment env)
         {
-            if (RequiresSwaggerChallenge(gatewayOptions, env, context))
+            var authCheck = CheckSwaggerAuth(gatewayOptions, env, context);
+            if (authCheck != null)
             {
-                // API-15: a bare 401 carries no WWW-Authenticate header, so browsers never start Kerberos/Negotiate.
-                // A challenge lets the default scheme answer with the proper header.
-                return Results.Challenge();
+                return authCheck;
             }
             var nonce = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
             context.Response.Headers.ContentSecurityPolicy = $"default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
