@@ -33,6 +33,9 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
     /// <summary>RR-L4-04: Event-bus channel used to invalidate decision caches on every replica.</summary>
     public const string InvalidationChannel = "autheris:rebac:invalidate";
 
+    /// <summary>Monotonic cluster generation key stored in the broker to detect partition drift on reconnect.</summary>
+    public const string GenerationKey = "rebac:generation";
+
     private readonly IEventBus? _eventBus;
 
     public ZanzibarRebacEvaluator(
@@ -50,6 +53,12 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
 
         if (_eventBus != null)
         {
+            _eventBus.ConnectionRestored += () =>
+            {
+                _logger.LogInformation("Event bus connection restored. Evicting ReBAC decision cache to synchronize with cluster (1.8).");
+                _cache.Clear();
+            };
+
             // Singleton for the application lifetime; the subscription lives as long as the event bus.
             _ = _eventBus.Subscribe<string>(InvalidationChannel, tenant =>
             {
@@ -78,11 +87,22 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
     {
         var tenant = InvalidateLocal(tenantId);
 
-        // RR-L4-04: propagate to all other replicas (Redis pub/sub when configured). Best effort;
-        // the per-entry TTL (Rebac.CacheTtlSeconds) bounds staleness if a message is lost.
         if (_eventBus != null)
         {
+            _ = IncrementGenerationAsync();
             _ = PublishInvalidationAsync(tenant);
+        }
+    }
+
+    private async Task IncrementGenerationAsync()
+    {
+        try
+        {
+            await _eventBus!.IncrementCounterAsync(GenerationKey).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "ReBAC cluster generation counter could not be incremented in event bus.");
         }
     }
 
