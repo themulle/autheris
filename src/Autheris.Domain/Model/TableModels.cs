@@ -143,6 +143,16 @@ public sealed record TableMetadata
 
     public bool IsCompositePrimaryKey => PrimaryKeyColumns.Count > 1;
 
+    /// <summary>
+    /// D-5: the record's generated ToString() printed every property, including masking rules with their HMAC key ids.
+    /// Only the identifier is printed, so logging a metadata object cannot disclose masking configuration.
+    /// </summary>
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Identifier = ").Append(Identifier.ToString());
+        return true;
+    }
+
     public DataSourceType DataSourceType => Table.DataSourceType;
     public HttpEndpointDescriptor? HttpEndpoint => Table.HttpEndpoint;
     public string? PluginName => Table.PluginName;

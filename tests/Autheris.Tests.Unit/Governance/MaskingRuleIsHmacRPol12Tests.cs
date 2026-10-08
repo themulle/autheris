@@ -19,3 +19,23 @@ public sealed class MaskingRuleIsHmacRPol12Tests
         new MaskingRule { RuleType = ruleType }.IsHmac.ShouldBe(expected);
     }
 }
+
+/// <summary>D-5: TableMetadata.ToString() does not disclose masking configuration (HMAC key ids).</summary>
+public sealed class TableMetadataToStringD5Tests
+{
+    [Fact]
+    public void ToString_PrintsOnlyTheIdentifier()
+    {
+        var meta = new TableMetadata
+        {
+            Identifier = new Autheris.Domain.Common.TableIdentifier("hr", "dbo", "employees"),
+            ColumnMaskingRules = new System.Collections.Generic.Dictionary<string, MaskingRule> { ["ssn"] = new MaskingRule { RuleType = "HMAC", HmacKeyId = "key-2026-secret-id" } }
+        };
+
+        var text = meta.ToString();
+
+        text.ShouldContain("employees");
+        text.ShouldNotContain("key-2026-secret-id");
+        text.ShouldNotContain("ColumnMaskingRules");
+    }
+}
