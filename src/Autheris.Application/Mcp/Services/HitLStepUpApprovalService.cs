@@ -94,13 +94,16 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                     {
                         itsmTicketId = dispatchResult.TicketReference.TicketId;
                         itsmTicketUrl = dispatchResult.TicketReference.TicketUrl;
-                        _logger.LogInformation("Dispatched HitL ITSM ticket '{TicketId}' for approval '{ApprovalId}'.", itsmTicketId, approvalId);
+                        var safeTicketId = (itsmTicketId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+                        var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                        _logger.LogInformation("Dispatched HitL ITSM ticket '{TicketId}' for approval '{ApprovalId}'.", safeTicketId, safeApprovalIdForLog);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to auto-create ITSM ticket for HitL approval '{ApprovalId}'. Proceeding with in-memory approval gate.", approvalId);
+                var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                _logger.LogWarning(ex, "Failed to auto-create ITSM ticket for HitL approval '{ApprovalId}'. Proceeding with in-memory approval gate.", safeApprovalIdForLog);
             }
         }
 
@@ -149,12 +152,15 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to register HitL ticket '{ApprovalId}' in cluster state.", approvalId);
+                var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                _logger.LogWarning(ex, "Failed to register HitL ticket '{ApprovalId}' in cluster state.", safeApprovalIdForLog);
             }
         }
 
+        var safeRequesterSidForLog = requesterSid.Replace("\r", string.Empty).Replace("\n", string.Empty);
+        var safeReqApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
         _logger.LogInformation("HitL Step-Up approval requested. ID: {ApprovalId}, Table: {Table}, Requester: {RequesterSid}, Timeout: {Timeout}s",
-            approvalId, targetTable, requesterSid, timeoutSeconds);
+            safeReqApprovalId, targetTable, safeRequesterSidForLog, timeoutSeconds);
 
         try
         {
@@ -178,7 +184,8 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                     }
                 }
 
-                _logger.LogWarning("HitL Step-Up approval '{ApprovalId}' timed out after {Timeout}s. Failing closed.", approvalId, timeoutSeconds);
+                var safeTimeoutApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                _logger.LogWarning("HitL Step-Up approval '{ApprovalId}' timed out after {Timeout}s. Failing closed.", safeTimeoutApprovalId, timeoutSeconds);
                 var expiredResult = new HitLApprovalResult(false, entry.Ticket, $"Approval timed out after {timeoutSeconds}s.");
                 entry.Tcs.TrySetResult(expiredResult);
                 return expiredResult;
@@ -293,8 +300,10 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                 // Every identifier of the approver is compared, so oid/sub/upn/PrimarySid variants of the same user are caught.
                 if (_options.Value.HitLStepUp.RequireDifferentApprover && IsSameIdentity(entry.Ticket.RequesterSid, approver))
                 {
+                    var safeRequesterSidForLog = (entry.Ticket.RequesterSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+                    var safeApprovalIdForWarn = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
                     _logger.LogWarning("Four-Eyes security violation: Requester '{RequesterSid}' attempted self-approval on ticket '{ApprovalId}'.",
-                        entry.Ticket.RequesterSid, approvalId);
+                        safeRequesterSidForLog, safeApprovalIdForWarn);
 
                     return new HitLApprovalResult(
                         false,
@@ -315,7 +324,9 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
             }
 
             await BroadcastDecisionAsync(approvalId, approvedResult.Ticket, new HitLApprovalBroadcast(approvalId, approver.ApproverSid, true), ct).ConfigureAwait(false);
-            _logger.LogInformation("HitL ticket '{ApprovalId}' approved by '{ApproverSid}'.", approvalId, approver.ApproverSid);
+            var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+            var safeApproverSidForLog = (approver.ApproverSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            _logger.LogInformation("HitL ticket '{ApprovalId}' approved by '{ApproverSid}'.", safeApprovalIdForLog, safeApproverSidForLog);
             return approvedResult;
         }
         finally
@@ -381,8 +392,11 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
 
             await BroadcastDecisionAsync(approvalId, rejectedResult.Ticket,
                 new HitLApprovalBroadcast(approvalId, approver.ApproverSid, false, rejectedResult.Ticket.RejectionReason), ct).ConfigureAwait(false);
+            var safeRejectApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+            var safeRejectApproverSidForLog = (approver.ApproverSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            var safeRejectReasonForLog = (rejectedResult.Ticket.RejectionReason ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
             _logger.LogInformation("HitL ticket '{ApprovalId}' rejected by '{ApproverSid}'. Reason: {Reason}",
-                approvalId, approver.ApproverSid, rejectedResult.Ticket.RejectionReason);
+                safeRejectApprovalIdForLog, safeRejectApproverSidForLog, safeRejectReasonForLog);
             return rejectedResult;
         }
         finally
@@ -406,7 +420,8 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Failed to acquire distributed lock for ticket '{ApprovalId}'.", approvalId);
+            var safeLockApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+            _logger.LogWarning(ex, "Failed to acquire distributed lock for ticket '{ApprovalId}'.", safeLockApprovalId);
             return (true, null);
         }
     }
@@ -442,7 +457,8 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to broadcast HitL decision for ticket '{ApprovalId}' to cluster.", approvalId);
+            var safeBroadcastApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+            _logger.LogWarning(ex, "Failed to broadcast HitL decision for ticket '{ApprovalId}' to cluster.", safeBroadcastApprovalId);
         }
     }
 
@@ -467,7 +483,8 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to fetch remote HitL ticket '{ApprovalId}' from cluster state.", approvalId);
+                    var safeFetchApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                    _logger.LogWarning(ex, "Failed to fetch remote HitL ticket '{ApprovalId}' from cluster state.", safeFetchApprovalId);
                 }
             }
         }
@@ -480,8 +497,11 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         if (!approver.IsCrossTenantAdmin &&
             !string.Equals(entry.Ticket.TenantId, approver.TenantId, StringComparison.OrdinalIgnoreCase))
         {
+            var safeApproverSidForLog = (approver.ApproverSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+            var safeTenantForLog = (approver.TenantId ?? "none").Replace("\r", string.Empty).Replace("\n", string.Empty);
+            var safeBlockedApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
             _logger.LogWarning("Cross-tenant HitL decision blocked: approver '{ApproverSid}' (tenant '{ApproverTenant}') attempted to act on ticket '{ApprovalId}' of another tenant.",
-                approver.ApproverSid, approver.TenantId ?? "none", approvalId);
+                safeApproverSidForLog, safeTenantForLog, safeBlockedApprovalId);
             return null;
         }
 
@@ -537,7 +557,8 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to fetch remote HitL ticket '{ApprovalId}' from cluster state.", approvalId);
+                var safeGetTicketApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                _logger.LogWarning(ex, "Failed to fetch remote HitL ticket '{ApprovalId}' from cluster state.", safeGetTicketApprovalId);
             }
         }
 

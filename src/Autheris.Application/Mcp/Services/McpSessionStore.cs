@@ -74,7 +74,8 @@ public sealed class McpSessionStore : IMcpSessionStore
             // SEC M-09: Per-principal limit (expired sessions of this principal are purged first).
             if (CountActiveSessionsForOwner(ownerKey, now) >= MaxSessionsPerPrincipal)
             {
-                _logger.LogWarning("MCP session limit per principal ({Max}) reached for {PrincipalId}. Rejecting session creation.", MaxSessionsPerPrincipal, ownerKey);
+                var safeOwnerKeyForLog = ownerKey.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                _logger.LogWarning("MCP session limit per principal ({Max}) reached for {PrincipalId}. Rejecting session creation.", MaxSessionsPerPrincipal, safeOwnerKeyForLog);
                 throw new McpSessionLimitExceededException($"Maximum active MCP sessions per principal ({MaxSessionsPerPrincipal}) reached. Close unused sessions or retry later.");
             }
 
@@ -94,8 +95,11 @@ public sealed class McpSessionStore : IMcpSessionStore
 
         PersistInBackground(sessionId, session);
 
+        var safeCreatedSessionId = sessionId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+        var safeCreatedSpn = servicePrincipalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+        var safeCreatedUserSid = (userSid ?? "none").Replace("\r", string.Empty).Replace("\n", string.Empty);
         _logger.LogInformation("Created new MCP session {SessionId} for principal {PrincipalId} (UserSid: {UserSid}) in tenant {TenantId}.",
-            sessionId, servicePrincipalId, userSid ?? "none", validatedTenant.Value);
+            safeCreatedSessionId, safeCreatedSpn, safeCreatedUserSid, validatedTenant.Value);
 
         return session;
     }
@@ -127,7 +131,8 @@ public sealed class McpSessionStore : IMcpSessionStore
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "Failed to retrieve remote MCP session {SessionId} from cluster state.", sessionId);
+                var safeGetSessionId = sessionId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                _logger.LogWarning(ex, "Failed to retrieve remote MCP session {SessionId} from cluster state.", safeGetSessionId);
             }
 
             if (session == null)
@@ -147,7 +152,8 @@ public sealed class McpSessionStore : IMcpSessionStore
         if (now - session.LastActiveAt > DefaultSessionTtl)
         {
             RemoveSession(sessionId);
-            _logger.LogWarning("MCP session {SessionId} expired due to inactivity (TTL: {Ttl}).", sessionId, DefaultSessionTtl);
+            var safeTouchSessionId = sessionId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+            _logger.LogWarning("MCP session {SessionId} expired due to inactivity (TTL: {Ttl}).", safeTouchSessionId, DefaultSessionTtl);
             return null;
         }
 
@@ -176,7 +182,8 @@ public sealed class McpSessionStore : IMcpSessionStore
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to persist MCP session {SessionId} in cluster state.", sessionId);
+            var safePersistSessionId = sessionId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+            _logger.LogWarning(ex, "Failed to persist MCP session {SessionId} in cluster state.", safePersistSessionId);
         }
     }
 
@@ -255,7 +262,8 @@ public sealed class McpSessionStore : IMcpSessionStore
 
         if (removed)
         {
-            _logger.LogInformation("Terminated MCP session {SessionId}.", sessionId);
+            var safeRemoveSessionId = sessionId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+            _logger.LogInformation("Terminated MCP session {SessionId}.", safeRemoveSessionId);
         }
         return removed;
     }
@@ -276,7 +284,8 @@ public sealed class McpSessionStore : IMcpSessionStore
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to clean up cluster state of MCP session {SessionId}.", sessionId);
+            var safeCleanupSessionId = sessionId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+            _logger.LogDebug(ex, "Failed to clean up cluster state of MCP session {SessionId}.", safeCleanupSessionId);
         }
     }
 
@@ -303,7 +312,8 @@ public sealed class McpSessionStore : IMcpSessionStore
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogDebug(ex, "Failed to dispatch routed cross-node SSE event to MCP session {SessionId}.", payload.SessionId);
+                            var safePayloadSessionId = (payload.SessionId ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+                            _logger.LogDebug(ex, "Failed to dispatch routed cross-node SSE event to MCP session {SessionId}.", safePayloadSessionId);
                         }
                     }
                 });
@@ -318,7 +328,8 @@ public sealed class McpSessionStore : IMcpSessionStore
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to subscribe to cross-node SSE events for MCP session {SessionId}.", sessionId);
+                var safeSubSessionId = sessionId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                _logger.LogWarning(ex, "Failed to subscribe to cross-node SSE events for MCP session {SessionId}.", safeSubSessionId);
             }
         }
     }
@@ -335,7 +346,8 @@ public sealed class McpSessionStore : IMcpSessionStore
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to dispatch SSE event to MCP session {SessionId}.", sessionId);
+                var safeSendSessionId = sessionId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                _logger.LogDebug(ex, "Failed to dispatch SSE event to MCP session {SessionId}.", safeSendSessionId);
                 _sseSenders.TryRemove(sessionId, out _);
                 return false;
             }
@@ -351,7 +363,8 @@ public sealed class McpSessionStore : IMcpSessionStore
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to publish cross-node SSE event for MCP session {SessionId}.", sessionId);
+                var safePubSessionId = sessionId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                _logger.LogWarning(ex, "Failed to publish cross-node SSE event for MCP session {SessionId}.", safePubSessionId);
             }
         }
 
