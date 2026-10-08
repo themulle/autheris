@@ -1223,6 +1223,33 @@ public static class GatewayServiceCollectionExtensions
             {
                 throw new ValidationException("Sicherheitsverletzung: RequireTrustedProxy darf bei aktivem ForwardAuth außerhalb von Development nicht auf false gesetzt sein!");
             }
+
+            if (options.Authentication.ForwardAuth.TrustedNetworks != null)
+            {
+                foreach (var netStr in options.Authentication.ForwardAuth.TrustedNetworks)
+                {
+                    if (!System.Net.IPNetwork.TryParse(netStr, out var network))
+                    {
+                        throw new ValidationException($"Konfigurationsfehler ForwardAuth.TrustedNetworks: Ungültiges IP-Netzwerk '{netStr}'.");
+                    }
+
+                    if (network.PrefixLength == 0)
+                    {
+                        throw new ValidationException($"Sicherheitsverletzung (API-8): ForwardAuth.TrustedNetworks '{netStr}' ist ein Wildcard-Netzwerk (/0). Wildcard-Netzwerke sind verboten!");
+                    }
+                }
+            }
+
+            if (options.Authentication.ForwardAuth.TrustedProxies != null)
+            {
+                foreach (var proxyStr in options.Authentication.ForwardAuth.TrustedProxies)
+                {
+                    if (!System.Net.IPAddress.TryParse(proxyStr, out _))
+                    {
+                        throw new ValidationException($"Konfigurationsfehler ForwardAuth.TrustedProxies: Ungültige IP-Adresse '{proxyStr}'.");
+                    }
+                }
+            }
         }
 
         if (!environment.IsDevelopment())
