@@ -58,7 +58,13 @@ public sealed class WebSqlTwoPartNameDataSourceTests
         return (service, repo);
     }
 
-    internal static (GovernedSqlExecutionService Service, ITableMetadataRepository Repository, DbCommand Command) CreateServiceWithCommand(params TableIdentifier[] catalogued)
+    internal static (GovernedSqlExecutionService Service, ITableMetadataRepository Repository, DbCommand Command) CreateServiceWithCommand(params TableIdentifier[] catalogued) =>
+        CreateServiceWithCommand(null, null, catalogued);
+
+    internal static (GovernedSqlExecutionService Service, ITableMetadataRepository Repository, DbCommand Command) CreateServiceWithCommand(
+        IAuditLogRepository? audit,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters,
+        params TableIdentifier[] catalogued)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
@@ -120,14 +126,15 @@ public sealed class WebSqlTwoPartNameDataSourceTests
             policyEnforcement: null,
             consentResolution: resolution,
             tableRepository: repo,
-            auditLogRepository: null,
+            auditLogRepository: audit,
             connectionFactory: factory,
             clientIpResolver: null,
             environment: null,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consents,
             secretProvider: null,
-            sessionInitializer: Substitute.For<IDbSessionContextInitializer>());
+            sessionInitializer: Substitute.For<IDbSessionContextInitializer>(),
+            mandatoryFilters: mandatoryFilters);
         return (service, repo, command);
     }
 

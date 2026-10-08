@@ -250,6 +250,18 @@ public sealed class MandatoryRowFilterResolverTests
         (await resolver.ResolveAsync(Query(air1))).AppliedFilters.ShouldBe(["filter_a", "filter_b"]);
     }
 
+    [Fact]
+    public async Task SameSchemaAndTableInAnotherDataSource_IsResolvedSeparately()
+    {
+        // The memo must key on the full identifier: same schema and table name in another data source is another object.
+        var resolver = Resolver(Snapshot([ByClient], Profile(UncoveredPolicy.Deny, new FilterBinding { FilterName = "filter_a" }) with { Scope = "*.*.*" }));
+        var local = Table("fms", "air1", "client_id");
+        var foreign = local with { Identifier = new TableIdentifier("other_source", "fms", "air1") };
+
+        (await resolver.ResolveAsync(Query(local))).PredicateSql.ShouldBe("P_filter_a(client_id)");
+        (await resolver.ResolveAsync(Query(foreign))).IsDenied.ShouldBeTrue();   // filter_a is defined for lwetem_prod only
+    }
+
     [Property(MaxTest = 50)]
     public bool OrderOfBindings_DoesNotChangeTheResult(bool reverse)
     {

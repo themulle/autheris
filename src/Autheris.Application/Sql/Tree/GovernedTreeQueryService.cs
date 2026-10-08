@@ -333,7 +333,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             TargetTable = table.ToString(),
             Decision = access.Decision.IsAllowed ? "ALLOW" : "DENY",
             TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
-            DetailsJson = JsonSerializer.Serialize(new { is_allowed = access.Decision.IsAllowed, reasons = access.Decision.DeniedReasons, path = "graphql_tree" })
+            DetailsJson = JsonSerializer.Serialize(new { is_allowed = access.Decision.IsAllowed, reasons = access.Decision.DeniedReasons, path = "graphql_tree", virtual_filters = access.Decision.AppliedVirtualFilters })
         }, ct).ConfigureAwait(false);
     }
 

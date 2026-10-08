@@ -138,10 +138,10 @@ public sealed record VirtualFilter
         sb.Append("name=").Append(Name).Append('\n').Append("source=").Append(Source).Append('\n');
         if (Structured != null)
         {
-            sb.Append("from=").Append(Structured.From.ToQualifiedName()).Append(" as ").Append(Structured.FromAlias).Append('\n');
+            sb.Append("from=").Append(Structured.From.ToString()).Append(" as ").Append(Structured.FromAlias).Append('\n');
             foreach (var join in Structured.Joins)
             {
-                sb.Append("join=").Append(join.Table.ToQualifiedName()).Append(" as ").Append(join.Alias)
+                sb.Append("join=").Append(join.Table.ToString()).Append(" as ").Append(join.Alias)
                   .Append(" on ").Append(join.LeftColumn).Append('=').Append(join.RightColumn).Append('\n');
             }
 
@@ -186,7 +186,7 @@ public sealed record VirtualFilter
     {
         if (!string.Equals(table.Domain, Source, StringComparison.OrdinalIgnoreCase))
         {
-            throw new ArgumentException($"The table '{table.ToQualifiedName()}' is not in the filter's data source '{Source}'.", nameof(table));
+            throw new ArgumentException($"The table '{table.ToString()}' is not in the filter's data source '{Source}'.", nameof(table));
         }
 
         VirtualFilterNames.ValidateIdentifier(table.Schema, nameof(Structured));

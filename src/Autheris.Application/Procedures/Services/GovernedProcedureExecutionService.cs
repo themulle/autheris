@@ -210,6 +210,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 rowCount = governed.Rows.Count,
                 truncated = raw.Truncated,
                 rowsRemovedByScope,
+                virtual_filters = decisions
+                    .Where(d => d.Value.Decision.AppliedVirtualFilters is { Count: > 0 })
+                    .ToDictionary(d => d.Key.ToString(), d => d.Value.Decision.AppliedVirtualFilters),
                 returnedColumns = governed.Columns.Count,
                 droppedColumns = raw.Columns.Count - governed.Columns.Count,
                 parameterHashes = HashParameters(values)

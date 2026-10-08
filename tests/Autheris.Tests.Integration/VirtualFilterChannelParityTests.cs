@@ -42,6 +42,22 @@ public sealed class VirtualFilterChannelParityTests : IClassFixture<VirtualFilte
     }
 
     [Fact]
+    public async Task EffectiveFilters_ExplainsTheDecisionForDavid()
+    {
+        var auditor = _fixture.Client();
+        auditor.DefaultRequestHeaders.Remove("X-Test-Roles");
+        auditor.DefaultRequestHeaders.Add("X-Test-Roles", "SecurityAuditor");
+
+        var response = await auditor.GetAsync($"/api/v1/governance/effective-filters?user={RowFilterChannelParityTests.Fixture.DavidSid}&table=default.main.air1");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var body = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("decision").GetString().ShouldBe("allow");
+        body.RootElement.GetProperty("sql").GetString()!.ShouldStartWith("EXISTS (SELECT 1 FROM \"client\" AS \"client\"");
+        body.RootElement.GetProperty("applied_filters")[0].GetString().ShouldBe("nicht_ausgelieferte_krane");
+    }
+
+    [Fact]
     public async Task UncoveredObject_IsDenied()
     {
         var response = await _fixture.Client().PostAsJsonAsync("/api/v1/sql", new { sql = "SELECT serial_number FROM crane" });

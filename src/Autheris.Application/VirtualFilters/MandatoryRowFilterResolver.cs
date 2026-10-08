@@ -35,6 +35,25 @@ public sealed record MandatoryFilterOutcome(bool IsDenied, string? DenyReason, s
     public override int GetHashCode() => HashCode.Combine(IsDenied, DenyReason, PredicateSql);
 }
 
+/// <summary>Why one binding of a profile applies to an object or not (phase 6, effective-filters).</summary>
+public sealed record BindingExplanation(
+    string Filter,
+    string Pattern,
+    bool Applies,
+    string? Reason,
+    IReadOnlyList<string> MissingColumns,
+    string? SupersededBy);
+
+/// <summary>One profile of the caller and its effect on the object.</summary>
+public sealed record ProfileExplanation(string Profile, string Scope, bool InScope, UncoveredPolicy? Uncovered, IReadOnlyList<BindingExplanation> Bindings);
+
+/// <summary>Full explanation of the virtual filter resolution for one caller and one object.</summary>
+public sealed record MandatoryFilterExplanation(long Generation, MandatoryFilterOutcome Outcome, IReadOnlyList<ProfileExplanation> Profiles)
+{
+    /// <summary>allow (no or applying filters), deny (an evaluation error) or unmatched-deny (uncovered object).</summary>
+    public string Decision => !Outcome.IsDenied ? "allow" : Outcome.DenyReason?.Contains("uncovered", StringComparison.Ordinal) == true ? "unmatched-deny" : "deny";
+}
+
 /// <summary>Current virtual filters and profiles; reloads when the generation changes.</summary>
 public interface IVirtualFilterSnapshotProvider
 {
@@ -145,19 +164,29 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             snapshot.Generation, query.Tenant.Value, query.UserSid.Value,
             string.Join(',', query.GroupSids.Select(s => s.Value).Order(StringComparer.Ordinal)),
             string.Join(',', query.Roles.Order(StringComparer.Ordinal)),
-            query.Metadata.Identifier.ToQualifiedName(), query.Metadata.Dialect, (int)query.ObjectKind,
+            query.Metadata.Identifier.ToString(), query.Metadata.Dialect, (int)query.ObjectKind,
             string.Join(',', query.Metadata.Columns.Select(c => c.ColumnName)));
         if (_memo.TryGetValue(key, out var cached))
         {
             return cached;
         }
 
-        var outcome = Resolve(snapshot, query);
+        var outcome = Resolve(snapshot, query, trace: null);
         _memo[key] = outcome;
         return outcome;
     }
 
-    private MandatoryFilterOutcome Resolve(VirtualFilterSnapshot snapshot, MandatoryFilterQuery query)
+    /// <summary>Same resolution as <see cref="ResolveAsync"/>, with the reason for every profile and binding (no memo).</summary>
+    public async ValueTask<MandatoryFilterExplanation> ExplainAsync(MandatoryFilterQuery query, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var snapshot = await _snapshots.GetAsync(ct).ConfigureAwait(false);
+        var trace = new List<ProfileExplanation>();
+        var outcome = Resolve(snapshot, query, trace);
+        return new MandatoryFilterExplanation(snapshot.Generation, outcome, trace);
+    }
+
+    private MandatoryFilterOutcome Resolve(VirtualFilterSnapshot snapshot, MandatoryFilterQuery query, List<ProfileExplanation>? trace)
     {
         var table = query.Metadata.Identifier;
         var profiles = snapshot.Profiles
@@ -171,14 +200,18 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         string? currentFilter = null;
         try
         {
+            var explained = new List<(AccessProfile Profile, List<(VirtualFilter? Filter, FilterBinding Binding, string? Reason, IReadOnlyList<string> Missing)> Bindings)>();
+            MandatoryFilterOutcome? uncoveredDeny = null;
             foreach (var profile in profiles)
             {
                 if (!Pattern(profile.Scope).MatchesObject(table))
                 {
+                    trace?.Add(new ProfileExplanation(profile.Name, profile.Scope, InScope: false, profile.Uncovered, []));
                     continue;
                 }
 
                 bool covered = false;
+                var bindingTrace = new List<(VirtualFilter? Filter, FilterBinding Binding, string? Reason, IReadOnlyList<string> Missing)>();
                 foreach (var binding in profile.Bindings)
                 {
                     currentFilter = binding.FilterName;
@@ -187,18 +220,50 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                         throw new InvalidOperationException($"The profile '{profile.Name}' binds the unknown virtual filter '{binding.FilterName}'.");
                     }
 
-                    if (Applies(filter, binding, profile, query))
+                    var (applies, reason, missing) = Check(filter, binding, profile, query);
+                    bindingTrace.Add((filter, binding, reason, missing));
+                    if (applies)
                     {
                         covered = true;
                         applying.TryAdd(filter.Name + "|" + binding.TargetPattern, (filter, binding));
                     }
                 }
 
-                if (!covered && profile.Uncovered == UncoveredPolicy.Deny)
+                explained.Add((profile, bindingTrace));
+                if (!covered && profile.Uncovered == UncoveredPolicy.Deny && uncoveredDeny == null)
                 {
-                    return MandatoryFilterOutcome.Deny(
-                        $"Virtual filters: '{table.ToQualifiedName()}' is in the scope of the profile '{profile.Name}' but no filter of the profile covers it (uncovered: deny).");
+                    uncoveredDeny = MandatoryFilterOutcome.Deny(
+                        $"Virtual filters: '{table.ToString()}' is in the scope of the profile '{profile.Name}' but no filter of the profile covers it (uncovered: deny).");
+                    if (trace == null)
+                    {
+                        return uncoveredDeny;
+                    }
                 }
+            }
+
+            var names = applying.Values.Select(a => a.Filter.Name).ToHashSet(StringComparer.Ordinal);
+            var supersededBy = applying.Values
+                .SelectMany(a => a.Filter.Supersedes.Where(names.Contains).Select(s => (Superseded: s, By: a.Filter.Name)))
+                .GroupBy(x => x.Superseded, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First().By, StringComparer.Ordinal);
+
+            if (trace != null)
+            {
+                foreach (var (profile, bindings) in explained)
+                {
+                    trace.Add(new ProfileExplanation(profile.Name, profile.Scope, InScope: true, profile.Uncovered, bindings.Select(b => new BindingExplanation(
+                        b.Binding.FilterName,
+                        b.Binding.TargetPattern ?? profile.Scope,
+                        Applies: b.Reason == null && !supersededBy.ContainsKey(b.Binding.FilterName),
+                        b.Reason,
+                        b.Missing,
+                        b.Reason == null && supersededBy.TryGetValue(b.Binding.FilterName, out var by) ? by : null)).ToList()));
+                }
+            }
+
+            if (uncoveredDeny != null)
+            {
+                return uncoveredDeny;
             }
 
             if (applying.Count == 0)
@@ -206,10 +271,8 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                 return MandatoryFilterOutcome.None;
             }
 
-            var names = applying.Values.Select(a => a.Filter.Name).ToHashSet(StringComparer.Ordinal);
-            var superseded = applying.Values.SelectMany(a => a.Filter.Supersedes).Where(names.Contains).ToHashSet(StringComparer.Ordinal);
             var effective = applying.Values
-                .Where(a => !superseded.Contains(a.Filter.Name))
+                .Where(a => !supersededBy.ContainsKey(a.Filter.Name))
                 .OrderBy(a => a.Filter.Name, StringComparer.Ordinal)
                 .ThenBy(a => a.Binding.TargetPattern, StringComparer.Ordinal)
                 .ToList();
@@ -226,31 +289,37 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException or RegexMatchTimeoutException)
         {
-            return MandatoryFilterOutcome.Deny($"Virtual filters: the filter '{currentFilter}' could not be evaluated for '{table.ToQualifiedName()}' ({ex.Message}).");
+            return MandatoryFilterOutcome.Deny($"Virtual filters: the filter '{currentFilter}' could not be evaluated for '{table.ToString()}' ({ex.Message}).");
         }
     }
 
-    private bool Applies(VirtualFilter filter, FilterBinding binding, AccessProfile profile, MandatoryFilterQuery query)
+    /// <summary>Whether the binding applies; otherwise the reason and the missing columns.</summary>
+    private (bool Applies, string? Reason, IReadOnlyList<string> Missing) Check(VirtualFilter filter, FilterBinding binding, AccessProfile profile, MandatoryFilterQuery query)
     {
         var table = query.Metadata.Identifier;
-        if ((binding.ObjectKinds & query.ObjectKind) == 0 ||
-            !string.Equals(table.Domain, filter.Source, StringComparison.OrdinalIgnoreCase))
+        if ((binding.ObjectKinds & query.ObjectKind) == 0)
         {
-            return false;
+            return (false, $"object kind {query.ObjectKind} not bound", []);
+        }
+
+        if (!string.Equals(table.Domain, filter.Source, StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, $"object is not in the filter's data source '{filter.Source}'", []);
         }
 
         var pattern = Pattern(binding.TargetPattern ?? profile.Scope);
         if (!pattern.MatchesObject(table))
         {
-            return false;
+            return (false, "pattern does not match the object", []);
         }
 
         if (pattern.HasColumnSegment && !query.Metadata.Columns.Any(c => pattern.MatchesColumn(c.ColumnName)))
         {
-            return false;
+            return (false, "pattern matches no column of the object", []);
         }
 
-        return VirtualFilterColumns.RequiredTargetColumns(filter, binding).All(query.Metadata.HasColumn);
+        var missing = VirtualFilterColumns.RequiredTargetColumns(filter, binding).Where(c => !query.Metadata.HasColumn(c)).ToList();
+        return missing.Count == 0 ? (true, null, []) : (false, "object lacks columns the filter needs", missing);
     }
 
     private ObjectPattern Pattern(string text) => _patterns.GetOrAdd(text, ObjectPattern.Parse);

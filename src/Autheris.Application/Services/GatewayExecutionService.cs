@@ -175,7 +175,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             TargetTable = table.ToString(),
             Decision = decision.IsAllowed ? "ALLOW" : "DENY",
             TraceId = traceId,
-            DetailsJson = JsonSerializer.Serialize(new { is_allowed = decision.IsAllowed, reasons = decision.DeniedReasons })
+            DetailsJson = JsonSerializer.Serialize(new { is_allowed = decision.IsAllowed, reasons = decision.DeniedReasons, virtual_filters = decision.AppliedVirtualFilters })
         }, ct);
 
         // Enforce Access

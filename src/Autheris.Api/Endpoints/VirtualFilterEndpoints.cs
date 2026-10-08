@@ -35,6 +35,8 @@ public static class VirtualFilterEndpoints
         group.MapDelete("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => DeleteProfileAsync(name, context, service));
         group.MapPost("/virtual-filters/sync/plan", (HttpContext context, VirtualFilterAdministrationService service) => PlanSyncAsync(context, service));
         group.MapPost("/virtual-filters/sync/apply", (HttpContext context, VirtualFilterAdministrationService service) => ApplySyncAsync(context, service));
+        group.MapGet("/effective-filters", (HttpContext context, MandatoryRowFilterResolver resolver, Autheris.Application.Interfaces.ITableMetadataRepository catalog) =>
+            EffectiveFiltersAsync(context, resolver, catalog));
         return app;
     }
 
@@ -140,6 +142,108 @@ public static class VirtualFilterEndpoints
             return Results.Ok(await service.ApplySyncAsync(request, actor, force, context.RequestAborted).ConfigureAwait(false));
         }).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Phase 6: for <c>user</c> (SID, optional <c>groups</c> and <c>roles</c> as comma separated lists) and <c>table</c>
+    /// (domain.schema.table) which bindings apply, which columns are missing, what supersedes what, the decision and the
+    /// SQL in the table's dialect. Without <c>table</c>: one line per catalog object (<c>page</c>, <c>pageSize</c>).
+    /// </summary>
+    internal static async Task<IResult> EffectiveFiltersAsync(
+        HttpContext context,
+        MandatoryRowFilterResolver resolver,
+        Autheris.Application.Interfaces.ITableMetadataRepository catalog)
+    {
+        var security = EndpointSecurity.GetSecurityContext(context);
+        if (!security.HasRole(GatewayRole.FilterAdmin) && !security.HasRole(GatewayRole.GovernanceAdmin) && !security.HasRole(GatewayRole.SecurityAuditor))
+        {
+            return Forbidden();
+        }
+
+        var query = context.Request.Query;
+        string? user = query["user"];
+        if (string.IsNullOrWhiteSpace(user))
+        {
+            return Results.Json(new { error = "The query parameter 'user' (SID) is required." }, statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var tenant = ResolveTenant(security, query["tenant"]);
+        if (tenant == null)
+        {
+            return Forbidden();
+        }
+
+        static HashSet<T> List<T>(string? value, Func<string, T> create) =>
+            (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(create).ToHashSet();
+        var groups = List<Sid>(query["groups"], v => new Sid(v));
+        var roles = List<string>(query["roles"], v => v);
+        MandatoryFilterQuery For(TableMetadata table) => new(new Sid(user), groups, roles, tenant.Value, table);
+
+        string? tableName = query["table"];
+        if (!string.IsNullOrWhiteSpace(tableName))
+        {
+            if (!TableIdentifier.TryParse(tableName, out var id))
+            {
+                return Results.Json(new { error = "The query parameter 'table' must be domain.schema.table." }, statusCode: StatusCodes.Status400BadRequest);
+            }
+
+            var table = await catalog.GetTableMetadataAsync(id, context.RequestAborted).ConfigureAwait(false);
+            if (table == null)
+            {
+                return Results.Json(new { error = $"The table '{tableName}' is not in the catalog." }, statusCode: StatusCodes.Status404NotFound);
+            }
+
+            var explanation = await resolver.ExplainAsync(For(table), context.RequestAborted).ConfigureAwait(false);
+            return Results.Ok(ExplanationView(user, table, explanation));
+        }
+
+        int page = int.TryParse(query["page"], out var p) && p > 0 ? p : 1;
+        int pageSize = int.TryParse(query["pageSize"], out var ps) ? Math.Clamp(ps, 1, 500) : 100;
+        var tables = (await catalog.GetAllTablesAsync(context.RequestAborted).ConfigureAwait(false))
+            .OrderBy(t => t.Identifier.ToString(), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var objects = new List<object>();
+        foreach (var table in tables.Skip((page - 1) * pageSize).Take(pageSize))
+        {
+            var explanation = await resolver.ExplainAsync(For(table), context.RequestAborted).ConfigureAwait(false);
+            objects.Add(new
+            {
+                table = table.Identifier.ToString(),
+                decision = explanation.Decision,
+                applied_filters = explanation.Outcome.AppliedFilters,
+                reason = explanation.Outcome.DenyReason
+            });
+        }
+
+        return Results.Ok(new { user, page, page_size = pageSize, total = tables.Count, objects });
+    }
+
+    private static object ExplanationView(string user, TableMetadata table, MandatoryFilterExplanation explanation) => new
+    {
+        user,
+        table = table.Identifier.ToString(),
+        dialect = table.Dialect.ToString(),
+        generation = explanation.Generation,
+        decision = explanation.Decision,
+        reason = explanation.Outcome.DenyReason,
+        sql = explanation.Outcome.PredicateSql,
+        applied_filters = explanation.Outcome.AppliedFilters,
+        profiles = explanation.Profiles.Select(p => new
+        {
+            profile = p.Profile,
+            scope = p.Scope,
+            in_scope = p.InScope,
+            uncovered = p.Uncovered?.ToString().ToLowerInvariant(),
+            bindings = p.Bindings.Select(b => new
+            {
+                filter = b.Filter,
+                pattern = b.Pattern,
+                applies = b.Applies,
+                reason = b.Reason,
+                missing_columns = b.MissingColumns,
+                superseded_by = b.SupersededBy
+            })
+        })
+    };
 
     // ------------------------------------------------------------------ helpers
 

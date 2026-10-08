@@ -333,6 +333,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         var internalParameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         var hmacKeyParameterNames = new Dictionary<string, string>(StringComparer.Ordinal);
         var accessedTables = new List<TableIdentifier>();
+        var virtualFilters = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var accessedTableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // SEC P-05: The SQL dialect comes from the data source configuration (the provider the connection factory will
@@ -512,6 +513,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 }
 
                 rlsParts.Add($"{tenantColumn} = '{tenantId.Value.Replace("'", "''")}'");
+            }
+
+            if (decision.AppliedVirtualFilters is { Count: > 0 } applied)
+            {
+                virtualFilters[target.FullName] = applied;
             }
 
             if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
@@ -726,7 +732,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
             {
-                return new GovernedRewrite(cachedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit);
+                return new GovernedRewrite(cachedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
             }
         }
 
@@ -772,7 +778,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             _logger?.LogDebug("GovernedSqlExecutionService: Generated secured SQL: {SecuredSql}", securedSql);
         }
 
-        return new GovernedRewrite(securedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit);
+        return new GovernedRewrite(securedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
     }
 
     public async Task ExecuteGovernedQueryAsync(
@@ -856,7 +862,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 {
                     originalSql = request.Sql,
                     securedSql,
-                    dataSource = dsName
+                    dataSource = dsName,
+                    virtual_filters = rewrite.VirtualFilters
                 })
             }, ct).ConfigureAwait(false);
         }
@@ -1767,7 +1774,14 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     }
 
     /// <param name="DeliveredRowLimit">Rows handed to the caller; the statement reads one more as probe (0 = no probe).</param>
-    private sealed record GovernedRewrite(string Sql, IReadOnlyDictionary<string, object?> InternalParameters, IReadOnlyList<TableIdentifier> AccessedTables, string DataSourceName, long DeliveredRowLimit = 0);
+    /// <param name="VirtualFilters">Virtual filters applied per referenced table (audit).</param>
+    private sealed record GovernedRewrite(
+        string Sql,
+        IReadOnlyDictionary<string, object?> InternalParameters,
+        IReadOnlyList<TableIdentifier> AccessedTables,
+        string DataSourceName,
+        long DeliveredRowLimit = 0,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? VirtualFilters = null);
 
     /// <summary>
     /// Collects the DML classification during governance so that executed AND rejected DML can be audited.
