@@ -49,8 +49,7 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
         var connStr = !string.IsNullOrWhiteSpace(cdcOptions.ConnectionString)
             ? cdcOptions.ConnectionString
             : _gatewayOptions.Value.DataSources.Connections.Values.FirstOrDefault(s =>
-                string.Equals(s.Provider, "sqlserver", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(s.Provider, "mssql", StringComparison.OrdinalIgnoreCase))?.ConnectionString ?? string.Empty;
+                DataSourceProvider.Is(s.Provider, DatabaseDialect.SqlServer))?.ConnectionString ?? string.Empty;
 
         return new DataSourceConnectionOptions
         {

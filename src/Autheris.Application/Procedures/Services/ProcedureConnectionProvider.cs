@@ -63,30 +63,8 @@ public sealed class ProcedureConnectionProvider
     public static bool SupportsSecurityContext(Autheris.Domain.Common.DatabaseDialect dialect) =>
         dialect is Autheris.Domain.Common.DatabaseDialect.SqlServer or Autheris.Domain.Common.DatabaseDialect.PostgreSql;
 
-    public static bool TryResolveDialect(string? provider, out Autheris.Domain.Common.DatabaseDialect dialect)
-    {
-        switch (provider?.Trim().ToLowerInvariant())
-        {
-            case "sqlite" or "sqlite3":
-                dialect = Autheris.Domain.Common.DatabaseDialect.Sqlite;
-                return true;
-            case "sqlserver" or "mssql" or "microsoft sql server":
-                dialect = Autheris.Domain.Common.DatabaseDialect.SqlServer;
-                return true;
-            case "postgres" or "postgresql" or "npgsql" or "pgsql":
-                dialect = Autheris.Domain.Common.DatabaseDialect.PostgreSql;
-                return true;
-            case "oracle" or "oracledb" or "odp":
-                dialect = Autheris.Domain.Common.DatabaseDialect.Oracle;
-                return true;
-            case "databricks" or "spark" or "sparksql":
-                dialect = Autheris.Domain.Common.DatabaseDialect.Databricks;
-                return true;
-            default:
-                dialect = default;
-                return false;
-        }
-    }
+    public static bool TryResolveDialect(string? provider, out Autheris.Domain.Common.DatabaseDialect dialect) =>
+        Autheris.Domain.Common.DataSourceProvider.TryResolveDialect(provider, out dialect);
 
     public string ResolveName(ProcedureDefinition definition) =>
         string.IsNullOrWhiteSpace(definition.DataSource)

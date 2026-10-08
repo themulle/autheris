@@ -120,12 +120,11 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         var metadata = context.Metadata;
         var dialect = metadata.Dialect;
 
-        // D-1: Fail-closed dialect alignment between catalog and connection provider. An empty provider is compared as
-        // "sqlite", because that is what SqlConnectionFactory opens for it.
-        var provider = string.IsNullOrWhiteSpace(connOptions.Provider) ? "sqlite" : connOptions.Provider.Trim();
-        if (!DatabaseDialectExtensions.TryParseDialect(provider, out var providerDialect) || dialect != providerDialect)
+        // D-1: Fail-closed dialect alignment between catalog and connection provider (same provider mapping as
+        // SqlConnectionFactory, Architecture 5).
+        if (!DataSourceProvider.TryResolveDialect(connOptions.Provider, out var providerDialect) || dialect != providerDialect)
         {
-            throw new InvalidOperationException($"Catalog dialect '{dialect}' does not match the provider '{provider}' of data source '{context.SourceName}' for table '{metadata.Identifier.ToQualifiedName()}'.");
+            throw new InvalidOperationException($"Catalog dialect '{dialect}' does not match the provider '{connOptions.Provider}' of data source '{context.SourceName}' for table '{metadata.Identifier.ToQualifiedName()}'.");
         }
 
         context.Items["RlsPushdownExecuted"] = true;

@@ -85,7 +85,7 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
             throw new InvalidOperationException($"No governed read connection is configured for data source '{connectionName}'.");
         }
 
-        if (!ProcedureConnectionProvider.TryResolveDialect(connOptions.Provider ?? "sqlite", out var dialect) ||
+        if (!ProcedureConnectionProvider.TryResolveDialect(connOptions.Provider, out var dialect) ||
             dialect is not (DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite))
         {
             throw new InvalidOperationException("Row scope filtering of procedure results supports SQL Server, PostgreSQL and SQLite only.");
