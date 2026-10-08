@@ -1354,17 +1354,18 @@ public static class GatewayServiceCollectionExtensions
 
             if (options.Authentication.BasicAuth.Enabled)
             {
-                if (options.Authentication.BasicAuth.Users.Any(u => string.IsNullOrWhiteSpace(u.Password) || !u.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase)))
+                if (options.Authentication.BasicAuth.Users.Any(u => string.IsNullOrWhiteSpace(u.Password) || (!u.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase) && !u.Password.StartsWith("$argon2id$", StringComparison.OrdinalIgnoreCase))))
                 {
-                    throw new ValidationException("Sicherheitsverletzung: Außerhalb von Development müssen BasicAuth-Passwörter zwingend als PBKDF2-Hash ($pbkdf2$...) gespeichert sein!");
+                    throw new ValidationException("Sicherheitsverletzung (DEP-14): Außerhalb von Development müssen BasicAuth-Passwörter zwingend als Hash ($argon2id$... oder $pbkdf2$...) gespeichert sein. Klartext-Passwörter sind verboten!");
                 }
 
                 // RR-L2-03: weak work factors (e.g. $pbkdf2$1$...) are rejected at boot.
                 var minIterations = Math.Max(210_000, options.Authentication.BasicAuth.MinimumPbkdf2Iterations);
                 if (options.Authentication.BasicAuth.Users.Any(u =>
-                        u.Password.Split('$') is not { Length: 5 } parts ||
-                        !int.TryParse(parts[2], out var iterations) ||
-                        iterations < minIterations))
+                        u.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase) &&
+                        (u.Password.Split('$') is not { Length: 5 } parts ||
+                         !int.TryParse(parts[2], out var iterations) ||
+                         iterations < minIterations)))
                 {
                     throw new ValidationException($"Sicherheitsverletzung: Außerhalb von Development müssen BasicAuth-PBKDF2-Hashes mindestens {minIterations} Iterationen verwenden!");
                 }
