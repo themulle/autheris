@@ -9,7 +9,7 @@
 [![CI Build & Test](https://img.shields.io/badge/CI-Passing-brightgreen?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/Tests-3%2C700%2B%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
 [![Security Review](https://img.shields.io/badge/Security%20Review-2026--10--02%20Remediated-brightgreen)](security-review-2026-10-02.md)
-[![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/themulle/gql/pkgs/container/gql)
+[![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/themulle/autheris/pkgs/container/autheris)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20Onion-blue)](docs/architecture/arc42.md)
 [![Diagram](https://img.shields.io/badge/Diagram-Architecture%20%26%20Capabilities-informational)](#-architecture--capabilities-overview-at-a-glance)
 [![Features](https://img.shields.io/badge/Features-45%2B%20Enterprise%20Catalog-blueviolet)](docs/features/README.md)
@@ -367,7 +367,7 @@ A turnkey container image featuring the integrated **Microsoft Garnet .NET Cache
 docker run -d -p 127.0.0.1:8080:8080 \
   -e ASPNETCORE_ENVIRONMENT=Development -e AUTHERIS_ALLOW_DEV_IN_CONTAINER=true \
   -v autheris-data:/app/data \
-  --name gql-gateway ghcr.io/themulle/gql:getting-started
+  --name gql-gateway ghcr.io/themulle/autheris:getting-started
 
 # Or via Docker Compose (Base = Production, Override = local Dev mode)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
