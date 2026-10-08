@@ -6,7 +6,6 @@ using System.ComponentModel.DataAnnotations;
 using Autheris.Api.Hosting;
 using Autheris.Api.Middleware;
 using Autheris.Application.Interfaces;
-using Autheris.Application.Kernel;
 using Autheris.Application.OpenMetadata.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
@@ -14,7 +13,6 @@ using Autheris.Application.Services;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
-using Autheris.Domain.Kernel;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Catalog;
 using Autheris.GraphQL.Federation;
@@ -462,9 +460,6 @@ public static class GatewayServiceCollectionExtensions
         services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();
         services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
-        services.AddSingleton<ISemanticQueryCache, SemanticQueryCacheService>();
-        services.AddSingleton<PolicyRecommendationService>();
-        services.AddScoped<IGovernedExecutionKernel, GovernedExecutionKernel>();
 
         // Model Context Protocol (MCP) Server & AI Data Guardrails
         services.AddSingleton<ISemanticPromptGuardrail, SemanticPromptGuardrail>();

@@ -13,7 +13,6 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
-using Autheris.Domain.Kernel;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using HotChocolate.Execution;
@@ -35,7 +34,6 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     private readonly IGatewayExecutionService _gatewayExecutionService;
     private readonly IPreFlightQuerySimulator? _querySimulator;
     private readonly IMcpProvenanceEnricher? _provenanceEnricher;
-    private readonly IGovernedExecutionKernel? _governedKernel;
     private readonly IPersistedToolValidator? _persistedToolValidator;
     private readonly ILogger<GatewayMcpQueryExecutor> _logger;
 
@@ -45,7 +43,6 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         ILogger<GatewayMcpQueryExecutor> logger,
         IPreFlightQuerySimulator? querySimulator = null,
         IMcpProvenanceEnricher? provenanceEnricher = null,
-        IGovernedExecutionKernel? governedKernel = null,
         IPersistedToolValidator? persistedToolValidator = null)
     {
         _executorProvider = executorProvider ?? throw new ArgumentNullException(nameof(executorProvider));
@@ -53,7 +50,6 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _querySimulator = querySimulator;
         _provenanceEnricher = provenanceEnricher;
-        _governedKernel = governedKernel;
         _persistedToolValidator = persistedToolValidator;
     }
 
@@ -158,119 +154,6 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             {
                 return await EnrichWithProvenanceAsync(tool, fastPathResult, cancellationToken).ConfigureAwait(false);
             }
-        }
-
-        // Native Governed Vector & RAG Egress Tool (F-AI-09)
-        if (tool.Name.Equals("search_rag_context", StringComparison.OrdinalIgnoreCase))
-        {
-            if (_governedKernel != null)
-            {
-                if (string.IsNullOrWhiteSpace(sessionContext.TenantId))
-                {
-                    return CreateErrorResult("unknown", tool.Name, McpErrorCodes.Forbidden, "Access denied: Missing TenantId in session context.");
-                }
-
-                var callerSidStr = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
-                    ? sessionContext.UserSid
-                    : sessionContext.ServicePrincipalId;
-
-                if (string.IsNullOrWhiteSpace(callerSidStr))
-                {
-                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Access denied: Missing caller SID in session context.");
-                }
-
-                var collectionName = variables.TryGetValue("collection", out var cVal) && !string.IsNullOrWhiteSpace(cVal?.ToString())
-                    ? cVal.ToString()!
-                    : "documents";
-                var queryText = variables.TryGetValue("query", out var qVal) ? qVal?.ToString() ?? "" : "";
-                var topK = variables.TryGetValue("topK", out var kVal) && int.TryParse(kVal?.ToString(), out var parsedK)
-                    ? Math.Clamp(parsedK, 1, 200)
-                    : 5;
-
-                var userSid = new Sid(callerSidStr);
-
-                var groupSids = sessionContext.GroupSids != null
-                    ? sessionContext.GroupSids.Select(s => new Sid(s)).ToHashSet()
-                    : new HashSet<Sid>();
-
-                // Zero-Trust: Do not assign default roles "out of thin air"
-                var roles = sessionContext.Roles != null && sessionContext.Roles.Count > 0
-                    ? sessionContext.Roles.ToHashSet(StringComparer.OrdinalIgnoreCase)
-                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                var secContext = new SecurityPrincipalContext
-                {
-                    UserSid = userSid,
-                    TenantId = new TenantId(sessionContext.TenantId),
-                    GroupSids = groupSids,
-                    TenantRoles = roles,
-                    ClusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-                    AuthenticationScheme = "McpAuth"
-                };
-
-                IReadOnlyList<float>? queryVector = null;
-                if (!string.IsNullOrWhiteSpace(argumentsJson))
-                {
-                    try
-                    {
-                        using var doc = JsonDocument.Parse(argumentsJson);
-                        if (doc.RootElement.TryGetProperty("query_vector", out var qvElem) && qvElem.ValueKind == JsonValueKind.Array)
-                        {
-                            var vecList = new List<float>();
-                            foreach (var item in qvElem.EnumerateArray())
-                            {
-                                if (item.TryGetSingle(out var f))
-                                {
-                                    vecList.Add(f);
-                                }
-                            }
-                            if (vecList.Count > 0)
-                            {
-                                queryVector = vecList;
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore invalid vector payload in json
-                    }
-                }
-
-                var searchReq = new VectorSearchRequest(
-                    TargetCollection: new TableIdentifier("ai", "public", collectionName),
-                    QueryVector: queryVector,
-                    RawQueryText: queryText,
-                    TopK: topK
-                );
-
-                try
-                {
-                    var result = await _governedKernel.ExecuteVectorQueryAsync(searchReq, secContext, cancellationToken).ConfigureAwait(false);
-                    // Information Disclosure Protection: Do not leak internal AccessDecision (RLS SQL, ColumnAccess map, DeniedReasons) to the AI agent
-                    var clientDto = new
-                    {
-                        collection = result.Collection.ToQualifiedName(),
-                        chunks = result.Chunks,
-                        metrics = result.Metrics
-                    };
-                    var json = JsonSerializer.Serialize(clientDto, CamelCaseJsonOptions);
-                    return await EnrichWithProvenanceAsync(tool, json, cancellationToken).ConfigureAwait(false);
-                }
-                catch (SecurityException ex)
-                {
-                    _logger.LogWarning(ex, "MCP search_rag_context access denied for tenant '{TenantId}', collection '{Collection}': {Message}", sessionContext.TenantId, collectionName, ex.Message);
-                    // Return generic message to prevent oracle / policy detail disclosure
-                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Access to vector collection denied by governance policy.");
-                }
-                catch (TableNotFoundException ex)
-                {
-                    _logger.LogWarning(ex, "MCP search_rag_context table not found for tenant '{TenantId}', collection '{Collection}'", sessionContext.TenantId, collectionName);
-                    // Return generic message to prevent collection enumeration oracle
-                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Access to vector collection denied by governance policy.");
-                }
-            }
-
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "Governed execution kernel is not available for vector search.");
         }
 
         // Standard GraphQL execution via HotChocolate IRequestExecutor
