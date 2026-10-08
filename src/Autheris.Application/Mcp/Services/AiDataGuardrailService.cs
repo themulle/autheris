@@ -530,7 +530,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     /// SEC M-17: Detects the structured error payload produced by the MCP query executor
     /// (<c>{"isError":true,"error":{"code":...,"message":...}}</c>).
     /// </summary>
-    internal static bool TryGetExecutorError(string? resultJson, out string? errorCode)
+    public static bool TryGetExecutorError(string? resultJson, out string? errorCode)
     {
         errorCode = null;
         if (string.IsNullOrWhiteSpace(resultJson))

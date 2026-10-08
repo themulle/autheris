@@ -125,24 +125,14 @@ INSERT INTO mcp_cranes VALUES (1,'LTM-1100','Mobilkran',100,'a@x.test'),(2,'LTM-
 
     private static async Task<(bool IsError, JsonElement Payload)> CallAsync(HttpClient client, string tool, object arguments)
     {
-        var (isError, text) = await CallRawAsync(client, tool, arguments);
-        if (!text.TrimStart().StartsWith('{'))
-        {
-            throw new InvalidOperationException($"Tool '{tool}' returned: {text}");
-        }
-
-        using var content = JsonDocument.Parse(text);
-        return (isError, content.RootElement.Clone());
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+        return await McpTestClient.CallJsonAsync(mcp, tool, arguments);
     }
 
     private static async Task<(bool IsError, string Text)> CallRawAsync(HttpClient client, string tool, object arguments)
     {
-        var payload = JsonSerializer.Serialize(new { jsonrpc = "2.0", id = 1, method = "tools/call", @params = new { name = tool, arguments } });
-        var response = await client.PostAsync("/mcp", new StringContent(payload, Encoding.UTF8, "application/json"));
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var result = doc.RootElement.GetProperty("result");
-        return (result.GetProperty("isError").GetBoolean(), result.GetProperty("content")[0].GetProperty("text").GetString()!);
+        await using var mcp = await McpTestClient.ConnectAsync(client);
+        return await McpTestClient.CallAsync(mcp, tool, arguments);
     }
 
     [Fact]

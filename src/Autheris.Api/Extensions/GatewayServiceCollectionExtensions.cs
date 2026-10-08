@@ -474,6 +474,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.Application.Mcp.Pruning.ISemanticToolPruner, Autheris.Application.Mcp.Pruning.SemanticToolPruner>();
         services.AddSingleton<IPersistedToolValidator, PersistedToolValidator>();
         services.AddScoped<IMcpQueryExecutor, Autheris.GraphQL.Mcp.GatewayMcpQueryExecutor>();
+        Autheris.Api.Mcp.GatewayMcpServer.AddGatewayMcpServer(services, gatewayOptions);
         services.AddScoped<IAiDataGuardrailService, AiDataGuardrailService>();
         services.AddScoped<IMcpProtocolHandler, McpProtocolHandler>();
         services.AddScoped<IMcpStdioRunner, McpStdioRunner>();
@@ -702,6 +703,8 @@ public static class GatewayServiceCollectionExtensions
         // Bearer tokens are routed by their (unverified) issuer and fully validated by the selected scheme.
         bool splitJwtSchemes = entraConfig.Enabled && adfsConfig.Enabled;
         authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearer, options => ConfigureJwtBearer(options, useEntra: entraConfig.Enabled, useAdfs: adfsConfig.Enabled && !splitJwtSchemes));
+        // MCP OAuth discovery (RFC 9728 protected resource metadata) for the configured token issuers.
+        Autheris.Api.Mcp.GatewayMcpOAuth.AddGatewayMcpOAuth(authBuilder, gatewayOptions);
         if (splitJwtSchemes)
         {
             authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearerAdfs, options => ConfigureJwtBearer(options, useEntra: false, useAdfs: true));
