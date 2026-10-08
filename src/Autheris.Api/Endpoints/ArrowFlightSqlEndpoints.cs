@@ -58,46 +58,46 @@ public static class ArrowFlightSqlEndpoints
             }
         }).RequireAuthorization();
 
-        app.MapPost("/api/v1/flight/sql/stream", async (
-            FlightSqlTicket ticket,
-            HttpContext context,
-            IArrowFlightSqlServer server) =>
-        {
-            try
-            {
-                context.Response.ContentType = "application/vnd.apache.arrow.stream";
-                await using var stream = context.Response.BodyWriter.AsStream();
-
-                ArrowStreamWriter? writer = null;
-                await foreach (var batch in server.DoGetStreamAsync(ticket, context.User, EndpointSecurity.GetRequestTenant(context), context.RequestAborted))
-                {
-                    if (writer == null)
-                    {
-                        // Same signal as the WebSQL JSON and Parquet paths: the row limit cut the result.
-                        if (batch.Schema.Metadata.TryGetValue(ArrowFlightSqlServer.TruncatedMetadataKey, out var truncated) && truncated == "true")
-                        {
-                            context.Response.Headers["X-Autheris-Truncated"] = "true";
-                        }
-
-                        writer = new ArrowStreamWriter(stream, batch.Schema, leaveOpen: true);
-                    }
-
-                    await writer.WriteRecordBatchAsync(batch, context.RequestAborted);
-                }
-
-                return Results.Empty;
-            }
-            catch (SecurityException ex)
-            {
-                return ForbidResult(context, ex);
-            }
-            catch (ArgumentException)
-            {
-                return BadRequestResult();
-            }
-        }).RequireAuthorization();
+        app.MapPost("/api/v1/flight/sql/stream", HandleStreamAsync).RequireAuthorization();
 
         return app;
+    }
+
+    internal static async Task<IResult> HandleStreamAsync(FlightSqlTicket ticket, HttpContext context, IArrowFlightSqlServer server)
+    {
+        try
+        {
+            context.Response.ContentType = "application/vnd.apache.arrow.stream";
+            await using var stream = context.Response.BodyWriter.AsStream();
+
+            ArrowStreamWriter? writer = null;
+            await foreach (var batch in server.DoGetStreamAsync(ticket, context.User, EndpointSecurity.GetRequestTenant(context), context.RequestAborted))
+            {
+                if (writer == null)
+                {
+                    // Same signal as the WebSQL JSON and Parquet paths: the row limit cut the result. A schema without
+                    // metadata has Metadata == null in Apache.Arrow.
+                    if (batch.Schema.Metadata?.TryGetValue(ArrowFlightSqlServer.TruncatedMetadataKey, out var truncated) == true && truncated == "true")
+                    {
+                        context.Response.Headers["X-Autheris-Truncated"] = "true";
+                    }
+
+                    writer = new ArrowStreamWriter(stream, batch.Schema, leaveOpen: true);
+                }
+
+                await writer.WriteRecordBatchAsync(batch, context.RequestAborted);
+            }
+
+            return Results.Empty;
+        }
+        catch (SecurityException ex)
+        {
+            return ForbidResult(context, ex);
+        }
+        catch (ArgumentException)
+        {
+            return BadRequestResult();
+        }
     }
 
     // RR-L3-03: parser and database details stay in the server log.
