@@ -22,7 +22,7 @@ public static class McpDatasetTools
         "1) call list_datasets to find the datasets you may use, " +
         "2) call describe_dataset for columns, types, the GraphQL field and an example query, " +
         "3) query with query_graphql - GraphQL is the preferred query path (filter, sort, paging and relations in one query; always pass a small first). " +
-        "sample_rows shows a few rows. Other protocols (OData, OpenAPI/REST, WebSQL, procedures, OLAP, Arrow) are listed by list_datasets and describe_dataset. " +
+        "sample_rows shows a few rows. Other protocols (OData, OpenAPI/REST, WebSQL / Trino /v1/statement, procedures, OLAP, Arrow) are listed by list_datasets and describe_dataset. " +
         "Results are filtered and masked for your identity; hidden datasets and columns do not appear.";
 
     /// <summary>ABAC object for catalog listings (like <c>query_data_catalog</c>).</summary>

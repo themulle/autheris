@@ -346,6 +346,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<TrinoSqlEngine.ISqlEngine, TrinoSqlEngine.FastSqlEngine>();
         services.AddSingleton<Autheris.Application.Sql.Interfaces.ISqlSecurityValidator, Autheris.Application.Sql.Services.DefaultSqlSecurityValidator>();
         services.AddScoped<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService, Autheris.Application.Sql.Services.GovernedSqlExecutionService>();
+        services.AddSingleton<Autheris.Application.Sql.Interfaces.IWebSqlStatementManager, Autheris.Application.Sql.Services.WebSqlStatementManager>();
         services.AddSingleton<Autheris.Application.SqlEndpoints.Interfaces.ISqlEndpointRegistry, Autheris.Application.SqlEndpoints.Services.InMemorySqlEndpointRegistry>();
         services.AddSingleton<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
         services.AddScoped<Autheris.Application.SqlEndpoints.Interfaces.ISqlEndpointExecutionService, Autheris.Application.SqlEndpoints.Services.SqlEndpointExecutionService>();

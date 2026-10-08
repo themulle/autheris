@@ -121,7 +121,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         TenantId tenantId,
         CancellationToken ct = default)
     {
-        var rewrite = await RewriteCoreAsync(rawSql, user, tenantId, _options.Value.WebSql.DefaultDataSourceName, dmlContext: null, ct).ConfigureAwait(false);
+        var rewrite = await RewriteCoreAsync(rawSql, user, tenantId, dataSourceName: null, dmlContext: null, ct).ConfigureAwait(false);
         return rewrite.Sql;
     }
 
@@ -129,7 +129,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         string rawSql,
         ClaimsPrincipal user,
         TenantId tenantId,
-        string dataSourceName,
+        string? dataSourceName,
         DmlAuditContext? dmlContext,
         CancellationToken ct)
     {
@@ -233,7 +233,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         if (_options.Value.IsWebSqlGovernanceBypassed)
         {
             _logger?.LogWarning("[DANGER] WebSQL governance bypass is active! Query will be executed without RLS or AST masking.");
-            return new GovernedRewrite(rawSql, new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase), Array.Empty<TableIdentifier>());
+            return new GovernedRewrite(rawSql, new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase), Array.Empty<TableIdentifier>(), dataSourceName ?? _options.Value.WebSql.DefaultDataSourceName);
         }
 
         // SEC C-01: RLS, masking and policies attach to physical table nodes. A statement without any governed table
@@ -278,6 +278,38 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         // SEC M-20: Make the requested action visible to ABAC sub-rules (applied after claims so it cannot be spoofed).
         var actionAttribute = new Dictionary<string, object?> { ["gql.action"] = isDml ? "write" : "read" };
 
+        // SQ-09 / Trino Compatibility: In Trino queries, 3-part names (catalog.schema.table) are canonical.
+        // Catalog auto-inference and cross-catalog validation:
+        var distinctCatalogs = metadata.ReferencedTables
+            .Where(t => !string.IsNullOrWhiteSpace(t.Catalog))
+            .Select(t => t.Catalog!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (distinctCatalogs.Count > 1)
+        {
+            throw new WebSqlPolicyException("Cross-catalog queries across multiple data sources are not supported in WebSQL.");
+        }
+
+        string effectiveDataSourceName;
+        if (!string.IsNullOrWhiteSpace(dataSourceName))
+        {
+            effectiveDataSourceName = dataSourceName;
+            if (distinctCatalogs.Count == 1 && !string.Equals(distinctCatalogs[0], dataSourceName, StringComparison.OrdinalIgnoreCase))
+            {
+                _logger?.LogWarning("WebSQL rejected statement: query catalog '{Catalog}' does not match data source '{DataSource}'.", distinctCatalogs[0], dataSourceName);
+                throw new WebSqlPolicyException($"Query catalog '{distinctCatalogs[0]}' does not match requested data source '{dataSourceName}'.");
+            }
+        }
+        else if (distinctCatalogs.Count == 1)
+        {
+            effectiveDataSourceName = ResolveAllowedDataSource(distinctCatalogs[0], tenantId);
+        }
+        else
+        {
+            effectiveDataSourceName = ResolveAllowedDataSource(null, tenantId);
+        }
+
         // 5. Resolve RLS filters and Column Masking for all referenced physical tables
         var tableRlsFilters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var tablesWithoutRls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -295,7 +327,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         // SEC P-05: The SQL dialect comes from the data source configuration (the provider the connection factory will
         // actually use). Without a configured connection (synthetic dev/test path) the catalog dialect of the first table
         // is used. Every referenced table must have exactly this dialect.
-        DatabaseDialect? targetDatabaseDialect = ResolveConnectionDialect(dataSourceName);
+        DatabaseDialect? targetDatabaseDialect = ResolveConnectionDialect(effectiveDataSourceName);
 
         // SQL-2: the policy maps below are keyed case-insensitively. Two references that fold to the same key but are
         // spelled differently may address different physical relations (PostgreSQL quoted identifiers, SQL Server with
@@ -316,7 +348,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         foreach (var target in metadata.ReferencedTables)
         {
             // SEC C-03: Tables without catalog metadata (or without column metadata) cannot be governed -> reject.
-            TableIdentifier tableId = ResolveTableIdentifier(target, dataSourceName);
+            TableIdentifier tableId = ResolveTableIdentifier(target, effectiveDataSourceName);
             TableIdentifier resolvedId = tableId;
             TableMetadata? tableMeta = null;
             if (_tableRepository != null)
@@ -387,18 +419,24 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             // SEC C-03 / SQ-09: A catalog table bound to a specific data source must only be queried through that source.
             if (!string.IsNullOrWhiteSpace(tableMeta.Table.SourceName) &&
-                !string.Equals(tableMeta.Table.SourceName, dataSourceName, StringComparison.OrdinalIgnoreCase))
+                !string.Equals(tableMeta.Table.SourceName, effectiveDataSourceName, StringComparison.OrdinalIgnoreCase))
             {
                 _logger?.LogWarning("WebSQL rejected table {Table}: catalog source does not match the requested data source.", target.FullName);
                 throw TableDenied(target);
             }
 
-            // SQ-09 / SQL-5: The catalog part of a 3-part name is emitted verbatim. On SQL Server it names a database,
-            // which is not the logical data source name it was checked against -> 3-part names are rejected.
+            // SQ-09 / SQL-5 / Trino Compatibility: In Trino queries, 3-part names (catalog.schema.table) are canonical.
+            // The catalog part identifies the logical data source and is validated against the active data source.
+            // When rewriting to backend SQL dialects (PostgreSQL, SQL Server, SQLite), the catalog prefix is stripped
+            // by the target dialect generator and RlsListener to prevent cross-database/physical collision errors.
             if (!string.IsNullOrWhiteSpace(target.Catalog))
             {
-                _logger?.LogWarning("WebSQL rejected table {Table}: 3-part names (catalog '{Catalog}') are not supported.", target.FullName, target.Catalog);
-                throw TableDenied(target);
+                if (!string.Equals(target.Catalog, effectiveDataSourceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger?.LogWarning("WebSQL rejected table {Table}: catalog '{Catalog}' does not match active data source '{DataSource}'.",
+                        target.FullName, target.Catalog, effectiveDataSourceName);
+                    throw TableDenied(target);
+                }
             }
 
             // RR-L5-02: PostgreSQL identifiers are case-sensitive when quoted and fold to lower case when unquoted.
@@ -677,7 +715,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
             {
-                return new GovernedRewrite(cachedSql, internalParameters, accessedTables);
+                return new GovernedRewrite(cachedSql, internalParameters, accessedTables, effectiveDataSourceName);
             }
         }
 
@@ -718,7 +756,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             _logger?.LogDebug("GovernedSqlExecutionService: Generated secured SQL: {SecuredSql}", securedSql);
         }
 
-        return new GovernedRewrite(securedSql, internalParameters, accessedTables);
+        return new GovernedRewrite(securedSql, internalParameters, accessedTables, effectiveDataSourceName);
     }
 
     public async Task ExecuteGovernedQueryAsync(
@@ -743,7 +781,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
         // SEC C-03: dataSource must be on the allowlist (default data source + WebSql.AllowedDataSources),
         // restricted further by WebSql.TenantDataSourceAllowlist if the tenant has an entry.
-        string dsName = ResolveAllowedDataSource(request.DataSourceName, tenantId);
+        string? requestedDs = !string.IsNullOrWhiteSpace(request.DataSourceName)
+            ? ResolveAllowedDataSource(request.DataSourceName, tenantId)
+            : null;
 
         // SEC H-13: Client parameters must not collide with gateway-internal parameters
         if (request.Parameters != null)
@@ -765,14 +805,17 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         GovernedRewrite rewrite;
         try
         {
-            rewrite = await RewriteCoreAsync(sqlForRewrite, user, tenantId, dsName, dmlContext, ct).ConfigureAwait(false);
+            rewrite = await RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct).ConfigureAwait(false);
         }
         catch (SecurityException policyEx) when (dmlContext.IsDml)
         {
             // Rejected DML statements are recorded in the audit chain as well.
-            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_REJECTED", "DENY", request.Sql, affectedRows: null, reason: policyEx is WebSqlPolicyException ? policyEx.Message : "policy violation", synthetic: false, ct).ConfigureAwait(false);
+            string auditDs = requestedDs ?? _options.Value.WebSql.DefaultDataSourceName;
+            await RecordDmlAuditAsync(tenantId, user, auditDs, dmlContext, "WEBSQL_DML_REJECTED", "DENY", request.Sql, affectedRows: null, reason: policyEx is WebSqlPolicyException ? policyEx.Message : "policy violation", synthetic: false, ct).ConfigureAwait(false);
             throw;
         }
+
+        string dsName = rewrite.DataSourceName;
 
         string securedSql = RestoreClientParameters(rewrite.Sql, clientParameterNames);
         if (_options.Value.Logging.LogGeneratedSql)
@@ -1574,7 +1617,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         return _masterHmacKey;
     }
 
-    private sealed record GovernedRewrite(string Sql, IReadOnlyDictionary<string, object?> InternalParameters, IReadOnlyList<TableIdentifier> AccessedTables);
+    private sealed record GovernedRewrite(string Sql, IReadOnlyDictionary<string, object?> InternalParameters, IReadOnlyList<TableIdentifier> AccessedTables, string DataSourceName);
 
     /// <summary>
     /// Collects the DML classification during governance so that executed AND rejected DML can be audited.
