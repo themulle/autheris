@@ -36,7 +36,7 @@ public sealed class PreFlightQuerySimulator(ILogger<PreFlightQuerySimulator> log
                 AppliedMaskingRules: [],
                 ActiveRlsFilters: [],
                 OptimizationRecommendations: [],
-                BlockReason: "Die Abfrage darf nicht leer sein."
+                BlockReason: "The query must not be empty."
             ));
         }
 
@@ -83,11 +83,11 @@ public sealed class PreFlightQuerySimulator(ILogger<PreFlightQuerySimulator> log
         var recommendations = new List<string>();
         if (requestedLimit <= 0)
         {
-            recommendations.Add("Fügen Sie einen 'first'- oder 'limit'-Parameter hinzu (z.B. first: 50), um die Tokenausgabe zu begrenzen.");
+            recommendations.Add("Add a 'first' or 'limit' argument (e.g. first: 50) to bound the number of returned tokens.");
         }
         if (!hasFilter)
         {
-            recommendations.Add("Verwenden Sie Filterbedingungen, um irrelevante Datensätze frühzeitig auszuschließen.");
+            recommendations.Add("Add filter conditions to exclude irrelevant rows early.");
         }
 
         // Hard Safety Limits
@@ -101,7 +101,7 @@ public sealed class PreFlightQuerySimulator(ILogger<PreFlightQuerySimulator> log
                 AppliedMaskingRules: new[] { "COLUMN_MASKING_ACTIVE" },
                 ActiveRlsFilters: new[] { "TENANT_ISOLATION_RLS" },
                 OptimizationRecommendations: recommendations,
-                BlockReason: $"Die Abfrage erzeugt schätzungsweise {estimatedTokens} Tokens und überschreitet das Hard-Safety-Limit von {MaxTokenBudget} Tokens. Bitte paginieren Sie mit 'first: 50' oder schränken Sie die Feldauswahl ein."
+                BlockReason: $"The query produces an estimated {estimatedTokens} tokens and exceeds the Hard-Safety-Limit of {MaxTokenBudget} tokens. Page with 'first: 50' or select fewer fields."
             ));
         }
 
@@ -115,7 +115,7 @@ public sealed class PreFlightQuerySimulator(ILogger<PreFlightQuerySimulator> log
                 AppliedMaskingRules: new[] { "COLUMN_MASKING_ACTIVE" },
                 ActiveRlsFilters: new[] { "TENANT_ISOLATION_RLS" },
                 OptimizationRecommendations: recommendations,
-                BlockReason: $"Der geschätzte Datenbank-Scan ({estimatedScanBytes / (1024 * 1024)} MB) überschreitet das Limit von 1 GB. Bitte filtern Sie die Abfrage."
+                BlockReason: $"The estimated database scan ({estimatedScanBytes / (1024 * 1024)} MB) exceeds the limit of 1 GB. Filter the query."
             ));
         }
 
