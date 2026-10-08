@@ -12,9 +12,9 @@ IDs: `SR15-NN`. Schwere: hoch / mittel / niedrig / info.
 
 | Punkt | Warum |
 |---|---|
-| **Build** | `VirtualFilterAdministrationService.cs:108/190` und `VirtualFilterEndpoints.cs:324` nutzen `VirtualFilterOptions.RequireApproval`. Die Eigenschaft fehlt in der committeten `GatewayOptions.cs`, sie liegt nur uncommittet im Arbeitsverzeichnis. Laut Review baut `HEAD` deshalb nicht; ein Build wurde nicht ausgeführt. |
+| ~~Build~~ | Erledigt in `0810278`: `VirtualFilterOptions.RequireApproval` fehlte zwischenzeitlich in der committeten `GatewayOptions.cs`. |
 | SR15-01, 02, 03, 04, 05 | Hoch: Umgehung von Zeilenfiltern oder Read-only bzw. Prozessabsturz durch beliebige angemeldete Nutzer. |
-| WIP SR15-06 (Resolver) | Die uncommittete Änderung am `MandatoryRowFilterResolver` macht aus SR15-06 ein Fail-open in die andere Richtung. Nicht so committen. |
+| SR15-06 (Resolver, `c8fbe0c`) | Inzwischen committet: Der Resolver ignoriert nicht aktive Filter und Profile. Damit schaltet schon das erneute Speichern die Einschränkung bis zur Freigabe ab. Die zuletzt freigegebene Fassung muss aktiv bleiben. |
 
 ## 1. Hoch
 
@@ -79,7 +79,7 @@ Committeter Stand:
 - Ein Upsert mit `PendingApproval` ersetzt die aktive Fassung sofort.
 - **Angriff:** Ein einzelner FilterAdmin entschärft einen Filter, zum Beispiel per Tautologie, `uncovered=skip` oder engerem Scope. Die Änderung gilt sofort.
 
-Uncommitteter Stand im Arbeitsverzeichnis:
+Stand ab `c8fbe0c`:
 - Der Resolver ignoriert jetzt nicht aktive Profile und Filter.
 - **Folge:** Ein bloßes erneutes Speichern, auch ohne Änderung, schaltet die Einschränkung bis zur Freigabe ab. Das Vier-Augen-Prinzip kehrt sich um.
 
@@ -223,10 +223,9 @@ INF-2, INF-3, DEP-11, DEP-12, DEP-15, DEP-16, SQL2-13 und SQL2-17 stehen in [sec
 
 ## 7. Reihenfolge
 
-1. Build reparieren (`RequireApproval`).
-2. SR15-01, 02, 04 (Absturz und RLS-Umgehung für jeden Nutzer).
-3. SR15-03, 05, 06, 07, 08.
-4. Die übrigen mittleren Befunde, vorrangig SR15-11, 12, 13, 16, 17, 19, 20, 24 und 25.
-5. Niedrig und Info nach Gelegenheit.
+1. SR15-01, 02, 04 (Absturz und RLS-Umgehung für jeden Nutzer).
+2. SR15-03, 05, 06, 07, 08.
+3. Die übrigen mittleren Befunde, vorrangig SR15-11, 12, 13, 16, 17, 19, 20, 24 und 25.
+4. Niedrig und Info nach Gelegenheit.
 
 Regeln wie üblich: TDD, jeder Sicherheitstest muss ohne Fix rot sein, ein Thema pro Commit.
