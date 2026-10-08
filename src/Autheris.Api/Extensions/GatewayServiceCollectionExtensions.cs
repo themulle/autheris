@@ -16,7 +16,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Kernel;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Catalog;
-using Autheris.GraphQL.Filtering;
 using Autheris.GraphQL.Federation;
 using Autheris.GraphQL.Types;
 using Autheris.Infrastructure.Cache;
@@ -309,7 +308,6 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IChunkedQueryExecutor>(sp => new ChunkedQueryExecutor(
             gatewayOptions.GraphQL.MaxInClauseBatchSize,
             sp.GetRequiredService<IParameterBudgetProvider>()));
-        services.AddSingleton<ISqlFilterProvider>(new SqlFilterProvider(gatewayOptions.GraphQL.MaxInClauseBatchSize));
 
         // Outbound SSRF protection (HIGH-03 / SEC-02) & OpenAPI ingestion (P1).
         // Data catalog clients, factory and sync are registered by AddGatewayExtensions (Autheris.Extensions/DataCatalog).
