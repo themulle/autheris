@@ -76,10 +76,11 @@ public sealed class CatalogListingVisibilityTests
         return repo;
     }
 
+    // Flight SQL lists the tables of data sources the tenant may query through WebSQL (catalog domain = data source).
     private static ArrowFlightSqlServer Flight(IConsentRepository? consents) => new(
         Substitute.For<IArrowExportService>(),
         Tables(),
-        Options.Create(new GatewayOptions()),
+        Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, AllowedDataSources = [Tenant] } }),
         NullLogger<ArrowFlightSqlServer>.Instance,
         consents);
 

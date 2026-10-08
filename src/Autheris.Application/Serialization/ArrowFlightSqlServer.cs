@@ -15,6 +15,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -118,10 +119,12 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
             throw new SecurityException("Authentication required to list Flight SQL tables.");
         }
 
-        // SEC M-7: Enforce strict tenant isolation; never expose tables belonging to other tenants
+        // SEC M-7: catalog domains are data source names. Only tables of data sources the tenant may query through
+        // WebSQL (the path Flight SQL executes on) are listed; the tenant allowlist keeps other tenants' sources out.
+        var webSqlOptions = _options.Value.WebSql ?? new WebSqlOptions();
         var tables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         var tenantTables = tables
-            .Where(t => string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase))
+            .Where(t => GovernedSqlExecutionService.IsDataSourceQueryable(webSqlOptions, tenant, t.Identifier.Domain))
             .ToList();
 
         // Wunsch 9: only tables the caller may discover (same rule as the GraphQL catalog and MCP).

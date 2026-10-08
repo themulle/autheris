@@ -1259,11 +1259,25 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
     private string ResolveGloballyAllowedDataSource(string? requested)
     {
-        var webSqlOptions = _options.Value.WebSql;
+        if (TryResolveGloballyAllowedDataSource(_options.Value.WebSql, requested, out var resolved))
+        {
+            return resolved;
+        }
+
+        throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
+    }
+
+    /// <summary>
+    /// SEC C-03: the default data source, a source listed in WebSql.AllowedDataSources or a mapped source
+    /// (WebSql.DataSourceMappings); <paramref name="resolved"/> is its configured spelling.
+    /// </summary>
+    private static bool TryResolveGloballyAllowedDataSource(WebSqlOptions webSqlOptions, string? requested, out string resolved)
+    {
         string defaultName = webSqlOptions.DefaultDataSourceName;
         if (string.IsNullOrWhiteSpace(requested) || string.Equals(requested, defaultName, StringComparison.OrdinalIgnoreCase))
         {
-            return defaultName;
+            resolved = defaultName;
+            return true;
         }
 
         var allowed = webSqlOptions.AllowedDataSources;
@@ -1273,17 +1287,33 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             {
                 if (string.Equals(candidate, requested, StringComparison.OrdinalIgnoreCase))
                 {
-                    return candidate;
+                    resolved = candidate;
+                    return true;
                 }
             }
         }
 
         if (webSqlOptions.DataSourceMappings != null && webSqlOptions.DataSourceMappings.ContainsKey(requested))
         {
-            return requested;
+            resolved = requested;
+            return true;
         }
 
-        throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
+        resolved = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// True when WebSQL is enabled and <paramref name="dataSourceName"/> may be queried by <paramref name="tenantId"/>
+    /// (globally allowed and within the tenant's allowlist), the same rule a statement on that source has to pass.
+    /// </summary>
+    internal static bool IsDataSourceQueryable(WebSqlOptions webSqlOptions, TenantId tenantId, string dataSourceName)
+    {
+        ArgumentNullException.ThrowIfNull(webSqlOptions);
+        return webSqlOptions.Enabled &&
+               !string.IsNullOrWhiteSpace(dataSourceName) &&
+               TryResolveGloballyAllowedDataSource(webSqlOptions, dataSourceName, out var resolved) &&
+               IsDataSourceAllowedForTenant(webSqlOptions, tenantId, resolved);
     }
 
     /// <summary>
