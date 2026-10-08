@@ -462,16 +462,16 @@ Die Abarbeitung erfolgt streng sequenziell in 20 Einzelschritten. Vor jedem Comm
 | 5 | API-11 | API | Erledigt in `86a6d89` (`fix(api): sanitize error messages in WebSql, Arrow Flight and Iceberg endpoints (API-11)`) |
 | 6 | DEP-14 | Auth | Erledigt in `15fe567` (`fix(auth): reject plaintext basic auth passwords during startup validation (DEP-14)`) |
 | 7 | DEP-16 | CORS | Erledigt in `7cf19f6` (`fix(cors): remove localhost fallback in production cors policy (DEP-16)`) |
-| 8 | MCP-7 | MCP | `fix(mcp): fail closed on argument parsing errors in query executor (MCP-7)` (Offen) |
-| 9 | MCP-4 | MCP | `fix(mcp): do not synthesize reader roles in fast path (MCP-4)` (Offen) |
-| 10 | SQL2-14 | OLAP | `fix(olap): support comments in DuckDB query validator (SQL2-14)` (Offen) |
-| 11 | SQL2-15 | SQL | `fix(sql): use dialect-escaped masking literals and N-prefix for sql server (SQL2-15)` (Offen) |
-| 12 | SQL2-16 | Audit | `fix(procedures): fail closed when audit repository is unavailable (SQL2-16)` (Offen) |
-| 13 | SQL2-19 | RLS | `fix(rls): qualify unqualified column names in subquery filter predicates (SQL2-19)` (Offen) |
-| 14 | POL-10 | Policy | `fix(policy): include requested columns in Casbin cache key (POL-10)` (Offen) |
+| 8 | MCP-7 | MCP | Erledigt in `ccf4a49` (`fix(mcp): fail closed on argument parsing errors in query executor (MCP-7)`) |
+| 9 | MCP-4 | MCP | Erledigt in `2069074` (`fix(mcp): do not synthesize reader roles in fast path (MCP-4)`) |
+| 10 | SQL2-14 | OLAP | Erledigt in `fb71ad1` (`fix(olap): support comments in duckdb olap query validator (SQL2-14)`) |
+| 11 | SQL2-15 | SQL | Erledigt in `1ac38f8` (`fix(sql): use dialect-escaped masking literals and N prefix for sql server (SQL2-15)`) |
+| 12 | SQL2-16 | Audit | Erledigt in `0afb7a5` (`fix(procedures): fail closed when audit repository is unavailable (SQL2-16)`) |
+| 13 | SQL2-19 | RLS | Erledigt in `963a8ea` (`fix(rls): qualify unqualified column names in subquery filter predicates (SQL2-19)`) |
+| 14 | POL-10 | Policy | Erledigt in `6c3ed38` (`fix(policy): include requested columns in Casbin cache key (POL-10)`) |
 | 15 | POL-11 | ReBAC | Erledigt in `b9937cd` (`refactor(policy): one table access decision for all paths (Architecture 1, SQL2-6, POL-6, API-10, POL-11)`) |
-| 16 | POL-13 | ABAC | `fix(federation): evaluate admin roles via role evaluator before bypassing mask (POL-13)` (Offen) |
-| 17 | INF-3 | Secrets | `fix(secrets): redact secret references in log statements (INF-3)` (Offen) |
-| 18 | EXT-6 | Catalog | `fix(catalog): enforce role mapping for user policies in OpenMetadata sync (EXT-6)` (Offen) |
-| 19 | EXT-7 | Catalog | `fix(catalog): do not activate newly discovered tables by default in data catalog (EXT-7)` (Offen) |
-| 20 | WF-1 | Workflow | `fix(workflow): validate parameters and status in ExtendConsentExpiryAsync (WF-1)` (Offen) |
+| 16 | POL-13 | ABAC | Erledigt in `8f371b5` (`fix(federation): evaluate admin roles via role evaluator before bypassing mask (POL-13)`) |
+| 17 | INF-3 | Secrets | Erledigt in `ca64652` (`fix(secrets): redact secret references in log statements (INF-3)`) |
+| 18 | EXT-6 | Catalog | Erledigt in `aa47e96` (`fix(catalog): enforce role mapping for user policies in OpenMetadata sync (EXT-6)`) |
+| 19 | EXT-7 | Catalog | Erledigt in `445fd0a` (`fix(catalog): do not activate newly discovered tables by default in data catalog (EXT-7)`) |
+| 20 | WF-1 | Workflow | Erledigt in `fc0b9f0` (`fix(workflow): validate parameters and status in ExtendConsentExpiryAsync (WF-1)`) |
