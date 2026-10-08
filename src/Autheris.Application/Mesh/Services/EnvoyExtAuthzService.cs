@@ -404,7 +404,10 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         sb.AppendLine("  selector:");
         sb.AppendLine("    matchLabels:");
         sb.AppendLine("      app: autheris-mesh-proxy");
-        sb.AppendLine("  url: oci://ghcr.io/autheris/envoy-pdp-wasm:latest");
+        var wasmUrl = !string.IsNullOrWhiteSpace(opts.WasmPluginUrl)
+            ? opts.WasmPluginUrl
+            : $"oci://ghcr.io/autheris/envoy-pdp-wasm:{opts.WasmPluginTag}";
+        sb.AppendLine($"  url: {wasmUrl}");
         sb.AppendLine("  phase: AUTHN");
         sb.AppendLine("  pluginConfig:");
         sb.AppendLine($"    endpoint: \"http://{opts.ServiceHost}:{opts.ServicePort}{opts.AuthzPath}\"");
@@ -451,6 +454,13 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         if (opts.TimeoutMs is < 1 or > 60000)
         {
             throw new ArgumentException("Invalid timeout.", nameof(opts));
+        }
+
+        if (string.IsNullOrWhiteSpace(opts.WasmPluginTag) ||
+            string.Equals(opts.WasmPluginTag, "latest", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(opts.WasmPluginTag, ":latest", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("WasmPluginTag must be pinned to a concrete version and cannot be 'latest'.", nameof(opts));
         }
     }
 }

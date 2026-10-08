@@ -308,4 +308,15 @@ public sealed class EnvoyExtAuthzSecurityTests
         Assert.Contains("failClosed: true", yaml);
         Assert.Contains("oci://ghcr.io/autheris/envoy-pdp-wasm", yaml);
     }
+
+    [Fact]
+    public void API_17_GenerateIstioWasmPluginYaml_UsesPinnedVersionTag_AndRejectsLatest()
+    {
+        var yaml = _service.GenerateIstioWasmPluginYaml();
+        Assert.DoesNotContain(":latest", yaml);
+        Assert.Contains(":v1.0.0", yaml);
+
+        var badOpts = new EnvoyFilterExportOptions { WasmPluginTag = "latest" };
+        Assert.Throws<ArgumentException>(() => _service.GenerateIstioWasmPluginYaml(badOpts));
+    }
 }
