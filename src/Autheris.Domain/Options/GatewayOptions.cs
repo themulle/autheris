@@ -1073,6 +1073,9 @@ public sealed class LakehouseStorageOptions
     public string S3Bucket { get; init; } = string.Empty;
     public string S3AccessKey { get; init; } = string.Empty;
     public string S3SecretKey { get; init; } = string.Empty;
+
+    /// <summary>EXT-8: SigV4 signing region. Empty = derived from the endpoint host (s3.&lt;region&gt;.amazonaws.com), else us-east-1.</summary>
+    public string S3Region { get; init; } = string.Empty;
     public string AzureAccountName { get; init; } = string.Empty;
     public string AzureContainer { get; init; } = string.Empty;
     public string AzureAccountKey { get; init; } = string.Empty;

@@ -90,13 +90,22 @@ public sealed class S3LakehouseStorageProvider : ILakehouseStorageProvider
         ApplySigV4OrUnsigned(request, HttpMethod.Get, uri, bucket, key);
 
         var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-        if (response.StatusCode == HttpStatusCode.NotFound)
+        try
         {
-            throw new FileNotFoundException($"S3 object not found: '{location}' (Resolved: '{uri}').", location);
-        }
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                throw new FileNotFoundException($"S3 object not found: '{location}' (Resolved: '{uri}').", location);
+            }
 
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            // EXT-8: release the connection when no stream is handed out (it leaked on 404 and error responses).
+            response.Dispose();
+            throw;
+        }
     }
 
     public async ValueTask<bool> ExistsAsync(string location, CancellationToken cancellationToken = default)
@@ -243,6 +252,26 @@ public sealed class S3LakehouseStorageProvider : ILakehouseStorageProvider
         }
     }
 
+    /// <summary>
+    /// EXT-8: the signing region must match the bucket's region, otherwise S3 rejects every signed request. An explicit
+    /// S3Region wins; otherwise the region is taken from AWS hosts (s3.eu-central-1.amazonaws.com,
+    /// bucket.s3.eu-central-1.amazonaws.com, s3-eu-west-1.amazonaws.com); us-east-1 remains the fallback.
+    /// </summary>
+    internal static string ResolveSigningRegion(string? configuredRegion, Uri uri)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredRegion))
+        {
+            return configuredRegion.Trim();
+        }
+
+        var match = System.Text.RegularExpressions.Regex.Match(
+            uri.Host,
+            @"(?:^|\.)s3[.-](?!external-1)([a-z]{2}(?:-gov)?-[a-z]+-\d)\.amazonaws\.com$",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(100));
+        return match.Success ? match.Groups[1].Value : "us-east-1";
+    }
+
     private void ApplySigV4OrUnsigned(HttpRequestMessage request, HttpMethod method, Uri uri, string bucket, string key)
     {
         var s3Opts = _options.Value.Lakehouse.Storage;
@@ -261,7 +290,7 @@ public sealed class S3LakehouseStorageProvider : ILakehouseStorageProvider
                 $"No S3 credentials provided and {nameof(GatewayOptions.AreUnsignedS3RequestsAllowed)} is false. Refusing unsigned request to '{uri}'.");
         }
 
-        SignAwsSigV4(request, method, uri, accessKey, secretKey, region: "us-east-1");
+        SignAwsSigV4(request, method, uri, accessKey, secretKey, region: ResolveSigningRegion(s3Opts.S3Region, uri));
     }
 
     private static void SignAwsSigV4(
