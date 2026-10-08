@@ -319,6 +319,13 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
                     string.Equals(r.Name, roleRef.Name, StringComparison.OrdinalIgnoreCase));
                 if (matchedRole != null)
                 {
+                    if (!omOptions.RoleToGatewayRoleMap.TryGetValue(matchedRole.Name, out var gatewayRole) ||
+                        string.IsNullOrWhiteSpace(gatewayRole))
+                    {
+                        _logger.LogDebug("OpenMetadata role '{Role}' for user '{User}' is not mapped in RoleToGatewayRoleMap allowlist. Skipping user consent generation.", matchedRole.Name, user.Name);
+                        continue;
+                    }
+
                     userPolicies.AddRange(ResolvePolicies(matchedRole.Policies, policyById, policyByName));
                 }
             }
