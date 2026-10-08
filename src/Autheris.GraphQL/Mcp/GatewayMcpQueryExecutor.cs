@@ -74,8 +74,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         {
             new(ClaimTypes.NameIdentifier, sessionContext.ServicePrincipalId),
             new("sub", sessionContext.ServicePrincipalId),
-            new("tenant_id", sessionContext.TenantId),
-            new(ClaimTypes.Role, "AiAgent")
+            new("tenant_id", sessionContext.TenantId)
         };
 
         if (!string.IsNullOrWhiteSpace(sessionContext.UserSid))
@@ -89,10 +88,6 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             {
                 claims.Add(new Claim(ClaimTypes.Role, role));
             }
-        }
-        else
-        {
-            claims.Add(new Claim(ClaimTypes.Role, "Reader"));
         }
 
         if (sessionContext.GroupSids != null)
@@ -301,7 +296,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                     .AddGlobalState("CallerSecurityContext", new CallerSecurityContext(
                         effectiveCallerSid,
                         groupSids,
-                        new[] { "AiAgent", "Reader" },
+                        sessionContext.Roles?.ToArray() ?? Array.Empty<string>(),
                         new TenantId(sessionContext.TenantId),
                         IsGovernanceAdmin: false,
                         IsClusterAdmin: false
