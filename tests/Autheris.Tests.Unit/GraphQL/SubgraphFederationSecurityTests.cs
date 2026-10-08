@@ -7,8 +7,10 @@ using System.Security.Claims;
 using Autheris.Application.Federation.Services;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Federation;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -254,5 +256,86 @@ public sealed class SubgraphFederationSecurityTests
         capturing.CapturedRequest.ShouldNotBeNull();
         capturing.CapturedRequest.Headers.Contains("Authorization").ShouldBeTrue();
         capturing.CapturedRequest.Headers.GetValues("Authorization").First().ShouldBe("Bearer trusted-client-token");
+    }
+
+    [Fact]
+    public void ApplySecurityHeaders_OutsideDevelopment_WithDefaultSecret_ThrowsInvalidOperationException()
+    {
+        var options = new GatewayOptions
+        {
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                EnableZeroTrustContextForwarding = true,
+                SignContextHeaders = true,
+                SigningKey = "autheris-federation-default-secret"
+            }
+        };
+
+        var prodEnv = Substitute.For<IHostEnvironment>();
+        prodEnv.EnvironmentName.Returns("Production");
+
+        var service = new SubgraphContextPropagationService(
+            Options.Create(options),
+            NullLogger<SubgraphContextPropagationService>.Instance,
+            prodEnv);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://subgraph.internal/graphql");
+        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FED-USER")], "Test"));
+
+        Should.Throw<InvalidOperationException>(() =>
+            service.ApplySecurityHeaders(request, "products", user, "tenant_alpha"))
+            .Message.ShouldContain("prohibited outside the Development environment");
+    }
+
+    [Fact]
+    public void ApplySecurityHeaders_OutsideDevelopment_WithShortSecret_ThrowsInvalidOperationException()
+    {
+        var options = new GatewayOptions
+        {
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                EnableZeroTrustContextForwarding = true,
+                SignContextHeaders = true,
+                SigningKey = "too-short-secret" // less than 32 bytes
+            }
+        };
+
+        var prodEnv = Substitute.For<IHostEnvironment>();
+        prodEnv.EnvironmentName.Returns("Production");
+
+        var service = new SubgraphContextPropagationService(
+            Options.Create(options),
+            NullLogger<SubgraphContextPropagationService>.Instance,
+            prodEnv);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://subgraph.internal/graphql");
+        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FED-USER")], "Test"));
+
+        Should.Throw<InvalidOperationException>(() =>
+            service.ApplySecurityHeaders(request, "products", user, "tenant_alpha"))
+            .Message.ShouldContain("must be at least 32 bytes long");
+    }
+
+    [Fact]
+    public void ValidateGatewayOptions_OutsideDevelopment_WithDefaultOrMissingSigningKey_ThrowsValidationException()
+    {
+        var options = new GatewayOptions
+        {
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                SignContextHeaders = true,
+                SigningKey = "autheris-federation-default-secret"
+            }
+        };
+
+        var prodEnv = Substitute.For<IHostEnvironment>();
+        prodEnv.EnvironmentName.Returns("Production");
+
+        Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
+            Autheris.Api.Extensions.GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv))
+            .Message.ShouldContain("Federation:SigningKey");
     }
 }

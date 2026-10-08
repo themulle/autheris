@@ -8,6 +8,8 @@ using Autheris.Application.Federation.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Application.Security;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -15,13 +17,16 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
 {
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<SubgraphContextPropagationService> _logger;
+    private readonly IHostEnvironment? _environment;
 
     public SubgraphContextPropagationService(
         IOptions<GatewayOptions> options,
-        ILogger<SubgraphContextPropagationService> logger)
+        ILogger<SubgraphContextPropagationService> logger,
+        IHostEnvironment? environment = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _environment = environment;
     }
 
     public void ApplySecurityHeaders(
@@ -86,9 +91,32 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
         // 6. Sign Zero-Trust Context Headers with HMAC-SHA256 (1.10)
         if (fedOptions.SignContextHeaders)
         {
-            var signingKey = !string.IsNullOrWhiteSpace(fedOptions.SigningKey)
-                ? fedOptions.SigningKey
-                : (_options.Value.DataMasking?.HmacSecretKeyVaultRef ?? "autheris-federation-default-secret");
+            var isDevelopment = _environment == null || _environment.IsDevelopment();
+            string? signingKey = fedOptions.SigningKey;
+
+            if (string.IsNullOrWhiteSpace(signingKey) || (!isDevelopment && string.Equals(signingKey, "autheris-federation-default-secret", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (isDevelopment)
+                {
+                    signingKey = !string.IsNullOrWhiteSpace(fedOptions.SigningKey)
+                        ? fedOptions.SigningKey
+                        : (_options.Value.DataMasking?.HmacSecretKeyVaultRef ?? "autheris-federation-default-secret");
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        "Security error: Federation Zero-Trust context header signing is enabled (Gateway:Federation:SignContextHeaders = true), " +
+                        "but no secure SigningKey is configured. Using the default secret is prohibited outside the Development environment.");
+                }
+            }
+
+            if (!isDevelopment)
+            {
+                SecretKeyRequirements.EnsureMinimumLength(
+                    System.Text.Encoding.UTF8.GetBytes(signingKey),
+                    "The Federation context header signing key (Federation:SigningKey)",
+                    isDevelopment: false);
+            }
 
             var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
             var nonce = Guid.NewGuid().ToString("N");

@@ -1222,6 +1222,23 @@ public static class GatewayServiceCollectionExtensions
             }
         }
 
+        // SR-P2-02 / SEC-GQL-02: Federation context header signing key must be configured outside Development
+        if (!environment.IsDevelopment() && options.Federation.Enabled && options.Federation.SignContextHeaders)
+        {
+            if (string.IsNullOrWhiteSpace(options.Federation.SigningKey) ||
+                string.Equals(options.Federation.SigningKey, "autheris-federation-default-secret", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ValidationException(
+                    "Security violation: Federation context header signing is enabled (Federation:SignContextHeaders = true), " +
+                    "but Federation:SigningKey is not configured or uses the insecure default secret. A secure key of at least 32 bytes is required outside Development.");
+            }
+
+            Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(
+                System.Text.Encoding.UTF8.GetBytes(options.Federation.SigningKey),
+                "Gateway:Federation:SigningKey",
+                isDevelopment: false);
+        }
+
         // Security switch semantics: DANGER = blocked outside Development (see below), WARN = permitted everywhere
         // but reported loudly at startup, regular options = no message (see GatewayOptions.GetAllActiveBypasses).
         var dangerBypasses = options.GetActiveDangerBypasses();
