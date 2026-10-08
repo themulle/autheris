@@ -267,7 +267,7 @@ sequenceDiagram
 - **In-Memory Result Masking**: `SubgraphResultMaskingMiddleware` enforces masking rules across aggregated federated response trees.
 
 ### 8.9 Model Context Protocol (MCP) AI Gateway & Semantic Guardrails
-- **Model Context Protocol Server**: Exposes GraphQL schemas and parameterized queries as AI Agent Tools via Stdio and Streamable HTTP/SSE (`/mcp`, `/mcp/sse`).
+- **Model Context Protocol Server**: Exposes GraphQL schemas and parameterized queries as AI Agent Tools via Stdio and Streamable HTTP (`/mcp`, official MCP C# SDK, stateless, OAuth protected resource metadata).
 - **Semantic Prompt Injection Defense**: `SemanticPromptGuardrail` inspects tool arguments against OWASP LLM01 prompt injection patterns, ChatML delimiters, and Base64 evasion techniques.
 - **AI Data Guardrail Engine**: Dynamic PII scrubbing, token consumption budgeting, query cost limits, and session ownership enforcement.
 

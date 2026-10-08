@@ -84,7 +84,7 @@ public sealed class CostAndQuotaMiddleware
         if (calculatedCost > clientContext.Policy.MaxCostPerQuery)
         {
             var error = ErrorBuilder.New()
-                .SetMessage($"Die Abfragekosten ({calculatedCost}) überschreiten das Tier-Limit von {clientContext.Policy.MaxCostPerQuery}.")
+                .SetMessage($"The query cost ({calculatedCost}) exceeds the tier limit of {clientContext.Policy.MaxCostPerQuery}.")
                 .SetCode("QUERY_COST_QUOTA_EXCEEDED")
                 .SetExtension("calculatedCost", calculatedCost)
                 .SetExtension("maxAllowedCost", clientContext.Policy.MaxCostPerQuery)
@@ -104,7 +104,7 @@ public sealed class CostAndQuotaMiddleware
         if (!limitResult.Allowed)
         {
             var error = ErrorBuilder.New()
-                .SetMessage("Rate Limit überschritten. Bitte warten Sie bis zum nächsten Zeitfenster.")
+                .SetMessage("Rate limit exceeded. Wait until the next time window.")
                 .SetCode("RATE_LIMIT_EXCEEDED")
                 .SetExtension("retryAfterSeconds", limitResult.RetryAfterSeconds)
                 .Build();

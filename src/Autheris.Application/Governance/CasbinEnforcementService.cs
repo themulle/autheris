@@ -356,31 +356,31 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
         if (subRule.Length > 500)
         {
-            throw new ArgumentException("Security validation error / Sicherheitsfehler: Casbin sub_rule überschreitet die maximale Länge von 500 Zeichen.", nameof(subRule));
+            throw new ArgumentException("Security validation error: Casbin sub_rule exceeds the maximum length of 500 characters.", nameof(subRule));
         }
 
         if (!SafeSubRulePattern.IsMatch(subRule))
         {
-            throw new ArgumentException("Security validation error / Sicherheitsfehler: Casbin sub_rule enthält nicht erlaubte Zeichen.", nameof(subRule));
+            throw new ArgumentException("Security validation error: Casbin sub_rule contains disallowed characters.", nameof(subRule));
         }
 
         if (!string.IsNullOrWhiteSpace(rlsFilter))
         {
             if (rlsFilter.Length > 1000)
             {
-                throw new ArgumentException("Security validation error / Sicherheitsfehler: Casbin rls_filter überschreitet die maximale Länge von 1000 Zeichen.", nameof(rlsFilter));
+                throw new ArgumentException("Security validation error: Casbin rls_filter exceeds the maximum length of 1000 characters.", nameof(rlsFilter));
             }
 
             if (!SafeRlsFilterPattern.IsMatch(rlsFilter))
             {
-                throw new ArgumentException("Security validation error / Sicherheitsfehler: Casbin rls_filter enthält nicht erlaubte Zeichen.", nameof(rlsFilter));
+                throw new ArgumentException("Security validation error: Casbin rls_filter contains disallowed characters.", nameof(rlsFilter));
             }
 
             foreach (var sqlToken in DangerousSqlTokens)
             {
                 if (rlsFilter.Contains(sqlToken, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new ArgumentException($"Security validation error / Sicherheitsfehler: Casbin rls_filter enthält nicht erlaubten SQL-Ausdruck '{sqlToken.Trim()}'.", nameof(rlsFilter));
+                    throw new ArgumentException($"Security validation error: Casbin rls_filter contains disallowed SQL expression '{sqlToken.Trim()}'.", nameof(rlsFilter));
                 }
             }
         }
@@ -389,12 +389,12 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         {
             if (subRule.Contains(token, StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException($"Security validation error / Sicherheitsfehler: Casbin sub_rule enthält nicht erlaubten Ausdruck '{token}'.", nameof(subRule));
+                throw new ArgumentException($"Security validation error: Casbin sub_rule contains disallowed expression '{token}'.", nameof(subRule));
             }
 
             if (!string.IsNullOrWhiteSpace(rlsFilter) && rlsFilter.Contains(token, StringComparison.OrdinalIgnoreCase))
             {
-                throw new ArgumentException($"Security validation error / Sicherheitsfehler: Casbin rls_filter enthält nicht erlaubten Ausdruck '{token}'.", nameof(rlsFilter));
+                throw new ArgumentException($"Security validation error: Casbin rls_filter contains disallowed expression '{token}'.", nameof(rlsFilter));
             }
         }
     }
@@ -413,7 +413,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
         if (tenant.Value == "*" && !_modelSupportsWildcardTenant)
         {
-            throw new InvalidOperationException("Das Casbin-Modell unterstützt keine Wildcard-Mandanten (Probe W1). `*`-Regeln sind nicht erlaubt.");
+            throw new InvalidOperationException("The Casbin model does not support wildcard tenants (probe W1). `*` rules are not allowed.");
         }
 
         var ruleMeta = new CasbinRuleMetadata(sub, tenant.Value, obj, act, subRule, eft, rlsFilter, correlatedRowFilter);
@@ -468,7 +468,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
         if (!_modelSupportsWildcardTenant)
         {
-            throw new InvalidOperationException("Das Casbin-Modell unterstützt keine Wildcard-Mandanten (Probe W1). `*`-Regeln sind nicht erlaubt.");
+            throw new InvalidOperationException("The Casbin model does not support wildcard tenants (probe W1). `*` rules are not allowed.");
         }
 
         var ruleMeta = new CasbinRuleMetadata(sub, WildcardTenant, obj, act, subRule, eft, rlsFilter, correlatedRowFilter);
@@ -774,7 +774,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 }
                 else
                 {
-                    throw new SecurityException($"Sicherheitsfehler: Korrelierter RLS-Filter für Tabelle '{tableStr}' konnte nicht generiert werden.");
+                    throw new SecurityException($"Security error: Correlated row filter for table '{tableStr}' could not be generated.");
                 }
             }
 
@@ -785,7 +785,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 if (string.IsNullOrWhiteSpace(interpolated))
                 {
                     // Fail-closed: a matched allow rule with an RLS filter must contribute that filter.
-                    throw new SecurityException($"Sicherheitsfehler: RLS-Filter für Tabelle '{tableStr}' ergab nach der Interpolation einen leeren Ausdruck.");
+                    throw new SecurityException($"Security error: Row filter for table '{tableStr}' resulted in an empty expression after interpolation.");
                 }
 
                 result.Add(interpolated);
@@ -837,7 +837,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         if (string.IsNullOrEmpty(value)) return string.Empty;
         if (!SafeClaimValueRegex.IsMatch(value))
         {
-            throw new SecurityException($"Sicherheitsfehler: Claim '{claimName}' enthält ungültige Zeichen für SQL-RLS-Interpolation.");
+            throw new SecurityException($"Security error: Claim '{claimName}' contains invalid characters for SQL row filter interpolation.");
         }
         return value.Replace("'", "''", StringComparison.Ordinal);
     }
@@ -848,25 +848,25 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         if ((filterTemplate.Contains("${department}", StringComparison.OrdinalIgnoreCase) || filterTemplate.Contains("${r.ctx.Department}", StringComparison.OrdinalIgnoreCase)) &&
             string.IsNullOrWhiteSpace(context.Department))
         {
-            throw new SecurityException($"Sicherheitsfehler: Erforderliches RLS-Attribut 'Department' fehlt im Kontext für Template '{filterTemplate}'.");
+            throw new SecurityException($"Security error: Required row filter attribute 'Department' is missing in the context for template '{filterTemplate}'.");
         }
 
         if ((filterTemplate.Contains("${region}", StringComparison.OrdinalIgnoreCase) || filterTemplate.Contains("${r.ctx.Region}", StringComparison.OrdinalIgnoreCase)) &&
             string.IsNullOrWhiteSpace(context.Region))
         {
-            throw new SecurityException($"Sicherheitsfehler: Erforderliches RLS-Attribut 'Region' fehlt im Kontext für Template '{filterTemplate}'.");
+            throw new SecurityException($"Security error: Required row filter attribute 'Region' is missing in the context for template '{filterTemplate}'.");
         }
 
         if ((filterTemplate.Contains("${clearance}", StringComparison.OrdinalIgnoreCase) || filterTemplate.Contains("${r.ctx.ClearanceLevel}", StringComparison.OrdinalIgnoreCase)) &&
             string.IsNullOrWhiteSpace(context.ClearanceLevel))
         {
-            throw new SecurityException($"Sicherheitsfehler: Erforderliches RLS-Attribut 'ClearanceLevel' fehlt im Kontext für Template '{filterTemplate}'.");
+            throw new SecurityException($"Security error: Required row filter attribute 'ClearanceLevel' is missing in the context for template '{filterTemplate}'.");
         }
 
         if ((filterTemplate.Contains("${purpose}", StringComparison.OrdinalIgnoreCase) || filterTemplate.Contains("${r.ctx.PurposeId}", StringComparison.OrdinalIgnoreCase)) &&
             string.IsNullOrWhiteSpace(context.PurposeId))
         {
-            throw new SecurityException($"Sicherheitsfehler: Erforderliches RLS-Attribut 'PurposeId' fehlt im Kontext für Template '{filterTemplate}'.");
+            throw new SecurityException($"Security error: Required row filter attribute 'PurposeId' is missing in the context for template '{filterTemplate}'.");
         }
 
         // SEC M-19: Placeholders are resolved by a single left-to-right scan that tracks SQL string-literal state.
@@ -901,12 +901,12 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 var match = RlsPlaceholderRegex.Match(filterTemplate, i);
                 if (!match.Success || match.Index != i)
                 {
-                    throw new SecurityException($"Sicherheitsfehler: Ungültiger RLS-Parameter im Template '{filterTemplate}'.");
+                    throw new SecurityException($"Security error: Invalid row filter parameter in template '{filterTemplate}'.");
                 }
 
                 var name = match.Groups[1].Value;
                 var value = ResolveRlsPlaceholder(name, context)
-                    ?? throw new SecurityException($"Sicherheitsfehler: Unaufgelöster RLS-Parameter im Template '{filterTemplate}'.");
+                    ?? throw new SecurityException($"Security error: Unresolved row filter parameter in template '{filterTemplate}'.");
 
                 var escaped = SanitizeClaimForSql(value, name);
                 if (inLiteral)
@@ -1258,7 +1258,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
                     if (ruleTenant == "*" && !modelSupportsWildcardTenant)
                     {
-                        throw new InvalidOperationException("Das Casbin-Modell unterstützt keine Wildcard-Mandanten (Probe W1). `*`-Regeln sind nicht erlaubt.");
+                        throw new InvalidOperationException("The Casbin model does not support wildcard tenants (probe W1). `*` rules are not allowed.");
                     }
 
                     obj = parts.Count > 3 ? parts[3] : "*";

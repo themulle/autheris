@@ -136,7 +136,7 @@ public static class GovernedConnectorReader
             var estimatedBytes = EstimateBytes(projected);
             if (estimatedBytes > maxBytes)
             {
-                throw new GatewaySecurityException($"Antwortgröße ({estimatedBytes} Bytes) überschreitet das konfigurierte Limit von {maxBytes} Bytes.", "RESPONSE_TOO_LARGE");
+                throw new GatewaySecurityException($"Response size ({estimatedBytes} bytes) exceeds the configured limit of {maxBytes} bytes.", "RESPONSE_TOO_LARGE");
             }
         }
 

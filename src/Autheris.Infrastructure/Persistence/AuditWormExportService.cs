@@ -320,7 +320,7 @@ public sealed class AuditWormExportService : IAuditWormExportService
         bool hasCredentials = !string.IsNullOrWhiteSpace(wormOpts.S3AccessKey) && !string.IsNullOrWhiteSpace(wormOpts.S3SecretKey);
         if (!hasCredentials && !_options.Value.AreUnsignedS3RequestsAllowed)
         {
-            throw new System.Security.SecurityException("S3 WORM-Export verlangt signierte Anfragen (S3AccessKey/S3SecretKey). Unsignierte Anfragen sind nur mit warn_allow_unsigned_s3_requests erlaubt.");
+            throw new System.Security.SecurityException("S3 WORM export requires signed requests (S3AccessKey/S3SecretKey). Unsigned requests are only allowed with warn_allow_unsigned_s3_requests.");
         }
 
         var dataUri = new Uri($"{endpoint}/{bucket}/{prefix}{fileName}");

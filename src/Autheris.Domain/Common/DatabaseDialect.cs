@@ -20,7 +20,7 @@ public static class DatabaseDialectExtensions
     {
         if (string.IsNullOrWhiteSpace(id) || !SafeIdentifierRegex.IsMatch(id))
         {
-            throw new ArgumentException($"Ungültiger Bezeichner '{id}'. Erlaubt sind nur alphanumerische Zeichen und Unterstriche, beginnend mit einem Buchstaben oder Unterstrich.", paramName);
+            throw new ArgumentException($"Invalid identifier '{id}'. Only alphanumeric characters and underscores are allowed, starting with a letter or underscore.", paramName);
         }
     }
 
@@ -135,7 +135,7 @@ public static class DatabaseDialectExtensions
     {
         if (value.Contains('\0'))
         {
-            throw new InvalidOperationException("Literal enthält verbotenes Null-Byte (\\0). Potenzieller Injection-Angriff.");
+            throw new InvalidOperationException("Literal contains a forbidden null byte (\\0). Potential injection attack.");
         }
 
         // Standard single quote doubling
@@ -165,12 +165,12 @@ public static class DatabaseDialectExtensions
             case System.Text.Json.JsonValueKind.Number:
                 if (!elem.TryGetInt64(out _) && !elem.TryGetDecimal(out _))
                 {
-                    throw new InvalidOperationException($"Ungültiger numerischer Literal-Wert im Zeilenfilter: {elem.GetRawText()}");
+                    throw new InvalidOperationException($"Invalid numeric literal value in row filter: {elem.GetRawText()}");
                 }
                 var raw = elem.GetRawText();
                 if (!Regex.IsMatch(raw, @"^[+-]?[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)?$"))
                 {
-                    throw new InvalidOperationException($"Ungültiges Zahlenformat im Zeilenfilter: '{raw}'");
+                    throw new InvalidOperationException($"Invalid number format in row filter: '{raw}'");
                 }
                 return raw;
 
@@ -184,7 +184,7 @@ public static class DatabaseDialectExtensions
                 return "NULL";
 
             default:
-                throw new InvalidOperationException($"Nicht unterstützter Literal-Typ im Zeilenfilter: {elem.ValueKind}");
+                throw new InvalidOperationException($"Unsupported literal type in row filter: {elem.ValueKind}");
         }
     }
 }

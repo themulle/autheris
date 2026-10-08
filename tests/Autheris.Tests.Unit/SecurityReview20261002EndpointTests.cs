@@ -472,24 +472,6 @@ public class SecurityReview20261002EndpointTests
     // =========================================================================
 
     [Fact]
-    public void H16_SessionBinding_RejectsOtherSubjectOrTenant()
-    {
-        var store = new McpSessionStore(NullLogger<McpSessionStore>.Instance);
-        var session = store.CreateSession("spa-client", "tenant-a", "S-1-5-21-ALICE", ["Reader"], []);
-
-        McpSessionBinding.IsOwnedBy(session, "S-1-5-21-ALICE", "tenant-a").ShouldBeTrue();
-
-        // Same SPA client_id, different user -> must not be able to use Alice's session.
-        McpSessionBinding.IsOwnedBy(session, "S-1-5-21-MALLORY", "tenant-a").ShouldBeFalse();
-        McpSessionBinding.IsOwnedBy(session, null, "tenant-a").ShouldBeFalse();
-        McpSessionBinding.IsOwnedBy(session, "S-1-5-21-ALICE", "tenant-b").ShouldBeFalse();
-
-        var anonymous = store.CreateSession("anonymous-ai-agent", "tenant-a");
-        McpSessionBinding.IsOwnedBy(anonymous, "S-1-5-21-ALICE", "tenant-a").ShouldBeFalse();
-        McpSessionBinding.IsOwnedBy(anonymous, null, "tenant-a").ShouldBeTrue();
-    }
-
-    [Fact]
     public void H16_RolesAreRefreshedFromCurrentPrincipal()
     {
         var store = new McpSessionStore(NullLogger<McpSessionStore>.Instance);
@@ -539,20 +521,6 @@ public class SecurityReview20261002EndpointTests
         caller.TenantId.ShouldBe("tenant-a");
         caller.PrincipalId.ShouldBe("shared-spa");
         caller.Roles.ShouldContain("Reader");
-    }
-
-    [Fact]
-    public void H16_SessionId_IsPreferablyTakenFromHeader()
-    {
-        var context = new DefaultHttpContext();
-        context.Request.Headers["Mcp-Session-Id"] = "from-header";
-        context.Request.QueryString = new QueryString("?sessionId=from-query");
-
-        McpEndpoints.GetSessionIdFromRequest(context.Request, preferHeader: true).ShouldBe("from-header");
-
-        var queryOnly = new DefaultHttpContext();
-        queryOnly.Request.QueryString = new QueryString("?sessionId=from-query");
-        McpEndpoints.GetSessionIdFromRequest(queryOnly.Request, preferHeader: true).ShouldBe("from-query");
     }
 
     // =========================================================================

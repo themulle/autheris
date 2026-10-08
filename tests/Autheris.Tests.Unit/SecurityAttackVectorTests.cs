@@ -166,8 +166,8 @@ public sealed class SecurityAttackVectorTests
                 eft: "allow");
         });
 
-        ex.Message.ShouldContain("Sicherheitsfehler");
-        ex.Message.ShouldContain("nicht erlaubten Ausdruck");
+        ex.Message.ShouldContain("Security validation error");
+        ex.Message.ShouldContain("disallowed expression");
     }
 
     [Theory]
@@ -192,7 +192,7 @@ public sealed class SecurityAttackVectorTests
                 rlsFilter: maliciousRls);
         });
 
-        ex.Message.ShouldContain("Sicherheitsfehler");
+        ex.Message.ShouldContain("Security validation error");
     }
 
     [Fact]
@@ -320,7 +320,7 @@ public sealed class SecurityAttackVectorTests
             await executor.ExecuteAsync(context);
         });
 
-        ex.Message.ShouldContain("Zero-Trust-Verletzung");
+        ex.Message.ShouldContain("Zero-Trust violation");
         ex.Message.ShouldContain("salary");
     }
 

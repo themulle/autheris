@@ -20,6 +20,14 @@ Wir etablieren einen nativen, standardkonformen **Model Context Protocol (MCP) S
    - **Token-Budgeting**: Berechnet geschätzte Token-Größen und trunkiert Ergebnisse kontrolliert bei Überschreitung von `MaxTokensPerCall`.
    - **Sicherheits-Insecure-Modi**: `danger_bypass_mcp_auth` (in Produktion verboten) und `warn_allow_unmasked_ai_access` für Dev/Sandbox-Tests.
 
+### Nachtrag 2026-10-08: offizielles MCP-SDK
+Der HTTP-Transport läuft jetzt auf dem offiziellen MCP-C#-SDK (`ModelContextProtocol.AspNetCore`) statt auf dem selbst geschriebenen JSON-RPC-Server:
+- **Ein Endpunkt** `/mcp` (Streamable HTTP) mit den aktuellen Protokollversionen; der alte SSE-Transport (`/mcp/sse`, `/mcp/message`) und `DELETE /mcp/session/{id}` entfallen.
+- **Zustandslos**: keine MCP-Sitzungen. Jede Anfrage wird mit der Identität ihrer eigenen HTTP-Anfrage ausgeführt; die Sitzungsbindung (SEC H-16) ist damit strukturell erfüllt, und Lastverteilung braucht keine Session-Affinität.
+- **OAuth-Erkennung** (RFC 9728): Bei aktiviertem Entra ID / AD FS liefert `/.well-known/oauth-protected-resource/mcp` die Autorisierungsserver; 401-Antworten verweisen darauf.
+- **Ressourcen-Templates**: `autheris://datasets/{dataset}` liefert die Dataset-Beschreibung (über denselben Guardrail-Pfad wie `describe_dataset`).
+- Werkzeuge, Ressourcen und alle Guardrails (ABAC, Vier-Augen, PII-Scrubbing, Token-Budget, Audit) bleiben unverändert in den Gateway-Diensten. Der stdio-Runner nutzt weiterhin `McpProtocolHandler`.
+
 ## Konsequenzen
 ### Positiv
 - Klare Marktdifferenzierung als erstes Enterprise GraphQL Gateway mit integrierter KI-Agent-Absicherung.

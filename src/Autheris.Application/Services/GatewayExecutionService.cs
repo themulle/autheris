@@ -149,7 +149,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         // Enforce Access
         if (!decision.IsAllowed)
         {
-            throw new GatewayForbiddenException($"Zugriff auf Tabelle '{table}' verweigert: {string.Join("; ", decision.DeniedReasons)}");
+            throw new GatewayForbiddenException($"Access to table '{table}' denied: {string.Join("; ", decision.DeniedReasons)}");
         }
 
         // Generate/Fetch query result via IDataSourceExecutor (SQL, Declarative HTTP, or Plugin)
@@ -159,7 +159,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         var executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
         if (executor == null)
         {
-            throw new GatewayNotImplementedException($"Für den DataSourceType '{metadata.Table.DataSourceType}' ist kein Executor registriert.");
+            throw new GatewayNotImplementedException($"No executor is registered for DataSourceType '{metadata.Table.DataSourceType}'.");
         }
 
         var execArgs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
@@ -294,7 +294,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         var userSidNullable = principal.GetUserSid();
         if (userSidNullable == null)
         {
-            throw new GatewayUnauthorizedException("Keine gültige Benutzer-SID im Authentifizierungstoken vorhanden.");
+            throw new GatewayUnauthorizedException("No valid user SID in the authentication token.");
         }
         var userSid = userSidNullable.Value;
 

@@ -82,7 +82,7 @@ public sealed class PreAuthIpRateLimitingMiddleware
                 {
                     new
                     {
-                        message = "Pre-Auth IP Rate Limit überschritten. Bitte warten.",
+                        message = "Pre-auth IP rate limit exceeded. Wait before retrying.",
                         extensions = new { code = "RATE_LIMIT_EXCEEDED" }
                     }
                 }
@@ -162,7 +162,7 @@ public sealed class PostAuthSidRateLimitingMiddleware
                 {
                     new
                     {
-                        message = "Benutzerbezogenes SID-Rate-Limit überschritten.",
+                        message = "Per-user SID rate limit exceeded.",
                         extensions = new { code = "RATE_LIMIT_EXCEEDED" }
                     }
                 }

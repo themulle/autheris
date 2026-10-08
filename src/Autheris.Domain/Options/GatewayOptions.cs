@@ -527,6 +527,22 @@ public sealed class EntraIdAuthOptions
     public string SidClaimType { get; init; } = "oid";
     public string GroupsClaimType { get; init; } = "groups";
     public string RolesClaimType { get; init; } = "roles";
+
+    /// <summary>
+    /// Delegated scopes (<c>scp</c>) that only permit reading, e.g. an agent scope. A user token whose scopes all appear
+    /// here is read-only: writes over HTTP, GraphQL mutations and WebSQL DML are rejected.
+    /// </summary>
+    public List<string> ReadOnlyScopes { get; init; } = ["Agent.Read"];
+
+    /// <summary>How app-only tokens (client credentials, no signed-in person) are treated.</summary>
+    public AppOnlyTokenAccess AppOnlyTokens { get; init; } = AppOnlyTokenAccess.ReadWrite;
+}
+
+public enum AppOnlyTokenAccess
+{
+    ReadWrite,
+    ReadOnly,
+    Deny
 }
 
 public sealed class AdfsAuthOptions
@@ -684,6 +700,23 @@ public sealed class RateLimitingOptions
 {
     [Required] public PreAuthIpRateLimitOptions PreAuthIpRateLimit { get; init; } = new();
     [Required] public PostAuthSidRateLimitOptions PostAuthSidRateLimit { get; init; } = new();
+    public ClientTierOptions ClientTiers { get; init; } = new();
+}
+
+public sealed class ClientTierOptions
+{
+    public Dictionary<string, ClientTierLimitOverride> TierLimits { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> RoleTierMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> ApiKeys { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class ClientTierLimitOverride
+{
+    public int? MaxCostPerQuery { get; init; }
+    public int? MaxComplexityDepth { get; init; }
+    public int? MaxTokensCapacity { get; init; }
+    public double? TokenRefillRatePerSecond { get; init; }
+    public bool? ExposeCostExtensions { get; init; }
 }
 
 public sealed class PreAuthIpRateLimitOptions
@@ -1268,6 +1301,11 @@ public sealed class WebSqlOptions
     /// DefaultDataSourceName is always allowed; empty list = only DefaultDataSourceName.
     /// </summary>
     public List<string> AllowedDataSources { get; init; } = [];
+
+    /// <summary>
+    /// Logical-to-physical data source connection mappings (e.g. catalog/domain name -> connection key in DataSources.Connections).
+    /// </summary>
+    public Dictionary<string, string> DataSourceMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// SEC C-03: Optional per-tenant data source allowlist (tenant id -> data sources). If the tenant has an

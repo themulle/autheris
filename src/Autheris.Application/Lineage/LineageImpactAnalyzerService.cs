@@ -65,13 +65,13 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             (consent.TenantId != tenant &&
              !callerContext.IsClusterAdmin))
         {
-            throw new KeyNotFoundException($"Consent mit ID '{consentId}' nicht gefunden.");
+            throw new KeyNotFoundException($"Consent with ID '{consentId}' not found.");
         }
 
         // SEC M-15: Nur Owner/Delegierte der Tabelle, GovernanceAdmin und PrivacyAdmin dürfen die Auswirkungsanalyse sehen.
         if (!await IsAuthorizedForAccessAnalysisAsync(consent.TableIdentifier, callerContext, ct).ConfigureAwait(false))
         {
-            throw new GatewayForbiddenException("Auswirkungsanalysen erfordern Data-Owner-, GovernanceAdmin- oder PrivacyAdmin-Rechte.");
+            throw new GatewayForbiddenException("Impact analyses require Data Owner, GovernanceAdmin or PrivacyAdmin permissions.");
         }
 
         var rootTableId = consent.TableIdentifier.ToString();
@@ -510,7 +510,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             allowedLogs.Count,
             recipients,
             sensitivityCategories.ToList(),
-            "Art. 15 Abs. 1 Bst. c DSGVO: Auskunft über die Empfänger oder Kategorien von Empfängern, gegenüber denen die personenbezogenen Daten offengelegt worden sind oder noch offengelegt werden.");
+            "Art. 15(1)(c) GDPR (DSGVO): Information about the recipients or categories of recipients to whom the personal data have been or will be disclosed.");
     }
 
     public sealed class LineagePathNode(string nodeId, LineagePathNode? parent)

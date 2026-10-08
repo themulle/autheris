@@ -176,7 +176,8 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         if (unconstrainedConsents.Count > 0)
         {
             // Rows outside every row filter are visible only through the unconstrained consents.
-            return unconstrainedConsents.Max(c => GetConsentColumnLevel(c, column));
+            var maxLevel = unconstrainedConsents.Max(c => GetConsentColumnLevel(c, column));
+            return Enum.IsDefined(maxLevel) ? maxLevel : ColumnAccessLevel.Deny;
         }
 
         if (rowConstrainedGroups.Count == 0)
@@ -187,7 +188,8 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         var result = ColumnAccessLevel.Clear;
         foreach (var group in rowConstrainedGroups)
         {
-            var groupLevel = group.Max(c => GetConsentColumnLevel(c, column));
+            var rawGroupLevel = group.Max(c => GetConsentColumnLevel(c, column));
+            var groupLevel = Enum.IsDefined(rawGroupLevel) ? rawGroupLevel : ColumnAccessLevel.Deny;
             if (groupLevel < result)
             {
                 result = groupLevel;
@@ -210,7 +212,14 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         }
 
         var rule = consent.ColumnRules.FirstOrDefault(cr => string.Equals(cr.ColumnName, column, StringComparison.OrdinalIgnoreCase));
-        return rule?.AccessLevel ?? ColumnAccessLevel.Deny;
+        if (rule == null)
+        {
+            return ColumnAccessLevel.Deny;
+        }
+
+        return Enum.IsDefined(rule.AccessLevel)
+            ? rule.AccessLevel
+            : ColumnAccessLevel.Deny;
     }
 
     private static bool IsSubjectMatch(

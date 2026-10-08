@@ -193,7 +193,7 @@ public static class DevPortalEndpoints
               <div class="card">
                 <div>
                   <h3>🍩 GraphQL Explorer</h3>
-                  <p>Interaktive Banana Cake Pop IDE zum Testen von GraphQL Queries, Subscriptions und Mutationen.</p>
+                  <p>Interactive Banana Cake Pop IDE for testing GraphQL queries, subscriptions and mutations.</p>
                 </div>
                 <div>
                   <a href="/graphql" target="_blank" class="btn">Open GraphQL IDE</a>
@@ -204,7 +204,7 @@ public static class DevPortalEndpoints
               <div class="card">
                 <div>
                   <h3>📄 OpenAPI 3.1 & Swagger</h3>
-                  <p>Standardkonforme OpenAPI 3.1 Dokumentation und interaktiver Swagger UI Explorer.</p>
+                  <p>Standards-compliant OpenAPI 3.1 documentation and interactive Swagger UI explorer.</p>
                 </div>
                 <div>
                   <a href="/docs" target="_blank" class="btn">Open Swagger UI</a>
@@ -215,17 +215,17 @@ public static class DevPortalEndpoints
               <div class="card">
                 <div>
                   <h3>🤖 AI Model Context Protocol (MCP)</h3>
-                  <p>Streamable HTTP & SSE Endpunkt für autonome KI-Agenten (Cursor, Windsurf, Claude Desktop).</p>
+                  <p>Streamable HTTP & SSE endpoint for autonomous AI agents (Cursor, Windsurf, Claude Desktop).</p>
                 </div>
                 <div>
-                  <a href="/mcp/sse" target="_blank" class="btn">MCP SSE Endpoint</a>
+                  <a href="/mcp" target="_blank" class="btn">MCP Endpoint</a>
                 </div>
               </div>
 
               <div class="card">
                 <div>
                   <h3>⚡ Governed WebSQL Engine</h3>
-                  <p>HTTP-basierte SQL-Ausführung mit ANTLR4 Trino-AST Linter, RLS-Injektion und PII-Maskierung.</p>
+                  <p>HTTP-based SQL execution with ANTLR4 Trino AST linter, RLS injection and PII masking.</p>
                 </div>
                 <div>
                   <a href="/docs?domain=sql" class="btn">WebSQL Documentation</a>
@@ -235,7 +235,7 @@ public static class DevPortalEndpoints
               <div class="card">
                 <div>
                   <h3>📊 Health & Telemetrie</h3>
-                  <p>Standardisierte Systemmetriken, Concurrency-Slots der Resource Groups und Cluster-Zustände.</p>
+                  <p>Standardized system metrics, resource group concurrency slots and cluster state.</p>
                 </div>
                 <div>
                   <a href="/health" target="_blank" class="btn">Health Check</a>
@@ -247,31 +247,31 @@ public static class DevPortalEndpoints
             <div class="identity-panel">
               <h2 class="section-title">👤 Interactive Identity & Test Personas</h2>
               <p style="color: var(--text-muted); font-size: 0.9rem;">
-                In der Development-Umgebung kannst du Anfragen mit folgenden Headern simulieren, um RLS und PII-Maskierung live zu testen:
+                In the Development environment, you can simulate requests with the following headers to test RLS and PII masking live:
               </p>
 
               <div class="persona-list">
                 <div class="persona-card">
                   <h4>Alice (Finance Analyst)</h4>
-                  <small>Rolle: FinanceManager | Sieht Rechnungen, PII maskiert</small>
+                  <small>Role: FinanceManager | Sees invoices, PII masked</small>
                   <button class="copy-btn" data-copy='-H "X-Test-User-Sid: S-1-5-21-ALICE-FINANCE" -H "X-Test-Roles: FinanceManager" -H "X-Test-Tenant: tenant-default"'>Copy Header</button>
                 </div>
 
                 <div class="persona-card">
                   <h4>Bob (HR Manager)</h4>
-                  <small>Rolle: HrManager | Sieht Mitarbeiter-Gehälter im Klartext</small>
+                  <small>Role: HrManager | Sees employee salaries in plain text</small>
                   <button class="copy-btn" data-copy='-H "X-Test-User-Sid: S-1-5-21-BOB-HR" -H "X-Test-Roles: HrManager" -H "X-Test-Tenant: tenant-default"'>Copy Header</button>
                 </div>
 
                 <div class="persona-card">
                   <h4>Carol (Governance Admin)</h4>
-                  <small>Rolle: GovernanceAdmin | Voller Zugriff auf Mutations & Policies</small>
+                  <small>Role: GovernanceAdmin | Full access to mutations & policies</small>
                   <button class="copy-btn" data-copy='-H "X-Test-User-Sid: S-1-5-21-ADMIN-CAROL" -H "X-Test-Roles: GovernanceAdmin,ClusterAdmin" -H "X-Test-Tenant: tenant-default"'>Copy Header</button>
                 </div>
 
                 <div class="persona-card">
                   <h4>Autonomous AI Agent</h4>
-                  <small>Rolle: AiAgent | MCP Tool Execution & Catalog Inspection</small>
+                  <small>Role: AiAgent | MCP Tool Execution & Catalog Inspection</small>
                   <button class="copy-btn" data-copy='-H "X-Test-User-Sid: S-1-5-21-AI-AGENT" -H "X-Test-Roles: AiAgent" -H "X-Test-Tenant: tenant-default"'>Copy Header</button>
                 </div>
               </div>
@@ -280,13 +280,13 @@ public static class DevPortalEndpoints
             <div class="identity-panel">
               <h2 class="section-title">💡 Claude Desktop & Cursor MCP Config</h2>
               <p style="color: var(--text-muted); font-size: 0.9rem;">
-                Füge dieses Snippet in deine <code>claude_desktop_config.json</code> oder <code>.cursor/mcp.json</code> ein:
+                Add this snippet to your <code>claude_desktop_config.json</code> or <code>.cursor/mcp.json</code>:
               </p>
               <div class="code-box">
                 {
                   "mcpServers": {
                     "gql-gateway": {
-                      "url": "http://localhost:5000/mcp/sse"
+                      "url": "http://localhost:5000/mcp"
                     }
                   }
                 }

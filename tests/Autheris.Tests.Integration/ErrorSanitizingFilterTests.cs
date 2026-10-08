@@ -53,7 +53,7 @@ public class ErrorSanitizingFilterTests
         var sanitized = filter.OnError(error);
 
         sanitized.Code.ShouldBe("INTERNAL_SERVER_ERROR");
-        sanitized.Message.ShouldBe("Ein interner Serverfehler ist aufgetreten.");
+        sanitized.Message.ShouldBe("An internal server error occurred.");
         sanitized.Exception.ShouldBeNull();
     }
 

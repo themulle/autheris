@@ -18,6 +18,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Autheris.Infrastructure.Health;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting;
@@ -161,6 +162,30 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         var optInOptions = new GatewayOptions
         {
             Insecure = new InsecureGettingStartedOptions { warn_enable_introspection = true },
+            AllowInsecureWarnFlagsInProduction = true,
+            DataMasking = ProdMasking()
+        };
+        Should.NotThrow(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(optInOptions, Env(Environments.Production), NoEnvironmentVariables));
+    }
+
+    [Fact]
+    public void SEM_EnableIntrospection_InProduction_RequiresExplicitOptIn()
+    {
+        var options = new GatewayOptions
+        {
+            GraphQL = new GraphQLOptions { EnableIntrospection = true },
+            DataMasking = ProdMasking()
+        };
+
+        // Prohibited in production without explicit opt-in
+        Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), NoEnvironmentVariables));
+
+        // Allowed with explicit opt-in
+        var optInOptions = new GatewayOptions
+        {
+            GraphQL = new GraphQLOptions { EnableIntrospection = true },
             AllowInsecureWarnFlagsInProduction = true,
             DataMasking = ProdMasking()
         };
@@ -520,6 +545,24 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         entry.TargetTable.ShouldBe("orders");
         entry.ActorSid.Value.ShouldBe("S-1-5-21-DML-WRITER");
         entry.TenantId.Value.ShouldBe(Tenant);
+    }
+
+    [Fact]
+    public async Task DML_ReadOnlyTokenWithWriterRole_IsRejected()
+    {
+        await using var fixture = await DmlFixture.CreateAsync();
+        var service = CreateDmlService(fixture);
+        var writer = CreateWriter();
+        TokenAccessScope.MarkReadOnly((ClaimsIdentity)writer.Identity!);
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => service.ExecuteGovernedQueryAsync(
+            new GovernedSqlQueryRequest("DELETE FROM orders WHERE amount = 10"),
+            writer,
+            new TenantId(Tenant),
+            (_, _) => Task.CompletedTask));
+
+        ex.Message.ShouldContain("read access");
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM orders")).ShouldBe(7);
     }
 
     [Fact]

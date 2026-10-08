@@ -521,7 +521,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             _logger.LogError(ex, "Failed to record audit event for MCP tool execution '{ToolName}'.", toolName);
             if (!_options.Value.IsMcpAuthBypassed)
             {
-                throw new System.Security.SecurityException($"Zero-Trust: Audit-Protokollierung für MCP-Tool '{toolName}' fehlgeschlagen. Ausführung abgebrochen (Fail-Closed).", ex);
+                throw new System.Security.SecurityException($"Zero-Trust: audit logging for MCP tool '{toolName}' failed. Execution aborted (fail-closed).", ex);
             }
         }
     }
@@ -530,7 +530,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     /// SEC M-17: Detects the structured error payload produced by the MCP query executor
     /// (<c>{"isError":true,"error":{"code":...,"message":...}}</c>).
     /// </summary>
-    internal static bool TryGetExecutorError(string? resultJson, out string? errorCode)
+    public static bool TryGetExecutorError(string? resultJson, out string? errorCode)
     {
         errorCode = null;
         if (string.IsNullOrWhiteSpace(resultJson))

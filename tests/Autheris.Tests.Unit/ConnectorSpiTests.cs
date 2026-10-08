@@ -145,7 +145,7 @@ public class ConnectorSpiTests
             await sqlConnector.RecordSource.ReadBatchAsync(split, session);
         });
 
-        ex.Message.ShouldContain("Zero-Trust-Verletzung");
+        ex.Message.ShouldContain("Zero-Trust violation");
     }
 
     [Fact]
@@ -184,7 +184,7 @@ public class ConnectorSpiTests
             await sqlConnector.RecordSource.ReadBatchAsync(split, session);
         });
 
-        ex.Message.ShouldContain("Zero-Trust-Verletzung");
+        ex.Message.ShouldContain("Zero-Trust violation");
         ex.Message.ShouldContain("Iban");
     }
 

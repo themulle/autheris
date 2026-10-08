@@ -76,7 +76,7 @@ public static class RebacEndpoints
                     string.IsNullOrWhiteSpace(t.TenantId) ||
                     (t.Object.Contains(':') && (string.IsNullOrWhiteSpace(t.Object.Split(':')[0]) || string.IsNullOrWhiteSpace(t.Object.Split(':')[1]))))
                 {
-                    return Results.BadRequest(new { error = "ReBAC-Tupelfelder (User, Relation, Object, TenantId) dürfen nicht leer sein." });
+                    return Results.BadRequest(new { error = "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty." });
                 }
             }
 
@@ -128,7 +128,7 @@ public static class RebacEndpoints
                 string.IsNullOrWhiteSpace(tuple.TenantId) ||
                 (tuple.Object.Contains(':') && (string.IsNullOrWhiteSpace(tuple.Object.Split(':')[0]) || string.IsNullOrWhiteSpace(tuple.Object.Split(':')[1]))))
             {
-                return Results.BadRequest(new { error = "ReBAC-Tupelfelder (User, Relation, Object, TenantId) dürfen nicht leer sein." });
+                return Results.BadRequest(new { error = "ReBAC tuple fields (User, Relation, Object, TenantId) must not be empty." });
             }
 
             if (!secContext.IsClusterAdmin)
@@ -201,7 +201,7 @@ public static class RebacEndpoints
                 string.IsNullOrWhiteSpace(check.Object) ||
                 string.IsNullOrWhiteSpace(check.TenantId))
             {
-                return Results.BadRequest(new { error = "ReBAC check fields (User, Relation, Object, TenantId) dürfen nicht leer sein." });
+                return Results.BadRequest(new { error = "ReBAC check fields (User, Relation, Object, TenantId) must not be empty." });
             }
 
             var secContext = EndpointSecurity.GetSecurityContext(request.HttpContext);

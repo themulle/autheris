@@ -60,7 +60,7 @@ public sealed class PluginTrustList
         var fileName = Path.GetFileName(fullPath);
         if (!TryGetExpectedHash(fullPath, out var expectedHash))
         {
-            throw new SecurityException($"Sicherheitsfehler: Plugin-Datei '{fileName}' ist nicht in Plugins:TrustedPluginHashes verzeichnet.");
+            throw new SecurityException($"Security error: Plugin file '{fileName}' is not listed in Plugins:TrustedPluginHashes.");
         }
 
         var bytes = File.ReadAllBytes(fullPath);
@@ -81,12 +81,12 @@ public sealed class PluginTrustList
             string? configured;
             if (!_hashes.TryGetValue(key, out configured) && !_hashes.TryGetValue(Path.GetFileName(key), out configured))
             {
-                throw new SecurityException($"Sicherheitsfehler: manifest.json listet '{file}', das nicht in Plugins:TrustedPluginHashes konfiguriert ist.");
+                throw new SecurityException($"Security error: manifest.json lists '{file}', which is not configured in Plugins:TrustedPluginHashes.");
             }
 
             if (!HashesEqual(configured, manifestHash))
             {
-                throw new SecurityException($"Sicherheitsfehler: manifest.json widerspricht der konfigurierten Integritätsangabe für '{file}'.");
+                throw new SecurityException($"Security error: manifest.json contradicts the configured integrity value for '{file}'.");
             }
         }
     }
@@ -96,7 +96,7 @@ public sealed class PluginTrustList
         var actualHash = Convert.ToHexString(SHA256.HashData(bytes));
         if (!HashesEqual(expectedHash, actualHash))
         {
-            throw new SecurityException($"Sicherheitsfehler: Integritätsprüfung fehlgeschlagen für Plugin '{fileName}'. Erwarteter SHA-256: {expectedHash}, Tatsächlich: {actualHash}");
+            throw new SecurityException($"Security error: Integrity check failed for plugin '{fileName}'. Expected SHA-256: {expectedHash}, actual: {actualHash}");
         }
     }
 

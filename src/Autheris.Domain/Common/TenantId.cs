@@ -20,7 +20,7 @@ public readonly record struct TenantId
         if (!SafeTenantIdRegex.IsMatch(value))
         {
             throw new ArgumentException(
-                $"Ungültiges TenantId-Format: '{value}'. Erwartet: alphanumerisch, '_', '-', max. 64 Zeichen.",
+                $"Invalid TenantId format: '{value}'. Expected: alphanumeric, '_', '-', max. 64 characters.",
                 nameof(value));
         }
         Value = value;

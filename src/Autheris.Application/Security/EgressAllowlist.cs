@@ -24,9 +24,10 @@ public static class EgressIntegrations
     public const string Lakehouse = "Lakehouse";
     public const string AuditWorm = "AuditWorm";
     public const string Cdn = "Cdn";
+    public const string Shadowing = "Shadowing";
 
     /// <summary>Integrations that may be listed in <see cref="OutboundEgressOptions.TrustedIntegrations"/>.</summary>
-    public static IReadOnlyList<string> AllowlistCapable { get; } = [Itsm, Catalog, OpenMetadata, Lineage, AuditWorm, Cdn];
+    public static IReadOnlyList<string> AllowlistCapable { get; } = [Itsm, Catalog, OpenMetadata, Lineage, AuditWorm, Cdn, Shadowing];
 }
 
 /// <summary>
@@ -185,7 +186,7 @@ public sealed class EgressAllowlist
             var name = integration?.Trim() ?? string.Empty;
             if (string.Equals(name, EgressIntegrations.Lakehouse, StringComparison.OrdinalIgnoreCase))
             {
-                errors.Add("Egress.TrustedIntegrations: 'Lakehouse' darf die Allowlist nie nutzen (Ziel-URLs stammen aus Producer-Daten).");
+                errors.Add("Egress.TrustedIntegrations: 'Lakehouse' must never use the allowlist (target URLs come from producer data).");
             }
             else if (!EgressIntegrations.AllowlistCapable.Any(i => string.Equals(i, name, StringComparison.OrdinalIgnoreCase)))
             {
@@ -202,7 +203,7 @@ public sealed class EgressAllowlist
         var trimmed = cidr?.Trim();
         if (string.IsNullOrEmpty(trimmed) || !trimmed.Contains('/') || !IPNetwork.TryParse(trimmed, out var parsed))
         {
-            error = "ungültige CIDR-Notation (erwartet z. B. 10.20.0.0/16).";
+            error = "invalid CIDR notation (expected e.g. 10.20.0.0/16).";
             return false;
         }
 
@@ -210,7 +211,7 @@ public sealed class EgressAllowlist
             (parsed.BaseAddress.AddressFamily == AddressFamily.InterNetworkV6 &&
              parsed.BaseAddress.GetAddressBytes().AsSpan(0, 10).SequenceEqual(stackalloc byte[10])))
         {
-            error = "IPv4-mapped IPv6-Netze (::ffff:0:0/96) sind nicht zulässig; IPv4-Notation verwenden.";
+            error = "IPv4-mapped IPv6 networks (::ffff:0:0/96) are not allowed; use IPv4 notation.";
             return false;
         }
 
@@ -218,7 +219,7 @@ public sealed class EgressAllowlist
         int minPrefix = isV4 ? MinIpv4PrefixLength : MinIpv6PrefixLength;
         if (parsed.PrefixLength < minPrefix)
         {
-            error = $"Netz zu groß (Präfix /{parsed.PrefixLength}); mindestens /{minPrefix} für {(isV4 ? "IPv4" : "IPv6")}.";
+            error = $"Network too large (prefix /{parsed.PrefixLength}); at least /{minPrefix} required for {(isV4 ? "IPv4" : "IPv6")}.";
             return false;
         }
 
@@ -226,7 +227,7 @@ public sealed class EgressAllowlist
         {
             if (forbidden.Contains(parsed.BaseAddress) || parsed.Contains(forbidden.BaseAddress))
             {
-                error = $"Netz überlappt den gesperrten Bereich {forbidden} (Loopback/Link-Local/Metadaten/CGNAT/Multicast/IPv4-mapped).";
+                error = $"Network overlaps the blocked range {forbidden} (loopback/link-local/metadata/CGNAT/multicast/IPv4-mapped).";
                 return false;
             }
         }
@@ -257,7 +258,7 @@ public sealed class EgressAllowlist
             }
             catch (ArgumentException)
             {
-                error = "ungültiger internationalisierter Hostname.";
+                error = "invalid internationalized hostname.";
                 return false;
             }
         }
@@ -265,7 +266,7 @@ public sealed class EgressAllowlist
         var hostType = Uri.CheckHostName(normalized);
         if (hostType == UriHostNameType.Unknown || hostType == UriHostNameType.Basic)
         {
-            error = "kein gültiger Hostname (ohne Schema, Port, Pfad oder Wildcard angeben).";
+            error = "not a valid hostname (specify without scheme, port, path or wildcard).";
             return false;
         }
 
@@ -274,7 +275,7 @@ public sealed class EgressAllowlist
             var ip = EgressAddressRules.TryParseIpLiteral(normalized);
             if (ip is null || EgressAddressRules.IsAlwaysForbidden(ip))
             {
-                error = "IP-Literal ist gesperrt (Loopback/Link-Local/Metadaten/CGNAT/Multicast).";
+                error = "IP literal is blocked (loopback/link-local/metadata/CGNAT/multicast).";
                 return false;
             }
         }
@@ -282,7 +283,7 @@ public sealed class EgressAllowlist
                  normalized.EndsWith(".localhost", StringComparison.Ordinal) ||
                  DeclarativeHttpDataSourceExecutor.IsForbiddenMetadataHost(normalized))
         {
-            error = "Metadaten-/Cluster-/Loopback-Hosts dürfen nicht vertraut werden.";
+            error = "Metadata, cluster and loopback hosts must not be trusted.";
             return false;
         }
 

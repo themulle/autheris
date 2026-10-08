@@ -29,7 +29,7 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
         }
         else if (environment != null && !environment.IsDevelopment())
         {
-            throw new InvalidOperationException("Sicherheitsfehler: In Nicht-Entwicklungsumgebungen muss der HMAC-Schlüssel zwingend über einen IKeyVaultSecretProvider aufgelöst werden.");
+            throw new InvalidOperationException("Security error: In non-development environments the HMAC key must be resolved through an IKeyVaultSecretProvider.");
         }
         else
         {
@@ -48,7 +48,7 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
         if (environment != null && !environment.IsDevelopment() && _hmacKey.Length < 32)
         {
             throw new InvalidOperationException(
-                $"Sicherheitsfehler: Der HMAC-Schlüssel muss außerhalb der Entwicklungsumgebung mindestens 32 Bytes lang sein (aktuelle Länge: {_hmacKey.Length}).");
+                $"Security error: The HMAC key must be at least 32 bytes long outside the development environment (current length: {_hmacKey.Length}).");
         }
     }
 

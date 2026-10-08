@@ -10,6 +10,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -52,15 +53,12 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         _clientIpResolver = clientIpResolver;
     }
 
-    public async ValueTask<IReadOnlyList<string>> ListNamespacesAsync(string tenantId, CancellationToken ct = default)
+    public async ValueTask<IReadOnlyList<string>> ListNamespacesAsync(string tenantId, ClaimsPrincipal principal, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentNullException.ThrowIfNull(principal);
 
-        // SEC H-3: Scoped strictly to caller's tenant
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var namespaces = allTables
-            .Where(t => string.Equals(t.Identifier.Domain, tenantId, StringComparison.OrdinalIgnoreCase))
-            .Where(t => t.Table.DataSourceType == DataSourceType.LakehouseIceberg || t.Table.DataSourceType == DataSourceType.LakehouseDelta)
+        var namespaces = (await VisibleLakehouseTablesAsync(tenantId, principal, ct).ConfigureAwait(false))
             .Select(t => t.Identifier.Schema)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -68,22 +66,39 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         return namespaces;
     }
 
-    public async ValueTask<IReadOnlyList<string>> ListTablesAsync(string tenantId, string @namespace, CancellationToken ct = default)
+    public async ValueTask<IReadOnlyList<string>> ListTablesAsync(string tenantId, string @namespace, ClaimsPrincipal principal, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(@namespace);
+        ArgumentNullException.ThrowIfNull(principal);
 
-        // SEC H-3: Scoped strictly to caller's tenant
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var tables = allTables
-            .Where(t => string.Equals(t.Identifier.Domain, tenantId, StringComparison.OrdinalIgnoreCase))
+        var tables = (await VisibleLakehouseTablesAsync(tenantId, principal, ct).ConfigureAwait(false))
             .Where(t => string.Equals(t.Identifier.Schema, @namespace, StringComparison.OrdinalIgnoreCase))
-            .Where(t => t.Table.DataSourceType == DataSourceType.LakehouseIceberg || t.Table.DataSourceType == DataSourceType.LakehouseDelta)
             .Select(t => t.Identifier.TableName)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return tables;
+    }
+
+    /// <summary>
+    /// SEC H-3: lakehouse tables of the caller's tenant only. Wunsch 9: of those, only tables the caller may discover
+    /// (same rule as the GraphQL catalog and MCP; no consent repository → nothing listed).
+    /// </summary>
+    private async ValueTask<IReadOnlyList<TableMetadata>> VisibleLakehouseTablesAsync(string tenantId, ClaimsPrincipal principal, CancellationToken ct)
+    {
+        if (principal.Identity?.IsAuthenticated != true)
+        {
+            return Array.Empty<TableMetadata>();
+        }
+
+        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+        var tenantTables = allTables
+            .Where(t => string.Equals(t.Identifier.Domain, tenantId, StringComparison.OrdinalIgnoreCase))
+            .Where(t => t.Table.DataSourceType == DataSourceType.LakehouseIceberg || t.Table.DataSourceType == DataSourceType.LakehouseDelta)
+            .ToList();
+
+        return await CatalogVisibility.VisibleTablesAsync(tenantTables, principal, new TenantId(tenantId), _consentRepo, ct).ConfigureAwait(false);
     }
 
     public async ValueTask<IcebergLoadTableResponse> LoadTableAsync(
@@ -161,16 +176,12 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
     {
         var tableId = new TableIdentifier(tenantId, @namespace, table);
         var tableMeta = await _metadataRepo.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
-        if (tableMeta == null)
+        // SEC H-3: never fall back to tables from other tenants. Review G5: deactivated tables are not served.
+        // Wunsch 9: unknown and inactive tables answer exactly like denied ones, so the endpoint cannot probe the catalog.
+        if (tableMeta == null || !tableMeta.Table.IsActive)
         {
-            // SEC H-3: Never fall back to tables from other tenants. Return 404.
-            throw new KeyNotFoundException($"Table '{@namespace}.{table}' not found in tenant '{tenantId}'.");
-        }
-
-        // Review G5: deactivated tables are not served (same as the governed query path).
-        if (!tableMeta.Table.IsActive)
-        {
-            throw new KeyNotFoundException($"Table '{@namespace}.{table}' not found in tenant '{tenantId}'.");
+            _logger.LogWarning("Iceberg table {Namespace}.{Table} not found or inactive in tenant {Tenant}; answering as denied.", @namespace, table, tenantId);
+            throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
         }
 
         if (_consentService == null || _consentRepo == null)

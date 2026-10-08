@@ -54,7 +54,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentifizierung erforderlich.")
+                .SetMessage("Authentication is required.")
                 .Build());
         }
 
@@ -63,7 +63,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Keine gültige Benutzer-SID im Authentifizierungstoken vorhanden.")
+                .SetMessage("No valid user SID in the authentication token.")
                 .Build());
         }
 
@@ -95,7 +95,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("Mandantenübergreifender Zugriff verboten: Token-Mandant stimmt nicht mit dem Mandanten des Verbindungskontexts überein.")
+                .SetMessage("Cross-tenant access forbidden: The token tenant does not match the tenant of the connection context.")
                 .Build());
         }
 
@@ -190,7 +190,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("INVALID_ARGUMENT")
-                .SetMessage("Domain, Schema und TableName müssen gültige, nicht-leere Werte sein.")
+                .SetMessage("Domain, Schema and TableName must be valid, non-empty values.")
                 .Build());
         }
 
@@ -198,7 +198,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("INVALID_ARGUMENT")
-                .SetMessage("Eine Begründung (Justification) mit mindestens 5 Zeichen ist erforderlich.")
+                .SetMessage("A justification of at least 5 characters is required.")
                 .Build());
         }
 
@@ -206,7 +206,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("INVALID_ARGUMENT")
-                .SetMessage("Die Begründung darf maximal 2000 Zeichen lang sein.")
+                .SetMessage("The justification must not exceed 2000 characters.")
                 .Build());
         }
 
@@ -214,7 +214,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("INVALID_ARGUMENT")
-                .SetMessage("Die Dauer (durationDays) muss zwischen 1 und 365 Tagen liegen.")
+                .SetMessage("The duration (durationDays) must be between 1 and 365 days.")
                 .Build());
         }
 
@@ -234,7 +234,7 @@ public sealed class Mutation
             // SEC (Niedrig): Keine Tabellen-Enumeration über NOT_FOUND + Tabellenname; neutrale FORBIDDEN-Antwort.
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("Zugriffsanfrage für die angegebene Tabelle ist nicht möglich.")
+                .SetMessage("Access request for the specified table is not possible.")
                 .Build());
         }
 
@@ -407,7 +407,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("NOT_FOUND")
-                .SetMessage($"Consent-Antrag '{requestId}' wurde nicht gefunden.")
+                .SetMessage($"Consent request '{requestId}' was not found.")
                 .Build());
         }
 
@@ -421,7 +421,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("Mandantenübergreifender Zugriff verboten: Consent-Antrag gehört zu einem anderen Mandanten.")
+                .SetMessage("Cross-tenant access forbidden: The consent request belongs to another tenant.")
                 .Build());
         }
 
@@ -431,7 +431,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("Funktionstrennung verletzt: Der Antragsteller kann den eigenen Consent-Antrag nicht genehmigen.")
+                .SetMessage("Separation of duties violated: The requester cannot approve their own consent request.")
                 .Build());
         }
 
@@ -442,7 +442,7 @@ public sealed class Mutation
             {
                 throw new GraphQLException(ErrorBuilder.New()
                     .SetCode("FORBIDDEN")
-                    .SetMessage($"Benutzer '{approverSid}' ist weder Data Owner noch delegierter Genehmiger für '{req.TableIdentifier}' und besitzt keine Genehmiger-Rolle.")
+                    .SetMessage($"User '{approverSid}' is neither a data owner nor a delegated approver for '{req.TableIdentifier}' and has no approver role.")
                     .Build());
             }
         }
@@ -525,7 +525,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("INVALID_ARGUMENT")
-                .SetMessage("Ein Ablehnungsgrund mit mindestens 3 Zeichen ist erforderlich.")
+                .SetMessage("A rejection reason of at least 3 characters is required.")
                 .Build());
         }
 
@@ -533,7 +533,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("INVALID_ARGUMENT")
-                .SetMessage("Der Ablehnungsgrund darf maximal 1000 Zeichen lang sein.")
+                .SetMessage("The rejection reason must not exceed 1000 characters.")
                 .Build());
         }
 
@@ -554,7 +554,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("NOT_FOUND")
-                .SetMessage($"Consent-Antrag '{requestId}' wurde nicht gefunden.")
+                .SetMessage($"Consent request '{requestId}' was not found.")
                 .Build());
         }
 
@@ -568,7 +568,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("Mandantenübergreifender Zugriff verboten: Consent-Antrag gehört zu einem anderen Mandanten.")
+                .SetMessage("Cross-tenant access forbidden: The consent request belongs to another tenant.")
                 .Build());
         }
 
@@ -579,7 +579,7 @@ public sealed class Mutation
             {
                 throw new GraphQLException(ErrorBuilder.New()
                     .SetCode("FORBIDDEN")
-                    .SetMessage($"Benutzer '{approverSid}' ist weder Data Owner noch delegierter Genehmiger für '{req.TableIdentifier}' und besitzt keine Genehmiger-Rolle.")
+                    .SetMessage($"User '{approverSid}' is neither a data owner nor a delegated approver for '{req.TableIdentifier}' and has no approver role.")
                     .Build());
             }
         }
@@ -619,7 +619,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("INVALID_ARGUMENT")
-                .SetMessage("Ein Widerrufsgrund mit mindestens 3 Zeichen ist erforderlich.")
+                .SetMessage("A revocation reason of at least 3 characters is required.")
                 .Build());
         }
 
@@ -627,7 +627,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("INVALID_ARGUMENT")
-                .SetMessage("Der Widerrufsgrund darf maximal 1000 Zeichen lang sein.")
+                .SetMessage("The revocation reason must not exceed 1000 characters.")
                 .Build());
         }
 
@@ -636,7 +636,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("NOT_FOUND")
-                .SetMessage($"Consent '{consentId}' wurde nicht gefunden.")
+                .SetMessage($"Consent '{consentId}' was not found.")
                 .Build());
         }
 
@@ -651,7 +651,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("Mandantenübergreifender Zugriff verboten: Consent gehört zu einem anderen Mandanten.")
+                .SetMessage("Cross-tenant access forbidden: The consent belongs to another tenant.")
                 .Build());
         }
 
@@ -669,7 +669,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage($"Benutzer '{revokerSid}' ist weder GovernanceAdmin, Data Owner oder delegierter Genehmiger für '{consent.TableIdentifier}', noch der Begünstigte selbst.")
+                .SetMessage($"User '{revokerSid}' is neither a GovernanceAdmin, data owner or delegated approver for '{consent.TableIdentifier}', nor the beneficiary.")
                 .Build());
         }
 
@@ -688,7 +688,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentifizierung erforderlich.")
+                .SetMessage("Authentication is required.")
                 .Build());
         }
 
@@ -697,7 +697,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("Nur Governance- oder Cluster-Administratoren dürfen das Schema neu laden.")
+                .SetMessage("Only governance or cluster administrators may reload the schema.")
                 .Build());
         }
 
@@ -742,7 +742,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentifizierung erforderlich.")
+                .SetMessage("Authentication is required.")
                 .Build());
         }
 
@@ -751,7 +751,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("Nur Governance- oder Cluster-Administratoren dürfen OpenMetadata synchronisieren.")
+                .SetMessage("Only governance or cluster administrators may synchronize OpenMetadata.")
                 .Build());
         }
 
@@ -777,7 +777,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentifizierung erforderlich.")
+                .SetMessage("Authentication is required.")
                 .Build());
         }
 
@@ -786,7 +786,7 @@ public sealed class Mutation
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("Nur Governance- oder Cluster-Administratoren dürfen den Datenkatalog synchronisieren.")
+                .SetMessage("Only governance or cluster administrators may synchronize the data catalog.")
                 .Build());
         }
 

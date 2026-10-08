@@ -180,7 +180,7 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                         {
                             TryCancel(cmd);
                             throw new GatewaySecurityException(
-                                $"Antwortgröße überschreitet das konfigurierte Limit von {maxBytes} Bytes.", "RESPONSE_TOO_LARGE");
+                                $"Response size exceeds the configured limit of {maxBytes} bytes.", "RESPONSE_TOO_LARGE");
                         }
 
                         rows.Add(values);

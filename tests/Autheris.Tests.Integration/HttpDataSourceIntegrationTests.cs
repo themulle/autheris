@@ -404,6 +404,6 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
 
         var body = await response.Content.ReadAsStringAsync();
         body.ShouldContain("FORBIDDEN");
-        body.ShouldContain("Zugriff auf Tabelle");
+        body.ShouldContain("Access to table");
     }
 }

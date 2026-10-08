@@ -12,6 +12,8 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     private readonly List<string> _projectedColumns = new();
     private readonly HashSet<string> _seenTableKeys = new(StringComparer.Ordinal);
     private readonly HashSet<string> _joinConditionColumns = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<JoinColumnReference> _joinColumnReferences = new();
+    private readonly List<FilterColumnReference> _filterColumnReferences = new();
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
     private readonly List<string> _functionCalls = new();
     private readonly HashSet<string> _seenFunctionCalls = new(StringComparer.Ordinal);
@@ -50,7 +52,9 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             FunctionCalls: _functionCalls.ToArray(),
             TableFunctionCalls: _tableFunctionCalls.ToArray(),
             HasSessionProperties: _hasSessionProperties,
-            HasInlineFunctionDefinitions: _hasInlineFunctionDefinitions);
+            HasInlineFunctionDefinitions: _hasInlineFunctionDefinitions,
+            JoinColumnReferences: _joinColumnReferences.ToArray(),
+            FilterColumnReferences: _filterColumnReferences.ToArray());
     }
 
     private void Reset()
@@ -60,6 +64,8 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         _projectedColumns.Clear();
         _seenTableKeys.Clear();
         _joinConditionColumns.Clear();
+        _joinColumnReferences.Clear();
+        _filterColumnReferences.Clear();
         _cteScopeStack.Clear();
         _cteScopeStack.Push(new HashSet<string>(StringComparer.Ordinal));
         _functionCalls.Clear();
@@ -222,6 +228,16 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             _joinCount += (context.relation().Length - 1);
         }
 
+        if (context.where != null)
+        {
+            ExtractFilterColumnReferences(context.where, _filterColumnReferences);
+        }
+
+        if (context.having != null)
+        {
+            ExtractFilterColumnReferences(context.having, _filterColumnReferences);
+        }
+
         if (_isRootQuerySpecification && _currentSubqueryDepth == 0)
         {
             _isRootQuerySpecification = false;
@@ -257,7 +273,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
 
     public override void EnterJoinCriteria(SqlBaseParser.JoinCriteriaContext context)
     {
-        ExtractIdentifiers(context, _joinConditionColumns);
+        ExtractJoinColumnReferences(context, _joinColumnReferences, _joinConditionColumns);
     }
 
     public override void EnterComparison(SqlBaseParser.ComparisonContext context)
@@ -270,16 +286,20 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
 
             if (leftCtx != null && rightCtx != null)
             {
+                var leftRefs = new List<JoinColumnReference>();
+                var rightRefs = new List<JoinColumnReference>();
                 var leftIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var rightIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                ExtractIdentifiers(leftCtx, leftIds);
-                ExtractIdentifiers(rightCtx, rightIds);
+                ExtractJoinColumnReferences(leftCtx, leftRefs, leftIds);
+                ExtractJoinColumnReferences(rightCtx, rightRefs, rightIds);
 
                 // If identifiers exist on BOTH sides of equality (e.g. a.col = b.col),
                 // this is a relational equijoin predicate (e.g. ANSI-89 comma join in WHERE clause)
                 if (leftIds.Count > 0 && rightIds.Count > 0)
                 {
+                    _joinColumnReferences.AddRange(leftRefs);
+                    _joinColumnReferences.AddRange(rightRefs);
                     foreach (var id in leftIds) _joinConditionColumns.Add(id);
                     foreach (var id in rightIds) _joinConditionColumns.Add(id);
                 }
@@ -287,28 +307,99 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         }
     }
 
-    private static void ExtractIdentifiers(Antlr4.Runtime.RuleContext? ctx, HashSet<string> identifiers)
+    private static void ExtractJoinColumnReferences(Antlr4.Runtime.RuleContext? ctx, List<JoinColumnReference> references, HashSet<string> flatColumnNames)
     {
         if (ctx == null) return;
-        if (ctx is SqlBaseParser.IdentifierContext id)
+
+        if (ctx is SqlBaseParser.JoinCriteriaContext joinCriteria && joinCriteria.USING() != null)
         {
-            string name = SqlIdentifierHelper.NormalizeIdentifier(id.GetText());
-            if (!string.IsNullOrWhiteSpace(name))
+            var ids = joinCriteria.identifier();
+            if (ids != null)
             {
-                identifiers.Add(name);
+                foreach (var id in ids)
+                {
+                    string colName = SqlIdentifierHelper.NormalizeIdentifier(id.GetText());
+                    if (!string.IsNullOrWhiteSpace(colName))
+                    {
+                        references.Add(new JoinColumnReference(null, colName));
+                        flatColumnNames.Add(colName);
+                    }
+                }
             }
+            return;
         }
+
+        if (ctx is SqlBaseParser.DereferenceContext deref && deref.fieldName != null)
+        {
+            string colName = SqlIdentifierHelper.NormalizeIdentifier(deref.fieldName.GetText());
+            string tableOrAlias = SqlIdentifierHelper.NormalizeIdentifier(deref.baseExpression.GetText());
+            if (!string.IsNullOrWhiteSpace(colName))
+            {
+                references.Add(new JoinColumnReference(tableOrAlias, colName));
+                flatColumnNames.Add(colName);
+            }
+            return;
+        }
+
+        if (ctx is SqlBaseParser.ColumnReferenceContext colRef && colRef.identifier() != null)
+        {
+            string colName = SqlIdentifierHelper.NormalizeIdentifier(colRef.identifier().GetText());
+            if (!string.IsNullOrWhiteSpace(colName))
+            {
+                references.Add(new JoinColumnReference(null, colName));
+                flatColumnNames.Add(colName);
+            }
+            return;
+        }
+
         for (int i = 0; i < ctx.ChildCount; i++)
         {
             if (ctx.GetChild(i) is Antlr4.Runtime.RuleContext child)
             {
-                ExtractIdentifiers(child, identifiers);
+                ExtractJoinColumnReferences(child, references, flatColumnNames);
+            }
+        }
+    }
+
+    private static void ExtractFilterColumnReferences(Antlr4.Runtime.RuleContext? ctx, List<FilterColumnReference> references)
+    {
+        if (ctx == null) return;
+
+        if (ctx is SqlBaseParser.DereferenceContext deref && deref.fieldName != null)
+        {
+            string colName = SqlIdentifierHelper.NormalizeIdentifier(deref.fieldName.GetText());
+            string tableOrAlias = SqlIdentifierHelper.NormalizeIdentifier(deref.baseExpression.GetText());
+            if (!string.IsNullOrWhiteSpace(colName))
+            {
+                references.Add(new FilterColumnReference(tableOrAlias, colName));
+            }
+            return;
+        }
+
+        if (ctx is SqlBaseParser.ColumnReferenceContext colRef && colRef.identifier() != null)
+        {
+            string colName = SqlIdentifierHelper.NormalizeIdentifier(colRef.identifier().GetText());
+            if (!string.IsNullOrWhiteSpace(colName))
+            {
+                references.Add(new FilterColumnReference(null, colName));
+            }
+            return;
+        }
+
+        for (int i = 0; i < ctx.ChildCount; i++)
+        {
+            if (ctx.GetChild(i) is Antlr4.Runtime.RuleContext child)
+            {
+                ExtractFilterColumnReferences(child, references);
             }
         }
     }
 
     public override void EnterQueryNoWith(SqlBaseParser.QueryNoWithContext context)
     {
+        // Befund 3.6: sorting on a redacted column orders by the replacement value; guarded like WHERE/HAVING.
+        ExtractFilterColumnReferences(context.orderBy(), _filterColumnReferences);
+
         // Check top-level limit only on the root query (SEC M-22: CTE bodies and subqueries do not count)
         bool isRoot = context.Parent is SqlBaseParser.QueryContext query && query.Parent is SqlBaseParser.RootQueryContext;
         if (isRoot && _currentSubqueryDepth == 0 && context.limit != null)
@@ -343,11 +434,19 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     public override void EnterDelete(SqlBaseParser.DeleteContext context)
     {
         RecordTableAccess(context.qualifiedName(), null);
+        if (context.booleanExpression() != null)
+        {
+            ExtractFilterColumnReferences(context.booleanExpression(), _filterColumnReferences);
+        }
     }
 
     public override void EnterUpdate(SqlBaseParser.UpdateContext context)
     {
         RecordTableAccess(context.qualifiedName(), null);
+        if (context.where != null)
+        {
+            ExtractFilterColumnReferences(context.where, _filterColumnReferences);
+        }
     }
 
     public override void EnterInsertInto(SqlBaseParser.InsertIntoContext context)

@@ -16,6 +16,8 @@ An agent connects to `/mcp` and finds everything it may use with a few generic t
 
 The `initialize` response carries the same guidance as MCP `instructions`. The tool list stays the same size however large the catalog is.
 
+The dataset description is also available as an MCP resource: the resource template `autheris://datasets/{dataset}` returns the same JSON as `describe_dataset` (and passes the same guardrails). The server runs on the official MCP C# SDK at `/mcp` (Streamable HTTP, current protocol revisions, OAuth protected resource metadata, see [ADR-014](../adr/ADR-014-enterprise-model-context-protocol-and-ai-data-guardrails.md)).
+
 ## 2. Tools
 
 | Tool | Arguments | Returns |
