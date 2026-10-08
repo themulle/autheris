@@ -115,60 +115,62 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         return Context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
     }
 
-    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
         if (!_gatewayOptions.Authentication.BasicAuth.Enabled)
         {
-            return Task.FromResult(AuthenticateResult.NoResult());
+            return AuthenticateResult.NoResult();
         }
 
         // E-13: anonymous probes never pay for cryptographic hashing (and cannot be used as a password oracle).
         if (Request.Path.StartsWithSegments("/health"))
         {
-            return Task.FromResult(AuthenticateResult.NoResult());
+            return AuthenticateResult.NoResult();
         }
 
         var authHeader = Request.Headers.Authorization.ToString();
         if (string.IsNullOrWhiteSpace(authHeader) ||
             !authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
         {
-            return Task.FromResult(AuthenticateResult.NoResult());
+            return AuthenticateResult.NoResult();
         }
 
         // Zero-allocation Base64 decoding directly from header span
         var encodedSpan = authHeader.AsSpan("Basic ".Length).Trim();
         if (encodedSpan.IsEmpty || encodedSpan.Length > 2048)
         {
-            return Task.FromResult(AuthenticateResult.Fail("Invalid Basic authorization header length."));
+            return AuthenticateResult.Fail("Invalid Basic authorization header length.");
         }
 
         Span<byte> decodedBytes = stackalloc byte[2048];
         if (!Convert.TryFromBase64Chars(encodedSpan, decodedBytes, out int bytesWritten))
         {
-            return Task.FromResult(AuthenticateResult.Fail("Invalid Base64 encoding in Basic authorization header."));
+            return AuthenticateResult.Fail("Invalid Base64 encoding in Basic authorization header.");
         }
 
         var credentials = decodedBytes[..bytesWritten];
         int colonIndex = credentials.IndexOf((byte)':');
         if (colonIndex <= 0)
         {
-            return Task.FromResult(AuthenticateResult.Fail("Invalid Basic authorization format. Expected 'username:password'."));
+            return AuthenticateResult.Fail("Invalid Basic authorization format. Expected 'username:password'.");
         }
 
         var username = Encoding.UTF8.GetString(credentials[..colonIndex]);
         var password = Encoding.UTF8.GetString(credentials[(colonIndex + 1)..]);
 
         var distCache = Context.RequestServices?.GetService(typeof(Microsoft.Extensions.Caching.Distributed.IDistributedCache)) as Microsoft.Extensions.Caching.Distributed.IDistributedCache;
-        var guard = BasicAuthAttemptGuard.For(_gatewayOptions.Authentication.BasicAuth, distCache);
+        var redis = Context.RequestServices?.GetService(typeof(StackExchange.Redis.IConnectionMultiplexer)) as StackExchange.Redis.IConnectionMultiplexer;
+        var guard = BasicAuthAttemptGuard.For(_gatewayOptions.Authentication.BasicAuth, distCache, redis);
         var clientIp = ResolveClientIp();
         var attemptKey = BasicAuthAttemptGuard.BuildAttemptKey(username, clientIp);
         var ipKey = BasicAuthAttemptGuard.BuildIpKey(clientIp);
 
         // RR-L2-03: locked-out (user, IP) pairs are rejected before any cryptographic work (no CPU amplification).
         // Review E-13: so are addresses with too many failures over all user names (password spraying).
-        if (guard.IsLockedOut(attemptKey) || guard.IsLockedOut(ipKey))
+        if (await guard.IsLockedOutAsync(attemptKey, Context.RequestAborted).ConfigureAwait(false) ||
+            await guard.IsLockedOutAsync(ipKey, Context.RequestAborted).ConfigureAwait(false))
         {
-            return Task.FromResult(AuthenticateResult.Fail("Invalid username or password."));
+            return AuthenticateResult.Fail("Invalid username or password.");
         }
 
         var configuredUser = _gatewayOptions.Authentication.BasicAuth.Users
@@ -199,9 +201,9 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
                 CryptographicOperations.FixedTimeEquals(dummyDerived, DummyTargetHash);
             }
 
-            guard.RecordFailure(attemptKey);
-            guard.RecordFailure(ipKey, guard.MaxFailedAttemptsPerIp);
-            return Task.FromResult(AuthenticateResult.Fail("Invalid username or password."));
+            await guard.RecordFailureAsync(attemptKey, null, Context.RequestAborted).ConfigureAwait(false);
+            await guard.RecordFailureAsync(ipKey, guard.MaxFailedAttemptsPerIp, Context.RequestAborted).ConfigureAwait(false);
+            return AuthenticateResult.Fail("Invalid username or password.");
         }
 
         // RR-L2-03: recently verified identical credentials skip the cryptographic computation.
@@ -212,12 +214,12 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
 
         if (!passwordMatches)
         {
-            guard.RecordFailure(attemptKey);
-            guard.RecordFailure(ipKey, guard.MaxFailedAttemptsPerIp);
-            return Task.FromResult(AuthenticateResult.Fail("Invalid username or password."));
+            await guard.RecordFailureAsync(attemptKey, null, Context.RequestAborted).ConfigureAwait(false);
+            await guard.RecordFailureAsync(ipKey, guard.MaxFailedAttemptsPerIp, Context.RequestAborted).ConfigureAwait(false);
+            return AuthenticateResult.Fail("Invalid username or password.");
         }
 
-        guard.RecordSuccess(attemptKey);
+        await guard.RecordSuccessAsync(attemptKey, Context.RequestAborted).ConfigureAwait(false);
         guard.CacheSuccess(authHeader, configuredUser.Username);
 
         // F-AUTH-DX: claims come from the shared factory so header login and cookie session are identical.
@@ -228,7 +230,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         var principal = new ClaimsPrincipal(identity);
         var ticket = new AuthenticationTicket(principal, Scheme.Name);
 
-        return Task.FromResult(AuthenticateResult.Success(ticket));
+        return AuthenticateResult.Success(ticket);
     }
 
     protected override async Task HandleChallengeAsync(AuthenticationProperties properties)

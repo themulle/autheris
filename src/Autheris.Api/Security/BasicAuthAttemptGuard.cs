@@ -27,6 +27,7 @@ internal sealed class BasicAuthAttemptGuard
     private readonly TimeSpan _successLifetime;
     private readonly TimeProvider _timeProvider;
     private readonly Microsoft.Extensions.Caching.Distributed.IDistributedCache? _distributedCache;
+    private readonly StackExchange.Redis.IConnectionMultiplexer? _redis;
 
     private sealed class FailureState
     {
@@ -40,7 +41,8 @@ internal sealed class BasicAuthAttemptGuard
     internal BasicAuthAttemptGuard(
         BasicAuthOptions options,
         TimeProvider? timeProvider = null,
-        Microsoft.Extensions.Caching.Distributed.IDistributedCache? distributedCache = null)
+        Microsoft.Extensions.Caching.Distributed.IDistributedCache? distributedCache = null,
+        StackExchange.Redis.IConnectionMultiplexer? redis = null)
     {
         _maxFailedAttempts = Math.Max(1, options.MaxFailedAttempts);
         _maxFailedAttemptsPerIp = Math.Max(_maxFailedAttempts, options.MaxFailedAttemptsPerIp);
@@ -48,12 +50,14 @@ internal sealed class BasicAuthAttemptGuard
         _successLifetime = TimeSpan.FromSeconds(Math.Clamp(options.SuccessCacheSeconds, 0, 300));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _distributedCache = distributedCache;
+        _redis = redis;
     }
 
     public static BasicAuthAttemptGuard For(
         BasicAuthOptions options,
-        Microsoft.Extensions.Caching.Distributed.IDistributedCache? distributedCache = null) =>
-        Guards.GetValue(options, o => new BasicAuthAttemptGuard(o, null, distributedCache));
+        Microsoft.Extensions.Caching.Distributed.IDistributedCache? distributedCache = null,
+        StackExchange.Redis.IConnectionMultiplexer? redis = null) =>
+        Guards.GetValue(options, o => new BasicAuthAttemptGuard(o, null, distributedCache, redis));
 
     public static string BuildAttemptKey(string username, string? clientIp) =>
         username.ToUpperInvariant() + "|" + NormalizeIp(clientIp);
@@ -97,13 +101,28 @@ internal sealed class BasicAuthAttemptGuard
         return ip.ToString();
     }
 
-    public bool IsLockedOut(string attemptKey)
+    public async ValueTask<bool> IsLockedOutAsync(string attemptKey, CancellationToken ct = default)
     {
-        if (_distributedCache != null)
+        if (_redis != null && _redis.IsConnected)
         {
             try
             {
-                var val = _distributedCache.GetString("autheris:lockout:" + attemptKey);
+                var db = _redis.GetDatabase();
+                if (await db.KeyExistsAsync("autheris:lockout:" + attemptKey).ConfigureAwait(false))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+                // Fall back to in-memory tracking on cache failure
+            }
+        }
+        else if (_distributedCache != null)
+        {
+            try
+            {
+                var val = await _distributedCache.GetStringAsync("autheris:lockout:" + attemptKey, ct).ConfigureAwait(false);
                 if (!string.IsNullOrEmpty(val))
                 {
                     return true;
@@ -111,7 +130,7 @@ internal sealed class BasicAuthAttemptGuard
             }
             catch
             {
-                // Fall back to in-memory tracking on cache communication failure (resilient)
+                // Fall back to in-memory tracking on cache communication failure
             }
         }
 
@@ -137,29 +156,59 @@ internal sealed class BasicAuthAttemptGuard
         }
     }
 
-    public void RecordFailure(string attemptKey, int? maxAttempts = null)
+    public bool IsLockedOut(string attemptKey)
+    {
+        // For synchronous invocations, check in-memory dictionary directly or run async
+        return IsLockedOutAsync(attemptKey).AsTask().GetAwaiter().GetResult();
+    }
+
+    public async ValueTask RecordFailureAsync(string attemptKey, int? maxAttempts = null, CancellationToken ct = default)
     {
         int limit = Math.Max(1, maxAttempts ?? _maxFailedAttempts);
         var now = _timeProvider.GetUtcNow();
 
-        if (_distributedCache != null)
+        if (_redis != null && _redis.IsConnected)
+        {
+            try
+            {
+                var db = _redis.GetDatabase();
+                var failKey = "autheris:fail:" + attemptKey;
+                var lockoutKey = "autheris:lockout:" + attemptKey;
+
+                long count = await db.StringIncrementAsync(failKey).ConfigureAwait(false);
+                if (count == 1)
+                {
+                    await db.KeyExpireAsync(failKey, _window).ConfigureAwait(false);
+                }
+
+                if (count >= limit)
+                {
+                    await db.StringSetAsync(lockoutKey, "1", _window).ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                // Fall back to in-memory tracking
+            }
+        }
+        else if (_distributedCache != null)
         {
             try
             {
                 string key = "autheris:fail:" + attemptKey;
-                string? current = _distributedCache.GetString(key);
+                string? current = await _distributedCache.GetStringAsync(key, ct).ConfigureAwait(false);
                 int count = int.TryParse(current, out int c) ? c + 1 : 1;
-                _distributedCache.SetString(key, count.ToString(), new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
+                await _distributedCache.SetStringAsync(key, count.ToString(), new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
                 {
                     AbsoluteExpirationRelativeToNow = _window
-                });
+                }, ct).ConfigureAwait(false);
 
                 if (count >= limit)
                 {
-                    _distributedCache.SetString("autheris:lockout:" + attemptKey, "1", new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
+                    await _distributedCache.SetStringAsync("autheris:lockout:" + attemptKey, "1", new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
                     {
                         AbsoluteExpirationRelativeToNow = _window
-                    });
+                    }, ct).ConfigureAwait(false);
                 }
             }
             catch
@@ -190,22 +239,42 @@ internal sealed class BasicAuthAttemptGuard
         }
     }
 
-    public void RecordSuccess(string attemptKey)
+    public void RecordFailure(string attemptKey, int? maxAttempts = null)
     {
-        if (_distributedCache != null)
+        RecordFailureAsync(attemptKey, maxAttempts).AsTask().GetAwaiter().GetResult();
+    }
+
+    public async ValueTask RecordSuccessAsync(string attemptKey, CancellationToken ct = default)
+    {
+        if (_redis != null && _redis.IsConnected)
         {
             try
             {
-                _distributedCache.Remove("autheris:fail:" + attemptKey);
-                _distributedCache.Remove("autheris:lockout:" + attemptKey);
+                var db = _redis.GetDatabase();
+                await db.KeyDeleteAsync(["autheris:fail:" + attemptKey, "autheris:lockout:" + attemptKey]).ConfigureAwait(false);
             }
             catch
             {
-                // Ignore distributed cache removal failure
+            }
+        }
+        else if (_distributedCache != null)
+        {
+            try
+            {
+                await _distributedCache.RemoveAsync("autheris:fail:" + attemptKey, ct).ConfigureAwait(false);
+                await _distributedCache.RemoveAsync("autheris:lockout:" + attemptKey, ct).ConfigureAwait(false);
+            }
+            catch
+            {
             }
         }
 
         _failures.TryRemove(attemptKey, out _);
+    }
+
+    public void RecordSuccess(string attemptKey)
+    {
+        RecordSuccessAsync(attemptKey).AsTask().GetAwaiter().GetResult();
     }
 
     public bool TryGetCachedSuccess(string authorizationHeader, out string username)
