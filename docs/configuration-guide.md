@@ -639,14 +639,16 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 
 | Eigenschaft | Typ | Wertebereich | Standard | Beschreibung |
 | :--- | :--- | :--- | :--- | :--- |
-| `Mcp:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den nativen MCP-Server (`/mcp/sse`, `/mcp/message`). |
-| `Mcp:EndpointPath` | `string` | URL-Pfad | `"/mcp"` | Basis-Endpunkt für den MCP SSE-Handshake und Message-Endpunkt. |
+| `Mcp:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den MCP-Server (Streamable HTTP unter `Mcp:EndpointPath`, offizielles MCP-C#-SDK, zustandslos). |
+| `Mcp:EndpointPath` | `string` | URL-Pfad | `"/mcp"` | Pfad des MCP-Endpunkts (Streamable HTTP). |
 | `Mcp:MaxTokensPerCall` | `int` | `256 .. 128000` | `4096` | Maximales Token-Budget pro Tool-Aufruf; verhindert Context-Window-Overflows. |
 | `Mcp:MaxResultRows` | `int` | `1 .. 10000` | `100` | Maximale Ergebniszeilen pro Datenabfrage. |
 | `Mcp:RequirePiiMasking` | `bool` | `true \| false` | `true` | Automatisches Scrubbing von PII- (E-Mail, IBAN) und DSGVO-Art.-9-Daten vor Übermittlung an LLMs. |
 | `Mcp:AllowedOperations` | `string[]` | GraphQL Operationen | `[]` | Whitelist freigegebener Abfragen. |
 
 > `warn_allow_unmasked_ai_access` und `danger_bypass_mcp_auth` liegen ausschließlich unter `Insecure` (ADR-012, Phase 4).
+
+Der Server arbeitet zustandslos: Jede Anfrage wird mit der Identität ihrer eigenen HTTP-Anfrage ausgeführt, es gibt keine MCP-Sitzungen und keinen alten SSE-Transport (`/mcp/sse`, `/mcp/message`) mehr. Sind Entra ID oder AD FS aktiviert, veröffentlicht das Gateway unter `/.well-known/oauth-protected-resource<EndpointPath>` die OAuth-Metadaten (RFC 9728) mit diesen Ausstellern als Autorisierungsserver; 401-Antworten des MCP-Endpunkts verweisen per `WWW-Authenticate: Bearer resource_metadata=…` darauf. MCP-Clients finden so ohne weitere Konfiguration heraus, wo sie ein Token bekommen.
 
 Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `sample_rows` ([F-AI-11](features/f-ai-11-mcp-dataset-tools.md)) sind immer registriert und brauchen keinen Eintrag in `AllowedOperations`. Agenten fragen Daten bevorzugt mit `query_graphql` ab. Ist `Casbin:Enabled` gesetzt, prüft Casbin die MCP-Tools zusätzlich: `list_datasets` auf dem Objekt `governance.catalog.datasets`, `describe_dataset` und `sample_rows` auf der angefragten Tabelle, `query_graphql` auf jeder Tabelle der Abfrage. Ohne aktives Casbin entfällt diese Prüfung; Consent, Zeilenfilter und Maskierung gelten in jedem Fall.
 
@@ -746,6 +748,61 @@ If any mandatory probe (M1–M8) or, when W1 is supported, any wildcard safety p
 - **Cross-File Deny Precedence**: Deny decisions take precedence file-wide and across files. If any rule (global wildcard or tenant-specific) produces a deny effect, the access is rejected regardless of allows in other files.
 - **Tenant Policy File Requirement (F-1)**: Each tenant policy file must contain at least one valid `p` rule. Files containing only comments, whitespace, or grouping-only rules without `p` rules are rejected fail-closed.
 - **Empty Tenant Policy File Rejection (E-6)**: An empty tenant policy file is rejected whenever global `*` rules are active. The gateway preserves the last-known-good policy set to prevent fail-open wildcard inheritance.
+
+---
+
+### 2.19 `WebSql` (Governed SQL & Trino REST Protocol)
+
+Autheris bietet eine integrierte, abgesicherte WebSQL-Schnittstelle, die 100% kompatibel zur Trino/Presto-SQL-Syntax und dem nativen Trino REST Client-Protokoll ist. Abfragen können über Standard-HTTP/HTTPS abgesetzt werden, ohne Datenbank-Ports nach außen zu öffnen.
+
+| Eigenschaft | Typ | Standard | Beschreibung |
+| :--- | :--- | :--- | :--- |
+| `WebSql:Enabled` | `bool` | `true` | Aktiviert die WebSQL- und Trino-Statement-Endpunkte. |
+| `WebSql:DefaultDataSourceName` | `string` | `"default"` | Standard-Datenquelle, wenn kein Catalog/DataSource explizit angegeben ist. |
+| `WebSql:AllowedDataSources` | `string[]` | `[]` | Liste global freigegebener Datenquellen für WebSQL-Abfragen. |
+| `WebSql:TenantDataSourceAllowlist` | `Dictionary<string, string[]>` | `{}` | Mandantenspezifische Einschränkung erlaubter Datenquellen. |
+| `WebSql:MaxResultRows` | `int` | `5000` | Maximale Zeilenanzahl bei synchronen Abfragen. |
+| `WebSql:ExecutionTimeoutSeconds` | `int` | `30` | Maximaler Timeout für die Abfrageausführung im Backend. |
+| `WebSql:AllowDml` | `bool` | `false` | Erlaubt schreibende Operationen (`INSERT`, `UPDATE`, `DELETE`). |
+| `WebSql:DmlWriterRoles` | `string[]` | `[]` | Rollen, die DML ausführen dürfen (Pflicht, wenn `AllowDml = true`). |
+| `WebSql:MaxAffectedRows` | `long` | `1000` | Maximal erlaubte Zeilenanzahl bei DML; Überschreitung triggert automatischen Rollback. |
+| `WebSql:RejectUnfilteredDml` | `bool` | `true` | Verhindert ungefilterte `UPDATE`/`DELETE`-Statements (`WHERE 1=1`, `WHERE true`). |
+
+```json
+"WebSql": {
+  "Enabled": true,
+  "DefaultDataSourceName": "default",
+  "AllowedDataSources": ["sales", "finance", "analytics"],
+  "MaxResultRows": 5000,
+  "ExecutionTimeoutSeconds": 30,
+  "AllowDml": false,
+  "DmlWriterRoles": ["DatabaseOperator"],
+  "MaxAffectedRows": 1000,
+  "RejectUnfilteredDml": true
+}
+```
+
+#### Trino REST Client Protokoll (`/v1/statement`) & `wait_timeout`
+
+Autheris unterstützt das native Trino REST Client Protokoll, womit Standard-Trino-Tools (Trino CLI, Python `trino-python-client`, DBeaver, Apache Superset) direkt angebunden werden können:
+
+- **Endpunkte:**
+  - `POST /v1/statement` (oder `POST /api/v1/sql`): Nimmt die Abfrage im Request-Body entgegen (Text oder JSON).
+  - `GET /v1/statement/queued/{id}` (oder `GET /api/sql/statements/{id}`): Pollt den Status langlaufender Abfragen.
+  - `DELETE /v1/statement/{id}` (oder `DELETE /api/sql/statements/{id}`): Bricht eine laufende Abfrage ab (`204 No Content`).
+- **Synchronous Fast-Path via `X-Trino-Wait-Timeout`:**
+  - Wird ein Timeout übergeben (z. B. `X-Trino-Wait-Timeout: 5s` oder URL-Parameter `?wait_timeout=5s`) und die Abfrage beendet innerhalb dieses Fensters, antwortet das Gateway sofort mit HTTP 200 und Status `FINISHED` inklusive aller Zeilen.
+- **Asynchronous Continuation Path:**
+  - Benötigt die Abfrage länger als der Timeout, antwortet das Gateway sofort mit Status `RUNNING` und einer `nextUri` (`/v1/statement/queued/{id}`), um Timeouts an Load-Balancern und Proxies zu verhindern.
+- **3-Teilige Bezeichner (`<catalog>.<schema>.<table>`):**
+  - Tabellen können standardmäßig als `catalog.schema.table` angesprochen werden.
+  - Der `catalog`-Teil wird gegen die Datenquelle validiert bzw. automatisch als Ziel-Datenquelle inferiert.
+  - Der Dialekt-Generator strippt den Catalog-Präfix vor der Ausführung auf PostgreSQL (`"schema"."table"`), SQL Server (`[schema].[table]`) oder SQLite (`[table]`), wodurch Cross-Database- und DB-Escape-Kollisionen verhindert werden.
+- **Header-Unterstützung:**
+  - `X-Trino-Catalog`: Wählt die Ziel-Datenquelle aus.
+  - `X-Trino-Schema`: Standard-Schema.
+  - `X-Trino-Wait-Timeout`: Wartefenster für synchrone Fertigstellung (z. B. `5s`, `500ms`, `1m`).
+  - `X-Trino-User` & `X-Trino-Source`: Identitäts- und Auditierungskontext.
 
 ---
 

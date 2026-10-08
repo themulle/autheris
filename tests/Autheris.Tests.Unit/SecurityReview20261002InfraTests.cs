@@ -643,7 +643,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
         });
 
         var ex = Should.Throw<SecurityException>(() => manager.LoadPluginsFromDirectory(dir));
-        ex.Message.ShouldContain("nicht in Plugins:TrustedPluginHashes");
+        ex.Message.ShouldContain("not listed in Plugins:TrustedPluginHashes");
     }
 
     [Fact]

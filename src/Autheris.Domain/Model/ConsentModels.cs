@@ -2,11 +2,17 @@ namespace Autheris.Domain.Model;
 
 public sealed class ConsentColumnRule
 {
+    private readonly ColumnAccessLevel _accessLevel = ColumnAccessLevel.Deny;
+
     public Guid Id { get; init; } = Guid.NewGuid();
     public Guid ConsentId { get; init; }
     public Guid TableColumnId { get; init; }
     public string ColumnName { get; init; } = string.Empty;
-    public ColumnAccessLevel AccessLevel { get; init; } = ColumnAccessLevel.Deny;
+    public ColumnAccessLevel AccessLevel
+    {
+        get => _accessLevel;
+        init => _accessLevel = Enum.IsDefined(value) ? value : ColumnAccessLevel.Deny;
+    }
 }
 
 public enum RowFilterType

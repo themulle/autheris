@@ -95,7 +95,7 @@ public sealed class OmnichannelDocumentationTests
         accountIdField.Description.ShouldNotBeNull();
         accountIdField.Description!.ShouldContain("Unique identifier of the customer account.");
         accountIdField.Description!.ShouldContain("---");
-        accountIdField.Description!.ShouldContain("**Ausführliche Spezifikation:**");
+        accountIdField.Description!.ShouldContain("**Detailed specification:**");
         accountIdField.Description!.ShouldContain("Foreign key referencing accounts.id");
 
         var revenueField = dynamicType.Fields["revenue_amount"];

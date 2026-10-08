@@ -39,20 +39,7 @@ internal static class McpCatalogVisibility
             return Array.Empty<TableMetadata>();
         }
 
-        var roles = principal.GetUserRoles();
-        bool isGlobalAdmin = roles.Contains("GovernanceAdmin") || roles.Contains("ClusterAdmin");
-        if (isGlobalAdmin)
-        {
-            return allTables;
-        }
-
-        var groupSids = principal.GetGroupSids();
-        var tenantId = principal.GetTenantId();
-        var allSubjects = groupSids.Append(userSid!.Value).ToList();
-        var activeConsents = await consentRepo.GetAllActiveConsentsForSubjectsAsync(
-            allSubjects, roles, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
-
-        // MCP-1: same table and column visibility as the GraphQL catalog (Deny consents, column grants).
-        return CatalogVisibility.FilterForSubject(allTables, activeConsents, tenantId);
+        // MCP-1: same table and column visibility as the GraphQL catalog (admins, Deny consents, column grants).
+        return await CatalogVisibility.VisibleTablesAsync(allTables, principal, principal.GetTenantId(), consentRepo, ct).ConfigureAwait(false);
     }
 }

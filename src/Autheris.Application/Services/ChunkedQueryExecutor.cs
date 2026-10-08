@@ -24,11 +24,11 @@ public sealed class ChunkedQueryExecutor : IChunkedQueryExecutor
     {
         if (defaultChunkSize <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(defaultChunkSize), "Chunk-Größe muss größer als 0 sein.");
+            throw new ArgumentOutOfRangeException(nameof(defaultChunkSize), "Chunk size must be greater than 0.");
         }
         if (maxDegreeOfParallelism <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(maxDegreeOfParallelism), "MaxDegreeOfParallelism muss größer als 0 sein.");
+            throw new ArgumentOutOfRangeException(nameof(maxDegreeOfParallelism), "MaxDegreeOfParallelism must be greater than 0.");
         }
         DefaultChunkSize = defaultChunkSize;
         _budgetProvider = budgetProvider;

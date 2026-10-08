@@ -507,14 +507,14 @@ def seed_governance_data(conn):
 
     print("[governance-seed] Inserting Consents, Column Rules, and RLS Row Filters...")
 
-    # Access levels: Clear = 1, Mask = 2, Deny = 3
+    # Access levels: Deny = 0, Mask = 1, Clear = 2
     # Effect: "Allow", "Deny"
     # GranteeType: User = 1, Group = 2, Role = 3
 
     # --------------------------------------------------------------------------
     # CONSENT 1: Group S-1-5-21-GROUP-FINANCE (Standard Finance Users)
     # RLS Pushdown: department = 'Finance'
-    # Column Rules: salary -> Deny, iban -> Mask, email -> Clear, others -> Clear
+    # Column Rules: salary -> Deny (0), iban -> Mask (1), email/others -> Clear (2)
     # --------------------------------------------------------------------------
     for target_tid in ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]:
         cid = str(uuid.uuid5(uuid.UUID(target_tid), "consent-finance-group"))
@@ -526,12 +526,16 @@ def seed_governance_data(conn):
 
         # Column rules
         col_rules = [
-            ("salary", 3), # Deny
-            ("iban", 2),   # Mask
-            ("email", 1),  # Clear
-            ("amount", 1), # Clear
-            ("name", 1),   # Clear
-            ("vendor", 1)  # Clear
+            ("salary", 0), # Deny
+            ("iban", 1),   # Mask
+            ("email", 2),  # Clear
+            ("amount", 2), # Clear
+            ("name", 2),   # Clear
+            ("vendor", 2), # Clear
+            ("id", 2),     # Clear
+            ("department", 2), # Clear
+            ("status", 2), # Clear
+            ("created_at", 2)  # Clear
         ]
         for cname, level in col_rules:
             col_id = col_id_map[(target_tid, cname)]
@@ -551,7 +555,7 @@ def seed_governance_data(conn):
     # --------------------------------------------------------------------------
     # CONSENT 2: Role FinanceAuditor
     # RLS Pushdown: amount >= 1000.00 (Cross-department auditing of high-value invoices)
-    # Column Rules: salary -> Mask, iban -> Mask, email -> Mask
+    # Column Rules: salary -> Mask, iban -> Mask, email -> Mask, others -> Clear
     # --------------------------------------------------------------------------
     for target_tid in ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"]:
         cid = str(uuid.uuid5(uuid.UUID(target_tid), "consent-auditor-role"))
@@ -562,6 +566,13 @@ def seed_governance_data(conn):
         """, (cid, target_tid, role_map["FinanceAuditor"], now_iso, far_future_iso))
 
         for cname in ["salary", "iban", "email"]:
+            col_id = col_id_map[(target_tid, cname)]
+            cur.execute("""
+                INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
+                VALUES (?, ?, ?, ?, 1)
+            """, (str(uuid.uuid4()), cid, col_id, cname))
+
+        for cname in ["amount", "name", "vendor", "id", "department", "status", "created_at"]:
             col_id = col_id_map[(target_tid, cname)]
             cur.execute("""
                 INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
@@ -615,8 +626,14 @@ def seed_governance_data(conn):
         note_col_id = col_id_map[(target_tid, "sensitive_note")]
         cur.execute("""
             INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
-            VALUES (?, ?, ?, 'sensitive_note', 2)
+            VALUES (?, ?, ?, 'sensitive_note', 1)
         """, (str(uuid.uuid4()), cid, note_col_id))
+
+        for cname in ["id", "parent_id", "product_name", "price"]:
+            cur.execute("""
+                INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
+                VALUES (?, ?, ?, ?, 2)
+            """, (str(uuid.uuid4()), cid, col_id_map[(target_tid, cname)], cname))
 
     # --------------------------------------------------------------------------
     # CONSENT 6: SQLite HR tables (Cross-Database benchmarking)
@@ -630,7 +647,7 @@ def seed_governance_data(conn):
             VALUES (?, ?, NULL, 'Allow', 'Group', 'S-1-5-21-GROUP-FINANCE', NULL, NULL, ?, ?, 0)
         """, (cid_grp, hr_tid, now_iso, far_future_iso))
 
-        for cname, lvl in [("salary", 3), ("email", 2), ("name", 1), ("department", 1), ("role", 1), ("created_at", 1)]:
+        for cname, lvl in [("salary", 0), ("email", 1), ("name", 2), ("department", 2), ("role", 2), ("created_at", 2), ("id", 2)]:
             cur.execute("""
                 INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
                 VALUES (?, ?, ?, ?, ?)
@@ -660,6 +677,11 @@ def seed_governance_data(conn):
         for cname in ["salary", "email"]:
             cur.execute("""
                 INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
+                VALUES (?, ?, ?, ?, 1)
+            """, (str(uuid.uuid4()), cid_aud, col_id_map[(hr_tid, cname)], cname))
+        for cname in ["id", "name", "department", "role", "created_at"]:
+            cur.execute("""
+                INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
                 VALUES (?, ?, ?, ?, 2)
             """, (str(uuid.uuid4()), cid_aud, col_id_map[(hr_tid, cname)], cname))
 
@@ -683,7 +705,7 @@ def seed_governance_data(conn):
         VALUES (?, ?, NULL, 'Allow', 'Group', 'S-1-5-21-GROUP-FINANCE', NULL, NULL, ?, ?, 0)
     """, (cid_crm_grp, crm_tid, now_iso, far_future_iso))
 
-    for cname, lvl in [("email", 2), ("id", 1), ("order_number", 1), ("customer_name", 1), ("total_amount", 1), ("department", 1), ("status", 1), ("created_at", 1)]:
+    for cname, lvl in [("email", 1), ("id", 2), ("order_number", 2), ("customer_name", 2), ("total_amount", 2), ("department", 2), ("status", 2), ("created_at", 2)]:
         cur.execute("""
             INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
             VALUES (?, ?, ?, ?, ?)
@@ -712,8 +734,13 @@ def seed_governance_data(conn):
     """, (cid_crm_aud, crm_tid, role_map["FinanceAuditor"], now_iso, far_future_iso))
     cur.execute("""
         INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
-        VALUES (?, ?, ?, 'email', 2)
+        VALUES (?, ?, ?, 'email', 1)
     """, (str(uuid.uuid4()), cid_crm_aud, col_id_map[(crm_tid, "email")]))
+    for cname in ["id", "order_number", "customer_name", "total_amount", "department", "status", "created_at"]:
+        cur.execute("""
+            INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
+            VALUES (?, ?, ?, ?, 2)
+        """, (str(uuid.uuid4()), cid_crm_aud, col_id_map[(crm_tid, cname)], cname))
 
     # Blocked User: Hard Deny
     cid_crm_blk = str(uuid.uuid5(uuid.UUID(crm_tid), "consent-crm-blocked-user"))
@@ -735,7 +762,7 @@ def seed_governance_data(conn):
         VALUES (?, ?, NULL, 'Allow', 'Group', 'S-1-5-21-GROUP-FINANCE', NULL, NULL, ?, ?, 0)
     """, (cid_lake_grp, lake_tid, now_iso, far_future_iso))
 
-    for cname, lvl in [("customerEmail", 2), ("orderId", 1), ("tenantId", 1), ("amount", 1), ("orderDate", 1)]:
+    for cname, lvl in [("customerEmail", 1), ("orderId", 2), ("tenantId", 2), ("amount", 2), ("orderDate", 2)]:
         cur.execute("""
             INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
             VALUES (?, ?, ?, ?, ?)
@@ -758,8 +785,13 @@ def seed_governance_data(conn):
     """, (cid_lake_aud, lake_tid, role_map["FinanceAuditor"], now_iso, far_future_iso))
     cur.execute("""
         INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
-        VALUES (?, ?, ?, 'customerEmail', 2)
+        VALUES (?, ?, ?, 'customerEmail', 1)
     """, (str(uuid.uuid4()), cid_lake_aud, col_id_map[(lake_tid, "customerEmail")]))
+    for cname in ["orderId", "tenantId", "amount", "orderDate"]:
+        cur.execute("""
+            INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
+            VALUES (?, ?, ?, ?, 2)
+        """, (str(uuid.uuid4()), cid_lake_aud, col_id_map[(lake_tid, cname)], cname))
 
     # Blocked User: Hard Deny
     cid_lake_blk = str(uuid.uuid5(uuid.UUID(lake_tid), "consent-lake-blocked-user"))

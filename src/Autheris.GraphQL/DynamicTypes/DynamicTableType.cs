@@ -138,7 +138,7 @@ public sealed class DynamicTableType : ObjectType
 
         if (hasDesc && hasLongDesc)
         {
-            return $"{col.Description}\n\n---\n**Ausführliche Spezifikation:**\n{longDesc}";
+            return $"{col.Description}\n\n---\n**Detailed specification:**\n{longDesc}";
         }
 
         if (hasDesc)

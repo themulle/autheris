@@ -150,7 +150,7 @@ public sealed class ItsmWebhookHandler(
             var diff = DateTimeOffset.UtcNow - timestamp;
             if (diff > TimeSpan.FromMinutes(5) || diff < TimeSpan.FromMinutes(-5))
             {
-                logger.LogWarning("Webhook abgelehnt: Timestamp außerhalb des 5-Minuten-Gültigkeitsfensters.");
+                logger.LogWarning("Webhook rejected: Timestamp is outside the 5-minute validity window.");
                 return false;
             }
         }
@@ -160,7 +160,7 @@ public sealed class ItsmWebhookHandler(
         var payload = ParsePayload(rawPayload, logger);
         if (payload == null || string.IsNullOrWhiteSpace(payload.TicketId))
         {
-            logger.LogWarning("Webhook abgelehnt: TicketId konnte nicht ermittelt werden.");
+            logger.LogWarning("Webhook rejected: TicketId could not be determined.");
             return false;
         }
 
@@ -180,7 +180,7 @@ public sealed class ItsmWebhookHandler(
             var secretKey = ResolveWebhookSecret(instanceId);
             if (secretKey == null)
             {
-                logger.LogError("Webhook abgelehnt: Für ITSM-Instanz '{InstanceId}' ist kein eigenes Webhook-Secret (itsm:webhook-secret:<instanceId>) konfiguriert.", instanceId);
+                logger.LogError("Webhook rejected: No dedicated webhook secret (itsm:webhook-secret:<instanceId>) is configured for ITSM instance '{InstanceId}'.", instanceId);
                 return false;
             }
 
@@ -197,7 +197,7 @@ public sealed class ItsmWebhookHandler(
             }
             catch (FormatException)
             {
-                logger.LogWarning("Webhook abgelehnt: Ungültiges Hex-Format der HMAC-SHA256-Signatur.");
+                logger.LogWarning("Webhook rejected: Invalid hex format of the HMAC-SHA256 signature.");
                 return false;
             }
 
@@ -217,7 +217,7 @@ public sealed class ItsmWebhookHandler(
 
             if (!signatureValid)
             {
-                logger.LogWarning("Webhook abgelehnt: Ungültige HMAC-SHA256-Signatur.");
+                logger.LogWarning("Webhook rejected: Invalid HMAC-SHA256 signature.");
                 return false;
             }
 
@@ -252,7 +252,10 @@ public sealed class ItsmWebhookHandler(
                     _replayCache.Remove(registered);
                 }
 
-                logger.LogWarning("Webhook-Replay erkannt (Instanz '{InstanceId}', Ticket '{TicketId}'). Zustellung wird ohne Wirkung quittiert.", instanceId, payload.TicketId);
+                logger.LogWarning(
+                    "Webhook replay detected (instance '{InstanceId}', ticket '{TicketId}'). Delivery is acknowledged without effect.",
+                    SanitizeForLog(instanceId),
+                    SanitizeForLog(payload.TicketId));
                 return true;
             }
 
@@ -280,6 +283,9 @@ public sealed class ItsmWebhookHandler(
 
     private async Task<bool> ProcessStatusChangeAsync(ItsmStatusChangeDto payload, string instanceId, CancellationToken ct)
     {
+        // Sanitize untrusted data before writing it to logs (prevent log forging via CR/LF).
+        var logInstanceId = instanceId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+
         // 5. Strikte Tenant-Bindung (umgehbar via warn_fallback_default_tenant_for_webhooks).
         // SEC H-06: Ticket-Lookup erfolgt mit Tenant-Filter (WHERE itsm_ticket_id = @t AND tenant_id = @tenant).
         var expectedTenant = _itsmOptions.GetTenantForInstance(instanceId);
@@ -294,7 +300,7 @@ public sealed class ItsmWebhookHandler(
                 {
                     logger.LogWarning(
                         "[DANGER] Bypassing cross-tenant mismatch for ticket {TicketId}. Request tenant: {ReqTenant}, callback instance: {InstanceId}. Prohibited outside Development.",
-                        payload.TicketId, request.TenantId, instanceId);
+                        payload.TicketId, request.TenantId, logInstanceId);
                 }
             }
         }
@@ -305,21 +311,21 @@ public sealed class ItsmWebhookHandler(
             {
                 logger.LogWarning(
                     "[DANGER] Bypassing tenant binding for unmapped ITSM instance {InstanceId} (ticket {TicketId}, request tenant {ReqTenant}). Prohibited outside Development.",
-                    instanceId, payload.TicketId, request.TenantId);
+                    logInstanceId, payload.TicketId, request.TenantId);
             }
         }
         else
         {
             GatewayDiagnostics.CrossTenantMismatchCounter.Add(1);
             logger.LogError(
-                "CROSS_TENANT_WEBHOOK_MISMATCH: Callback für Ticket {TicketId} kam von nicht zugeordneter Instanz {InstanceId}.",
-                payload.TicketId, instanceId);
+                "CROSS_TENANT_WEBHOOK_MISMATCH: Callback for ticket {TicketId} came from an unassigned instance {InstanceId}.",
+                payload.TicketId, logInstanceId);
             return false; // Streng verweigern!
         }
 
         if (request == null)
         {
-            logger.LogWarning("Webhook verworfen: Unbekannte TicketId '{TicketId}' für Instanz '{InstanceId}'.", payload.TicketId, instanceId);
+            logger.LogWarning("Webhook discarded: Unknown TicketId '{TicketId}' for instance '{InstanceId}'.", payload.TicketId, logInstanceId);
             return false;
         }
 
@@ -347,7 +353,7 @@ public sealed class ItsmWebhookHandler(
 
         if (string.Equals(payload.Action, "APPROVE", StringComparison.OrdinalIgnoreCase))
         {
-            logger.LogInformation("Consent Request {RequestId} via ITSM Ticket {TicketId} ({System}) genehmigt. Führe Genehmigungsschritt aus...", request.Id, payload.TicketId, payload.System);
+            logger.LogInformation("Consent Request {RequestId} via ITSM Ticket {TicketId} ({System}) approved. Running approval step...", request.Id, payload.TicketId, payload.System);
 
             // SEC M-2: Route approval through ApproveConsentRequestStepAsync to enforce separation of duties,
             // approver != requester check, and four-eyes verification rather than bypassing directly to ActivateConsentAsync.
@@ -386,6 +392,28 @@ public sealed class ItsmWebhookHandler(
     /// SEC H-06: The instance comes from the signed payload only. An (unsigned) header instance must match it.
     /// Only in signature-bypass mode (insecure getting started) the header is accepted as fallback.
     /// </summary>
+    private static string SanitizeForLog(string? value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var sanitized = new StringBuilder(value.Length);
+        foreach (var ch in value)
+        {
+            if (ch == '\r' || ch == '\n')
+            {
+                sanitized.Append(' ');
+                continue;
+            }
+
+            sanitized.Append(char.IsControl(ch) ? ' ' : ch);
+        }
+
+        return sanitized.ToString();
+    }
+
     private string? ResolveInstanceId(string? payloadInstanceId, string? headerInstanceId, bool bypassSignature)
     {
         var fromPayload = string.IsNullOrWhiteSpace(payloadInstanceId) ? null : payloadInstanceId.Trim();
@@ -395,7 +423,10 @@ public sealed class ItsmWebhookHandler(
             !string.Equals(fromPayload, fromHeader, StringComparison.OrdinalIgnoreCase))
         {
             GatewayDiagnostics.CrossTenantMismatchCounter.Add(1);
-            logger.LogWarning("Webhook abgelehnt: Instanz-Header '{HeaderInstance}' widerspricht der signierten Payload-Instanz '{PayloadInstance}'.", fromHeader, fromPayload);
+            logger.LogWarning(
+                "Webhook abgelehnt: Instanz-Header '{HeaderInstance}' widerspricht der signierten Payload-Instanz '{PayloadInstance}'.",
+                SanitizeForLog(fromHeader),
+                SanitizeForLog(fromPayload));
             return null;
         }
 
@@ -409,7 +440,7 @@ public sealed class ItsmWebhookHandler(
             return fromHeader;
         }
 
-        logger.LogWarning("Webhook abgelehnt: Die signierte Payload enthält keine ITSM-Instanz-ID.");
+        logger.LogWarning("Webhook rejected: The signed payload does not contain an ITSM instance ID.");
         return null;
     }
 
@@ -448,7 +479,7 @@ public sealed class ItsmWebhookHandler(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Webhook-Secret '{SecretRef}' konnte nicht geladen werden.", secretRef);
+            logger.LogDebug(ex, "Webhook secret '{SecretRef}' could not be loaded.", secretRef);
             return null;
         }
     }
@@ -657,7 +688,7 @@ public sealed class ItsmWebhookHandler(
 
             if (string.IsNullOrWhiteSpace(ticketId))
             {
-                logger.LogWarning("Webhook abgelehnt: TicketId konnte weder aus DTO noch aus ServiceNow- oder Jira-Struktur ermittelt werden.");
+                logger.LogWarning("Webhook rejected: TicketId could not be determined from the DTO or from the ServiceNow or Jira structure.");
                 return null;
             }
 
@@ -681,7 +712,7 @@ public sealed class ItsmWebhookHandler(
         }
         catch (JsonException ex)
         {
-            logger.LogWarning(ex, "Webhook abgelehnt: Ungültiges JSON-Payload.");
+            logger.LogWarning(ex, "Webhook rejected: Invalid JSON payload.");
             return null;
         }
     }

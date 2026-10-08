@@ -440,7 +440,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             builder.Append(buffer, 0, read);
             if (builder.Length * 2L > maxBytes)
             {
-                throw new GatewaySecurityException($"Antwortgröße überschreitet das konfigurierte Limit von {maxBytes} Bytes.", "RESPONSE_TOO_LARGE");
+                throw new GatewaySecurityException($"Response size exceeds the configured limit of {maxBytes} bytes.", "RESPONSE_TOO_LARGE");
             }
         }
         return builder.ToString();

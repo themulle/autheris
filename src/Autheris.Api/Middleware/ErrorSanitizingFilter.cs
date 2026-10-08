@@ -97,14 +97,14 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
 
             if (ContainsSensitivePatterns(cleanError.Message))
             {
-                return cleanError.WithMessage("Die Anfrage enthält ungültige Parameter oder kann nicht verarbeitet werden.");
+                return cleanError.WithMessage("The request contains invalid parameters or cannot be processed.");
             }
             return cleanError;
         }
 
         // Non-whitelisted or unhandled technical exceptions: mask as generic INTERNAL_SERVER_ERROR
         return error
-            .WithMessage("Ein interner Serverfehler ist aufgetreten.")
+            .WithMessage("An internal server error occurred.")
             .WithCode("INTERNAL_SERVER_ERROR")
             .WithException(null);
     }
@@ -116,9 +116,9 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         {
             return error.SetExtension("dev_fix_hints", new[]
             {
-                "Header 'X-Test-User-Sid: S-1-5-21-ALICE-FINANCE' & 'X-Test-Roles: FinanceManager' setzen",
-                "Oder 'Gateway:Dev:Preset: Quickstart' in appsettings.Development.json aktivieren",
-                "Besuche das Developer Dashboard auf http://localhost:5000/ zum Kopieren vorgefertigter Test-Personas"
+                "Set headers 'X-Test-User-Sid: S-1-5-21-ALICE-FINANCE' & 'X-Test-Roles: FinanceManager'",
+                "Or enable 'Gateway:Dev:Preset: Quickstart' in appsettings.Development.json",
+                "Visit the developer dashboard at http://localhost:5000/ to copy predefined test personas"
             });
         }
 
@@ -126,9 +126,9 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         {
             return error.SetExtension("dev_fix_hints", new[]
             {
-                "Consent anfragen via GraphQL Mutation 'requestConsent(domain: ..., tableName: ...)'",
-                "Oder 'Insecure:warn_auto_approve_access_requests: true' in appsettings.Development.json aktivieren",
-                "Oder 'Insecure:danger_bypass_consent_checks: true' für unbeschränkten Dev-Zugriff aktivieren"
+                "Request consent via GraphQL mutation 'requestConsent(domain: ..., tableName: ...)'",
+                "Or enable 'Insecure:warn_auto_approve_access_requests: true' in appsettings.Development.json",
+                "Or enable 'Insecure:danger_bypass_consent_checks: true' for unrestricted dev access"
             });
         }
 

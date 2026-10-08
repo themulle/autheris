@@ -932,16 +932,17 @@ public sealed class RlsListener : SqlBaseBaseListener
             }
         }
 
+        string backendTableName = SqlIdentifierHelper.StripCatalogPrefix(rawTableName);
         string subquery;
         if (!string.IsNullOrWhiteSpace(policyFilter))
         {
             // Correlated row filters reference the filtered table through the reserved alias.
             string targetAlias = RowFilterAliases.ReferencesTarget(policyFilter) ? $" AS {RowFilterAliases.Target}" : string.Empty;
-            subquery = $"(SELECT {selectColumns} FROM {rawTableName}{targetAlias} WHERE {policyFilter})";
+            subquery = $"(SELECT {selectColumns} FROM {backendTableName}{targetAlias} WHERE {policyFilter})";
         }
         else
         {
-            subquery = $"(SELECT {selectColumns} FROM {rawTableName})";
+            subquery = $"(SELECT {selectColumns} FROM {backendTableName})";
         }
 
         if (_options.AppendTableAlias)

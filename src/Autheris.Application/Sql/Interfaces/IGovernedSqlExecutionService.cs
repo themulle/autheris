@@ -19,7 +19,8 @@ public sealed record GovernedSqlResult(
     IReadOnlyList<string> Columns,
     IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
     int RowCount,
-    long ElapsedMilliseconds);
+    long ElapsedMilliseconds,
+    bool Truncated = false);
 
 public interface IGovernedSqlExecutionService
 {

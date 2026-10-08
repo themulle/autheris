@@ -21,7 +21,7 @@ public static class SecretKeyRequirements
         if (length < MinimumKeyBytes)
         {
             throw new InvalidOperationException(
-                $"Sicherheitsfehler: {purpose} muss außerhalb der Entwicklungsumgebung mindestens {MinimumKeyBytes} Bytes lang sein (aktuelle Länge: {length}).");
+                $"Security error: {purpose} must be at least {MinimumKeyBytes} bytes long outside the development environment (current length: {length}).");
         }
     }
 }

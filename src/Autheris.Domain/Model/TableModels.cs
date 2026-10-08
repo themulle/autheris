@@ -116,7 +116,7 @@ public sealed class MaskingRule
             if (rule.HmacKeyId.Contains("|tenant:", StringComparison.Ordinal))
             {
                 throw new InvalidOperationException(
-                    $"Die Maskierungsregel ist bereits an einen anderen Mandanten gebunden ('{rule.HmacKeyId}'). Mandantenübergreifende Verwendung für Mandant '{tenant}' ist unzulässig.");
+                    $"The masking rule is already bound to another tenant ('{rule.HmacKeyId}'). Cross-tenant use for tenant '{tenant}' is not allowed.");
             }
         }
 

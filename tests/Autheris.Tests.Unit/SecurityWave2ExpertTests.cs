@@ -74,7 +74,7 @@ public class SecurityWave2ExpertTests
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv);
         });
 
-        ex.Message.ShouldContain("Sicherheitsverletzung: GettingStarted-Profile 'Quickstart' darf AUSSCHLIESSLICH in der Development-Umgebung aktiv sein!");
+        ex.Message.ShouldContain("Security violation: The GettingStarted profile 'Quickstart' may be active ONLY in the Development environment.");
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public class SecurityWave2ExpertTests
         var filter = new ErrorSanitizingFilter(devEnv, logger);
 
         var unauthError = ErrorBuilder.New()
-            .SetMessage("Authentifizierung erforderlich für Katalogabfragen.")
+            .SetMessage("Authentication is required for catalog queries.")
             .SetCode("UNAUTHORIZED")
             .Build();
 
@@ -131,7 +131,7 @@ public class SecurityWave2ExpertTests
         var filter = new ErrorSanitizingFilter(prodEnv, logger);
 
         var unauthError = ErrorBuilder.New()
-            .SetMessage("Authentifizierung erforderlich für Katalogabfragen.")
+            .SetMessage("Authentication is required for catalog queries.")
             .SetCode("UNAUTHORIZED")
             .Build();
 

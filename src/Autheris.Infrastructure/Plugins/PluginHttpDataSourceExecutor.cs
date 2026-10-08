@@ -41,14 +41,14 @@ public sealed class PluginHttpDataSourceExecutor : IDataSourceExecutor
         if (string.IsNullOrWhiteSpace(pluginName))
         {
             throw new InvalidOperationException(
-                $"Tabelle '{context.Metadata.Identifier}' ist als HttpPlugin konfiguriert, spezifiziert aber weder PluginName noch SourceName.");
+                $"Table '{context.Metadata.Identifier}' is configured as HttpPlugin but specifies neither PluginName nor SourceName.");
         }
 
         var plugin = _pluginManager.GetPlugin(pluginName);
         if (plugin == null)
         {
             throw new InvalidOperationException(
-                $"Das angeforderte HTTP-Plugin '{pluginName}' für Tabelle '{context.Metadata.Identifier}' wurde nicht gefunden oder ist nicht geladen.");
+                $"The requested HTTP plugin '{pluginName}' for table '{context.Metadata.Identifier}' was not found or is not loaded.");
         }
 
         _logger.LogInformation("Routing query for table '{Table}' to HTTP DataSource Plugin '{PluginName}'",

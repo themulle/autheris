@@ -254,7 +254,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
             await _repository.ApproveConsentRequestStepAsync(req.Id, ownerRequesterSid);
         });
 
-        ex.Message.ShouldContain("Funktionstrennung verletzt");
+        ex.Message.ShouldContain("Separation of duties violated");
     }
 
     #endregion

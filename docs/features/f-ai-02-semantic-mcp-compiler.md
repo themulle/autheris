@@ -72,8 +72,7 @@ curl -X POST http://localhost:8080/mcp \
   "Gateway": {
     "Mcp": {
       "Enabled": true,
-      "Endpoint": "/mcp",
-      "SseEndpoint": "/mcp/sse",
+      "EndpointPath": "/mcp",
       "SemanticCompiler": {
         "IncludeDbtDocBlocks": true,
         "IncludeCatalogGlossary": true,

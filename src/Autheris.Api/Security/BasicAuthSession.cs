@@ -80,17 +80,17 @@ public static class BasicAuthSession
 
         if (options.Authentication.RequireKerberosOnly)
         {
-            errors.Add("BasicAuth.Session darf nicht aktiviert sein, wenn RequireKerberosOnly=true ist.");
+            errors.Add("BasicAuth.Session must not be enabled when RequireKerberosOnly=true.");
         }
 
         if (environment.IsProduction() ||
             session.AllowedEnvironments.Any(e => string.Equals(e, Environments.Production, StringComparison.OrdinalIgnoreCase)))
         {
-            errors.Add("Sicherheitsverletzung: BasicAuth.Session ist in der Production-Umgebung grundsätzlich verboten.");
+            errors.Add("Security violation: BasicAuth.Session is prohibited in the Production environment.");
         }
         else if (!session.AllowedEnvironments.Any(e => string.Equals(e, environment.EnvironmentName, StringComparison.OrdinalIgnoreCase)))
         {
-            errors.Add($"Sicherheitsverletzung: BasicAuth.Session ist für die Umgebung '{environment.EnvironmentName}' nicht freigegeben " +
+            errors.Add($"Security violation: BasicAuth.Session is not approved for the environment '{environment.EnvironmentName}' " +
                        $"(BasicAuth.Session.AllowedEnvironments: {string.Join(", ", session.AllowedEnvironments)}).");
         }
 
@@ -98,7 +98,7 @@ public static class BasicAuthSession
             !session.CookieName.StartsWith("__Host-", StringComparison.Ordinal) ||
             session.CookieName.Length <= "__Host-".Length)
         {
-            errors.Add("BasicAuth.Session.CookieName muss das Präfix '__Host-' verwenden (Secure, Path=/, keine Domain).");
+            errors.Add("BasicAuth.Session.CookieName must use the '__Host-' prefix (Secure, Path=/, no Domain).");
         }
 
         if (session.AbsoluteExpirationMinutes < session.SlidingExpirationMinutes)
@@ -110,14 +110,14 @@ public static class BasicAuthSession
         // (e.g. the Quickstart profile) the session is disabled instead of failing the start, see IsAllowed.
         if (options.IsWildcardCors && !environment.IsDevelopment())
         {
-            errors.Add("Sicherheitsverletzung: BasicAuth.Session ist mit warn_allow_all_cors_origins / TrustedOrigins '*' nicht kombinierbar (CSRF).");
+            errors.Add("Security violation: BasicAuth.Session cannot be combined with warn_allow_all_cors_origins / TrustedOrigins '*' (CSRF).");
         }
 
         // Without a shared key ring every replica would reject the cookies issued by the others.
         if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) &&
             string.IsNullOrWhiteSpace(session.KeyDirectory))
         {
-            errors.Add("BasicAuth.Session mit mehreren Replikas erfordert BasicAuth.Session.KeyDirectory auf einem gemeinsamen Volume.");
+            errors.Add("BasicAuth.Session with multiple replicas requires BasicAuth.Session.KeyDirectory on a shared volume.");
         }
 
         return errors;
@@ -154,18 +154,18 @@ public static class BasicAuthSession
         {
             if (string.IsNullOrWhiteSpace(user.Username) || user.Username.Contains(':'))
             {
-                errors.Add("BasicAuth-Benutzer benötigen einen nicht-leeren Benutzernamen ohne ':'.");
+                errors.Add("BasicAuth users require a non-empty username without ':'.");
                 continue;
             }
 
             if (!seen.Add(user.Username))
             {
-                errors.Add($"BasicAuth-Benutzer '{user.Username}' ist mehrfach konfiguriert.");
+                errors.Add($"BasicAuth user '{user.Username}' is configured more than once.");
             }
 
             if (string.IsNullOrEmpty(user.Password))
             {
-                errors.Add($"Sicherheitsverletzung: BasicAuth-Benutzer '{user.Username}' hat kein Passwort.");
+                errors.Add($"Security violation: BasicAuth user '{user.Username}' has no password.");
             }
 
             var sid = BasicAuthPrincipalFactory.ResolveSid(user);
@@ -173,12 +173,12 @@ public static class BasicAuthSession
                 sid.StartsWith("ITSM", StringComparison.OrdinalIgnoreCase) ||
                 sid.StartsWith("S-1-5-21-ITSM-", StringComparison.OrdinalIgnoreCase))
             {
-                errors.Add($"Sicherheitsverletzung: BasicAuth-Benutzer '{user.Username}' hat eine unzulässige SID (kein ':' und kein Präfix 'ITSM' erlaubt).");
+                errors.Add($"Security violation: BasicAuth user '{user.Username}' has an invalid SID (':' and the prefix 'ITSM' are not allowed).");
             }
 
             if (!string.IsNullOrWhiteSpace(user.TenantId) && !TenantId.TryParse(user.TenantId, out _))
             {
-                errors.Add($"Sicherheitsverletzung: BasicAuth-Benutzer '{user.Username}' hat ein ungültiges TenantId-Format.");
+                errors.Add($"Security violation: BasicAuth user '{user.Username}' has an invalid TenantId format.");
             }
         }
 

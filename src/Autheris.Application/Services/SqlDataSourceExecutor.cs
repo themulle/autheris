@@ -52,8 +52,8 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         {
             var reasons = context.AccessDecision.DeniedReasons.Count > 0
                 ? string.Join("; ", context.AccessDecision.DeniedReasons)
-                : "Tabelle ist durch Zugriffsrichtlinie gesperrt.";
-            throw new SecurityException($"Zero-Trust-Verletzung: Zugriff auf Tabelle '{context.Metadata.Identifier}' verweigert: {reasons}");
+                : "Table is blocked by access policy.";
+            throw new SecurityException($"Zero-Trust violation: Access to table '{context.Metadata.Identifier}' denied: {reasons}");
         }
 
         // SEC-AC-02: Zero-Trust: Validate RLS filter early before any connection or query execution
@@ -80,7 +80,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 var access = context.AccessDecision.GetEffectiveColumnAccess(matchingCol.ColumnName, context.Metadata);
                 if (access != ColumnAccessLevel.Clear)
                 {
-                    throw new SecurityException($"Zero-Trust-Verletzung: Filtern auf Spalte '{matchingCol.ColumnName}' in Tabelle '{context.Metadata.Identifier}' ist nicht gestattet (Zugriffsebene: {access}).");
+                    throw new SecurityException($"Zero-Trust violation: Filtering on column '{matchingCol.ColumnName}' in table '{context.Metadata.Identifier}' is not permitted (access level: {access}).");
                 }
             }
         }
@@ -103,7 +103,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
             if (!isDev && !isExplicitlyAllowed)
             {
-                throw new GatewayNotImplementedException($"Die SQL-Datenquelle '{context.SourceName}' besitzt keine aktive Datenbankverbindung. Synthetischer Daten-Fallback ist außerhalb der Development-Umgebung deaktiviert.");
+                throw new GatewayNotImplementedException($"The SQL data source '{context.SourceName}' has no active database connection. Synthetic data fallback is disabled outside the Development environment.");
             }
 
             return GenerateSyntheticRows(context);
@@ -250,7 +250,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 var access = context.AccessDecision.GetEffectiveColumnAccess(matchingCol.ColumnName, metadata);
                 if (access != ColumnAccessLevel.Clear)
                 {
-                    throw new SecurityException($"Zero-Trust-Verletzung: Filtern auf Spalte '{matchingCol.ColumnName}' in Tabelle '{metadata.Identifier}' ist nicht gestattet (Zugriffsebene: {access}).");
+                    throw new SecurityException($"Zero-Trust violation: Filtering on column '{matchingCol.ColumnName}' in table '{metadata.Identifier}' is not permitted (access level: {access}).");
                 }
 
                 var paramName = $"@p{paramIndex++}";
@@ -427,7 +427,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             if (estimatedBytes > maxBytes)
             {
                 throw new Autheris.Domain.Exceptions.GatewaySecurityException(
-                    $"Antwortgröße überschreitet das konfigurierte Limit von {maxBytes} Bytes.", "RESPONSE_TOO_LARGE");
+                    $"Response size exceeds the configured limit of {maxBytes} bytes.", "RESPONSE_TOO_LARGE");
             }
             results.Add(row);
         }
@@ -613,7 +613,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         {
             if (bytes.Length > MaxAllowedBinaryBytes)
             {
-                throw new SecurityException($"Die Binärspalte '{columnName ?? "unbekannt"}' überschreitet die zulässige Maximalgröße von {MaxAllowedBinaryBytes / (1024 * 1024)} MB.");
+                throw new SecurityException($"Binary column '{columnName ?? "unknown"}' exceeds the maximum allowed size of {MaxAllowedBinaryBytes / (1024 * 1024)} MB.");
             }
             return Convert.ToBase64String(bytes);
         }

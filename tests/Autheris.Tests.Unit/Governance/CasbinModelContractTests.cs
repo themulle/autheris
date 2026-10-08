@@ -215,7 +215,7 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
                 casbin.AddWildcardPolicy("alice", "hr.employees", "read"));
 
             ex.Message.ShouldContain("W1");
-            ex.Message.ShouldContain("Wildcard-Mandanten");
+            ex.Message.ShouldContain("wildcard tenants");
         }
         finally
         {

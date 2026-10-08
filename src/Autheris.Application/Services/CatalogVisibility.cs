@@ -3,6 +3,10 @@ namespace Autheris.Application.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
@@ -72,5 +76,39 @@ public static class CatalogVisibility
         }
 
         return visible;
+    }
+
+    /// <summary>
+    /// Tables <paramref name="principal"/> may discover within <paramref name="tenantId"/>: GovernanceAdmin and ClusterAdmin
+    /// see every table, everybody else only tables passing <see cref="FilterForSubject"/>. Without a SID or without a consent
+    /// repository nothing is visible (fail-closed).
+    /// </summary>
+    public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
+        IReadOnlyList<TableMetadata> allTables,
+        ClaimsPrincipal principal,
+        TenantId tenantId,
+        IConsentRepository? consentRepository,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(allTables);
+        ArgumentNullException.ThrowIfNull(principal);
+
+        var roles = principal.GetUserRoles();
+        if (roles.Contains("GovernanceAdmin") || roles.Contains("ClusterAdmin"))
+        {
+            return allTables;
+        }
+
+        var userSid = principal.GetUserSid();
+        if (userSid == null || consentRepository == null)
+        {
+            return Array.Empty<TableMetadata>();
+        }
+
+        var subjects = principal.GetGroupSids().Append(userSid.Value).ToList();
+        var activeConsents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(
+            subjects, roles, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
+
+        return FilterForSubject(allTables, activeConsents, tenantId);
     }
 }

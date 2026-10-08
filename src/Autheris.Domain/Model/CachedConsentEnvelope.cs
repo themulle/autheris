@@ -53,7 +53,9 @@ public partial class CachedConsentEnvelope
         var colMap = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
         foreach (var (col, levelVal) in ColumnAccess)
         {
-            colMap[col] = (ColumnAccessLevel)levelVal;
+            colMap[col] = Enum.IsDefined((ColumnAccessLevel)levelVal)
+                ? (ColumnAccessLevel)levelVal
+                : ColumnAccessLevel.Deny;
         }
 
         var tableId = new TableIdentifier(

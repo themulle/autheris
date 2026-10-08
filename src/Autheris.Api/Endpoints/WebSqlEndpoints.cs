@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.IO;
+using System.Linq;
 using System.Security;
 using System.Security.Claims;
 using System.Text.Json;
@@ -66,6 +67,39 @@ public static class WebSqlEndpoints
            .WithRequestBodyLimit(2 * 1024 * 1024)
            .RequireAuthorization();
 
+        app.MapPost("/v1/statement", HandleWebSqlRequest)
+           .WithName("ExecuteTrinoStatementV1")
+           .WithRequestBodyLimit(2 * 1024 * 1024)
+           .RequireAuthorization();
+
+        app.MapGet("/v1/statement/queued/{statementId}", HandleTrinoQueuedStatementRequest)
+           .WithName("GetTrinoQueuedStatementV1")
+           .RequireAuthorization();
+
+        app.MapGet("/v1/statement/executing/{statementId}", HandleTrinoQueuedStatementRequest)
+           .WithName("GetTrinoExecutingStatementV1")
+           .RequireAuthorization();
+
+        app.MapDelete("/v1/statement/{statementId}", HandleTrinoCancelStatementRequest)
+           .WithName("CancelTrinoStatementV1")
+           .RequireAuthorization();
+
+        app.MapGet("/api/v1/sql/statements/{statementId}", HandleTrinoQueuedStatementRequest)
+           .WithName("GetWebSqlStatementV1")
+           .RequireAuthorization();
+
+        app.MapGet("/api/sql/statements/{statementId}", HandleTrinoQueuedStatementRequest)
+           .WithName("GetWebSqlStatement")
+           .RequireAuthorization();
+
+        app.MapDelete("/api/v1/sql/statements/{statementId}", HandleTrinoCancelStatementRequest)
+           .WithName("CancelWebSqlStatementV1")
+           .RequireAuthorization();
+
+        app.MapDelete("/api/sql/statements/{statementId}", HandleTrinoCancelStatementRequest)
+           .WithName("CancelWebSqlStatement")
+           .RequireAuthorization();
+
         return app;
     }
 
@@ -77,6 +111,7 @@ public static class WebSqlEndpoints
     {
         var logger = loggerFactory.CreateLogger("Autheris.Api.WebSql");
         var ct = httpContext.RequestAborted;
+        var statementManager = httpContext.RequestServices?.GetService<IWebSqlStatementManager>();
 
         // Content Length validation
         var maxBodySizeFeature = httpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
@@ -142,7 +177,40 @@ public static class WebSqlEndpoints
         bool formatArrays = httpContext.Request.Query.TryGetValue("format", out var formatVal) &&
                             string.Equals(formatVal.ToString(), "arrays", StringComparison.OrdinalIgnoreCase);
 
+        // Check if Trino protocol or wait_timeout requested
+        bool isTrinoRoute = httpContext.Request.Path.StartsWithSegments("/v1/statement", StringComparison.OrdinalIgnoreCase);
+        var trinoWaitTimeout = TryParseWaitTimeout(httpContext.Request);
+
+        // Check for X-Trino-Catalog if dataSource was not explicitly passed in body
+        if (string.IsNullOrWhiteSpace(dataSource) &&
+            httpContext.Request.Headers.TryGetValue("X-Trino-Catalog", out var trinoCatalogHeader) &&
+            !string.IsNullOrWhiteSpace(trinoCatalogHeader))
+        {
+            dataSource = trinoCatalogHeader.ToString().Trim();
+        }
+
         var governedRequest = new GovernedSqlQueryRequest(sql, parameters, dataSource);
+
+        if (isTrinoRoute || trinoWaitTimeout != null)
+        {
+            if (statementManager == null)
+            {
+                throw new GatewayNotImplementedException("WebSQL statement manager is not configured.");
+            }
+
+            var timeout = trinoWaitTimeout ?? TimeSpan.FromSeconds(5);
+            try
+            {
+                var status = await statementManager.SubmitOrWaitAsync(governedRequest, user, tenantId, timeout, ct);
+                await WriteTrinoStatementResponseAsync(httpContext, status, ct);
+                return;
+            }
+            catch (Exception ex)
+            {
+                await WriteWebSqlErrorAsync(httpContext, ex, logger, ct);
+                return;
+            }
+        }
 
         // F-DATA-01: Parquet output (Accept: application/vnd.apache.parquet) of the fully governed result set
         if (ParquetContentNegotiation.IsParquetRequested(httpContext.Request))
@@ -150,6 +218,10 @@ public static class WebSqlEndpoints
             await HandleParquetWebSqlRequestAsync(httpContext, sqlService, gatewayOptions, logger, governedRequest, user, tenantId, ct);
             return;
         }
+
+        var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
+        var sqlEngine = httpContext.RequestServices?.GetService<TrinoSqlEngine.ISqlEngine>();
+        long effectiveLimit = DetermineEffectiveLimit(sql, webSqlOptions, sqlEngine);
 
         // SEC M-10: The JSON writer is created lazily when the first result arrives. Policy/parse errors raised while the
         // statement is governed therefore never start the response, so the 4xx/5xx status and the curated body can still be sent.
@@ -237,8 +309,14 @@ public static class WebSqlEndpoints
                 writer.WriteEndArray();
             }
 
+            bool truncated = rowCount >= effectiveLimit;
             writer.WriteNumber("rowCount", rowCount);
+            writer.WriteBoolean("truncated", truncated);
             writer.WriteEndObject();
+            if (truncated && !httpContext.Response.HasStarted)
+            {
+                httpContext.Response.Headers["X-Autheris-Truncated"] = "true";
+            }
             await writer.FlushAsync(ct);
             await httpContext.Response.Body.FlushAsync(ct);
         }
@@ -692,5 +770,229 @@ public static class WebSqlEndpoints
                 writer.WriteStringValue(val.ToString());
                 break;
         }
+    }
+
+    internal static async Task HandleTrinoQueuedStatementRequest(
+        string statementId,
+        HttpContext httpContext,
+        IWebSqlStatementManager statementManager,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("Autheris.Api.WebSql");
+        var ct = httpContext.RequestAborted;
+
+        var user = httpContext.User;
+        var securityContext = EndpointSecurity.GetSecurityContext(httpContext);
+        var tenantId = securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(httpContext);
+
+        var waitTimeout = TryParseWaitTimeout(httpContext.Request) ?? TimeSpan.FromSeconds(5);
+
+        try
+        {
+            var status = await statementManager.GetStatusOrWaitAsync(statementId, user, tenantId, waitTimeout, ct);
+            await WriteTrinoStatementResponseAsync(httpContext, status, ct);
+        }
+        catch (KeyNotFoundException)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+            await httpContext.Response.WriteAsJsonAsync(new { error = "Statement not found or expired.", id = statementId }, ct);
+        }
+        catch (SecurityException)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await httpContext.Response.WriteAsJsonAsync(new { error = "Forbidden", message = GenericForbiddenMessage }, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to poll statement {StatementId}", statementId);
+            httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await httpContext.Response.WriteAsJsonAsync(new { error = "InternalServerError", message = GenericServerErrorMessage }, ct);
+        }
+    }
+
+    internal static async Task HandleTrinoCancelStatementRequest(
+        string statementId,
+        HttpContext httpContext,
+        IWebSqlStatementManager statementManager)
+    {
+        var ct = httpContext.RequestAborted;
+        var user = httpContext.User;
+        var securityContext = EndpointSecurity.GetSecurityContext(httpContext);
+        var tenantId = securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(httpContext);
+
+        try
+        {
+            bool canceled = await statementManager.CancelStatementAsync(statementId, user, tenantId, ct);
+            if (!canceled)
+            {
+                httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            httpContext.Response.StatusCode = StatusCodes.Status204NoContent;
+        }
+        catch (SecurityException)
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+        }
+    }
+
+    internal static TimeSpan? TryParseWaitTimeout(HttpRequest request)
+    {
+        string? val = null;
+        if (request.Headers.TryGetValue("X-Trino-Wait-Timeout", out var headerVal) && !string.IsNullOrWhiteSpace(headerVal))
+        {
+            val = headerVal.ToString().Trim();
+        }
+        else if (request.Query.TryGetValue("wait_timeout", out var queryVal) && !string.IsNullOrWhiteSpace(queryVal))
+        {
+            val = queryVal.ToString().Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(val))
+        {
+            return null;
+        }
+
+        return ParseDuration(val);
+    }
+
+    internal static TimeSpan ParseDuration(string text)
+    {
+        text = text.Trim();
+        if (text.EndsWith("ms", StringComparison.OrdinalIgnoreCase) &&
+            double.TryParse(text[..^2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var ms))
+        {
+            return TimeSpan.FromMilliseconds(ms);
+        }
+        if (text.EndsWith("s", StringComparison.OrdinalIgnoreCase) &&
+            double.TryParse(text[..^1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var s))
+        {
+            return TimeSpan.FromSeconds(s);
+        }
+        if (text.EndsWith("m", StringComparison.OrdinalIgnoreCase) &&
+            double.TryParse(text[..^1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var m))
+        {
+            return TimeSpan.FromMinutes(m);
+        }
+        if (double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var rawNum))
+        {
+            return rawNum > 100 ? TimeSpan.FromMilliseconds(rawNum) : TimeSpan.FromSeconds(rawNum);
+        }
+
+        return TimeSpan.FromSeconds(5);
+    }
+
+    internal static async Task WriteTrinoStatementResponseAsync(
+        HttpContext httpContext,
+        StatementExecutionStatus status,
+        CancellationToken ct)
+    {
+        httpContext.Response.StatusCode = StatusCodes.Status200OK;
+        httpContext.Response.ContentType = "application/json; charset=utf-8";
+
+        var trinoColumns = status.Columns != null
+            ? status.Columns.Select(c => new { name = c, type = "varchar" }).ToList()
+            : null;
+
+        var trinoStats = new
+        {
+            state = status.State,
+            queued = status.State == "QUEUED",
+            scheduled = true,
+            nodes = 1,
+            totalSplits = 1,
+            queuedSplits = 0,
+            runningSplits = status.State == "RUNNING" ? 1 : 0,
+            completedSplits = status.State == "FINISHED" ? 1 : 0,
+            cpuTimeMillis = status.ElapsedTimeMillis,
+            wallTimeMillis = status.ElapsedTimeMillis,
+            queuedTimeMillis = 0,
+            elapsedTimeMillis = status.ElapsedTimeMillis
+        };
+
+        object? trinoError = null;
+        if (status.State == "FAILED")
+        {
+            trinoError = new
+            {
+                message = status.ErrorMessage ?? "Statement execution failed.",
+                errorCode = 1,
+                errorName = "SYNTAX_ERROR",
+                errorType = "USER_ERROR"
+            };
+        }
+
+        var responseObj = new Dictionary<string, object?>
+        {
+            ["id"] = status.StatementId,
+            ["infoUri"] = $"/ui/query.html?{status.StatementId}",
+            ["stats"] = trinoStats
+        };
+
+        if (!string.IsNullOrWhiteSpace(status.NextUri))
+        {
+            responseObj["nextUri"] = status.NextUri;
+        }
+
+        if (trinoColumns != null)
+        {
+            responseObj["columns"] = trinoColumns;
+        }
+
+        if (status.Data != null)
+        {
+            responseObj["data"] = status.Data;
+        }
+
+        if (trinoError != null)
+        {
+            responseObj["error"] = trinoError;
+        }
+
+        await httpContext.Response.WriteAsJsonAsync(responseObj, ct);
+    }
+
+    private static long DetermineEffectiveLimit(string sql, WebSqlOptions webSqlOptions, TrinoSqlEngine.ISqlEngine? sqlEngine)
+    {
+        long? explicitLimit = null;
+        if (sqlEngine != null)
+        {
+            try
+            {
+                var meta = sqlEngine.Analyze(sql.AsMemory());
+                if (meta.HasExplicitLimit && meta.ExplicitLimitValue is > 0)
+                {
+                    explicitLimit = meta.ExplicitLimitValue;
+                }
+            }
+            catch
+            {
+                // Fallback to regex if parse fails or engine throws
+            }
+        }
+
+        if (explicitLimit == null)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(sql, @"\bLIMIT\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            if (match.Success && long.TryParse(match.Groups[1].ValueSpan, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsedLimit))
+            {
+                explicitLimit = parsedLimit;
+            }
+        }
+
+        if (explicitLimit is > 0)
+        {
+            return webSqlOptions.MaxAllowedRows > 0
+                ? Math.Min(explicitLimit.Value, webSqlOptions.MaxAllowedRows)
+                : explicitLimit.Value;
+        }
+
+        var defaultLimit = webSqlOptions.DefaultMaxRows > 0 ? webSqlOptions.DefaultMaxRows : 1000;
+        if (webSqlOptions.MaxAllowedRows > 0 && defaultLimit > webSqlOptions.MaxAllowedRows)
+        {
+            defaultLimit = webSqlOptions.MaxAllowedRows;
+        }
+        return defaultLimit;
     }
 }

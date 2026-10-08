@@ -92,66 +92,66 @@ public static class GatewayServiceCollectionExtensions
             .ValidateDataAnnotations()
             .Validate(opts =>
                 Enum.IsDefined(opts.RowFilters.SubqueryStrategy),
-                "Gateway:RowFilters:SubqueryStrategy muss Exists, InCorrelated oder In sein.")
+                "Gateway:RowFilters:SubqueryStrategy must be Exists, InCorrelated or In.")
             .Validate(opts =>
                 opts.HighAvailability.ShutdownTimeoutSeconds >= opts.HighAvailability.QueryTimeoutSeconds + 10,
-                "NF-HA-01 Verletzung: ShutdownTimeoutSeconds muss mindestens 10s größer als QueryTimeoutSeconds sein.")
+                "NF-HA-01 violation: ShutdownTimeoutSeconds must be at least 10s greater than QueryTimeoutSeconds.")
             .Validate(opts =>
                 opts.HighAvailability.TerminationGracePeriodSeconds >= opts.HighAvailability.DrainDelaySeconds + opts.HighAvailability.ShutdownTimeoutSeconds + 10,
-                "NF-HA-01 Verletzung: TerminationGracePeriodSeconds muss größer als DrainDelay + ShutdownTimeout + 10s sein.")
+                "NF-HA-01 violation: TerminationGracePeriodSeconds must be greater than DrainDelay + ShutdownTimeout + 10s.")
             .Validate(opts =>
                 !(opts.Authentication.RequireKerberosOnly && opts.Authentication.BasicAuth.Enabled),
-                "Sicherheitskonflikt: BasicAuth darf nicht aktiviert sein, wenn RequireKerberosOnly auf true gesetzt ist.")
+                "Security conflict: BasicAuth must not be enabled when RequireKerberosOnly is set to true.")
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.Authentication.ForwardAuth.Enabled ||
                 (!string.IsNullOrWhiteSpace(opts.Authentication.ForwardAuth.SharedSecret) || !string.IsNullOrWhiteSpace(opts.Authentication.ForwardAuth.SharedSecretKeyVaultRef)),
-                "Sicherheitsverletzung: Außerhalb von Development erfordert ForwardAuth zwingend ein konfiguriertes SharedSecret oder SharedSecretKeyVaultRef.")
+                "Security violation: Outside Development, ForwardAuth requires a configured SharedSecret or SharedSecretKeyVaultRef.")
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.Authentication.ForwardAuth.Enabled || opts.Authentication.ForwardAuth.RequireTrustedProxy,
-                "Sicherheitsverletzung: RequireTrustedProxy darf bei aktivem ForwardAuth außerhalb von Development nicht auf false gesetzt sein!")
+                "Security violation: RequireTrustedProxy must not be set to false when ForwardAuth is enabled outside Development.")
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.Authentication.EnableTestAuthHandler,
-                "Sicherheitsverletzung: EnableTestAuthHandler darf AUSSCHLIESSLICH in der Development-Umgebung true sein!")
+                "Security violation: EnableTestAuthHandler may be true ONLY in the Development environment.")
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.IsAnonymousAccessAllowed,
-                "Sicherheitsverletzung: danger_allow_anonymous_access darf AUSSCHLIESSLICH in der Development-Umgebung true sein!")
+                "Security violation: danger_allow_anonymous_access may be true ONLY in the Development environment.")
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.AreUntrustedCertificatesAllowed,
-                "Sicherheitsverletzung: danger_allow_untrusted_certificates darf AUSSCHLIESSLICH in der Development-Umgebung true sein!")
+                "Security violation: danger_allow_untrusted_certificates may be true ONLY in the Development environment.")
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.GraphQL.TrustedOrigins.Contains("*"),
-                "Sicherheitsverletzung: TrustedOrigins '*' (Wildcard-CORS) ist außerhalb der Development-Umgebung aus Sicherheitsgründen (CSRF-Schutz) verboten!")
+                "Security violation: TrustedOrigins '*' (wildcard CORS) is prohibited outside the Development environment for security reasons (CSRF protection).")
             .Validate(opts =>
                 environment.IsDevelopment() || opts.GraphQL.TrustedOrigins.All(o => o == "*" || (Uri.TryCreate(o, UriKind.Absolute, out var u) && string.Equals(u.Scheme, "https", StringComparison.OrdinalIgnoreCase))),
-                "Sicherheitsverletzung: TrustedOrigins dürfen außerhalb von Development nur HTTPS-URLs enthalten.")
+                "Security violation: Outside Development, TrustedOrigins must contain only HTTPS URLs.")
             .Validate(opts =>
                 environment.IsDevelopment() || (
                     !string.IsNullOrWhiteSpace(opts.DataMasking.HmacSecretKeyVaultRef) &&
                     opts.DataMasking.HmacSecretKeyVaultRef != "DEV_INSECURE_TEST_KEY_ONLY" &&
                     opts.DataMasking.HmacSecretKeyVaultRef != "dev-only-hmac-salt-secure-fallback"
                 ) || opts.IsInsecureTransportAllowed || opts.IsColumnMaskingDisabled,
-                "NF-SEC-03 Verletzung: HmacSecretKeyVaultRef muss außerhalb von Development eine gültige Key Vault Secret-Referenz sein!")
+                "NF-SEC-03 violation: Outside Development, HmacSecretKeyVaultRef must be a valid Key Vault secret reference.")
             .Validate(opts =>
                 IsSupportedGovernanceDbProvider(opts.GovernanceDb.Provider),
-                "GovernanceDb Provider wird aktuell nur als 'Sqlite' oder 'PostgreSql' unterstützt.")
+                "The GovernanceDb provider currently supports only 'Sqlite' or 'PostgreSql'.")
             .Validate(opts =>
                 !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) ||
                 !DataSourceProvider.Is(opts.GovernanceDb.Provider, DatabaseDialect.Sqlite),
-                "Sicherheitsverletzung (E-2): Multi-Node Cluster Mode und mehr als 1 Replika sind mit SQLite nicht zulässig, da SQLite lokale Datenbankdateien pro Instanz verwendet. Bitte konfigurieren Sie GovernanceDb.Provider = 'PostgreSql' für Cluster-Betrieb.")
+                "Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' for cluster operation.")
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.OpenMetadata.Enabled ||
                 (Uri.TryCreate(opts.OpenMetadata.ServerUrl, UriKind.Absolute, out var uri) && string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)) ||
                 opts.IsInsecureTransportAllowed,
-                "Sicherheitsverletzung: OpenMetadata.ServerUrl muss außerhalb von Development zwingend HTTPS verwenden.")
+                "Security violation: Outside Development, OpenMetadata.ServerUrl must use HTTPS.")
             .Validate(opts =>
                 environment.IsDevelopment() || !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) || opts.Caching.Redis.Enabled,
-                "NF-HA-02 Verletzung: Im MultiNodeClusterMode bzw. bei mehr als einer Replika (PG-6) erfordert die clusterweite Cache- und Epoch-Invalidierung zwingend Caching.Redis.Enabled = true!")
+                "NF-HA-02 violation: In MultiNodeClusterMode or with more than one replica (PG-6), cluster-wide cache and epoch invalidation requires Caching.Redis.Enabled = true.")
             .Validate(opts =>
                 environment.IsDevelopment() ||
                 string.IsNullOrWhiteSpace(opts.Plugins.Directory) ||
                 !Directory.Exists(System.IO.Path.GetFullPath(opts.Plugins.Directory)) ||
                 opts.Plugins.RequireIntegrityManifest,
-                "Sicherheitsverletzung: Außerhalb von Development erfordert ein konfiguriertes Plugin-Verzeichnis zwingend Plugins.RequireIntegrityManifest = true!")
+                "Security violation: Outside Development, a configured plugin directory requires Plugins.RequireIntegrityManifest = true.")
             .ValidateOnStart();
 
         var gatewayOptions = configuration.GetSection(GatewayOptions.SectionName).Get<GatewayOptions>() ?? new GatewayOptions();
@@ -346,6 +346,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<TrinoSqlEngine.ISqlEngine, TrinoSqlEngine.FastSqlEngine>();
         services.AddSingleton<Autheris.Application.Sql.Interfaces.ISqlSecurityValidator, Autheris.Application.Sql.Services.DefaultSqlSecurityValidator>();
         services.AddScoped<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService, Autheris.Application.Sql.Services.GovernedSqlExecutionService>();
+        services.AddSingleton<Autheris.Application.Sql.Interfaces.IWebSqlStatementManager, Autheris.Application.Sql.Services.WebSqlStatementManager>();
         services.AddSingleton<Autheris.Application.SqlEndpoints.Interfaces.ISqlEndpointRegistry, Autheris.Application.SqlEndpoints.Services.InMemorySqlEndpointRegistry>();
         services.AddSingleton<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
         services.AddScoped<Autheris.Application.SqlEndpoints.Interfaces.ISqlEndpointExecutionService, Autheris.Application.SqlEndpoints.Services.SqlEndpointExecutionService>();
@@ -474,6 +475,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.Application.Mcp.Pruning.ISemanticToolPruner, Autheris.Application.Mcp.Pruning.SemanticToolPruner>();
         services.AddSingleton<IPersistedToolValidator, PersistedToolValidator>();
         services.AddScoped<IMcpQueryExecutor, Autheris.GraphQL.Mcp.GatewayMcpQueryExecutor>();
+        Autheris.Api.Mcp.GatewayMcpServer.AddGatewayMcpServer(services, gatewayOptions);
         services.AddScoped<IAiDataGuardrailService, AiDataGuardrailService>();
         services.AddScoped<IMcpProtocolHandler, McpProtocolHandler>();
         services.AddScoped<IMcpStdioRunner, McpStdioRunner>();
@@ -538,8 +540,9 @@ public static class GatewayServiceCollectionExtensions
         // F-ARCH-11: Envoy External Authorization & Istio Service Mesh Adapter
         services.AddSingleton<Autheris.Application.Mesh.Interfaces.IEnvoyExtAuthzService, Autheris.Application.Mesh.Services.EnvoyExtAuthzService>();
 
-        // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01)
-        services.AddHttpClient<Autheris.Application.Diagnostics.Shadowing.TrafficShadowingService>();
+        // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01, INF-2)
+        services.AddHttpClient<Autheris.Application.Diagnostics.Shadowing.TrafficShadowingService>()
+            .AddSecureOutboundHandlers(EgressIntegrations.Shadowing);
         services.AddSingleton<Autheris.Application.Diagnostics.Shadowing.TrafficShadowingService>();
         services.AddSingleton<Autheris.Application.Diagnostics.Shadowing.ITrafficShadowingService>(sp =>
             sp.GetRequiredService<Autheris.Application.Diagnostics.Shadowing.TrafficShadowingService>());
@@ -701,6 +704,8 @@ public static class GatewayServiceCollectionExtensions
         // Bearer tokens are routed by their (unverified) issuer and fully validated by the selected scheme.
         bool splitJwtSchemes = entraConfig.Enabled && adfsConfig.Enabled;
         authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearer, options => ConfigureJwtBearer(options, useEntra: entraConfig.Enabled, useAdfs: adfsConfig.Enabled && !splitJwtSchemes));
+        // MCP OAuth discovery (RFC 9728 protected resource metadata) for the configured token issuers.
+        Autheris.Api.Mcp.GatewayMcpOAuth.AddGatewayMcpOAuth(authBuilder, gatewayOptions);
         if (splitJwtSchemes)
         {
             authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearerAdfs, options => ConfigureJwtBearer(options, useEntra: false, useAdfs: true));
@@ -731,6 +736,7 @@ public static class GatewayServiceCollectionExtensions
 
             var validIssuers = new List<string>();
             var validAudiences = new List<string>();
+            var entraIssuers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             if (useEntra)
             {
@@ -739,8 +745,9 @@ public static class GatewayServiceCollectionExtensions
                     var instance = string.IsNullOrWhiteSpace(entraConfig.Instance)
                         ? "https://login.microsoftonline.com/"
                         : entraConfig.Instance.TrimEnd('/') + "/";
-                    validIssuers.Add($"{instance}{entraConfig.TenantId}/v2.0");
-                    validIssuers.Add($"https://sts.windows.net/{entraConfig.TenantId}/");
+                    entraIssuers.Add($"{instance}{entraConfig.TenantId}/v2.0");
+                    entraIssuers.Add($"https://sts.windows.net/{entraConfig.TenantId}/");
+                    validIssuers.AddRange(entraIssuers);
                 }
                 if (!string.IsNullOrWhiteSpace(entraConfig.Audience)) validAudiences.Add(entraConfig.Audience);
                 if (!string.IsNullOrWhiteSpace(entraConfig.ClientId)) validAudiences.Add(entraConfig.ClientId);
@@ -768,6 +775,26 @@ public static class GatewayServiceCollectionExtensions
                 ValidateIssuerSigningKey = true,
                 ClockSkew = TimeSpan.FromMinutes(2)
             };
+
+            if (useEntra)
+            {
+                // Finding 3.3 / R13: scope and token-kind rules apply to Entra tokens only (ADFS may share this scheme).
+                options.Events ??= new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents();
+                options.Events.OnTokenValidated = ctx =>
+                {
+                    if (ctx.Principal != null && entraIssuers.Contains(ctx.SecurityToken?.Issuer ?? string.Empty))
+                    {
+                        var resolver = ctx.HttpContext.RequestServices.GetRequiredService<IIdentitySubjectResolver>();
+                        var failure = EntraTokenPolicy.Apply(ctx.Principal, entraConfig, resolver);
+                        if (failure != null)
+                        {
+                            ctx.Fail(failure);
+                        }
+                    }
+
+                    return Task.CompletedTask;
+                };
+            }
         }
 
         // 5. Smart Dynamic Policy Scheme: Route requests based on Authorization header or ForwardAuth
@@ -938,6 +965,7 @@ public static class GatewayServiceCollectionExtensions
         gqlBuilder
             .UseDocumentParser()
             .UseDocumentValidation()
+            .UseRequest<Autheris.GraphQL.Interceptors.ReadOnlyOperationMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.DbtHealthExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.SchemaSunsettingExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware>()
@@ -1006,8 +1034,8 @@ public static class GatewayServiceCollectionExtensions
         if (egressErrors.Count > 0)
         {
             throw new ValidationException(
-                "Konfigurationsfehler Egress-Allowlist (Gateway:Egress): IPv4-Netze mindestens /8, IPv6 mindestens /32, keine Überlappung mit " +
-                "Loopback/Link-Local/Metadaten/CGNAT/Multicast/IPv4-mapped-Bereichen:\n  - " + string.Join("\n  - ", egressErrors));
+                "Egress allowlist configuration error (Gateway:Egress): IPv4 networks at least /8, IPv6 at least /32, no overlap with " +
+                "loopback/link-local/metadata/CGNAT/multicast/IPv4-mapped ranges:\n  - " + string.Join("\n  - ", egressErrors));
         }
 
         // POL-1 / F-7: Validate Casbin ModelPath whenever configured, or require it when Enabled
@@ -1015,7 +1043,7 @@ public static class GatewayServiceCollectionExtensions
         {
             if (!File.Exists(options.Casbin.ModelPath))
             {
-                throw new ValidationException($"Casbin Model-Datei '{options.Casbin.ModelPath}' wurde nicht gefunden.");
+                throw new ValidationException($"Casbin model file '{options.Casbin.ModelPath}' was not found.");
             }
             if (new FileInfo(options.Casbin.ModelPath).Length == 0)
             {
@@ -1028,12 +1056,12 @@ public static class GatewayServiceCollectionExtensions
             }
             catch (CasbinModelValidationException ex)
             {
-                throw new ValidationException($"Casbin-Modell '{options.Casbin.ModelPath}' erfüllt den Gateway-Vertrag nicht: {string.Join("; ", ex.Violations)}", ex);
+                throw new ValidationException($"Casbin-Modell '{options.Casbin.ModelPath}' does not satisfy the gateway contract: {string.Join("; ", ex.Violations)}", ex);
             }
         }
         else if (options.Casbin.Enabled)
         {
-            throw new ValidationException("Casbin ist aktiviert (Gateway:Casbin:Enabled = true), aber Casbin:ModelPath ist nicht konfiguriert.");
+            throw new ValidationException("Casbin is enabled (Gateway:Casbin:Enabled = true), but Casbin:ModelPath is not configured.");
         }
 
         // POL-1 / R-POL-5: If Casbin is enabled, PolicyPath must exist, not be empty, and contain valid 'p' rules
@@ -1041,15 +1069,15 @@ public static class GatewayServiceCollectionExtensions
         {
             if (string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
-                throw new ValidationException("Casbin ist aktiviert (Gateway:Casbin:Enabled = true), aber Casbin:PolicyPath ist nicht konfiguriert.");
+                throw new ValidationException("Casbin is enabled (Gateway:Casbin:Enabled = true), but Casbin:PolicyPath is not configured.");
             }
             if (!File.Exists(options.Casbin.PolicyPath))
             {
-                throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' wurde nicht gefunden.");
+                throw new ValidationException($"Casbin is enabled, but policy file '{options.Casbin.PolicyPath}' was not found.");
             }
             if (new FileInfo(options.Casbin.PolicyPath).Length == 0)
             {
-                throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' ist leer.");
+                throw new ValidationException($"Casbin is enabled, but policy file '{options.Casbin.PolicyPath}' is empty.");
             }
 
             // R-POL-5: Test-parse policy file at startup and verify that at least one 'p' rule exists (fail-closed)
@@ -1059,7 +1087,7 @@ public static class GatewayServiceCollectionExtensions
                 int totalPRules = Autheris.Application.Governance.CasbinEnforcementService.ValidatePolicyFile(policyText, modelSupportsWildcardTenant: true);
                 if (totalPRules == 0)
                 {
-                    throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' enthält keine gültigen 'p'-Regeln.");
+                    throw new ValidationException($"Casbin is enabled, but policy file '{options.Casbin.PolicyPath}' contains no valid 'p' rules.");
                 }
             }
             catch (ValidationException)
@@ -1068,7 +1096,7 @@ public static class GatewayServiceCollectionExtensions
             }
             catch (Exception ex)
             {
-                throw new ValidationException($"Casbin ist aktiviert, aber Policy-Datei '{options.Casbin.PolicyPath}' ist ungültig: {ex.Message}", ex);
+                throw new ValidationException($"Casbin is enabled, but policy file '{options.Casbin.PolicyPath}' is invalid: {ex.Message}", ex);
             }
         }
 
@@ -1079,7 +1107,7 @@ public static class GatewayServiceCollectionExtensions
             {
                 if (!System.Net.IPNetwork.TryParse(netStr, out var network))
                 {
-                    throw new ValidationException($"Konfigurationsfehler ReverseProxy.KnownNetworks: Ungültiges IP-Netzwerk '{netStr}'.");
+                    throw new ValidationException($"Configuration error ReverseProxy.KnownNetworks: invalid IP network '{netStr}'.");
                 }
 
                 if (network.PrefixLength == 0)
@@ -1092,7 +1120,7 @@ public static class GatewayServiceCollectionExtensions
             {
                 if (!System.Net.IPAddress.TryParse(proxyStr, out _))
                 {
-                    throw new ValidationException($"Konfigurationsfehler ReverseProxy.KnownProxies: Ungültige IP-Adresse '{proxyStr}'.");
+                    throw new ValidationException($"Configuration error ReverseProxy.KnownProxies: invalid IP address '{proxyStr}'.");
                 }
             }
         }
@@ -1105,9 +1133,9 @@ public static class GatewayServiceCollectionExtensions
             !IsTruthy(getEnvironmentVariable("AUTHERIS_ALLOW_DEV_IN_CONTAINER")))
         {
             throw new ValidationException(
-                "Sicherheitsverletzung: ASPNETCORE_ENVIRONMENT=Development ist in einem Container (DOTNET_RUNNING_IN_CONTAINER=true) " +
-                "nur mit explizitem Opt-in erlaubt (Gateway:AllowDevelopmentInContainer=true bzw. AUTHERIS_ALLOW_DEV_IN_CONTAINER=true). " +
-                "Für Produktion ASPNETCORE_ENVIRONMENT=Production verwenden; für lokale Tests docker-compose.dev.yml nutzen.");
+                "Security violation: ASPNETCORE_ENVIRONMENT=Development in a container (DOTNET_RUNNING_IN_CONTAINER=true) " +
+                "is allowed only with an explicit opt-in (Gateway:AllowDevelopmentInContainer=true or AUTHERIS_ALLOW_DEV_IN_CONTAINER=true). " +
+                "Use ASPNETCORE_ENVIRONMENT=Production for production; use docker-compose.dev.yml for local testing.");
         }
 
         // SEC H-08: PersistedQueriesOnly needs a trusted document store; otherwise the switch would be ineffective.
@@ -1117,8 +1145,8 @@ public static class GatewayServiceCollectionExtensions
             if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(System.IO.Path.GetFullPath(dir)))
             {
                 throw new ValidationException(
-                    "Sicherheitsverletzung: GraphQL.PersistedQueriesOnly=true erfordert ein existierendes GraphQL.TrustedDocumentsDirectory " +
-                    "mit den freigegebenen Operationen (*.graphql / *.gql). Ohne Dokumentenspeicher wäre der Schalter wirkungslos.");
+                    "Security violation: GraphQL.PersistedQueriesOnly=true requires an existing GraphQL.TrustedDocumentsDirectory " +
+                    "containing the approved operations (*.graphql / *.gql). Without a document store, the switch would have no effect.");
             }
         }
 
@@ -1148,23 +1176,23 @@ public static class GatewayServiceCollectionExtensions
         if (options.WebSql.AllowDml && options.WebSql.DmlWriterRoles.Count == 0)
         {
             throw new ValidationException(
-                "Konfigurationsfehler: WebSql.AllowDml=true erfordert mindestens eine Rolle in WebSql.DmlWriterRoles " +
-                "(SEC M-20: DML ist nur für explizit berechtigte Rollen zulässig).");
+                "Configuration error: WebSql.AllowDml=true requires at least one role in WebSql.DmlWriterRoles " +
+                "(SEC M-20: DML is allowed only for explicitly authorized roles).");
         }
 
         if (!environment.IsDevelopment() && options.IsQuickstartProfile)
         {
-            throw new ValidationException("Sicherheitsverletzung: GettingStarted-Profile 'Quickstart' darf AUSSCHLIESSLICH in der Development-Umgebung aktiv sein!");
+            throw new ValidationException("Security violation: The GettingStarted profile 'Quickstart' may be active ONLY in the Development environment.");
         }
 
         if (options.HighAvailability.ShutdownTimeoutSeconds < options.HighAvailability.QueryTimeoutSeconds + 10)
         {
-            throw new ValidationException("NF-HA-01 Verletzung: ShutdownTimeoutSeconds muss mindestens 10s größer als QueryTimeoutSeconds sein.");
+            throw new ValidationException("NF-HA-01 violation: ShutdownTimeoutSeconds must be at least 10s greater than QueryTimeoutSeconds.");
         }
 
         if (options.HighAvailability.TerminationGracePeriodSeconds < options.HighAvailability.DrainDelaySeconds + options.HighAvailability.ShutdownTimeoutSeconds + 10)
         {
-            throw new ValidationException("NF-HA-01 Verletzung: TerminationGracePeriodSeconds muss größer als DrainDelay + ShutdownTimeout + 10s sein.");
+            throw new ValidationException("NF-HA-01 violation: TerminationGracePeriodSeconds must be greater than DrainDelay + ShutdownTimeout + 10s.");
         }
 
         var devErrors = DevOptionsValidator.Validate(options, environment.IsDevelopment());
@@ -1195,12 +1223,12 @@ public static class GatewayServiceCollectionExtensions
             !string.IsNullOrWhiteSpace(options.Authentication.ForwardAuth.DefaultTenantId) &&
             !Autheris.Domain.Common.TenantId.TryParse(options.Authentication.ForwardAuth.DefaultTenantId, out _))
         {
-            throw new ValidationException("ForwardAuth.DefaultTenantId hat ein ungültiges Tenant-Format.");
+            throw new ValidationException("ForwardAuth.DefaultTenantId has an invalid tenant format.");
         }
 
         if (options.Authentication.RequireKerberosOnly && options.Authentication.BasicAuth.Enabled)
         {
-            throw new ValidationException("Sicherheitskonflikt: BasicAuth darf nicht aktiviert sein, wenn RequireKerberosOnly auf true gesetzt ist.");
+            throw new ValidationException("Security conflict: BasicAuth must not be enabled when RequireKerberosOnly is set to true.");
         }
 
         if (!environment.IsDevelopment() && options.Authentication.ForwardAuth.Enabled)
@@ -1209,18 +1237,18 @@ public static class GatewayServiceCollectionExtensions
                             !string.IsNullOrWhiteSpace(options.Authentication.ForwardAuth.SharedSecretKeyVaultRef);
             if (!hasSecret)
             {
-                throw new ValidationException("Sicherheitsverletzung: Außerhalb von Development erfordert ForwardAuth zwingend ein konfiguriertes SharedSecret oder SharedSecretKeyVaultRef.");
+                throw new ValidationException("Security violation: Outside Development, ForwardAuth requires a configured SharedSecret or SharedSecretKeyVaultRef.");
             }
 
             if (!string.IsNullOrWhiteSpace(options.Authentication.ForwardAuth.SharedSecret) &&
                 System.Text.Encoding.UTF8.GetByteCount(options.Authentication.ForwardAuth.SharedSecret) < 32)
             {
-                throw new ValidationException("Sicherheitsverletzung: ForwardAuth.SharedSecret muss außerhalb der Entwicklungsumgebung mindestens 32 Bytes lang sein.");
+                throw new ValidationException("Security violation: Outside the development environment, ForwardAuth.SharedSecret must be at least 32 bytes long.");
             }
 
             if (!options.Authentication.ForwardAuth.RequireTrustedProxy)
             {
-                throw new ValidationException("Sicherheitsverletzung: RequireTrustedProxy darf bei aktivem ForwardAuth außerhalb von Development nicht auf false gesetzt sein!");
+                throw new ValidationException("Security violation: RequireTrustedProxy must not be set to false when ForwardAuth is enabled outside Development.");
             }
 
             if (options.Authentication.ForwardAuth.TrustedNetworks != null)
@@ -1229,7 +1257,7 @@ public static class GatewayServiceCollectionExtensions
                 {
                     if (!System.Net.IPNetwork.TryParse(netStr, out var network))
                     {
-                        throw new ValidationException($"Konfigurationsfehler ForwardAuth.TrustedNetworks: Ungültiges IP-Netzwerk '{netStr}'.");
+                        throw new ValidationException($"Configuration error ForwardAuth.TrustedNetworks: invalid IP network '{netStr}'.");
                     }
 
                     if (network.PrefixLength == 0)
@@ -1245,7 +1273,7 @@ public static class GatewayServiceCollectionExtensions
                 {
                     if (!System.Net.IPAddress.TryParse(proxyStr, out _))
                     {
-                        throw new ValidationException($"Konfigurationsfehler ForwardAuth.TrustedProxies: Ungültige IP-Adresse '{proxyStr}'.");
+                        throw new ValidationException($"Configuration error ForwardAuth.TrustedProxies: invalid IP address '{proxyStr}'.");
                     }
                 }
             }
@@ -1260,39 +1288,39 @@ public static class GatewayServiceCollectionExtensions
 
             if (options.Authentication.EnableTestAuthHandler)
             {
-                throw new ValidationException("Sicherheitsverletzung: EnableTestAuthHandler darf AUSSCHLIESSLICH in der Development-Umgebung true sein!");
+                throw new ValidationException("Security violation: EnableTestAuthHandler may be true ONLY in the Development environment.");
             }
 
             if (options.IsAnonymousAccessAllowed)
             {
-                throw new ValidationException("Sicherheitsverletzung: danger_allow_anonymous_access darf AUSSCHLIESSLICH in der Development-Umgebung true sein!");
+                throw new ValidationException("Security violation: danger_allow_anonymous_access may be true ONLY in the Development environment.");
             }
 
             // Only DANGER entries are blocked outside Development; WARN entries are permitted (reported above).
             if (dangerBypasses.Count > 0)
             {
                 throw new ValidationException(
-                    $"Kritische Sicherheitsverletzung: Folgende Sicherheits-Bypasses dürfen AUSSCHLIESSLICH in der Development-Umgebung aktiv sein:\n  - " +
+                    $"Critical security violation: The following security bypasses may be active ONLY in the Development environment:\n  - " +
                     string.Join("\n  - ", dangerBypasses));
             }
         }
 
         if (!environment.IsDevelopment())
         {
-            // RR-L3-05: warn_enable_introspection is prohibited outside Development without explicit opt-in
-            if (options.IsIntrospectionForced && !options.AllowInsecureWarnFlagsInProduction)
+            // RR-L3-05: warn_enable_introspection and GraphQL:EnableIntrospection are prohibited outside Development without explicit opt-in
+            if ((options.IsIntrospectionForced || options.GraphQL.EnableIntrospection) && !options.AllowInsecureWarnFlagsInProduction)
             {
                 throw new ValidationException(
-                    "Sicherheitsverletzung: warn_enable_introspection darf außerhalb von Development nur mit explizitem " +
-                    "Opt-in (AllowInsecureWarnFlagsInProduction = true) aktiv sein!");
+                    "Security violation: Outside Development, GraphQL introspection (GraphQL:EnableIntrospection or warn_enable_introspection) " +
+                    "may be active only with an explicit opt-in (AllowInsecureWarnFlagsInProduction = true).");
             }
 
             // API-16: warn_allow_all_cors_origins is prohibited outside Development without explicit opt-in
             if (options.IsAllCorsAllowed && !options.AllowInsecureWarnFlagsInProduction)
             {
                 throw new ValidationException(
-                    "Sicherheitsverletzung (API-16): warn_allow_all_cors_origins darf außerhalb von Development nur mit explizitem " +
-                    "Opt-in (AllowInsecureWarnFlagsInProduction = true) aktiv sein!");
+                    "Security violation (API-16): Outside Development, warn_allow_all_cors_origins may be active only with an explicit " +
+                    "opt-in (AllowInsecureWarnFlagsInProduction = true).");
             }
 
             if (!options.IsInsecureTransportAllowed && !options.IsColumnMaskingDisabled &&
@@ -1300,19 +1328,19 @@ public static class GatewayServiceCollectionExtensions
                 options.DataMasking.HmacSecretKeyVaultRef == "DEV_INSECURE_TEST_KEY_ONLY" ||
                 options.DataMasking.HmacSecretKeyVaultRef == "dev-only-hmac-salt-secure-fallback"))
             {
-                throw new ValidationException("NF-SEC-03 Verletzung: HmacSecretKeyVaultRef muss außerhalb von Development eine gültige Key Vault Secret-Referenz sein!");
+                throw new ValidationException("NF-SEC-03 violation: Outside Development, HmacSecretKeyVaultRef must be a valid Key Vault secret reference.");
             }
 
             if (!options.IsInsecureTransportAllowed && options.OpenMetadata.Enabled &&
                 Uri.TryCreate(options.OpenMetadata.ServerUrl, UriKind.Absolute, out var omUri) &&
                 !string.Equals(omUri.Scheme, "https", StringComparison.OrdinalIgnoreCase))
             {
-                throw new ValidationException("Sicherheitsverletzung: OpenMetadata.ServerUrl muss außerhalb von Development zwingend HTTPS verwenden.");
+                throw new ValidationException("Security violation: Outside Development, OpenMetadata.ServerUrl must use HTTPS.");
             }
 
             if (options.AreUntrustedCertificatesAllowed)
             {
-                throw new ValidationException("Sicherheitsverletzung: danger_allow_untrusted_certificates darf AUSSCHLIESSLICH in der Development-Umgebung true sein!");
+                throw new ValidationException("Security violation: danger_allow_untrusted_certificates may be true ONLY in the Development environment.");
             }
 
             // DEP-7 / INF-6: data source connections must encrypt and verify the server certificate outside Development.
@@ -1326,36 +1354,36 @@ public static class GatewayServiceCollectionExtensions
 
             if (options.GraphQL.TrustedOrigins.Contains("*"))
             {
-                throw new ValidationException("Sicherheitsverletzung: TrustedOrigins '*' (Wildcard-CORS) ist außerhalb der Development-Umgebung aus Sicherheitsgründen (CSRF-Schutz) verboten!");
+                throw new ValidationException("Security violation: TrustedOrigins '*' (wildcard CORS) is prohibited outside the Development environment for security reasons (CSRF protection).");
             }
 
             if (options.GraphQL.TrustedOrigins.Any(o => o != "*" && (!Uri.TryCreate(o, UriKind.Absolute, out var u) || !string.Equals(u.Scheme, "https", StringComparison.OrdinalIgnoreCase))))
             {
-                throw new ValidationException("Sicherheitsverletzung: TrustedOrigins dürfen außerhalb von Development nur HTTPS-URLs enthalten.");
+                throw new ValidationException("Security violation: Outside Development, TrustedOrigins must contain only HTTPS URLs.");
             }
 
             if (options.HighAvailability.MultiNodeClusterMode && options.Rebac.Enabled && !options.Caching.Redis.Enabled)
             {
-                throw new ValidationException("Sicherheitsverletzung: ReBAC im MultiNodeClusterMode erfordert zwingend Caching.Redis.Enabled = true für clusterweite Invalidierung (RR-L4-04).");
+                throw new ValidationException("Security violation: ReBAC in MultiNodeClusterMode requires Caching.Redis.Enabled = true for cluster-wide invalidation (RR-L4-04).");
             }
 
             if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) && !options.Caching.Redis.Enabled)
             {
-                throw new ValidationException("NF-HA-02 Verletzung: Im MultiNodeClusterMode bzw. bei mehr als einer Replika (PG-6) erfordert die clusterweite Cache- und Epoch-Invalidierung zwingend Caching.Redis.Enabled = true!");
+                throw new ValidationException("NF-HA-02 violation: In MultiNodeClusterMode or with more than one replica (PG-6), cluster-wide cache and epoch invalidation requires Caching.Redis.Enabled = true.");
             }
 
             if (!string.IsNullOrWhiteSpace(options.Plugins.Directory) &&
                 Directory.Exists(System.IO.Path.GetFullPath(options.Plugins.Directory)) &&
                 !options.Plugins.RequireIntegrityManifest)
             {
-                throw new ValidationException("Sicherheitsverletzung: Außerhalb von Development erfordert ein konfiguriertes Plugin-Verzeichnis zwingend Plugins.RequireIntegrityManifest = true!");
+                throw new ValidationException("Security violation: Outside Development, a configured plugin directory requires Plugins.RequireIntegrityManifest = true.");
             }
 
             if (options.Authentication.BasicAuth.Enabled)
             {
                 if (options.Authentication.BasicAuth.Users.Any(u => string.IsNullOrWhiteSpace(u.Password) || (!u.Password.StartsWith("$pbkdf2$", StringComparison.OrdinalIgnoreCase) && !u.Password.StartsWith("$argon2id$", StringComparison.OrdinalIgnoreCase))))
                 {
-                    throw new ValidationException("Sicherheitsverletzung (DEP-14): Außerhalb von Development müssen BasicAuth-Passwörter zwingend als Hash ($argon2id$... oder $pbkdf2$...) gespeichert sein. Klartext-Passwörter sind verboten!");
+                    throw new ValidationException("Security violation (DEP-14): Outside Development, BasicAuth passwords must be stored as a hash ($argon2id$... or $pbkdf2$...). Plaintext passwords are prohibited.");
                 }
 
                 // RR-L2-03: weak work factors (e.g. $pbkdf2$1$...) are rejected at boot.
@@ -1366,7 +1394,7 @@ public static class GatewayServiceCollectionExtensions
                          !int.TryParse(parts[2], out var iterations) ||
                          iterations < minIterations)))
                 {
-                    throw new ValidationException($"Sicherheitsverletzung: Außerhalb von Development müssen BasicAuth-PBKDF2-Hashes mindestens {minIterations} Iterationen verwenden!");
+                    throw new ValidationException($"Security violation: Outside Development, BasicAuth PBKDF2 hashes must use at least {minIterations} iterations.");
                 }
             }
 
@@ -1375,18 +1403,18 @@ public static class GatewayServiceCollectionExtensions
                 ((string.IsNullOrWhiteSpace(options.Authentication.EntraId.Audience) && string.IsNullOrWhiteSpace(options.Authentication.EntraId.ClientId)) ||
                  string.IsNullOrWhiteSpace(options.Authentication.EntraId.TenantId)))
             {
-                throw new ValidationException("Sicherheitsverletzung: Außerhalb von Development müssen bei aktivem EntraId zwingend Audience oder ClientId sowie TenantId (Issuer) konfiguriert sein!");
+                throw new ValidationException("Security violation: Outside Development, EntraId requires Audience or ClientId, plus TenantId (issuer), to be configured.");
             }
 
             if (options.Authentication.Adfs.Enabled && (string.IsNullOrWhiteSpace(options.Authentication.Adfs.Audience) || string.IsNullOrWhiteSpace(options.Authentication.Adfs.Authority)))
             {
-                throw new ValidationException("Sicherheitsverletzung: Außerhalb von Development müssen Adfs.Audience und Authority zwingend konfiguriert sein!");
+                throw new ValidationException("Security violation: Outside Development, Adfs.Audience and Authority must be configured.");
             }
 
             if (options.Audit.Worm.Enabled && string.Equals(options.Audit.Worm.StorageType, "S3", StringComparison.OrdinalIgnoreCase) && options.Audit.Worm.EnforceObjectLock &&
                 (string.IsNullOrWhiteSpace(options.Audit.Worm.S3AccessKey) || string.IsNullOrWhiteSpace(options.Audit.Worm.S3SecretKey)))
             {
-                throw new ValidationException("Sicherheitsverletzung: Außerhalb von Development müssen für S3-WORM mit EnforceObjectLock zwingend S3AccessKey und S3SecretKey konfiguriert sein!");
+                throw new ValidationException("Security violation: Outside Development, S3 WORM with EnforceObjectLock requires S3AccessKey and S3SecretKey to be configured.");
             }
 
             if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
@@ -1394,7 +1422,7 @@ public static class GatewayServiceCollectionExtensions
                 (options.GovernanceDb.ConnectionString.Contains(":memory:", StringComparison.OrdinalIgnoreCase) ||
                  options.GovernanceDb.ConnectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase)))
             {
-                throw new ValidationException("Sicherheitsverletzung: In-Memory SQLite-Datenbanken (GovernanceDb.ConnectionString) sind außerhalb von Development streng verboten!");
+                throw new ValidationException("Security violation: In-memory SQLite databases (GovernanceDb.ConnectionString) are strictly prohibited outside Development.");
             }
 
             // DEP-4: In container environments, a relative SQLite database path in /app is unwritable for non-root APP_UID
@@ -1413,9 +1441,9 @@ public static class GatewayServiceCollectionExtensions
                         if (isDirectRootFile || isAppRoot)
                         {
                             throw new ValidationException(
-                                "Sicherheits- und Konfigurationsfehler (DEP-4): Im Container läuft der Prozess als non-root User ($APP_UID). " +
-                                $"Der SQLite-Pfad '{builder.DataSource}' liegt direkt im nicht-beschreibbaren Anwendungsverzeichnis (/app). " +
-                                "Bitte verwenden Sie das beschreibbare Datenverzeichnis '/app/data' (z. B. 'Data Source=/app/data/governance.db;Cache=Shared').");
+                                "Security and configuration error (DEP-4): In the container, the process runs as non-root user ($APP_UID). " +
+                                $"The SQLite path '{builder.DataSource}' is located directly in the non-writable application directory (/app). " +
+                                "Use the writable data directory '/app/data' (e.g. 'Data Source=/app/data/governance.db;Cache=Shared').");
                         }
                     }
                 }
@@ -1432,13 +1460,13 @@ public static class GatewayServiceCollectionExtensions
 
         if (!IsSupportedGovernanceDbProvider(options.GovernanceDb.Provider))
         {
-            throw new ValidationException($"GovernanceDb Provider '{options.GovernanceDb.Provider}' wird aktuell nicht unterstützt. Erlaubt sind 'Sqlite' oder 'PostgreSql'.");
+            throw new ValidationException($"GovernanceDb provider '{options.GovernanceDb.Provider}' is not supported. Allowed values are 'Sqlite' or 'PostgreSql'.");
         }
 
         if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) &&
             DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite))
         {
-            throw new ValidationException("Sicherheitsverletzung (E-2): Multi-Node Cluster Mode und mehr als 1 Replika sind mit SQLite nicht zulässig, da SQLite lokale Datenbankdateien pro Instanz verwendet. Bitte konfigurieren Sie GovernanceDb.Provider = 'PostgreSql' für Cluster-Betrieb.");
+            throw new ValidationException("Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' for cluster operation.");
         }
     }
 

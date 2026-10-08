@@ -247,7 +247,8 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         // Basic challenge so the browser does not pop up its native login dialog in the middle of a page.
         if (!Request.Headers.ContainsKey("X-Requested-With"))
         {
-            Response.Headers["WWW-Authenticate"] = $"Basic realm=\"{realm}\"";
+            // Appended: other schemes of the same request (e.g. the MCP OAuth challenge) may add their own challenge.
+            Response.Headers.Append("WWW-Authenticate", $"Basic realm=\"{realm}\"");
         }
 
         Response.StatusCode = Microsoft.AspNetCore.Http.StatusCodes.Status401Unauthorized;

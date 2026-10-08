@@ -154,4 +154,12 @@ public sealed class EgressAllowlistTests
             await invoker.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://10.20.1.5/api"), CancellationToken.None));
         inner.Calls.ShouldBe(0);
     }
+
+    [Fact]
+    public void INF_2_Shadowing_IsAllowlistCapable()
+    {
+        EgressIntegrations.Shadowing.ShouldBe("Shadowing");
+        EgressIntegrations.AllowlistCapable.ShouldContain(EgressIntegrations.Shadowing);
+    }
 }
+

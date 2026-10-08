@@ -31,8 +31,8 @@ public static class ConnectorSecurityPolicyEvaluator
         {
             var reasons = session.AccessDecision.DeniedReasons.Count > 0
                 ? string.Join("; ", session.AccessDecision.DeniedReasons)
-                : "Tabelle ist durch Zugriffsrichtlinie gesperrt.";
-            throw new SecurityException($"Zero-Trust-Verletzung: Zugriff auf Tabelle '{metadata.Identifier}' verweigert: {reasons}");
+                : "Table is blocked by access policy.";
+            throw new SecurityException($"Zero-Trust violation: Access to table '{metadata.Identifier}' denied: {reasons}");
         }
 
         // SEC-AC-02: Zero-Trust: Validate RLS filter early before any connection or query execution
@@ -60,7 +60,7 @@ public static class ConnectorSecurityPolicyEvaluator
                     var access = session.AccessDecision.GetEffectiveColumnAccess(matchingCol.ColumnName, metadata);
                     if (access != ColumnAccessLevel.Clear)
                     {
-                        throw new SecurityException($"Zero-Trust-Verletzung: Filtern auf Spalte '{matchingCol.ColumnName}' in Tabelle '{metadata.Identifier}' ist nicht gestattet (Zugriffsebene: {access}).");
+                        throw new SecurityException($"Zero-Trust violation: Filtering on column '{matchingCol.ColumnName}' in table '{metadata.Identifier}' is not permitted (access level: {access}).");
                     }
                 }
             }

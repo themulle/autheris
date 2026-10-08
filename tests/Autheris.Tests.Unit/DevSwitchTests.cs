@@ -163,6 +163,38 @@ public sealed class DevSwitchTests
         Bind(config).GovernanceDb.ConnectionString.ShouldContain("Mode=Memory");
     }
 
+    // ---------- Personas Isolation ----------
+
+    [Fact]
+    public void DevPersonas_WhenNoCustomUsers_InjectsDevPersonas()
+    {
+        var (config, _) = Resolve("Development");
+        var options = Bind(config);
+
+        options.Authentication.BasicAuth.Users.Count.ShouldBe(6);
+        options.Authentication.BasicAuth.Users.ShouldContain(u => u.Username == "dev-admin" && u.Roles.Contains("ClusterAdmin"));
+        options.Authentication.BasicAuth.Users.ShouldContain(u => u.Username == "analyst-b" && u.TenantId == "tenant-b");
+    }
+
+    [Fact]
+    public void DevPersonas_WhenCustomUsersConfigured_DoesNotMergeOrInjectDevPersonas()
+    {
+        var (config, _) = Resolve("Development",
+            ("Gateway:Authentication:BasicAuth:Users:0:Username", "custom-analyst"),
+            ("Gateway:Authentication:BasicAuth:Users:0:Password", "s3cret-dev"));
+
+        var options = Bind(config);
+
+        // Only the single custom user must exist; no index merging with dev-admin (no ClusterAdmin role)
+        options.Authentication.BasicAuth.Users.Count.ShouldBe(1);
+        var user = options.Authentication.BasicAuth.Users[0];
+        user.Username.ShouldBe("custom-analyst");
+        user.Password.ShouldBe("s3cret-dev");
+        user.Roles.ShouldBeEmpty();
+        user.TenantId.ShouldBe("legacy-single-tenant");
+        user.TenantId.ShouldNotBe("tenant-b");
+    }
+
     // ---------- Outside Development ----------
 
     [Theory]
@@ -224,7 +256,7 @@ public sealed class DevSwitchTests
     {
         // A new Gateway:Dev switch must be added either to the risky values (rejected outside Development) or to the
         // ignored list (resolves to off outside Development). This keeps the "Development only" rule from eroding.
-        string[] ignoredOutsideDevelopment = ["Banner", "VerboseErrors", "PersonaLogin", "Info"];
+        string[] ignoredOutsideDevelopment = ["Banner", "ShowPasswords", "VerboseErrors", "PersonaLogin", "Info"];
         var covered = RiskyValues.Select(r => r.Name.Split(':')[0]).Concat(ignoredOutsideDevelopment).ToHashSet();
 
         var properties = typeof(DevOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name);

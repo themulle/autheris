@@ -188,12 +188,12 @@ m = g(r.sub, p.sub) && r.tenant == p.tenant && keyMatch2(r.obj, p.obj) && (r.act
                 simService.SimulateAsync(
                     new PolicySimulationRequest(DraftPolicyCsv: wildcardPolicyCsv, Tenant: TenantA, TargetTable: "hr.dbo.employees", Limit: 10),
                     TenantA));
-            simEx.Message.ShouldContain("Wildcard-Mandanten");
+            simEx.Message.ShouldContain("wildcard tenants");
 
             // Enforcement must reject wildcard rule because model does not support wildcard tenant
             var enfEx = Should.Throw<InvalidOperationException>(() =>
                 casbin.LoadPolicyFromText(wildcardPolicyCsv));
-            enfEx.Message.ShouldContain("Wildcard-Mandanten");
+            enfEx.Message.ShouldContain("wildcard tenants");
         }
         finally
         {

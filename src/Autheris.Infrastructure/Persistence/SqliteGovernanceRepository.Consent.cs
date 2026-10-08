@@ -345,13 +345,16 @@ public partial class SqliteGovernanceRepository
         using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
+            var rawLevel = reader.GetInt32(4);
             rules.Add(new ConsentColumnRule
             {
                 Id = Guid.Parse(reader.GetString(0)),
                 ConsentId = Guid.Parse(reader.GetString(1)),
                 TableColumnId = Guid.Parse(reader.GetString(2)),
                 ColumnName = reader.GetString(3),
-                AccessLevel = (ColumnAccessLevel)reader.GetInt32(4)
+                AccessLevel = Enum.IsDefined((ColumnAccessLevel)rawLevel)
+                    ? (ColumnAccessLevel)rawLevel
+                    : ColumnAccessLevel.Deny
             });
         }
         return rules;
@@ -462,13 +465,16 @@ public partial class SqliteGovernanceRepository
                     var cid = Guid.Parse(reader.GetString(1));
                     if (rulesMap.TryGetValue(cid, out var list))
                     {
+                        var rawLevel = reader.GetInt32(4);
                         list.Add(new ConsentColumnRule
                         {
                             Id = Guid.Parse(reader.GetString(0)),
                             ConsentId = cid,
                             TableColumnId = Guid.Parse(reader.GetString(2)),
                             ColumnName = reader.GetString(3),
-                            AccessLevel = (ColumnAccessLevel)reader.GetInt32(4)
+                            AccessLevel = Enum.IsDefined((ColumnAccessLevel)rawLevel)
+                                ? (ColumnAccessLevel)rawLevel
+                                : ColumnAccessLevel.Deny
                         });
                     }
                 }
@@ -990,7 +996,7 @@ public partial class SqliteGovernanceRepository
 
         if (ConsentApprovalPolicy.IsSelfApproval(req, approverSid, itsmApproverAccount))
         {
-            throw new InvalidOperationException("Funktionstrennung verletzt: Antragsteller darf eigenen Antrag nicht genehmigen.");
+            throw new InvalidOperationException("Separation of duties violated: The requester cannot approve their own request.");
         }
 
         await _lock.WaitAsync(ct);
@@ -1011,14 +1017,14 @@ public partial class SqliteGovernanceRepository
             // Four-eyes principle / Separation of duties check at repository layer
             if (ConsentApprovalPolicy.IsSelfApproval(req, approverSid, itsmApproverAccount))
             {
-                throw new InvalidOperationException("Funktionstrennung verletzt: Der Antragsteller kann den eigenen Consent-Antrag nicht genehmigen.");
+                throw new InvalidOperationException("Separation of duties violated: The requester cannot approve their own consent request.");
             }
 
             // Review R4-4 (rest): compare by the stable data owner id as well, not only by spelling.
             var approverOwnerIds = await ResolveDataOwnerIdsInternalAsync(ConsentApprovalPolicy.IdentifierCandidates(approverSid.Value, itsmApproverAccount), ct);
             if (ConsentApprovalPolicy.ShareOwnerId(approverOwnerIds, await ResolveRequesterOwnerIdsInternalAsync(req, ct)))
             {
-                throw new InvalidOperationException("Funktionstrennung verletzt: Der Antragsteller kann den eigenen Consent-Antrag nicht genehmigen.");
+                throw new InvalidOperationException("Separation of duties violated: The requester cannot approve their own consent request.");
             }
 
             if (!isExternalItsmApproval)
@@ -1026,7 +1032,7 @@ public partial class SqliteGovernanceRepository
                 bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, ct);
                 if (!isAuthorized)
                 {
-                    throw new UnauthorizedAccessException($"Benutzer '{approverSid}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
+                    throw new UnauthorizedAccessException($"User '{approverSid}' is neither a data owner nor a delegated approver for table '{req.TableIdentifier}'.");
                 }
             }
             else
@@ -1039,13 +1045,13 @@ public partial class SqliteGovernanceRepository
                     string? account = string.IsNullOrWhiteSpace(itsmApproverAccount) ? null : itsmApproverAccount.Trim();
                     if (account == null)
                     {
-                        throw new UnauthorizedAccessException($"ITSM-Freigabe ohne benannten Genehmiger ist für Tabelle '{req.TableIdentifier}' mit konfigurierten Data Ownern nicht zulässig.");
+                        throw new UnauthorizedAccessException($"ITSM approval without a named approver is not allowed for table '{req.TableIdentifier}' with configured data owners.");
                     }
 
                     bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, account, ct);
                     if (!isAuthorized)
                     {
-                        throw new UnauthorizedAccessException($"ITSM-Genehmiger '{account}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
+                        throw new UnauthorizedAccessException($"ITSM approver '{account}' is neither a data owner nor a delegated approver for table '{req.TableIdentifier}'.");
                     }
                 }
             }
@@ -1184,7 +1190,7 @@ public partial class SqliteGovernanceRepository
                                 await IsAuthorizedApproverForTableInternalAsync(req.TableIdentifier, approverSid, ct);
             if (!isAuthorized)
             {
-                throw new UnauthorizedAccessException($"Benutzer '{approverSid}' ist weder Data Owner noch delegierter Genehmiger für Tabelle '{req.TableIdentifier}'.");
+                throw new UnauthorizedAccessException($"User '{approverSid}' is neither a data owner nor a delegated approver for table '{req.TableIdentifier}'.");
             }
 
             using var tx = _connection.BeginTransaction();
@@ -1437,7 +1443,7 @@ public partial class SqliteGovernanceRepository
 
             if (!tableId.HasValue)
             {
-                throw new KeyNotFoundException($"Consent mit ID '{consentId}' existiert nicht.");
+                throw new KeyNotFoundException($"Consent with ID '{consentId}' does not exist.");
             }
 
             if (!isGranteeSelf)
@@ -1445,7 +1451,7 @@ public partial class SqliteGovernanceRepository
                 bool isAuthorized = await IsAuthorizedApproverForTableInternalAsync(tableId.Value, revokedBySid, ct);
                 if (!isAuthorized)
                 {
-                    throw new UnauthorizedAccessException($"Benutzer '{revokedBySid}' ist weder Data Owner oder delegierter Genehmiger für '{tableId.Value}', noch der Begünstigte selbst.");
+                    throw new UnauthorizedAccessException($"User '{revokedBySid}' is neither a data owner nor a delegated approver for '{tableId.Value}', nor the beneficiary.");
                 }
             }
 

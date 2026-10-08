@@ -52,7 +52,7 @@ public sealed partial class OpenJevClient : IOpenJevClient
         // 2. Per-User Rate Limiting (Token Bucket: max 20 per minute)
         if (!CheckRateLimit(userSid.Value))
         {
-            _logger.LogWarning("OpenJev Rate Limit überschritten für User {UserSid}", userSid.Value);
+            _logger.LogWarning("OpenJev rate limit exceeded for user {UserSid}", userSid.Value);
             return new JustificationTriageResult(
                 JustificationCategory.Unclassified,
                 0.0,
@@ -71,7 +71,7 @@ public sealed partial class OpenJevClient : IOpenJevClient
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("OpenJev Klassifikator Timeout (> 120 ms) für User {UserSid}. Fallback auf UNCLASSIFIED.", userSid.Value);
+            _logger.LogWarning("OpenJev classifier timeout (> 120 ms) for user {UserSid}. Falling back to UNCLASSIFIED.", userSid.Value);
             return new JustificationTriageResult(
                 JustificationCategory.Unclassified,
                 0.0,
@@ -81,7 +81,7 @@ public sealed partial class OpenJevClient : IOpenJevClient
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "OpenJev Klassifikator Fehler für User {UserSid}. Fallback auf UNCLASSIFIED.", userSid.Value);
+            _logger.LogError(ex, "OpenJev classifier error for user {UserSid}. Falling back to UNCLASSIFIED.", userSid.Value);
             return new JustificationTriageResult(
                 JustificationCategory.Unclassified,
                 0.0,
@@ -118,7 +118,7 @@ public sealed partial class OpenJevClient : IOpenJevClient
             lower.Contains("prompt leakage"))
         {
             var hashPrefix = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..12];
-            _logger.LogWarning("Prompt-Injection erkannt in Justification für User {UserSid}. PatternCategory: SuspiciousExfiltration, TextLength: {Length}, HashPrefix: {Hash}",
+            _logger.LogWarning("Prompt injection detected in justification for user {UserSid}. PatternCategory: SuspiciousExfiltration, TextLength: {Length}, HashPrefix: {Hash}",
                 userSid.Value, text.Length, hashPrefix);
             return Task.FromResult(new JustificationTriageResult(
                 JustificationCategory.SuspiciousExfiltration,

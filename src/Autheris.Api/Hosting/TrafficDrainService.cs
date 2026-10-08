@@ -82,14 +82,14 @@ public sealed class TrafficDrainHostedService : IHostedService
 
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        _logger.LogWarning("NF-HA-01 Graceful Shutdown eingeleitet. Phase 1: Status auf Draining gesetzt.");
+        _logger.LogWarning("NF-HA-01 Graceful shutdown initiated. Phase 1: status set to Draining.");
         _controller.InitiateGracefulShutdown();
 
         _logger.LogWarning("NF-HA-01 Phase 2: /health/ready liefert ab sofort HTTP 503.");
 
         // Phase 3: Drain-Puffer für Load Balancer Deregistrierung
         var drainDelay = TimeSpan.FromSeconds(_haOptions.DrainDelaySeconds);
-        _logger.LogInformation("NF-HA-01 Phase 3: Warte {Delay}s auf Load-Balancer-Propagation.", drainDelay.TotalSeconds);
+        _logger.LogInformation("NF-HA-01 Phase 3: Waiting {Delay}s for load balancer propagation.", drainDelay.TotalSeconds);
         try
         {
             await Task.Delay(drainDelay, cancellationToken);
@@ -99,7 +99,7 @@ public sealed class TrafficDrainHostedService : IHostedService
             _logger.LogWarning("Drain-Puffer durch CancellationToken abgebrochen.");
         }
 
-        _logger.LogInformation("NF-HA-01 Phase 4 & 5: Kestrel schließt Keep-Alive-Verbindungen und wartet auf In-Flight GraphQL Queries (Timeout: {Timeout}s).", _haOptions.QueryTimeoutSeconds);
+        _logger.LogInformation("NF-HA-01 Phase 4 & 5: Kestrel is closing keep-alive connections and waiting for in-flight GraphQL queries (timeout: {Timeout}s).", _haOptions.QueryTimeoutSeconds);
 
         var queryTimeout = TimeSpan.FromSeconds(_haOptions.ShutdownTimeoutSeconds > 0 ? _haOptions.ShutdownTimeoutSeconds : _haOptions.QueryTimeoutSeconds);
         try
@@ -108,7 +108,7 @@ public sealed class TrafficDrainHostedService : IHostedService
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("Warten auf In-Flight-Queries durch CancellationToken abgebrochen.");
+            _logger.LogWarning("Waiting for in-flight queries was canceled by the cancellation token.");
         }
 
         _controller.MarkCompleted();
