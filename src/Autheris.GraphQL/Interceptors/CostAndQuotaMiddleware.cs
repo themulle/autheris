@@ -90,7 +90,7 @@ public sealed class CostAndQuotaMiddleware
                 .SetExtension("maxAllowedCost", clientContext.Policy.MaxCostPerQuery)
                 .Build();
             context.Result = OperationResult.FromError(error);
-            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            HttpResponseGuard.SetStatus(httpContext, StatusCodes.Status400BadRequest);
             return;
         }
 
@@ -109,8 +109,8 @@ public sealed class CostAndQuotaMiddleware
                 .SetExtension("retryAfterSeconds", limitResult.RetryAfterSeconds)
                 .Build();
             context.Result = OperationResult.FromError(error);
-            httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            httpContext.Response.Headers.RetryAfter = limitResult.RetryAfterSeconds.ToString();
+            HttpResponseGuard.SetStatus(httpContext, StatusCodes.Status429TooManyRequests);
+            HttpResponseGuard.SetHeader(httpContext, "Retry-After", limitResult.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture));
             return;
         }
 
@@ -118,8 +118,8 @@ public sealed class CostAndQuotaMiddleware
         await _next(context).ConfigureAwait(false);
 
         // 6. Enrich response headers and extensions
-        httpContext.Response.Headers["X-Query-Cost"] = calculatedCost.ToString();
-        httpContext.Response.Headers["X-RateLimit-Remaining"] = limitResult.RemainingTokens.ToString();
+        HttpResponseGuard.SetHeader(httpContext, "X-Query-Cost", calculatedCost.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        HttpResponseGuard.SetHeader(httpContext, "X-RateLimit-Remaining", limitResult.RemainingTokens.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
         if (clientContext.Policy.ExposeCostExtensions && context.Result is OperationResult opResult)
         {

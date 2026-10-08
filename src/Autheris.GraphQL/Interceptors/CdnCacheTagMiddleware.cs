@@ -72,19 +72,19 @@ public sealed class CdnCacheTagMiddleware
 
         if (allTags.Count > 0)
         {
-            httpContext.Response.Headers["Cache-Control"] = "public, s-maxage=300, stale-while-revalidate=60";
-            httpContext.Response.Headers["Cache-Tag"] = string.Join(", ", allTags);
-            httpContext.Response.Headers["Surrogate-Key"] = string.Join(" ", allTags);
+            HttpResponseGuard.SetHeader(httpContext, "Cache-Control", "public, s-maxage=300, stale-while-revalidate=60");
+            HttpResponseGuard.SetHeader(httpContext, "Cache-Tag", string.Join(", ", allTags));
+            HttpResponseGuard.SetHeader(httpContext, "Surrogate-Key", string.Join(" ", allTags));
             // SEC (Niedrig): Katalog-Ergebnisse hängen vom X-Domain-Scope-Header ab.
-            httpContext.Response.Headers["Vary"] = "Accept-Encoding, Origin, X-Domain-Scope";
+            HttpResponseGuard.SetHeader(httpContext, "Vary", "Accept-Encoding, Origin, X-Domain-Scope");
         }
     }
 
     private static void SetPrivateNoStore(HttpContext httpContext)
     {
-        httpContext.Response.Headers["Cache-Control"] = "private, no-cache, no-store, must-revalidate";
-        httpContext.Response.Headers["Pragma"] = "no-cache";
-        httpContext.Response.Headers.Remove("Cache-Tag");
-        httpContext.Response.Headers.Remove("Surrogate-Key");
+        HttpResponseGuard.SetHeader(httpContext, "Cache-Control", "private, no-cache, no-store, must-revalidate");
+        HttpResponseGuard.SetHeader(httpContext, "Pragma", "no-cache");
+        HttpResponseGuard.RemoveHeader(httpContext, "Cache-Tag");
+        HttpResponseGuard.RemoveHeader(httpContext, "Surrogate-Key");
     }
 }
