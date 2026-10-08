@@ -44,8 +44,6 @@ Jeder Test muss ohne Fix rot werden.
 | ID | Befund | Status / Commit |
 |---|---|---|
 | POL-19 | `ChunkPiiRedactor` ist ohne Katalogspalten nicht fail-closed. | Offen |
-| API-13 | BasicAuth-Lockout nicht atomar und synchron. | Offen |
-| INF-2 | CDN-Purge und Shadowing nutzen einen ungehärteten HttpClient. | Offen |
 | SQL-6 | Join-Guardrail arbeitet ohne Tabellenbezug. | Offen |
 | DEP-9 | `--vulnerable`-Schritt in CI ist wirkungslos. | Offen |
 | DEP-10 | Kein Locked-Mode, keine `NuGet.config`. | Offen |
@@ -53,6 +51,9 @@ Jeder Test muss ohne Fix rot werden.
 | DEP-12 | Alte Benchmark-Secrets in der Git-History (HEAD sauber). | Offen |
 | DEP-15 | Benchmark-Images mit `:latest` und `sa`. | Offen |
 | F-8 (info) | Jede Casbin-Änderung baut alle Enforcer neu; viele `AddPolicy`-Aufrufe kosten O(n²). | Offen |
+| API-13 | BasicAuth-Lockout nicht atomar und synchron. | Behoben in `ccb6ec5` |
+| INF-2 | CDN-Purge und Shadowing nutzen einen ungehärteten HttpClient. | Behoben in `140df9c` |
+| INF-3 | Secret-Referenzen landen im Klartext im Log. | Behoben in `fa02ffd` |
 | POL-8 | Vorab terminierte DENY-Consents greifen bis zu 10 min verspätet. | Behoben in `49b6509` |
 | POL-9 | Degraded-Mode bestimmt Sensitivität per Substring im Tabellennamen; L1 wird bei Reconnect nicht geleert. | Behoben in `593d704` |
 | POL-12 | Audit der Freigabeschritte nach dem Commit, Fehler werden verschluckt. | Behoben in `120fa2d` |
