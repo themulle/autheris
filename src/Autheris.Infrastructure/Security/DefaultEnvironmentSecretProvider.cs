@@ -62,7 +62,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
         var isInstanceSpecificItsmRef = secretRef.StartsWith("itsm:", StringComparison.OrdinalIgnoreCase) && IsInstanceSpecificReference(secretRef);
         if (isInstanceSpecificItsmRef)
         {
-            _logger?.LogDebug("Secret reference '{SecretRef}' is instance-specific; no global alias fallback is applied.", secretRef);
+            _logger?.LogDebug("Secret reference '{SecretRef}' is instance-specific; no global alias fallback is applied.", DescribeReference(secretRef));
         }
         else if (secretRef.StartsWith("itsm:", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(secretRef, "itsm-webhook-secret", StringComparison.OrdinalIgnoreCase) ||
@@ -103,7 +103,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             var secretVal = _configuration[key];
             if (!string.IsNullOrWhiteSpace(secretVal))
             {
-                _logger?.LogWarning("Secret reference '{SecretRef}' resolved from configuration key '{CandidateKey}'. In production, ensure sensitive secrets are stored securely in Azure Key Vault or environment variables rather than configuration files.", secretRef, key);
+                _logger?.LogWarning("Secret reference '{SecretRef}' resolved from configuration key '{CandidateKey}'. In production, ensure sensitive secrets are stored securely in Azure Key Vault or environment variables rather than configuration files.", DescribeReference(secretRef), key);
                 var bytes = Encoding.UTF8.GetBytes(secretVal);
                 ValidateSecretLength(bytes, secretRef);
                 return bytes;
@@ -112,7 +112,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             var envVal = Environment.GetEnvironmentVariable(key.Replace(":", "__").Replace("-", "_"));
             if (!string.IsNullOrWhiteSpace(envVal))
             {
-                _logger?.LogDebug("Resolved secret reference '{SecretRef}' using environment variable '{CandidateKey}'.", secretRef, key);
+                _logger?.LogDebug("Resolved secret reference '{SecretRef}' using environment variable '{CandidateKey}'.", DescribeReference(secretRef), key);
                 var bytes = Encoding.UTF8.GetBytes(envVal);
                 ValidateSecretLength(bytes, secretRef);
                 return bytes;
@@ -121,7 +121,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
             envVal = Environment.GetEnvironmentVariable(key);
             if (!string.IsNullOrWhiteSpace(envVal))
             {
-                _logger?.LogDebug("Resolved secret reference '{SecretRef}' using direct environment variable '{CandidateKey}'.", secretRef, key);
+                _logger?.LogDebug("Resolved secret reference '{SecretRef}' using direct environment variable '{CandidateKey}'.", DescribeReference(secretRef), key);
                 var bytes = Encoding.UTF8.GetBytes(envVal);
                 ValidateSecretLength(bytes, secretRef);
                 return bytes;
