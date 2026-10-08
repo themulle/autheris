@@ -686,7 +686,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                     if (!string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase) ||
                         (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
                         !MatchObjectPattern(rule.Obj, tableStr) ||
-                        !IsActionMatch(rule.Act, requestedAction))
+                        !IsActionMatch(rule.Act, requestedAction, isDeny: true))
                     {
                         continue;
                     }
@@ -818,9 +818,10 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         return false;
     }
 
-    private static bool IsActionMatch(string ruleAct, string requestedAction) =>
+    private static bool IsActionMatch(string ruleAct, string requestedAction, bool isDeny = false) =>
         string.Equals(ruleAct, "*", StringComparison.Ordinal) ||
-        string.Equals(ruleAct, requestedAction, StringComparison.OrdinalIgnoreCase);
+        string.Equals(ruleAct, requestedAction, StringComparison.OrdinalIgnoreCase) ||
+        (isDeny && string.Equals(ruleAct, "read", StringComparison.OrdinalIgnoreCase) && string.Equals(requestedAction, "write", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsSubjectMatch(string ruleSub, string subject, Enforcer enforcer) =>
         string.Equals(ruleSub, "*", StringComparison.OrdinalIgnoreCase) ||

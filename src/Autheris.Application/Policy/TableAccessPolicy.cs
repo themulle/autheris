@@ -321,6 +321,12 @@ public sealed class TableAccessPolicy
         var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         foreach (var claim in claims)
         {
+            // SR15-08: Action claims from client tokens MUST NOT spoof gateway-internal action resolution!
+            if (string.Equals(claim.Type, "action", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(claim.Type, "gql.action", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
             attributes[claim.Type] = claim.Value;
         }
 
