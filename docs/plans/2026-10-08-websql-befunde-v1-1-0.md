@@ -69,6 +69,7 @@ Der PoC läuft mit `Gateway__RowFilters__SubqueryStrategy=InCorrelated`. Aggrega
 
 ### 2.2 Fehler: Trino-Spaltentyp ist immer `varchar`
 
+- **Status:** Behoben. Die Typen kommen aus dem Reader (`SqlResultColumns.Describe`: CLR-Typ, Datenbanktyp, Präzision und Skala) und werden in `TrinoColumnTypes` auf Trino-Typen samt `typeSignature` abgebildet; die Werte folgen der Trino-Kodierung (`decimal`, `date`, `time`, `timestamp` als Text, `varbinary` als Base64). Eine Spalte, deren Werte nicht alle zum gemeldeten Typ passen (SQLite), bleibt `varchar`. `decimal` ohne bekannte Präzision wird `decimal(38,s)` mit der größten Skala der Werte. Tests: `tests/Autheris.Tests.Unit/Sql/TrinoColumnTypeTests.cs`.
 - **Ort:** `src/Autheris.Api/Endpoints/WebSqlEndpoints.cs:894-896` (`WriteTrinoStatementResponseAsync`): `status.Columns.Select(c => new { name = c, type = "varchar" })`.
 - **Folge:** Die Daten sind echte Zahlen, Zeitstempel usw., der angekündigte Typ ist aber immer `varchar`. Tolerante Clients lesen das noch; typisierte Clients (JDBC, trino-python mit Typkonvertierung) können falsche Werte erzeugen oder abbrechen. Das widerspricht dem Ziel „100 % Trino-kompatibel“ aus `2026-10-08-trino-compatibility-websql.md`.
 - **Fix:** Spaltentyp aus dem Ergebnis des Readers (CLR-Typ oder `GetDataTypeName`) auf Trino-Typen abbilden (`bigint`, `integer`, `double`, `decimal(p,s)`, `boolean`, `varchar`, `timestamp(3) with time zone`, `date`, `varbinary`). `StatementExecutionStatus.Columns` hält heute nur Namen; die Typen müssen mitgeführt werden. Unbekannte Typen bleiben `varchar`. Offen: Die Klasse mit `GetDataTypeName(...) => "varchar"` in `GovernedSqlExecutionService.cs:1780` ist vermutlich ein Hilfs-Reader und liefert die Typen nicht; Herkunft der Typen vor der Umsetzung klären.
@@ -76,6 +77,7 @@ Der PoC läuft mit `Gateway__RowFilters__SubqueryStrategy=InCorrelated`. Aggrega
 
 ### 2.3 Kleiner Fehler: Spalten ohne Namen bleiben leer
 
+- **Status:** Behoben. `SqlResultColumns.MakeUnique` benennt leere und (ohne Groß-/Kleinschreibung) doppelte Spalten `_colN` nach Position; gilt für WebSQL (JSON, Parquet), Trino und deklarierte Abfragen. Der Parquet-Export hieß solche Spalten bisher `column1`, `column2` ….
 - **Ort:** Namen kommen aus `reader.GetName(i)` (`GovernedSqlExecutionService.cs:1172`) und werden unverändert in die Antwort geschrieben.
 - **Ursache:** SQL Server liefert für Ausdrücke ohne Alias (`COUNT(*)`) einen leeren Namen. Das betrifft auch das Ergebnis von `POST /api/v1/sql`, nicht nur Trino: Das JSON-Objekt der Zeile erhält einen Schlüssel `""`.
 - **Fix:** Leere oder doppelte Namen durch `_col0`, `_col1` … (Position) ersetzen, wie Trino es tut, beim Lesen des Readers. Gilt für WebSQL und Trino gleich.

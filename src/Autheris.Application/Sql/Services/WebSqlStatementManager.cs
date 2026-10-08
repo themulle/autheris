@@ -4,6 +4,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Security;
 using System.Security.Claims;
 using System.Threading;
@@ -203,6 +204,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             var result = session.ExecutionTask.Result;
             var columns = result.Columns;
             var data = ConvertRowsTo2DArray(result.Columns, result.Rows);
+            var columnTypes = EncodeTrinoTypes(result.ColumnDescriptions, columns, data);
 
             return new StatementExecutionStatus(
                 session.StatementId,
@@ -211,7 +213,8 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                 Data: data,
                 NextUri: null,
                 ErrorMessage: null,
-                ElapsedTimeMillis: elapsedMillis);
+                ElapsedTimeMillis: elapsedMillis,
+                ColumnTypes: columnTypes);
         }
 
         // Still running: provide continuation URI
@@ -223,6 +226,41 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             NextUri: $"/v1/statement/queued/{session.StatementId}",
             ErrorMessage: null,
             ElapsedTimeMillis: elapsedMillis);
+    }
+
+    /// <summary>
+    /// WebSQL findings 2.2: Trino type of every column, with the values in <paramref name="data"/> re-encoded in place
+    /// for that type. Without column descriptions (or when they do not match the columns) every column is announced as
+    /// varchar and the values stay unchanged.
+    /// </summary>
+    private static IReadOnlyList<TrinoColumnType> EncodeTrinoTypes(
+        IReadOnlyList<SqlResultColumn>? descriptions,
+        IReadOnlyList<string> columns,
+        IReadOnlyList<IReadOnlyList<object?>> data)
+    {
+        var types = new TrinoColumnType[columns.Count];
+        if (descriptions == null || descriptions.Count != columns.Count)
+        {
+            Array.Fill(types, TrinoColumnType.Varchar);
+            return types;
+        }
+
+        for (int c = 0; c < columns.Count; c++)
+        {
+            int column = c;
+            types[c] = TrinoColumnTypes.Map(descriptions[c], data.Select(row => row[column]));
+        }
+
+        foreach (var row in data)
+        {
+            var values = (object?[])row;
+            for (int c = 0; c < types.Length; c++)
+            {
+                values[c] = TrinoColumnTypes.Encode(values[c], types[c]);
+            }
+        }
+
+        return types;
     }
 
     private static IReadOnlyList<IReadOnlyList<object?>> ConvertRowsTo2DArray(

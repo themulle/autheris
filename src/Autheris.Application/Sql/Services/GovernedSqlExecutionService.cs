@@ -1163,6 +1163,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
         var rows = new List<IReadOnlyDictionary<string, object?>>();
         var columns = new List<string>();
+        IReadOnlyList<SqlResultColumn> columnDescriptions = Array.Empty<SqlResultColumn>();
         var sw = Stopwatch.StartNew();
 
         string securedSql = await ExecuteCoreAsync(
@@ -1171,9 +1172,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             tenantId,
             async (reader, token) =>
             {
-                for (int i = 0; i < reader.FieldCount; i++)
+                // WebSQL findings 2.3: unnamed and duplicate columns get unique names (_colN), so no value is lost.
+                columnDescriptions = SqlResultColumns.Describe(reader);
+                foreach (var column in columnDescriptions)
                 {
-                    columns.Add(reader.GetName(i));
+                    columns.Add(column.Name);
                 }
 
                 while (await reader.ReadAsync(token).ConfigureAwait(false))
@@ -1181,7 +1184,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                     var row = new Dictionary<string, object?>(reader.FieldCount, StringComparer.OrdinalIgnoreCase);
                     for (int i = 0; i < reader.FieldCount; i++)
                     {
-                        row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        row[columns[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
                     }
                     rows.Add(row);
                 }
@@ -1204,7 +1207,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             Rows: rows.AsReadOnly(),
             RowCount: rows.Count,
             ElapsedMilliseconds: sw.ElapsedMilliseconds,
-            Truncated: isTruncated);
+            Truncated: isTruncated,
+            ColumnDescriptions: columnDescriptions);
     }
 
     /// <summary>

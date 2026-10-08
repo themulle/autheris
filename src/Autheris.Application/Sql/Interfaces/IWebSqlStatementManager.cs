@@ -17,7 +17,8 @@ public sealed record StatementExecutionStatus(
     IReadOnlyList<IReadOnlyList<object?>>? Data,
     string? NextUri,
     string? ErrorMessage,
-    long ElapsedTimeMillis);
+    long ElapsedTimeMillis,
+    IReadOnlyList<TrinoColumnType>? ColumnTypes = null);
 
 /// <summary>
 /// Manages asynchronous and synchronous WebSQL statement executions, supporting the Trino HTTP client protocol

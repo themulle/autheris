@@ -245,11 +245,8 @@ public static class WebSqlEndpoints
                     w.WriteStartObject();
 
                     int fieldCount = reader.FieldCount;
-                    columnNames = new string[fieldCount];
-                    for (int i = 0; i < fieldCount; i++)
-                    {
-                        columnNames[i] = reader.GetName(i);
-                    }
+                    // WebSQL findings 2.3: unnamed and duplicate columns get unique names (_colN).
+                    columnNames = SqlResultColumns.UniqueNames(reader);
 
                     // Write "columns": [...]
                     w.WriteStartArray("columns");
@@ -369,7 +366,7 @@ public static class WebSqlEndpoints
                 async (reader, token) =>
                 {
                     int fieldCount = reader.FieldCount;
-                    columnNames = BuildUniqueColumnNames(reader);
+                    columnNames = SqlResultColumns.UniqueNames(reader);
 
                     // At most MaxRowsPerFile + 1 rows are read: the extra row only marks the export as truncated
                     // (X-Export-Truncated: true); the remaining result set is never materialized.
@@ -694,32 +691,6 @@ public static class WebSqlEndpoints
         };
     }
 
-    private static string[] BuildUniqueColumnNames(DbDataReader reader)
-    {
-        var names = new string[reader.FieldCount];
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        for (int i = 0; i < names.Length; i++)
-        {
-            var baseName = reader.GetName(i);
-            if (string.IsNullOrWhiteSpace(baseName))
-            {
-                baseName = "column" + (i + 1);
-            }
-
-            var name = baseName;
-            var suffix = 1;
-            while (!seen.Add(name))
-            {
-                name = baseName + "_" + suffix;
-                suffix++;
-            }
-
-            names[i] = name;
-        }
-
-        return names;
-    }
-
     private static void WriteDbValue(Utf8JsonWriter writer, object? val)
     {
         if (val is null or DBNull)
@@ -891,9 +862,21 @@ public static class WebSqlEndpoints
         httpContext.Response.StatusCode = StatusCodes.Status200OK;
         httpContext.Response.ContentType = "application/json; charset=utf-8";
 
-        var trinoColumns = status.Columns != null
-            ? status.Columns.Select(c => new { name = c, type = "varchar" }).ToList()
-            : null;
+        // WebSQL findings 2.2: the type (and client type signature) of every column; varchar when unknown.
+        var trinoColumns = status.Columns?.Select((name, i) =>
+        {
+            var type = status.ColumnTypes != null && i < status.ColumnTypes.Count ? status.ColumnTypes[i] : TrinoColumnType.Varchar;
+            return new
+            {
+                name,
+                type = type.Name,
+                typeSignature = new
+                {
+                    rawType = type.RawType,
+                    arguments = type.Arguments.Select(value => new { kind = "LONG", value }).ToList()
+                }
+            };
+        }).ToList();
 
         var trinoStats = new
         {
