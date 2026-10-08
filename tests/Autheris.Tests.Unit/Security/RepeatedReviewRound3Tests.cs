@@ -311,6 +311,24 @@ public sealed class RepeatedReviewRound3Tests
     }
 
     [Fact]
+    public void API_16_ValidateGatewayOptions_RejectsAllowAllCorsInProductionWithoutOptIn()
+    {
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "https://vault.azure.net/secrets/hmac-secret" },
+            Insecure = new InsecureGettingStartedOptions { warn_allow_all_cors_origins = true },
+            AllowInsecureWarnFlagsInProduction = false
+        };
+
+        var ex = Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env, _ => null));
+        ex.Message.ShouldContain("warn_allow_all_cors_origins");
+    }
+
+    [Fact]
     public void RR_L3_06_TableIdentifierNormalizer_CanonicalizesArrowAndRebacObjects()
     {
         // 1-part table

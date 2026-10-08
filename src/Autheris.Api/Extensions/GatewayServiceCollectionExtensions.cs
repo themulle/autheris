@@ -1288,6 +1288,14 @@ public static class GatewayServiceCollectionExtensions
                     "Opt-in (AllowInsecureWarnFlagsInProduction = true) aktiv sein!");
             }
 
+            // API-16: warn_allow_all_cors_origins is prohibited outside Development without explicit opt-in
+            if (options.IsAllCorsAllowed && !options.AllowInsecureWarnFlagsInProduction)
+            {
+                throw new ValidationException(
+                    "Sicherheitsverletzung (API-16): warn_allow_all_cors_origins darf außerhalb von Development nur mit explizitem " +
+                    "Opt-in (AllowInsecureWarnFlagsInProduction = true) aktiv sein!");
+            }
+
             if (!options.IsInsecureTransportAllowed && !options.IsColumnMaskingDisabled &&
                 (string.IsNullOrWhiteSpace(options.DataMasking.HmacSecretKeyVaultRef) ||
                 options.DataMasking.HmacSecretKeyVaultRef == "DEV_INSECURE_TEST_KEY_ONLY" ||
