@@ -538,8 +538,9 @@ public static class GatewayServiceCollectionExtensions
         // F-ARCH-11: Envoy External Authorization & Istio Service Mesh Adapter
         services.AddSingleton<Autheris.Application.Mesh.Interfaces.IEnvoyExtAuthzService, Autheris.Application.Mesh.Services.EnvoyExtAuthzService>();
 
-        // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01)
-        services.AddHttpClient<Autheris.Application.Diagnostics.Shadowing.TrafficShadowingService>();
+        // AST-Aware Traffic Shadowing & Dark Replay (F-OPS-01, INF-2)
+        services.AddHttpClient<Autheris.Application.Diagnostics.Shadowing.TrafficShadowingService>()
+            .AddSecureOutboundHandlers(EgressIntegrations.Shadowing);
         services.AddSingleton<Autheris.Application.Diagnostics.Shadowing.TrafficShadowingService>();
         services.AddSingleton<Autheris.Application.Diagnostics.Shadowing.ITrafficShadowingService>(sp =>
             sp.GetRequiredService<Autheris.Application.Diagnostics.Shadowing.TrafficShadowingService>());
