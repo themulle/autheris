@@ -401,4 +401,101 @@ public sealed class OpenMetadataSyncServiceTests
         duplicateResult.ShouldBeTrue();
         await _metadataRepo.DidNotReceiveWithAnyArgs().UpsertTableMetadataAsync(default!, default);
     }
+
+    [Fact]
+    public async Task EXT_6_SyncPermissionsAsync_WhenUserHasUnmappedRole_DoesNotGenerateConsentsForUser()
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacKeyId = "test-hmac-key" },
+            OpenMetadata = new OpenMetadataOptions
+            {
+                Enabled = true,
+                WebhookSecret = "test-secret",
+                RoleToGatewayRoleMap = new Dictionary<string, string>
+                {
+                    ["ApprovedRole"] = "GatewayApprovedRole"
+                    // "UnmappedRole" is NOT mapped!
+                },
+                UserToUserSidMap = new Dictionary<string, string>
+                {
+                    ["alice@corp.local"] = "S-1-5-21-ALICE-SID"
+                },
+                AutoCreateConsents = true
+            }
+        };
+
+        var tableGuid = Guid.NewGuid();
+        var table = new OpenMetadataTable
+        {
+            Id = tableGuid,
+            Name = "classified_docs",
+            FullyQualifiedName = "service.db.schema.classified_docs",
+            Service = new OpenMetadataEntityReference { Name = "service" },
+            DatabaseSchema = new OpenMetadataEntityReference { Name = "schema" },
+            Columns = [new OpenMetadataColumn { Name = "id", DataType = "INT" }]
+        };
+
+        var policyGuid = Guid.NewGuid();
+        var policy = new OpenMetadataPolicy
+        {
+            Id = policyGuid,
+            Name = "UnmappedPolicy",
+            Enabled = true,
+            Rules =
+            [
+                new OpenMetadataRule
+                {
+                    Name = "Rule1",
+                    Effect = "allow",
+                    Resources = ["classified_docs"],
+                    Operations = ["ViewAll"]
+                }
+            ]
+        };
+
+        var unmappedRoleGuid = Guid.NewGuid();
+        var unmappedRole = new OpenMetadataRole
+        {
+            Id = unmappedRoleGuid,
+            Name = "UnmappedRole",
+            Policies = [new OpenMetadataEntityReference { Id = policyGuid, Name = "UnmappedPolicy" }]
+        };
+
+        var userGuid = Guid.NewGuid();
+        var user = new OpenMetadataUser
+        {
+            Id = userGuid,
+            Name = "alice",
+            Email = "alice@corp.local",
+            Roles = [new OpenMetadataEntityReference { Id = unmappedRoleGuid, Name = "UnmappedRole" }]
+        };
+
+        _client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>([table]));
+        _client.GetPoliciesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([policy]));
+        _client.GetRolesAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([unmappedRole]));
+        _client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
+        _client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([user]));
+
+        var createdConsents = new List<Consent>();
+        _consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo =>
+            {
+                var cons = callInfo.Arg<Consent>();
+                createdConsents.Add(cons);
+                return Task.FromResult(cons);
+            });
+
+        var syncService = new OpenMetadataSyncService(
+            _client,
+            _metadataRepo,
+            _consentRepo,
+            _epochRepo,
+            Options.Create(options),
+            NullLogger<OpenMetadataSyncService>.Instance);
+
+        await syncService.SyncPermissionsAsync(dryRun: false);
+
+        createdConsents.ShouldNotContain(c => c.GranteeSid == new Sid("S-1-5-21-ALICE-SID"));
+    }
 }
