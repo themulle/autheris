@@ -67,7 +67,8 @@ public sealed class SchemaContractManager : ISchemaContractManager
                 name: name,
                 includedTags: opt.IncludedTags,
                 excludedTags: opt.ExcludedTags,
-                excludeInaccessible: opt.ExcludeInaccessible
+                excludeInaccessible: opt.ExcludeInaccessible,
+                allowedTables: opt.AllowedTables
             );
             _contracts[name] = def;
         }

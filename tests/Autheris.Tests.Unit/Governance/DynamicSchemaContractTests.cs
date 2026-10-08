@@ -6,6 +6,8 @@ using System.IO;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
 using Autheris.Application.Governance.Contracts;
+using Autheris.Domain.Common;
+using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -235,5 +237,49 @@ public sealed class DynamicSchemaContractTests
         {
             context.Items[SchemaContractMiddleware.ContractItemKey].ShouldBe(expectedContract);
         }
+    }
+
+    [Fact]
+    public void CatalogVisibility_FilterByContract_AllowedTables_FiltersTablesAccurately()
+    {
+        var t1 = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "public", "orders"),
+            Table = new Table { TableName = "orders", SchemaName = "public" }
+        };
+        var t2 = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "public", "invoices"),
+            Table = new Table { TableName = "invoices", SchemaName = "public" }
+        };
+
+        var contract = new SchemaContractDefinition("partner", allowedTables: ["orders"]);
+
+        var filtered = Autheris.Application.Services.CatalogVisibility.FilterByContract(new[] { t1, t2 }, contract);
+
+        filtered.Count.ShouldBe(1);
+        filtered[0].Identifier.TableName.ShouldBe("orders");
+    }
+
+    [Fact]
+    public void CatalogVisibility_FilterByContract_ExcludedTags_ExcludesSensitiveTables()
+    {
+        var t1 = new TableMetadata
+        {
+            Identifier = new TableIdentifier("hr", "public", "public_info"),
+            Table = new Table { TableName = "public_info", Sensitivity = "PUBLIC" }
+        };
+        var t2 = new TableMetadata
+        {
+            Identifier = new TableIdentifier("hr", "public", "salaries"),
+            Table = new Table { TableName = "salaries", Sensitivity = "HIGH" }
+        };
+
+        var contract = new SchemaContractDefinition("external", excludedTags: ["HIGH"]);
+
+        var filtered = Autheris.Application.Services.CatalogVisibility.FilterByContract(new[] { t1, t2 }, contract);
+
+        filtered.Count.ShouldBe(1);
+        filtered[0].Identifier.TableName.ShouldBe("public_info");
     }
 }

@@ -78,16 +78,59 @@ public static class CatalogVisibility
         return visible;
     }
 
+    public static IReadOnlyList<TableMetadata> FilterByContract(
+        IEnumerable<TableMetadata> tables,
+        Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract)
+    {
+        if (contract == null)
+        {
+            return tables.ToList();
+        }
+
+        return tables.Where(t =>
+        {
+            if (contract.AllowedTables.Count > 0 &&
+                !contract.AllowedTables.Contains(t.Identifier.TableName) &&
+                !contract.AllowedTables.Contains(t.Identifier.ToQualifiedName()))
+            {
+                return false;
+            }
+
+            if (contract.ExcludedTags.Count > 0 &&
+                contract.ExcludedTags.Contains(t.Table.Sensitivity))
+            {
+                return false;
+            }
+
+            if (contract.IncludedTags.Count > 0 &&
+                !contract.IncludedTags.Contains(t.Table.Sensitivity))
+            {
+                return false;
+            }
+
+            return true;
+        }).ToList();
+    }
+
     /// <summary>
     /// Tables <paramref name="principal"/> may discover within <paramref name="tenantId"/>: GovernanceAdmin and ClusterAdmin
     /// see every table, everybody else only tables passing <see cref="FilterForSubject"/>. Without a SID or without a consent
-    /// repository nothing is visible (fail-closed).
+    /// repository nothing is visible (fail-closed). Slices results by <paramref name="contract"/> if specified.
     /// </summary>
+    public static Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
+        IReadOnlyList<TableMetadata> allTables,
+        ClaimsPrincipal principal,
+        TenantId tenantId,
+        IConsentRepository? consentRepository,
+        CancellationToken ct = default)
+        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract: null, ct);
+
     public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
         ClaimsPrincipal principal,
         TenantId tenantId,
         IConsentRepository? consentRepository,
+        Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(allTables);
@@ -96,7 +139,7 @@ public static class CatalogVisibility
         var roles = principal.GetUserRoles();
         if (roles.Contains("GovernanceAdmin") || roles.Contains("ClusterAdmin"))
         {
-            return allTables;
+            return FilterByContract(allTables, contract);
         }
 
         var userSid = principal.GetUserSid();
@@ -109,6 +152,7 @@ public static class CatalogVisibility
         var activeConsents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(
             subjects, roles, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
 
-        return FilterForSubject(allTables, activeConsents, tenantId);
+        var visible = FilterForSubject(allTables, activeConsents, tenantId);
+        return FilterByContract(visible, contract);
     }
 }
