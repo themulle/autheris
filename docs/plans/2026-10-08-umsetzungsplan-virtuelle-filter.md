@@ -9,6 +9,22 @@
 
 Jede Phase ist ein Commit und beginnt mit fehlschlagenden Tests.
 
+**Stand der Umsetzung (08.10.2026, Branch `feat/virtual-filters`):**
+
+| Phase | Stand |
+| :--- | :--- |
+| 0 Vergleich über alle Kanäle | umgesetzt; Profilvarianten (strukturiert, SQL) in Phase 5 und 7 ergänzt |
+| 1 Modell und Muster | umgesetzt |
+| 2 Speicherung, API, Audit, Abgleich | umgesetzt; 2b: Profile, Abgleich in einer Transaktion, `MaxRemovals` |
+| 3 Auflösung | umgesetzt; Verdrahtung aller Entscheidungsstellen per Test gesichert; Stream und Iceberg lehnen ab |
+| 4 SQL strukturiert | umgesetzt mit eigenem `StructuredFilterSqlBuilder` (statt Umbau von `AdvancedRlsFilterGenerator`); Grenze 8000 Zeichen (Entscheidung 9) |
+| 5 Kanäle | umgesetzt; Quellen mit Filter im Speicher antworten 403; Envoy ext_authz lehnt ab (Entscheidung 7) |
+| 6 `effective-filters`, Audit | umgesetzt |
+| 7 SQL-Definition, Datumsfunktionen | umgesetzt (7a, 7b, 7c) |
+| 8 Prozeduren | umgesetzt; Lücke beim Bypass ohne Einwilligungsdienste geschlossen |
+| 9 Leistung | Resolver gemessen ([Messungen](2026-10-08-virtuelle-filter-messungen.md)); SQL Server im PoC offen |
+| – | **Offen:** Neuladen aus GitHub (Entwurf 4.2), `RequireApproval`, Talos-Bereitstellung (Schritt 4) |
+
 **Anpassung an den erweiterten Entwurf (faa3be5):**
 - **Profile:** Berechtigter, Bereich (`scope`) und `uncovered` stehen am Profil (`AccessProfile`). Die Bindungen eines Profils tragen nur Filter, Muster (ohne Muster gilt der Bereich), Objektarten, Zeitspalte und Zuordnung. `on_unmatched` je Bindung entfällt.
 - **Regel für die Auflösung (Phase 3):** Ein Objekt im Bereich, auf das **kein** Filter des Profils zutrifft, wird nach `uncovered` behandelt. Treffen mehrere, gilt ihr AND.
