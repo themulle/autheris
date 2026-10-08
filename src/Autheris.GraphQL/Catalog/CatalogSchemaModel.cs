@@ -44,7 +44,7 @@ public sealed record CatalogTableType(
     IReadOnlyList<CatalogColumnField> Columns,
     IReadOnlyList<CatalogRelationField> Relations);
 
-public sealed class CatalogSchemaModel
+public sealed partial class CatalogSchemaModel
 {
     public IReadOnlyList<CatalogTableType> Tables { get; }
     public IReadOnlyDictionary<TableIdentifier, CatalogTableType> TablesByIdentifier { get; }
@@ -70,11 +70,13 @@ public sealed class CatalogSchemaModel
 
         var allTables = await metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
 
-        // Filter: only active SQL tables with supported database dialect, ordered deterministically
+        // Filter: only active SQL tables whose dialect the tree compiler supports (R-GQL-13: Oracle/Databricks tables
+        // appeared in the schema but every query failed with NotSupported), ordered deterministically
         var activeSqlTables = allTables
             .Where(t => t.Table.IsActive &&
                         t.DataSourceType == DataSourceType.Sql &&
-                        DatabaseDialectExtensions.TryParseDialect(t.Table.SourceType, out _))
+                        DatabaseDialectExtensions.TryParseDialect(t.Table.SourceType, out var dialect) &&
+                        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite)
             .OrderBy(t => t.Identifier.Domain, StringComparer.Ordinal)
             .ThenBy(t => t.Identifier.Schema, StringComparer.Ordinal)
             .ThenBy(t => t.Identifier.TableName, StringComparer.Ordinal)
@@ -126,6 +128,14 @@ public sealed class CatalogSchemaModel
 
             foreach (var col in meta.Columns)
             {
+                // R-GQL-13: the tree compiler only accepts plain column names; others (e.g. "a-b") were offered in the
+                // schema under a sanitized name but could never be queried.
+                if (!QueryableColumnNameRegex().IsMatch(col.ColumnName))
+                {
+                    logger?.LogInformation("GraphQL catalog schema: column '{Column}' of '{Table}' is not a plain identifier and is omitted.", col.ColumnName, meta.Identifier.ToQualifiedName());
+                    continue;
+                }
+
                 var colFieldName = SanitizeGraphQlName(col.ColumnName);
                 if (reservedFilterKeywords.Contains(colFieldName))
                 {
@@ -304,6 +314,9 @@ public sealed class CatalogSchemaModel
         }
         return string.IsNullOrEmpty(res) ? "_" : res;
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
+    private static partial System.Text.RegularExpressions.Regex QueryableColumnNameRegex();
 
     public static CatalogFieldType MapDataType(string? dataType)
     {

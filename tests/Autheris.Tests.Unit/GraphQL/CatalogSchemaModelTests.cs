@@ -1,3 +1,4 @@
+using System.Linq;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -293,6 +294,42 @@ public sealed class CatalogSchemaModelTests
 
         var relField = Assert.Single(parentModel.Relations);
         Assert.Equal("profile_rel", relField.FieldName);
+    }
+
+    [Fact]
+    public async Task BuildAsync_TablesOfDialectsWithoutTreeCompiler_AreOmitted()
+    {
+        // R-GQL-13: Oracle and Databricks tables were in the schema, but every query failed with NotSupported.
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+        var pg = CreateTable(new TableIdentifier("sales", "public", "orders"), dialect: "PostgreSql");
+        var oracle = CreateTable(new TableIdentifier("erp", "app", "invoices"), dialect: "Oracle");
+        var databricks = CreateTable(new TableIdentifier("lake", "gold", "facts"), dialect: "Databricks");
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([pg, oracle, databricks]);
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
+
+        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
+
+        Assert.Equal(pg.Identifier, Assert.Single(model.Tables).Identifier);
+    }
+
+    [Fact]
+    public async Task BuildAsync_ColumnsWithoutPlainNames_AreOmitted()
+    {
+        // R-GQL-13: "a-b" was offered as a_b but the tree compiler rejects such column names.
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+        var table = CreateTable(new TableIdentifier("sales", "public", "orders"), columns:
+        [
+            new TableColumn { ColumnName = "id", DataType = "int" },
+            new TableColumn { ColumnName = "unit-price", DataType = "decimal" }
+        ]);
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
+
+        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
+
+        Assert.Equal(["id"], Assert.Single(model.Tables).Columns.Select(c => c.ColumnName));
     }
 
     private static TableMetadata CreateTable(
