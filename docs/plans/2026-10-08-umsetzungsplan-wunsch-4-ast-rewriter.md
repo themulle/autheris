@@ -4,6 +4,21 @@
 **Bezug:** [Befund Wunsch 4](2026-10-08-befund-autheris.md), Abschnitt 1 („WebSQL mit `SqlRewriterEngine=AstCompiler`“) und 5.
 **Vorgehen:** TDD (erst roter Test, dann Fix), ein Thema je Commit, Standard-Engine `LegacyTokenStream` bleibt unverändert.
 
+**Umsetzungsstand (08.10.2026):** Phasen 0–7 umgesetzt, je ein Commit auf `feat/ast-target-dialect-generator`:
+
+| Phase | Commit | Abweichung vom Plan |
+|---|---|---|
+| 0 Fail-loud, Differenztest | 66a219f | Differenztest nur gegen SQLite; Postgres/SQL Server per Testcontainers und Shadow-Logging stehen aus |
+| 1 `COUNT(*)`, Funktionsnamen | 12bd022 | Stern als Flag `IsStar` statt eigener Knoten; gequotete Namen bleiben gequotet |
+| 2 Client-Parameter | 0195090 | – |
+| 3 Zeilenfilter im Zieldialekt | 48d29d5 | – |
+| 4 Fenster, FILTER, Aggregat-ORDER BY, Literale | 67749fb | `IGNORE NULLS` und benannte Fenster weiter 400; Guard aus Wunsch 8 deckt jetzt auch FILTER und Fenster-ORDER BY ab |
+| 5 GROUP BY-Varianten | 1b5c8b5 | – |
+| 6 EXTRACT, Sonderformen, Typnamen | b6a6786, 0056033, 41d4734 | zusätzlich: `DOW` in PostgreSQL war still falsch; `TRY_CAST` nur noch in SQL Server/DuckDB/Snowflake |
+| 7 SQL Server Projektion, IS DISTINCT FROM, USING | bafab16 | `USING` auf SQL Server wird abgelehnt statt umgeschrieben (ON ist nicht gleichwertig) |
+
+Nebenbefund am Legacy-Rewriter (nicht Teil von Wunsch 4): gegen SQLite reicht er `OFFSET n LIMIT m` und `DATE '…'` unverändert durch, SQLite lehnt beides ab.
+
 ## 1. Ziel und Abnahme
 
 Der AST-Rewriter soll für WebSQL und deklarierte Abfragen dieselben Abfragen korrekt ausführen wie der Legacy-Rewriter, in allen Zieldialekten. Ein Konstrukt, das er nicht kann, wird **laut abgelehnt (400)**, nie still weggelassen und nie als 500 an die Datenbank durchgereicht.
