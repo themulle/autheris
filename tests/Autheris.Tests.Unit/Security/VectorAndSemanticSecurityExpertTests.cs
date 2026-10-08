@@ -553,12 +553,10 @@ public sealed class VectorAndSemanticSecurityExpertTests
             .Returns(Task.FromResult<TableMetadata?>(metadata));
 
         var pdp = Substitute.For<IUnifiedPolicyDecisionPoint>();
-        var guardrail = Substitute.For<IExecutionGuardrailService>();
         var masking = Substitute.For<IColumnMaskingProvider>();
-        var gatewayExec = Substitute.For<IGatewayExecutionService>();
 
         var kernel = new GovernedExecutionKernel(
-            metaRepo, pdp, guardrail, masking, gatewayExec,
+            metaRepo, pdp, masking,
             NullLogger<GovernedExecutionKernel>.Instance);
 
         var secContext = new SecurityPrincipalContext

@@ -1524,7 +1524,6 @@ public sealed class DuckDbOlapOptions
     public int MaxStagedRowsPerTable { get; init; } = 250000;
     public int QueryTimeoutSeconds { get; init; } = 60;
     public int MaxThreads { get; init; } = 2;
-    public bool EnableCrossDomainJoinOptimization { get; init; } = true;
 }
 
 /// <summary>

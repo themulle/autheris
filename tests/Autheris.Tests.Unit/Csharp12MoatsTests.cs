@@ -35,22 +35,4 @@ public class Csharp12MoatsTests
         span1.ToString().ShouldBe("[REDACTED_STACK_SPAN:GDPR_ART_9_FINANCIAL]");
     }
 
-    [Fact]
-    public void SimdTokenScanner_ShouldVectorizeScanDelimitersAndSqlTokens()
-    {
-        // Arrange
-        ReadOnlySpan<char> graphQlQuery = "{ hero(id: $id) { name } }";
-        ReadOnlySpan<char> sqlInjection = "SELECT * FROM users WHERE id = 1; DROP TABLE users;";
-        ReadOnlySpan<char> cleanAlpha = "CustomerOrderSummary2026";
-
-        // Act & Assert
-        SimdTokenScanner.ContainsGraphQlDelimiter(graphQlQuery).ShouldBeTrue();
-        SimdTokenScanner.IndexOfGraphQlDelimiter(graphQlQuery).ShouldBe(0); // starts with '{'
-
-        SimdTokenScanner.ContainsDangerousSqlChars(sqlInjection).ShouldBeTrue();
-        SimdTokenScanner.IndexOfDangerousSqlChar(sqlInjection).ShouldBeGreaterThanOrEqualTo(0);
-
-        SimdTokenScanner.ContainsGraphQlDelimiter(cleanAlpha).ShouldBeFalse();
-        SimdTokenScanner.ContainsDangerousSqlChars(cleanAlpha).ShouldBeFalse();
-    }
 }

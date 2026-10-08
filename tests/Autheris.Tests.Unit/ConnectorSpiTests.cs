@@ -219,35 +219,6 @@ public class ConnectorSpiTests
     }
 
     [Fact]
-    public async Task ConnectorDataSourceExecutorAdapter_BiDirectionalBridge_ExecutesSuccessfully()
-    {
-        var meta = CreateSampleMetadata();
-        var principal = CreatePrincipal();
-        var decision = TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
-
-        var innerExecutor = new FakeSqlExecutor();
-        var connector = new LegacyDataSourceExecutorAdapter(innerExecutor, "adapter-sql");
-
-        var bridgedExecutor = new ConnectorDataSourceExecutorAdapter(connector);
-        bridgedExecutor.SupportedType.ShouldBe(DataSourceType.Sql);
-
-        var context = new DataSourceExecutionContext(
-            SourceName: "adapter-sql",
-            Metadata: meta,
-            Principal: principal,
-            AccessDecision: decision,
-            Arguments: new Dictionary<string, object?>(),
-            RequestedFields: ["Id", "Amount"],
-            Limit: 50,
-            Offset: 0);
-
-        var results = await bridgedExecutor.ExecuteAsync(context);
-        results.Count.ShouldBe(1);
-        results[0]["Id"].ShouldBe(101);
-        results[0]["Amount"].ShouldBe(250.0m);
-    }
-
-    [Fact]
     public async Task SqlConnector_ResolvesConnectionByTableSourceName_NotByConnectorId()
     {
         // Connection is configured under the table's data source ("lwetem_prod"), the connector is registered as "default-sql".

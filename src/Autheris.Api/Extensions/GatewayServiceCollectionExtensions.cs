@@ -461,7 +461,6 @@ public static class GatewayServiceCollectionExtensions
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();
-        services.AddSingleton<IExecutionGuardrailService, ExecutionGuardrailService>();
         services.AddScoped<IUnifiedPolicyDecisionPoint, UnifiedPolicyDecisionPoint>();
         services.AddSingleton<ISemanticQueryCache, SemanticQueryCacheService>();
         services.AddSingleton<PolicyRecommendationService>();
