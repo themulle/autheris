@@ -14,6 +14,7 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.SqlEndpoints.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -69,7 +70,7 @@ public static class SqlEndpointRoutes
         HttpContext context,
         Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? loader = null)
     {
-        if (!IsListAdmin(context.User))
+        if (context.User.IsReadOnly() || !IsListAdmin(context.User))
         {
             return Results.Forbid();
         }
