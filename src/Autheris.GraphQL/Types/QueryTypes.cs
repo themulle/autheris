@@ -242,6 +242,8 @@ public sealed class Query
         int timeWindowDays = 30,
         [Service] ILineageImpactAnalyzerService lineageService = null!,
         [Service] IHttpContextAccessor httpContextAccessor = null!,
+        [Service] IConsentRepository? consentRepository = null,
+        [Service] IDataOwnershipRepository? ownershipRepository = null,
         CancellationToken ct = default)
     {
         var callerContext = GetCallerSecurityContext(httpContextAccessor);
@@ -254,6 +256,41 @@ public sealed class Query
         }
 
         var tableId = new TableIdentifier(domain, schema, tableName);
+
+        // GQL-6: Consent and Tenant Authorization Filter
+        bool isPrivilegedAdmin = callerContext.IsClusterAdmin || callerContext.IsGovernanceAdmin;
+        if (!isPrivilegedAdmin)
+        {
+            bool isTableApprover = ownershipRepository != null &&
+                await ownershipRepository.IsAuthorizedApproverForTableAsync(tableId, callerContext.UserSid, ct).ConfigureAwait(false);
+
+            if (!isTableApprover)
+            {
+                if (consentRepository == null)
+                {
+                    throw new GraphQLException(ErrorBuilder.New()
+                        .SetCode("FORBIDDEN")
+                        .SetMessage($"Access denied to consumer analyses for table '{domain}.{schema}.{tableName}'.")
+                        .Build());
+                }
+
+                var allSubjects = callerContext.GroupSids.Append(callerContext.UserSid).ToList();
+                var activeConsents = await consentRepository.GetActiveConsentsForSubjectsAsync(
+                    allSubjects, tableId, DateTimeOffset.UtcNow, callerContext.Tenant, ct).ConfigureAwait(false);
+
+                bool hasActiveAllow = activeConsents.Any(c => c.Effect == ConsentEffect.Allow);
+                bool hasUnconditionalDeny = activeConsents.Any(c => c.Effect == ConsentEffect.Deny && c.RowFilters.Count == 0 && c.ColumnRules.Count == 0);
+
+                if (!hasActiveAllow || hasUnconditionalDeny)
+                {
+                    throw new GraphQLException(ErrorBuilder.New()
+                        .SetCode("FORBIDDEN")
+                        .SetMessage($"Access denied to consumer analyses for table '{domain}.{schema}.{tableName}'.")
+                        .Build());
+                }
+            }
+        }
+
         return await lineageService.GetTableConsumersAsync(tableId, timeWindowDays, callerContext, ct);
     }
 

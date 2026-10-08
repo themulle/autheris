@@ -324,10 +324,11 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
     {
         if (session == null) return null;
         var identity = new System.Security.Claims.ClaimsIdentity("MCP");
-        if (!string.IsNullOrWhiteSpace(session.UserSid))
+        var sid = !string.IsNullOrWhiteSpace(session.UserSid) ? session.UserSid : session.ServicePrincipalId;
+        if (!string.IsNullOrWhiteSpace(sid))
         {
-            identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, session.UserSid));
-            identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, session.UserSid));
+            identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, sid));
+            identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, sid));
         }
         if (!string.IsNullOrWhiteSpace(session.TenantId))
         {
