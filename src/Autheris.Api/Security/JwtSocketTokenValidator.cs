@@ -43,7 +43,7 @@ public sealed class JwtSocketTokenValidator : ISocketTokenValidator
 
         try
         {
-            var jwtOptions = _jwtOptionsMonitor.Get(GatewayAuthSchemes.JwtBearer);
+            var jwtOptions = _jwtOptionsMonitor.Get(GatewayAuthSchemes.SelectJwtScheme(token, _gatewayOptions.Value));
             var validationParameters = jwtOptions.TokenValidationParameters?.Clone();
 
             if (validationParameters != null)
