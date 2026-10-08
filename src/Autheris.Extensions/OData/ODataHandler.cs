@@ -110,7 +110,7 @@ public sealed partial class ODataHandler(
         return authorizedTables;
     }
 
-    public async Task<ODataQueryResult> ExecuteEntitySetQueryAsync(
+    public Task<ODataQueryResult> ExecuteEntitySetQueryAsync(
         ClaimsPrincipal? principal,
         string serviceRootUrl,
         TableIdentifier table,
@@ -120,6 +120,20 @@ public sealed partial class ODataHandler(
         bool includeCount,
         IReadOnlyDictionary<string, string[]>? headers,
         string? orderBy = null,
+        CancellationToken ct = default) =>
+        ExecuteEntitySetQueryAsync(principal, serviceRootUrl, table, top, skip, select, includeCount, headers, orderBy, filter: null, ct);
+
+    public async Task<ODataQueryResult> ExecuteEntitySetQueryAsync(
+        ClaimsPrincipal? principal,
+        string serviceRootUrl,
+        TableIdentifier table,
+        int? top,
+        int? skip,
+        string? select,
+        bool includeCount,
+        IReadOnlyDictionary<string, string[]>? headers,
+        string? orderBy,
+        string? filter,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceRootUrl);
@@ -163,6 +177,24 @@ public sealed partial class ODataHandler(
             orderByColumns = parsedOrder;
         }
 
+        // Befund 2.1: $filter pushdown parser with Zero-Trust tracking
+        TableFilterClause? filterClause = null;
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            try
+            {
+                filterClause = ODataFilterParser.Parse(filter);
+            }
+            catch (Autheris.Domain.Exceptions.GatewayInvalidQueryException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return Error(400, "InvalidQueryOption", $"Invalid $filter expression: {ex.Message}");
+            }
+        }
+
         // Safe limit handling: default top 100, max 1000
         var effectiveTop = top.HasValue ? Math.Clamp(top.Value, 1, 1000) : 100;
         var effectiveSkip = skip.HasValue ? Math.Max(0, skip.Value) : 0;
@@ -201,7 +233,7 @@ public sealed partial class ODataHandler(
 
         try
         {
-            // O5 / 4a.3: $count is the total under the same row filter, counted by the data source in the same statement
+            // O5 / 4a.3 / 2.1: $count is the total under the same row filter and $filter, counted by the data source in the same statement
             // context; a source that cannot count answers 501, never the number of rows on the page.
             var page = await _executionService.ExecuteTablePageAsync(
                 principal,
@@ -211,6 +243,7 @@ public sealed partial class ODataHandler(
                     After: effectiveSkip,
                     RequestedFields: requestedFields,
                     OrderBy: orderByColumns,
+                    Filter: filterClause,
                     IncludeTotalCount: includeCount,
                     RequestHeaders: headers),
                 ct).ConfigureAwait(false);

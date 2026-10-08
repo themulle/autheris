@@ -15,7 +15,7 @@ for i in $(seq 1 60); do
 done
 
 echo "[sqlserver] Executing database initialization script..."
-/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -i /usr/local/bin/init-db.sql
+/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -v MSSQL_CRM_PASSWORD="$MSSQL_SA_PASSWORD" -i /usr/local/bin/init-db.sql
 echo "[sqlserver] Initialization complete. Marking ready..."
 touch /tmp/.sqlserver_ready
 

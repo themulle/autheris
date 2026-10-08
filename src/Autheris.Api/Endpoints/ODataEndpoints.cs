@@ -379,12 +379,23 @@ public static class ODataEndpoints
 
         string? select = context.Request.Query["$select"].FirstOrDefault();
         string? orderBy = context.Request.Query.TryGetValue("$orderby", out var orderByVal) ? orderByVal.ToString() : null;
+        string? filter = context.Request.Query.TryGetValue("$filter", out var filterVal) ? filterVal.ToString() : null;
         bool includeCount = false;
         if (context.Request.Query.TryGetValue("$count", out var countVal))
         {
             if (!bool.TryParse(countVal, out includeCount))
             {
                 return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", "The query parameter '$count' must be 'true' or 'false'.");
+            }
+        }
+
+        // Befund 1.2: Strict Content Negotiation. If Accept header requests non-OData formats (CSV, NDJSON, etc.), reject with 406.
+        if (context.Request.Headers.Accept.Count > 0)
+        {
+            var acceptEval = ParquetContentNegotiation.Evaluate(context.Request);
+            if (!acceptEval.ParquetPreferred && !acceptEval.HasJsonAlternative)
+            {
+                return Results.StatusCode(StatusCodes.Status406NotAcceptable);
             }
         }
 
@@ -411,8 +422,9 @@ public static class ODataEndpoints
             select: select,
             includeCount: includeCount,
             headers: headers,
-            ct: context.RequestAborted,
-            orderBy: orderBy
+            orderBy: orderBy,
+            filter: filter,
+            ct: context.RequestAborted
         );
 
         if (result.RetryAfterSeconds is int retryAfter)
@@ -481,11 +493,11 @@ public static class ODataEndpoints
 
     /// <summary>System query options the entity set endpoint implements.</summary>
     private static readonly FrozenSet<string> SupportedSystemQueryOptions =
-        new[] { "$top", "$skip", "$select", "$count", "$orderby", "$format" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        new[] { "$top", "$skip", "$select", "$count", "$orderby", "$filter", "$format" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>OData v4 system query options that exist but are not implemented yet (answered with 501, never ignored).</summary>
     private static readonly FrozenSet<string> NotImplementedSystemQueryOptions =
-        new[] { "$filter", "$expand", "$search", "$apply", "$compute", "$skiptoken", "$deltatoken", "$levels", "$index", "$schemaversion", "$id" }
+        new[] { "$expand", "$search", "$apply", "$compute", "$skiptoken", "$deltatoken", "$levels", "$index", "$schemaversion", "$id" }
             .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>

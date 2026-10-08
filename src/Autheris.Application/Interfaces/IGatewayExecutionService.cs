@@ -53,12 +53,28 @@ public interface IGatewayExecutionService
 /// <summary>A column to order by (4a.3).</summary>
 public sealed record TableOrderBy(string Column, bool Descending = false);
 
+/// <summary>
+/// Befund 2.1: Parameterized SQL filter clause pushed down into the database query with Zero-Trust guardrails.
+/// </summary>
+public sealed record TableFilterClause(
+    string SqlPredicate,
+    IReadOnlyDictionary<string, object?> Parameters,
+    IReadOnlyList<string> ReferencedColumns)
+{
+    /// <summary>Optional dialect-specific predicate builder when AST is available.</summary>
+    public Func<DatabaseDialect, string>? DialectSqlFactory { get; init; }
+
+    public string GetSqlPredicate(DatabaseDialect dialect) =>
+        DialectSqlFactory?.Invoke(dialect) ?? SqlPredicate;
+}
+
 /// <summary>Page request of <see cref="IGatewayExecutionService.ExecuteTablePageAsync"/>.</summary>
 public sealed record TablePageRequest(
     int First,
     int After,
     IReadOnlyList<string>? RequestedFields = null,
     IReadOnlyList<TableOrderBy>? OrderBy = null,
+    TableFilterClause? Filter = null,
     bool IncludeTotalCount = false,
     IReadOnlyDictionary<string, string[]>? RequestHeaders = null);
 
@@ -69,13 +85,16 @@ public sealed record TableQueryPage(
     long? TotalCount);
 
 /// <summary>
-/// Keys of <see cref="DataSourceExecutionContext.Items"/> that carry ordering and counting between the gateway and the
-/// SQL executor (4a.3). An executor that does not know them leaves <see cref="TotalCount"/> unset.
+/// Keys of <see cref="DataSourceExecutionContext.Items"/> that carry ordering, filtering and counting between the gateway and the
+/// SQL executor (4a.3 / 2.1). An executor that does not know them leaves <see cref="TotalCount"/> unset.
 /// </summary>
 public static class TableQueryItems
 {
     /// <summary>Request: <see cref="IReadOnlyList{T}"/> of <see cref="TableOrderBy"/>.</summary>
     public const string OrderBy = "TableQuery.OrderBy";
+
+    /// <summary>Request: <see cref="TableFilterClause"/> pushed down to SQL WHERE clause.</summary>
+    public const string Filter = "TableQuery.Filter";
 
     /// <summary>Request: <c>true</c> to count all rows under the same filters.</summary>
     public const string CountTotal = "TableQuery.CountTotal";
@@ -83,3 +102,4 @@ public static class TableQueryItems
     /// <summary>Response: the total row count (<see cref="long"/>).</summary>
     public const string TotalCount = "TableQuery.TotalCount";
 }
+

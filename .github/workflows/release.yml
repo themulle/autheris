@@ -27,6 +27,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Restore with Locked Mode
+        run: dotnet restore Autheris.sln --locked-mode
+
+      - name: Run Test Suite
+        run: dotnet test Autheris.sln -c Release --no-restore --verbosity normal
+
       - name: Build and Package Binaries
         run: |
           mkdir -p dist

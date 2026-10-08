@@ -416,7 +416,10 @@ public static class SqlEndpointRoutes
 
     private static (bool Requested, IParquetExportService? Service) ResolveParquetService(HttpContext httpContext)
     {
-        if (!ParquetContentNegotiation.IsParquetRequested(httpContext.Request))
+        bool isParquet = ParquetContentNegotiation.IsParquetRequested(httpContext.Request) ||
+            string.Equals(httpContext.Request.Query["format"], "parquet", StringComparison.OrdinalIgnoreCase);
+
+        if (!isParquet)
         {
             return (false, null);
         }

@@ -29,7 +29,7 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
             builder.UseSetting("Gateway:WebSql:AllowDml", "false");
             builder.UseSetting("Gateway:WebSql:DefaultMaxRows", "200");

@@ -405,4 +405,53 @@ public sealed class CasbinSnapshotImmutabilityTests
         var unknownEnforcer = casbin.GetEnforcer(new TenantId("unknown-tenant"));
         unknownEnforcer.ShouldNotBeNull();
     }
+
+    [Fact]
+    public void Test15_F8_SingleTenantUpdate_ReusesWildcardAndUnrelatedTenantEnforcers()
+    {
+        using var casbin = new CasbinEnforcementService();
+        var tenant1 = new TenantId("tenant-1");
+        var tenant2 = new TenantId("tenant-2");
+
+        casbin.LoadPolicyFromText(tenant1, "p, alice, tenant-1, hr.dbo.employees, read, true, allow\n");
+        casbin.LoadPolicyFromText(tenant2, "p, bob, tenant-2, hr.dbo.employees, read, true, allow\n");
+
+        var enforcerWildcardBefore = casbin.GetEnforcer(new TenantId("unknown-wildcard"));
+        var enforcer1Before = casbin.GetEnforcer(tenant1);
+        var enforcer2Before = casbin.GetEnforcer(tenant2);
+
+        // Mutate only tenant-1
+        casbin.AddPolicy(tenant1, "charlie", "hr.dbo.employees", "read");
+
+        var enforcerWildcardAfter = casbin.GetEnforcer(new TenantId("unknown-wildcard"));
+        var enforcer1After = casbin.GetEnforcer(tenant1);
+        var enforcer2After = casbin.GetEnforcer(tenant2);
+
+        // Tenant 1 enforcer was rebuilt
+        ReferenceEquals(enforcer1Before, enforcer1After).ShouldBeFalse();
+
+        // Wildcard enforcer and Tenant 2 enforcer instances were reused (O(1) rebuild)
+        ReferenceEquals(enforcerWildcardBefore, enforcerWildcardAfter).ShouldBeTrue();
+        ReferenceEquals(enforcer2Before, enforcer2After).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Test16_F8_AddPolicies_BatchAddsRulesAtomically()
+    {
+        using var casbin = new CasbinEnforcementService();
+        var tenant = new TenantId("tenant-batch");
+
+        var batchRules = new[]
+        {
+            new CasbinRuleInput("user1", "hr.dbo.employees", "read"),
+            new CasbinRuleInput("user2", "hr.dbo.employees", "read"),
+            new CasbinRuleInput("user3", "hr.dbo.salaries", "read", RlsFilter: "department = 'IT'")
+        };
+
+        casbin.AddPolicies(tenant, batchRules);
+
+        var enforcer = casbin.GetEnforcer(tenant);
+        enforcer.ShouldNotBeNull();
+        casbin.DiagnosticPolicyCount(tenant.Value).ShouldBe(3);
+    }
 }

@@ -29,7 +29,7 @@ public sealed class FinOpsIntegrationTests : IClassFixture<WebApplicationFactory
             b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
             b.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            b.UseSetting("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             b.UseSetting("Gateway:FinOps:Enabled", "true");
             b.UseSetting("Gateway:FinOps:PricePerComputeSecond", "1000");
             b.UseSetting("Gateway:FinOps:DefaultMonthlyBudget", "1000000");

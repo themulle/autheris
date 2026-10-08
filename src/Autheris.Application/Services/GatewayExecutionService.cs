@@ -125,7 +125,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         CancellationToken ct = default)
     {
-        var page = await ExecutePageCoreAsync(principal, table, first, after, queryArguments, requestedFields, requestHeaders, orderBy: null, countTotal: false, ct)
+        var page = await ExecutePageCoreAsync(principal, table, first, after, queryArguments, requestedFields, requestHeaders, orderBy: null, filter: null, countTotal: false, ct)
             .ConfigureAwait(false);
         return (page.Rows, page.Decision);
     }
@@ -139,7 +139,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         ArgumentNullException.ThrowIfNull(request);
         return ExecutePageCoreAsync(
             principal, table, request.First, request.After, queryArguments: null, request.RequestedFields, request.RequestHeaders,
-            request.OrderBy, request.IncludeTotalCount, ct);
+            request.OrderBy, request.Filter, request.IncludeTotalCount, ct);
     }
 
     private async Task<TableQueryPage> ExecutePageCoreAsync(
@@ -151,6 +151,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IReadOnlyList<string>? requestedFields,
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         IReadOnlyList<TableOrderBy>? orderBy,
+        TableFilterClause? filter,
         bool countTotal,
         CancellationToken ct)
     {
@@ -216,18 +217,24 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             ? await ResolveRequestedFieldsAsync(requestedFields, metadata, decision, authorizedColumns, tenantId, userSid, table, traceId, ct).ConfigureAwait(false)
             : authorizedColumns;
 
-        // 4a.3: ordering and counting are pushed into the SQL statement; other data sources cannot do it (never ignored).
+        // 4a.3 / 2.1: ordering, filtering and counting are pushed into the SQL statement; other data sources cannot do it (never ignored).
         var pageItems = new Dictionary<string, object?>(StringComparer.Ordinal);
-        if (orderBy is { Count: > 0 } || countTotal)
+        if (orderBy is { Count: > 0 } || countTotal || filter != null)
         {
             if (metadata.Table.DataSourceType != DataSourceType.Sql)
             {
-                throw new GatewayNotImplementedException("Ordering and counting are only supported for SQL data sources.");
+                throw new GatewayNotImplementedException("Filtering, ordering and counting are only supported for SQL data sources.");
             }
 
             if (orderBy is { Count: > 0 })
             {
                 pageItems[TableQueryItems.OrderBy] = ValidateOrderBy(orderBy, metadata, decision);
+            }
+
+            if (filter != null)
+            {
+                ValidateFilter(filter, metadata, decision);
+                pageItems[TableQueryItems.Filter] = filter;
             }
 
             if (countTotal)
@@ -344,6 +351,28 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
 
         return validated;
+    }
+
+    /// <summary>
+    /// Befund 2.1: Zero-Trust filter column validation. Columns referenced in $filter must exist and be readable
+    /// in clear text. Filtering on masked or denied columns would turn pushdown queries into an inference oracle.
+    /// </summary>
+    private static void ValidateFilter(TableFilterClause filter, TableMetadata metadata, TableAccessDecision decision)
+    {
+        foreach (var colName in filter.ReferencedColumns)
+        {
+            var column = metadata.GetColumn(colName);
+            if (column == null)
+            {
+                throw new GatewayInvalidQueryException($"The column '{colName}' in '$filter' does not exist.");
+            }
+
+            var access = decision.GetEffectiveColumnAccess(column.ColumnName, metadata);
+            if (access != ColumnAccessLevel.Clear)
+            {
+                throw new GatewayForbiddenException($"Filtering on column '{column.ColumnName}' is not permitted (access level: {access}).");
+            }
+        }
     }
 
     /// <summary>

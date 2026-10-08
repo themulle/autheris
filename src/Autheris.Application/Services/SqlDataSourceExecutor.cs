@@ -263,6 +263,34 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             }
         }
 
+        // Befund 2.1: $filter pushdown with Zero-Trust enforcement and parameterization
+        if (context.Items.TryGetValue(TableQueryItems.Filter, out var filterObj) && filterObj is TableFilterClause filterClause)
+        {
+            foreach (var colName in filterClause.ReferencedColumns)
+            {
+                var matchingCol = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, colName, StringComparison.OrdinalIgnoreCase));
+                if (matchingCol != null)
+                {
+                    var access = context.AccessDecision.GetEffectiveColumnAccess(matchingCol.ColumnName, metadata);
+                    if (access != ColumnAccessLevel.Clear)
+                    {
+                        throw new SecurityException($"Zero-Trust violation: Filtering on column '{matchingCol.ColumnName}' in table '{metadata.Identifier}' is not permitted (access level: {access}).");
+                    }
+                }
+            }
+
+            var filterPredicate = filterClause.GetSqlPredicate(dialect);
+            whereParts.Add($"({filterPredicate})");
+
+            foreach (var (pName, pVal) in filterClause.Parameters)
+            {
+                var p = command.CreateParameter();
+                p.ParameterName = pName;
+                p.Value = pVal ?? DBNull.Value;
+                command.Parameters.Add(p);
+            }
+        }
+
         var sqlBuilder = new StringBuilder();
         // The reserved alias lets correlated row filters (EXISTS ... = autheris_target.fk) bind to this table.
         var aliasKeyword = dialect == DatabaseDialect.Oracle ? " " : " AS ";

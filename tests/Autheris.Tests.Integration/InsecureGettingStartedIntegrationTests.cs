@@ -35,7 +35,7 @@ public class InsecureGettingStartedIntegrationTests : IClassFixture<WebApplicati
             builder.UseSetting("Gateway:Insecure:warn_enable_introspection", "true");
 
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.UseSetting("Gateway:Itsm:Enabled", "true");
         });
     }

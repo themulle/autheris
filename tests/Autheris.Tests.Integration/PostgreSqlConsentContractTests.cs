@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.Hosting;
@@ -87,4 +88,56 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         def.ShouldNotBeNull();
         def.ShouldContain("UNIQUE");
     }
+
+    [Fact]
+    public async Task ApproveConsentRequest_HighSensitivityTable_EnforcesFourEyesWhenRequiresFourEyesIsFalse()
+    {
+        if (!_available) return;
+
+        await using var repo = NewRepository();
+        var tableId = new TableIdentifier("sales", "crm", "pg_fe_" + Guid.NewGuid().ToString("N")[..8]);
+        var table = new Table
+        {
+            Id = Guid.NewGuid(),
+            SourceName = tableId.Domain,
+            SchemaName = tableId.Schema,
+            TableName = tableId.TableName,
+            Sensitivity = "HIGH",
+            RequiresFourEyes = false,
+            IsActive = true
+        };
+
+        var meta = await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Identifier = tableId,
+            Table = table,
+            Columns = [new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "VARCHAR" }]
+        });
+
+        var request = await repo.CreateConsentRequestAsync(new ConsentRequest
+        {
+            TableId = meta.Table.Id,
+            TableIdentifier = tableId,
+            RequesterSid = new Sid("S-1-5-21-REQ"),
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = "S-1-5-21-REQ",
+            BusinessJustification = "Support",
+            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            Status = "PENDING",
+            TenantId = new TenantId("tenant-pg")
+        });
+
+        var approver1 = new Sid("S-1-5-21-APP1");
+        var approver2 = new Sid("S-1-5-21-APP2");
+
+        var step1 = await repo.ApproveConsentRequestStepAsync(request.Id, approver1);
+        step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
+
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            repo.ApproveConsentRequestStepAsync(request.Id, approver1));
+
+        var step2 = await repo.ApproveConsentRequestStepAsync(request.Id, approver2);
+        step2.Status.ShouldBe("APPROVED");
+    }
 }
+

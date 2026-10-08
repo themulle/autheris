@@ -216,8 +216,11 @@ public static class WebSqlEndpoints
             }
         }
 
-        // F-DATA-01: Parquet output (Accept: application/vnd.apache.parquet) of the fully governed result set
-        if (ParquetContentNegotiation.IsParquetRequested(httpContext.Request))
+        // F-DATA-01 / Befund 1.2: Parquet output (Accept: application/vnd.apache.parquet or ?format=parquet) of the fully governed result set
+        bool isParquet = ParquetContentNegotiation.IsParquetRequested(httpContext.Request) ||
+            string.Equals(httpContext.Request.Query["format"], "parquet", StringComparison.OrdinalIgnoreCase);
+
+        if (isParquet)
         {
             await HandleParquetWebSqlRequestAsync(httpContext, sqlService, gatewayOptions, logger, governedRequest, user, tenantId, ct);
             return;

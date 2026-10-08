@@ -78,7 +78,7 @@ public sealed class HttpDataSourceIntegrationTests : IClassFixture<WebApplicatio
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.ConfigureServices(services =>
             {
                 // Register a mock HttpClientFactory that serves declarative REST responses
