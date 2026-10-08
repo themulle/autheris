@@ -1336,6 +1336,9 @@ public sealed class WebSqlOptions
     public int MaxQueryLength { get; init; } = 64_000;
     public int ExecutionTimeoutSeconds { get; init; } = 30;
     public string DefaultDataSourceName { get; init; } = "default";
+    public int MaxConcurrentSessionsPerUser { get; init; } = 10;
+    public int MaxTotalStatementSessions { get; init; } = 1000;
+    public int StatementRetentionMinutes { get; init; } = 5;
 
     /// <summary>
     /// SEC C-03: Additional data sources (keys of DataSources.Connections) a WebSQL request may target.

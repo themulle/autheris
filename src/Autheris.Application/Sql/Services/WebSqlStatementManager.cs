@@ -11,8 +11,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Thread-safe in-memory statement manager implementing the Trino REST client query lifecycle
@@ -23,25 +25,44 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WebSqlStatementManager>? _logger;
     private readonly TimeSpan _retentionPeriod;
+    private readonly int _maxSessionsPerUser;
+    private readonly int _maxTotalSessions;
     private readonly ConcurrentDictionary<string, StatementSession> _sessions = new(StringComparer.Ordinal);
     private readonly Timer? _cleanupTimer;
     private long _statementCounter;
     private bool _disposed;
 
-    private static readonly TimeSpan DefaultRetention = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan DefaultRetention = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan MaxWaitTimeout = TimeSpan.FromSeconds(300);
 
     public WebSqlStatementManager(
         IServiceScopeFactory scopeFactory,
         ILogger<WebSqlStatementManager>? logger = null,
-        TimeSpan? retentionPeriod = null)
+        IOptions<GatewayOptions>? options = null,
+        TimeSpan? retentionPeriod = null,
+        int? maxSessionsPerUser = null,
+        int? maxTotalSessions = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger;
-        _retentionPeriod = retentionPeriod ?? DefaultRetention;
 
-        // Clean up expired sessions periodically every 2 minutes
-        _cleanupTimer = new Timer(CleanupExpiredSessions, null, TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(2));
+        var webSqlOpt = options?.Value?.WebSql;
+        _retentionPeriod = retentionPeriod ?? (webSqlOpt != null && webSqlOpt.StatementRetentionMinutes > 0
+            ? TimeSpan.FromMinutes(webSqlOpt.StatementRetentionMinutes)
+            : DefaultRetention);
+        _maxSessionsPerUser = maxSessionsPerUser ?? (webSqlOpt?.MaxConcurrentSessionsPerUser > 0 ? webSqlOpt.MaxConcurrentSessionsPerUser : 10);
+        _maxTotalSessions = maxTotalSessions ?? (webSqlOpt?.MaxTotalStatementSessions > 0 ? webSqlOpt.MaxTotalStatementSessions : 1000);
+
+        // Clean up expired sessions periodically every 1 minute
+        _cleanupTimer = new Timer(CleanupExpiredSessions, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+    }
+
+    public WebSqlStatementManager(
+        IServiceScopeFactory scopeFactory,
+        ILogger<WebSqlStatementManager>? logger,
+        TimeSpan? retentionPeriod)
+        : this(scopeFactory, logger, options: null, retentionPeriod: retentionPeriod)
+    {
     }
 
     public async Task<StatementExecutionStatus> SubmitOrWaitAsync(
@@ -57,6 +78,74 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         PurgeExpiredSessions();
 
         string userSid = ResolveUserSid(user);
+
+        // SR15-17: enforce per-user concurrent active sessions and eviction of completed sessions
+        int activeUserCount = 0;
+        List<StatementSession>? userCompletedSessions = null;
+        int totalUserSessions = 0;
+
+        foreach (var s in _sessions.Values)
+        {
+            if (s.UserSid == userSid && s.TenantId == tenantId)
+            {
+                totalUserSessions++;
+                if (!s.ExecutionTask.IsCompleted)
+                {
+                    activeUserCount++;
+                }
+                else
+                {
+                    userCompletedSessions ??= new();
+                    userCompletedSessions.Add(s);
+                }
+            }
+        }
+
+        if (activeUserCount >= _maxSessionsPerUser)
+        {
+            throw new Autheris.Domain.Exceptions.GatewayThrottledException(
+                $"User '{userSid}' has reached the limit of {_maxSessionsPerUser} concurrent active statements. Wait for existing statements to complete.",
+                retryAfterSeconds: 5);
+        }
+
+        // Evict oldest completed sessions for this user if total sessions exceed quota
+        if (totalUserSessions >= _maxSessionsPerUser && userCompletedSessions != null)
+        {
+            var toEvict = userCompletedSessions.OrderBy(s => s.CreatedAt).Take(totalUserSessions - _maxSessionsPerUser + 1);
+            foreach (var old in toEvict)
+            {
+                if (_sessions.TryRemove(old.StatementId, out var removed))
+                {
+                    try { removed.Cts.Dispose(); } catch { }
+                }
+            }
+        }
+
+        // Global capacity check
+        if (_sessions.Count >= _maxTotalSessions)
+        {
+            var globalCompleted = _sessions.Values
+                .Where(s => s.ExecutionTask.IsCompleted)
+                .OrderBy(s => s.CreatedAt)
+                .Take(Math.Max(1, _sessions.Count - _maxTotalSessions + 1))
+                .ToList();
+
+            foreach (var old in globalCompleted)
+            {
+                if (_sessions.TryRemove(old.StatementId, out var removed))
+                {
+                    try { removed.Cts.Dispose(); } catch { }
+                }
+            }
+
+            if (_sessions.Count >= _maxTotalSessions)
+            {
+                throw new Autheris.Domain.Exceptions.GatewayThrottledException(
+                    "Global statement session capacity exceeded. Please retry later.",
+                    retryAfterSeconds: 5);
+            }
+        }
+
         long counter = Interlocked.Increment(ref _statementCounter);
         string statementId = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{counter:00000}_{Guid.NewGuid().ToString("N")[..6]}";
 
