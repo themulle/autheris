@@ -27,6 +27,7 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
     private readonly IDeltaMetadataReader _metadataReader;
     private readonly IDeltaPartitionPruner _partitionPruner;
     private readonly IColumnMaskingProvider _maskingProvider;
+    private readonly IDemoDataSwitch? _demoData;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<DeltaLakeDataSourceExecutor> _logger;
 
@@ -35,8 +36,10 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
         IDeltaPartitionPruner partitionPruner,
         IColumnMaskingProvider maskingProvider,
         IOptions<GatewayOptions> options,
-        ILogger<DeltaLakeDataSourceExecutor> logger)
+        ILogger<DeltaLakeDataSourceExecutor> logger,
+        IDemoDataSwitch? demoData = null)
     {
+        _demoData = demoData;
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _partitionPruner = partitionPruner ?? throw new ArgumentNullException(nameof(partitionPruner));
         _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
@@ -108,6 +111,13 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
         // SEC E-3: the tenant column is mandatory evidence - files without partition equality / min == max == tenant are dropped.
         var mandatoryColumns = string.IsNullOrWhiteSpace(tenantId) ? Array.Empty<string>() : new[] { TenantColumn };
         var prunedFiles = _partitionPruner.PruneDataFiles(snapshot.ActiveFiles, snapshot.Metadata.PartitionColumns, predicates, mandatoryColumns);
+
+        // EXT-4: rows are synthesized from file metadata, not read from Parquet. Outside demo mode that would answer with
+        // invented data, so the request is refused (501) instead.
+        if (prunedFiles.Count > 0 && _demoData?.Enabled != true)
+        {
+            throw new Autheris.Domain.Exceptions.GatewayNotImplementedException("Reading lakehouse data files is not implemented; only sample rows are available with demo data enabled (Development).");
+        }
 
         // Generate synthetic row data for pruned files respecting schema & partition values
         var rawRows = new List<Dictionary<string, object?>>();

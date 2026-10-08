@@ -358,7 +358,8 @@ public sealed class SecurityReview20261002ExtensionsTests
             new IcebergPartitionPruner(NullLogger<IcebergPartitionPruner>.Instance),
             new PassThroughMaskingProvider(),
             options,
-            NullLogger<LakehouseDataSourceExecutor>.Instance);
+            NullLogger<LakehouseDataSourceExecutor>.Instance,
+            new DemoDataSwitch(true));
 
         var metadata = new TableMetadata
         {

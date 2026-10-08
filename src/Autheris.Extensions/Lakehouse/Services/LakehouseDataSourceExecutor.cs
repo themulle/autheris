@@ -172,6 +172,7 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
     private readonly IIcebergMetadataReader _metadataReader;
     private readonly IIcebergPartitionPruner _partitionPruner;
     private readonly IColumnMaskingProvider _maskingProvider;
+    private readonly IDemoDataSwitch? _demoData;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<LakehouseDataSourceExecutor> _logger;
 
@@ -180,8 +181,10 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
         IIcebergPartitionPruner partitionPruner,
         IColumnMaskingProvider maskingProvider,
         IOptions<GatewayOptions> options,
-        ILogger<LakehouseDataSourceExecutor> logger)
+        ILogger<LakehouseDataSourceExecutor> logger,
+        IDemoDataSwitch? demoData = null)
     {
+        _demoData = demoData;
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _partitionPruner = partitionPruner ?? throw new ArgumentNullException(nameof(partitionPruner));
         _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
@@ -279,6 +282,12 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
         var matchingFiles = _partitionPruner.PruneDataFiles(allDataFiles, mergedPredicates, metadata.PartitionSpec, mandatoryColumns);
         var totalPruned = allDataFiles.Count - matchingFiles.Count;
         var efficiency = allDataFiles.Count > 0 ? (double)totalPruned / allDataFiles.Count * 100.0 : 0.0;
+
+        // EXT-4: rows below are synthesized from file metadata, not read from Parquet; refuse outside demo mode (501).
+        if (matchingFiles.Count > 0 && _demoData?.Enabled != true)
+        {
+            throw new Autheris.Domain.Exceptions.GatewayNotImplementedException("Reading lakehouse data files is not implemented; only sample rows are available with demo data enabled (Development).");
+        }
 
         // 4. Generate/Scan Rows from matching data files (SEC EX-18: clamp limit by MaxScanRowsLimit)
         var rows = new List<IReadOnlyDictionary<string, object?>>();

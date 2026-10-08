@@ -90,7 +90,7 @@ public sealed class GovernedDataPathsG4Tests
     }
 
     private static (DeltaLakeDataSourceExecutor Executor, DataSourceExecutionContext Context) NewDelta(
-        string tenantColumn, IReadOnlyList<DeltaDataFile> files)
+        string tenantColumn, IReadOnlyList<DeltaDataFile> files, bool demoData = true)
     {
         var reader = Substitute.For<IDeltaMetadataReader>();
         var snapshot = new DeltaSnapshot(
@@ -105,7 +105,7 @@ public sealed class GovernedDataPathsG4Tests
 
         var executor = new DeltaLakeDataSourceExecutor(
             reader, new DeltaPartitionPruner(NullLogger<DeltaPartitionPruner>.Instance), Substitute.For<IColumnMaskingProvider>(),
-            Options.Create(new GatewayOptions()), NullLogger<DeltaLakeDataSourceExecutor>.Instance);
+            Options.Create(new GatewayOptions()), NullLogger<DeltaLakeDataSourceExecutor>.Instance, new DemoDataSwitch(demoData));
 
         var tableId = new TableIdentifier("lake", "default", "delta_table");
         var metadata = new TableMetadata
@@ -123,6 +123,18 @@ public sealed class GovernedDataPathsG4Tests
             }),
             new Dictionary<string, object?>(), new List<string> { "id", tenantColumn }, null, 1000, 0, Tenant1);
         return (executor, context);
+    }
+
+    [Fact]
+    public async Task EXT4_DeltaExecutor_WithoutDemoData_RefusesSyntheticRows()
+    {
+        // EXT-4: rows are synthesized from file metadata; outside demo mode the executor answers 501 instead.
+        var (executor, context) = NewDelta("tenantId",
+        [
+            DFile("owned.parquet", min: new Dictionary<string, string> { ["tenantId"] = "tenant-1" }, max: new Dictionary<string, string> { ["tenantId"] = "tenant-1" })
+        ], demoData: false);
+
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayNotImplementedException>(() => executor.ExecuteAsync(context));
     }
 
     [Fact]
