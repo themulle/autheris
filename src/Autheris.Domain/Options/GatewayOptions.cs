@@ -992,6 +992,12 @@ public sealed class DataCatalogOptions
     public string WebhookSecret { get; init; } = string.Empty;
 
     /// <summary>
+    /// EXT-7: Wenn true, werden neu im Katalog entdeckte Tabellen automatisch als Active = true markiert.
+    /// Standard: false (Tabellen bleiben inaktiv, bis sie von einem Data Steward freigegeben werden).
+    /// </summary>
+    public bool ActivateNewTables { get; init; } = false;
+
+    /// <summary>
     /// Open Schema Mode: Wenn true, dürfen alle Benutzer (auch ohne GovernanceAdmin/CatalogReader Rollen)
     /// den gesamten Datenkatalog, OpenAPI-Spezifikationen, Indexe und Tabellenschemata einsehen.
     /// Standard: false (Disabled - Zero-Trust Role-Enforcement aktiv).

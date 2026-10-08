@@ -54,9 +54,10 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
 
         var catalogOpts = _options.Value.Catalog;
 
-        // SEC E-09: tables first seen through the OpenMetadata catalog provider are created inactive unless
-        // OpenMetadata.ActivateNewTables is set (same rule as the OpenMetadata sync and webhook).
-        var activateNewTables = client.ProviderType != DataCatalogProviderType.OpenMetadata || _options.Value.OpenMetadata.ActivateNewTables;
+        // EXT-7: Newly discovered tables are created inactive unless ActivateNewTables is explicitly configured
+        // (default: false, requiring data steward approval). For OpenMetadata, OpenMetadata.ActivateNewTables is also respected.
+        var activateNewTables = catalogOpts.ActivateNewTables ||
+            (client.ProviderType == DataCatalogProviderType.OpenMetadata && _options.Value.OpenMetadata.ActivateNewTables);
 
         foreach (var tableAsset in tables)
         {
@@ -174,7 +175,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                     SourceType = finalSourceType,
                     Sensitivity = finalSensitivity,
                     RequiresFourEyes = finalRequiresFourEyes,
-                    IsActive = existing != null || activateNewTables
+                    IsActive = existing != null ? existing.Table.IsActive : activateNewTables
                 },
                 Columns = tableColumns,
                 ColumnMaskingRules = maskingRules
