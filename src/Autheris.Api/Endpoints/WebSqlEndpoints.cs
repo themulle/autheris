@@ -407,10 +407,11 @@ public static class WebSqlEndpoints
                 logger.LogWarning(secEx, "WebSQL Security Violation. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
                 httpContext.Response.ContentType = "application/json; charset=utf-8";
+                var isProduction = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
                 await httpContext.Response.WriteAsJsonAsync(new
                 {
                     error = "Forbidden",
-                    message = secEx is WebSqlPolicyException ? secEx.Message : GenericForbiddenMessage,
+                    message = (!isProduction && secEx is WebSqlPolicyException) ? secEx.Message : GenericForbiddenMessage,
                     traceId = httpContext.TraceIdentifier
                 }, ct);
                 break;
