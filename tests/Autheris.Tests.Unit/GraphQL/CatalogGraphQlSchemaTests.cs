@@ -572,4 +572,53 @@ public sealed class CatalogGraphQlSchemaTests
 
         _treeService.Received(1).ClearOperation(capturedOpIds[0]); // Operation was cleared when resolvers completed
     }
+    [Fact]
+    public async Task G9_IsNullNull_IsRejected_InsteadOfBecomingIsNotNull()
+    {
+        TreeQueryNode? captured = null;
+        _treeService.ExecuteAsync(Arg.Any<ClaimsPrincipal>(), Arg.Do<TreeQueryNode>(n => captured = n), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(_ => JsonDocument.Parse("[]"));
+        var executor = await CreateExecutorAsync();
+
+        var result = await executor.ExecuteAsync("{ sales_dbo_customers(where: { name: { isNull: null } }) { id } }");
+
+        Assert.Null(captured);
+        Assert.Contains("errors", result.ToJson());
+    }
+
+    [Fact]
+    public async Task G9_EmptyNot_MatchesNoRow()
+    {
+        TreeQueryNode? captured = null;
+        _treeService.ExecuteAsync(Arg.Any<ClaimsPrincipal>(), Arg.Do<TreeQueryNode>(n => captured = n), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(_ => JsonDocument.Parse("[]"));
+        var executor = await CreateExecutorAsync();
+
+        await executor.ExecuteAsync("{ sales_dbo_customers(where: { not: {} }) { id } }");
+
+        Assert.NotNull(captured);
+        var or = Assert.IsType<TreeOrFilter>(captured!.Where);
+        Assert.Empty(or.Items);
+    }
+
+    [Fact]
+    public async Task G5_OrderByDirection_FromVariable_IsResolved()
+    {
+        TreeQueryNode? captured = null;
+        _treeService.ExecuteAsync(Arg.Any<ClaimsPrincipal>(), Arg.Do<TreeQueryNode>(n => captured = n), Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(_ => JsonDocument.Parse("[]"));
+        var executor = await CreateExecutorAsync();
+
+        var request = OperationRequestBuilder.New()
+            .SetDocument("query($dir: AutherisSortDirection!) { sales_dbo_customers(orderBy: [{ id: $dir }]) { id } }")
+            .SetVariableValues(new Dictionary<string, object?> { ["dir"] = "DESC" })
+            .Build();
+        var result = await executor.ExecuteAsync(request);
+
+        Assert.DoesNotContain("errors", result.ToJson());
+        Assert.NotNull(captured);
+        var order = Assert.Single(captured!.OrderBy);
+        Assert.Equal("id", order.Column);
+        Assert.True(order.Descending);
+    }
 }
