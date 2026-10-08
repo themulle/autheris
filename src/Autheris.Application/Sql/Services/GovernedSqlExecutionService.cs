@@ -1626,7 +1626,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 }
 
                 // SEC H-13: No resolvable HMAC secret -> redact (fail-closed), never fall back to an unkeyed hash
-                return "'***'";
+                return BuildDefaultTypeSafeMask(tableMeta, columnName);
             }
             if (ruleType == "MASK_EMAIL")
             {
@@ -1642,7 +1642,37 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 return $"{prefix}'{tableMeta.Dialect.EscapeSqlLiteral(rule.Replacement)}'";
             }
         }
-        return "'***'";
+        return BuildDefaultTypeSafeMask(tableMeta, columnName);
+    }
+
+    private static string BuildDefaultTypeSafeMask(TableMetadata tableMeta, string columnName)
+    {
+        var col = tableMeta.Columns?.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
+        if (col == null || string.IsNullOrWhiteSpace(col.DataType))
+        {
+            return "'***'";
+        }
+
+        var dt = col.DataType.Trim().ToLowerInvariant();
+        if (dt.Contains('('))
+        {
+            dt = dt[..dt.IndexOf('(')].Trim();
+        }
+
+        return dt switch
+        {
+            "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal" or "money" or "smallmoney" or "real" or "float" or "double precision" or "double" => "0",
+            "bit" or "bool" or "boolean" => tableMeta.Dialect == DatabaseDialect.SqlServer ? "0" : "FALSE",
+            "date" => "'1970-01-01'",
+            "datetime" or "datetime2" or "smalldatetime" or "timestamp" or "timestamptz" => tableMeta.Dialect switch
+            {
+                DatabaseDialect.SqlServer => "'1970-01-01 00:00:00'",
+                DatabaseDialect.PostgreSql => "'1970-01-01 00:00:00'::timestamp",
+                _ => "'1970-01-01 00:00:00'"
+            },
+            "uniqueidentifier" or "uuid" => "'00000000-0000-0000-0000-000000000000'",
+            _ => "'***'"
+        };
     }
 
     private static string BuildEmailMaskExpression(string columnName, DatabaseDialect dialect)
