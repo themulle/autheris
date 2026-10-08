@@ -294,7 +294,7 @@ public static class ODataEndpoints
         int? skip = null;
         if (context.Request.Query.TryGetValue("$skip", out var skipVal))
         {
-            if (!int.TryParse(skipVal, out var s) || s < 0)
+            if (!long.TryParse(skipVal, out var s) || s < 0)
             {
                 return Results.Json(
                     new { error = new { code = "InvalidQueryOption", message = "The query parameter '$skip' must be a non-negative integer." } },
@@ -302,7 +302,15 @@ public static class ODataEndpoints
                     contentType: "application/json;odata.metadata=minimal;charset=utf-8"
                 );
             }
-            skip = s;
+            if (s > ODataHandler.MaxSkip)
+            {
+                return Results.Json(
+                    new { error = new { code = "InvalidQueryOption", message = $"The query parameter '$skip' must not exceed {ODataHandler.MaxSkip}." } },
+                    statusCode: StatusCodes.Status400BadRequest,
+                    contentType: "application/json;odata.metadata=minimal;charset=utf-8"
+                );
+            }
+            skip = (int)s;
         }
 
         string? select = context.Request.Query["$select"].FirstOrDefault();
