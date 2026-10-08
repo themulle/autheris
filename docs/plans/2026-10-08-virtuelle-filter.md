@@ -50,16 +50,27 @@ select * from (select * from fms.air1 where client_id in (<virtueller Filter>)) 
 | `definition` | die Abfrage, anfangs strukturiert (siehe 3.4), später als SQL |
 | `source` | Datenquelle (`lwetem_prod`); alle Tabellen der Abfrage müssen dort liegen |
 
-**Bindung** (`FilterBinding`): wendet einen Filter auf eine Menge von Objekten für Berechtigte an.
+**Bindung** (`FilterBinding`): wendet einen Filter auf eine Menge von Objekten an.
 
 | Feld | Bedeutung |
 | :--- | :--- |
 | `filter` | Name des virtuellen Filters |
-| `target` | Muster `quelle.schema.objekt.spalte`, siehe 3.2 |
-| `grantee` | Benutzer (SID) oder Rolle, wie bei Einwilligungen |
+| `target` | Muster `quelle.schema.objekt[.spalte]`, siehe 3.2; fehlt es, gilt der Bereich (`scope`) des Profils |
 | `object_kinds` | `table`, `view`, `procedure_result` (Standard: alle) |
 | `time_column` | optional: Spalte des Objekts, die gegen das Zeitfenster des Filters geprüft wird (siehe 3.6) |
-| `on_unmatched` | `skip` oder `deny`: Was gilt für Objekte, die das Muster nicht trifft (siehe 5); Vorschlag: `deny` |
+
+**Profil** (`AccessProfile`): fasst die Bindungen **eines Berechtigten** zusammen (Benutzer-SID oder Rolle, wie bei Einwilligungen).
+
+| Feld | Bedeutung |
+| :--- | :--- |
+| `grantee` | Benutzer oder Rolle |
+| `scope` | Bereich, für den das Profil gilt, als Muster `quelle.schema.objekt` (`lwetem_prod.*.*`) |
+| `bindings` | die Filter mit je eigenem `target` und `time_column` |
+| `uncovered` | `deny` oder `skip`: Was gilt für Objekte im Bereich, auf die **kein** Filter des Profils zutrifft (siehe 3.9); Vorschlag: `deny` |
+
+`uncovered` gehört bewusst ans Profil und nicht an die einzelne Bindung: Ein Berechtigter braucht oft mehrere Filter, die einander ergänzen (einer
+für Objekte mit `client_id`, einer für Objekte mit `crane_serial_number`). Würde jede Bindung die Objekte ohne ihre Spalten sperren, sperrte sie
+auch die, die ein anderer Filter des Profils abdeckt.
 
 ### 3.2 Muster
 
@@ -222,9 +233,9 @@ Schemas. Das Spaltensegment ist dann nicht nötig, weil der Filter selbst festle
 Im PoC (Katalogstand 21.09.2026) heißt das für `client_id` und `ts`: `fms` 52 von 52 Tabellen mit beiden Spalten, `tem` 22 von 43 mit beiden
 (42 mit `client_id`), `dm` 5 von 8 (6 mit `client_id`), `conf` 0 von 8 mit `ts` (6 mit `client_id`), `md` und `ud` keine mit `client_id`.
 
-**Objekte im Muster, aber ohne die Spalten** (etwa `tem.<tabelle>` mit `client_id`, aber ohne `ts`): `on_unmatched` entscheidet.
-`deny` sperrt sie für die Berechtigten (fail closed, Vorschlag), `skip` lässt sie ungefiltert zur Einwilligung durch. Jede Bindung nennt
-das ausdrücklich; es gibt keinen stillen Standard.
+**Objekte im Bereich, auf die kein Filter des Profils zutrifft** (etwa `tem.<tabelle>` ohne `client_id` und `ts`): `uncovered` im Profil
+entscheidet. `deny` sperrt sie für den Berechtigten (fail closed, Vorschlag), `skip` lässt sie ungefiltert zur Einwilligung durch. Das Profil
+nennt es ausdrücklich; es gibt keinen stillen Standard. Maßgeblich ist, ob **irgendein** Filter des Profils trifft, nicht jeder einzeln.
 
 **Mehrere Filter auf einem Objekt: die Reihenfolge der Konfiguration spielt keine Rolle.** Alle zutreffenden Filter wirken zusammen (AND, siehe
 3.3), und AND ist in der Reihenfolge unabhängig. Der Spaltenbedarf entscheidet, was zutrifft:
@@ -233,7 +244,7 @@ das ausdrücklich; es gibt keinen stillen Standard.
 | :--- | :--- | :--- | :--- |
 | `client_id`, `ts` | trifft | trifft | A **und** B |
 | nur `client_id` | trifft | trifft nicht | nur A |
-| keins von beiden | trifft nicht | trifft nicht | `on_unmatched` je Bindung |
+| keins von beiden | trifft nicht | trifft nicht | `uncovered` des Profils (sofern auch kein anderer Filter trifft) |
 
 Bewusst **kein „der erste Treffer gewinnt“ und keine Priorität nach Reihenfolge**: Wer in einer Sicherheitskonfiguration zwei Zeilen
 vertauscht, würde sonst unbemerkt einen Filter abschwächen. Soll B den A **ersetzen** (nur das Zeitfenster, nicht beides), steht das
@@ -249,7 +260,7 @@ diese Sicht für die Dateien). Der Audit-Eintrag eines Zugriffs nennt die angewe
 | Teil | Wo | Begründung |
 | :--- | :--- | :--- |
 | Durchsetzung (Bindung, AND-Verknüpfung, Prozeduren, Audit) | **Autheris** | Nur dort greifen alle Kanäle gleich; ein Filter im PoC-Skript lässt sich über eine zusätzliche Einwilligung umgehen. |
-| Definition (Filter und Bindungen als Dateien) | **Talos**, `dbt_sample/governance/access/` | Rolle Datenschutz / Data Owner, mit Vererbung und CODEOWNERS wie die übrige Governance. |
+| Definition (Filter und Profile als Dateien) | **Talos**, `dbt_sample/governance/access/` | Eigener Ordner unter Verantwortung von **Data Owner und Data Steward**: Sie legen Filter und Profile an und verantworten sie; ein Pull Request dorthin geht an sie (CODEOWNERS). |
 | Bereitstellung (Dateien nach Autheris) | **Talos**, ersetzt `grant_row_scoped_user.py` | Liest die Dateien, ruft die Autheris-API auf (mit Audit), nicht mehr die SQLite-Datei. |
 
 ### 4.1 Speicherung und Abgleich
@@ -268,23 +279,141 @@ die Durchsetzung zur Laufzeit ohne Zugriff auf ein Git-Repository auskommen muss
 Bis Autheris das kann (Schritt 1 in Abschnitt 6), wird **nichts davon in Autheris gespeichert**: Die Bereitstellung erzeugt wie heute
 Einwilligungen mit Zeilenfilter je Tabelle. Der Filter als eigener Begriff existiert dann nur in den Dateien in Talos.
 
-Beispiel der Definition in Talos:
+Ablage in Talos (angelegt in `dbt_sample/governance/access/`):
+
+```text
+governance/access/
+├── filters/<filter>.yml      Definition: name, source, sql (Prädikat mit `target`, Trino-Syntax)
+└── profiles/<profil>.yml     Berechtigter, Bereich, Filter mit Muster, uncovered
+```
 
 ```yaml
-filters:
-  nicht_ausgelieferte_krane:
-    key_columns: [client_id]
-    from: conf.client
-    joins:
-      - table: md.crane
-        on: { crane.serial_number: client.crane_serial_number }
-    where:
-      - crane.is_delivered: null
+# filters/nicht_ausgelieferte_krane__client_id.yml
+name: nicht_ausgelieferte_krane__client_id
+source: lwetem_prod
+sql: |
+  from conf.client client
+  join md.crane crane on crane.serial_number = client.crane_serial_number
+  where crane.is_delivered is null
+    and target.client_id = client.client_id
+# profiles/david.yml
+grantee: { user: S-1-5-21-LWE-DAVID }
+scope: lwetem_prod.*.*
+uncovered: deny
 bindings:
-  - filter: nicht_ausgelieferte_krane
-    target: lwetem_prod.*.*.client_id
-    grantee: { user: S-1-5-21-LWE-DAVID }
+  - filter: nicht_ausgelieferte_krane__client_id
+  - filter: nicht_ausgelieferte_krane__crane_serial_number
+  - filter: nicht_ausgelieferte_krane__crane
 ```
+
+### 4.2 Neuladen aus GitHub (periodisch und per Webhook)
+
+Statt dass ein Werkzeug die Konfiguration nach Autheris schreibt (4.1), holt Autheris sie selbst: ein Hintergrunddienst fragt in einem
+festen Takt, und ein Endpunkt stößt den Abgleich sofort an. Beides führt in denselben **Abgleich** (`plan` und `apply` aus 4.1); ein
+Aufruf von Hand und ein Aufruf aus einer CI-Pipeline benutzen ihn ebenfalls.
+
+**Was es in Autheris schon gibt** (gelesen, nicht gebaut oder getestet): Webhook-Endpunkte mit HMAC-SHA256-Prüfung (`X-Hub-Signature-256`
+wird akzeptiert), Größenbegrenzung des Bodys und festen Zeitfenstern gegen Wiederholung (`WebhookEndpoints.cs`, `DbtWebhookReceiver`), den
+Endpunkt `/api/extensions/dbt/sync` mit `dryRun` und eigener Rolle `DbtAdmin`, und eine Rolle `CatalogSync`. Kein Git-Client und kein
+Hintergrunddienst zum Holen von Konfiguration.
+
+| Baustein | Vorschlag |
+| :--- | :--- |
+| Quelle | Feste Konfiguration, **nicht** aus dem Webhook: `Repository` (`lis-github.liebherr.com/...`), `Ref` (ein geschützter Branch oder ein Tag), `Path` (zum Beispiel `dbt_sample/governance/access`), `Interval` (Standard 5 Minuten), `Enabled`. |
+| Holen | Über die GitHub-REST-API, nicht über einen Git-Client: Commit des `Ref` abfragen (mit `ETag`, ein unverändertes Ergebnis ist ein günstiges `304`), nur bei neuem Commit den Pfad als Archiv laden. Zugriff mit einem **nur lesenden** Token oder Deploy-Key aus dem Secret-Provider (`DefaultEnvironmentSecretProvider`). |
+| Webhook | `POST /api/webhooks/config-sync`, `push`-Ereignis. Er ist nur ein **Auslöser**: Autheris liest den Inhalt immer selbst vom Commit, nie aus dem Body. Geprüft werden Signatur, `ref` gleich dem konfigurierten, und `X-GitHub-Delivery` (jede Lieferung nur einmal). GitHub schickt keinen Zeitstempel, deshalb passt der Zeitfenster-Test des Katalog-Webhooks hier nicht; die Lieferungs-ID ersetzt ihn. Antwort sofort `202`, der Abgleich läuft danach; mehrere Ereignisse werden zusammengefasst. |
+| Abgleich | 1. Alles parsen und prüfen (Schema, Muster, SQL mit AST und Funktionsliste, Zyklen bei `supersedes`) **vor** jeder Änderung. 2. Unterschiede zum gespeicherten Stand berechnen. 3. In **einer Transaktion** anwenden: alles oder nichts. 4. Policy-Epoche der betroffenen Tabellen erhöhen, damit Zwischenspeicher verfallen. 5. Audit-Eintrag mit Commit, Autor, Anzahl der Änderungen und Hash. |
+| Fehlerfall | Schlägt Holen oder Prüfen fehl, bleibt der **letzte gute Stand** bestehen (nichts wird entfernt), der Status wird `Fehler`, und eine Warnung geht raus. |
+| Sicht | `GET /api/…/config-sync/status`: letzter Commit, Zeit, Ergebnis, Drift. `POST /api/…/config-sync/run?dryRun=true` für Administratoren (eigene Rolle `ConfigSyncAdmin`, nicht die Einwilligungsrechte). |
+| Mehrere Instanzen | Nur eine wendet an (Sperre in der Governance-Datenbank), sonst laufen zwei Abgleiche gegeneinander. |
+
+**Sicherheit.** Die Konfiguration entscheidet über Zugriffe, deshalb gilt:
+
+- **Mitentscheidend ist GitHub, nicht Autheris:** Ein vertrauenswürdiger Stand ist nur ein geschützter Branch mit Pflicht zur Prüfung durch die
+  Zuständigen (`CODEOWNERS.example`). Autheris liest nur diesen `Ref`. Optional lehnt es Commits ab, die GitHub nicht als signiert
+  (`verification.verified`) meldet.
+- **Freigabe:** Standard ist, dass der Pull-Request-Review auf GitHub die Freigabe war und Autheris ohne weiteren Schritt anwendet
+  (`RequireApproval: None`). Wer in Autheris zusätzlich prüfen will, schaltet `Loosening` oder `All` ein (siehe 4.3, Punkt 4).
+- **Der gefährliche Fall ist das Entfernen.** Wird eine Bindung gelöscht, sehen die Berechtigten **mehr**. Ein Schutz gegen Fehler (zum Beispiel
+  ein versehentlich geleerter Ordner): Entfernt ein Abgleich mehr als `MaxRemovals` Bindungen oder alle, wird er nicht angewendet und braucht
+  `force` durch `ConfigSyncAdmin`. Der Wert ist einstellbar, `0` schaltet die Prüfung ab.
+- **Veraltung ist ebenfalls ein Risiko:** Ein Entzug im Repository wirkt erst nach dem nächsten Abgleich. Das Intervall begrenzt dieses Fenster,
+  der Webhook verkürzt es; ist der letzte erfolgreiche Abgleich älter als eine Schwelle, schlägt der Gesundheitsstatus an.
+- **Kein Ausführen:** Es werden nur Dateien eines erlaubten Pfads gelesen und als Daten geparst; keine Symlinks, Größenlimit für das Archiv,
+  Repository und Pfad nur aus der Konfiguration (kein SSRF über den Webhook-Body).
+- **Die vorhandenen „Bypass“-Schalter** (`IsWebhookSignatureBypassed`, `IsWebhookTimestampToleranceIgnored`) dürfen für diesen Endpunkt nicht gelten.
+
+**Erreichbarkeit.** Autheris muss `lis-github.liebherr.com` erreichen (Firmenzertifikat und Proxy: der PoC-Container hat keine Firmen-CAs, im
+Cluster ist das zu prüfen). Der Webhook braucht die Gegenrichtung: GitHub muss Autheris erreichen, im lokalen PoC mit Podman geht das nicht.
+Das Abfragen im Takt ist deshalb die **Grundlage**, der Webhook nur eine Beschleunigung.
+
+**Alternative: Schieben aus der CI.** Eine Pipeline ruft nach dem Zusammenführen `apply` auf. Vorteil: Autheris braucht keinen Zugang zu GitHub
+und kein Token, der Zeitpunkt ist exakt. Nachteil: Die Pipeline braucht eine Berechtigung in Autheris und Zugang dorthin, und ein Ausfall der
+Pipeline bleibt unbemerkt (kein Takt, der nachholt). Beide Wege nutzen denselben Abgleich; das Schieben ist ohne weiteren Aufwand mit
+abgedeckt.
+
+**Ablauf von der Änderung bis zur Wirkung** (ohne dbt):
+
+1. Owner oder Steward ändert eine Datei unter `governance/access/` und öffnet einen Pull Request.
+2. **Vor dem Zusammenführen** läuft in der CI `resolve_governance.py --check` als Pflichtprüfung: Filter vollständig und nur lesend,
+   Profile verweisen auf vorhandene Filter, `uncovered` gesetzt, Muster treffen Objekte. Ein roter Lauf verhindert das Zusammenführen.
+3. CODEOWNERS verlangt die Freigabe von Owner und Steward; der Branch ist geschützt. Das ist die Freigabe (siehe 4.3, Punkt 4).
+4. Nach dem Zusammenführen kommt der **Auslöser** (siehe unten) bei Autheris an.
+5. Autheris holt den Commit selbst, prüft **erneut** mit seinen eigenen Regeln (AST, Funktionslisten), berechnet `plan`, wendet in einer Transaktion
+   an, erhöht die Policy-Epochen und schreibt den Audit-Eintrag mit Commit und Autor.
+6. Autheris meldet das Ergebnis zurück (als Commit-Status an GitHub und in `config-sync/status`). Bei einem Fehler bleibt der letzte gute Stand.
+
+**Mögliche Auslöser**, alle führen in denselben Abgleich (`plan`/`apply`), und mehrere lassen sich kombinieren:
+
+| Auslöser | Ablauf | Vorteil | Nachteil |
+| :--- | :--- | :--- | :--- |
+| Takt in Autheris (Grundlage) | Hintergrunddienst fragt alle N Minuten den Commit des `Ref` ab (`ETag`) | Braucht nur Zugang von Autheris zu GitHub; holt Verpasstes nach | Verzögerung bis zum nächsten Takt |
+| GitHub-Webhook (`push`) | `POST /api/webhooks/config-sync`, löst den Abgleich sofort aus | Wirkt in Sekunden | GitHub muss Autheris erreichen; kann ausfallen, deshalb nie allein |
+| CI-Schritt nach dem Zusammenführen | Eine Pipeline ruft `config-sync/run` mit einem Dienstkonto auf (oder ein Werkzeug `apply` aus `tools/`) | Exakter Zeitpunkt, Ergebnis im Pipeline-Lauf sichtbar, Autheris braucht keinen GitHub-Zugang | Pipeline braucht Zugang und Berechtigung in Autheris; fällt sie aus, wird nichts nachgeholt |
+| Zeitgesteuerter Job im Cluster | Kubernetes-CronJob führt denselben `apply` aus | Keine Änderung in Autheris, wenn der Abgleich als Werkzeug läuft | Zusätzlicher Baustein mit eigenem Zugriff auf die Datenbank |
+| Von Hand | Administrator ruft `config-sync/run` auf (mit `dryRun`) | Für Tests und Notfälle | Nicht für den Regelbetrieb |
+
+**Empfehlung:** Takt als Grundlage plus Webhook als Beschleunigung, wie oben. Läuft Autheris dort, wo GitHub es nicht erreicht (lokaler PoC,
+strenge Netze), ist der CI-Schritt der Ersatz für den Webhook. Der Takt bleibt in jedem Fall als Sicherheitsnetz, damit ein verpasster Auslöser
+nicht zu einem dauerhaft veralteten Stand führt.
+
+### 4.3 Die dbt-Integration in Autheris (Ist-Stand, gelesen, nicht gebaut oder getestet)
+
+Autheris nimmt dbt-Metadaten über `POST /api/extensions/dbt/sync[?dryRun=true]` entgegen (`DbtEndpoints.cs`,
+`DbtMetadataIngestionService`, `DbtArtifactStreamingParser`). Gedacht ist es als **Vorschlagsverfahren für Metadaten**, nicht als
+Konfiguration, die Zugriffe setzt:
+
+| Schritt | Was passiert |
+| :--- | :--- |
+| Aufruf | Ein dbt-`manifest.json` (bis 100 MB) wird **hineingeschickt** (Push); Autheris holt nichts. Erlaubt nur für globale Governance-Administratoren und die Rolle `DbtAdmin`. `dryRun` zählt nur. Daneben: `validate-contract`, `run-results`, `exposures`, `health` und ein dbt-Cloud-Webhook mit HMAC-Prüfung. |
+| Lesen | Nur Knoten `model.*` und `seed.*` aus `nodes`: Name, Datenbank, Schema, Beschreibung, `tags`, `meta`, `columns`, `depends_on`, Vertrag. **Quellen (`sources`) werden nicht gelesen.** |
+| Vorschläge | Spalten mit `meta.pii: true` oder `email`/`ssn`/`pseudonym` im Namen oder Tag werden zu **Vorschlägen** (`PendingReview`) für eine Maskierung (`MASK_EMAIL`, `REDACT`, `HMAC_SHA256`). Ebenso `meta.rls_filter` (Spalte oder Modell) und `meta.casbin_roles`. |
+| Freigabe | Ein Mensch gibt jeden Vorschlag frei oder lehnt ihn ab (`proposals/{id}/approve`). Freigegeben wird **nur eine Maskierungsregel**; ein Vorschlag mit `RLS_FILTER:` oder `CASBIN_ROLES:` wird bei der Freigabe **abgelehnt** („als Einwilligungs-Zeilenfilter oder Casbin-Richtlinie umsetzen“). Eine Freigabe darf eine stärkere vorhandene Maskierung nicht abschwächen (`CatalogGovernanceRatchet`); danach steigt die Policy-Epoche der Tabelle. |
+| Sofort wirksam | Beschreibung und `long_description` werden in die Tabellen-Metadaten übernommen (wenn die Tabelle im Katalog existiert), die Herkunft (Lineage) wird aktualisiert, `meta.owner` und `meta.owner_email` landen im Lineage-Knoten; auf Wunsch (`SqlEndpoints.AutoSyncFromDbt`) entstehen `.sql`-Dateien für SQL-Endpunkte. |
+
+**Folgerungen für dieses Vorhaben:**
+
+1. **`dbt_sample` passt heute nicht.** Alle Tabellen sind dort `sources`; von `nodes` kommen nur die 115 Seeds, mit dem Schema des
+   Ziels (nicht `md`, `tem` …). Für eine Übernahme müsste der Parser `source.*` lesen und `database` und `schema` der Quelle verwenden. Ob die
+   Bezeichner (`LWETEM_PROD`) zu den Katalog-Bezeichnern (`lwetem_prod`) passen, ist ungeprüft.
+2. **Governance fehlt im Manifest.** Eigentümer, Klassifizierung und PII stehen in `dbt_sample/governance/` **außerhalb** von dbt. Autheris sieht
+   davon nichts, bis `resolve_governance.py` sie als `meta` in die Quellen schreibt (oder Autheris `target/governance/` selbst liest).
+3. **Virtuelle Filter gehören nicht dorthin.** dbt kennt kein Filterkonzept, und Autheris lehnt `RLS_FILTER`-Vorschläge aus dbt ausdrücklich ab.
+   Filter brauchen den eigenen Weg aus 4.1 und 4.2.
+4. **Grundsatzfrage, die der Code schon beantwortet:** Autheris wendet Metadaten aus dbt **nicht von selbst** auf Zugriffsregeln an, es verlangt
+   die Freigabe durch einen Menschen in Autheris. Der Entwurf in 4.2 wendet Filter nach dem Zusammenführen auf GitHub **automatisch** an.
+   Das ist ein anderer Maßstab. **Entschieden (08.10.2026): Die manuelle Freigabe in Autheris ist per Konfiguration schaltbar. Standard ist
+   „aus“: Es gilt als gegeben, dass die Freigabe bereits auf GitHub per Pull-Request-Review erfolgt ist** (geschützter Branch, `CODEOWNERS`), und
+   Autheris wendet einen geprüften Stand selbst an. Ist die Freigabe **eingeschaltet** (`ConfigSync:RequireApproval`), landet jede Änderung als
+   **Vorschlag** in Autheris und wird erst nach Freigabe wirksam, nach dem Muster der dbt-Vorschläge (`PendingReview`, `approve`, `reject`). Feiner
+   einstellbar: `RequireApproval: Loosening` verlangt die Freigabe nur für Lockerungen (Bindung entfernt, Filter abgeschwächt, `uncovered` von `deny`
+   auf `skip`), im Sinne der vorhandenen Ratsche (`CatalogGovernanceRatchet`). Werte: `None` (Standard), `Loosening`, `All`. Der Vorschlagsspeicher
+   muss dafür **dauerhaft** sein (heute nur im Arbeitsspeicher, siehe Punkt 5).
+5. **Wiederverwendbar aus dbt:** Rolle und Muster der Endpunkte (`DbtAdmin`, `dryRun`), HMAC-Prüfung des Webhooks, Vorschlags- und Freigabespeicher
+   (`IDbtProposalRepository`, bisher nur im Speicher: `InMemoryDbtProposalRepository`, nach einem Neustart weg), Erhöhung der Policy-Epoche.
+
+**Empfehlung:** dbt nur für **beschreibende** Metadaten (Beschreibungen, Herkunft, PII-Vorschläge) nutzen, wie vorgesehen, und `sources` dazu
+im Parser ergänzen. Filter und Bindungen über den eigenen Weg 4.1/4.2; die Freigabe in Autheris ist per Konfiguration schaltbar, Standard aus (Review auf GitHub gilt als Freigabe).
 
 ## 5. Offene Fragen
 
@@ -293,7 +422,7 @@ David-Fall gesperrt (`deny`), Bindungen gewähren nichts. Die übrigen Zeilen si
 
 | Frage | Folge |
 | :--- | :--- |
-| Was gilt für Objekte **ohne** passende Spalte (zum Beispiel Stammdaten ohne `client_id`)? Heute bekommt David nur Tabellen mit Bezug zu Kranen; alle anderen sind gesperrt. | `on_unmatched: deny` bildet das ab (Standard für den David-Fall); `skip` lässt die Einwilligungen allein entscheiden. |
+| Was gilt für Objekte **ohne** passende Spalte (zum Beispiel Stammdaten ohne `client_id`)? Heute bekommt David nur Tabellen mit Bezug zu Kranen; alle anderen sind gesperrt. | `uncovered: deny` im Profil bildet das ab (Standard für den David-Fall); `skip` lässt die Einwilligungen allein entscheiden. |
 | Dürfen Bindungen auch **gewähren** (Zugriff ohne Einwilligung)? | Vorschlag nein: Einwilligungen bleiben die einzige Quelle für Zugriff. |
 | Wie lange darf die Wertemenge des Filters zwischengespeichert werden? | Betrifft Prozedur-Ergebnisse und Sicht auf neu ausgelieferte Krane; Vorschlag: Policy-Epoche wie bei Einwilligungen. |
 | Leistung bei einer Menge von ~46 700 Kranen und Zeitreihentabellen mit Millionen Zeilen | `InCorrelated` oder `Exists` je Tabelle messen, nicht raten. Im PoC ist `InCorrelated` bereits Standard (wegen derselben Lage). |
@@ -306,7 +435,7 @@ David-Fall gesperrt (`deny`), Bindungen gewähren nichts. Die übrigen Zeilen si
    laufen automatisch mit. Es bleibt die Umgehungslücke aus Abschnitt 2.
 2. **Autheris, Kern:** `VirtualFilter` und `FilterBinding` (Speicher, API, Audit), `MandatoryRowPredicate` in
    `ConsentResolutionService`, Strukturierte Definition. Tests: Muster, AND-Verknüpfung, Umgehung durch zusätzliche Einwilligung
-   unmöglich, `on_unmatched`, Gleichheit der Ergebnisse in WebSQL, GraphQL, OData, Trino.
+   unmöglich, `uncovered`, Gleichheit der Ergebnisse in WebSQL, GraphQL, OData, Trino.
 3. **Autheris, Erweiterung:** SQL-Definition mit AST-Prüfung, Prozedur-Ergebnisse, MCP-Stichproben, Zwischenspeicher.
 4. **Talos:** Bereitstellung auf die API umstellen, `grant_row_scoped_user.py` entfernen.
 
