@@ -59,6 +59,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             ExtractExpression ext => VisitExtractExpression(ext),
             TrustedSqlExpression trusted => trusted,
             TypedLiteralExpression typed => typed,
+            GroupingOperationExpression grouping => VisitGroupingOperation(grouping),
             IntervalLiteralExpression interval => interval,
             OrderByClause ord => VisitOrderByClause(ord),
             OrderByElement el => VisitOrderByElement(el),
@@ -482,8 +483,17 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     public virtual SqlNode VisitGroupByClause(GroupByClause node)
     {
         var exprs = RewriteList(node.GroupingExpressions, e => (Expression)Visit(e));
-        if (exprs == node.GroupingExpressions) return node;
-        return node with { GroupingExpressions = exprs };
+        var advanced = node.AdvancedElements != null
+            ? RewriteList(node.AdvancedElements, el => el with { Sets = RewriteList(el.Sets, set => RewriteList(set, e => (Expression)Visit(e))) })
+            : null;
+        if (exprs == node.GroupingExpressions && advanced == node.AdvancedElements) return node;
+        return node with { GroupingExpressions = exprs, AdvancedElements = advanced };
+    }
+
+    public virtual SqlNode VisitGroupingOperation(GroupingOperationExpression node)
+    {
+        var columns = RewriteList(node.Columns, c => (ColumnReference)Visit(c));
+        return columns == node.Columns ? node : node with { Columns = columns };
     }
 
     public virtual SqlNode VisitUpdateAssignment(UpdateAssignment node)

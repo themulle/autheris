@@ -22,11 +22,10 @@ public sealed class AstBuilderFailLoudTests
     }
 
     [Theory]
-    // grouping elements other than plain expressions (previously: GROUP BY dropped entirely)
-    [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY ROLLUP (dept)")]
-    [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY CUBE (dept)")]
-    [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY GROUPING SETS ((dept), ())")]
-    [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY DISTINCT dept")]
+    // grouping elements that are still not representable
+    [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY AUTO")]
+    // lambdas
+    [InlineData("SELECT transform(tags, x -> upper(x)) FROM t")]
     // aggregate modifiers that are still not representable
     // window details that are still not representable
     [InlineData("SELECT lag(amount) IGNORE NULLS OVER (ORDER BY id) FROM t")]
@@ -56,6 +55,11 @@ public sealed class AstBuilderFailLoudTests
     [InlineData("SELECT COUNT(id) FILTER (WHERE amount > 1) FROM t")]
     [InlineData("SELECT array_agg(id ORDER BY amount) FROM t")]
     [InlineData("SELECT SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t")]
+    // Phase 5
+    [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY ROLLUP (dept)")]
+    [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY CUBE (dept)")]
+    [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY GROUPING SETS ((dept), ())")]
+    [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY DISTINCT dept")]
     [InlineData("SELECT id FROM t WHERE created_at > DATE '2024-01-01'")]
     [InlineData("SELECT id FROM t WHERE created_at > TIMESTAMP '2024-01-01 00:00:00'")]
     public void Supported_Construct_StillBuilds(string sql)

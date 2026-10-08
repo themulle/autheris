@@ -15,6 +15,18 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.SqlServer;
 
+    /// <summary>Wunsch 4: T-SQL GROUPING() takes one column; the multi-column bitmask is GROUPING_ID().</summary>
+    protected override void FormatGroupingOperation(ref ValueStringBuilder builder, GroupingOperationExpression grouping, SqlEmitterContext context)
+    {
+        builder.Append(grouping.Columns.Count == 1 ? "GROUPING(" : "GROUPING_ID(");
+        for (int i = 0; i < grouping.Columns.Count; i++)
+        {
+            if (i > 0) builder.Append(", ");
+            GenerateExpression(grouping.Columns[i], ref builder, context);
+        }
+        builder.Append(')');
+    }
+
     /// <summary>Wunsch 4: T-SQL has no DATE/TIMESTAMP literal syntax; <c>timestamp</c> would even mean rowversion.</summary>
     protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context)
     {

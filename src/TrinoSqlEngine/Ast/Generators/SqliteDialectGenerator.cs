@@ -14,6 +14,7 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Sqlite;
     protected override bool SupportsAggregateFilter => true;
+    protected override bool SupportsGroupingSets => false;
 
     /// <summary>Wunsch 4: SQLite stores dates as ISO text and has no typed literals; the ISO string compares correctly.</summary>
     protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context) =>

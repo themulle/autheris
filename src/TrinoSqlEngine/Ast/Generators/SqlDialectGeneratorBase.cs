@@ -166,14 +166,9 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             context.InPredicateContext = prevWherePred;
         }
 
-        if (spec.GroupBy != null && spec.GroupBy.GroupingExpressions.Count > 0)
+        if (spec.GroupBy != null && (spec.GroupBy.GroupingExpressions.Count > 0 || spec.GroupBy.AdvancedElements is { Count: > 0 }))
         {
-            builder.Append(" GROUP BY ");
-            for (int i = 0; i < spec.GroupBy.GroupingExpressions.Count; i++)
-            {
-                if (i > 0) builder.Append(", ");
-                GenerateExpression(spec.GroupBy.GroupingExpressions[i], ref builder, context);
-            }
+            GenerateGroupBy(spec.GroupBy, ref builder, context);
         }
 
         if (spec.Having != null)
@@ -496,6 +491,9 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             case FunctionCallExpression fn:
                 GenerateFunctionCall(fn, ref builder, context);
                 break;
+            case GroupingOperationExpression grouping:
+                FormatGroupingOperation(ref builder, grouping, context);
+                break;
             case TypedLiteralExpression typed:
                 FormatTypedLiteral(ref builder, typed, context);
                 break;
@@ -712,6 +710,83 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
     };
 
     public abstract void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context);
+
+    /// <summary>Wunsch 4: the dialect supports ROLLUP, CUBE and GROUPING SETS.</summary>
+    protected virtual bool SupportsGroupingSets => true;
+
+    /// <summary>Wunsch 4: the dialect supports <c>GROUP BY DISTINCT</c>.</summary>
+    protected virtual bool SupportsGroupByDistinct => false;
+
+    protected virtual void GenerateGroupBy(GroupByClause groupBy, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        builder.Append(" GROUP BY ");
+        if (groupBy.Distinct)
+        {
+            if (!SupportsGroupByDistinct)
+            {
+                throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"SQL construct GROUP BY DISTINCT is not supported for {TargetDialect}.");
+            }
+
+            builder.Append("DISTINCT ");
+        }
+
+        bool first = true;
+        foreach (var expr in groupBy.GroupingExpressions)
+        {
+            if (!first) builder.Append(", ");
+            GenerateExpression(expr, ref builder, context);
+            first = false;
+        }
+
+        foreach (var element in groupBy.AdvancedElements ?? [])
+        {
+            if (!SupportsGroupingSets)
+            {
+                throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"SQL construct GROUP BY {element.Kind} is not supported for {TargetDialect}.");
+            }
+
+            if (!first) builder.Append(", ");
+            first = false;
+            builder.Append(element.Kind switch
+            {
+                GroupingElementKind.Rollup => "ROLLUP (",
+                GroupingElementKind.Cube => "CUBE (",
+                _ => "GROUPING SETS ("
+            });
+            for (int i = 0; i < element.Sets.Count; i++)
+            {
+                if (i > 0) builder.Append(", ");
+                var set = element.Sets[i];
+                // GROUPING SETS lists each set in parentheses; ROLLUP/CUBE only composite sets.
+                bool parenthesize = element.Kind == GroupingElementKind.GroupingSets || set.Count != 1;
+                if (parenthesize) builder.Append('(');
+                for (int j = 0; j < set.Count; j++)
+                {
+                    if (j > 0) builder.Append(", ");
+                    GenerateExpression(set[j], ref builder, context);
+                }
+                if (parenthesize) builder.Append(')');
+            }
+            builder.Append(')');
+        }
+    }
+
+    /// <summary>Wunsch 4: <c>GROUPING(a, b)</c>; several columns give a bitmask in Trino, PostgreSQL and Oracle.</summary>
+    protected virtual void FormatGroupingOperation(ref ValueStringBuilder builder, GroupingOperationExpression grouping, SqlEmitterContext context)
+    {
+        if (!SupportsGroupingSets)
+        {
+            throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"SQL construct GROUPING() is not supported for {TargetDialect}.");
+        }
+
+        builder.Append("GROUPING(");
+        for (int i = 0; i < grouping.Columns.Count; i++)
+        {
+            if (i > 0) builder.Append(", ");
+            GenerateExpression(grouping.Columns[i], ref builder, context);
+        }
+        builder.Append(')');
+    }
 
     /// <summary>Wunsch 4: the dialect evaluates <c>agg(…) FILTER (WHERE …)</c> natively; otherwise it is emulated with CASE.</summary>
     protected virtual bool SupportsAggregateFilter => false;

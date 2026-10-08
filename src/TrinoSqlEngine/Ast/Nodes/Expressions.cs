@@ -164,6 +164,9 @@ public enum FrameBoundKind
     UnboundedFollowing
 }
 
+/// <summary>Wunsch 4: <c>GROUPING(col, …)</c>; with several columns a bitmask (SQL Server: GROUPING_ID).</summary>
+public sealed record GroupingOperationExpression(IReadOnlyList<ColumnReference> Columns) : Expression;
+
 /// <summary>Wunsch 4: <c>DATE '…'</c>, <c>TIME '…'</c>, <c>TIMESTAMP '…'</c>; the value is validated by the builder.</summary>
 public sealed record TypedLiteralExpression(TypedLiteralKind Kind, string Value) : Expression;
 

@@ -87,7 +87,7 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
     public async Task UnsupportedConstruct_IsBadRequest_NotServerError(string sourceType)
     {
         var ex = await Should.ThrowAsync<ArgumentException>(() =>
-            RewriteAsync(sourceType, "SELECT dept, SUM(amount) FROM orders GROUP BY CUBE (dept)"));
+            RewriteAsync(sourceType, "SELECT dept, SUM(amount) FROM orders GROUP BY AUTO"));
 
         ex.Message.ShouldContain("not supported");
     }

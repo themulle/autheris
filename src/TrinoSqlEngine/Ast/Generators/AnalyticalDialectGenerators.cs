@@ -58,6 +58,7 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.DuckDb;
     protected override bool SupportsAggregateFilter => true;
     protected override bool SupportsOrderedAggregates => true;
+    protected override bool SupportsGroupByDistinct => true;
     public override int MaxParameterBudget => 65535;
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)

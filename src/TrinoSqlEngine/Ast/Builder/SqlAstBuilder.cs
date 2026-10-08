@@ -421,30 +421,32 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         GroupByClause? groupBy = null;
         if (context.groupBy() != null)
         {
-            if (context.groupBy().setQuantifier()?.DISTINCT() != null)
-            {
-                throw Unsupported("GROUP BY DISTINCT");
-            }
-
+            bool groupByDistinct = context.groupBy().setQuantifier()?.DISTINCT() != null;
             var groupingElements = context.groupBy().groupingElement();
             var groupingExpressions = new List<Expression>();
+            List<GroupingElement>? advanced = null;
             foreach (var ge in groupingElements)
             {
-                if (ge is not SqlBaseParser.SingleGroupingSetContext sgs)
+                // Wunsch 4: ROLLUP/CUBE/GROUPING SETS used to fall through and remove the whole GROUP BY.
+                switch (ge)
                 {
-                    throw Unsupported($"GROUP BY {ge.GetChild(0).GetText().ToUpperInvariant()}");
-                }
-
-                var exprs = sgs.groupingSet().expression();
-                if (exprs != null)
-                {
-                    foreach (var e in exprs)
-                    {
-                        groupingExpressions.Add((Expression)Visit(e));
-                    }
+                    case SqlBaseParser.SingleGroupingSetContext sgs:
+                        groupingExpressions.AddRange(BuildGroupingSet(sgs.groupingSet()));
+                        break;
+                    case SqlBaseParser.RollupContext rollup:
+                        (advanced ??= []).Add(new GroupingElement(GroupingElementKind.Rollup, rollup.groupingSet().Select(BuildGroupingSet).ToList()));
+                        break;
+                    case SqlBaseParser.CubeContext cube:
+                        (advanced ??= []).Add(new GroupingElement(GroupingElementKind.Cube, cube.groupingSet().Select(BuildGroupingSet).ToList()));
+                        break;
+                    case SqlBaseParser.MultipleGroupingSetsContext sets:
+                        (advanced ??= []).Add(new GroupingElement(GroupingElementKind.GroupingSets, sets.groupingSet().Select(BuildGroupingSet).ToList()));
+                        break;
+                    default:
+                        throw Unsupported($"GROUP BY {ge.GetChild(0).GetText().ToUpperInvariant()}");
                 }
             }
-            groupBy = new GroupByClause(groupingExpressions);
+            groupBy = new GroupByClause(groupingExpressions, advanced, groupByDistinct);
         }
 
         Expression? having = context.having != null ? (Expression)Visit(context.having) : null;
@@ -863,6 +865,21 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                 // Wunsch 4: typed literals (DATE '…', INTERVAL …), binary and unicode literals are not plain strings.
                 throw Unsupported($"literal '{lit.GetType().Name.Replace("Context", string.Empty, StringComparison.Ordinal)}'");
         }
+    }
+
+    private IReadOnlyList<Expression> BuildGroupingSet(SqlBaseParser.GroupingSetContext set) =>
+        set.expression().Select(e => (Expression)Visit(e)).ToList();
+
+    /// <summary>Wunsch 4: <c>GROUPING(col, …)</c> (was: no visitor, ArgumentNullException → 500).</summary>
+    public override SqlNode VisitGroupingOperation(SqlBaseParser.GroupingOperationContext context)
+    {
+        var columns = context.qualifiedName().Select(q => new ColumnReference(ToSqlQualifiedName(q))).ToList();
+        if (columns.Count == 0)
+        {
+            throw Unsupported("GROUPING() without columns");
+        }
+
+        return new GroupingOperationExpression(columns);
     }
 
     private static readonly System.Text.RegularExpressions.Regex DateValue = new(@"^\d{4}-\d{2}-\d{2}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
