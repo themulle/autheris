@@ -727,6 +727,12 @@ public sealed class GraphQLOptions
     /// </summary>
     [Range(5, 3600)] public int SubscriptionRevalidationSeconds { get; init; } = 60;
 
+    /// <summary>
+    /// R-GQL-12: interval in which the GraphQL catalog schema checks the catalog for changes and rebuilds itself
+    /// (also after the governance database was unreachable at startup). 0 disables the check.
+    /// </summary>
+    [Range(0, 3600)] public int CatalogSchemaRefreshSeconds { get; init; } = 60;
+
     /// <summary>GQL-4: maximum number of open CDC subscriptions per subject (tenant + SID).</summary>
     [Range(1, 1000)] public int MaxSubscriptionsPerSubject { get; init; } = 10;
     [Range(100, 1000000)] public int MaxAggregateRowBudget { get; init; } = 50000;
