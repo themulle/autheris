@@ -201,6 +201,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         var table = query.Metadata.Identifier;
         var profiles = snapshot.Profiles
             .Where(p => p.TenantId == query.Tenant &&
+                        p.Status == FilterApprovalStatus.Active &&
                         GranteeMatcher.Matches(p.GranteeType, p.GranteeSid, p.RoleName, null, query.UserSid, query.GroupSids, query.Roles))
             .OrderBy(p => p.Name, StringComparer.Ordinal)
             .ToList();
@@ -306,6 +307,11 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
     /// <summary>Whether the binding applies; otherwise the reason and the missing columns.</summary>
     private (bool Applies, string? Reason, IReadOnlyList<string> Missing) Check(VirtualFilter filter, FilterBinding binding, AccessProfile profile, MandatoryFilterQuery query)
     {
+        if (filter.Status != FilterApprovalStatus.Active)
+        {
+            return (false, $"filter '{filter.Name}' is not active (status: {filter.Status})", []);
+        }
+
         var table = query.Metadata.Identifier;
         if ((binding.ObjectKinds & query.ObjectKind) == 0)
         {
