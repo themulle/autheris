@@ -148,9 +148,11 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                     var colId = new SqlIdentifier(col, IsQuoted: true);
                     if (_options.ColumnMaskingProvider != null && _options.ColumnMaskingProvider.HasMask(normalizedName, col))
                     {
+                        // SQL-4: mask expressions are rendered by the gateway for the target dialect (bound key parameters,
+                        // T-SQL brackets); re-parsing them as Trino SQL failed for every HMAC column. They are emitted
+                        // verbatim, exactly like the legacy rewriter does.
                         string maskExpr = _options.ColumnMaskingProvider.GetMaskedExpression(normalizedName, col);
-                        var maskAst = ParseFilterExpression(maskExpr);
-                        list.Add(new ColumnSelectItem(maskAst, colId));
+                        list.Add(new ColumnSelectItem(new TrustedSqlExpression(maskExpr), colId));
                     }
                     else
                     {
@@ -227,6 +229,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitDeleteStatement(DeleteStatement node)
     {
+        // SQL-7: the enforced row limit applies to the root SELECT of a read. A DML statement has none; a SELECT inside its
+        // WHERE (or the source of INSERT ... SELECT) must not be truncated, that would change which rows are written.
+        _rootLimitHandled = true;
         string normalizedName = node.TargetTable.Name.NormalizedName;
 
         // SEC H-15 / SQ-03: Ensure no masked column or whole-row references in WHERE
@@ -262,6 +267,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitUpdateStatement(UpdateStatement node)
     {
+        // SQL-7: the enforced row limit applies to the root SELECT of a read. A DML statement has none; a SELECT inside its
+        // WHERE (or the source of INSERT ... SELECT) must not be truncated, that would change which rows are written.
+        _rootLimitHandled = true;
         string normalizedName = node.TargetTable.Name.NormalizedName;
 
         var visitedAssignments = new List<UpdateAssignment>(node.Assignments.Count);
@@ -336,6 +344,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitInsertStatement(InsertStatement node)
     {
+        // SQL-7: the enforced row limit applies to the root SELECT of a read. A DML statement has none; a SELECT inside its
+        // WHERE (or the source of INSERT ... SELECT) must not be truncated, that would change which rows are written.
+        _rootLimitHandled = true;
         string normalizedName = node.TargetTable.Name.NormalizedName;
         string simpleTableName = node.TargetTable.Name.SimpleName;
         string tenantColumn = _options.GetTenantColumnName(normalizedName);

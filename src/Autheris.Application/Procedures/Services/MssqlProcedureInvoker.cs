@@ -63,35 +63,43 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
             try
             {
                 // 1. Session settings + security context on the very same connection.
-                if (dialect == DatabaseDialect.SqlServer)
+                if (dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql)
                 {
-                    await using var init = connection.CreateCommand();
-                    init.CommandType = CommandType.Text;
-                    init.CommandTimeout = 30;
-                    init.CommandText =
-                        "SET XACT_ABORT ON; " +
-                        "SET LOCK_TIMEOUT " + settings.LockTimeoutMs.ToString(CultureInfo.InvariantCulture) + ";";
-                    await init.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                    if (!TenantId.TryParse(security.TenantId, out var validatedTenantId))
+                    {
+                        throw new GatewayForbiddenException("Invalid tenant identity.");
+                    }
 
-                    await _sessionInitializer.InitializeSessionAsync(
-                        connection,
-                        tx: null,
-                        dialect,
-                        new TenantId(security.TenantId),
-                        userSid: security.UserSid,
-                        purpose: security.Purpose,
-                        ct: ct).ConfigureAwait(false);
-                }
-                else if (dialect == DatabaseDialect.PostgreSql)
-                {
-                    transaction = await _sessionInitializer.InitializeSessionAsync(
-                        connection,
-                        dialect,
-                        new TenantId(security.TenantId),
-                        userSid: security.UserSid,
-                        purpose: security.Purpose,
-                        requireTransaction: true,
-                        ct: ct).ConfigureAwait(false);
+                    if (dialect == DatabaseDialect.SqlServer)
+                    {
+                        await using var init = connection.CreateCommand();
+                        init.CommandType = CommandType.Text;
+                        init.CommandTimeout = 30;
+                        init.CommandText =
+                            "SET XACT_ABORT ON; " +
+                            "SET LOCK_TIMEOUT " + settings.LockTimeoutMs.ToString(CultureInfo.InvariantCulture) + ";";
+                        await init.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+                        await _sessionInitializer.InitializeSessionAsync(
+                            connection,
+                            tx: null,
+                            dialect,
+                            validatedTenantId,
+                            userSid: security.UserSid,
+                            purpose: security.Purpose,
+                            ct: ct).ConfigureAwait(false);
+                    }
+                    else if (dialect == DatabaseDialect.PostgreSql)
+                    {
+                        transaction = await _sessionInitializer.InitializeSessionAsync(
+                            connection,
+                            dialect,
+                            validatedTenantId,
+                            userSid: security.UserSid,
+                            purpose: security.Purpose,
+                            requireTransaction: true,
+                            ct: ct).ConfigureAwait(false);
+                    }
                 }
                 else if (definition.RlsMode == ProcedureRlsMode.SessionContext)
                 {
@@ -130,7 +138,8 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
 
                 try
                 {
-                    await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                    // R-SQL-8: sequential access, so LOB values are read in chunks against the remaining budget.
+                    await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false);
 
                     var columns = new List<string>(reader.FieldCount);
                     for (int i = 0; i < reader.FieldCount; i++)
@@ -138,7 +147,7 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                         columns.Add(reader.GetName(i));
                     }
 
-                    var maxBytes = _options.Value?.GraphQL?.MaxResponseBytes > 0 ? _options.Value.GraphQL.MaxResponseBytes : 10 * 1024 * 1024;
+                    var maxBytes = settings.MaxResponseBytes > 0 ? settings.MaxResponseBytes : 10 * 1024 * 1024;
                     long estimatedBytes = 0;
                     var rows = new List<object?[]>();
                     bool truncated = false;
@@ -154,9 +163,17 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
                         var values = new object?[columns.Count];
                         for (int i = 0; i < values.Length; i++)
                         {
-                            var val = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                            values[i] = val;
-                            estimatedBytes += EstimateSerializedBytes(columns[i], val);
+                            estimatedBytes += columns[i].Length * 2L;
+                            try
+                            {
+                                values[i] = BoundedValueReader.Read(reader, i, maxBytes - estimatedBytes, out var consumed);
+                                estimatedBytes += consumed;
+                            }
+                            catch (GatewaySecurityException)
+                            {
+                                TryCancel(cmd);
+                                throw;
+                            }
                         }
 
                         if (estimatedBytes > maxBytes)
@@ -407,12 +424,4 @@ public sealed class MssqlProcedureInvoker : IProcedureInvoker
         };
     }
 
-    private static long EstimateSerializedBytes(string columnName, object? value) =>
-        columnName.Length * 2L + value switch
-        {
-            null => 0,
-            string s => s.Length * 2L,
-            byte[] b => b.Length,
-            _ => 16
-        };
 }

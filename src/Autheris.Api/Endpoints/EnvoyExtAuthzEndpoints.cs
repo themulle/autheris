@@ -16,15 +16,9 @@ public static class EnvoyExtAuthzEndpoints
 {
     public static IEndpointRouteBuilder MapEnvoyExtAuthzEndpoints(this IEndpointRouteBuilder app)
     {
-        // POST /api/v1/envoy/authz: JSON protocol (envoy.service.auth.v3.CheckRequest -> CheckResponse)
-        app.MapPost("/api/v1/envoy/authz", async (
-            EnvoyCheckRequest request,
-            IEnvoyExtAuthzService authzService,
-            HttpContext context) =>
-        {
-            var response = await authzService.CheckAsync(request, context.User, context.RequestAborted);
-            return Results.Ok(response);
-        }).RequireAuthorization();
+        // API-2: the former JSON protocol endpoint (POST /api/v1/envoy/authz) decided with the identity of the calling
+        // mesh service instead of the end user (confused deputy) and is no longer mapped. The header mode below
+        // receives the original request, so the decision uses the end user's credentials.
 
         // GET or POST /api/v1/envoy/check: Envoy HTTP ext_authz header mode
         // G3: Envoy http_service forwards the original method and appends the original path to path_prefix, so the route

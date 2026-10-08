@@ -19,6 +19,10 @@ public sealed class InMemoryCdcEventChannel : ICdcEventChannel
         new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<InMemoryCdcEventChannel> _logger;
 
+    // GQL-8: registering a subscriber and removing an empty topic must not interleave; otherwise a subscriber can be
+    // added to a topic dictionary that was just removed and never receives an event. Publishing stays lock-free.
+    private readonly object _registrationLock = new();
+
     private const int MaxTopics = 1_000;
     private const int MaxSubscribersPerTopic = 500;
     private const int PerSubscriberChannelCapacity = 1_000;
@@ -82,18 +86,6 @@ public sealed class InMemoryCdcEventChannel : ICdcEventChannel
     {
         ValidateTopic(topic);
 
-        if (_topicSubscribers.Count >= MaxTopics && !_topicSubscribers.ContainsKey(topic))
-        {
-            throw new InvalidOperationException($"CDC event channel limit of {MaxTopics} topics exceeded.");
-        }
-
-        var subscribers = _topicSubscribers.GetOrAdd(topic, _ => new ConcurrentDictionary<Guid, Channel<CdcEvent>>());
-
-        if (subscribers.Count >= MaxSubscribersPerTopic)
-        {
-            throw new InvalidOperationException($"Subscriber limit of {MaxSubscribersPerTopic} per topic '{topic}' exceeded.");
-        }
-
         var subscriberId = Guid.NewGuid();
         var channel = Channel.CreateBounded<CdcEvent>(new BoundedChannelOptions(PerSubscriberChannelCapacity)
         {
@@ -111,7 +103,23 @@ public sealed class InMemoryCdcEventChannel : ICdcEventChannel
             }
         }
 
-        subscribers.TryAdd(subscriberId, channel);
+        ConcurrentDictionary<Guid, Channel<CdcEvent>> subscribers;
+        lock (_registrationLock)
+        {
+            if (_topicSubscribers.Count >= MaxTopics && !_topicSubscribers.ContainsKey(topic))
+            {
+                throw new InvalidOperationException($"CDC event channel limit of {MaxTopics} topics exceeded.");
+            }
+
+            subscribers = _topicSubscribers.GetOrAdd(topic, _ => new ConcurrentDictionary<Guid, Channel<CdcEvent>>());
+
+            if (subscribers.Count >= MaxSubscribersPerTopic)
+            {
+                throw new InvalidOperationException($"Subscriber limit of {MaxSubscribersPerTopic} per topic '{topic}' exceeded.");
+            }
+
+            subscribers.TryAdd(subscriberId, channel);
+        }
 
         var seenEventIds = new HashSet<string>(StringComparer.Ordinal);
         try
@@ -135,14 +143,18 @@ public sealed class InMemoryCdcEventChannel : ICdcEventChannel
         }
         finally
         {
-            if (subscribers.TryRemove(subscriberId, out var removedChannel))
+            lock (_registrationLock)
             {
-                removedChannel.Writer.TryComplete();
-            }
+                if (subscribers.TryRemove(subscriberId, out var removedChannel))
+                {
+                    removedChannel.Writer.TryComplete();
+                }
 
-            if (subscribers.IsEmpty)
-            {
-                _topicSubscribers.TryRemove(topic, out _);
+                if (subscribers.IsEmpty)
+                {
+                    // Only remove the dictionary this subscriber used, never a newer one for the same topic.
+                    _topicSubscribers.TryRemove(new KeyValuePair<string, ConcurrentDictionary<Guid, Channel<CdcEvent>>>(topic, subscribers));
+                }
             }
         }
     }

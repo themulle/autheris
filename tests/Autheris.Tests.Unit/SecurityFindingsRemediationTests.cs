@@ -584,7 +584,7 @@ public class SecurityFindingsRemediationTests
         var policyService = new TestPolicyEnforcementService(ctx =>
             TableAccessDecision.Denied(ctx.TargetTable, "Access denied by ABAC policy for tool"));
 
-        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
+        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
         var guardrail = new AiDataGuardrailService(
             registry,
             options,
@@ -615,7 +615,7 @@ public class SecurityFindingsRemediationTests
             return TableAccessDecision.Allowed(ctx.TargetTable, new System.Collections.Generic.Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
         });
 
-        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
+        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
         var guardrail = new AiDataGuardrailService(
             registry,
             options,
@@ -661,7 +661,7 @@ public class SecurityFindingsRemediationTests
             return TableAccessDecision.Allowed(ctx.TargetTable, new System.Collections.Generic.Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
         });
 
-        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
+        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
         var guardrail = new AiDataGuardrailService(
             registry,
             options,
@@ -1011,6 +1011,59 @@ public class SecurityFindingsRemediationTests
     }
 
     [Fact]
+    public void INF_3_DefaultEnvironmentSecretProvider_RedactsSecretReferenceInLogStatements()
+    {
+        var inMemory = new System.Collections.Generic.Dictionary<string, string?>
+        {
+            ["AUDIT_HMAC_KEY"] = "SuperSecretValue12345678901234567890"
+        };
+        var config = new ConfigurationBuilder().AddInMemoryCollection(inMemory).Build();
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns(Environments.Production);
+        var logger = new TestSecretProviderLogger();
+
+        var provider = new DefaultEnvironmentSecretProvider(config, env, logger);
+        provider.GetSecretBytes("audit-hmac-key");
+
+        logger.Messages.Count.ShouldBeGreaterThan(0);
+        foreach (var msg in logger.Messages)
+        {
+            msg.ShouldNotContain("audit-hmac-key");
+        }
+        logger.Messages.ShouldContain(m => m.Contains("Referenz mit Länge 14"));
+    }
+
+    [Fact]
+    public void INF_3_DefaultEnvironmentSecretProvider_InstanceSpecificItsm_RedactsSecretReference()
+    {
+        var config = new ConfigurationBuilder().Build();
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns(Environments.Production);
+        var logger = new TestSecretProviderLogger();
+
+        var provider = new DefaultEnvironmentSecretProvider(config, env, logger);
+        Should.Throw<InvalidOperationException>(() => provider.GetSecretBytes("itsm:webhook-secret:inst-xyz-987"));
+
+        logger.Messages.Count.ShouldBeGreaterThan(0);
+        foreach (var msg in logger.Messages)
+        {
+            msg.ShouldNotContain("itsm:webhook-secret:inst-xyz-987");
+        }
+        logger.Messages.ShouldContain(m => m.Contains("Referenz mit Länge 32"));
+    }
+
+    private sealed class TestSecretProviderLogger : Microsoft.Extensions.Logging.ILogger<DefaultEnvironmentSecretProvider>
+    {
+        public readonly System.Collections.Generic.List<string> Messages = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+        public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
+        }
+    }
+
+    [Fact]
     public void CRIT01_LocalStorageProvider_PrefixCollisionTraversal_ThrowsSecurityException()
     {
         var tempBase = Path.Combine(Path.GetTempPath(), "lakehouse_" + Guid.NewGuid().ToString("N"));
@@ -1112,6 +1165,104 @@ public class SecurityFindingsRemediationTests
 
         maxCdcPayloadBytes.ShouldBe(10485760);
         maxSchemaRegistryPayloadBytes.ShouldBe(10485760);
+    }
+
+    [Fact]
+    public void F7_ValidateGatewayOptions_InvalidModelPath_WhenCasbinDisabled_ThrowsValidationException()
+    {
+        var options = new GatewayOptions
+        {
+            Casbin = new CasbinOptions
+            {
+                Enabled = false,
+                ModelPath = "non_existent_model_file.conf"
+            }
+        };
+
+        var devEnv = Substitute.For<IHostEnvironment>();
+        devEnv.EnvironmentName.Returns(Environments.Development);
+
+        var ex = Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
+        ex.Message.ShouldContain("Casbin Model-Datei");
+        ex.Message.ShouldContain("wurde nicht gefunden");
+    }
+
+    [Fact]
+    public void RPOL5_ValidateGatewayOptions_PolicyFileWithOnlyComments_ThrowsValidationException()
+    {
+        var tempModel = Path.GetTempFileName();
+        var tempPolicy = Path.GetTempFileName();
+        try
+        {
+            // Valid model from CasbinEnforcementService
+            File.WriteAllText(tempModel, Autheris.Application.Governance.CasbinEnforcementService.DefaultModelText);
+
+            // Policy with only comments
+            File.WriteAllText(tempPolicy, """
+                # This file contains only comments
+                # No p-rules are declared
+                """);
+
+            var options = new GatewayOptions
+            {
+                Casbin = new CasbinOptions
+                {
+                    Enabled = true,
+                    ModelPath = tempModel,
+                    PolicyPath = tempPolicy
+                }
+            };
+
+            var devEnv = Substitute.For<IHostEnvironment>();
+            devEnv.EnvironmentName.Returns(Environments.Development);
+
+            var ex = Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
+                GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
+            ex.Message.ShouldContain("enthält keine gültigen 'p'-Regeln");
+        }
+        finally
+        {
+            if (File.Exists(tempModel)) File.Delete(tempModel);
+            if (File.Exists(tempPolicy)) File.Delete(tempPolicy);
+        }
+    }
+
+    [Fact]
+    public void RPOL5_ValidateGatewayOptions_ValidPolicyFile_Succeeds()
+    {
+        var tempModel = Path.GetTempFileName();
+        var tempPolicy = Path.GetTempFileName();
+        try
+        {
+            File.WriteAllText(tempModel, Autheris.Application.Governance.CasbinEnforcementService.DefaultModelText);
+
+            File.WriteAllText(tempPolicy, """
+                # Valid rule
+                p, alice, tenant-a, hr.employees, read, true, allow
+                """);
+
+            var options = new GatewayOptions
+            {
+                Casbin = new CasbinOptions
+                {
+                    Enabled = true,
+                    ModelPath = tempModel,
+                    PolicyPath = tempPolicy
+                }
+            };
+
+            var devEnv = Substitute.For<IHostEnvironment>();
+            devEnv.EnvironmentName.Returns(Environments.Development);
+
+            Should.NotThrow(() =>
+                GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
+        }
+        finally
+        {
+            if (File.Exists(tempModel)) File.Delete(tempModel);
+            if (File.Exists(tempPolicy)) File.Delete(tempPolicy);
+        }
     }
 
     private sealed class TestPolicyEnforcementService : IPolicyEnforcementService

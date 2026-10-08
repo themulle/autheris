@@ -135,6 +135,13 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
                 return Task.FromResult(AuthenticateResult.Fail("Configured ForwardAuth shared secret could not be resolved."));
             }
 
+            // R-DEP-1: a short shared secret is rejected whatever its reference is called.
+            if (!_isDevelopment && expectedBytes.Length < Autheris.Application.Security.SecretKeyRequirements.MinimumKeyBytes)
+            {
+                Logger.LogError("ForwardAuth rejected: the configured shared secret is shorter than {Min} bytes.", Autheris.Application.Security.SecretKeyRequirements.MinimumKeyBytes);
+                return Task.FromResult(AuthenticateResult.Fail("Configured ForwardAuth shared secret is too short."));
+            }
+
             var secretHeader = string.IsNullOrWhiteSpace(forwardAuthOptions.SharedSecretHeader)
                 ? "X-Forwarded-Secret"
                 : forwardAuthOptions.SharedSecretHeader;
@@ -298,7 +305,7 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
     private static readonly HashSet<string> HeaderForbiddenRoles = new(StringComparer.OrdinalIgnoreCase)
     {
         "ClusterAdmin", "PlatformAdmin", "GatewayAdmin", "GovernanceAdmin", "SecurityAdmin",
-        "PrivacyAdmin", "BreakGlassOperator"
+        "PrivacyAdmin", "BreakGlassOperator", "DataProtectionOfficer"
     };
 
     /// <summary>RR-L2-02: Administrative roles are never accepted from proxy headers (even if listed in AllowedRoles).</summary>

@@ -1,7 +1,7 @@
 # F-AI-10: Semantic Query Cache & Autonomous Policy Recommendation
 
-**Status:** [Done] (100% GA – Next-Gen)  
-**Components:** [`SemanticCacheModels.cs`](file:///root/lis-git/autheris/src/Autheris.Domain/Model/SemanticCacheModels.cs), [`ISemanticQueryCache.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Caching/ISemanticQueryCache.cs)
+**Status:** [Not implemented] – The semantic cache and the policy recommendation service were only used by the unreachable RAG path ([F-AI-09](f-ai-09-native-vector-database-rag-egress.md)) and were removed (2026-10-08).  
+**Components:** none. The rest of this document describes the original target design.
 
 ---
 

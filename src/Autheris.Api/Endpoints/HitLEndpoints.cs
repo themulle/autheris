@@ -76,7 +76,7 @@ public static class HitLEndpoints
                 return forbidden;
             }
 
-            var result = hitlService.ApproveStepUpRequest(request.ApprovalId, approver);
+            var result = await hitlService.ApproveStepUpRequestAsync(request.ApprovalId, approver, context.RequestAborted);
             return result.IsApproved ? Results.Ok(result) : Results.BadRequest(result);
         }).RequireAuthorization();
 
@@ -108,7 +108,7 @@ public static class HitLEndpoints
                 return forbidden;
             }
 
-            var result = hitlService.RejectStepUpRequest(request.ApprovalId, approver, request.Reason);
+            var result = await hitlService.RejectStepUpRequestAsync(request.ApprovalId, approver, request.Reason, context.RequestAborted);
             return Results.Ok(result);
         }).RequireAuthorization();
 
@@ -168,7 +168,7 @@ public static class HitLEndpoints
             return null;
         }
 
-        var ticket = hitlService.GetTicket(approvalId);
+        var ticket = await hitlService.GetTicketAsync(approvalId, context.RequestAborted);
         if (ticket == null ||
             (!approver.IsCrossTenantAdmin && !string.Equals(ticket.TenantId, approver.TenantId, StringComparison.OrdinalIgnoreCase)))
         {

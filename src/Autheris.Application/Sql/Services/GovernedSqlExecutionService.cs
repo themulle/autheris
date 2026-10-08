@@ -14,6 +14,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
@@ -35,10 +36,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     /// </summary>
     internal const string InternalParameterPrefix = "__gql_";
 
-    /// <summary>
-    /// SEC P-05 / SQ-01: Second line of defense against backslash-escape lexer differentials on PostgreSQL sessions.
-    /// </summary>
-    internal const string PostgreSqlSessionInitializationSql = "SET standard_conforming_strings = on";
 
     /// <summary>
     /// SQ-01/02/10/11/13: Token checks applied already during the analysis step (dollar quoting is decided per dialect
@@ -66,6 +63,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IHostEnvironment? _environment;
     private readonly ILogger<GovernedSqlExecutionService>? _logger;
+    private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
+    private readonly IConsentCacheService? _consentCache;
     private readonly IConsentRepository? _consentRepository;
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
@@ -92,7 +91,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         ICompiledSqlQueryPlanCache? planCache = null,
         ISqlSecurityValidator? sqlSecurityValidator = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
-        IDbSessionContextInitializer? sessionInitializer = null)
+        IDbSessionContextInitializer? sessionInitializer = null,
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
+        IConsentCacheService? consentCache = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement;
@@ -110,6 +111,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         _sqlSecurityValidator = sqlSecurityValidator ?? new DefaultSqlSecurityValidator();
         _concurrencyGate = concurrencyGate;
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
+        _rebacEvaluator = rebacEvaluator;
+        _consentCache = consentCache;
     }
 
     public async Task<string> RewriteSqlAsync(
@@ -271,16 +274,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         var groupSids = user.GetGroupSids();
         var roles = user.GetUserRoles();
         var clientIp = ResolveClientIp(user);
-        var purpose = user.FindFirst("purpose")?.Value ?? user.FindFirst("purpose_id")?.Value;
 
-        var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var claim in user.Claims)
-        {
-            attributes[claim.Type] = claim.Value;
-        }
-
-        // SEC M-20: Make the requested action visible to ABAC sub-rules (set after claims so it cannot be spoofed).
-        attributes["gql.action"] = isDml ? "write" : "read";
+        // SEC M-20: Make the requested action visible to ABAC sub-rules (applied after claims so it cannot be spoofed).
+        var actionAttribute = new Dictionary<string, object?> { ["gql.action"] = isDml ? "write" : "read" };
 
         // 5. Resolve RLS filters and Column Masking for all referenced physical tables
         var tableRlsFilters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -300,6 +296,22 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         // actually use). Without a configured connection (synthetic dev/test path) the catalog dialect of the first table
         // is used. Every referenced table must have exactly this dialect.
         DatabaseDialect? targetDatabaseDialect = ResolveConnectionDialect(dataSourceName);
+
+        // SQL-2: the policy maps below are keyed case-insensitively. Two references that fold to the same key but are
+        // spelled differently may address different physical relations (PostgreSQL quoted identifiers, SQL Server with
+        // a case-sensitive collation), and their policies would overwrite each other -> reject.
+        var referenceSpellings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var target in metadata.ReferencedTables)
+        {
+            if (referenceSpellings.TryGetValue(target.FullName, out var firstSpelling) &&
+                !string.Equals(firstSpelling, target.FullName, StringComparison.Ordinal))
+            {
+                _logger?.LogWarning("WebSQL rejected table {Table}: referenced with differing letter case ('{First}').", target.FullName, firstSpelling);
+                throw TableDenied(target);
+            }
+
+            referenceSpellings[target.FullName] = target.FullName;
+        }
 
         foreach (var target in metadata.ReferencedTables)
         {
@@ -381,12 +393,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 throw TableDenied(target);
             }
 
-            // SQ-09: If a 3-part name was used, validate the catalog part against the data source / catalog
-            if (!string.IsNullOrWhiteSpace(target.Catalog) &&
-                !string.Equals(target.Catalog, dataSourceName, StringComparison.OrdinalIgnoreCase) &&
-                (string.IsNullOrWhiteSpace(tableMeta.Table.SourceName) || !string.Equals(target.Catalog, tableMeta.Table.SourceName, StringComparison.OrdinalIgnoreCase)))
+            // SQ-09 / SQL-5: The catalog part of a 3-part name is emitted verbatim. On SQL Server it names a database,
+            // which is not the logical data source name it was checked against -> 3-part names are rejected.
+            if (!string.IsNullOrWhiteSpace(target.Catalog))
             {
-                _logger?.LogWarning("WebSQL rejected table {Table}: 3-part catalog '{Catalog}' does not match data source '{DataSource}'.", target.FullName, target.Catalog, dataSourceName);
+                _logger?.LogWarning("WebSQL rejected table {Table}: 3-part names (catalog '{Catalog}') are not supported.", target.FullName, target.Catalog);
                 throw TableDenied(target);
             }
 
@@ -410,54 +421,24 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 accessedTables.Add(resolvedId);
             }
 
-            // SEC C-03: Consent model (same truth table as the GraphQL path)
-            TableAccessDecision decision;
-            if (consentBypassed)
-            {
-                decision = TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
-            }
-            else if (_consentRepository == null || _consentResolution == null)
+            // SEC C-03 / Architecture 1: the shared access decision (ReBAC on query paths, consents with the decision
+            // cache, Casbin as an additional restriction). The merged row filter is validated below.
+            if (!consentBypassed && (_consentRepository == null || _consentResolution == null))
             {
                 _logger?.LogError("WebSQL cannot evaluate consents (consent services not available); denying access (fail-closed).");
                 throw TableDenied(target);
             }
-            else
-            {
-                var allSubjects = groupSids.Append(userSid).ToList();
-                var activeConsents = await _consentRepository.GetActiveConsentsForSubjectsAsync(allSubjects, resolvedId, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
-                var tenantConsents = activeConsents.Where(c => c.TenantId == tenantId).ToList();
-                decision = _consentResolution.ResolveAccess(userSid, groupSids, roles, resolvedId, tenantConsents, tableMeta.Dialect);
-            }
+
+            var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
+                ? TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
+                : await AccessPolicy().DecideAsync(
+                    new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute),
+                    ct).ConfigureAwait(false);
 
             if (!decision.IsAllowed)
             {
-                _logger?.LogWarning("WebSQL access to table {Table} denied by consent model.", target.FullName);
+                _logger?.LogWarning("WebSQL access to table {Table} denied: {Reasons}", target.FullName, string.Join("; ", decision.DeniedReasons));
                 throw TableDenied(target);
-            }
-
-            // ABAC (Casbin) is applied as an additional restriction only
-            if (_policyEnforcement != null && _policyEnforcement.HasPolicies(tenantId))
-            {
-                var secContext = new SecurityEvaluationContext(
-                    UserSid: userSid,
-                    GroupSids: groupSids,
-                    Tenant: tenantId,
-                    TargetTable: resolvedId,
-                    RequestedColumns: colList,
-                    ClientIp: clientIp,
-                    Timestamp: DateTimeOffset.UtcNow,
-                    PurposeId: purpose,
-                    Attributes: attributes,
-                    TargetDialect: tableMeta.Dialect);
-
-                var policyDecision = await _policyEnforcement.EvaluatePolicyAsync(secContext, ct).ConfigureAwait(false);
-                if (!policyDecision.IsAllowed)
-                {
-                    _logger?.LogWarning("WebSQL access to table {Table} denied by ABAC policy.", target.FullName);
-                    throw TableDenied(target);
-                }
-
-                decision = RestrictWithPolicy(decision, policyDecision, tableMeta);
             }
 
             // Row-level security: tenant isolation (defense in depth) AND consent/ABAC row filters
@@ -797,14 +778,13 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
         if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString) || _connectionFactory == null)
         {
-            bool isDevOrTest = _environment == null ||
-                               string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
-                               string.Equals(_environment.EnvironmentName, "Test", StringComparison.OrdinalIgnoreCase);
+            bool isDev = _environment != null &&
+                         string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
             bool isExplicitlyAllowed = _options.Value.AreExternalSystemsMockedIfUnreachable;
 
-            if (!isDevOrTest && !isExplicitlyAllowed)
+            if (!isDev && !isExplicitlyAllowed)
             {
-                throw new NotSupportedException($"No active database connection configured for data source '{dsName}'. Synthetic fallback is disabled in production.");
+                throw new GatewayNotImplementedException($"No active database connection configured for data source '{dsName}'. Synthetic fallback is disabled outside Development.");
             }
 
             if (dmlContext.IsDml)
@@ -848,6 +828,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         }
 
         DbTransaction? tx = null;
+        bool txCommitted = false;
         try
         {
             // Real Database Execution
@@ -909,7 +890,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             if (dmlContext.IsDml)
             {
                 await ExecuteDmlInTransactionAsync(connection, command, tx, tenantId, user, dsName, dmlContext, securedSql, ct).ConfigureAwait(false);
-                tx = null;
+                txCommitted = true;
 
                 // DML produces no result set; hand an empty reader to the writer (same shape as before).
                 using var emptyTable = new DataTable();
@@ -926,13 +907,13 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             if (tx != null)
             {
                 await tx.CommitAsync(ct).ConfigureAwait(false);
-                tx = null;
+                txCommitted = true;
             }
             return securedSql;
         }
         catch (Exception)
         {
-            if (tx != null)
+            if (tx != null && !txCommitted)
             {
                 try
                 {
@@ -980,32 +961,59 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         long maxAffectedRows = _options.Value.WebSql.MaxAffectedRows;
         int affectedRows;
 
+        bool ownsTx = existingTx == null;
         DbTransaction transaction = existingTx ?? await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         command.Transaction = transaction;
 
         try
         {
-            affectedRows = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            try
+            {
+                affectedRows = await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                try
+                {
+                    await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception rbEx)
+                {
+                    _logger?.LogWarning(rbEx, "Failed to rollback WebSQL DML transaction.");
+                }
+
+                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_FAILED", "DENY", securedSql, affectedRows: null, reason: ex.GetType().Name, synthetic: false, ct).ConfigureAwait(false);
+                throw;
+            }
+
+            if (maxAffectedRows > 0 && (affectedRows < 0 || affectedRows > maxAffectedRows))
+            {
+                try
+                {
+                    await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception rbEx)
+                {
+                    _logger?.LogWarning(rbEx, "Failed to rollback WebSQL DML transaction after row limit exceeded.");
+                }
+
+                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_REJECTED", "DENY", securedSql, affectedRows, reason: "MaxAffectedRows exceeded; rolled back", synthetic: false, ct).ConfigureAwait(false);
+
+                throw new WebSqlPolicyException(affectedRows < 0
+                    ? "The number of rows affected by the DML statement could not be verified against WebSql.MaxAffectedRows. The statement was rolled back."
+                    : $"The DML statement affected {affectedRows} rows, which exceeds the configured limit of {maxAffectedRows} (WebSql.MaxAffectedRows). The statement was rolled back.");
+            }
+
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_EXECUTED", "ALLOW", securedSql, affectedRows, reason: null, synthetic: false, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        finally
         {
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_FAILED", "DENY", securedSql, affectedRows: null, reason: ex.GetType().Name, synthetic: false, ct).ConfigureAwait(false);
-            throw;
+            if (ownsTx)
+            {
+                await transaction.DisposeAsync().ConfigureAwait(false);
+            }
         }
-
-        if (maxAffectedRows > 0 && (affectedRows < 0 || affectedRows > maxAffectedRows))
-        {
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_REJECTED", "DENY", securedSql, affectedRows, reason: "MaxAffectedRows exceeded; rolled back", synthetic: false, ct).ConfigureAwait(false);
-
-            throw new WebSqlPolicyException(affectedRows < 0
-                ? "The number of rows affected by the DML statement could not be verified against WebSql.MaxAffectedRows. The statement was rolled back."
-                : $"The DML statement affected {affectedRows} rows, which exceeds the configured limit of {maxAffectedRows} (WebSql.MaxAffectedRows). The statement was rolled back.");
-        }
-
-        await transaction.CommitAsync(ct).ConfigureAwait(false);
-        await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_EXECUTED", "ALLOW", securedSql, affectedRows, reason: null, synthetic: false, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1181,55 +1189,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
     }
 
-    /// <summary>
-    /// SEC C-03: Applies an ABAC (Casbin) decision as an additional restriction on top of the consent decision.
-    /// Column levels can only be lowered; an explicit Clear can only come from the consent decision.
-    /// Row filters are combined with AND.
-    /// </summary>
-    private static TableAccessDecision RestrictWithPolicy(TableAccessDecision consentDecision, TableAccessDecision policyDecision, TableMetadata tableMeta)
-    {
-        var mergedColumns = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
-        foreach (var col in tableMeta.Columns)
-        {
-            var policyLevel = policyDecision.GetColumnAccess(col.ColumnName);
-            if (consentDecision.ColumnAccess.TryGetValue(col.ColumnName, out var explicitLevel))
-            {
-                mergedColumns[col.ColumnName] = explicitLevel < policyLevel ? explicitLevel : policyLevel;
-            }
-            else if (consentDecision.HasUnconstrainedColumnAllow)
-            {
-                if (policyLevel != ColumnAccessLevel.Clear)
-                {
-                    mergedColumns[col.ColumnName] = policyLevel;
-                }
-            }
-        }
-
-        string? mergedFilter = consentDecision.CombinedRowFilterSql;
-        if (!string.IsNullOrWhiteSpace(policyDecision.CombinedRowFilterSql))
-        {
-            SqlSecurityValidator.ValidatePredicateSql(policyDecision.CombinedRowFilterSql, "CombinedRowFilterSql");
-            mergedFilter = !string.IsNullOrWhiteSpace(mergedFilter)
-                ? $"({mergedFilter}) AND ({policyDecision.CombinedRowFilterSql})"
-                : policyDecision.CombinedRowFilterSql;
-        }
-
-        Dictionary<string, object?>? mergedParameters = null;
-        if (consentDecision.RowFilterParameters != null || policyDecision.RowFilterParameters != null)
-        {
-            mergedParameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            AddInternalRowFilterParameters(consentDecision.RowFilterParameters, mergedParameters);
-            AddInternalRowFilterParameters(policyDecision.RowFilterParameters, mergedParameters);
-        }
-
-        return consentDecision with
-        {
-            ColumnAccess = mergedColumns,
-            CombinedRowFilterSql = mergedFilter,
-            RowFilterParameters = mergedParameters ?? consentDecision.RowFilterParameters
-        };
-    }
-
+    /// <summary>Row filters of different tables share one parameter set; the same name with two values is refused.</summary>
     private static void AddInternalRowFilterParameters(IReadOnlyDictionary<string, object?>? source, Dictionary<string, object?> target)
     {
         if (source == null)
@@ -1248,6 +1208,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             target[name] = value;
         }
     }
+
+    /// <summary>Architecture 1: the shared table access decision; only called with consent services present.</summary>
+    private TableAccessPolicy AccessPolicy() =>
+        new(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value);
 
     /// <summary>
     /// SEC P-05: Dialect of the configured connection for <paramref name="dataSourceName"/>, or null when no connection
@@ -1273,40 +1237,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     }
 
     /// <summary>
-    /// SEC P-05: Maps DataSourceConnectionOptions.Provider to a dialect, using the same provider names as the SQL
-    /// connection factory. Returns false for unknown providers.
+    /// SEC P-05: Maps DataSourceConnectionOptions.Provider to a dialect WebSQL can rewrite for. Returns false for
+    /// unknown providers and for dialects without a dedicated WebSQL rewrite.
     /// </summary>
-    internal static bool TryMapProviderToDialect(string? provider, out DatabaseDialect dialect)
-    {
-        switch (provider?.Trim().ToLowerInvariant() ?? "sqlite")
-        {
-            case "sqlite":
-            case "sqlite3":
-                dialect = DatabaseDialect.Sqlite;
-                return true;
-            case "sqlserver":
-            case "mssql":
-            case "microsoft sql server":
-                dialect = DatabaseDialect.SqlServer;
-                return true;
-            case "postgres":
-            case "postgresql":
-            case "npgsql":
-                dialect = DatabaseDialect.PostgreSql;
-                return true;
-            default:
-                dialect = default;
-                return false;
-        }
-    }
+    internal static bool TryMapProviderToDialect(string? provider, out DatabaseDialect dialect) =>
+        DataSourceProvider.TryResolveDialect(provider, out dialect) && IsWebSqlSupportedDialect(dialect);
 
     /// <summary>SEC P-05: Dialects with a dedicated, tested WebSQL rewrite.</summary>
     internal static bool IsWebSqlSupportedDialect(DatabaseDialect dialect) =>
         dialect is DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer or DatabaseDialect.Sqlite;
-
-    /// <summary>SEC P-05 / SQ-01: Session initialization statement executed before every WebSQL statement (null = none).</summary>
-    internal static string? GetSessionInitializationSql(DatabaseDialect dialect) =>
-        dialect == DatabaseDialect.PostgreSql ? PostgreSqlSessionInitializationSql : null;
 
     // SEC M-10: Identical message for "unknown table" and "access denied" (no catalog enumeration oracle, no policy details)
     private static WebSqlPolicyException TableDenied(TableAccessTarget target) =>
@@ -1499,7 +1438,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
             if (!string.IsNullOrWhiteSpace(rule.Replacement))
             {
-                return $"'{rule.Replacement.Replace("'", "''")}'";
+                var prefix = tableMeta.Dialect == DatabaseDialect.SqlServer ? "N" : string.Empty;
+                return $"{prefix}'{tableMeta.Dialect.EscapeSqlLiteral(rule.Replacement)}'";
             }
         }
         return "'***'";

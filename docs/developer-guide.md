@@ -14,8 +14,7 @@ This guide helps engineers run the gateway locally with zero external dependenci
 8. [Testing Data Catalog Synchronization](#8-testing-data-catalog-synchronization)
 9. [Testing Lineage & GDPR Disclosure Queries](#9-testing-lineage--gdpr-disclosure-queries)
 10. [Validating Casbin Governance Policies](#10-validating-casbin-governance-policies)
-11. [Testing Vector Databases, RAG Egress & Semantic Cache](#11-testing-vector-databases-rag-egress--semantic-cache-f-ai-09--f-ai-10)
-12. [Testing In-Memory OLAP & Arrow Export](#12-testing-in-memory-olap--arrow-export-f-data-03--f-data-04)
+11. [Testing In-Memory OLAP & Arrow Export](#11-testing-in-memory-olap--arrow-export-f-data-03--f-data-04)
 
 ---
 
@@ -250,10 +249,13 @@ During early development or when onboarding third-party webhooks (e.g. ServiceNo
 ```
 
 - `Insecure` is the **only** place for `warn_*` / `danger_*` flags. The former domain-local copies (e.g. `Mcp:danger_bypass_mcp_auth`, `GraphQL:warn_allow_all_cors_origins`, `WebSql:warn_allow_dml`) were removed in ADR-012 phase 4. If an old key is still set to `true`, the gateway refuses to start and names the replacement (`LegacySwitchGuard`); `WebSql:warn_allow_dml` became `WebSql:AllowDml`. Environment variables follow the same rule: use `Gateway__Insecure__<name>`.
-- `danger_*` flags are forbidden outside Development. Some `warn_*` flags (e.g. `warn_enable_introspection`) additionally need the explicit opt-in `AllowInsecureWarnFlagsInProduction`.
+- `danger_*` flags are forbidden outside Development. Any active `DANGER:` switch causes an immediate, fail-fast process startup crash via `ValidationException`. Some `warn_*` flags (e.g. `warn_enable_introspection`) additionally need the explicit opt-in `AllowInsecureWarnFlagsInProduction`.
 
 > [!WARNING]
-> Never commit `danger_* = true` in production configuration files. CI audits reject it.
+> **Migration Notice (R-API-1 / API-1)**:
+> Outside of the `Development` environment, setting `Itsm.LegacyGlobalWebhookSecret = true` or enabling any `DANGER:` bypass flags strictly blocks application startup with a `ValidationException`.
+> Deployments that previously relied on the global ITSM webhook secret must migrate to per-instance webhook secrets (`itsm:webhook-secret:<instanceId>`).
+> Never commit `danger_* = true` or `Itsm.LegacyGlobalWebhookSecret = true` in non-development configuration files.
 
 ---
 
@@ -374,35 +376,7 @@ dotnet run --project tools/casbin-policy-lint/casbin-policy-lint.csproj
 
 ---
 
-## 11. Testing Vector Databases, RAG Egress & Semantic Cache (`F-AI-09` / `F-AI-10`)
-
-Developers can verify RAG search, chunk PII redaction, and semantic caching locally:
-
-```bash
-# Run dedicated security & vector integration tests
-dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj --filter "FullyQualifiedName~Vector|FullyQualifiedName~Semantic"
-```
-
-To invoke RAG search through the Model Context Protocol (MCP) tool:
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "search_rag_context",
-    "arguments": {
-      "collection": "public.documents",
-      "query_vector": [0.12, 0.45, -0.22, 0.89],
-      "top_k": 5
-    }
-  }
-}
-```
-
----
-
-## 12. Testing In-Memory OLAP & Arrow Export (`F-DATA-03` / `F-DATA-04`)
+## 11. Testing In-Memory OLAP & Arrow Export (`F-DATA-03` / `F-DATA-04`)
 
 Test fast vector analytical queries and Arrow Flight/IPC endpoints:
 

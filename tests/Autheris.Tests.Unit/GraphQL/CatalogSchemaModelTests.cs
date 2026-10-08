@@ -1,3 +1,4 @@
+using System.Linq;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -46,7 +47,7 @@ public sealed class CatalogSchemaModelTests
     }
 
     [Fact]
-    public async Task BuildAsync_DeduplicatesCollidingTableNames()
+    public async Task BuildAsync_CollidingTableNames_OmitsDuplicateAndPreservesCanonicalTable()
     {
         var metaRepo = Substitute.For<ITableMetadataRepository>();
         var relRepo = Substitute.For<ITableRelationRepository>();
@@ -63,9 +64,58 @@ public sealed class CatalogSchemaModelTests
 
         var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
 
-        Assert.Equal(2, model.Tables.Count);
-        Assert.NotEqual(model.Tables[0].TypeName, model.Tables[1].TypeName);
-        Assert.EndsWith("_2", model.Tables[1].TypeName);
+        // G-2: Stable naming - the canonical table is preserved, the colliding duplicate is omitted
+        var canonicalTable = Assert.Single(model.Tables);
+        Assert.Equal(table1.Identifier, canonicalTable.Identifier);
+        Assert.Equal("sales_dbo_orders_item", canonicalTable.TypeName);
+    }
+
+    [Fact]
+    public async Task BuildAsync_TableCollidingWithFilterNameOfEarlierTable_IsOmittedAndPreservesCanonicalTable()
+    {
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+
+        var table1 = CreateTable(new TableIdentifier("db", "public", "orders"), dialect: "SqlServer");
+        var table2 = CreateTable(new TableIdentifier("db", "public", "orders_filter"), dialect: "SqlServer");
+
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([table1, table2]);
+
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
+
+        // G-2: orders is preserved with canonical name and not renamed to orders_2; orders_filter is omitted
+        var canonicalTable = Assert.Single(model.Tables);
+        Assert.Equal(table1.Identifier, canonicalTable.Identifier);
+        Assert.Equal("db_public_orders", canonicalTable.TypeName);
+        Assert.Equal("db_public_orders_filter", canonicalTable.FilterTypeName);
+    }
+
+    [Fact]
+    public async Task BuildAsync_TableCollidingWithOrderByNameOfEarlierTable_IsOmittedAndPreservesCanonicalTable()
+    {
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+
+        var table1 = CreateTable(new TableIdentifier("db", "public", "orders"), dialect: "SqlServer");
+        var table2 = CreateTable(new TableIdentifier("db", "public", "orders_order_by"), dialect: "SqlServer");
+
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([table1, table2]);
+
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
+
+        // G-2: orders is preserved with canonical name and not renamed; orders_order_by is omitted
+        var canonicalTable = Assert.Single(model.Tables);
+        Assert.Equal(table1.Identifier, canonicalTable.Identifier);
+        Assert.Equal("db_public_orders", canonicalTable.TypeName);
+        Assert.Equal("db_public_orders_order_by", canonicalTable.OrderByTypeName);
     }
 
     [Fact]
@@ -102,6 +152,47 @@ public sealed class CatalogSchemaModelTests
         Assert.Equal(CatalogFieldType.Boolean, colMap["is_available"]);
         Assert.Equal(CatalogFieldType.DateTime, colMap["created_at"]);
         Assert.Equal(CatalogFieldType.String, colMap["description"]);
+    }
+
+    [Fact]
+    public async Task BuildAsync_ColumnWithHmacMaskingRule_IsTypedAsStringInSchema()
+    {
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+
+        var table = CreateTable(
+            new TableIdentifier("billing", "dbo", "payments"),
+            dialect: "PostgreSql",
+            columns:
+            [
+                new TableColumn { ColumnName = "id", DataType = "bigint" },
+                new TableColumn { ColumnName = "user_id", DataType = "int" },
+                new TableColumn { ColumnName = "amount", DataType = "decimal(18,2)" },
+                new TableColumn { ColumnName = "is_verified", DataType = "boolean" },
+                new TableColumn { ColumnName = "created_at", DataType = "timestamptz" }
+            ],
+            columnMaskingRules: new Dictionary<string, MaskingRule>
+            {
+                ["user_id"] = new MaskingRule { RuleType = "HMAC" },
+                ["amount"] = new MaskingRule { RuleType = "HMAC_SHA256" },
+                ["is_verified"] = new MaskingRule { RuleType = "HASH" }
+            });
+
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([table]);
+
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns([]);
+
+        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
+        var tableType = Assert.Single(model.Tables);
+
+        var colMap = tableType.Columns.ToDictionary(c => c.ColumnName, c => c.FieldType);
+        Assert.Equal(CatalogFieldType.Long, colMap["id"]); // unmasked
+        Assert.Equal(CatalogFieldType.String, colMap["user_id"]); // HMAC -> String
+        Assert.Equal(CatalogFieldType.String, colMap["amount"]); // HMAC_SHA256 -> String
+        Assert.Equal(CatalogFieldType.String, colMap["is_verified"]); // HASH -> String
+        Assert.Equal(CatalogFieldType.DateTime, colMap["created_at"]); // unmasked
     }
 
     [Fact]
@@ -205,12 +296,49 @@ public sealed class CatalogSchemaModelTests
         Assert.Equal("profile_rel", relField.FieldName);
     }
 
+    [Fact]
+    public async Task BuildAsync_TablesOfDialectsWithoutTreeCompiler_AreOmitted()
+    {
+        // R-GQL-13: Oracle and Databricks tables were in the schema, but every query failed with NotSupported.
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+        var pg = CreateTable(new TableIdentifier("sales", "public", "orders"), dialect: "PostgreSql");
+        var oracle = CreateTable(new TableIdentifier("erp", "app", "invoices"), dialect: "Oracle");
+        var databricks = CreateTable(new TableIdentifier("lake", "gold", "facts"), dialect: "Databricks");
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([pg, oracle, databricks]);
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
+
+        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
+
+        Assert.Equal(pg.Identifier, Assert.Single(model.Tables).Identifier);
+    }
+
+    [Fact]
+    public async Task BuildAsync_ColumnsWithoutPlainNames_AreOmitted()
+    {
+        // R-GQL-13: "a-b" was offered as a_b but the tree compiler rejects such column names.
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var relRepo = Substitute.For<ITableRelationRepository>();
+        var table = CreateTable(new TableIdentifier("sales", "public", "orders"), columns:
+        [
+            new TableColumn { ColumnName = "id", DataType = "int" },
+            new TableColumn { ColumnName = "unit-price", DataType = "decimal" }
+        ]);
+        metaRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+        relRepo.GetRelationsForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns([]);
+
+        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
+
+        Assert.Equal(["id"], Assert.Single(model.Tables).Columns.Select(c => c.ColumnName));
+    }
+
     private static TableMetadata CreateTable(
         TableIdentifier id,
         bool isActive = true,
         DataSourceType dsType = DataSourceType.Sql,
         string dialect = "PostgreSql",
-        IReadOnlyList<TableColumn>? columns = null)
+        IReadOnlyList<TableColumn>? columns = null,
+        IReadOnlyDictionary<string, MaskingRule>? columnMaskingRules = null)
     {
         return new TableMetadata
         {
@@ -221,7 +349,8 @@ public sealed class CatalogSchemaModelTests
                 SourceType = dialect,
                 DataSourceType = dsType
             },
-            Columns = columns ?? [new TableColumn { ColumnName = "id", DataType = "int" }]
+            Columns = columns ?? [new TableColumn { ColumnName = "id", DataType = "int" }],
+            ColumnMaskingRules = columnMaskingRules ?? new Dictionary<string, MaskingRule>()
         };
     }
 }

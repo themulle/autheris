@@ -75,8 +75,13 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
     {
         GatewayInvalidQueryException e => (StatusCodes.Status400BadRequest, e.Message, null),
         GatewayThrottledException e => (StatusCodes.Status429TooManyRequests, "Too many concurrent requests. Retry later.", e.RetryAfterSeconds),
-        GatewayUnsupportedColumnTypeException e => (StatusCodes.Status501NotImplemented, e.Message, null),
-        NotSupportedException e => (StatusCodes.Status501NotImplemented, e.Message, null),
+        GatewayNotImplementedException => (StatusCodes.Status501NotImplemented, "The requested feature or data source capability is not implemented.", null),
+        GatewayUnsupportedColumnTypeException => (StatusCodes.Status501NotImplemented, "The requested column type is not supported.", null),
+        NotSupportedException => (StatusCodes.Status501NotImplemented, "The requested operation is not supported.", null),
+        Antlr4.Runtime.Misc.ParseCanceledException => (StatusCodes.Status400BadRequest, "Invalid SQL syntax.", null),
+        Antlr4.Runtime.RecognitionException => (StatusCodes.Status400BadRequest, "Invalid SQL syntax.", null),
+        Exception e when e.InnerException is Antlr4.Runtime.Misc.ParseCanceledException or Antlr4.Runtime.RecognitionException =>
+            (StatusCodes.Status400BadRequest, "Invalid SQL syntax.", null),
         GatewayUnauthorizedException => (StatusCodes.Status401Unauthorized, "Authentication required.", null),
         GatewaySecurityException { ErrorCode: "RESPONSE_TOO_LARGE" } => (StatusCodes.Status400BadRequest, "The response exceeds the size limit.", null),
         GatewaySecurityException => (StatusCodes.Status403Forbidden, "Access denied.", null),

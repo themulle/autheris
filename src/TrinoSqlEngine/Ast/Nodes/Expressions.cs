@@ -7,6 +7,13 @@ public abstract record Expression : SqlNode;
 
 public sealed record ColumnReference(SqlQualifiedName Name) : Expression;
 
+/// <summary>
+/// SQL-4: an expression rendered by the gateway itself for the target dialect (column mask expressions with bound key
+/// parameters, e.g. <c>ENCODE(HMAC(..., @key, 'sha256'), 'hex')</c> or T-SQL <c>HASHBYTES</c>). It is emitted verbatim,
+/// as the legacy rewriter does. The AST builder never creates it, so client SQL can never produce this node.
+/// </summary>
+public sealed record TrustedSqlExpression(string Sql) : Expression;
+
 public sealed record ParameterReference(
     string Name,
     int? PositionalIndex = null,

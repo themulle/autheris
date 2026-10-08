@@ -129,6 +129,12 @@ public sealed class McpToolRegistry : IMcpToolRegistry
             TargetGraphQLOperation: "get_golden_queries"
         ));
 
+        // 6. Built-in dataset tools: catalog discovery and governed sample rows
+        foreach (var datasetTool in McpDatasetTools.Definitions())
+        {
+            RegisterTool(datasetTool);
+        }
+
         // Register any explicitly declared operations
         if (allowedOperations != null)
         {

@@ -360,6 +360,12 @@ public class AuthenticationSecurityTests
     }
 
     [Fact]
+    public void API_09_ForwardAuth_DataProtectionOfficer_IsForbiddenFromHeaders()
+    {
+        ForwardAuthAuthenticationHandler.IsHeaderForbiddenRole("DataProtectionOfficer").ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task RR_L2_02_ForwardAuth_TenantNotInAllowlist_IsRejected()
     {
         var options = new GatewayOptions

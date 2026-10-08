@@ -9,7 +9,7 @@
 [![CI Build & Test](https://img.shields.io/badge/CI-Passing-brightgreen?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
 [![Tests](https://img.shields.io/badge/Tests-3%2C700%2B%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
 [![Security Review](https://img.shields.io/badge/Security%20Review-2026--10--02%20Remediated-brightgreen)](security-review-2026-10-02.md)
-[![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/themulle/gql/pkgs/container/gql)
+[![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/themulle/autheris/pkgs/container/autheris)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20Onion-blue)](docs/architecture/arc42.md)
 [![Diagram](https://img.shields.io/badge/Diagram-Architecture%20%26%20Capabilities-informational)](#-architecture--capabilities-overview-at-a-glance)
 [![Features](https://img.shields.io/badge/Features-45%2B%20Enterprise%20Catalog-blueviolet)](docs/features/README.md)
@@ -57,7 +57,7 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
   - Dynamic schema generation and type projection driven by the active governance catalog.
   - Incremental data delivery via `@defer` and `@stream` ([`F-PERF-12`](docs/features/f-perf-12-incremental-delivery.md)) to dramatically reduce Time-to-First-Byte (TTFB) for large payloads.
   - GraphQL-to-SQL AST Single-Query Compiler ([`F-PERF-09`](docs/features/f-perf-09-single-query-pushdown.md)): Compiles deeply nested GraphQL selections directly into a single optimized SQL statement with relational `JOIN`s, eliminating N+1 roundtrips.
-  - Multi-Stage Pushdown Cascades & Cross-Domain Joins ([`F-GOV-06`](docs/features/f-gov-06-cross-domain-joins.md)): Cross-domain joins across heterogeneous data sources with automated split execution.
+  - Cross-source joins run through the DuckDB OLAP endpoint; the multi-stage pushdown design ([`F-GOV-06`](docs/features/f-gov-06-cross-domain-joins.md)) is not implemented.
   - Dynamic Schema Contracts & Tag-Based Projection via `@tag` ([`F-GOV-08`](docs/features/f-gov-08-schema-contracts-tag-projection.md)).
   - OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing ([`F-OPEN-01`](docs/features/f-open-01-openschema-catalog-slicing.md)).
 - **Governed WebSQL Engine ([`F-DATA-02`](docs/features/f-data-02-governed-websql.md))**:
@@ -130,6 +130,8 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
 
 - **Enterprise MCP Server Gateway ([`ADR-014`](docs/adr/ADR-014-enterprise-model-context-protocol-and-ai-data-guardrails.md))**:
   - Standard I/O runner (`McpStdioRunner`) and streaming HTTP/SSE endpoints (`/mcp`, `/mcp/sse`) for AI agents (Claude, Cursor, LangChain).
+- **MCP Dataset Tools ([`F-AI-11`](docs/features/f-ai-11-mcp-dataset-tools.md))**:
+  - `list_datasets` and `describe_dataset` let agents discover every dataset they may use; `query_graphql` queries it through GraphQL, the preferred path. The other protocols (OData, OpenAPI, WebSQL, procedures, OLAP, Arrow) are listed too. Consent, row filters and masking apply as for the HTTP APIs.
 - **Semantic MCP Compiler & Schema Grounding ([`F-AI-02`](docs/features/f-ai-02-semantic-mcp-compiler.md))**:
   - Automatically transforms GraphQL and relational database schemas into semantically enriched, LLM-optimized tool signatures.
 - **Dynamic Few-Shot Golden Query Injection ([`F-AI-03`](docs/features/f-ai-03-golden-queries.md))**:
@@ -144,10 +146,6 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
   - Minimizes LLM token context by filtering schemas down to task-relevant entities and attributes.
 - **FOCUS FinOps Token & Compute Accounting ([`F-AI-08`](docs/features/f-ai-08-focus-finops-accounting.md))**:
   - FinOps Open Cost and Usage Specification accounting (`/api/v1/finops/*`) with tenant- and user-level budget tracking for LLM tokens and compute latency.
-- **Native Vector Database & RAG Egress ([`F-AI-09`](docs/features/f-ai-09-native-vector-database-rag-egress.md))**:
-  - Direct vector search execution and egress pipelines targeting pgvector, Qdrant, and Milvus.
-- **Semantic Query Cache & Autonomous Policy Recommendation ([`F-AI-10`](docs/features/f-ai-10-semantic-cache-policy-recommendation.md))**:
-  - Vector similarity caching and ML-driven policy recommendations derived from live access patterns.
 
 ---
 
@@ -233,9 +231,9 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
 
 | Configuration Switch | Classification | Behavior |
 |---|---|---|
-| `danger_allow_anonymous_access`, `danger_bypass_consent_checks`, `danger_disable_column_masking`, `danger_allow_insecure_transport`, `danger_bypass_webhook_signature_validation`, `danger_bypass_mcp_auth`, `danger_bypass_websql_governance`, `OpenSchema` | DANGER | Outside of `Development`, the gateway strictly refuses to start (`ValidateGatewayOptions`). `/health/ready` reports 503 Unhealthy. |
-| `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests` | DANGER (Legacy Prefix) | Fatal startup error outside of `Development`. |
-| `warn_allow_all_cors_origins`, `warn_relaxed_query_limits`, `warn_enable_introspection`, `warn_fallback_default_tenant_for_webhooks`, `Catalog.AllowLegacyPayloadOnlySignature`, `Itsm.LegacyGlobalWebhookSecret` | WARN | Permitted in production, but generates console warning banners and marks health status as `degraded`. |
+| `danger_allow_anonymous_access`, `danger_bypass_consent_checks`, `danger_disable_column_masking`, `danger_allow_insecure_transport`, `danger_bypass_webhook_signature_validation`, `danger_bypass_mcp_auth`, `danger_bypass_websql_governance`, `OpenSchema`, `Itsm.LegacyGlobalWebhookSecret` | DANGER | Outside of `Development`, the gateway strictly refuses to start (`ValidateGatewayOptions`). `/health/ready` reports 503 Unhealthy. |
+| `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_fallback_default_tenant_for_webhooks` | DANGER (Legacy Prefix) | Fatal startup error outside of `Development`. |
+| `warn_allow_all_cors_origins`, `warn_relaxed_query_limits`, `warn_enable_introspection`, `Catalog.AllowLegacyPayloadOnlySignature` | WARN | Permitted in production, but generates console warning banners and marks health status as `degraded`. |
 | `WebSql.AllowDml` (+ mandatory `WebSql.DmlWriterRoles`) | Regular Option | Transactional DML execution with automated rollback and cryptographic audit trail logging. |
 
 ---
@@ -363,10 +361,11 @@ A turnkey container image featuring the integrated **Microsoft Garnet .NET Cache
 > interface only (`127.0.0.1`), as shown below. Never bind them to `0.0.0.0` or a public address.
 
 ```bash
-# Direct Docker run (Ports 8080 HTTP / 8081 HTTPS) – local getting-started mode
-docker run -d -p 127.0.0.1:8080:8080 -p 127.0.0.1:8081:8081 \
+# Direct Docker run (Port 8080 HTTP) – local getting-started mode
+docker run -d -p 127.0.0.1:8080:8080 \
   -e ASPNETCORE_ENVIRONMENT=Development -e AUTHERIS_ALLOW_DEV_IN_CONTAINER=true \
-  --name gql-gateway ghcr.io/themulle/gql:getting-started
+  -v autheris-data:/app/data \
+  --name gql-gateway ghcr.io/themulle/autheris:getting-started
 
 # Or via Docker Compose (Base = Production, Override = local Dev mode)
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d

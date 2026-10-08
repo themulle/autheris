@@ -7,14 +7,6 @@ public sealed class Role
     public string Description { get; init; } = string.Empty;
 }
 
-public sealed class RoleMember
-{
-    public Guid Id { get; init; } = Guid.NewGuid();
-    public Guid RoleId { get; init; }
-    public string MemberType { get; init; } = "USER"; // USER, AD_GROUP
-    public Sid MemberSid { get; init; }
-}
-
 public sealed class DataOwner
 {
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -23,14 +15,6 @@ public sealed class DataOwner
     public string DisplayName { get; init; } = string.Empty;
     public string Email { get; init; } = string.Empty;
     public bool IsActive { get; init; } = true;
-}
-
-public sealed class TableOwner
-{
-    public Guid Id { get; init; } = Guid.NewGuid();
-    public Guid TableId { get; init; }
-    public Guid DataOwnerId { get; init; }
-    public string OwnerRole { get; init; } = "PRIMARY"; // PRIMARY, SECONDARY, STEWARD
 }
 
 public sealed class DataOwnerDelegation

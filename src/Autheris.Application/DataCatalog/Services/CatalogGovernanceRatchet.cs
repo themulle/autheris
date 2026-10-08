@@ -113,16 +113,8 @@ public static class CatalogGovernanceRatchet
         return SensitivityRank(incoming) > SensitivityRank(existing) ? incoming : existing;
     }
 
-    private static int SensitivityRank(string sensitivity) => sensitivity.Trim().ToUpperInvariant() switch
-    {
-        "LOW" or "PUBLIC" => 0,
-        "NORMAL" or "INTERNAL" => 1,
-        "MEDIUM" => 2,
-        "CONFIDENTIAL" => 3,
-        "HIGH" => 4,
-        "RESTRICTED" or "SECRET" => 5,
-        _ => 4 // unknown classifications are treated conservatively
-    };
+    // D-4: one ranking for the ratchet and Table.IsSensitivityHigh (unknown classifications rank like HIGH).
+    private static int SensitivityRank(string sensitivity) => Table.SensitivityRank(sensitivity);
 
     public static int MaskingRuleStrength(MaskingRule rule) => (rule.RuleType ?? string.Empty).Trim().ToUpperInvariant() switch
     {

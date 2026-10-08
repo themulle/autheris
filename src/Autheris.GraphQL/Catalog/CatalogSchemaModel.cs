@@ -2,6 +2,7 @@ using System.Text;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging;
 
 namespace Autheris.GraphQL.Catalog;
 
@@ -43,12 +44,43 @@ public sealed record CatalogTableType(
     IReadOnlyList<CatalogColumnField> Columns,
     IReadOnlyList<CatalogRelationField> Relations);
 
-public sealed class CatalogSchemaModel
+public sealed partial class CatalogSchemaModel
 {
     public IReadOnlyList<CatalogTableType> Tables { get; }
     public IReadOnlyDictionary<TableIdentifier, CatalogTableType> TablesByIdentifier { get; }
     public IReadOnlyDictionary<string, CatalogTableType> TablesByTypeName { get; }
     public IReadOnlyDictionary<string, CatalogTableType> TablesByQueryFieldName { get; }
+
+    /// <summary>R-GQL-12: catalog without tables, used while the governance database is unreachable.</summary>
+    public static CatalogSchemaModel Empty { get; } = new([]);
+
+    /// <summary>
+    /// R-GQL-12: stable fingerprint of everything the generated GraphQL types depend on (type and field names, column
+    /// types, masking-driven typing and relations). A different fingerprint means the schema must be rebuilt.
+    /// </summary>
+    public string Fingerprint()
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var t in Tables)
+        {
+            sb.Append(t.TypeName).Append('|').Append(t.Metadata.Table.SourceType).Append('{');
+            foreach (var c in t.Columns)
+            {
+                sb.Append(c.FieldName).Append(':').Append(c.ColumnName).Append(':').Append(c.FieldType).Append(',');
+            }
+
+            sb.Append('}').Append('[');
+            foreach (var r in t.Relations)
+            {
+                sb.Append(r.FieldName).Append('>').Append(r.TargetTypeName).Append(r.IsList ? "*" : "1")
+                  .Append('(').Append(string.Join(',', r.ParentColumns)).Append('=').Append(string.Join(',', r.ChildColumns)).Append(')');
+            }
+
+            sb.Append("];");
+        }
+
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sb.ToString())));
+    }
 
     private CatalogSchemaModel(List<CatalogTableType> tables)
     {
@@ -61,6 +93,7 @@ public sealed class CatalogSchemaModel
     public static async Task<CatalogSchemaModel> BuildAsync(
         ITableMetadataRepository metadataRepository,
         ITableRelationRepository relationRepository,
+        Microsoft.Extensions.Logging.ILogger? logger = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(metadataRepository);
@@ -68,19 +101,21 @@ public sealed class CatalogSchemaModel
 
         var allTables = await metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
 
-        // Filter: only active SQL tables with supported database dialect
+        // Filter: only active SQL tables whose dialect the tree compiler supports (R-GQL-13: Oracle/Databricks tables
+        // appeared in the schema but every query failed with NotSupported), ordered deterministically
         var activeSqlTables = allTables
             .Where(t => t.Table.IsActive &&
                         t.DataSourceType == DataSourceType.Sql &&
-                        DatabaseDialectExtensions.TryParseDialect(t.Table.SourceType, out _))
-            .OrderBy(t => t.Identifier.Domain)
-            .ThenBy(t => t.Identifier.Schema)
-            .ThenBy(t => t.Identifier.TableName)
+                        DatabaseDialectExtensions.TryParseDialect(t.Table.SourceType, out var dialect) &&
+                        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite)
+            .OrderBy(t => t.Identifier.Domain, StringComparer.Ordinal)
+            .ThenBy(t => t.Identifier.Schema, StringComparer.Ordinal)
+            .ThenBy(t => t.Identifier.TableName, StringComparer.Ordinal)
             .ToList();
 
         var usedSchemaTypeNames = new HashSet<string>(StringComparer.Ordinal)
         {
-            "Query", "AutherisSortDirection",
+            "Query", "Mutation", "Subscription", "AutherisSortDirection",
             "AutherisStringFilter", "AutherisIntFilter", "AutherisLongFilter",
             "AutherisFloatFilter", "AutherisDecimalFilter", "AutherisBooleanFilter",
             "AutherisDateTimeFilter"
@@ -99,15 +134,19 @@ public sealed class CatalogSchemaModel
             var typeName = baseName;
             var filterTypeName = $"{typeName}_filter";
             var orderTypeName = $"{typeName}_order_by";
-            var suffix = 2;
 
-            while (usedSchemaTypeNames.Contains(typeName) ||
-                   usedSchemaTypeNames.Contains(filterTypeName) ||
-                   usedSchemaTypeNames.Contains(orderTypeName))
+            string? collidingName = null;
+            if (usedSchemaTypeNames.Contains(typeName)) collidingName = typeName;
+            else if (usedSchemaTypeNames.Contains(filterTypeName)) collidingName = filterTypeName;
+            else if (usedSchemaTypeNames.Contains(orderTypeName)) collidingName = orderTypeName;
+
+            if (collidingName != null)
             {
-                typeName = $"{baseName}_{suffix++}";
-                filterTypeName = $"{typeName}_filter";
-                orderTypeName = $"{typeName}_order_by";
+                logger?.LogError(
+                    "GraphQL catalog schema: table '{Table}' conflicts with existing schema type name '{CollidingName}'. The table is omitted from GraphQL schema generation to preserve schema stability.",
+                    meta.Identifier.ToQualifiedName(),
+                    collidingName);
+                continue;
             }
 
             usedSchemaTypeNames.Add(typeName);
@@ -120,6 +159,14 @@ public sealed class CatalogSchemaModel
 
             foreach (var col in meta.Columns)
             {
+                // R-GQL-13: the tree compiler only accepts plain column names; others (e.g. "a-b") were offered in the
+                // schema under a sanitized name but could never be queried.
+                if (!QueryableColumnNameRegex().IsMatch(col.ColumnName))
+                {
+                    logger?.LogInformation("GraphQL catalog schema: column '{Column}' of '{Table}' is not a plain identifier and is omitted.", col.ColumnName, meta.Identifier.ToQualifiedName());
+                    continue;
+                }
+
                 var colFieldName = SanitizeGraphQlName(col.ColumnName);
                 if (reservedFilterKeywords.Contains(colFieldName))
                 {
@@ -133,6 +180,12 @@ public sealed class CatalogSchemaModel
                 }
 
                 var fieldType = MapDataType(col.DataType);
+                if (meta.ColumnMaskingRules != null &&
+                    meta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var maskRule) &&
+                    maskRule.IsHmac)
+                {
+                    fieldType = CatalogFieldType.String;
+                }
                 columns.Add(new CatalogColumnField(colFieldName, col.ColumnName, fieldType, col.DataType, true));
             }
 
@@ -290,6 +343,9 @@ public sealed class CatalogSchemaModel
         }
         return string.IsNullOrEmpty(res) ? "_" : res;
     }
+
+    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
+    private static partial System.Text.RegularExpressions.Regex QueryableColumnNameRegex();
 
     public static CatalogFieldType MapDataType(string? dataType)
     {

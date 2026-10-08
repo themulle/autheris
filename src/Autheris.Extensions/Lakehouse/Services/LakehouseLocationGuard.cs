@@ -195,8 +195,8 @@ internal static class LakehouseLocationGuard
     }
 
     /// <summary>
-    /// Buckets that may be addressed: the configured S3 bucket plus the buckets of all configured s3:// / minio:// table locations.
-    /// An empty set means no bucket restriction has been configured.
+    /// Buckets that may be addressed: the configured S3 bucket, <c>S3AllowedBuckets</c> and the buckets of all configured
+    /// s3:// / minio:// table locations. EXT-5: an empty set allows no bucket (fail-closed).
     /// </summary>
     internal static HashSet<string> GetAllowedBuckets(GatewayOptions options)
     {
@@ -205,6 +205,14 @@ internal static class LakehouseLocationGuard
         if (!string.IsNullOrWhiteSpace(storage.S3Bucket))
         {
             buckets.Add(storage.S3Bucket.Trim());
+        }
+
+        foreach (var allowed in storage.S3AllowedBuckets ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(allowed))
+            {
+                buckets.Add(allowed.Trim());
+            }
         }
 
         foreach (var table in options.Lakehouse.Tables.Values)
@@ -232,6 +240,55 @@ internal static class LakehouseLocationGuard
         }
 
         return buckets;
+    }
+
+    /// <summary>
+    /// EXT-5: Azure containers that may be addressed: the configured container, <c>AzureAllowedContainers</c> and the
+    /// containers of all configured abfs(s):// / azure:// table locations. An empty set allows no container (fail-closed).
+    /// </summary>
+    internal static HashSet<string> GetAllowedContainers(GatewayOptions options)
+    {
+        var containers = new HashSet<string>(StringComparer.Ordinal);
+        var storage = options.Lakehouse.Storage;
+        if (!string.IsNullOrWhiteSpace(storage.AzureContainer))
+        {
+            containers.Add(storage.AzureContainer.Trim());
+        }
+
+        foreach (var allowed in storage.AzureAllowedContainers ?? [])
+        {
+            if (!string.IsNullOrWhiteSpace(allowed))
+            {
+                containers.Add(allowed.Trim());
+            }
+        }
+
+        foreach (var table in options.Lakehouse.Tables.Values)
+        {
+            var loc = table.Location;
+            if (string.IsNullOrWhiteSpace(loc)) continue;
+
+            string? container = null;
+            if (loc.StartsWith("abfss://", StringComparison.OrdinalIgnoreCase) || loc.StartsWith("abfs://", StringComparison.OrdinalIgnoreCase))
+            {
+                var raw = loc[(loc.IndexOf("://", StringComparison.Ordinal) + 3)..];
+                var at = raw.IndexOf('@');
+                container = at > 0 ? raw[..at] : null;
+            }
+            else if (loc.StartsWith("azure://", StringComparison.OrdinalIgnoreCase))
+            {
+                var raw = loc[8..];
+                var slash = raw.IndexOf('/');
+                container = slash >= 0 ? raw[..slash] : raw;
+            }
+
+            if (!string.IsNullOrWhiteSpace(container))
+            {
+                containers.Add(container);
+            }
+        }
+
+        return containers;
     }
 
     internal static async ValueTask<string> ReadBoundedTextAsync(HttpContent content, long maxBytes, string location, CancellationToken cancellationToken)

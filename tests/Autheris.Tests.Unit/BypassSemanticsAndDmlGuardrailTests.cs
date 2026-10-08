@@ -128,7 +128,6 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
     }
 
     [Theory]
-    [InlineData("warn_allow_all_cors_origins")]
     [InlineData("warn_relaxed_query_limits")]
     [InlineData("catalog_legacy_payload_only_signature")]
     [InlineData("allow_development_in_container")]
@@ -162,6 +161,28 @@ public sealed class BypassSemanticsAndDmlGuardrailTests
         var optInOptions = new GatewayOptions
         {
             Insecure = new InsecureGettingStartedOptions { warn_enable_introspection = true },
+            AllowInsecureWarnFlagsInProduction = true,
+            DataMasking = ProdMasking()
+        };
+        Should.NotThrow(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(optInOptions, Env(Environments.Production), NoEnvironmentVariables));
+    }
+
+    [Fact]
+    public void SEM_WarnAllowAllCorsOrigins_InProduction_RequiresExplicitOptIn()
+    {
+        var options = WithWarnSwitch("warn_allow_all_cors_origins");
+        options.GetActiveWarnings().ShouldContain(w => w.StartsWith("WARN:warn_allow_all_cors_origins", StringComparison.Ordinal));
+        options.GetActiveDangerBypasses().ShouldBeEmpty();
+
+        // API-16: Prohibited in production without explicit opt-in
+        Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, Env(Environments.Production), NoEnvironmentVariables));
+
+        // Allowed with explicit opt-in
+        var optInOptions = new GatewayOptions
+        {
+            Insecure = new InsecureGettingStartedOptions { warn_allow_all_cors_origins = true },
             AllowInsecureWarnFlagsInProduction = true,
             DataMasking = ProdMasking()
         };

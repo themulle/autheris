@@ -108,7 +108,7 @@ public static partial class AdvancedRlsFilterGenerator
         // Parse and append subquery predicates
         if (!string.IsNullOrWhiteSpace(filter.SubqueryFilterPredicateJson))
         {
-            var parsedConditions = ParseSubqueryPredicates(filter.SubqueryFilterPredicateJson, dialect, Rebase);
+            var parsedConditions = ParseSubqueryPredicates(filter.SubqueryFilterPredicateJson, dialect, Rebase, depAlias);
             whereConditions.AddRange(parsedConditions);
         }
 
@@ -217,9 +217,19 @@ public static partial class AdvancedRlsFilterGenerator
         return dialect.FormatSafeLiteral(elem);
     }
 
-    private static List<string> ParseSubqueryPredicates(string json, DatabaseDialect dialect, Func<string, string> rebase)
+    private static List<string> ParseSubqueryPredicates(string json, DatabaseDialect dialect, Func<string, string> rebase, string? defaultAlias = null)
     {
         var conditions = new List<string>();
+
+        string Qualify(string column)
+        {
+            if (!column.Contains('.') && !string.IsNullOrWhiteSpace(defaultAlias))
+            {
+                return $"{defaultAlias}.{column}";
+            }
+            return column;
+        }
+
         try
         {
             using var doc = JsonDocument.Parse(json);
@@ -228,7 +238,7 @@ public static partial class AdvancedRlsFilterGenerator
                 foreach (var prop in doc.RootElement.EnumerateObject())
                 {
                     ValidateQualifiedIdentifier(prop.Name, "SubqueryPredicate.Column");
-                    var quotedCol = QuoteQualifiedColumn(rebase(prop.Name), dialect);
+                    var quotedCol = QuoteQualifiedColumn(rebase(Qualify(prop.Name)), dialect);
                     if (prop.Value.ValueKind == JsonValueKind.Null)
                     {
                         conditions.Add($"{quotedCol} IS NULL");
@@ -265,7 +275,7 @@ public static partial class AdvancedRlsFilterGenerator
                     {
                         throw new InvalidOperationException("Subquery-Prädikat muss ein 'value'-Property enthalten.");
                     }
-                    var quotedCol = QuoteQualifiedColumn(rebase(col), dialect);
+                    var quotedCol = QuoteQualifiedColumn(rebase(Qualify(col)), dialect);
 
                     if (rawVal.ValueKind == JsonValueKind.Null)
                     {

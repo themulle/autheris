@@ -10,7 +10,7 @@ using System.Text.RegularExpressions;
 /// </summary>
 public readonly record struct TenantId
 {
-    private static readonly Regex SafeTenantIdRegex = new(@"^([a-zA-Z0-9_-]{1,64}|\*)\z", RegexOptions.Compiled);
+    private static readonly Regex SafeTenantIdRegex = new(@"^[a-zA-Z0-9_-]{1,64}\z", RegexOptions.Compiled);
 
     public string Value { get; }
 
@@ -20,14 +20,13 @@ public readonly record struct TenantId
         if (!SafeTenantIdRegex.IsMatch(value))
         {
             throw new ArgumentException(
-                $"Ungültiges TenantId-Format: '{value}'. Erwartet: alphanumerisch, '_', '-', max. 64 Zeichen oder '*'.",
+                $"Ungültiges TenantId-Format: '{value}'. Erwartet: alphanumerisch, '_', '-', max. 64 Zeichen.",
                 nameof(value));
         }
         Value = value;
     }
 
     public static readonly TenantId LegacySingleTenant = new("legacy-single-tenant");
-    public static readonly TenantId Wildcard = new("*");
 
     public static bool TryParse(string? value, out TenantId tenantId)
     {

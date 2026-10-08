@@ -85,13 +85,13 @@ public class SecurityReview20261002EndpointTests
             ["S-1-5-21-ATTACKER", "3f2a-oid-attacker", "attacker@corp.example"],
             "tenant-a");
 
-        var result = service.ApproveStepUpRequest(ticket.ApprovalId, approver);
+        var result = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, approver);
 
         result.IsApproved.ShouldBeFalse();
         result.Message!.ShouldContain("Self-approval is strictly prohibited");
-        service.GetTicket(ticket.ApprovalId)!.Status.ShouldBe(HitLApprovalStatus.Pending);
+        (await service.GetTicketAsync(ticket.ApprovalId))!.Status.ShouldBe(HitLApprovalStatus.Pending);
 
-        service.RejectStepUpRequest(ticket.ApprovalId, new HitLApproverContext("steward", ["steward"], "tenant-a"), "cleanup");
+        await service.RejectStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("steward", ["steward"], "tenant-a"), "cleanup");
         (await requestTask).IsApproved.ShouldBeFalse();
     }
 
@@ -105,16 +105,16 @@ public class SecurityReview20261002EndpointTests
         var ticket = await WaitForPendingTicketAsync(service, "tenant-a");
 
         var foreignApprover = new HitLApproverContext("steward-b", ["steward-b"], "tenant-b");
-        var approveResult = service.ApproveStepUpRequest(ticket.ApprovalId, foreignApprover);
-        var rejectResult = service.RejectStepUpRequest(ticket.ApprovalId, foreignApprover, "sabotage");
+        var approveResult = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, foreignApprover);
+        var rejectResult = await service.RejectStepUpRequestAsync(ticket.ApprovalId, foreignApprover, "sabotage");
 
         approveResult.IsApproved.ShouldBeFalse();
         approveResult.Message.ShouldBe("Approval ticket not found.");
         rejectResult.Message.ShouldBe("Approval ticket not found.");
-        service.GetTicket(ticket.ApprovalId)!.Status.ShouldBe(HitLApprovalStatus.Pending);
+        (await service.GetTicketAsync(ticket.ApprovalId))!.Status.ShouldBe(HitLApprovalStatus.Pending);
 
         // Legitimate approver of the same tenant still works.
-        var ok = service.ApproveStepUpRequest(ticket.ApprovalId, new HitLApproverContext("steward-a", ["steward-a"], "tenant-a"));
+        var ok = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("steward-a", ["steward-a"], "tenant-a"));
         ok.IsApproved.ShouldBeTrue();
         (await requestTask).IsApproved.ShouldBeTrue();
     }
@@ -126,7 +126,7 @@ public class SecurityReview20261002EndpointTests
         var requestTask = service.RequestStepUpApprovalAsync("tool", "tenant-a", "user-a", new TableIdentifier("d", "s", "t"));
         var ticket = await WaitForPendingTicketAsync(service, "tenant-a");
 
-        var result = service.ApproveStepUpRequest(ticket.ApprovalId, new HitLApproverContext("cluster-admin", ["cluster-admin"], "tenant-x", IsCrossTenantAdmin: true));
+        var result = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("cluster-admin", ["cluster-admin"], "tenant-x", IsCrossTenantAdmin: true));
 
         result.IsApproved.ShouldBeTrue();
         (await requestTask).IsApproved.ShouldBeTrue();
@@ -138,7 +138,7 @@ public class SecurityReview20261002EndpointTests
         var service = CreateHitLService();
         var requestTask = service.RequestStepUpApprovalAsync("tool", "tenant-a", "user-a", new TableIdentifier("d", "s", "t"));
         var ticket = await WaitForPendingTicketAsync(service, "tenant-a");
-        service.ApproveStepUpRequest(ticket.ApprovalId, new HitLApproverContext("steward", ["steward"], "tenant-a")).IsApproved.ShouldBeTrue();
+        (await service.ApproveStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("steward", ["steward"], "tenant-a"))).IsApproved.ShouldBeTrue();
         await requestTask;
 
         service.TicketCount.ShouldBe(1);

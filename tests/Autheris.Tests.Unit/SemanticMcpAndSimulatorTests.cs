@@ -54,7 +54,7 @@ public sealed class SemanticMcpAndSimulatorTests
     }
 
     [Fact]
-    public async Task SemanticMcpCompiler_GetSemanticResourcesAsync_YieldsGlossaryAndLineageUris()
+    public async Task SemanticMcpCompiler_GetSemanticResourcesAsync_YieldsGlossary_AndNoInventedLineage()
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         var table = CreateSampleTable();
@@ -64,16 +64,15 @@ public sealed class SemanticMcpAndSimulatorTests
         var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance);
         var resources = await compiler.GetSemanticResourcesAsync("finance");
 
-        resources.Count.ShouldBe(2);
+        resources.Count.ShouldBe(1);
 
         var glossary = resources.FirstOrDefault(r => r.Uri.StartsWith("glossary://", StringComparison.Ordinal));
         glossary.ShouldNotBeNull();
         glossary.Text.ShouldContain("gross_revenue");
         glossary.Text.ShouldContain("[SENSITIVE/MASKED]");
 
-        var lineage = resources.FirstOrDefault(r => r.Uri.StartsWith("dbt://", StringComparison.Ordinal));
-        lineage.ShouldNotBeNull();
-        lineage.Text.ShouldContain("models/marts/finance/monthly_revenue.sql");
+        // The catalog does not know the dbt model of a table; a lineage resource derived from the table name would be invented.
+        resources.ShouldNotContain(r => r.Uri.EndsWith("/lineage", StringComparison.Ordinal));
     }
 
     [Fact]

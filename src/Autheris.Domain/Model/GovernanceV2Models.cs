@@ -110,15 +110,6 @@ public enum DataCatalogSyncMode
     Reference = 2    // Referencing/federated lookup on-demand
 }
 
-public enum DataSensitivityClassification
-{
-    Normal = 1,
-    Internal = 2,
-    Confidential = 3,
-    Pii = 4,
-    GdprArticle9 = 5 // Special category under GDPR Art. 9 (Health, Biometrics, Political, Religious, etc.)
-}
-
 public sealed record DownstreamConsumerEntity(
     string Id,
     string Name,

@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -110,7 +111,7 @@ public sealed class SemanticMcpCompiler(
         var isMcpAuthBypassed = _options?.Value.IsMcpAuthBypassed == true;
         if (_consentRepo != null && !isMcpAuthBypassed)
         {
-            allTables = await FilterTablesForPrincipalAsync(allTables, principal, ct).ConfigureAwait(false);
+            allTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepo, ct).ConfigureAwait(false);
         }
 
         var filtered = string.IsNullOrWhiteSpace(domainScope)
@@ -146,22 +147,7 @@ public sealed class SemanticMcpCompiler(
                 Text: glossaryText
             ));
 
-            // 2. dbt Lineage Resource
-            var lineageText = $"# dbt Lineage & Contract: {table}\n\n" +
-                              $"* **Model**: models/marts/{domain}/{table}.sql\n" +
-                              $"* **Primary Keys**: {string.Join(", ", t.PrimaryKeyColumns)}\n" +
-                              $"* **Upstream**: sources.{domain}.raw_{table}\n" +
-                              $"* **Governance Contract**: Enforced fail-closed Zero-Trust policy.";
-
-            resources.Add(new McpResourceItem(
-                Uri: $"dbt://models/{table}/lineage",
-                Name: $"{table}_dbt_lineage",
-                Description: $"dbt lineage graph and schema contracts for {table}",
-                MimeType: "text/markdown",
-                Text: lineageText
-            ));
-
-            // 3. Column-level Docs Resources on Demand
+            // 2. Column-level Docs Resources on Demand
             foreach (var col in t.Columns)
             {
                 var hasDesc = !string.IsNullOrWhiteSpace(col.Description);
@@ -213,7 +199,7 @@ public sealed class SemanticMcpCompiler(
                 }
             }
 
-            // 4. Golden Queries / Few-Shot Examples Resource (examples://{domain}/{table})
+            // 3. Golden Queries / Few-Shot Examples Resource (examples://{domain}/{table})
             if (_goldenQueryService != null)
             {
                 var goldens = await _goldenQueryService.GetGoldenQueriesAsync(domain, table, ct).ConfigureAwait(false);
@@ -256,49 +242,6 @@ public sealed class SemanticMcpCompiler(
         }
 
         return resources;
-    }
-
-    /// <summary>
-    /// SEC M-28: anonymous callers (no principal, no SID, the synthetic MCP anonymous SID) see no tables at all;
-    /// only explicit governance roles see the whole catalog; everybody else sees only tables with an active
-    /// Allow consent within the caller's own tenant.
-    /// </summary>
-    private async Task<IReadOnlyList<TableMetadata>> FilterTablesForPrincipalAsync(
-        IReadOnlyList<TableMetadata> allTables,
-        System.Security.Claims.ClaimsPrincipal? principal,
-        CancellationToken ct)
-    {
-        if (principal == null || _consentRepo == null)
-        {
-            return Array.Empty<TableMetadata>();
-        }
-
-        var userSid = principal.GetUserSid();
-        bool isAnonymous = userSid == null || string.Equals(userSid.Value.Value, "ANONYMOUS_MCP_CLIENT", StringComparison.OrdinalIgnoreCase);
-        if (isAnonymous)
-        {
-            return Array.Empty<TableMetadata>();
-        }
-
-        var roles = principal.GetUserRoles();
-        bool isGlobalAdmin = roles.Contains("GovernanceAdmin") || roles.Contains("ClusterAdmin");
-        if (isGlobalAdmin)
-        {
-            return allTables;
-        }
-
-        var groupSids = principal.GetGroupSids();
-        var tenantId = principal.GetTenantId();
-        var allSubjects = groupSids.Append(userSid!.Value).ToList();
-        var activeConsents = await _consentRepo.GetAllActiveConsentsForSubjectsAsync(
-            allSubjects, roles, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
-
-        var allowedTableIds = activeConsents
-            .Where(c => c.Effect == ConsentEffect.Allow && c.TenantId == tenantId)
-            .Select(c => c.TableIdentifier)
-            .ToHashSet();
-
-        return allTables.Where(t => allowedTableIds.Contains(t.Identifier)).ToList();
     }
 
     private static string MapDataTypeToJsonType(string? dataType)

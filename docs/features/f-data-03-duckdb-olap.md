@@ -53,8 +53,7 @@ curl -X POST http://localhost:8080/api/v1/olap/query \
       "MaxMemory": "1GB",
       "MaxStagedRowsPerTable": 250000,
       "QueryTimeoutSeconds": 60,
-      "MaxThreads": 2,
-      "EnableCrossDomainJoinOptimization": true
+      "MaxThreads": 2
     }
   }
 }

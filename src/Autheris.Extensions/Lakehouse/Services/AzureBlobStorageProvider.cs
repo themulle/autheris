@@ -180,6 +180,7 @@ public sealed class AzureBlobStorageProvider : ILakehouseStorageProvider
 
             LakehouseLocationGuard.EnsureSafeStorageKey(blob, location);
             EnsureValidContainer(container, location);
+            EnsureAllowedContainer(container, location);
             return parsedUri;
         }
         else if (location.Contains("://", StringComparison.Ordinal))
@@ -193,6 +194,7 @@ public sealed class AzureBlobStorageProvider : ILakehouseStorageProvider
 
         LakehouseLocationGuard.EnsureSafeStorageKey(blob, location);
         EnsureValidContainer(container, location);
+        EnsureAllowedContainer(container, location);
 
         var fullUriString = $"https://{configuredAccount}.blob.core.windows.net/{container}/{blob}";
         var resolvedUri = new Uri(fullUriString);
@@ -219,6 +221,18 @@ public sealed class AzureBlobStorageProvider : ILakehouseStorageProvider
         if (!IsConfiguredAccountHost(host, configuredAccount))
         {
             throw new System.Security.SecurityException($"SSRF protection: Outbound access to unpermitted Azure storage host '{host}' is forbidden (only the configured account is allowed).");
+        }
+    }
+
+    /// <summary>
+    /// EXT-5: the shared key signs requests for every container of the account; only allowlisted containers may be
+    /// addressed, otherwise a table location could reach another tenant's container (confused deputy).
+    /// </summary>
+    private void EnsureAllowedContainer(string container, string location)
+    {
+        if (!LakehouseLocationGuard.GetAllowedContainers(_options.Value).Contains(container))
+        {
+            throw new System.Security.SecurityException($"Azure container in lakehouse location '{location}' is not part of the configured lakehouse locations.");
         }
     }
 

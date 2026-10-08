@@ -11,12 +11,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
-using Autheris.Domain.Kernel;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using HotChocolate.Execution;
+using HotChocolate.Language;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
@@ -35,8 +36,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     private readonly IGatewayExecutionService _gatewayExecutionService;
     private readonly IPreFlightQuerySimulator? _querySimulator;
     private readonly IMcpProvenanceEnricher? _provenanceEnricher;
-    private readonly IGovernedExecutionKernel? _governedKernel;
     private readonly IPersistedToolValidator? _persistedToolValidator;
+    private readonly IMcpDatasetCatalog? _datasetCatalog;
     private readonly ILogger<GatewayMcpQueryExecutor> _logger;
 
     public GatewayMcpQueryExecutor(
@@ -45,16 +46,16 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         ILogger<GatewayMcpQueryExecutor> logger,
         IPreFlightQuerySimulator? querySimulator = null,
         IMcpProvenanceEnricher? provenanceEnricher = null,
-        IGovernedExecutionKernel? governedKernel = null,
-        IPersistedToolValidator? persistedToolValidator = null)
+        IPersistedToolValidator? persistedToolValidator = null,
+        IMcpDatasetCatalog? datasetCatalog = null)
     {
         _executorProvider = executorProvider ?? throw new ArgumentNullException(nameof(executorProvider));
         _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _querySimulator = querySimulator;
         _provenanceEnricher = provenanceEnricher;
-        _governedKernel = governedKernel;
         _persistedToolValidator = persistedToolValidator;
+        _datasetCatalog = datasetCatalog;
     }
 
     public async Task<string> ExecuteOperationAsync(
@@ -74,8 +75,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         {
             new(ClaimTypes.NameIdentifier, sessionContext.ServicePrincipalId),
             new("sub", sessionContext.ServicePrincipalId),
-            new("tenant_id", sessionContext.TenantId),
-            new(ClaimTypes.Role, "AiAgent")
+            new("tenant_id", sessionContext.TenantId)
         };
 
         if (!string.IsNullOrWhiteSpace(sessionContext.UserSid))
@@ -89,10 +89,6 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             {
                 claims.Add(new Claim(ClaimTypes.Role, role));
             }
-        }
-        else
-        {
-            claims.Add(new Claim(ClaimTypes.Role, "Reader"));
         }
 
         if (sessionContext.GroupSids != null)
@@ -136,6 +132,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Unexpected error parsing arguments JSON for tool '{ToolName}'.", tool.Name);
+                return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "Invalid arguments JSON payload.");
             }
         }
 
@@ -153,6 +150,12 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "Query simulator is not available.");
         }
 
+        // Dataset tools: catalog discovery and governed sample rows
+        if (McpDatasetTools.IsDatasetTool(tool.Name))
+        {
+            return await ExecuteDatasetToolAsync(tool, principal, sessionContext, variables, argumentsJson, cancellationToken).ConfigureAwait(false);
+        }
+
         // Fast-path / Specialized execution for registered tables if operation is standard table query
         if (tool.Name.Equals("query_customers", StringComparison.OrdinalIgnoreCase) ||
             tool.Name.Equals("query_invoices", StringComparison.OrdinalIgnoreCase))
@@ -162,119 +165,6 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             {
                 return await EnrichWithProvenanceAsync(tool, fastPathResult, cancellationToken).ConfigureAwait(false);
             }
-        }
-
-        // Native Governed Vector & RAG Egress Tool (F-AI-09)
-        if (tool.Name.Equals("search_rag_context", StringComparison.OrdinalIgnoreCase))
-        {
-            if (_governedKernel != null)
-            {
-                if (string.IsNullOrWhiteSpace(sessionContext.TenantId))
-                {
-                    return CreateErrorResult("unknown", tool.Name, McpErrorCodes.Forbidden, "Access denied: Missing TenantId in session context.");
-                }
-
-                var callerSidStr = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
-                    ? sessionContext.UserSid
-                    : sessionContext.ServicePrincipalId;
-
-                if (string.IsNullOrWhiteSpace(callerSidStr))
-                {
-                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Access denied: Missing caller SID in session context.");
-                }
-
-                var collectionName = variables.TryGetValue("collection", out var cVal) && !string.IsNullOrWhiteSpace(cVal?.ToString())
-                    ? cVal.ToString()!
-                    : "documents";
-                var queryText = variables.TryGetValue("query", out var qVal) ? qVal?.ToString() ?? "" : "";
-                var topK = variables.TryGetValue("topK", out var kVal) && int.TryParse(kVal?.ToString(), out var parsedK)
-                    ? Math.Clamp(parsedK, 1, 200)
-                    : 5;
-
-                var userSid = new Sid(callerSidStr);
-
-                var groupSids = sessionContext.GroupSids != null
-                    ? sessionContext.GroupSids.Select(s => new Sid(s)).ToHashSet()
-                    : new HashSet<Sid>();
-
-                // Zero-Trust: Do not assign default roles "out of thin air"
-                var roles = sessionContext.Roles != null && sessionContext.Roles.Count > 0
-                    ? sessionContext.Roles.ToHashSet(StringComparer.OrdinalIgnoreCase)
-                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-                var secContext = new SecurityPrincipalContext
-                {
-                    UserSid = userSid,
-                    TenantId = new TenantId(sessionContext.TenantId),
-                    GroupSids = groupSids,
-                    TenantRoles = roles,
-                    ClusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-                    AuthenticationScheme = "McpAuth"
-                };
-
-                IReadOnlyList<float>? queryVector = null;
-                if (!string.IsNullOrWhiteSpace(argumentsJson))
-                {
-                    try
-                    {
-                        using var doc = JsonDocument.Parse(argumentsJson);
-                        if (doc.RootElement.TryGetProperty("query_vector", out var qvElem) && qvElem.ValueKind == JsonValueKind.Array)
-                        {
-                            var vecList = new List<float>();
-                            foreach (var item in qvElem.EnumerateArray())
-                            {
-                                if (item.TryGetSingle(out var f))
-                                {
-                                    vecList.Add(f);
-                                }
-                            }
-                            if (vecList.Count > 0)
-                            {
-                                queryVector = vecList;
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore invalid vector payload in json
-                    }
-                }
-
-                var searchReq = new VectorSearchRequest(
-                    TargetCollection: new TableIdentifier("ai", "public", collectionName),
-                    QueryVector: queryVector,
-                    RawQueryText: queryText,
-                    TopK: topK
-                );
-
-                try
-                {
-                    var result = await _governedKernel.ExecuteVectorQueryAsync(searchReq, secContext, cancellationToken).ConfigureAwait(false);
-                    // Information Disclosure Protection: Do not leak internal AccessDecision (RLS SQL, ColumnAccess map, DeniedReasons) to the AI agent
-                    var clientDto = new
-                    {
-                        collection = result.Collection.ToQualifiedName(),
-                        chunks = result.Chunks,
-                        metrics = result.Metrics
-                    };
-                    var json = JsonSerializer.Serialize(clientDto, CamelCaseJsonOptions);
-                    return await EnrichWithProvenanceAsync(tool, json, cancellationToken).ConfigureAwait(false);
-                }
-                catch (SecurityException ex)
-                {
-                    _logger.LogWarning(ex, "MCP search_rag_context access denied for tenant '{TenantId}', collection '{Collection}': {Message}", sessionContext.TenantId, collectionName, ex.Message);
-                    // Return generic message to prevent oracle / policy detail disclosure
-                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Access to vector collection denied by governance policy.");
-                }
-                catch (TableNotFoundException ex)
-                {
-                    _logger.LogWarning(ex, "MCP search_rag_context table not found for tenant '{TenantId}', collection '{Collection}'", sessionContext.TenantId, collectionName);
-                    // Return generic message to prevent collection enumeration oracle
-                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Access to vector collection denied by governance policy.");
-                }
-            }
-
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "Governed execution kernel is not available for vector search.");
         }
 
         // Standard GraphQL execution via HotChocolate IRequestExecutor
@@ -300,7 +190,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                     .AddGlobalState("CallerSecurityContext", new CallerSecurityContext(
                         effectiveCallerSid,
                         groupSids,
-                        new[] { "AiAgent", "Reader" },
+                        sessionContext.Roles?.ToArray() ?? Array.Empty<string>(),
                         new TenantId(sessionContext.TenantId),
                         IsGovernanceAdmin: false,
                         IsClusterAdmin: false
@@ -347,6 +237,163 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         _logger.LogWarning("MCP tool '{ToolName}' has no executable target operation.", tool.Name);
         return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "Tool has no executable target operation.");
     }
+
+    private async Task<string> ExecuteDatasetToolAsync(
+        McpToolDefinition tool,
+        ClaimsPrincipal principal,
+        McpSessionContext sessionContext,
+        Dictionary<string, object?> variables,
+        string? argumentsJson,
+        CancellationToken cancellationToken)
+    {
+        if (string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExecuteGraphQlQueryAsync(tool, principal, sessionContext, argumentsJson, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (_datasetCatalog == null)
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "The dataset catalog is not available.");
+        }
+
+        string? Text(string name) => variables.TryGetValue(name, out var v) ? v as string : null;
+
+        try
+        {
+            object result = tool.Name.ToLowerInvariant() switch
+            {
+                McpDatasetTools.ListDatasets => await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), cancellationToken).ConfigureAwait(false),
+                McpDatasetTools.DescribeDataset => await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, cancellationToken).ConfigureAwait(false),
+                _ => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables), cancellationToken).ConfigureAwait(false)
+            };
+
+            return JsonSerializer.Serialize(result, CamelCaseJsonOptions);
+        }
+        catch (TableNotFoundException)
+        {
+            // Hidden and missing datasets look the same to the agent.
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotFound, "Dataset not found or not visible.");
+        }
+        catch (GatewayForbiddenException ex)
+        {
+            _logger.LogWarning(ex, "MCP tool '{ToolName}' was denied by governance policy.", tool.Name);
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Access denied by data governance policy.");
+        }
+        catch (ArgumentException ex)
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, ex.Message);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Dataset tool '{ToolName}' failed.", tool.Name);
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "Tool execution failed.");
+        }
+    }
+
+    /// <summary>
+    /// query_graphql: one read-only GraphQL query against the gateway schema. The catalog resolvers authorize every
+    /// table with the caller's identity (consent, ReBAC, Casbin, row filters, masking), as for POST /graphql.
+    /// </summary>
+    private async Task<string> ExecuteGraphQlQueryAsync(
+        McpToolDefinition tool,
+        ClaimsPrincipal principal,
+        McpSessionContext sessionContext,
+        string? argumentsJson,
+        CancellationToken cancellationToken)
+    {
+        string Invalid(string message) => CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, message);
+
+        if (!McpDatasetTools.TryGetStringArgument(argumentsJson, "query", out var query) || string.IsNullOrWhiteSpace(query))
+        {
+            return Invalid("The 'query' argument (one GraphQL query) is required.");
+        }
+
+        Dictionary<string, object?>? variableValues = null;
+        using (var args = JsonDocument.Parse(argumentsJson!))
+        {
+            foreach (var property in args.RootElement.EnumerateObject())
+            {
+                if (!string.Equals(property.Name, "variables", StringComparison.OrdinalIgnoreCase) || property.Value.ValueKind == JsonValueKind.Null)
+                {
+                    continue;
+                }
+
+                if (property.Value.ValueKind != JsonValueKind.Object)
+                {
+                    return Invalid("'variables' must be an object.");
+                }
+
+                variableValues = (Dictionary<string, object?>)ToVariableValue(property.Value)!;
+            }
+        }
+
+        DocumentNode document;
+        try
+        {
+            document = Utf8GraphQLParser.Parse(query);
+        }
+        catch (SyntaxException ex)
+        {
+            return Invalid($"The query could not be parsed: {ex.Message}");
+        }
+
+        var operations = document.Definitions.OfType<OperationDefinitionNode>().ToList();
+        if (operations.Count != 1)
+        {
+            return Invalid("Send exactly one operation per call.");
+        }
+
+        if (operations[0].Operation != OperationType.Query)
+        {
+            return Invalid("Only queries are allowed over MCP; mutations and subscriptions are not available.");
+        }
+
+        var executor = await _executorProvider.GetExecutorAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        var requestBuilder = OperationRequestBuilder.New()
+            .SetDocument(query)
+            .AddGlobalState("ClaimsPrincipal", principal);
+        if (variableValues != null)
+        {
+            requestBuilder.SetVariableValues(variableValues);
+        }
+
+        var executionResult = await executor.ExecuteAsync(requestBuilder.Build(), cancellationToken).ConfigureAwait(false);
+        if (executionResult is not OperationResult result)
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "Unsupported GraphQL execution result.");
+        }
+
+        var json = FormatOperationResult(result);
+        return result.Errors is null || result.Errors.Count == 0
+            ? json
+            : CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "GraphQL execution returned errors.", json);
+    }
+
+    private static object? ToVariableValue(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Object => value.EnumerateObject().ToDictionary(p => p.Name, p => ToVariableValue(p.Value), StringComparer.Ordinal),
+        JsonValueKind.Array => value.EnumerateArray().Select(ToVariableValue).ToList(),
+        JsonValueKind.String => value.GetString(),
+        JsonValueKind.Number when value.TryGetInt32(out var i) => i,
+        JsonValueKind.Number when value.TryGetInt64(out var l) => l,
+        JsonValueKind.Number => value.GetDecimal(),
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        _ => null
+    };
+
+    private static int? ToCount(Dictionary<string, object?> variables) =>
+        variables.TryGetValue("count", out var v) ? v switch
+        {
+            int i => i,
+            long l => (int)Math.Clamp(l, int.MinValue, int.MaxValue),
+            double d => (int)Math.Clamp(d, int.MinValue, int.MaxValue),
+            _ => null
+        } : null;
 
     private async Task<string> EnrichWithProvenanceAsync(McpToolDefinition tool, string json, CancellationToken cancellationToken)
     {
@@ -476,6 +523,7 @@ public static class McpErrorCodes
     public const string InvalidParams = "INVALID_PARAMS";
     public const string ExecutionFailed = "EXECUTION_FAILED";
     public const string NotAvailable = "NOT_AVAILABLE";
+    public const string NotFound = "NOT_FOUND";
 }
 
 internal sealed record McpToolError(string Code, string Message);

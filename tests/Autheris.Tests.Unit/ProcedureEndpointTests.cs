@@ -404,6 +404,19 @@ public class ProcedureEndpointTests
     }
 
     [Fact]
+    public async Task SQL2_16_Execute_WhenAuditRepositoryIsNull_FailsClosed()
+    {
+        var f = Active();
+        var svc = new GovernedProcedureExecutionService(
+            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Tables, f.Consents, f.Resolution, f.Masking, audit: null);
+
+        var ex = await Should.ThrowAsync<SecurityException>(() =>
+            svc.ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
+
+        ex.Message.ShouldContain("audit repository is required but unavailable (SQL2-16)");
+    }
+
+    [Fact]
     public async Task Execute_BusinessError_IsRethrownAndAudited()
     {
         var f = Active();
@@ -763,7 +776,7 @@ public class ProcedureEndpointTests
         var reader = Substitute.For<System.Data.Common.DbDataReader>();
         reader.FieldCount.Returns(0);
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+        execCmd.ExecuteReaderAsync(Arg.Any<System.Data.CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
 
         conn.CreateCommand().Returns(initCmd, execCmd);
 
@@ -830,7 +843,7 @@ public class ProcedureEndpointTests
         var reader = Substitute.For<System.Data.Common.DbDataReader>();
         reader.FieldCount.Returns(0);
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+        execCmd.ExecuteReaderAsync(Arg.Any<System.Data.CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
 
         conn.CreateCommand().Returns(execCmd);
 
@@ -895,7 +908,7 @@ public class ProcedureEndpointTests
         var reader = Substitute.For<System.Data.Common.DbDataReader>();
         reader.FieldCount.Returns(0);
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+        execCmd.ExecuteReaderAsync(Arg.Any<System.Data.CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
 
         conn.CreateCommand().Returns(execCmd);
 
@@ -1019,7 +1032,7 @@ public class ProcedureEndpointTests
         var reader = Substitute.For<System.Data.Common.DbDataReader>();
         reader.FieldCount.Returns(0);
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
-        execCmd.ExecuteReaderAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
+        execCmd.ExecuteReaderAsync(Arg.Any<System.Data.CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
         conn.CreateCommand().Returns(initCmd, execCmd);
         connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(conn));
 
@@ -1251,5 +1264,49 @@ public class ProcedureEndpointTests
         var ok = result.ShouldBeOfType<Ok<Dictionary<string, object>>>();
         var paths = (Dictionary<string, object>)ok.Value!["paths"];
         paths.ShouldContainKey("/api/v1/procedures/get_orders");
+    }
+
+    [Fact]
+    public async Task MssqlProcedureInvoker_InvalidTenantIdentity_ThrowsGatewayForbiddenException()
+    {
+        var connFactory = Substitute.For<ISqlConnectionFactory>();
+        var conn = Substitute.For<System.Data.Common.DbConnection>();
+        connFactory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(conn));
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>
+                {
+                    ["mssql_ds"] = new() { ConnectionString = "Data Source=mssql;", Provider = "SqlServer" }
+                }
+            },
+            SqlEndpoints = new SqlEndpointsOptions
+            {
+                Procedures = new ProcedureEndpointsOptions { Enabled = true, ConnectionName = "mssql_ds" }
+            }
+        });
+
+        var provider = new ProcedureConnectionProvider(connFactory, options);
+        var invoker = new MssqlProcedureInvoker(provider, options);
+
+        const string yaml = """
+            name: get_orders
+            procedure: api.usp_GetOrders
+            kind: procedure
+            rls: session_context
+            parameters: []
+            outputs: []
+            """;
+        var def = ProcedureDefinitionParser.ParseYaml(yaml, "mssql_ds", allowRlsNone: false, maxTimeoutSeconds: 30);
+
+        // Security context with invalid characters for TenantId (e.g., spaces or semicolons)
+        var security = new ProcedureSecurityContext("invalid tenant id; DROP TABLE", "S-1-5-21-ALICE", "AUDIT");
+
+        var ex = await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayForbiddenException>(() =>
+            invoker.ExecuteReadAsync(def, new Dictionary<string, object?>(), security, CancellationToken.None));
+        ex.Message.ShouldBe("Invalid tenant identity.");
     }
 }

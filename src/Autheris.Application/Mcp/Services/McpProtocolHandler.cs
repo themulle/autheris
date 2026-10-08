@@ -57,6 +57,9 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         return _sessionStore.GetSession(sessionId);
     }
 
+    public ValueTask<McpSessionContext?> GetSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+        => _sessionStore.GetSessionAsync(sessionId, cancellationToken);
+
     public bool RemoveSession(string sessionId)
     {
         return _sessionStore.RemoveSession(sessionId);
@@ -70,7 +73,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentException.ThrowIfNullOrWhiteSpace(jsonRpcPayload);
 
-        var session = _sessionStore.GetSession(sessionId);
+        var session = await _sessionStore.GetSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
         if (session == null)
         {
             return CreateErrorResponse(null, -32000, $"Invalid or expired MCP session '{sessionId}'.");
@@ -122,6 +125,7 @@ public sealed class McpProtocolHandler : IMcpProtocolHandler
               "name": "Autheris.McpServer",
               "version": "1.4.0"
             },
+            "instructions": "{{EscapeJson(McpDatasetTools.ServerInstructions)}}",
             "capabilities": {
               "tools": { "listChanged": false },
               "resources": { "subscribe": false, "listChanged": false }

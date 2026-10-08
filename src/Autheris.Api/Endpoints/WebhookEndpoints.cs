@@ -236,7 +236,9 @@ public static class WebhookEndpoints
             var result = await webhookHandler.HandleWebhookAsync(payload, signature, timestamp, provider, context.RequestAborted);
             if (!result.Success)
             {
-                return Results.Json(result, statusCode: StatusCodes.Status401Unauthorized);
+                // INF-5: a processing failure is retryable (503); only rejected deliveries are 401.
+                var status = result.Status == "PARTIALLY_FAILED" ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status401Unauthorized;
+                return Results.Json(result, statusCode: status);
             }
 
             return Results.Ok(result);
@@ -332,7 +334,9 @@ public static class WebhookEndpoints
             var result = await webhookHandler.HandleWebhookAsync(payload, signature, timestamp, provider, context.RequestAborted);
             if (!result.Success)
             {
-                return Results.Json(result, statusCode: StatusCodes.Status401Unauthorized);
+                // INF-5: a processing failure is retryable (503); only rejected deliveries are 401.
+                var status = result.Status == "PARTIALLY_FAILED" ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status401Unauthorized;
+                return Results.Json(result, statusCode: status);
             }
 
             return Results.Ok(result);

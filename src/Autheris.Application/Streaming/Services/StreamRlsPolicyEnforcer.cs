@@ -203,7 +203,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         // 6b. ReBAC Policy Enforcement (Google Zanzibar) on Streaming Events
         if (_rebacEvaluator != null && _rebacEvaluator.IsEnabled && _options?.Rebac?.EnforceOnStreaming == true)
         {
-            var targetTable = $"table:{cdcEvent.Table.ToQualifiedName()}";
+            var targetTable = Autheris.Application.Policy.RebacTableGate.ObjectId(cdcEvent.Table);
             var rebacReq = new Autheris.Domain.Model.RebacCheckRequest(tenantId.Value, userSid.Value, "subscriber", targetTable);
             try
             {

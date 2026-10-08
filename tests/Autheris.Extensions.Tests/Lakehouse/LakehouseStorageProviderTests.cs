@@ -90,7 +90,7 @@ public sealed class LakehouseStorageProviderTests
         var options = Options.Create(new GatewayOptions
         {
             Insecure = new InsecureGettingStartedOptions { warn_allow_unsigned_s3_requests = true },
-            Lakehouse = new LakehouseOptions()
+            Lakehouse = new LakehouseOptions { Storage = new LakehouseStorageOptions { S3Bucket = "test-bucket" } }
         });
         var httpClient = new HttpClient(handler);
         var provider = new S3LakehouseStorageProvider(httpClient, options, NullLogger<S3LakehouseStorageProvider>.Instance);
@@ -174,7 +174,10 @@ public sealed class LakehouseStorageProviderTests
                     {
                         LocalBasePath = testDir,
                         // SEC H-18: only the configured account may be addressed
-                        AzureAccountName = "account"
+                        AzureAccountName = "account",
+                        // EXT-5: only allowlisted buckets and containers may be addressed
+                        S3AllowedBuckets = ["bucket"],
+                        AzureAllowedContainers = ["container"]
                     }
                 }
             });

@@ -48,7 +48,7 @@ public sealed class Wave3MarketFeaturesTests
         Assert.Equal(HitLApprovalStatus.Pending, ticket.Status);
 
         // Approve by a different user (Data Steward Alice)
-        var approveResult = service.ApproveStepUpRequest(ticket.ApprovalId, "steward-alice");
+        var approveResult = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, "steward-alice");
         Assert.True(approveResult.IsApproved);
         Assert.Equal(HitLApprovalStatus.Approved, approveResult.Ticket.Status);
         Assert.Equal("steward-alice", approveResult.Ticket.ApproverSid);
@@ -74,7 +74,7 @@ public sealed class Wave3MarketFeaturesTests
         await Task.Delay(50);
 
         var ticket = Assert.Single(service.GetPendingTickets("tenant-a"));
-        var rejectResult = service.RejectStepUpRequest(ticket.ApprovalId, "steward-alice", "Unauthorized access to payroll.");
+        var rejectResult = await service.RejectStepUpRequestAsync(ticket.ApprovalId, "steward-alice", "Unauthorized access to payroll.");
 
         Assert.False(rejectResult.IsApproved);
         Assert.Equal(HitLApprovalStatus.Rejected, rejectResult.Ticket.Status);
@@ -102,14 +102,14 @@ public sealed class Wave3MarketFeaturesTests
         var ticket = Assert.Single(service.GetPendingTickets("tenant-a"));
 
         // Attacker attempts to approve their own request!
-        var approveResult = service.ApproveStepUpRequest(ticket.ApprovalId, "user-attacker");
+        var approveResult = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, "user-attacker");
 
         Assert.False(approveResult.IsApproved);
         Assert.Contains("Self-approval is strictly prohibited", approveResult.Message);
         Assert.Equal(HitLApprovalStatus.Pending, ticket.Status); // Ticket remains pending
 
         // Clean up by rejecting
-        service.RejectStepUpRequest(ticket.ApprovalId, "admin", "Cleanup");
+        await service.RejectStepUpRequestAsync(ticket.ApprovalId, "admin", "Cleanup");
         await requestTask;
     }
 
@@ -130,11 +130,11 @@ public sealed class Wave3MarketFeaturesTests
         var ticket = Assert.Single(service.GetPendingTickets("tenant-a"));
 
         // First approval succeeds
-        var firstApproval = service.ApproveStepUpRequest(ticket.ApprovalId, "steward-1");
+        var firstApproval = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, "steward-1");
         Assert.True(firstApproval.IsApproved);
 
         // Second approval attempt (Replay / Race) MUST fail
-        var secondApproval = service.ApproveStepUpRequest(ticket.ApprovalId, "steward-2");
+        var secondApproval = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, "steward-2");
         Assert.False(secondApproval.IsApproved);
         Assert.Contains("already in status", secondApproval.Message);
 
@@ -214,7 +214,7 @@ public sealed class Wave3MarketFeaturesTests
         var ticket = Assert.Single(pending);
 
         // Approve by Steward Alice
-        hitlService.ApproveStepUpRequest(ticket.ApprovalId, "steward-alice");
+        await hitlService.ApproveStepUpRequestAsync(ticket.ApprovalId, "steward-alice");
 
         var result = await guardrailTask;
         Assert.True(result.IsSuccess);

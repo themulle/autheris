@@ -41,9 +41,6 @@ public sealed record ProcedureParameter(
 /// <summary>Binds a gateway security context value to a procedure parameter (never client-controlled).</summary>
 public sealed record ProcedureContextBinding(ProcedureContextKey Key, string ParameterName);
 
-/// <summary>Maps a result-set column to a catalog column so column governance can be applied.</summary>
-public sealed record ProcedureResultColumn(string Name, bool IsCleared);
-
 /// <summary>F-SQL-02: How a stored procedure endpoint is validated.</summary>
 public enum ProcedureValidationMode
 {

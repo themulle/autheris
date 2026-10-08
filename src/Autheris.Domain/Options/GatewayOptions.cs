@@ -35,7 +35,6 @@ public sealed class GatewayOptions
     [Required] public ParquetEgressOptions ParquetEgress { get; init; } = new();
     [Required] public OutboundEgressOptions Egress { get; init; } = new();
     [Required] public HitLStepUpOptions HitLStepUp { get; init; } = new();
-    [Required] public SingleQueryPushdownOptions SingleQueryPushdown { get; init; } = new();
     [Required] public WebSqlOptions WebSql { get; init; } = new();
     [Required] public SqlEndpointsOptions SqlEndpoints { get; init; } = new();
     [Required] public InsecureGettingStartedOptions Insecure { get; init; } = new();
@@ -726,6 +725,17 @@ public sealed class GraphQLOptions
     /// caller's token was revoked (ITokenRevocationService). Revoked sessions are closed.
     /// </summary>
     [Range(5, 3600)] public int SubscriptionRevalidationSeconds { get; init; } = 60;
+
+    /// <summary>
+    /// R-GQL-12: interval in which the GraphQL catalog schema checks the catalog for changes and rebuilds itself
+    /// (also after the governance database was unreachable at startup). 0 disables the check.
+    /// </summary>
+    [Range(0, 3600)] public int CatalogSchemaRefreshSeconds { get; init; } = 60;
+
+    /// <summary>GQL-4: maximum number of open CDC subscriptions per subject (tenant + SID).</summary>
+    [Range(1, 1000)] public int MaxSubscriptionsPerSubject { get; init; } = 10;
+    [Range(100, 1000000)] public int MaxAggregateRowBudget { get; init; } = 50000;
+    [Range(0, 100000)] public int MaxAllowedOffset { get; init; } = 10000;
     public List<string> TrustedOrigins { get; init; } = [];
 }
 
@@ -982,6 +992,12 @@ public sealed class DataCatalogOptions
     public string WebhookSecret { get; init; } = string.Empty;
 
     /// <summary>
+    /// EXT-7: Wenn true, werden neu im Katalog entdeckte Tabellen automatisch als Active = true markiert.
+    /// Standard: false (Tabellen bleiben inaktiv, bis sie von einem Data Steward freigegeben werden).
+    /// </summary>
+    public bool ActivateNewTables { get; init; } = false;
+
+    /// <summary>
     /// Open Schema Mode: Wenn true, dürfen alle Benutzer (auch ohne GovernanceAdmin/CatalogReader Rollen)
     /// den gesamten Datenkatalog, OpenAPI-Spezifikationen, Indexe und Tabellenschemata einsehen.
     /// Standard: false (Disabled - Zero-Trust Role-Enforcement aktiv).
@@ -1068,9 +1084,25 @@ public sealed class LakehouseStorageOptions
     public string S3Bucket { get; init; } = string.Empty;
     public string S3AccessKey { get; init; } = string.Empty;
     public string S3SecretKey { get; init; } = string.Empty;
+
+    /// <summary>EXT-8: SigV4 signing region. Empty = derived from the endpoint host (s3.&lt;region&gt;.amazonaws.com), else us-east-1.</summary>
+    public string S3Region { get; init; } = string.Empty;
     public string AzureAccountName { get; init; } = string.Empty;
     public string AzureContainer { get; init; } = string.Empty;
     public string AzureAccountKey { get; init; } = string.Empty;
+
+    /// <summary>
+    /// EXT-5: additional S3 buckets that may be addressed besides <see cref="S3Bucket"/> and the buckets of configured
+    /// table locations. Without any allowed bucket every S3 request is refused (fail-closed).
+    /// </summary>
+    public List<string> S3AllowedBuckets { get; init; } = [];
+
+    /// <summary>
+    /// EXT-5: additional Azure containers that may be addressed besides <see cref="AzureContainer"/> and the containers of
+    /// configured table locations. The account key signs requests for the whole account, so without any allowed container
+    /// every Azure request is refused (fail-closed).
+    /// </summary>
+    public List<string> AzureAllowedContainers { get; init; } = [];
 
     /// <summary>SEC: Maximale Byte-Anzahl beim Lesen von Metadaten-/Manifest-Dateien (Standard 64 MB).</summary>
     public long MaxReadBytes { get; init; } = 64L * 1024 * 1024;
@@ -1220,19 +1252,6 @@ public sealed class HitLStepUpOptions
     public ItsmSystemType PreferredItsmSystem { get; init; } = ItsmSystemType.ServiceNow;
 }
 
-public sealed class SingleQueryPushdownOptions
-{
-    public bool Enabled { get; init; } = true;
-    public int MaxSubqueryDepth { get; init; } = 5;
-    public bool FallbackToBatchingOnUnsupportedDialect { get; init; } = true;
-    public List<DatabaseDialect> SupportedDialects { get; init; } =
-    [
-        DatabaseDialect.SqlServer,
-        DatabaseDialect.PostgreSql,
-        DatabaseDialect.Sqlite
-    ];
-}
-
 public sealed class WebSqlOptions
 {
     // SEC C-01/C-03: WebSQL is opt-in (secure default).
@@ -1329,6 +1348,9 @@ public sealed class ProcedureEndpointsOptions
     [Range(1, 1440)] public int RevalidationIntervalMinutes { get; init; } = 15;
     [Range(0, 60000)] public int LockTimeoutMs { get; init; } = 5000;
     [Range(1, 100000)] public int MaxRows { get; init; } = 5000;
+
+    /// <summary>R-SQL-8: response budget of one procedure call (estimated JSON size; binary values count as Base64).</summary>
+    [Range(1024, 104857600)] public long MaxResponseBytes { get; init; } = 10485760;
     [Range(1, 1000000)] public int MaxStringParameterLength { get; init; } = 4000;
     [Range(1, 300)] public int MaxTimeoutSeconds { get; init; } = 60;
     public bool EnableHotReload { get; init; } = true;
@@ -1470,6 +1492,13 @@ public sealed class RebacOptions
     public int CacheTtlSeconds { get; init; } = 60;
     public int MaxCachedDecisions { get; init; } = 50000;
     public bool EnforceOnStreaming { get; init; } = false;
+
+    /// <summary>
+    /// POL-6: also require the ReBAC relation <c>can_query</c> on OData, GraphQL, WebSQL and stored procedures.
+    /// Off by default: the evaluator denies every table without tuples, so enable it only once tuples are maintained.
+    /// The unified PDP (MCP-RAG, DuckDB OLAP) checks ReBAC whenever <see cref="Enabled"/> is true.
+    /// </summary>
+    public bool EnforceOnQueryPaths { get; init; } = false;
     public string? OpenFgaApiUrl { get; init; }
     public string? OpenFgaStoreId { get; init; }
 }
@@ -1501,7 +1530,6 @@ public sealed class DuckDbOlapOptions
     public int MaxStagedRowsPerTable { get; init; } = 250000;
     public int QueryTimeoutSeconds { get; init; } = 60;
     public int MaxThreads { get; init; } = 2;
-    public bool EnableCrossDomainJoinOptimization { get; init; } = true;
 }
 
 /// <summary>

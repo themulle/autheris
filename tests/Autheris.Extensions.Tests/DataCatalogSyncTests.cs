@@ -105,6 +105,45 @@ public class DataCatalogSyncTests
         await _epochService.Received(1).InvalidateEpochAsync(Arg.Is<TableIdentifier>(t => t.Equals(tableId)), Arg.Any<CancellationToken>());
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SyncCatalogAsync_Art9TagOnColumnOnly_RedactsColumnAndTightensTable(bool asClassification)
+    {
+        // POL-5: an Art. 9 tag on a single column (table without the tag) must protect that column and the table.
+        var tableId = new TableIdentifier("healthcare", "dbo", "visits");
+        var healthColumn = asClassification
+            ? new CatalogColumnAsset { ColumnName = "diagnosis", DataType = "varchar", Classifications = ["gdpr_art9"] }
+            : new CatalogColumnAsset { ColumnName = "diagnosis", DataType = "varchar", Tags = ["gdpr_art9"] };
+        var catalogTable = new CatalogTableAsset
+        {
+            Identifier = tableId,
+            Tags = ["clinical"],
+            Columns =
+            [
+                new() { ColumnName = "visit_id", DataType = "int" },
+                healthColumn
+            ]
+        };
+
+        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<CatalogTableAsset> { catalogTable });
+
+        var result = await _sut.SyncCatalogAsync(dryRun: false);
+
+        result.Art9ProtectedTablesCount.ShouldBe(1);
+        await _tableRepo.Received(1).UpsertTableMetadataAsync(
+            Arg.Is<TableMetadata>(m =>
+                m.Identifier.Equals(tableId) &&
+                m.Table.Sensitivity == "HIGH" &&
+                m.Table.RequiresFourEyes &&
+                m.Columns.Single(c => c.ColumnName == "diagnosis").IsSensitive &&
+                !m.Columns.Single(c => c.ColumnName == "visit_id").IsSensitive &&
+                m.ColumnMaskingRules.ContainsKey("diagnosis") &&
+                m.ColumnMaskingRules["diagnosis"].RuleType == "REDACT"),
+            Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task SyncCatalogAsync_DryRunMode_DoesNotPersistToRepository()
     {
@@ -140,5 +179,71 @@ public class DataCatalogSyncTests
 
         await Should.ThrowAsync<InvalidOperationException>(() => _sut.SyncCatalogAsync(dryRun: false));
         await _tableRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task EXT_7_SyncCatalogAsync_NewTableWithoutActivateNewTables_LeavesTableInactive()
+    {
+        var tableId = new TableIdentifier("sales", "dbo", "leads");
+        var catalogTable = new CatalogTableAsset
+        {
+            Identifier = tableId,
+            DisplayName = "Leads",
+            Tags = [],
+            Columns = [new() { ColumnName = "id", DataType = "int" }]
+        };
+
+        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<CatalogTableAsset> { catalogTable });
+        _tableRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
+            .Returns((TableMetadata?)null); // New table
+
+        var result = await _sut.SyncCatalogAsync(dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        await _tableRepo.Received(1).UpsertTableMetadataAsync(
+            Arg.Is<TableMetadata>(m => m.Identifier.Equals(tableId) && m.Table.IsActive == false),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task EXT_7_SyncCatalogAsync_WhenActivateNewTablesIsTrue_ActivatesTable()
+    {
+        var gatewayOptions = new GatewayOptions
+        {
+            Catalog = new DataCatalogOptions
+            {
+                Provider = DataCatalogProviderType.MicrosoftPurview,
+                ActivateNewTables = true
+            }
+        };
+
+        var sut = new DataCatalogSyncService(
+            _clientFactory,
+            _tableRepo,
+            _epochService,
+            Options.Create(gatewayOptions),
+            NullLogger<DataCatalogSyncService>.Instance);
+
+        var tableId = new TableIdentifier("sales", "dbo", "leads_active");
+        var catalogTable = new CatalogTableAsset
+        {
+            Identifier = tableId,
+            DisplayName = "Leads Active",
+            Tags = [],
+            Columns = [new() { ColumnName = "id", DataType = "int" }]
+        };
+
+        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<CatalogTableAsset> { catalogTable });
+        _tableRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
+            .Returns((TableMetadata?)null);
+
+        var result = await sut.SyncCatalogAsync(dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        await _tableRepo.Received(1).UpsertTableMetadataAsync(
+            Arg.Is<TableMetadata>(m => m.Identifier.Equals(tableId) && m.Table.IsActive == true),
+            Arg.Any<CancellationToken>());
     }
 }

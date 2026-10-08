@@ -278,17 +278,34 @@ public sealed class TreeSqlCompilerTests : IDisposable
     }
 
     [Fact]
-    public void ConflictingRowFilterParameters_FailClosed()
+    public void SameRowFilterParameterName_OnTwoTables_IsBoundPerTable()
     {
+        // SQL2-11: both consents name their parameter @rf with different values; each filter keeps its own value
+        // (the query used to be rejected).
         var root = new TreeQueryNode(Authors, ["id"])
         {
-            Relations = [ArticlesOf(new TreeQueryNode(Articles, ["id"]))]
+            OrderBy = [new TreeOrder("id")],
+            Relations = [ArticlesOf(new TreeQueryNode(Articles, ["id"]) { OrderBy = [new TreeOrder("id")] })]
         };
         var access = Access(
             authorsRowFilter: "\"rating\" = @rf", authorsRowFilterParameters: new Dictionary<string, object?> { ["@rf"] = 5L },
             articlesRowFilter: "\"published\" = @rf", articlesRowFilterParameters: new Dictionary<string, object?> { ["@rf"] = 1L });
 
-        Should.Throw<GatewaySecurityException>(() => TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite));
+        var result = Execute(TreeSqlCompiler.Compile(root, access, DatabaseDialect.Sqlite));
+
+        var authors = result.EnumerateArray().ToList();
+        authors.Select(a => a.GetProperty("id").GetInt32()).ShouldBe(new[] { 1, 4 });
+        authors[0].GetProperty("articles").EnumerateArray().Select(a => a.GetProperty("id").GetInt32()).ShouldBe(new[] { 10, 12 });
+    }
+
+    [Fact]
+    public void RenameParameters_LeavesLiteralsAndQuotedIdentifiersAlone()
+    {
+        var renamed = TreeSqlCompiler.RenameParameters(
+            "\"@rf\" = @rf AND note = '@rf' AND x = @rfx",
+            new Dictionary<string, string> { ["rf"] = "@rf7_rf" });
+
+        renamed.ShouldBe("\"@rf\" = @rf7_rf AND note = '@rf' AND x = @rfx");
     }
 
     [Fact]

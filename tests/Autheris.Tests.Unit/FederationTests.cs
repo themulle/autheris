@@ -9,9 +9,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Federation.Interfaces;
 using Autheris.Application.Federation.Services;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Autheris.GraphQL.Federation;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -173,6 +175,45 @@ public sealed class FederationTests
         result.ShouldNotBeNull();
         result["email"].ShouldBe("admin@corp.local");
         result["salary"].ShouldBe("150000");
+    }
+
+    [Fact]
+    public void POL_13_SubgraphResultMasker_EvaluatesAdminRolesViaRoleEvaluator_BeforeBypassingMask()
+    {
+        var maskingProvider = new ColumnMaskingProvider();
+        var options = Options.Create(new GatewayOptions
+        {
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                EnableResultMasking = true
+            }
+        });
+
+        var roleEvaluatorMock = Substitute.For<IGatewayRoleEvaluator>();
+        // Mock explicitly rejects admin role
+        roleEvaluatorMock.HasAnyRole(Arg.Any<ClaimsPrincipal>(), Arg.Any<IEnumerable<GatewayRole>>(), Arg.Any<string?>())
+            .Returns(false);
+
+        var masker = new SubgraphResultMasker(maskingProvider, options, NullLogger<SubgraphResultMasker>.Instance, roleEvaluatorMock);
+
+        var rawData = new Dictionary<string, object?>
+        {
+            ["email"] = "admin@corp.local",
+            ["salary"] = "150000"
+        };
+
+        // Principal has raw claim string, but roleEvaluator rejects it
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.Role, "GovernanceAdmin")
+        ], "Test"));
+
+        var result = masker.MaskResultData(rawData, principal) as IReadOnlyDictionary<string, object?>;
+        result.ShouldNotBeNull();
+        // Since role evaluator rejected admin, email must be masked, NOT cleartext!
+        result["email"]!.ToString().ShouldNotBe("admin@corp.local");
+        result["email"]!.ToString().ShouldStartWith("a***@");
     }
 
     [Fact]

@@ -112,9 +112,13 @@ public sealed class DbtPolicyAutoSyncTests
         colRlsProposal.ShouldNotBeNull();
         colRlsProposal.SuggestedRuleType.ShouldBe("RLS_FILTER:amount > 0");
 
-        // Test Approval of policy proposal
-        var approved = await ingestionService.ApproveProposalAsync(casbinProposal.Id, "security_officer");
-        approved.Status.ShouldBe(DbtProposalStatus.Approved);
-        approved.ReviewedBy.ShouldBe("security_officer");
+        // R-EXT-1: Casbin and RLS proposals have no automatic implementation; approving them is refused and the
+        // proposal stays pending (previously it was marked Approved without any effect).
+        await Should.ThrowAsync<InvalidOperationException>(() => ingestionService.ApproveProposalAsync(casbinProposal.Id, "security_officer"));
+        await Should.ThrowAsync<InvalidOperationException>(() => ingestionService.ApproveProposalAsync(modelRlsProposal.Id, "security_officer"));
+        (await proposalRepo.GetPendingProposalsAsync(tableId)).Count.ShouldBe(3);
+
+        var rejected = await ingestionService.RejectProposalAsync(casbinProposal.Id, "security_officer");
+        rejected.Status.ShouldBe(DbtProposalStatus.Rejected);
     }
 }

@@ -294,9 +294,6 @@ public sealed class Round4ParserGatewayTests
         sqlite.ShouldBe(DatabaseDialect.Sqlite);
         GovernedSqlExecutionService.TryMapProviderToDialect("Oracle", out _).ShouldBeFalse();
 
-        GovernedSqlExecutionService.GetSessionInitializationSql(DatabaseDialect.PostgreSql).ShouldBe("SET standard_conforming_strings = on");
-        GovernedSqlExecutionService.GetSessionInitializationSql(DatabaseDialect.SqlServer).ShouldBeNull();
-        GovernedSqlExecutionService.GetSessionInitializationSql(DatabaseDialect.Sqlite).ShouldBeNull();
     }
 
     [Fact]

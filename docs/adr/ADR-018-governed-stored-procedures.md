@@ -22,7 +22,7 @@ Das Gateway kann den Rumpf einer Stored Procedure nicht umschreiben. Die RLS- un
    - als `read` deklarierte Prozeduren ändern keine Tabellen,
    - nur direkte Referenzen auf Tabellen (verschachtelte Prozeduren/Views werden abgelehnt).
    Die Validierung läuft beim Start, nach Hot-Reload und zyklisch. Bei Drift wird der Endpoint deaktiviert (503) und `PROCEDURE_DISABLED` auditiert.
-4. **Spalten-Governance im Gateway** auf der Ergebnismenge: Consent-Deny entfernt die Spalte, Mask maskiert, unbekannte Spalten werden entfernt (außer `@result-column x clear`).
+4. **Spalten-Governance im Gateway** auf der Ergebnismenge: Consent-Deny entfernt die Spalte, Mask maskiert, unbekannte Spalten werden entfernt (außer synthetische/berechnete Spalten mit `@result-column x clear`). Eine maskierte Quellspalte bleibt auch bei deklariertem `clear` maskiert (R-SQL-10 / SQL2-1; siehe Nachtrag).
 5. **Consents mit Zeilenfilter werden abgelehnt.** Sie lassen sich nicht in eine Prozedur schieben, und eine In-Memory-Filterung weicht von der SQL-Semantik ab (Review E-6). Phase 1 ist damit unabhängig von E-5/E-6.
 6. **Audit synchron und fail-closed** (`PROCEDURE_EXECUTE`, `PROCEDURE_DENIED`, `PROCEDURE_REJECTED`, `PROCEDURE_FAILED`). Parameter werden nur als gekürzter SHA-256-Hash protokolliert.
 7. **Aufruf ausschließlich** über `CommandType.StoredProcedure` mit typisierten Parametern. Kontextparameter (`@context`) kann der Client nicht setzen; sie werden mit 400 abgelehnt wie jeder unbekannte Parameter.
@@ -46,6 +46,20 @@ Nach dem Security Review vom 2026-10-05 (Nachprüfung 3, P-1 … P-8) gelten fü
 - **Datenbanken:** Mit `rls: session-context` sind nur SQL Server (read-only `SESSION_CONTEXT`) und PostgreSQL erlaubt. PostgreSQL setzt den Kontext transaktionslokal (`set_config(..., true)`) in derselben Transaktion wie den Aufruf; die Transaktion wird nie committet. PostgreSQL kennt keine read-only Einstellungen, die Funktion darf die Werte nicht überschreiben (DBA-Review). Oracle, Databricks und SQLite sind nur mit `rls: none` (nur Development) nutzbar.
 - **YAML** ist fail-closed wie das Header-Format: unbekannte Schlüssel, unbekannte Kontextwerte und ungültige Bezeichner führen zur Ablehnung der Datei. Fehlerhafte Dateien werden übersprungen, ohne den Dienst zu beenden.
 - **Hot Reload:** Umbenennen und Löschen entfernen den Endpoint, ein geänderter `@name` meldet den alten Namen ab, doppelte Endpoint-Namen werden abgelehnt, Verzeichnis-Symlinks werden nicht verfolgt. Aktivierung und Deaktivierung erfolgen nur für die validierte Definitionsinstanz (Compare-and-Swap).
+
+## Addendum 2026-10-08: Stored Procedure Result Column Masking and `clear` Semantics (R-SQL-10 / SQL2-1)
+
+Following the security review rechecks and remediation of SQL governance gaps (R-SQL-10 / SQL2-1), the column governance of stored procedure results enforces the following fail-closed rules:
+
+1. **Masked Columns Remain Masked Despite `@result-column x clear`**:
+   - When a result column is mapped to an underlying table column (via browse-mode source tracking or `@result-table` metadata) that is subject to data catalog masking or consent policy masking, declaring `@result-column x clear` in the procedure definition **does not unmask** the column.
+   - The column remains governed at `ColumnAccessLevel.Mask` and is masked (or redacted) as dictated by the table policy and tenant scope.
+   - The `clear` declaration exclusively applies to synthetic, aggregated, or calculated columns that have no underlying source table column in the catalog or consent store.
+
+2. **Browse Source Information Requirement (Bypass Prevention)**:
+   - To prevent masking bypasses on complex or joined queries, the gateway inspects database browse-mode column provenance (`ResultColumnSource`).
+   - If browse source information is absent or unresolvable for a column declared as `clear` (meaning the gateway cannot verify whether the column originates from a governed table), the declared `clear` column is **removed / redacted** fail-closed (`continue` in governance planning).
+   - This ensures that callers and procedure authors cannot bypass column masking on catalog tables simply by omitting browse metadata or declaring computed aliases as `clear`.
 
 ## Phase 2 (noch nicht umgesetzt)
 

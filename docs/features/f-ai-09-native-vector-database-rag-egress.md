@@ -1,7 +1,7 @@
 # F-AI-09: Native Vector Database & RAG Egress (pgvector, Qdrant, Milvus)
 
-**Status:** [Done] (100% GA – Next-Gen)  
-**Components:** [`IVectorRecordSource.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Connectors/IVectorRecordSource.cs), [`VectorRagEgressExecutor.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Vector/VectorRagEgressExecutor.cs)
+**Status:** [Not implemented] – The vector connectors never queried a database and were not registered; the RAG path was unreachable and was removed (2026-10-08). MCP agents reach the catalog through the dataset tools instead.  
+**Components:** none. The rest of this document describes the original target design.
 
 ---
 

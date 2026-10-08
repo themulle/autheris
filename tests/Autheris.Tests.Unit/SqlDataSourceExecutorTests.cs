@@ -22,6 +22,13 @@ namespace Autheris.Tests.Unit;
 
 public sealed class SqlDataSourceExecutorTests
 {
+    private static Microsoft.Extensions.Hosting.IHostEnvironment CreateDevEnvironment()
+    {
+        var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        return env;
+    }
+
     private static TableMetadata CreateMetadata()
     {
         var id = new TableIdentifier("corp", "hr", "employees");
@@ -129,7 +136,7 @@ public sealed class SqlDataSourceExecutorTests
         };
 
         var context = CreateContext(metadata, columnAccess, arguments);
-        var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance);
+        var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance, environment: CreateDevEnvironment());
 
         var rows = await executor.ExecuteAsync(context);
         rows.ShouldNotBeNull();
@@ -351,7 +358,7 @@ public sealed class SqlDataSourceExecutorTests
             RequestedFields: ["id", "name", "salary", "ssn"] // Request all columns including denied ones
         );
 
-        var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance);
+        var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance, environment: CreateDevEnvironment());
         var rows = await executor.ExecuteAsync(context);
 
         rows.ShouldNotBeEmpty();

@@ -99,6 +99,10 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         using (var queryCmd = connection.CreateCommand())
         {
             queryCmd.CommandText = request.Sql;
+
+            // SQL2-9: DuckDB.NET checks the token only before it starts; Cancel() calls duckdb_interrupt and stops a
+            // running query when the timeout fires or the caller aborts.
+            using var interrupt = cts.Token.Register(static state => ((System.Data.Common.DbCommand)state!).Cancel(), queryCmd);
             using var reader = await queryCmd.ExecuteReaderAsync(cts.Token).ConfigureAwait(false);
 
             int fieldCount = reader.FieldCount;
@@ -252,7 +256,8 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             throw new ArgumentException("SQL query cannot be empty.", nameof(sql));
         }
 
-        var trimmed = sql.Trim();
+        var stripped = StripSqlComments(sql);
+        var trimmed = stripped.Trim();
 
         // 1. Single statement check: reject semicolons outside quotes
         bool inQuotes = false;
@@ -294,7 +299,9 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         {
             "CREATE", "DROP", "ALTER", "INSERT", "UPDATE", "DELETE",
             "ATTACH", "DETACH", "COPY", "EXPORT", "IMPORT", "INSTALL", "LOAD",
-            "PRAGMA", "SET"
+            "PRAGMA", "SET",
+            // SQL2-9: recursive CTEs generate unbounded rows
+            "RECURSIVE"
         };
 
         var tokens = ExtractTokens(trimmed);
@@ -306,14 +313,11 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             }
         }
 
-        // 4. Prohibit unbounded generator table functions if no sources were staged
-        if (sources == null || sources.Count == 0)
+        // 4. SQL2-9: unbounded generator table functions are prohibited, also next to staged tables (cross join bomb).
+        var match = DisallowedGeneratorRegex.Match(trimmed);
+        if (match.Success)
         {
-            var match = DisallowedGeneratorRegex.Match(trimmed);
-            if (match.Success)
-            {
-                throw new System.Security.SecurityException($"Table generator function '{match.Groups[1].Value}' is not permitted without staged tables.");
-            }
+            throw new System.Security.SecurityException($"Table generator function '{match.Groups[1].Value}' is not permitted in OLAP queries.");
         }
     }
 
@@ -382,6 +386,68 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         }
 
         return list;
+    }
+
+    private static string StripSqlComments(string sql)
+    {
+        var sb = new System.Text.StringBuilder(sql.Length);
+        bool inQuotes = false;
+        char quoteChar = '\0';
+        int i = 0;
+
+        while (i < sql.Length)
+        {
+            char c = sql[i];
+            if (c == '\'' || c == '"')
+            {
+                if (!inQuotes)
+                {
+                    inQuotes = true;
+                    quoteChar = c;
+                }
+                else if (c == quoteChar)
+                {
+                    inQuotes = false;
+                }
+                sb.Append(c);
+                i++;
+            }
+            else if (!inQuotes && c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
+            {
+                // Line comment: skip until newline or end
+                i += 2;
+                while (i < sql.Length && sql[i] != '\n' && sql[i] != '\r')
+                {
+                    i++;
+                }
+                sb.Append(' ');
+            }
+            else if (!inQuotes && c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
+            {
+                // Block comment: skip until */ or end
+                i += 2;
+                while (i + 1 < sql.Length && !(sql[i] == '*' && sql[i + 1] == '/'))
+                {
+                    i++;
+                }
+                if (i + 1 < sql.Length)
+                {
+                    i += 2; // skip */
+                }
+                else
+                {
+                    i = sql.Length;
+                }
+                sb.Append(' ');
+            }
+            else
+            {
+                sb.Append(c);
+                i++;
+            }
+        }
+
+        return sb.ToString();
     }
 }
 

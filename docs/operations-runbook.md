@@ -341,7 +341,7 @@ Based on production load tests (Hetzner Dedicated AX-series, AMD EPYC / Ryzen 9,
 | **Standard Enterprise** | 500 – 2,000 | 5,000 – 15,000 | 2 – 4 vCPU, 2 – 4 GB RAM | 3 – 5 |
 | **High-Throughput Analytics** | 2,000 – 10,000 | 20,000 – 50,000+ | 8 vCPU, 8 – 16 GB RAM | 5 – 10 (HPA) |
 
-> **Replica count:** more than one replica requires `GovernanceDb:Provider = PostgreSql` (SQLite is rejected at startup) and, outside Development, `Caching:Redis:Enabled = true` for cluster-wide cache/epoch and token-revocation propagation. The PostgreSQL connection must use TLS (`SSL Mode=Require` or stronger) and a dedicated account; apply the schema with `GovernanceDb:MigrationConnectionString` and give the runtime role only the rights it needs (INSERT/SELECT on `AUDIT_LOG_ENTRIES` plus `USAGE` on its sequence; no UPDATE/DELETE/TRUNCATE).
+> **Replica count:** more than one replica requires `GovernanceDb:Provider = PostgreSql` (SQLite is rejected at startup) and, outside Development, `Caching:Redis:Enabled = true` for cluster-wide cache/epoch and token-revocation propagation. The PostgreSQL connection must use TLS with certificate verification (`SSL Mode=VerifyFull` or `VerifyCA`; DEP-7) and a dedicated account; apply the schema with `GovernanceDb:MigrationConnectionString` and give the runtime role only the rights it needs (INSERT/SELECT on `AUDIT_LOG_ENTRIES` plus `USAGE` on its sequence; no UPDATE/DELETE/TRUNCATE).
 
 ### 9.2 Latency Budgets & SLA Targets
 

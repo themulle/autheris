@@ -70,12 +70,3 @@ public sealed record DeltaDataFile(
     IReadOnlyDictionary<string, long>? NullCounts = null
 );
 
-/// <summary>
-/// Delta UniForm (Universal Format) metadata compatibility mode.
-/// </summary>
-public enum DeltaUniFormCompatibility
-{
-    DeltaNative = 0,
-    IcebergCompat = 1,
-    HudiCompat = 2
-}

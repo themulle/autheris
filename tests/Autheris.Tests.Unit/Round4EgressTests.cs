@@ -346,7 +346,10 @@ public sealed class Round4EgressTests
     [Fact]
     public void E02_S3ManifestUrlPointingToInternalElb_IsRejected()
     {
-        var options = Options.Create(new GatewayOptions());
+        var options = Options.Create(new GatewayOptions
+        {
+            Lakehouse = new LakehouseOptions { Storage = new LakehouseStorageOptions { S3Bucket = "my-bucket" } }
+        });
         using var httpClient = new HttpClient(new OkHandler());
         var provider = new S3LakehouseStorageProvider(httpClient, options, NullLogger<S3LakehouseStorageProvider>.Instance);
 

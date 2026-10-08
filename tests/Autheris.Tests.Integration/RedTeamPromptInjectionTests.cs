@@ -8,7 +8,6 @@ using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Extensions.Lineage;
-using Autheris.Infrastructure.Persistence.Migrations;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
@@ -117,60 +116,6 @@ public class RedTeamPromptInjectionTests
         result.AutoGrantEligible.ShouldBeFalse("Sensitive tables must NEVER be auto-granted even with high confidence");
         result.GrantedDuration.ShouldBeNull();
         mockAuditRepo.RecordedEvents.ShouldNotContain(e => e.EventType == "AUTO_GRANT_LOW_SENSITIVITY");
-    }
-
-    [Fact]
-    public async Task TenantBackfillMigration_VerifyThrows_WhenUnmigratedRowsExistInMultiTenantMode()
-    {
-        // Arrange
-        using var conn = new SqliteConnection("Data Source=InMemoryDb_" + Guid.NewGuid().ToString("N") + ";Mode=Memory;Cache=Shared");
-        await conn.OpenAsync();
-
-        using (var cmd = conn.CreateCommand())
-        {
-            cmd.CommandText = @"
-                CREATE TABLE CONSENT_REQUESTS (
-                    id TEXT PRIMARY KEY,
-                    tenant_id TEXT,
-                    user_sid TEXT NOT NULL
-                );
-                INSERT INTO CONSENT_REQUESTS (id, tenant_id, user_sid) VALUES ('req-1', NULL, 'user-1');
-                INSERT INTO CONSENT_REQUESTS (id, tenant_id, user_sid) VALUES ('req-2', '   ', 'user-2');
-                INSERT INTO CONSENT_REQUESTS (id, tenant_id, user_sid) VALUES ('req-3', 'tenant-a', 'user-3');
-            ";
-            await cmd.ExecuteNonQueryAsync();
-        }
-
-        // Act & Assert 1: In Multi-Tenant Mode, verify must throw
-        var ex = await Should.ThrowAsync<InvalidOperationException>(async () =>
-        {
-            await TenantBackfillMigration.VerifyTenantBackfillAsync(conn, isMultiTenantEnabled: true);
-        });
-        ex.Message.ShouldContain("FATAL MIGRATION ERROR");
-
-        // Act & Assert 2: In Single-Tenant Mode (disabled), verify passes
-        await Should.NotThrowAsync(async () =>
-        {
-            await TenantBackfillMigration.VerifyTenantBackfillAsync(conn, isMultiTenantEnabled: false);
-        });
-
-        // Act 3: Run Backfill
-        var updated = await TenantBackfillMigration.RunBackfillAsync(conn);
-        updated.ShouldBe(2);
-
-        // Act & Assert 4: Now verify must pass even in Multi-Tenant mode
-        await Should.NotThrowAsync(async () =>
-        {
-            await TenantBackfillMigration.VerifyTenantBackfillAsync(conn, isMultiTenantEnabled: true);
-        });
-
-        // Assert that tenant_id was updated to legacy-single-tenant
-        using (var checkCmd = conn.CreateCommand())
-        {
-            checkCmd.CommandText = "SELECT COUNT(*) FROM CONSENT_REQUESTS WHERE tenant_id = 'legacy-single-tenant';";
-            var count = Convert.ToInt64(await checkCmd.ExecuteScalarAsync());
-            count.ShouldBe(2);
-        }
     }
 
     private sealed class FakeMetadataRepository : ITableMetadataRepository

@@ -13,6 +13,8 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Connectors;
+using Autheris.Infrastructure.Persistence;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
@@ -217,35 +219,6 @@ public class ConnectorSpiTests
     }
 
     [Fact]
-    public async Task ConnectorDataSourceExecutorAdapter_BiDirectionalBridge_ExecutesSuccessfully()
-    {
-        var meta = CreateSampleMetadata();
-        var principal = CreatePrincipal();
-        var decision = TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
-
-        var innerExecutor = new FakeSqlExecutor();
-        var connector = new LegacyDataSourceExecutorAdapter(innerExecutor, "adapter-sql");
-
-        var bridgedExecutor = new ConnectorDataSourceExecutorAdapter(connector);
-        bridgedExecutor.SupportedType.ShouldBe(DataSourceType.Sql);
-
-        var context = new DataSourceExecutionContext(
-            SourceName: "adapter-sql",
-            Metadata: meta,
-            Principal: principal,
-            AccessDecision: decision,
-            Arguments: new Dictionary<string, object?>(),
-            RequestedFields: ["Id", "Amount"],
-            Limit: 50,
-            Offset: 0);
-
-        var results = await bridgedExecutor.ExecuteAsync(context);
-        results.Count.ShouldBe(1);
-        results[0]["Id"].ShouldBe(101);
-        results[0]["Amount"].ShouldBe(250.0m);
-    }
-
-    [Fact]
     public async Task SqlConnector_ResolvesConnectionByTableSourceName_NotByConnectorId()
     {
         // Connection is configured under the table's data source ("lwetem_prod"), the connector is registered as "default-sql".
@@ -285,6 +258,77 @@ public class ConnectorSpiTests
         });
 
         factory.ConnectionString.ShouldBe("Server=db;Database=x;");
+    }
+
+    [Fact]
+    public async Task SQL202_SqlConnector_RespectsSessionLimitBeyond5000()
+    {
+        var memConnStr = $"Data Source=sql202_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+        using var masterConn = new SqliteConnection(memConnStr);
+        masterConn.Open();
+
+        using (var cmd = masterConn.CreateCommand())
+        {
+            cmd.CommandText = "CREATE TABLE orders (id INT, tenant_id TEXT);";
+            cmd.ExecuteNonQuery();
+
+            using var tx = masterConn.BeginTransaction();
+            using var insertCmd = masterConn.CreateCommand();
+            insertCmd.Transaction = tx;
+            insertCmd.CommandText = "INSERT INTO orders VALUES ($id, 'tenant-1');";
+            var p = insertCmd.CreateParameter();
+            p.ParameterName = "$id";
+            insertCmd.Parameters.Add(p);
+
+            for (int i = 1; i <= 6000; i++)
+            {
+                p.Value = i;
+                insertCmd.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+
+        var table = new TableIdentifier("sales", "main", "orders");
+        var meta = new TableMetadata
+        {
+            Identifier = table,
+            Table = new Table { SchemaName = "main", TableName = "orders", SourceName = "sqlite_ds", SourceType = "Sqlite" },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "tenant_id", DataType = "text" }]
+        };
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections =
+                {
+                    ["sqlite_ds"] = new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = memConnStr }
+                }
+            },
+            DuckDbOlap = new DuckDbOlapOptions { MaxStagedRowsPerTable = 25000 }
+        });
+
+        var sqlConnector = new SqlConnector(
+            connectorId: "default-sql",
+            connectionFactory: new SqlConnectionFactory(),
+            metadataRepository: new FakeMetadataRepository([meta]),
+            options: options);
+
+        var decision = TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+        var session = new ConnectorSessionContext(
+            Principal: CreatePrincipal(),
+            Tenant: new TenantId("tenant-1"),
+            AccessDecision: decision,
+            ProjectedColumns: ["id"],
+            Arguments: new Dictionary<string, object?>(),
+            Limit: 6000);
+        session.Items["TableMetadata"] = meta;
+
+        var batch = await sqlConnector.RecordSource.ReadBatchAsync(ConnectorSplit.Default(), session);
+
+        // Before fix: batch.Count was 5000 because of Math.Clamp(..., 1, 5000).
+        // After fix: batch.Count is 6000!
+        batch.Count.ShouldBe(6000);
     }
 
     private sealed class RecordingConnectionFactory : ISqlConnectionFactory

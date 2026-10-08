@@ -5,91 +5,6 @@ using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 /// <summary>
-/// F-ARCH-11: Envoy External Authorization (ext_authz) request representation.
-/// Conforms to envoy.service.auth.v3.CheckRequest JSON protocol.
-/// </summary>
-public sealed record EnvoyCheckRequest
-{
-    [JsonPropertyName("attributes")]
-    public EnvoyAttributeContext? Attributes { get; init; }
-}
-
-public sealed record EnvoyAttributeContext
-{
-    [JsonPropertyName("source")]
-    public EnvoyPeer? Source { get; init; }
-
-    [JsonPropertyName("destination")]
-    public EnvoyPeer? Destination { get; init; }
-
-    [JsonPropertyName("request")]
-    public EnvoyRequest? Request { get; init; }
-
-    [JsonPropertyName("contextExtensions")]
-    public Dictionary<string, string> ContextExtensions { get; init; } = new(StringComparer.OrdinalIgnoreCase);
-}
-
-public sealed record EnvoyPeer
-{
-    [JsonPropertyName("address")]
-    public EnvoyAddress? Address { get; init; }
-
-    [JsonPropertyName("service")]
-    public string? Service { get; init; }
-
-    [JsonPropertyName("principal")]
-    public string? Principal { get; init; }
-}
-
-public sealed record EnvoyAddress
-{
-    [JsonPropertyName("socketAddress")]
-    public EnvoySocketAddress? SocketAddress { get; init; }
-}
-
-public sealed record EnvoySocketAddress
-{
-    [JsonPropertyName("address")]
-    public string? Address { get; init; }
-
-    [JsonPropertyName("portValue")]
-    public int PortValue { get; init; }
-}
-
-public sealed record EnvoyRequest
-{
-    [JsonPropertyName("time")]
-    public string? Time { get; init; }
-
-    [JsonPropertyName("http")]
-    public EnvoyHttpRequest? Http { get; init; }
-}
-
-public sealed record EnvoyHttpRequest
-{
-    [JsonPropertyName("id")]
-    public string? Id { get; init; }
-
-    [JsonPropertyName("method")]
-    public string Method { get; init; } = "GET";
-
-    [JsonPropertyName("headers")]
-    public Dictionary<string, string> Headers { get; init; } = new(StringComparer.OrdinalIgnoreCase);
-
-    [JsonPropertyName("path")]
-    public string Path { get; init; } = "/";
-
-    [JsonPropertyName("host")]
-    public string? Host { get; init; }
-
-    [JsonPropertyName("scheme")]
-    public string? Scheme { get; init; }
-
-    [JsonPropertyName("body")]
-    public string? Body { get; init; }
-}
-
-/// <summary>
 /// F-ARCH-11: Envoy External Authorization response conforming to envoy.service.auth.v3.CheckResponse.
 /// </summary>
 public sealed record EnvoyCheckResponse
@@ -245,4 +160,6 @@ public sealed record EnvoyFilterExportOptions
     public int TimeoutMs { get; init; } = 250;
     public bool FailOpen { get; init; } = false;
     public IReadOnlyList<string> PathPrefixes { get; init; } = new[] { "/api/", "/graphql" };
+    public string WasmPluginTag { get; init; } = "v1.0.0";
+    public string? WasmPluginUrl { get; init; }
 }

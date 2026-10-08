@@ -49,6 +49,7 @@ CREATE SCHEMA md;
 CREATE TABLE md.crane (serial_number text PRIMARY KEY, client_id integer NOT NULL, is_delivered boolean, tenant_id text NOT NULL);
 CREATE UNIQUE INDEX ux_crane_partial ON md.crane (client_id) WHERE is_delivered IS NULL;
 CREATE TABLE md.client (client_id integer NOT NULL, region text NOT NULL);
+CREATE SEQUENCE md.side_effect;
 INSERT INTO md.crane VALUES ('100', 1, true, 'tenant-a'), ('200', 2, NULL, 'tenant-a'), ('300', 3, NULL, 'tenant-b');
 INSERT INTO md.client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
         await cmd.ExecuteNonQueryAsync();
@@ -101,6 +102,18 @@ INSERT INTO md.client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
             [["100"], ["200"], ["300"]], Caller, CancellationToken.None);
 
         allowed.ShouldBe(new[] { RowScopeKeys.Normalize(["200"])! });
+    }
+
+    [Fact]
+    public async Task Lookup_RunsInReadOnlyTransaction_SideEffectsAreRejected()
+    {
+        if (!_available) return;
+
+        // R-SQL-4: nextval() writes; inside SET TRANSACTION READ ONLY PostgreSQL refuses it.
+        var ex = await Should.ThrowAsync<Npgsql.PostgresException>(() => Resolver().GetAllowedKeysAsync(
+            Definition(), Crane(), Decision("nextval('md.side_effect') > 0"), ["serial_number"], [["100"]], Caller, CancellationToken.None));
+
+        ex.SqlState.ShouldBe("25006"); // read_only_sql_transaction
     }
 
     [Fact]

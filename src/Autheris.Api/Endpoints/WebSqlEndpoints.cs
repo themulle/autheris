@@ -316,7 +316,7 @@ public static class WebSqlEndpoints
         }
     }
 
-    private static async Task WriteWebSqlErrorAsync(
+    internal static async Task WriteWebSqlErrorAsync(
         HttpContext httpContext,
         Exception ex,
         ILogger logger,
@@ -343,6 +343,54 @@ public static class WebSqlEndpoints
                 }, ct);
                 break;
 
+            case GatewayNotImplementedException notImplEx:
+                logger.LogWarning(notImplEx, "WebSQL Not Implemented. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status501NotImplemented;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "NotImplemented",
+                    message = "The requested feature or data source capability is not implemented.",
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
+            case Antlr4.Runtime.Misc.ParseCanceledException parseEx:
+                logger.LogWarning(parseEx, "WebSQL SQL Syntax Error. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "BadRequest",
+                    message = "Invalid SQL syntax.",
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
+            case Antlr4.Runtime.RecognitionException recogEx:
+                logger.LogWarning(recogEx, "WebSQL SQL Syntax Error. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "BadRequest",
+                    message = "Invalid SQL syntax.",
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
+            case Exception exWithParse when exWithParse.InnerException is Antlr4.Runtime.Misc.ParseCanceledException or Antlr4.Runtime.RecognitionException:
+                logger.LogWarning(exWithParse, "WebSQL SQL Syntax Error. TraceId={TraceId}", httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "BadRequest",
+                    message = "Invalid SQL syntax.",
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
             case NotSupportedException notSuppEx:
                 logger.LogWarning(notSuppEx, "WebSQL Not Supported. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status501NotImplemented;
@@ -350,7 +398,7 @@ public static class WebSqlEndpoints
                 await httpContext.Response.WriteAsJsonAsync(new
                 {
                     error = "NotImplemented",
-                    message = notSuppEx.Message,
+                    message = "The requested operation is not supported.",
                     traceId = httpContext.TraceIdentifier
                 }, ct);
                 break;
@@ -359,10 +407,11 @@ public static class WebSqlEndpoints
                 logger.LogWarning(secEx, "WebSQL Security Violation. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
                 httpContext.Response.ContentType = "application/json; charset=utf-8";
+                var isProduction = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
                 await httpContext.Response.WriteAsJsonAsync(new
                 {
                     error = "Forbidden",
-                    message = secEx is WebSqlPolicyException ? secEx.Message : GenericForbiddenMessage,
+                    message = (!isProduction && secEx is WebSqlPolicyException) ? secEx.Message : GenericForbiddenMessage,
                     traceId = httpContext.TraceIdentifier
                 }, ct);
                 break;

@@ -21,31 +21,116 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.GraphQL.Catalog;
 
-public sealed class CatalogGraphQlTypeModule : ITypeModule
+public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
 {
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly ITableRelationRepository _relationRepo;
+    private readonly Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? _logger;
+    private readonly TimeSpan _refreshInterval;
+    private readonly object _timerLock = new();
+    private Timer? _refreshTimer;
+    private volatile string? _builtFingerprint;
+    private int _checking;
 
     public CatalogGraphQlTypeModule(
         ITableMetadataRepository metadataRepo,
-        ITableRelationRepository relationRepo)
+        ITableRelationRepository relationRepo,
+        Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? logger = null,
+        TimeSpan? refreshInterval = null)
     {
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _relationRepo = relationRepo ?? throw new ArgumentNullException(nameof(relationRepo));
+        _logger = logger;
+        _refreshInterval = refreshInterval ?? TimeSpan.Zero;
     }
 
-    public event EventHandler<EventArgs>? TypesChanged
+    /// <summary>
+    /// R-GQL-12: raised when the catalog changed (or became reachable again) since the schema was built, so
+    /// HotChocolate rebuilds the schema without a restart. Detection polls a catalog fingerprint.
+    /// </summary>
+    public event EventHandler<EventArgs>? TypesChanged;
+
+    internal string? BuiltFingerprint => _builtFingerprint;
+
+    /// <summary>Compares the current catalog with the one the schema was built from; raises TypesChanged on a difference.</summary>
+    internal async Task<bool> CheckForCatalogChangesAsync(CancellationToken ct = default)
     {
-        add { }
-        remove { }
+        if (Interlocked.Exchange(ref _checking, 1) == 1)
+        {
+            return false;
+        }
+
+        try
+        {
+            string current;
+            try
+            {
+                current = (await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, null, ct).ConfigureAwait(false)).Fingerprint();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger?.LogDebug(ex, "GraphQL catalog change check failed; retrying with the next interval.");
+                return false;
+            }
+
+            if (string.Equals(current, _builtFingerprint, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            _logger?.LogInformation("GraphQL catalog changed; rebuilding the GraphQL schema.");
+            TypesChanged?.Invoke(this, EventArgs.Empty);
+            return true;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _checking, 0);
+        }
+    }
+
+    private void EnsureRefreshTimer()
+    {
+        if (_refreshInterval <= TimeSpan.Zero || _refreshTimer != null)
+        {
+            return;
+        }
+
+        lock (_timerLock)
+        {
+            _refreshTimer ??= new Timer(_ => _ = CheckForCatalogChangesAsync(), null, _refreshInterval, _refreshInterval);
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_timerLock)
+        {
+            _refreshTimer?.Dispose();
+            _refreshTimer = null;
+        }
     }
 
     public async ValueTask<IReadOnlyCollection<ITypeSystemMember>> CreateTypesAsync(
         IDescriptorContext context,
         CancellationToken cancellationToken)
     {
-        var schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, cancellationToken)
-            .ConfigureAwait(false);
+        // R-GQL-12: an unreachable governance database must not take down the whole GraphQL endpoint; the schema is built
+        // without catalog tables and rebuilt once the catalog can be read (change detection).
+        CatalogSchemaModel schemaModel;
+        try
+        {
+            schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, cancellationToken)
+                .ConfigureAwait(false);
+            _builtFingerprint = schemaModel.Fingerprint();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex, "GraphQL catalog schema could not be built; serving the schema without catalog tables until the catalog is reachable.");
+            schemaModel = CatalogSchemaModel.Empty;
+            _builtFingerprint = null;
+        }
+
+        EnsureRefreshTimer();
 
         var types = new List<ITypeSystemMember>();
 
@@ -259,7 +344,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule
         }));
     }
 
-    private static string GetScalarName(CatalogFieldType type) => type switch
+    internal static string GetScalarName(CatalogFieldType type) => type switch
     {
         CatalogFieldType.String => "String",
         CatalogFieldType.Int => "Int",
@@ -283,6 +368,16 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule
         _ => "AutherisStringFilter"
     };
 
+    private static object? ReportMasked(IResolverContext ctx, CatalogColumnField col)
+    {
+        ctx.ReportError(ErrorBuilder.New()
+            .SetMessage($"Column '{col.ColumnName}' is masked.")
+            .SetCode("MASKED")
+            .SetPath(ctx.Path)
+            .Build());
+        return null;
+    }
+
     private static object? ResolveColumnValue(IResolverContext ctx, CatalogColumnField col)
     {
         var parent = ctx.Parent<JsonElement>();
@@ -304,18 +399,37 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule
 
         return col.FieldType switch
         {
-            CatalogFieldType.Int => prop.ValueKind == JsonValueKind.Number ? prop.GetInt32() : (int.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : null),
-            CatalogFieldType.Long => prop.ValueKind == JsonValueKind.Number ? prop.GetInt64() : (long.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var l) ? l : null),
-            CatalogFieldType.Float => prop.ValueKind == JsonValueKind.Number ? prop.GetDouble() : (double.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null),
-            CatalogFieldType.Decimal => prop.ValueKind == JsonValueKind.Number ? prop.GetDecimal() : (decimal.TryParse(prop.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var m) ? m : null),
+            CatalogFieldType.Int => prop.ValueKind == JsonValueKind.Number
+                ? (prop.TryGetInt32(out var n) ? n : (int.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var pi) ? pi : ReportMasked(ctx, col)))
+                : (int.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var strN) ? strN : ReportMasked(ctx, col)),
+
+            CatalogFieldType.Long => prop.ValueKind == JsonValueKind.Number
+                ? (prop.TryGetInt64(out var l) ? l : (long.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var pl) ? pl : ReportMasked(ctx, col)))
+                : (long.TryParse(prop.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var strL) ? strL : ReportMasked(ctx, col)),
+
+            CatalogFieldType.Float => prop.ValueKind == JsonValueKind.Number
+                ? (prop.TryGetDouble(out var d) ? d : (double.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var pd) ? pd : ReportMasked(ctx, col)))
+                : (double.TryParse(prop.GetString(), System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var strD) ? strD : ReportMasked(ctx, col)),
+
+            CatalogFieldType.Decimal => prop.ValueKind == JsonValueKind.Number
+                ? (prop.TryGetDecimal(out var m) ? m : (decimal.TryParse(prop.GetRawText(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var pm) ? pm : ReportMasked(ctx, col)))
+                : (decimal.TryParse(prop.GetString(), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var strM) ? strM : ReportMasked(ctx, col)),
+
             CatalogFieldType.Boolean => prop.ValueKind switch
             {
                 JsonValueKind.True => true,
                 JsonValueKind.False => false,
-                JsonValueKind.Number => prop.GetInt32() != 0,
-                JsonValueKind.String => bool.TryParse(prop.GetString(), out var b) ? b : (prop.GetString() == "1" ? true : (prop.GetString() == "0" ? false : null)),
-                _ => null
+                JsonValueKind.Number => prop.TryGetInt64(out var i)
+                    ? i != 0
+                    : (prop.TryGetDouble(out var dVal) ? Math.Abs(dVal) > double.Epsilon : ReportMasked(ctx, col)),
+                JsonValueKind.String => string.Equals(prop.GetString(), "true", StringComparison.OrdinalIgnoreCase) ? true
+                    : (string.Equals(prop.GetString(), "false", StringComparison.OrdinalIgnoreCase) ? false
+                    : (prop.GetString() == "1" ? true
+                    : (prop.GetString() == "0" ? false
+                    : ReportMasked(ctx, col)))),
+                _ => ReportMasked(ctx, col)
             },
+
             CatalogFieldType.String or CatalogFieldType.DateTime => prop.ValueKind == JsonValueKind.String ? prop.GetString() : prop.GetRawText(),
             _ => prop.ToString()
         };
@@ -389,10 +503,18 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule
             // Fallback to default
         }
 
-        if (!ctx.ContextData.TryGetValue("AutherisOperationId", out var opIdObj) || opIdObj is not string opId)
+        string opId;
+        lock (ctx.ContextData)
         {
-            opId = Guid.NewGuid().ToString("N");
-            ctx.ContextData["AutherisOperationId"] = opId;
+            if (!ctx.ContextData.TryGetValue("AutherisOperationId", out var opIdObj) || opIdObj is not string existingOpId)
+            {
+                opId = Guid.NewGuid().ToString("N");
+                ctx.ContextData["AutherisOperationId"] = opId;
+            }
+            else
+            {
+                opId = existingOpId;
+            }
         }
 
         try

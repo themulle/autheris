@@ -97,14 +97,13 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         // If no real connection is configured, or connection factory is missing, execute synthetic demo data generator (fallback for dev & unit tests)
         if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString) || _connectionFactory == null)
         {
-            bool isDevOrTest = _environment == null ||
-                               string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase) ||
-                               string.Equals(_environment.EnvironmentName, "Test", StringComparison.OrdinalIgnoreCase);
+            bool isDev = _environment != null &&
+                         string.Equals(_environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
             bool isExplicitlyAllowed = _options?.Value?.AreExternalSystemsMockedIfUnreachable == true;
 
-            if (!isDevOrTest && !isExplicitlyAllowed)
+            if (!isDev && !isExplicitlyAllowed)
             {
-                throw new NotSupportedException($"Die SQL-Datenquelle '{context.SourceName}' besitzt keine gültige Datenbankverbindung. Synthetischer Daten-Fallback ist in Produktivumgebungen deaktiviert.");
+                throw new GatewayNotImplementedException($"Die SQL-Datenquelle '{context.SourceName}' besitzt keine aktive Datenbankverbindung. Synthetischer Daten-Fallback ist außerhalb der Development-Umgebung deaktiviert.");
             }
 
             return GenerateSyntheticRows(context);
@@ -121,12 +120,11 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         var metadata = context.Metadata;
         var dialect = metadata.Dialect;
 
-        // D-1: Fail-closed dialect alignment between catalog and connection provider. An empty provider is compared as
-        // "sqlite", because that is what SqlConnectionFactory opens for it.
-        var provider = string.IsNullOrWhiteSpace(connOptions.Provider) ? "sqlite" : connOptions.Provider.Trim();
-        if (!DatabaseDialectExtensions.TryParseDialect(provider, out var providerDialect) || dialect != providerDialect)
+        // D-1: Fail-closed dialect alignment between catalog and connection provider (same provider mapping as
+        // SqlConnectionFactory, Architecture 5).
+        if (!DataSourceProvider.TryResolveDialect(connOptions.Provider, out var providerDialect) || dialect != providerDialect)
         {
-            throw new InvalidOperationException($"Catalog dialect '{dialect}' does not match the provider '{provider}' of data source '{context.SourceName}' for table '{metadata.Identifier.ToQualifiedName()}'.");
+            throw new InvalidOperationException($"Catalog dialect '{dialect}' does not match the provider '{connOptions.Provider}' of data source '{context.SourceName}' for table '{metadata.Identifier.ToQualifiedName()}'.");
         }
 
         context.Items["RlsPushdownExecuted"] = true;
@@ -151,7 +149,10 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
         // SEC H-13: HMAC pseudonymization is computed in the gateway after reading (keyed with the resolved secret),
         // never in SQL with a secret (or secret name) embedded in the statement text.
-        var tenantVal = context.Tenant?.Value ?? context.Principal.FindFirst("tenant")?.Value ?? TenantId.LegacySingleTenant.Value;
+        var tenantVal = context.Tenant?.Value
+            ?? context.Principal?.FindFirst("tenant_id")?.Value
+            ?? context.Principal?.FindFirst("tenant")?.Value
+            ?? TenantId.LegacySingleTenant.Value;
         var gatewayHmacColumns = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var col in authorizedColumns)
@@ -327,7 +328,8 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
             if (!TenantId.TryParse(tenantVal, out var validatedTenantId))
             {
-                throw new GatewayForbiddenException($"Invalid tenant identity '{tenantVal}'.");
+                _logger?.LogWarning("Invalid tenant identity claim rejected: {TenantVal}", tenantVal);
+                throw new GatewayForbiddenException("Invalid tenant identity.");
             }
 
             tx = await _sessionInitializer.InitializeSessionAsync(
@@ -487,7 +489,8 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             }
             else if (!string.IsNullOrWhiteSpace(rule.Replacement))
             {
-                maskExpr = $"'{rule.Replacement.Replace("'", "''")}'";
+                var prefix = dialect == DatabaseDialect.SqlServer ? "N" : string.Empty;
+                maskExpr = $"{prefix}'{dialect.EscapeSqlLiteral(rule.Replacement)}'";
             }
             else
             {
@@ -502,8 +505,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         return $"{maskExpr} AS {quotedCol}";
     }
 
-    private static bool IsHmacRule(MaskingRule rule) =>
-        rule.RuleType?.ToUpperInvariant() is "HMAC" or "HMAC_SHA256" or "HASH";
+    private static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;
 
     /// <summary>
     /// SEC H-13: Derives a tenant-scoped HMAC key id so pseudonyms cannot be correlated across tenants.
