@@ -190,4 +190,31 @@ public sealed class RebacZanzibarTests
         owenCheck.Allowed.ShouldBeTrue();
         strangerCheck.Allowed.ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task CanQuery_WhenInheritCanQueryFromViewerDisabled_ViewerIsDenied_WhileEditorAndOwnerArePermitted()
+    {
+        var store = new InMemoryRebacStore(NullLogger<InMemoryRebacStore>.Instance);
+        var options = new GatewayOptions
+        {
+            Rebac = new RebacOptions
+            {
+                Enabled = true,
+                InheritCanQueryFromViewer = false
+            }
+        };
+        var evaluator = new ZanzibarRebacEvaluator(store, Options.Create(options), NullLogger<ZanzibarRebacEvaluator>.Instance);
+
+        await store.AddTupleAsync(new RebacTuple("tenant-test", "user:david", "viewer", "table:lakehouse.dbo.orders"));
+        await store.AddTupleAsync(new RebacTuple("tenant-test", "user:ed", "editor", "table:sales.public.orders"));
+        await store.AddTupleAsync(new RebacTuple("tenant-test", "user:owen", "owner", "table:conf.client"));
+
+        var davidCheck = await evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:david", "can_query", "table:lakehouse.dbo.orders"));
+        var edCheck = await evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:ed", "can_query", "table:sales.public.orders"));
+        var owenCheck = await evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:owen", "can_query", "table:conf.client"));
+
+        davidCheck.Allowed.ShouldBeFalse();
+        edCheck.Allowed.ShouldBeTrue();
+        owenCheck.Allowed.ShouldBeTrue();
+    }
 }

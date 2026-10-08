@@ -1582,6 +1582,14 @@ public sealed class RebacOptions
     /// The unified PDP (MCP-RAG, DuckDB OLAP) checks ReBAC whenever <see cref="Enabled"/> is true.
     /// </summary>
     public bool EnforceOnQueryPaths { get; init; } = false;
+
+    /// <summary>
+    /// SR15-23: When true, users with the <c>viewer</c> relation automatically inherit <c>can_query</c>.
+    /// Defaults to true for backwards compatibility with POL-6 / OLAP / Arrow egress, but can be set to false
+    /// to require explicit <c>can_query</c>, <c>editor</c>, or <c>owner</c> relations, preventing existing <c>viewer</c>
+    /// tuples from automatically granting full analytical and raw egress capabilities.
+    /// </summary>
+    public bool InheritCanQueryFromViewer { get; init; } = true;
     public string? OpenFgaApiUrl { get; init; }
     public string? OpenFgaStoreId { get; init; }
 
