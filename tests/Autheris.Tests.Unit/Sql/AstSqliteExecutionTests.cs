@@ -57,6 +57,9 @@ public sealed class AstSqliteExecutionTests
     [InlineData("SELECT trim(BOTH '2' FROM created_at) FROM orders", "024-03-15")]
     [InlineData("SELECT trim(LEADING '20' FROM created_at) FROM orders", "4-03-15")]
     [InlineData("SELECT trim(TRAILING '5' FROM created_at) FROM orders", "2024-03-1")]
+    [InlineData("SELECT COUNT(*) FROM orders WHERE created_at IS DISTINCT FROM NULL", "1")]
+    [InlineData("SELECT COUNT(*) FROM orders WHERE NULL IS NOT DISTINCT FROM NULL", "1")]
+    [InlineData("SELECT COUNT(*) FROM orders WHERE created_at IS NOT DISTINCT FROM '2024-03-15'", "1")]
     public void StringSpecialForms_MatchTrino(string trinoSql, string expected)
     {
         Convert.ToString(Scalar(trinoSql, "2024-03-15"), CultureInfo.InvariantCulture).ShouldBe(expected);

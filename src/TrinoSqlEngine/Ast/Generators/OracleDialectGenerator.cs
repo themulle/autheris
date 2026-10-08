@@ -17,6 +17,16 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 
     protected override string SubstringFunctionName => "SUBSTR";
 
+    /// <summary>Wunsch 4: Oracle has no IS DISTINCT FROM; DECODE treats two NULLs as equal.</summary>
+    protected override void FormatIsDistinctFrom(ref ValueStringBuilder builder, IsDistinctFromExpression dist, SqlEmitterContext context)
+    {
+        builder.Append("DECODE(");
+        GenerateExpression(dist.Left, ref builder, context);
+        builder.Append(", ");
+        GenerateExpression(dist.Right, ref builder, context);
+        builder.Append(dist.IsNotDistinctFrom ? ", 0, 1) = 0" : ", 0, 1) = 1");
+    }
+
     /// <summary>Wunsch 4: Oracle spellings (VARCHAR2, NUMBER, BINARY_DOUBLE); no BOOLEAN or TIME before 23ai.</summary>
     protected override string FormatTypeName(TrinoType type) => type.Name switch
     {

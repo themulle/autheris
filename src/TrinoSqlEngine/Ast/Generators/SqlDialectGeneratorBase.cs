@@ -141,6 +141,9 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
 
         bool prevPred = context.InPredicateContext;
+        // Wunsch 4: restore the outer projection context; a scalar subquery in a projection used to reset it to false,
+        // so later boolean projections were no longer wrapped (SQL Server, Oracle).
+        bool prevProjection = context.InProjectionContext;
         context.InPredicateContext = false;
         context.InProjectionContext = true;
         for (int i = 0; i < spec.Projections.Count; i++)
@@ -148,7 +151,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             if (i > 0) builder.Append(", ");
             GenerateSelectItem(spec.Projections[i], ref builder, context);
         }
-        context.InProjectionContext = false;
+        context.InProjectionContext = prevProjection;
         context.InPredicateContext = prevPred;
 
         if (spec.From != null)
@@ -253,6 +256,12 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 }
                 else if (joined.Condition is UsingJoinCondition usingCond)
                 {
+                    if (!SupportsJoinUsing)
+                    {
+                        // ON l.c = r.c is not equivalent (USING merges the column), so the construct is rejected.
+                        throw UnsupportedConstruct("JOIN … USING", TargetDialect);
+                    }
+
                     builder.Append(" USING (");
                     for (int i = 0; i < usingCond.Columns.Count; i++)
                     {
@@ -474,10 +483,9 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 foreach (var w in cs.WhenClauses)
                 {
                     builder.Append(" WHEN ");
-                    bool prevCasePred = context.InPredicateContext;
-                    context.InPredicateContext = true;
-                    GenerateExpression(w.Condition, ref builder, context);
-                    context.InPredicateContext = prevCasePred;
+                    // Wunsch 4: a searched CASE condition is a predicate, never a projected boolean (no second CASE wrap).
+                    if (cs.Operand == null) GeneratePredicate(w.Condition, ref builder, context);
+                    else GenerateExpression(w.Condition, ref builder, context);
                     builder.Append(" THEN ");
                     GenerateExpression(w.Result, ref builder, context);
                 }
@@ -758,6 +766,9 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         GenerateExpression(source, ref builder, context);
         builder.Append(')');
     }
+
+    /// <summary>Wunsch 4: the dialect accepts <c>JOIN … USING (…)</c> (all but SQL Server).</summary>
+    protected virtual bool SupportsJoinUsing => true;
 
     /// <summary>Wunsch 4: the dialect has TRY_CAST (SQL Server, DuckDB, Snowflake).</summary>
     protected virtual bool SupportsTryCast => false;

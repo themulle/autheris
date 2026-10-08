@@ -16,6 +16,17 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.SqlServer;
 
     protected override bool SupportsTryCast => true;
+    protected override bool SupportsJoinUsing => false;
+
+    /// <summary>Wunsch 4: IS [NOT] DISTINCT FROM needs SQL Server 2022; INTERSECT compares NULLs as equal on every version.</summary>
+    protected override void FormatIsDistinctFrom(ref ValueStringBuilder builder, IsDistinctFromExpression dist, SqlEmitterContext context)
+    {
+        builder.Append(dist.IsNotDistinctFrom ? "EXISTS (SELECT " : "NOT EXISTS (SELECT ");
+        GenerateExpression(dist.Left, ref builder, context);
+        builder.Append(" INTERSECT SELECT ");
+        GenerateExpression(dist.Right, ref builder, context);
+        builder.Append(')');
+    }
 
     /// <summary>Wunsch 4: T-SQL names; <c>timestamp</c> would be rowversion, so it maps to datetime2.</summary>
     protected override string FormatTypeName(TrinoType type) => type.Name switch

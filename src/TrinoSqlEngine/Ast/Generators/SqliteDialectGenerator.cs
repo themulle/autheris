@@ -18,6 +18,14 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
 
     protected override string SubstringFunctionName => "SUBSTR";
 
+    /// <summary>Wunsch 4: SQLite's null-safe comparison is IS / IS NOT.</summary>
+    protected override void FormatIsDistinctFrom(ref ValueStringBuilder builder, IsDistinctFromExpression dist, SqlEmitterContext context)
+    {
+        GenerateExpression(dist.Left, ref builder, context);
+        builder.Append(dist.IsNotDistinctFrom ? " IS " : " IS NOT ");
+        GenerateExpression(dist.Right, ref builder, context);
+    }
+
     protected override void FormatCurrentDateTime(ref ValueStringBuilder builder, CurrentDateTimeKind kind, SqlEmitterContext context)
     {
         builder.Append(kind switch
