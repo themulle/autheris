@@ -11,6 +11,7 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.GraphQL.Mcp;
@@ -112,6 +113,33 @@ public sealed class McpDatasetToolWiringTests
         {
             result.ErrorMessage!.ShouldContain("Four-Eyes");
         }
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task Guardrail_AsksCasbin_OnlyWhenCasbinIsEnabled(bool casbinEnabled, bool expectedSuccess)
+    {
+        // With Casbin disabled (the default) the engine has no policies and would deny every tool call.
+        var policy = Substitute.For<IPolicyEnforcementService>();
+        policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+            .Returns(ValueTask.FromResult(TableAccessDecision.Denied(McpDatasetTools.CatalogTable, "no policy")));
+        var executor = Substitute.For<IMcpQueryExecutor>();
+        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult("""{"datasets":[]}"""));
+
+        var guardrail = new AiDataGuardrailService(
+            new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData(false)),
+            Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = casbinEnabled }, Mcp = new McpOptions { Enabled = true } }),
+            NullLogger<AiDataGuardrailService>.Instance,
+            queryExecutor: executor,
+            policyEnforcementService: policy);
+
+        var session = new McpSessionContext("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER");
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("list_datasets", "{}"), session);
+
+        result.IsSuccess.ShouldBe(expectedSuccess);
+        await policy.Received(casbinEnabled ? 1 : 0).EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>());
     }
 
     private static GatewayMcpQueryExecutor Executor(IMcpDatasetCatalog catalog) => new(

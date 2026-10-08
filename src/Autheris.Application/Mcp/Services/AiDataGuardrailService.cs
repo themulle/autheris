@@ -211,7 +211,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                  string.Equals(effectiveTable.Domain, "governance", StringComparison.OrdinalIgnoreCase) ||
                  string.Equals(effectiveTable.Domain, "catalog", StringComparison.OrdinalIgnoreCase));
 
-            if (_policyEnforcementService != null && !_options.Value.IsMcpAuthBypassed && !isSchemaTool)
+            if (_policyEnforcementService != null && _options.Value.Casbin.Enabled && !_options.Value.IsMcpAuthBypassed && !isSchemaTool)
             {
 
                 var userSidStr = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
