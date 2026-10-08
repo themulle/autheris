@@ -107,6 +107,24 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         }
     }
 
+    /// <summary>
+    /// Wunsch 4: every grammar rule without an explicit visitor is rejected. The ANTLR default (visit all children and
+    /// return the last result) silently dropped constructs such as ROLLUP, FILTER or window frames, or returned null.
+    /// </summary>
+    public override SqlNode VisitChildren(IRuleNode node)
+    {
+        string rule = node.RuleContext.GetType().Name;
+        if (rule.EndsWith("Context", StringComparison.Ordinal))
+        {
+            rule = rule[..^"Context".Length];
+        }
+
+        throw Unsupported($"'{rule}'");
+    }
+
+    private static AstBuildException Unsupported(string construct) =>
+        new($"SQL construct {construct} is not supported by the AST compiler.");
+
     public override SqlNode VisitSingleStatement(SqlBaseParser.SingleStatementContext context)
     {
         using var _ = EnterScope();
@@ -348,22 +366,34 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         Expression? where = context.where != null ? (Expression)Visit(context.where) : null;
 
+        if (context.windowDefinition() is { Length: > 0 })
+        {
+            throw Unsupported("WINDOW (named window definitions)");
+        }
+
         GroupByClause? groupBy = null;
         if (context.groupBy() != null)
         {
+            if (context.groupBy().setQuantifier()?.DISTINCT() != null)
+            {
+                throw Unsupported("GROUP BY DISTINCT");
+            }
+
             var groupingElements = context.groupBy().groupingElement();
             var groupingExpressions = new List<Expression>();
             foreach (var ge in groupingElements)
             {
-                if (ge is SqlBaseParser.SingleGroupingSetContext sgs)
+                if (ge is not SqlBaseParser.SingleGroupingSetContext sgs)
                 {
-                    var exprs = sgs.groupingSet().expression();
-                    if (exprs != null)
+                    throw Unsupported($"GROUP BY {ge.GetChild(0).GetText().ToUpperInvariant()}");
+                }
+
+                var exprs = sgs.groupingSet().expression();
+                if (exprs != null)
+                {
+                    foreach (var e in exprs)
                     {
-                        foreach (var e in exprs)
-                        {
-                            groupingExpressions.Add((Expression)Visit(e));
-                        }
+                        groupingExpressions.Add((Expression)Visit(e));
                     }
                 }
             }
@@ -779,7 +809,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
             case SqlBaseParser.NullLiteralContext:
                 return new LiteralExpression(null, LiteralType.Null);
             default:
-                return new LiteralExpression(lit.GetText(), LiteralType.String);
+                // Wunsch 4: typed literals (DATE '…', INTERVAL …), binary and unicode literals are not plain strings.
+                throw Unsupported($"literal '{lit.GetType().Name.Replace("Context", string.Empty, StringComparison.Ordinal)}'");
         }
     }
 
@@ -792,6 +823,13 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             throw new SecurityException($"Function '{name}' is not permitted by the SQL function policy.");
         }
+
+        // Wunsch 4: modifiers the AST cannot represent yet are rejected instead of being dropped.
+        if (context.processingMode() != null) throw Unsupported("RUNNING/FINAL");
+        if (context.label != null) throw Unsupported("label.* in function calls");
+        if (context.filter() != null) throw Unsupported("FILTER (WHERE …) in aggregates");
+        if (context.orderBy() != null) throw Unsupported("ORDER BY inside aggregates");
+        if (context.nullTreatment() != null) throw Unsupported("IGNORE/RESPECT NULLS");
 
         var qName = ToSqlQualifiedName(context.qualifiedName());
         var args = new List<Expression>();
@@ -817,9 +855,17 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         WindowSpecification? window = null;
         var overCtx = context.over();
+        if (overCtx != null && overCtx.windowSpecification() == null)
+        {
+            throw Unsupported("OVER <window name>");
+        }
+
         if (overCtx?.windowSpecification() != null)
         {
             var winSpec = overCtx.windowSpecification();
+            if (winSpec.existingWindowName != null) throw Unsupported("window inheritance");
+            if (winSpec.windowFrame() != null) throw Unsupported("window frames (ROWS/RANGE/GROUPS)");
+
             var partitionExprs = winSpec._partition != null && winSpec._partition.Count > 0
                 ? winSpec._partition.Select(p => (Expression)Visit(p)).ToList().AsReadOnly()
                 : null;

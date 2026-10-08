@@ -749,6 +749,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 "UPDATE/DELETE statements in WebSQL require a restricting WHERE clause (statements without WHERE or with a trivially true condition such as 'WHERE 1=1' are rejected).",
                 unfilteredEx);
         }
+        catch (TrinoSqlEngine.Ast.Builder.AstBuildException astEx)
+        {
+            // Wunsch 4: a construct the AST compiler cannot translate is a client error (400), not a server error.
+            throw new ArgumentException($"The SQL statement could not be compiled: {astEx.Message}", nameof(rawSql), astEx);
+        }
         catch (SecurityException secEx)
         {
             _logger?.LogWarning(secEx, "WebSQL statement rejected by RLS rewriter.");
