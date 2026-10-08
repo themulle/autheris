@@ -131,6 +131,8 @@ public sealed class IntegrationGapBTests
     {
         var options = Options.Create(new GatewayOptions
         {
+            // Casbin is enabled: the guardrail asks it only then.
+            Casbin = new CasbinOptions { Enabled = true },
             OpenSchema = true,
             Catalog = new DataCatalogOptions { OpenSchema = true }
         });

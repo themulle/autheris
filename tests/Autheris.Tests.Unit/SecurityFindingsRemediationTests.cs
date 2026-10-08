@@ -584,7 +584,7 @@ public class SecurityFindingsRemediationTests
         var policyService = new TestPolicyEnforcementService(ctx =>
             TableAccessDecision.Denied(ctx.TargetTable, "Access denied by ABAC policy for tool"));
 
-        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
+        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
         var guardrail = new AiDataGuardrailService(
             registry,
             options,
@@ -615,7 +615,7 @@ public class SecurityFindingsRemediationTests
             return TableAccessDecision.Allowed(ctx.TargetTable, new System.Collections.Generic.Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
         });
 
-        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
+        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
         var guardrail = new AiDataGuardrailService(
             registry,
             options,
@@ -661,7 +661,7 @@ public class SecurityFindingsRemediationTests
             return TableAccessDecision.Allowed(ctx.TargetTable, new System.Collections.Generic.Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
         });
 
-        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
+        var options = Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } });
         var guardrail = new AiDataGuardrailService(
             registry,
             options,
