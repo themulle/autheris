@@ -38,7 +38,8 @@ public sealed record VirtualFilterSyncPlan(
     IReadOnlyList<string> DeleteProfiles,
     IReadOnlyList<string> DriftedProfiles,
     int RemovedBindings,
-    bool RequiresForce)
+    bool RequiresForce,
+    int TotalRelaxations = 0)
 {
     public bool HasChanges =>
         CreateFilters.Count + UpdateFilters.Count + DeleteFilters.Count +
@@ -57,6 +58,7 @@ public sealed class VirtualFilterAdministrationService
     private readonly VirtualFilterOptions _options;
     private readonly IVirtualFilterSnapshotProvider? _snapshots;
     private readonly ITableMetadataRepository? _catalog;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<TenantId, List<(DateTimeOffset Timestamp, int Count)>> _removalHistory = new();
 
     public VirtualFilterAdministrationService(
         IVirtualFilterRepository repository,
@@ -565,6 +567,17 @@ public sealed class VirtualFilterAdministrationService
 
         await AuditAsync(request.TenantId, actor, "VIRTUAL_FILTER_SYNC_APPLIED", "virtual_filter:*",
             new { path = request.ManagedBy.Path, commit = request.ManagedBy.Commit, force, plan }, ct).ConfigureAwait(false);
+
+        // SR15-15: Record relaxations in the sliding window history
+        if (plan.TotalRelaxations > 0)
+        {
+            var historyList = _removalHistory.GetOrAdd(request.TenantId, _ => new List<(DateTimeOffset, int)>());
+            lock (historyList)
+            {
+                historyList.Add((DateTimeOffset.UtcNow, plan.TotalRelaxations));
+            }
+        }
+
         return plan;
     }
 
@@ -615,12 +628,47 @@ public sealed class VirtualFilterAdministrationService
             throw new VirtualFilterConflictException($"The virtual filter '{stillBound.FilterName}' would be removed but is bound in the unmanaged profile '{stillBound.Profile}'.");
         }
 
-        // Removing a binding widens what its grantee sees: count them for the safety check.
+        // SR15-15: Removing bindings, weakening uncovered policies (Deny -> Skip), narrowing scopes,
+        // or deleting profiles/filters widens what grantees see: count them for the safety check across a sliding time window.
         static IEnumerable<string> Keys(AccessProfile p) => p.Bindings.Select(b => p.Name + "|" + b.FilterName + "|" + b.TargetPattern);
         var existingKeys = managedProfiles.Values.SelectMany(Keys).ToHashSet(StringComparer.Ordinal);
         var desiredKeys = desiredProfiles.SelectMany(Keys).ToHashSet(StringComparer.Ordinal);
-        int removed = existingKeys.Count(k => !desiredKeys.Contains(k));
-        bool requiresForce = removed > 0 && ((_options.MaxRemovals > 0 && removed > _options.MaxRemovals) || desiredKeys.Count == 0);
+        int removedBindings = existingKeys.Count(k => !desiredKeys.Contains(k));
+
+        int uncoveredWeakened = 0;
+        int scopeChanged = 0;
+        foreach (var desiredProfile in desiredProfiles)
+        {
+            if (managedProfiles.TryGetValue(desiredProfile.Name, out var existingProf))
+            {
+                if (existingProf.Uncovered == UncoveredPolicy.Deny && desiredProfile.Uncovered == UncoveredPolicy.Skip)
+                {
+                    uncoveredWeakened++;
+                }
+
+                if (!string.Equals(existingProf.Scope, desiredProfile.Scope, StringComparison.OrdinalIgnoreCase))
+                {
+                    scopeChanged++;
+                }
+            }
+        }
+
+        int planRelaxations = removedBindings + uncoveredWeakened + scopeChanged + deleteProfiles.Count + deleteFilters.Count;
+
+        var windowStart = DateTimeOffset.UtcNow.AddMinutes(-Math.Max(1, _options.MaxRemovalsWindowMinutes));
+        int pastRelaxations = 0;
+        if (_removalHistory.TryGetValue(tenant, out var history))
+        {
+            lock (history)
+            {
+                history.RemoveAll(entry => entry.Timestamp < windowStart);
+                pastRelaxations = history.Sum(entry => entry.Count);
+            }
+        }
+
+        int totalRelaxationsInWindow = pastRelaxations + planRelaxations;
+        bool requiresForce = planRelaxations > 0 &&
+            ((_options.MaxRemovals > 0 && totalRelaxationsInWindow > _options.MaxRemovals) || desiredKeys.Count == 0);
 
         changes = new VirtualFilterChangeSet
         {
@@ -633,7 +681,7 @@ public sealed class VirtualFilterAdministrationService
         return new VirtualFilterSyncPlan(
             createFilters, updateFilters, deleteFilters, Drifted(managedFilters.Values, f => f.Name, f => f.ComputeDefinitionHash(), f => f.StoredDefinitionHash),
             createProfiles, updateProfiles, deleteProfiles, Drifted(managedProfiles.Values, p => p.Name, p => p.ComputeDefinitionHash(), p => p.StoredDefinitionHash),
-            removed, requiresForce);
+            removedBindings, requiresForce, planRelaxations);
     }
 
     private static (List<string> Create, List<string> Update, List<T> Save) Diff<T>(

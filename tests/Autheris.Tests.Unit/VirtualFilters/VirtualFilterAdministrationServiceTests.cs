@@ -267,6 +267,59 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
         await Should.ThrowAsync<VirtualFilterConflictException>(() => _service.ApplySyncAsync(Desired("c2"), Sync));
     }
 
+    [Fact]
+    public async Task SlidingWindow_SalamiSlicing_AccumulatesRemovalsAndRequiresForce()
+    {
+        var filters = Enumerable.Range(1, 5).Select(i => VirtualFilterModelTests.DavidFilter($"filter_{i}")).ToArray();
+        var profile = VirtualFilterModelTests.DavidProfile("david", filters.Select(f => f.Name).ToArray()) with
+        {
+            Bindings = filters.Select(f => new FilterBinding { FilterName = f.Name }).ToList()
+        };
+        // Initial state with 5 bindings
+        await _service.ApplySyncAsync(Desired("c1", [.. filters, profile]), Sync);
+
+        // First removal: removes 2 bindings (5 -> 3). MaxRemovals is 2, so 2 <= 2 passes without force.
+        var step1 = profile with { Bindings = profile.Bindings.Take(3).ToList() };
+        var plan1 = await _service.PlanSyncAsync(Desired("c2", [.. filters, step1]));
+        plan1.RequiresForce.ShouldBeFalse();
+        await _service.ApplySyncAsync(Desired("c2", [.. filters, step1]), Sync);
+
+        // Second removal in window: removes 1 binding (3 -> 2).
+        // 1 alone is <= 2, but accumulated in window is 2 + 1 = 3 > 2!
+        var step2 = profile with { Bindings = profile.Bindings.Take(2).ToList() };
+        var plan2 = await _service.PlanSyncAsync(Desired("c3", [.. filters, step2]));
+        plan2.RequiresForce.ShouldBeTrue();
+        await Should.ThrowAsync<VirtualFilterConflictException>(() => _service.ApplySyncAsync(Desired("c3", [.. filters, step2]), Sync));
+
+        // Applying with force succeeds
+        await _service.ApplySyncAsync(Desired("c3", [.. filters, step2]), Sync, force: true);
+        (await _repository.LoadSnapshotAsync()).Profiles.Single().Bindings.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task WeakeningUncoveredPolicy_CountsAsRelaxationTowardsMaxRemovals()
+    {
+        // Setup 3 profiles with Uncovered = Deny
+        var filter = VirtualFilterModelTests.DavidFilter("filter_1");
+        var profiles = Enumerable.Range(1, 3).Select(i => new AccessProfile
+        {
+            TenantId = Tenant,
+            Name = $"profile_{i}",
+            GranteeSid = new Sid($"S-1-5-21-USER{i}"),
+            Scope = "lwetem_prod.*.*",
+            Uncovered = UncoveredPolicy.Deny,
+            Bindings = [new FilterBinding { FilterName = filter.Name }]
+        }).ToArray();
+
+        await _service.ApplySyncAsync(Desired("c1", [filter, .. profiles]), Sync);
+
+        // Weaken all 3 profiles from Deny to Skip (3 relaxations > limit 2)
+        var weakenedProfiles = profiles.Select(p => p with { Uncovered = UncoveredPolicy.Skip }).ToArray();
+        var plan = await _service.PlanSyncAsync(Desired("c2", [filter, .. weakenedProfiles]));
+        plan.RequiresForce.ShouldBeTrue();
+        await Should.ThrowAsync<VirtualFilterConflictException>(() => _service.ApplySyncAsync(Desired("c2", [filter, .. weakenedProfiles]), Sync));
+    }
+
     // ------------------------------------------------------------------ sql definitions (phase 7)
 
     private static VirtualFilter SqlFilter(string sql) => new()

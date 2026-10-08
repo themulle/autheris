@@ -1656,6 +1656,12 @@ public sealed class VirtualFilterOptions
     /// When non-empty, any table referenced in a virtual filter subquery must be present in this list.
     /// </summary>
     public IReadOnlyList<string>? AllowedReferenceTables { get; init; } = null;
+
+    /// <summary>
+    /// SR15-15: Sliding time window in minutes across which removals and relaxations accumulate toward MaxRemovals.
+    /// Default is 60 minutes.
+    /// </summary>
+    public int MaxRemovalsWindowMinutes { get; init; } = 60;
 }
 
 /// <summary>
