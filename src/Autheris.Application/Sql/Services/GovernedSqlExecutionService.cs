@@ -594,6 +594,40 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                         throw new WebSqlPolicyException(
                             $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
                     }
+
+                    // SEC-FILTER-01 / Befund 3.6: Zero-Trust Guardrail: Check if any masked or denied column is used in WHERE / HAVING filter predicates
+                    bool isUsedInFilter = false;
+                    if (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Count > 0)
+                    {
+                        foreach (var fc in metadata.FilterColumnReferences)
+                        {
+                            if (string.Equals(fc.ColumnName, col.ColumnName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (fc.TableOrAlias == null)
+                                {
+                                    isUsedInFilter = true;
+                                    break;
+                                }
+                                else if (string.Equals(fc.TableOrAlias, target.Alias, StringComparison.OrdinalIgnoreCase) ||
+                                         string.Equals(fc.TableOrAlias, target.TableName, StringComparison.OrdinalIgnoreCase) ||
+                                         string.Equals(fc.TableOrAlias, target.FullName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    isUsedInFilter = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (isUsedInFilter)
+                    {
+                        string ruleDesc = tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
+                            ? mRule.RuleType ?? "REDACT"
+                            : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
+
+                        throw new WebSqlPolicyException(
+                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING). Filtering on masked or denied columns is forbidden to prevent oracle inference attacks.");
+                    }
                 }
             }
 
@@ -864,9 +898,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         }
 
         // Connection resolution
-        var connections = _options.Value.DataSources?.Connections;
-        DataSourceConnectionOptions? connOptions = null;
-        connections?.TryGetValue(dsName, out connOptions);
+        DataSourceConnectionOptions? connOptions = ResolveConnectionOptions(dsName);
 
         if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString) || _connectionFactory == null)
         {
@@ -1286,7 +1318,34 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
         }
 
+        if (webSqlOptions.DataSourceMappings != null && webSqlOptions.DataSourceMappings.ContainsKey(requested))
+        {
+            return requested;
+        }
+
         throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
+    }
+
+    /// <summary>
+    /// Resolves connection options for <paramref name="dataSourceName"/>, considering WebSql.DataSourceMappings.
+    /// </summary>
+    private DataSourceConnectionOptions? ResolveConnectionOptions(string dataSourceName)
+    {
+        string effectiveName = dataSourceName;
+        if (_options.Value.WebSql?.DataSourceMappings != null &&
+            _options.Value.WebSql.DataSourceMappings.TryGetValue(dataSourceName, out var mapped) &&
+            !string.IsNullOrWhiteSpace(mapped))
+        {
+            effectiveName = mapped;
+        }
+
+        var connections = _options.Value.DataSources?.Connections;
+        if (connections != null && connections.TryGetValue(effectiveName, out var connOptions))
+        {
+            return connOptions;
+        }
+
+        return null;
     }
 
     /// <summary>Row filters of different tables share one parameter set; the same name with two values is refused.</summary>
@@ -1319,9 +1378,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     /// </summary>
     private DatabaseDialect? ResolveConnectionDialect(string dataSourceName)
     {
-        var connections = _options.Value.DataSources?.Connections;
-        DataSourceConnectionOptions? connOptions = null;
-        connections?.TryGetValue(dataSourceName, out connOptions);
+        DataSourceConnectionOptions? connOptions = ResolveConnectionOptions(dataSourceName);
         if (connOptions == null || string.IsNullOrWhiteSpace(connOptions.ConnectionString))
         {
             return null;

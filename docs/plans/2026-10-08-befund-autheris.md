@@ -101,7 +101,7 @@ Reihenfolge nach Schwere; die Nummern bleiben, weil Abschnitt 4 auf sie verweist
 | Nr | Wunsch | Beleg | Schwere | Status | Aufwand |
 |---|---|---|---|---|---|
 | 9 | Schema je Person (Katalog für unberechtigte Konten einschränken) | Befund 3.4 | **Mittel**: Katalog lesbar für jedes Konto | teilweise offen: Schalter `GraphQL:EnableIntrospection` im Betrieb gesperrt; Schema je Person offen | groß |
-| 8 | Filter auf nicht freigegebene Spalten in WebSQL mit 403 und Meldung beantworten statt 500 oder 0 Treffern | Befund 3.6 | **Mittel**: kein Leck, aber stille Falschergebnisse | offen | mittel |
+| 8 | Filter auf nicht freigegebene Spalten in WebSQL mit 403 und Meldung beantworten statt 500 oder 0 Treffern | Befund 3.6 | **Mittel**: kein Leck, aber stille Falschergebnisse | behoben: WebSqlPolicyException (HTTP 403) bei WHERE/HAVING-Filtern auf maskierten oder verbotenen Spalten (SEC-FILTER-01) | mittel |
 | 4 | AST-Rewriter: siehe die Punkte unter der Tabelle | Abschnitt 1 | **Mittel**: nicht Standard, aber Ziel des laufenden Branches; fehlende Gruppierungen ändern Ergebnisse still | offen; `EXTRACT` und `CAST` teilweise | groß |
 | 6 | GraphQL-Kostenlimit konfigurierbar oder je Rolle; API-Keys registrierbar machen | Abschnitt 1 | **Niedrig**: begrenzt Agenten auf kleine Seiten | behoben: konfigurierbare TierLimits, RoleTierMappings und ApiKeys in ClientTierOptions / ClientTierResolver | mittel |
 | 11 | Eine Maskenform je Regel, gleich in allen Wegen | Befund 3.7 | **Niedrig** | behoben: dialektspezifische SQL-Maskierungsausdrücke für MASK_EMAIL und MASK_IBAN in GovernedSqlExecutionService | mittel |

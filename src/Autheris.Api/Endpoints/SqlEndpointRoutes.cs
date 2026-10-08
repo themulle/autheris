@@ -33,6 +33,10 @@ public static class SqlEndpointRoutes
              .WithName("ListSqlEndpoints")
              .RequireAuthorization();
 
+        group.MapPost("/", HandleRegisterEndpoint)
+             .WithName("RegisterSqlEndpoint")
+             .RequireAuthorization();
+
         var openApiEndpoint = group.MapGet("/openapi.json", HandleOpenApiSpec)
              .WithName("GetSqlEndpointsOpenApiSpec");
 
@@ -57,6 +61,94 @@ public static class SqlEndpointRoutes
              .RequireAuthorization();
 
         return app;
+    }
+
+    internal static async Task<IResult> HandleRegisterEndpoint(
+        RegisterSqlEndpointRequest? request,
+        ISqlEndpointRegistry registry,
+        HttpContext context,
+        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? loader = null)
+    {
+        if (!IsListAdmin(context.User))
+        {
+            return Results.Forbid();
+        }
+
+        if (request == null || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Sql))
+        {
+            return Results.BadRequest((object)new { error = "Name and Sql are required." });
+        }
+
+        string trimmedName = request.Name.Trim();
+        if (!IsValidEndpointName(trimmedName))
+        {
+            return Results.BadRequest((object)new { error = "Invalid endpoint name. Must contain only alphanumeric characters, underscores, or hyphens and not exceed 128 characters." });
+        }
+
+        var endpointLoader = loader ?? context.RequestServices?.GetService<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
+        Autheris.Domain.Model.SqlEndpointDefinition definition;
+
+        if (endpointLoader != null)
+        {
+            string contentToParse = request.Sql;
+            if (!string.IsNullOrWhiteSpace(request.Summary) && !contentToParse.Contains("-- @summary"))
+            {
+                contentToParse = $"-- @summary {request.Summary}\n" + contentToParse;
+            }
+            if (!string.IsNullOrWhiteSpace(request.DataSource) && !contentToParse.Contains("-- @datasource"))
+            {
+                contentToParse = $"-- @datasource {request.DataSource}\n" + contentToParse;
+            }
+
+            definition = endpointLoader.ParseSqlContent(contentToParse, trimmedName);
+            if (!string.Equals(definition.Name, trimmedName, StringComparison.OrdinalIgnoreCase))
+            {
+                definition = definition with { Name = trimmedName };
+            }
+        }
+        else
+        {
+            definition = new Autheris.Domain.Model.SqlEndpointDefinition(
+                trimmedName,
+                request.Summary ?? string.Empty,
+                request.Sql,
+                request.DataSource,
+                HttpMethod: request.HttpMethod ?? "GET",
+                TimeoutSeconds: request.TimeoutSeconds ?? 30);
+        }
+
+        registry.Register(definition);
+
+        return Results.Created($"/api/v1/queries/{definition.Name}", (object)new
+        {
+            name = definition.Name,
+            summary = definition.Summary,
+            dataSource = definition.DataSource,
+            registered = true
+        });
+    }
+
+    private static bool IsValidEndpointName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 128)
+        {
+            return false;
+        }
+
+        if (string.Equals(name, "openapi.json", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        foreach (char c in name)
+        {
+            if (!char.IsLetterOrDigit(c) && c != '_' && c != '-')
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static IResult HandleListEndpoints(ISqlEndpointRegistry registry, HttpContext context)
@@ -375,3 +467,12 @@ public static class SqlEndpointRoutes
         }
     }
 }
+
+public sealed record RegisterSqlEndpointRequest(
+    string Name,
+    string Sql,
+    string? Summary = null,
+    string? DataSource = null,
+    string? HttpMethod = null,
+    int? TimeoutSeconds = null);
+

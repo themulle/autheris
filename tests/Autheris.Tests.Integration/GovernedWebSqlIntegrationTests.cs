@@ -133,7 +133,7 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
         // RLS subquery rewrite must contain tenant predicate
         secured.ShouldContain("tenant_id = 'tenant_123'");
         // Limit must be clamped to MaxAllowedRows (500)
-        secured.ShouldContain("LIMIT 200");
+        secured.ShouldContain("LIMIT 500");
         secured.ShouldNotContain("5000");
     }
 

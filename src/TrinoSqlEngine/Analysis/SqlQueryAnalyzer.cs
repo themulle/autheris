@@ -13,6 +13,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     private readonly HashSet<string> _seenTableKeys = new(StringComparer.Ordinal);
     private readonly HashSet<string> _joinConditionColumns = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<JoinColumnReference> _joinColumnReferences = new();
+    private readonly List<FilterColumnReference> _filterColumnReferences = new();
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
     private readonly List<string> _functionCalls = new();
     private readonly HashSet<string> _seenFunctionCalls = new(StringComparer.Ordinal);
@@ -52,7 +53,8 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             TableFunctionCalls: _tableFunctionCalls.ToArray(),
             HasSessionProperties: _hasSessionProperties,
             HasInlineFunctionDefinitions: _hasInlineFunctionDefinitions,
-            JoinColumnReferences: _joinColumnReferences.ToArray());
+            JoinColumnReferences: _joinColumnReferences.ToArray(),
+            FilterColumnReferences: _filterColumnReferences.ToArray());
     }
 
     private void Reset()
@@ -63,6 +65,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         _seenTableKeys.Clear();
         _joinConditionColumns.Clear();
         _joinColumnReferences.Clear();
+        _filterColumnReferences.Clear();
         _cteScopeStack.Clear();
         _cteScopeStack.Push(new HashSet<string>(StringComparer.Ordinal));
         _functionCalls.Clear();
@@ -225,6 +228,16 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             _joinCount += (context.relation().Length - 1);
         }
 
+        if (context.where != null)
+        {
+            ExtractFilterColumnReferences(context.where, _filterColumnReferences);
+        }
+
+        if (context.having != null)
+        {
+            ExtractFilterColumnReferences(context.having, _filterColumnReferences);
+        }
+
         if (_isRootQuerySpecification && _currentSubqueryDepth == 0)
         {
             _isRootQuerySpecification = false;
@@ -348,6 +361,40 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         }
     }
 
+    private static void ExtractFilterColumnReferences(Antlr4.Runtime.RuleContext? ctx, List<FilterColumnReference> references)
+    {
+        if (ctx == null) return;
+
+        if (ctx is SqlBaseParser.DereferenceContext deref && deref.fieldName != null)
+        {
+            string colName = SqlIdentifierHelper.NormalizeIdentifier(deref.fieldName.GetText());
+            string tableOrAlias = SqlIdentifierHelper.NormalizeIdentifier(deref.baseExpression.GetText());
+            if (!string.IsNullOrWhiteSpace(colName))
+            {
+                references.Add(new FilterColumnReference(tableOrAlias, colName));
+            }
+            return;
+        }
+
+        if (ctx is SqlBaseParser.ColumnReferenceContext colRef && colRef.identifier() != null)
+        {
+            string colName = SqlIdentifierHelper.NormalizeIdentifier(colRef.identifier().GetText());
+            if (!string.IsNullOrWhiteSpace(colName))
+            {
+                references.Add(new FilterColumnReference(null, colName));
+            }
+            return;
+        }
+
+        for (int i = 0; i < ctx.ChildCount; i++)
+        {
+            if (ctx.GetChild(i) is Antlr4.Runtime.RuleContext child)
+            {
+                ExtractFilterColumnReferences(child, references);
+            }
+        }
+    }
+
     public override void EnterQueryNoWith(SqlBaseParser.QueryNoWithContext context)
     {
         // Check top-level limit only on the root query (SEC M-22: CTE bodies and subqueries do not count)
@@ -384,11 +431,19 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     public override void EnterDelete(SqlBaseParser.DeleteContext context)
     {
         RecordTableAccess(context.qualifiedName(), null);
+        if (context.booleanExpression() != null)
+        {
+            ExtractFilterColumnReferences(context.booleanExpression(), _filterColumnReferences);
+        }
     }
 
     public override void EnterUpdate(SqlBaseParser.UpdateContext context)
     {
         RecordTableAccess(context.qualifiedName(), null);
+        if (context.where != null)
+        {
+            ExtractFilterColumnReferences(context.where, _filterColumnReferences);
+        }
     }
 
     public override void EnterInsertInto(SqlBaseParser.InsertIntoContext context)
