@@ -117,4 +117,57 @@ public class CasbinAbacPropertyTests : IDisposable
 
         _service.CurrentEpoch.ShouldBeGreaterThan(initialEpoch);
     }
+
+    [Fact]
+    public async Task POL_10_DecisionCache_IncludesRequestedColumns_AndDistinguishesDifferentColumnSets()
+    {
+        var tenant = new TenantId("tenant-col-cache");
+        var userSid = new Sid("S-1-5-21-user-col");
+        var targetTable = new TableIdentifier("finance", "dbo", "invoices");
+
+        _service.AddPolicy(tenant, userSid.Value, targetTable.ToString(), "read", "true", "allow");
+
+        var context1 = new SecurityEvaluationContext(
+            userSid,
+            [],
+            tenant,
+            targetTable,
+            ["colA", "colB"],
+            IPAddress.Loopback,
+            DateTimeOffset.UtcNow,
+            "audit");
+
+        var context2 = new SecurityEvaluationContext(
+            userSid,
+            [],
+            tenant,
+            targetTable,
+            ["colA", "colC"],
+            IPAddress.Loopback,
+            DateTimeOffset.UtcNow,
+            "audit");
+
+        var context3 = new SecurityEvaluationContext(
+            userSid,
+            [],
+            tenant,
+            targetTable,
+            ["colB", "colA"], // Permuted order of context1
+            IPAddress.Loopback,
+            DateTimeOffset.UtcNow,
+            "audit");
+
+        // Act 1: First evaluation
+        await _service.EvaluatePolicyAsync(context1);
+        _service.DiagnosticDecisionCacheCount.ShouldBe(1);
+
+        // Act 2: Second evaluation with different columns -> must NOT share cache key
+        await _service.EvaluatePolicyAsync(context2);
+        _service.DiagnosticDecisionCacheCount.ShouldBe(2);
+
+        // Act 3: Third evaluation with same columns permuted -> must hit cache for context1
+        await _service.EvaluatePolicyAsync(context3);
+        _service.DiagnosticDecisionCacheCount.ShouldBe(2);
+    }
 }
+

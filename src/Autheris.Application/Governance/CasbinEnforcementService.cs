@@ -516,7 +516,10 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         var attrsStr = context.Attributes != null && context.Attributes.Count > 0
             ? string.Join(";", context.Attributes.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => $"{kv.Key}={kv.Value}"))
             : string.Empty;
-        var cacheKey = $"{snapshot.Epoch}:{context.Tenant.Value}:{context.UserSid.Value}:{tableStr}:{context.PurposeId}:{context.Department}:{context.Region}:{context.ClearanceLevel}:{context.ClientIp}:G[{groupsStr}]:A[{attrsStr}]";
+        var colsStr = context.RequestedColumns != null && context.RequestedColumns.Count > 0
+            ? string.Join(",", context.RequestedColumns.OrderBy(c => c, StringComparer.OrdinalIgnoreCase))
+            : string.Empty;
+        var cacheKey = $"{snapshot.Epoch}:{context.Tenant.Value}:{context.UserSid.Value}:{tableStr}:{context.PurposeId}:{context.Department}:{context.Region}:{context.ClearanceLevel}:{context.ClientIp}:G[{groupsStr}]:A[{attrsStr}]:C[{colsStr}]";
 
         if (_decisionCache.TryGetValue(cacheKey, out var cachedEntry))
         {
@@ -1612,6 +1615,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         }
         return 0;
     }
+
+    internal int DiagnosticDecisionCacheCount => _decisionCache.Count;
 
     public void Dispose()
     {
