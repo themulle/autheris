@@ -1438,7 +1438,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
             if (!string.IsNullOrWhiteSpace(rule.Replacement))
             {
-                return $"'{rule.Replacement.Replace("'", "''")}'";
+                var prefix = tableMeta.Dialect == DatabaseDialect.SqlServer ? "N" : string.Empty;
+                return $"{prefix}'{tableMeta.Dialect.EscapeSqlLiteral(rule.Replacement)}'";
             }
         }
         return "'***'";
