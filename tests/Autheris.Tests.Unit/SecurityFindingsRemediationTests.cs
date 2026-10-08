@@ -6,9 +6,11 @@ using System.IO;
 using System.Security.Claims;
 using System.Text;
 using System.Threading.Tasks;
+using Autheris.Api.Endpoints;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
+using NSubstitute.ExceptionExtensions;
 using Autheris.Application.Governance;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
@@ -1263,6 +1265,126 @@ public class SecurityFindingsRemediationTests
             if (File.Exists(tempModel)) File.Delete(tempModel);
             if (File.Exists(tempPolicy)) File.Delete(tempPolicy);
         }
+    }
+
+    [Fact]
+    public void SEC_12H_02_ValidateGatewayOptions_Rebac_DemoTuplesInProduction_ThrowsValidationException()
+    {
+        var prodEnv = Substitute.For<IHostEnvironment>();
+        prodEnv.EnvironmentName.Returns(Environments.Production);
+
+        var options = new GatewayOptions
+        {
+            Rebac = new RebacOptions
+            {
+                SeedTuples = [new("default", "user:david", "viewer", "table:lakehouse.dbo.orders")]
+            }
+        };
+
+        var ex = Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv));
+        ex.Message.ShouldContain("Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.");
+    }
+
+    [Fact]
+    public void SEC_12H_02_ValidateGatewayOptions_Rebac_ProductionTargetedTuplesInProduction_ThrowsValidationException()
+    {
+        var prodEnv = Substitute.For<IHostEnvironment>();
+        prodEnv.EnvironmentName.Returns(Environments.Production);
+
+        var options = new GatewayOptions
+        {
+            Rebac = new RebacOptions
+            {
+                SeedTuples = [new("tenant_lwe", "user:alice", "viewer", "table:lwetem_prod.conf.client")]
+            }
+        };
+
+        var ex = Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv));
+        ex.Message.ShouldContain("Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.");
+    }
+
+    [Fact]
+    public void SEC_12H_02_ValidateGatewayOptions_Rebac_PermittedInDevelopment()
+    {
+        var devEnv = Substitute.For<IHostEnvironment>();
+        devEnv.EnvironmentName.Returns(Environments.Development);
+
+        var options = new GatewayOptions
+        {
+            Rebac = new RebacOptions
+            {
+                SeedTuples = [new("default", "user:david", "viewer", "table:lakehouse.dbo.orders")]
+            }
+        };
+
+        Should.NotThrow(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
+    }
+
+    // =========================================================================
+    // Finding SEC-12H-05: Atomic Redis Lockout Counter via Lua Script
+    // =========================================================================
+
+    [Fact]
+    public async Task SEC_12H_05_BasicAuthAttemptGuard_UsesAtomicLuaScript_WhenRedisConnected()
+    {
+        var redis = Substitute.For<StackExchange.Redis.IConnectionMultiplexer>();
+        var db = Substitute.For<StackExchange.Redis.IDatabase>();
+        redis.IsConnected.Returns(true);
+        redis.GetDatabase(Arg.Any<int>(), Arg.Any<object>()).Returns(db);
+
+        var options = new BasicAuthOptions
+        {
+            Enabled = true,
+            MaxFailedAttempts = 5,
+            FailureWindowSeconds = 60
+        };
+
+        var guard = new BasicAuthAttemptGuard(options, redis: redis);
+        await guard.RecordFailureAsync("TESTUSER|127.0.0.1");
+
+        await db.Received(1).ScriptEvaluateAsync(
+            Arg.Is<string>(s => s.Contains("redis.call('INCR'") && s.Contains("redis.call('EXPIRE'")),
+            Arg.Is<StackExchange.Redis.RedisKey[]>(keys => keys.Length == 2 && keys[0].ToString() == "autheris:fail:TESTUSER|127.0.0.1"),
+            Arg.Is<StackExchange.Redis.RedisValue[]>(vals => vals.Length == 2 && (long)vals[0] == 60 && (int)vals[1] == 5));
+    }
+
+    // =========================================================================
+    // Finding SEC-12H-06: WebSQL Trino Statement Session Enumeration Oracle Uniform 404
+    // =========================================================================
+
+    [Fact]
+    public async Task SEC_12H_06_HandleTrinoQueuedStatementRequest_SecurityException_ReturnsUniform404()
+    {
+        var statementManager = Substitute.For<Application.Sql.Interfaces.IWebSqlStatementManager>();
+        statementManager.GetStatusOrWaitAsync(Arg.Any<string>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<TimeSpan>(), Arg.Any<System.Threading.CancellationToken>())
+            .ThrowsAsync(new System.Security.SecurityException("Cross-tenant access forbidden."));
+
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+
+        await WebSqlEndpoints.HandleTrinoQueuedStatementRequest("stmt-foreign-tenant", context, statementManager, NullLoggerFactory.Instance);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var doc = System.Text.Json.JsonDocument.Parse(context.Response.Body);
+        doc.RootElement.GetProperty("error").GetString().ShouldBe("Statement not found or expired.");
+    }
+
+    [Fact]
+    public async Task SEC_12H_06_HandleTrinoCancelStatementRequest_SecurityException_ReturnsUniform404()
+    {
+        var statementManager = Substitute.For<Application.Sql.Interfaces.IWebSqlStatementManager>();
+        statementManager.CancelStatementAsync(Arg.Any<string>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<System.Threading.CancellationToken>())
+            .ThrowsAsync(new System.Security.SecurityException("Cross-tenant access forbidden."));
+
+        var context = new DefaultHttpContext();
+
+        await WebSqlEndpoints.HandleTrinoCancelStatementRequest("stmt-foreign-tenant", context, statementManager);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
     }
 
     private sealed class TestPolicyEnforcementService : IPolicyEnforcementService

@@ -14,13 +14,13 @@ using ModelContextProtocol.Authentication;
 /// </summary>
 public static class GatewayMcpOAuth
 {
-    /// <summary>Only with MCP and at least one OAuth issuer; Kerberos, Basic and ForwardAuth have nothing to discover.</summary>
+    /// <summary>Only with MCP and at least one OAuth issuer enabled; Kerberos, Basic and ForwardAuth have nothing to discover.</summary>
     public static bool IsEnabled(GatewayOptions options) =>
-        options.Mcp.Enabled && AuthorizationServers(options).Count > 0;
+        options.Mcp.Enabled && (options.Authentication.EntraId.Enabled || options.Authentication.Adfs.Enabled);
 
     public static AuthenticationBuilder AddGatewayMcpOAuth(this AuthenticationBuilder builder, GatewayOptions options)
     {
-        if (!IsEnabled(options))
+        if (!IsEnabled(options) || AuthorizationServers(options).Count == 0)
         {
             return builder;
         }

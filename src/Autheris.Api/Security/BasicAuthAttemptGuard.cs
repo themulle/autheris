@@ -16,6 +16,20 @@ internal sealed class BasicAuthAttemptGuard
 {
     private const int MaxTrackedEntries = 10_000;
 
+    /// <summary>
+    /// SEC-12H-05: Atomic failure increment, TTL sliding window initialization, and lockout flag setting via Lua script.
+    /// </summary>
+    private const string AtomicRecordFailureScript = """
+        local count = redis.call('INCR', KEYS[1])
+        if count == 1 or redis.call('TTL', KEYS[1]) == -1 then
+            redis.call('EXPIRE', KEYS[1], ARGV[1])
+        end
+        if count >= tonumber(ARGV[2]) then
+            redis.call('SET', KEYS[2], '1', 'EX', ARGV[1])
+        end
+        return count
+        """;
+
     private static readonly ConditionalWeakTable<BasicAuthOptions, BasicAuthAttemptGuard> Guards = new();
 
     private readonly ConcurrentDictionary<string, FailureState> _failures = new(StringComparer.Ordinal);
@@ -174,17 +188,11 @@ internal sealed class BasicAuthAttemptGuard
                 var db = _redis.GetDatabase();
                 var failKey = "autheris:fail:" + attemptKey;
                 var lockoutKey = "autheris:lockout:" + attemptKey;
+                var windowSeconds = (long)Math.Max(1, _window.TotalSeconds);
 
-                long count = await db.StringIncrementAsync(failKey).ConfigureAwait(false);
-                if (count == 1)
-                {
-                    await db.KeyExpireAsync(failKey, _window).ConfigureAwait(false);
-                }
-
-                if (count >= limit)
-                {
-                    await db.StringSetAsync(lockoutKey, "1", _window).ConfigureAwait(false);
-                }
+                StackExchange.Redis.RedisKey[] keys = [failKey, lockoutKey];
+                StackExchange.Redis.RedisValue[] values = [windowSeconds, limit];
+                await db.ScriptEvaluateAsync(AtomicRecordFailureScript, keys, values).ConfigureAwait(false);
             }
             catch
             {
