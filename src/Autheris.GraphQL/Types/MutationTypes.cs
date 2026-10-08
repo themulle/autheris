@@ -460,15 +460,8 @@ public sealed class Mutation
                 var tableMeta = await metadataRepository.GetTableMetadataAsync(approved.TableIdentifier, ct);
                 if (tableMeta != null && tableMeta.Columns.Count > 0)
                 {
-                    foreach (var col in tableMeta.Columns)
-                    {
-                        var isSensitive = col.IsSensitive || tableMeta.ColumnMaskingRules.ContainsKey(col.ColumnName);
-                        columnRules.Add(new ConsentColumnRule
-                        {
-                            ColumnName = col.ColumnName,
-                            AccessLevel = isSensitive ? ColumnAccessLevel.Mask : ColumnAccessLevel.Clear
-                        });
-                    }
+                    // POL-3 / R-POL-11: same snapshot rule as the ITSM activation in the repositories.
+                    columnRules.AddRange(ConsentColumnSnapshot.FromMetadata(tableMeta));
                 }
             }
 

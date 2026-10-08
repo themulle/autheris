@@ -1434,9 +1434,7 @@ public partial class PostgreSqlGovernanceRepository
                     var colName = reader.GetString(1);
                     var isSensitive = Convert.ToInt32(reader.GetValue(2)) == 1;
                     var hasMask = Convert.ToInt32(reader.GetValue(3)) == 1;
-                    int accessLevel = (isSensitive || hasMask)
-                        ? (int)Autheris.Domain.Interfaces.ColumnAccessLevel.Mask
-                        : (int)Autheris.Domain.Interfaces.ColumnAccessLevel.Clear;
+                    int accessLevel = (int)ConsentColumnSnapshot.AccessLevelFor(isSensitive, hasMask);
                     columnRules.Add((Guid.NewGuid(), colId, colName, accessLevel));
                 }
             }
