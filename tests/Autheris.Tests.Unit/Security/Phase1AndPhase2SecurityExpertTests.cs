@@ -23,7 +23,9 @@ using Autheris.Domain.Kernel;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -422,6 +424,44 @@ public sealed class Phase1AndPhase2SecurityExpertTests
 
         Should.NotThrow(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+    }
+
+    [Fact]
+    public async Task DEP_16_Cors_LocalhostFallback_PresentInDevelopmentWhenTrustedOriginsEmpty()
+    {
+        var services = new ServiceCollection();
+        var options = new GatewayOptions();
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Development");
+        services.AddSingleton<IHostEnvironment>(env);
+
+        services.AddGatewayInfrastructure(options);
+        using var sp = services.BuildServiceProvider();
+        var policyProvider = sp.GetRequiredService<ICorsPolicyProvider>();
+        var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), null);
+
+        policy.ShouldNotBeNull();
+        policy.Origins.ShouldContain("http://localhost:5000");
+        policy.Origins.ShouldContain("https://localhost:5001");
+    }
+
+    [Fact]
+    public async Task DEP_16_Cors_LocalhostFallback_RemovedInProductionWhenTrustedOriginsEmpty()
+    {
+        var services = new ServiceCollection();
+        var options = new GatewayOptions();
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+        services.AddSingleton<IHostEnvironment>(env);
+
+        services.AddGatewayInfrastructure(options);
+        using var sp = services.BuildServiceProvider();
+        var policyProvider = sp.GetRequiredService<ICorsPolicyProvider>();
+        var policy = await policyProvider.GetPolicyAsync(new DefaultHttpContext(), null);
+
+        policy.ShouldNotBeNull();
+        policy.Origins.ShouldNotContain("http://localhost:5000");
+        policy.Origins.ShouldNotContain("https://localhost:5001");
     }
 
     [Fact]

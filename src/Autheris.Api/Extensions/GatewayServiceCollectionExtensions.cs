@@ -203,8 +203,11 @@ public static class GatewayServiceCollectionExtensions
 
     public static IServiceCollection AddGatewayInfrastructure(
         this IServiceCollection services,
-        GatewayOptions gatewayOptions)
+        GatewayOptions gatewayOptions,
+        IHostEnvironment? environment = null)
     {
+        var hostEnv = environment ?? (services.FirstOrDefault(d => d.ServiceType == typeof(IHostEnvironment))?.ImplementationInstance as IHostEnvironment);
+        var isDev = hostEnv?.IsDevelopment() ?? false;
         services.AddMemoryCache(options =>
         {
             options.SizeLimit = (long)gatewayOptions.Caching.L1MemoryCache.SizeLimitMb * 1024 * 1024;
@@ -595,7 +598,7 @@ public static class GatewayServiceCollectionExtensions
                               .AllowCredentials();
                     }
                 }
-                else
+                else if (isDev)
                 {
                     policy.WithOrigins("http://localhost:5000", "https://localhost:5001")
                           .AllowAnyHeader()
