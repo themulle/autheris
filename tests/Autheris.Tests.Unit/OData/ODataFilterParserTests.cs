@@ -84,16 +84,32 @@ public class ODataFilterParserTests
     public void Parse_StringFunctions_Contains_StartsWith_EndsWith()
     {
         var containsClause = ODataFilterParser.Parse("contains(company_name, 'GmbH')", DatabaseDialect.PostgreSql);
-        containsClause.SqlPredicate.ShouldBe("(\"company_name\" LIKE @p_od_0)");
+        containsClause.SqlPredicate.ShouldBe("(\"company_name\" LIKE @p_od_0 ESCAPE '\\')");
         containsClause.Parameters["@p_od_0"].ShouldBe("%GmbH%");
 
         var startsClause = ODataFilterParser.Parse("startswith(sku, 'PRD-')", DatabaseDialect.PostgreSql);
-        startsClause.SqlPredicate.ShouldBe("(\"sku\" LIKE @p_od_0)");
+        startsClause.SqlPredicate.ShouldBe("(\"sku\" LIKE @p_od_0 ESCAPE '\\')");
         startsClause.Parameters["@p_od_0"].ShouldBe("PRD-%");
 
         var endsClause = ODataFilterParser.Parse("endswith(email, '@corp.com')", DatabaseDialect.PostgreSql);
-        endsClause.SqlPredicate.ShouldBe("(\"email\" LIKE @p_od_0)");
+        endsClause.SqlPredicate.ShouldBe("(\"email\" LIKE @p_od_0 ESCAPE '\\')");
         endsClause.Parameters["@p_od_0"].ShouldBe("%@corp.com");
+    }
+
+    [Fact]
+    public void Parse_StringFunctions_EscapesLikeWildcards_ToPreventWildcardInjection()
+    {
+        var containsClause = ODataFilterParser.Parse("contains(code, '100%_discount[vip]')", DatabaseDialect.PostgreSql);
+        containsClause.SqlPredicate.ShouldBe("(\"code\" LIKE @p_od_0 ESCAPE '\\')");
+        containsClause.Parameters["@p_od_0"].ShouldBe("%100\\%\\_discount\\[vip]%");
+
+        var startsClause = ODataFilterParser.Parse("startswith(code, '10%_')", DatabaseDialect.PostgreSql);
+        startsClause.SqlPredicate.ShouldBe("(\"code\" LIKE @p_od_0 ESCAPE '\\')");
+        startsClause.Parameters["@p_od_0"].ShouldBe("10\\%\\_%");
+
+        var endsClause = ODataFilterParser.Parse("endswith(code, '_[end]%')", DatabaseDialect.PostgreSql);
+        endsClause.SqlPredicate.ShouldBe("(\"code\" LIKE @p_od_0 ESCAPE '\\')");
+        endsClause.Parameters["@p_od_0"].ShouldBe("%\\_\\[end]\\%");
     }
 
     [Fact]

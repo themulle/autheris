@@ -765,21 +765,21 @@ public static class ODataFilterParser
                         var targetContains = Args[0].ToSql(ctx);
                         var patternContains = GetLikePattern(Args[1], "%{0}%");
                         var pContains = ctx.AddParameter(patternContains);
-                        return $"({targetContains} LIKE {pContains})";
+                        return $"({targetContains} LIKE {pContains} ESCAPE '\\')";
 
                     case "startswith":
                         if (Args.Count != 2) throw new GatewayInvalidQueryException("Function 'startswith' requires 2 arguments.");
                         var targetStarts = Args[0].ToSql(ctx);
                         var patternStarts = GetLikePattern(Args[1], "{0}%");
                         var pStarts = ctx.AddParameter(patternStarts);
-                        return $"({targetStarts} LIKE {pStarts})";
+                        return $"({targetStarts} LIKE {pStarts} ESCAPE '\\')";
 
                     case "endswith":
                         if (Args.Count != 2) throw new GatewayInvalidQueryException("Function 'endswith' requires 2 arguments.");
                         var targetEnds = Args[0].ToSql(ctx);
                         var patternEnds = GetLikePattern(Args[1], "%{0}");
                         var pEnds = ctx.AddParameter(patternEnds);
-                        return $"({targetEnds} LIKE {pEnds})";
+                        return $"({targetEnds} LIKE {pEnds} ESCAPE '\\')";
 
                     case "tolower":
                         if (Args.Count != 1) throw new GatewayInvalidQueryException("Function 'tolower' requires 1 argument.");
@@ -803,10 +803,17 @@ public static class ODataFilterParser
         {
             if (node is LiteralNode lit && lit.Value != null)
             {
-                return string.Format(CultureInfo.InvariantCulture, format, lit.Value);
+                var val = lit.Value.ToString() ?? string.Empty;
+                return string.Format(CultureInfo.InvariantCulture, format, EscapeLike(val));
             }
             throw new GatewayInvalidQueryException("String functions (contains, startswith, endswith) require a literal string as the pattern argument.");
         }
+
+        private static string EscapeLike(string value) =>
+            value.Replace("\\", "\\\\", StringComparison.Ordinal)
+                 .Replace("%", "\\%", StringComparison.Ordinal)
+                 .Replace("_", "\\_", StringComparison.Ordinal)
+                 .Replace("[", "\\[", StringComparison.Ordinal);
 
         public override void CollectReferencedColumns(List<string> columns, int depth = 0)
         {
