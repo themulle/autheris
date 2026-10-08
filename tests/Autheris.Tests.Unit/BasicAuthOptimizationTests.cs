@@ -321,6 +321,36 @@ public sealed class BasicAuthOptimizationTests
         result.Failure?.Message.ShouldContain("Invalid username or password");
     }
 
+    [Fact]
+    public async Task Handler_UnknownUser_Pbkdf2Configured_UsesOwaspOrConfiguredIterations()
+    {
+        // SR15-38: When users are configured with PBKDF2, unknown users must execute PBKDF2 with at least
+        // DefaultPbkdf2Iterations (600,000) or user iterations, eliminating timing discrepancies with 10k iters.
+        var pbkdf2Hash = PasswordHasher.HashPasswordPbkdf2("secret", 15_000);
+        var options = new GatewayOptions
+        {
+            Authentication = new Autheris.Domain.Options.AuthenticationOptions
+            {
+                BasicAuth = new BasicAuthOptions
+                {
+                    Enabled = true,
+                    Users = [new BasicAuthUserConfig { Username = "realUser", Password = pbkdf2Hash }]
+                }
+            }
+        };
+
+        var handler = CreateHandler(options);
+        var httpContext = new DefaultHttpContext();
+        var rawCredentials = Convert.ToBase64String(Encoding.UTF8.GetBytes("nonExistentUser:somePassword123"));
+        httpContext.Request.Headers.Authorization = $"Basic {rawCredentials}";
+
+        await handler.InitializeAsync(new AuthenticationScheme(GatewayAuthSchemes.Basic, "Basic", typeof(BasicAuthenticationHandler)), httpContext);
+        var result = await handler.AuthenticateAsync();
+
+        result.Succeeded.ShouldBeFalse();
+        result.Failure?.Message.ShouldContain("Invalid username or password");
+    }
+
     private static BasicAuthenticationHandler CreateHandler(
         GatewayOptions options,
         IClientIpResolver? clientIpResolver = null)

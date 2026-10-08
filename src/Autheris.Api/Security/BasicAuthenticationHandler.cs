@@ -26,6 +26,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
     private readonly int _dummyArgon2Iterations;
     private readonly int _dummyArgon2Parallelism;
     private readonly int _dummyPbkdf2Iterations;
+    private readonly string _dummyStoredHash;
     private readonly Autheris.Application.Interfaces.IClientIpResolver? _clientIpResolver;
 
     public BasicAuthenticationHandler(
@@ -44,15 +45,23 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
 
         ConfigureDummyCost(
             _gatewayOptions.Authentication.BasicAuth.Users,
+            _gatewayOptions.Authentication.BasicAuth.MinimumPbkdf2Iterations,
             out _hasArgon2Users,
             out _dummyArgon2MemoryKb,
             out _dummyArgon2Iterations,
             out _dummyArgon2Parallelism,
             out _dummyPbkdf2Iterations);
+
+        // SR15-38: Precompute a canonical dummy stored hash to route unknown users through the exact same
+        // PasswordHasher.VerifyPassword pipeline, ensuring identical timing characteristics.
+        _dummyStoredHash = _hasArgon2Users
+            ? $"$argon2id$v=19$m={_dummyArgon2MemoryKb},t={_dummyArgon2Iterations},p={_dummyArgon2Parallelism}${Convert.ToBase64String(DummySalt)}${Convert.ToBase64String(DummyTargetHash)}"
+            : $"$pbkdf2${_dummyPbkdf2Iterations}${Convert.ToBase64String(DummySalt)}${Convert.ToBase64String(DummyTargetHash)}";
     }
 
     private static void ConfigureDummyCost(
         IEnumerable<BasicAuthUserConfig> users,
+        int minimumPbkdf2Iterations,
         out bool hasArgon2,
         out int argon2Mem,
         out int argon2Iters,
@@ -63,7 +72,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         argon2Mem = PasswordHasher.DefaultArgon2MemorySizeKb;
         argon2Iters = PasswordHasher.DefaultArgon2Iterations;
         argon2Par = PasswordHasher.DefaultArgon2Parallelism;
-        pbkdf2Iters = 10_000;
+        pbkdf2Iters = Math.Max(PasswordHasher.DefaultPbkdf2Iterations, minimumPbkdf2Iterations);
 
         foreach (var user in users)
         {
@@ -176,43 +185,19 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         var configuredUser = _gatewayOptions.Authentication.BasicAuth.Users
             .FirstOrDefault(u => string.Equals(u.Username, username, StringComparison.OrdinalIgnoreCase));
 
-        if (configuredUser == null)
-        {
-            // SEC-03: Mitigate user enumeration timing attacks by running equivalent cryptographic hash calculation with mirrored cost
-            if (_hasArgon2Users)
-            {
-                var dummyDerived = PasswordHasher.ComputeArgon2idHash(
-                    password,
-                    DummySalt,
-                    _dummyArgon2MemoryKb,
-                    _dummyArgon2Iterations,
-                    _dummyArgon2Parallelism,
-                    32);
-                CryptographicOperations.FixedTimeEquals(dummyDerived, DummyTargetHash);
-            }
-            else
-            {
-                var dummyDerived = Rfc2898DeriveBytes.Pbkdf2(
-                    password,
-                    DummySalt,
-                    iterations: _dummyPbkdf2Iterations,
-                    HashAlgorithmName.SHA256,
-                    outputLength: 32);
-                CryptographicOperations.FixedTimeEquals(dummyDerived, DummyTargetHash);
-            }
-
-            await guard.RecordFailureAsync(attemptKey, null, Context.RequestAborted).ConfigureAwait(false);
-            await guard.RecordFailureAsync(ipKey, guard.MaxFailedAttemptsPerIp, Context.RequestAborted).ConfigureAwait(false);
-            return AuthenticateResult.Fail("Invalid username or password.");
-        }
+        // SR15-38: Always execute the exact same PasswordHasher.VerifyPassword pipeline with dummyStoredHash
+        // when the user is not found, ensuring uniform parsing, base64 decoding and cryptographic hashing times
+        // to defeat timing-based user enumeration.
+        var storedHashToVerify = configuredUser?.Password ?? _dummyStoredHash;
+        bool passwordVerified = PasswordHasher.VerifyPassword(password, storedHashToVerify, username, _isDevelopment, msg => Logger.LogError("{Message}", msg));
 
         // RR-L2-03: recently verified identical credentials skip the cryptographic computation.
-        bool passwordMatches =
-            (guard.TryGetCachedSuccess(authHeader, out var cachedUser) &&
-             string.Equals(cachedUser, configuredUser.Username, StringComparison.Ordinal)) ||
-            PasswordHasher.VerifyPassword(password, configuredUser.Password, username, _isDevelopment, msg => Logger.LogError("{Message}", msg));
+        bool passwordMatches = configuredUser != null &&
+            ((guard.TryGetCachedSuccess(authHeader, out var cachedUser) &&
+              string.Equals(cachedUser, configuredUser.Username, StringComparison.Ordinal)) ||
+             passwordVerified);
 
-        if (!passwordMatches)
+        if (!passwordMatches || configuredUser == null)
         {
             await guard.RecordFailureAsync(attemptKey, null, Context.RequestAborted).ConfigureAwait(false);
             await guard.RecordFailureAsync(ipKey, guard.MaxFailedAttemptsPerIp, Context.RequestAborted).ConfigureAwait(false);
@@ -220,10 +205,10 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         }
 
         await guard.RecordSuccessAsync(attemptKey, Context.RequestAborted).ConfigureAwait(false);
-        guard.CacheSuccess(authHeader, configuredUser.Username);
+        guard.CacheSuccess(authHeader, configuredUser!.Username);
 
         // F-AUTH-DX: claims come from the shared factory so header login and cookie session are identical.
-        var claims = BasicAuthPrincipalFactory.BuildClaims(configuredUser);
+        var claims = BasicAuthPrincipalFactory.BuildClaims(configuredUser!);
         claims.Add(new Claim(BasicAuthSession.AuthMethodClaimType, BasicAuthSession.AuthMethodBasic));
 
         var identity = new ClaimsIdentity(claims, Scheme.Name);
