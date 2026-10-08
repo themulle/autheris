@@ -228,9 +228,15 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         forcedBySync.Request.QueryString = new QueryString("?force=true");
         (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(forcedBySync, _service), forcedBySync)).ShouldBe(StatusCodes.Status403Forbidden);
 
-        var forcedByAdmin = Context(Tenant, emptied, "FilterAdmin");
-        forcedByAdmin.Request.QueryString = new QueryString("?force=true");
-        (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(forcedByAdmin, _service), forcedByAdmin)).ShouldBe(StatusCodes.Status200OK);
+        // SR15-07: FilterAdmin alone cannot force sync
+        var forcedByAdminOnly = Context(Tenant, emptied, "FilterAdmin");
+        forcedByAdminOnly.Request.QueryString = new QueryString("?force=true");
+        (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(forcedByAdminOnly, _service), forcedByAdminOnly)).ShouldBe(StatusCodes.Status403Forbidden);
+
+        // SR15-07: force=true requires BOTH FilterSync AND FilterAdmin roles
+        var forcedBySyncAndAdmin = Context(Tenant, emptied, "FilterSync", "FilterAdmin");
+        forcedBySyncAndAdmin.Request.QueryString = new QueryString("?force=true");
+        (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(forcedBySyncAndAdmin, _service), forcedBySyncAndAdmin)).ShouldBe(StatusCodes.Status200OK);
         (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
     }
 

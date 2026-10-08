@@ -161,7 +161,8 @@ public static class VirtualFilterEndpoints
     {
         var security = EndpointSecurity.GetSecurityContext(context);
         bool force = string.Equals(context.Request.Query["force"], "true", StringComparison.OrdinalIgnoreCase);
-        if (force ? !security.HasRole(GatewayRole.FilterAdmin) : !security.HasRole(GatewayRole.FilterSync))
+        // SR15-07: Sync requires FilterSync role; force=true requires BOTH FilterSync AND FilterAdmin roles
+        if (!security.HasRole(GatewayRole.FilterSync) || (force && !security.HasRole(GatewayRole.FilterAdmin)))
         {
             return Forbidden();
         }
