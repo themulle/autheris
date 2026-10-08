@@ -22,6 +22,8 @@ public readonly record struct TableAccessTarget(
     bool SchemaQuoted = false,
     bool TableNameQuoted = false);
 
+public readonly record struct JoinColumnReference(string? TableOrAlias, string ColumnName);
+
 public sealed record SqlQueryMetadata(
     SqlStatementType StatementType,
     IReadOnlyList<TableAccessTarget> ReferencedTables,
@@ -34,7 +36,8 @@ public sealed record SqlQueryMetadata(
     IReadOnlyList<string>? FunctionCalls = null,
     IReadOnlyList<string>? TableFunctionCalls = null,
     bool HasSessionProperties = false,
-    bool HasInlineFunctionDefinitions = false);
+    bool HasInlineFunctionDefinitions = false,
+    IReadOnlyList<JoinColumnReference>? JoinColumnReferences = null);
 
 public interface ISqlQueryAnalyzer
 {
