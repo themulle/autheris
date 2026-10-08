@@ -707,21 +707,31 @@ public static class GatewayServiceCollectionExtensions
         var entraConfig = gatewayOptions.Authentication.EntraId;
         var adfsConfig = gatewayOptions.Authentication.Adfs;
 
-        authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearer, options =>
+        // API-14: with Entra ID and AD FS both enabled a single JwtBearer scheme could only load the signing keys of one
+        // authority (Entra), so every AD FS token failed. Each IdP then gets its own scheme with its own metadata;
+        // Bearer tokens are routed by their (unverified) issuer and fully validated by the selected scheme.
+        bool splitJwtSchemes = entraConfig.Enabled && adfsConfig.Enabled;
+        authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearer, options => ConfigureJwtBearer(options, useEntra: entraConfig.Enabled, useAdfs: adfsConfig.Enabled && !splitJwtSchemes));
+        if (splitJwtSchemes)
+        {
+            authBuilder.AddJwtBearer(GatewayAuthSchemes.JwtBearerAdfs, options => ConfigureJwtBearer(options, useEntra: false, useAdfs: true));
+        }
+
+        void ConfigureJwtBearer(Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerOptions options, bool useEntra, bool useAdfs)
         {
             // Review E-1: JwtBearer keeps the default inbound claim mapping (sub -> NameIdentifier, oid -> objectidentifier
             // URI); revocation lookups (GetLookupKeys) accept both spellings.
-            options.RequireHttpsMetadata = (entraConfig.Enabled && entraConfig.RequireHttpsMetadata) ||
-                                           (adfsConfig.Enabled && adfsConfig.RequireHttpsMetadata);
+            options.RequireHttpsMetadata = (useEntra && entraConfig.RequireHttpsMetadata) ||
+                                           (useAdfs && adfsConfig.RequireHttpsMetadata);
 
-            if (entraConfig.Enabled && !string.IsNullOrWhiteSpace(entraConfig.TenantId))
+            if (useEntra && !string.IsNullOrWhiteSpace(entraConfig.TenantId))
             {
                 var instance = string.IsNullOrWhiteSpace(entraConfig.Instance)
                     ? "https://login.microsoftonline.com/"
                     : entraConfig.Instance.TrimEnd('/') + "/";
                 options.Authority = $"{instance}{entraConfig.TenantId}/v2.0";
             }
-            else if (adfsConfig.Enabled && !string.IsNullOrWhiteSpace(adfsConfig.Authority))
+            else if (useAdfs && !string.IsNullOrWhiteSpace(adfsConfig.Authority))
             {
                 options.Authority = adfsConfig.Authority.TrimEnd('/');
                 if (!string.IsNullOrWhiteSpace(adfsConfig.MetadataAddress))
@@ -733,7 +743,7 @@ public static class GatewayServiceCollectionExtensions
             var validIssuers = new List<string>();
             var validAudiences = new List<string>();
 
-            if (entraConfig.Enabled)
+            if (useEntra)
             {
                 if (!string.IsNullOrWhiteSpace(entraConfig.TenantId))
                 {
@@ -747,7 +757,7 @@ public static class GatewayServiceCollectionExtensions
                 if (!string.IsNullOrWhiteSpace(entraConfig.ClientId)) validAudiences.Add(entraConfig.ClientId);
             }
 
-            if (adfsConfig.Enabled)
+            if (useAdfs)
             {
                 if (!string.IsNullOrWhiteSpace(adfsConfig.Authority))
                 {
@@ -769,7 +779,7 @@ public static class GatewayServiceCollectionExtensions
                 ValidateIssuerSigningKey = true,
                 ClockSkew = TimeSpan.FromMinutes(2)
             };
-        });
+        }
 
         // 5. Smart Dynamic Policy Scheme: Route requests based on Authorization header or ForwardAuth
         authBuilder.AddPolicyScheme(GatewayAuthSchemes.DefaultScheme, "Gateway Smart Authentication", options =>
@@ -781,7 +791,7 @@ public static class GatewayServiceCollectionExtensions
                 // 1. Explicit Authorization headers have top priority (prevents ForwardAuth Header-Preemption DoS)
                 if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
                 {
-                    return GatewayAuthSchemes.JwtBearer;
+                    return GatewayAuthSchemes.SelectJwtScheme(authHeader["Bearer ".Length..], gatewayOptions);
                 }
 
                 if (authHeader.StartsWith("Basic ", StringComparison.OrdinalIgnoreCase))
