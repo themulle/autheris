@@ -2,7 +2,7 @@
 
 Stand: Branch `feat/ast-target-dialect-generator`, geprüft wurde `c4f2c32` gegen `1dd4e09`. Grundlage sind die Befunde aus
 [security-review-2026-10-07.md](security-review-2026-10-07.md) und die Spezifikation
-[graphql-g1-g5-uebergabe.md](graphql-g1-g5-uebergabe.md).
+GraphQL-Übergabe G1–G5 (Datei entfernt, Stand in `status-und-umsetzungsplan-2026-10-07.md`).
 
 Vorgehen:
 - Nur gelesen, nichts gebaut oder ausgeführt (kein .NET-SDK). Erster Schritt für die Umsetzung: `dotnet build` und `dotnet test`.
