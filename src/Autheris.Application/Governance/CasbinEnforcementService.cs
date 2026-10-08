@@ -583,7 +583,31 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         }, changedTenant: WildcardTenant);
     }
 
-    private const string RequestedAction = "read";
+    public static string ResolveRequestedAction(SecurityEvaluationContext context)
+    {
+        if (context.Attributes != null)
+        {
+            if (context.Attributes.TryGetValue("gql.action", out var gqlAction) && gqlAction != null)
+            {
+                var s = gqlAction.ToString();
+                if (!string.IsNullOrWhiteSpace(s))
+                {
+                    return s;
+                }
+            }
+
+            if (context.Attributes.TryGetValue("action", out var action) && action != null)
+            {
+                var s = action.ToString();
+                if (!string.IsNullOrWhiteSpace(s))
+                {
+                    return s;
+                }
+            }
+        }
+
+        return "read";
+    }
 
     public ValueTask<TableAccessDecision> EvaluatePolicyAsync(
         SecurityEvaluationContext context,
@@ -592,6 +616,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         ArgumentNullException.ThrowIfNull(context);
 
         var snapshot = Volatile.Read(ref _currentSnapshot);
+        var requestedAction = ResolveRequestedAction(context);
 
         var tableStr = context.TargetTable.ToString();
         var groupsStr = context.GroupSids != null && context.GroupSids.Count > 0
@@ -603,7 +628,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         var colsStr = context.RequestedColumns != null && context.RequestedColumns.Count > 0
             ? string.Join(",", context.RequestedColumns.OrderBy(c => c, StringComparer.OrdinalIgnoreCase))
             : string.Empty;
-        var cacheKey = $"{snapshot.Epoch}:{context.Tenant.Value}:{context.UserSid.Value}:{tableStr}:{context.PurposeId}:{context.Department}:{context.Region}:{context.ClearanceLevel}:{context.ClientIp}:G[{groupsStr}]:A[{attrsStr}]:C[{colsStr}]";
+        var cacheKey = $"{snapshot.Epoch}:{context.Tenant.Value}:{context.UserSid.Value}:{tableStr}:{requestedAction}:{context.PurposeId}:{context.Department}:{context.Region}:{context.ClearanceLevel}:{context.ClientIp}:G[{groupsStr}]:A[{attrsStr}]:C[{colsStr}]";
 
         if (_decisionCache.TryGetValue(cacheKey, out var cachedEntry))
         {
@@ -657,10 +682,11 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 bool denied = false;
                 foreach (var rule in tenantRulesSnapshot)
                 {
-                    // Deny rules are matched conservatively (any action, wildcard tenant or current tenant).
+                    // Deny rules are matched conservatively (matching action or wildcard, wildcard tenant or current tenant).
                     if (!string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase) ||
                         (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
-                        !MatchObjectPattern(rule.Obj, tableStr))
+                        !MatchObjectPattern(rule.Obj, tableStr) ||
+                        !IsActionMatch(rule.Act, requestedAction))
                     {
                         continue;
                     }
@@ -673,7 +699,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                         }
 
                         // Fail-closed: a deny rule whose condition cannot be evaluated is treated as matching.
-                        if (EvaluateSubRule(rule.SubRule, context, subject, tableStr, RequestedAction) != false)
+                        if (EvaluateSubRule(rule.SubRule, context, subject, tableStr, requestedAction) != false)
                         {
                             denied = true;
                             break;
@@ -692,7 +718,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                     // rules determined here is both the authorization basis and the source of the RLS filters.
                     foreach (var rule in tenantRulesSnapshot)
                     {
-                        if (IsAllowRuleMatch(rule, context, subjects, tableStr, enforcer))
+                        if (IsAllowRuleMatch(rule, context, subjects, tableStr, requestedAction, enforcer))
                         {
                             matchedAllowRules.Add(rule);
                         }
@@ -706,7 +732,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                     foreach (var subject in subjects)
                     {
                         // r = sub, tenant, obj, act, ctx
-                        if (enforcer.Enforce(subject, context.Tenant.Value, tableStr, RequestedAction, context))
+                        if (enforcer.Enforce(subject, context.Tenant.Value, tableStr, requestedAction, context))
                         {
                             casbinAllowed = true;
                             break;
@@ -792,9 +818,9 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         return false;
     }
 
-    private static bool IsActionMatch(string ruleAct) =>
+    private static bool IsActionMatch(string ruleAct, string requestedAction) =>
         string.Equals(ruleAct, "*", StringComparison.Ordinal) ||
-        string.Equals(ruleAct, RequestedAction, StringComparison.OrdinalIgnoreCase);
+        string.Equals(ruleAct, requestedAction, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsSubjectMatch(string ruleSub, string subject, Enforcer enforcer) =>
         string.Equals(ruleSub, "*", StringComparison.OrdinalIgnoreCase) ||
@@ -806,6 +832,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         SecurityEvaluationContext context,
         IReadOnlyList<string> subjects,
         string tableStr,
+        string requestedAction,
         Enforcer enforcer)
     {
         if (!string.Equals(rule.Eft, "allow", StringComparison.OrdinalIgnoreCase))
@@ -820,7 +847,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             return false;
         }
 
-        if (!MatchObjectPattern(rule.Obj, tableStr) || !IsActionMatch(rule.Act))
+        if (!MatchObjectPattern(rule.Obj, tableStr) || !IsActionMatch(rule.Act, requestedAction))
         {
             return false;
         }
@@ -829,7 +856,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         {
             // Sub_rule is evaluated with r.sub = the matched subject (user or group), as in the Casbin request.
             if (IsSubjectMatch(rule.Sub, subject, enforcer) &&
-                EvaluateSubRule(rule.SubRule, context, subject, tableStr, RequestedAction) == true)
+                EvaluateSubRule(rule.SubRule, context, subject, tableStr, requestedAction) == true)
             {
                 return true;
             }

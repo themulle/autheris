@@ -94,6 +94,12 @@ public static class GatewayServiceCollectionExtensions
                 Enum.IsDefined(opts.RowFilters.SubqueryStrategy),
                 "Gateway:RowFilters:SubqueryStrategy must be Exists, InCorrelated or In.")
             .Validate(opts =>
+                !opts.Casbin.Enabled || !string.IsNullOrWhiteSpace(opts.Casbin.ModelPath),
+                "Gateway:Casbin is enabled, but ModelPath is not configured. Failing closed.")
+            .Validate(opts =>
+                !opts.Casbin.Enabled || !string.IsNullOrWhiteSpace(opts.Casbin.PolicyPath),
+                "Gateway:Casbin is enabled, but PolicyPath is not configured. Failing closed.")
+            .Validate(opts =>
                 opts.HighAvailability.ShutdownTimeoutSeconds >= opts.HighAvailability.QueryTimeoutSeconds + 10,
                 "NF-HA-01 violation: ShutdownTimeoutSeconds must be at least 10s greater than QueryTimeoutSeconds.")
             .Validate(opts =>
@@ -152,6 +158,10 @@ public static class GatewayServiceCollectionExtensions
                 !Directory.Exists(System.IO.Path.GetFullPath(opts.Plugins.Directory)) ||
                 opts.Plugins.RequireIntegrityManifest,
                 "Security violation: Outside Development, a configured plugin directory requires Plugins.RequireIntegrityManifest = true.")
+            .Validate(opts =>
+                environment.IsDevelopment() || opts.Rebac.SeedTuples.Count == 0 ||
+                !opts.Rebac.SeedTuples.Any(t => t.User.Contains("david", StringComparison.OrdinalIgnoreCase) || t.Object.Contains("prod", StringComparison.OrdinalIgnoreCase)),
+                "Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.")
             .ValidateOnStart();
 
         var gatewayOptions = configuration.GetSection(GatewayOptions.SectionName).Get<GatewayOptions>() ?? new GatewayOptions();
@@ -382,6 +392,28 @@ public static class GatewayServiceCollectionExtensions
             {
                 logger?.LogWarning("Casbin ABAC engine is DISABLED (Gateway:Casbin:Enabled = false). Access control via Casbin policies is inactive.");
             }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(options.Casbin.ModelPath))
+                {
+                    throw new InvalidOperationException("Gateway:Casbin is enabled, but ModelPath is not configured. Failing closed.");
+                }
+                var fullModelPath = System.IO.Path.GetFullPath(options.Casbin.ModelPath);
+                if (!System.IO.File.Exists(fullModelPath))
+                {
+                    throw new FileNotFoundException($"Gateway:Casbin is enabled, but model file '{fullModelPath}' was not found. Failing closed.");
+                }
+                if (string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
+                {
+                    throw new InvalidOperationException("Gateway:Casbin is enabled, but PolicyPath is not configured. Failing closed.");
+                }
+                var fullPolicyPath = System.IO.Path.GetFullPath(options.Casbin.PolicyPath);
+                if (!System.IO.File.Exists(fullPolicyPath))
+                {
+                    throw new FileNotFoundException($"Gateway:Casbin is enabled, but policy file '{fullPolicyPath}' was not found. Failing closed.");
+                }
+            }
+
             var service = new CasbinEnforcementService(options.Casbin.ModelPath, rlsGen, logger);
             if (options.Casbin.Enabled && !string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
@@ -574,13 +606,45 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>(sp =>
         {
             var multiplexer = sp.GetService<StackExchange.Redis.IConnectionMultiplexer>();
-            return multiplexer != null
+            var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>();
+            var env = sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+            Autheris.Application.Security.Rebac.Interfaces.IRebacStore store = multiplexer != null
                 ? new Autheris.Infrastructure.Rebac.RedisRebacStore(
                     multiplexer,
-                    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>(),
+                    opts,
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Infrastructure.Rebac.RedisRebacStore>>())
                 : new Autheris.Application.Security.Rebac.Services.InMemoryRebacStore(
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Security.Rebac.Services.InMemoryRebacStore>>());
+
+            var tuplesToSeed = new List<Autheris.Domain.Model.RebacTuple>(opts.Value.Rebac.SeedTuples);
+            if (tuplesToSeed.Count == 0 && env?.IsDevelopment() == true)
+            {
+                tuplesToSeed.AddRange([
+                    new("default", "user:david", "viewer", "table:lakehouse.dbo.orders"),
+                    new("default", "S-1-5-21-LWE-DAVID", "viewer", "table:lakehouse.dbo.orders"),
+                    new("default", "user:david", "viewer", "table:sales.public.orders"),
+                    new("default", "S-1-5-21-LWE-DAVID", "viewer", "table:sales.public.orders"),
+                    new("default", "user:david", "viewer", "table:sales.crm.contacts"),
+                    new("tenant_lwe", "user:david", "viewer", "table:lakehouse.dbo.orders"),
+                    new("tenant_lwe", "S-1-5-21-LWE-DAVID", "viewer", "table:lakehouse.dbo.orders")
+                ]);
+            }
+
+            if (tuplesToSeed.Count > 0)
+            {
+                try
+                {
+                    store.AddTuplesAsync(tuplesToSeed).AsTask().GetAwaiter().GetResult();
+                }
+                catch (Exception ex)
+                {
+                    sp.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()
+                        ?.CreateLogger("RebacSeeder")
+                        .LogWarning(ex, "Failed to preload ReBAC seed tuples.");
+                }
+            }
+
+            return store;
         });
         services.AddSingleton<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator, Autheris.Application.Security.Rebac.Services.ZanzibarRebacEvaluator>();
         services.AddScoped<Autheris.Application.Security.Rebac.Interfaces.IRebacBatchDataLoader, Autheris.Application.Security.Rebac.Services.RebacBatchDataLoader>();
@@ -1302,6 +1366,14 @@ public static class GatewayServiceCollectionExtensions
             if (options.IsAnonymousAccessAllowed)
             {
                 throw new ValidationException("Security violation: danger_allow_anonymous_access may be true ONLY in the Development environment.");
+            }
+
+            if (options.Rebac.SeedTuples.Count > 0)
+            {
+                if (options.Rebac.SeedTuples.Any(t => t.User.Contains("david", StringComparison.OrdinalIgnoreCase) || t.Object.Contains("prod", StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new ValidationException("Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.");
+                }
             }
 
             // Only DANGER entries are blocked outside Development; WARN entries are permitted (reported above).
