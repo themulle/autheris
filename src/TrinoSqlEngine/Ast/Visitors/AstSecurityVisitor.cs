@@ -495,9 +495,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             UnaryExpression u => ContainsColumnReference(u.Operand),
             LikeExpression l => ContainsColumnReference(l.Operand) || ContainsColumnReference(l.Pattern) || (l.Escape != null && ContainsColumnReference(l.Escape)),
             InListExpression inList => ContainsColumnReference(inList.Operand) || inList.Items.Any(ContainsColumnReference),
-            InSubqueryExpression => true,
-            ExistsExpression => true,
-            ScalarSubqueryExpression => true,
+            InSubqueryExpression inSq => ContainsColumnReference(inSq.Operand) || ContainsColumnReferenceInQuery(inSq.Subquery),
+            ExistsExpression ex => ContainsColumnReferenceInQuery(ex.Subquery),
+            ScalarSubqueryExpression sc => ContainsColumnReferenceInQuery(sc.Subquery),
             BetweenExpression between => ContainsColumnReference(between.Operand) || ContainsColumnReference(between.Lower) || ContainsColumnReference(between.Upper),
             CaseExpression caseExpr => (caseExpr.Operand != null && ContainsColumnReference(caseExpr.Operand)) ||
                                        caseExpr.WhenClauses.Any(w => ContainsColumnReference(w.Condition) || ContainsColumnReference(w.Result)) ||
@@ -510,9 +510,27 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             DateFunctionExpression dateFunc => ContainsColumnReference(dateFunc.Source),
             ExtractExpression extract => ContainsColumnReference(extract.Source),
             IsDistinctFromExpression distinct => ContainsColumnReference(distinct.Left) || ContainsColumnReference(distinct.Right),
-            QuantifiedComparisonExpression quant => ContainsColumnReference(quant.Left),
+            QuantifiedComparisonExpression quant => ContainsColumnReference(quant.Left) || ContainsColumnReferenceInQuery(quant.Subquery),
             _ => false
         };
+    }
+
+    private static bool ContainsColumnReferenceInQuery(SelectStatement subquery)
+    {
+        var stack = new Stack<SqlNode>();
+        stack.Push(subquery);
+
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            if (node is ColumnReference or WildcardSelectItem or UsingJoinCondition)
+            {
+                return true;
+            }
+            PushChildren(node, stack);
+        }
+
+        return false;
     }
 
     private static bool TryCompareNumericLiterals(LiteralExpression left, LiteralExpression right, out int comparison)
@@ -576,6 +594,10 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                         return cmpLe <= 0;
                     return Equals(le1.Value?.ToString(), le2.Value?.ToString());
                 }
+                if (b.Left is ColumnReference leCol1 && b.Right is ColumnReference leCol2)
+                {
+                    return leCol1.Name.NormalizedName.Equals(leCol2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase);
+                }
                 return false;
             case BinaryExpression b when b.Operator == BinaryOperator.GreaterThan:
                 if (b.Left is LiteralExpression gtl && b.Right is LiteralExpression gtr &&
@@ -590,6 +612,30 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                     if (TryCompareNumericLiterals(ge1, ge2, out int cmpGe))
                         return cmpGe >= 0;
                     return Equals(ge1.Value?.ToString(), ge2.Value?.ToString());
+                }
+                if (b.Left is ColumnReference geCol1 && b.Right is ColumnReference geCol2)
+                {
+                    return geCol1.Name.NormalizedName.Equals(geCol2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase);
+                }
+                return false;
+            case BetweenExpression between:
+                if (between.Operand is ColumnReference opCol &&
+                    between.Lower is ColumnReference lowCol &&
+                    between.Upper is ColumnReference upCol)
+                {
+                    if (opCol.Name.NormalizedName.Equals(lowCol.Name.NormalizedName, StringComparison.OrdinalIgnoreCase) &&
+                        opCol.Name.NormalizedName.Equals(upCol.Name.NormalizedName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            case InListExpression inList:
+                if (inList.Operand is ColumnReference inCol &&
+                    inList.Items.Any(item => item is ColumnReference itemCol &&
+                                            itemCol.Name.NormalizedName.Equals(inCol.Name.NormalizedName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
                 }
                 return false;
             case UnaryExpression u when u.Operator == UnaryOperator.Not:
@@ -616,7 +662,27 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             if (node is ColumnReference colRef)
             {
                 string colName = colRef.Name.SimpleName;
-                if (_options.ColumnMaskingProvider.HasMask(normalizedTableName, colName))
+                bool isMasked = _options.ColumnMaskingProvider.HasMask(normalizedTableName, colName);
+
+                if (!isMasked && colRef.Name.Parts.Count > 1)
+                {
+                    string qualifier = colRef.Name.Parts[^2].Value;
+                    isMasked = _options.ColumnMaskingProvider.HasMask(qualifier, colName);
+                }
+
+                if (!isMasked && _options.TablesWithMaskedColumns != null)
+                {
+                    foreach (var tbl in _options.TablesWithMaskedColumns)
+                    {
+                        if (_options.ColumnMaskingProvider.HasMask(tbl, colName))
+                        {
+                            isMasked = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (isMasked)
                 {
                     throw new SecurityException($"Masked column '{colName}' of table '{normalizedTableName}' must not be referenced in {clause}.");
                 }
@@ -627,6 +693,29 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                     HasMaskingForTable(normalizedTableName))
                 {
                     throw new SecurityException($"Whole-row reference to '{colName}' in {clause} is forbidden because table '{normalizedTableName}' contains masked columns.");
+                }
+            }
+            else if (node is UsingJoinCondition usingCond)
+            {
+                foreach (var col in usingCond.Columns)
+                {
+                    string colName = col.Value;
+                    bool isMasked = _options.ColumnMaskingProvider.HasMask(normalizedTableName, colName);
+                    if (!isMasked && _options.TablesWithMaskedColumns != null)
+                    {
+                        foreach (var tbl in _options.TablesWithMaskedColumns)
+                        {
+                            if (_options.ColumnMaskingProvider.HasMask(tbl, colName))
+                            {
+                                isMasked = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (isMasked)
+                    {
+                        throw new SecurityException($"Masked column '{colName}' of table '{normalizedTableName}' must not be referenced in {clause}.");
+                    }
                 }
             }
 
@@ -650,6 +739,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 stack.Push(cast.Operand);
                 break;
             case LikeExpression lk:
+                if (lk.Escape != null) stack.Push(lk.Escape);
                 stack.Push(lk.Pattern);
                 stack.Push(lk.Operand);
                 break;
@@ -722,13 +812,57 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 stack.Push(pos.Haystack);
                 break;
             case SelectStatement s:
+                if (s.With != null) { foreach (var cte in s.With.Ctes) stack.Push(cte.Query); }
                 stack.Push(s.Body);
                 if (s.OrderBy != null) stack.Push(s.OrderBy);
+                if (s.Pagination != null)
+                {
+                    if (s.Pagination.Offset != null) stack.Push(s.Pagination.Offset);
+                    if (s.Pagination.Limit != null) stack.Push(s.Pagination.Limit);
+                }
                 break;
             case QuerySpecification qs:
                 foreach (var p in qs.Projections) stack.Push(p);
+                if (qs.From != null) stack.Push(qs.From);
                 if (qs.Where != null) stack.Push(qs.Where);
+                if (qs.GroupBy != null) stack.Push(qs.GroupBy);
                 if (qs.Having != null) stack.Push(qs.Having);
+                break;
+            case SetOperationQuery so:
+                stack.Push(so.Left);
+                stack.Push(so.Right);
+                break;
+            case ValuesQueryBody vq:
+                foreach (var r in vq.Rows) stack.Push(r);
+                break;
+            case JoinedTableSource jt:
+                stack.Push(jt.Left);
+                stack.Push(jt.Right);
+                if (jt.Condition != null) stack.Push(jt.Condition);
+                break;
+            case SubqueryTableSource st:
+                stack.Push(st.Subquery);
+                break;
+            case LateralTableSource lt:
+                stack.Push(lt.Subquery);
+                break;
+            case OnJoinCondition on:
+                stack.Push(on.Predicate);
+                break;
+            case UsingJoinCondition:
+                break;
+            case GroupByClause gb:
+                foreach (var g in gb.GroupingExpressions) stack.Push(g);
+                if (gb.AdvancedElements != null)
+                {
+                    foreach (var adv in gb.AdvancedElements)
+                    {
+                        foreach (var set in adv.Sets)
+                        {
+                            foreach (var g in set) stack.Push(g);
+                        }
+                    }
+                }
                 break;
             case ColumnSelectItem csi:
                 stack.Push(csi.Expression);
