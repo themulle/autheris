@@ -27,10 +27,14 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
 
     private static readonly char[] CrlfChars = new[] { '\r', '\n' };
 
+    private readonly Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider? _virtualFilters;
+
     public EnvoyExtAuthzService(
         IPolicyEnforcementService policyService,
-        ILogger<EnvoyExtAuthzService> logger)
+        ILogger<EnvoyExtAuthzService> logger,
+        Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider? virtualFilters = null)
     {
+        _virtualFilters = virtualFilters;
         _policyService = policyService ?? throw new ArgumentNullException(nameof(policyService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -204,6 +208,27 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
                 principal, tenantStr, resourceName, method, reason);
 
             return EnvoyCheckResponse.Deny(403, reason);
+        }
+
+        // Virtual filters (decision 7): ext_authz enforces no row filters. A caller whose access profile has the table in
+        // its scope must read it through a channel that applies the filter. Roles are unknown here, so a role profile
+        // covering the table denies as well (fail closed).
+        if (_virtualFilters != null)
+        {
+            var snapshot = await _virtualFilters.GetAsync(ct).ConfigureAwait(false);
+            var callerSid = new Sid(principal);
+            var groups = new HashSet<Sid>(groupList);
+            var covering = snapshot.Profiles.FirstOrDefault(p =>
+                p.TenantId == tenantId &&
+                (p.GranteeType == GranteeType.Role ||
+                 Autheris.Application.Policy.GranteeMatcher.Matches(p.GranteeType, p.GranteeSid, p.RoleName, null, callerSid, groups, new HashSet<string>())) &&
+                ObjectPattern.Parse(p.Scope).MatchesObject(targetTable));
+            if (covering != null)
+            {
+                _logger.LogWarning("Envoy ext_authz DENIED: Subject '{Principal}', Resource '{Resource}' is restricted by the access profile '{Profile}'.",
+                    principal, resourceName, covering.Name);
+                return EnvoyCheckResponse.Deny(403, $"Access to resource '{resourceName}' is restricted by virtual filters; use a governed data channel.");
+            }
         }
 
         _logger.LogInformation("Envoy ext_authz ALLOWED: Subject '{Principal}', Tenant '{Tenant}', Resource '{Resource}'",
