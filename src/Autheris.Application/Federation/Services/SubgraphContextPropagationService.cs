@@ -83,6 +83,30 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
         request.Headers.Remove("X-Correlation-ID");
         request.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
 
+        // 6. Sign Zero-Trust Context Headers with HMAC-SHA256 (1.10)
+        if (fedOptions.SignContextHeaders)
+        {
+            var signingKey = !string.IsNullOrWhiteSpace(fedOptions.SigningKey)
+                ? fedOptions.SigningKey
+                : (_options.Value.DataMasking?.HmacSecretKeyVaultRef ?? "autheris-federation-default-secret");
+
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+            var nonce = Guid.NewGuid().ToString("N");
+            var userSid = principal?.GetUserSid()?.Value ?? string.Empty;
+
+            var payload = $"{effectiveTenant}:{userSid}:{timestamp}:{nonce}";
+            using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(signingKey));
+            var signature = Convert.ToHexStringLower(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload)));
+
+            request.Headers.Remove("X-Autheris-Signature");
+            request.Headers.Remove("X-Autheris-Timestamp");
+            request.Headers.Remove("X-Autheris-Nonce");
+
+            request.Headers.TryAddWithoutValidation("X-Autheris-Signature", signature);
+            request.Headers.TryAddWithoutValidation("X-Autheris-Timestamp", timestamp);
+            request.Headers.TryAddWithoutValidation("X-Autheris-Nonce", nonce);
+        }
+
         _logger.LogDebug("Propagated Zero-Trust context to subgraph '{Subgraph}' (Tenant: {Tenant}, Correlation: {Correlation})",
             subgraphName, effectiveTenant, correlationId);
     }

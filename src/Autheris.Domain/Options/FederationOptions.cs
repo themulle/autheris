@@ -24,6 +24,16 @@ public sealed class FederationOptions
     public bool EnableZeroTrustContextForwarding { get; init; } = true;
 
     /// <summary>
+    /// Cryptographic signing secret used for HMAC-SHA256 signing of forwarded Zero-Trust context headers (1.10).
+    /// </summary>
+    public string? SigningKey { get; init; }
+
+    /// <summary>
+    /// When enabled, context headers forwarded to downstream subgraphs are signed with HMAC-SHA256 to prevent header spoofing (1.10).
+    /// </summary>
+    public bool SignContextHeaders { get; init; } = true;
+
+    /// <summary>
     /// Enables in-memory PII/sensitive column masking on aggregated subgraph response results.
     /// </summary>
     public bool EnableResultMasking { get; init; } = true;
