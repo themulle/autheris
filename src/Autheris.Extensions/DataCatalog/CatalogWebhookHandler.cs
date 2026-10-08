@@ -26,6 +26,7 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
     private readonly IPolicyEpochRepository _epochRepo;
     private readonly IDataCatalogSyncService _syncService;
     private readonly ILogger<CatalogWebhookHandler> _logger;
+    private readonly Autheris.Application.State.IDistributedClusterStateProvider? _clusterState;
 
     private static readonly TimeSpan DefaultTimestampTolerance = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan DeduplicationTtl = TimeSpan.FromMinutes(15);
@@ -37,8 +38,10 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
         IOptions<GatewayOptions> options,
         IPolicyEpochRepository epochRepo,
         IDataCatalogSyncService syncService,
-        ILogger<CatalogWebhookHandler> logger)
+        ILogger<CatalogWebhookHandler> logger,
+        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null)
     {
+        _clusterState = clusterState;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _epochRepo = epochRepo ?? throw new ArgumentNullException(nameof(epochRepo));
         _syncService = syncService ?? throw new ArgumentNullException(nameof(syncService));
@@ -114,7 +117,7 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
 
         // 3. SEC M-34: Event-ID / signature deduplication (in-memory, TTL) against replays inside the tolerance window
         var dedupKey = BuildDeduplicationKey(rawPayload, signature, timestamp);
-        if (dedupKey != null && !TryRegisterEvent(dedupKey))
+        if (dedupKey != null && !await TryRegisterEventClusterWideAsync(dedupKey, ct).ConfigureAwait(false))
         {
             _logger.LogWarning("Catalog webhook ignored: duplicate event (replay) detected.");
             return new CatalogWebhookResult(true, "IGNORED_DUPLICATE_EVENT", []);
@@ -129,6 +132,7 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
         }
 
         // 5. Invalidate distributed cache & bump policy epochs
+        var anyFailed = false;
         foreach (var tableId in affectedTables)
         {
             try
@@ -139,8 +143,17 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
             }
             catch (Exception ex)
             {
+                anyFailed = true;
                 _logger.LogError(ex, "Failed to apply real-time catalog invalidation for table '{Table}'", tableId);
             }
+        }
+
+        // INF-5: the event was registered before processing; when processing failed, the registration is released so the
+        // provider's retry is processed instead of being dropped as a duplicate.
+        if (anyFailed && dedupKey != null)
+        {
+            await UnregisterEventAsync(dedupKey).ConfigureAwait(false);
+            return new CatalogWebhookResult(false, "PARTIALLY_FAILED", affectedTables, "Catalog invalidation failed for at least one table; retry the event.");
         }
 
         return new CatalogWebhookResult(true, "INVALIDATED", affectedTables);
@@ -224,6 +237,59 @@ public sealed class CatalogWebhookHandler : IDataCatalogWebhookHandler
 
         return null;
     }
+
+    /// <summary>
+    /// INF-5: deduplication across gateway instances via the cluster state (atomic counter per event key); without a
+    /// reachable cluster state only this instance deduplicates.
+    /// </summary>
+    private async Task<bool> TryRegisterEventClusterWideAsync(string key, CancellationToken ct)
+    {
+        if (!TryRegisterEvent(key))
+        {
+            return false;
+        }
+
+        if (_clusterState == null)
+        {
+            return true;
+        }
+
+        try
+        {
+            var count = await _clusterState.IncrementAsync(ClusterKey(key), 1, DeduplicationTtl, ct).ConfigureAwait(false);
+            if (count is > 1)
+            {
+                return false;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Catalog webhook deduplication: cluster state unavailable; deduplicating per instance only.");
+        }
+
+        return true;
+    }
+
+    private async Task UnregisterEventAsync(string key)
+    {
+        ProcessedEvents.TryRemove(key, out _);
+        if (_clusterState == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _clusterState.RemoveAsync(ClusterKey(key)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Catalog webhook deduplication: failed to release the event registration in the cluster state.");
+        }
+    }
+
+    private static string ClusterKey(string key) =>
+        "catalog:webhook:dedup:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
 
     private static bool TryRegisterEvent(string key)
     {
