@@ -489,7 +489,8 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             }
             else if (!string.IsNullOrWhiteSpace(rule.Replacement))
             {
-                maskExpr = $"'{rule.Replacement.Replace("'", "''")}'";
+                var prefix = dialect == DatabaseDialect.SqlServer ? "N" : string.Empty;
+                maskExpr = $"{prefix}'{dialect.EscapeSqlLiteral(rule.Replacement)}'";
             }
             else
             {
