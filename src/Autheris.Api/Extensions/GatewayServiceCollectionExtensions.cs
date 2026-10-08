@@ -260,6 +260,7 @@ public static class GatewayServiceCollectionExtensions
         }
 
         services.AddSingleton<IEpochValidationService, EpochValidationService>();
+        services.AddSingleton<Autheris.Application.VirtualFilters.VirtualFilterAdministrationService>();
         services.AddSingleton<IConsentCacheService, ConsentCacheService>();
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
@@ -274,6 +275,7 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
         }
         else
@@ -288,6 +290,7 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
         }
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();

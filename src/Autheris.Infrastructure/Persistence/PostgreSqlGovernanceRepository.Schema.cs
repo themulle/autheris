@@ -272,6 +272,40 @@ public partial class PostgreSqlGovernanceRepository
 
             CREATE INDEX IF NOT EXISTS idx_itsm_outbox_status_retry
                 ON ITSM_OUTBOX (status, next_retry_at);
+
+            -- Virtual filters (docs/plans/2026-10-08-umsetzungsplan-virtuelle-filter.md, phase 2)
+            CREATE TABLE IF NOT EXISTS VIRTUAL_FILTERS (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                source TEXT NOT NULL,
+                definition_json TEXT NOT NULL,
+                definition_hash TEXT NOT NULL,
+                managed_path TEXT,
+                managed_commit TEXT,
+                updated_by TEXT,
+                updated_at TEXT NOT NULL,
+                UNIQUE (tenant_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS FILTER_BINDINGS (
+                id TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                filter_name TEXT NOT NULL,
+                definition_json TEXT NOT NULL,
+                definition_hash TEXT NOT NULL,
+                managed_path TEXT,
+                managed_commit TEXT,
+                updated_by TEXT,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_GENERATION (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                generation BIGINT NOT NULL
+            );
+
+            INSERT INTO VIRTUAL_FILTER_GENERATION (id, generation) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
         ";
 
         // Review PG-1: concurrent replica starts must not run the DDL at the same time ("tuple concurrently updated").

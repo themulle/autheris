@@ -82,6 +82,9 @@ public sealed record VirtualFilter
     public string? UpdatedBy { get; init; }
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
 
+    /// <summary>Hash stored with the row (set by the repository); differs from <see cref="ComputeDefinitionHash"/> after a write outside Autheris.</summary>
+    public string? StoredDefinitionHash { get; init; }
+
     /// <summary>Column names the protected object must have (the unqualified key columns).</summary>
     public IReadOnlyList<string> TargetKeyColumns => KeyColumns.Select(k => VirtualFilterNames.ColumnOf(k)).ToList();
 
@@ -223,6 +226,12 @@ public sealed record FilterBinding
     public ManagedBy? ManagedBy { get; init; }
     public string? UpdatedBy { get; init; }
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Hash stored with the row (set by the repository).</summary>
+    public string? StoredDefinitionHash { get; init; }
+
+    /// <summary>Identity of a binding for the sync from the file repository: filter, target and grantee.</summary>
+    public string NaturalKey => string.Join('|', FilterName, TargetPattern, GranteeType, GranteeSid?.Value, RoleName);
 
     public void Validate()
     {
