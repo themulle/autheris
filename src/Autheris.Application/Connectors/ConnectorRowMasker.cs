@@ -8,7 +8,8 @@ using Autheris.Domain.Model;
 namespace Autheris.Application.Connectors;
 
 /// <summary>
-/// Centralized row masking and column stripping utility for connectors, streaming pipelines, and federation engines.
+/// Row masking and column stripping for one connector row; delegates to <see cref="GovernedConnectorReader.ProjectRow"/>
+/// (Architecture 2), which callers reading whole tables should use through <see cref="GovernedConnectorReader.ReadAsync"/>.
 /// </summary>
 public static class ConnectorRowMasker
 {
@@ -33,41 +34,9 @@ public static class ConnectorRowMasker
         string? defaultHmacKeyId = null,
         bool alreadyMasked = false)
     {
-        ArgumentNullException.ThrowIfNull(rawRow);
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(decision);
         ArgumentNullException.ThrowIfNull(maskingProvider);
-
-        var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var col in metadata.Columns)
-        {
-            var access = decision.GetColumnAccess(col.ColumnName);
-            if (access == ColumnAccessLevel.Deny)
-            {
-                continue; // Strip denied columns completely
-            }
-
-            // Zero-Trust: Sensitive columns in catalog never output cleartext without explicit Clear rule
-            bool isSensitiveInCatalog = col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName);
-            if (isSensitiveInCatalog && !decision.HasExplicitClear(col.ColumnName))
-            {
-                access = ColumnAccessLevel.Mask;
-            }
-
-            if (rawRow.TryGetValue(col.ColumnName, out var rawVal))
-            {
-                if (access == ColumnAccessLevel.Mask && !alreadyMasked)
-                {
-                    var rule = metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
-                        ? mRule
-                        : new MaskingRule { RuleType = "REDACT" };
-                    // SEC D-3: HMAC pseudonyms are tenant-scoped (idempotent - values already scoped by the SQL path stay single-scoped).
-                    rule = Autheris.Application.Services.GatewayExecutionService.ScopeRuleForTenant(rule, tenantId, defaultHmacKeyId);
-                    rawVal = maskingProvider.MaskValue(col.ColumnName, rawVal, rule);
-                }
-                dict[col.ColumnName] = rawVal;
-            }
-        }
-        return dict;
+        return GovernedConnectorReader.ProjectRow(rawRow, metadata, decision, tenantId, new GovernedRowPolicy(maskingProvider, defaultHmacKeyId), alreadyMasked);
     }
 }

@@ -226,26 +226,30 @@ public static class DuckDbOlapEndpoints
                     Limit: options.MaxStagedRowsPerTable + 1,
                     Offset: 0);
 
-                session.Items["TableMetadata"] = meta;
-
-                var splits = await connector.SplitManager.GetSplitsAsync(meta, session, ct).ConfigureAwait(false);
-                var rawRows = new List<IReadOnlyDictionary<string, object?>>();
-                foreach (var split in splits)
+                // Architecture 2 / SQL2-5: the governed reader applies the row filter when the connector did not push it
+                // down, masks exactly once (SQL2-4) and checks the staging capacity before rows are kept (SQL2-2).
+                List<IReadOnlyDictionary<string, object?>> maskedRows;
+                try
                 {
-                    var batch = await connector.RecordSource.ReadBatchAsync(split, session, ct).ConfigureAwait(false);
-                    // RR-L3-01 / SQL2-2: verify staging capacity BEFORE adding batch
-                    if (rawRows.Count + batch.Count > options.MaxStagedRowsPerTable)
-                    {
-                        httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                        await httpContext.Response.WriteAsJsonAsync(new { error = $"Table '{meta.Identifier}' exceeds maximum allowed staging rows ({options.MaxStagedRowsPerTable})." }, ct);
-                        return;
-                    }
-                    rawRows.AddRange(batch);
+                    var read = await GovernedConnectorReader.ReadAsync(
+                        connector,
+                        session,
+                        meta,
+                        new GovernedRowPolicy(
+                            maskingProvider,
+                            gatewayOptions.Value.DataMasking?.HmacKeyId,
+                            MaskingDisabled: gatewayOptions.Value.IsColumnMaskingDisabled,
+                            MaxRows: options.MaxStagedRowsPerTable),
+                        ct).ConfigureAwait(false);
+                    maskedRows = read.Rows.ToList();
+                }
+                catch (ConnectorRowLimitExceededException)
+                {
+                    httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    await httpContext.Response.WriteAsJsonAsync(new { error = $"Table '{meta.Identifier}' exceeds maximum allowed staging rows ({options.MaxStagedRowsPerTable})." }, ct);
+                    return;
                 }
 
-                // Dynamic Column Masking preservation (SEC-OLAP-04 / SQL2-4: keine Doppelmaskierung)
-                bool alreadyMasked = session.Items.TryGetValue("InDbColumnMaskingExecuted", out var m) && m is true;
-                var maskedRows = rawRows.Select(r => ConnectorRowMasker.MaskRow(r, meta, decision, maskingProvider, tenantId.Value, gatewayOptions.Value.DataMasking?.HmacKeyId, alreadyMasked)).ToList();
                 if (!await TryAuditAsync("OLAP_TABLE_STAGED", meta.Identifier.ToQualifiedName(), new
                 {
                     tenant = tenantId.Value,

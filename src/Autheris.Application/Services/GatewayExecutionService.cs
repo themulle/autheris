@@ -216,26 +216,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 Offset: after ?? 0,
                 RequestHeaders: requestHeaders);
 
-            session.Items["TableMetadata"] = metadata;
+            rawRows = await Autheris.Application.Connectors.GovernedConnectorReader.ReadRawAsync(connector, session, metadata, maxRows: null, ct).ConfigureAwait(false);
 
-            var splits = await connector.SplitManager.GetSplitsAsync(metadata, session, ct).ConfigureAwait(false);
-            if (splits.Count == 0)
-            {
-                rawRows = Array.Empty<IReadOnlyDictionary<string, object?>>();
-            }
-            else
-            {
-                var combinedRows = new List<IReadOnlyDictionary<string, object?>>();
-                foreach (var split in splits)
-                {
-                    var splitRows = await connector.RecordSource.ReadBatchAsync(split, session, ct).ConfigureAwait(false);
-                    combinedRows.AddRange(splitRows);
-                }
-                rawRows = combinedRows;
-            }
-
-            rlsPushdownAlreadyOccurred = session.Items.TryGetValue("RlsPushdownExecuted", out var p1) && p1 is true;
-            inDbMaskingAlreadyOccurred = session.Items.TryGetValue("InDbColumnMaskingExecuted", out var m1) && m1 is true;
+            rlsPushdownAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.Connectors.GovernedConnectorReader.RlsPushdownExecutedKey, out var p1) && p1 is true;
+            inDbMaskingAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.Connectors.GovernedConnectorReader.InDbColumnMaskingExecutedKey, out var m1) && m1 is true;
         }
         else
         {
@@ -258,90 +242,21 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             inDbMaskingAlreadyOccurred = execContext.Items.TryGetValue("InDbColumnMaskingExecuted", out var m2) && m2 is true;
         }
 
-        // Central Zero-Trust Pipeline: Step 1: In-Memory RLS Post-Filtering
-        // For SQL data sources where RLS pushdown has already been executed in the DB engine via WHERE clause,
-        // redundant in-memory DataTable filtering is skipped.
-        // For non-SQL data sources (REST, Plugins) or synthetic dev/test mock fallback without DB pushdown,
-        // in-memory evaluation is enforced.
-        var filteredRows = rawRows.ToList();
-
-        if (!rlsPushdownAlreadyOccurred && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
-        {
-            filteredRows = FilterRows(filteredRows, decision.CombinedRowFilterSql, metadata);
-        }
-
-        // Central Zero-Trust Pipeline: Step 2: Column Masking & Deny Stripping
-        var processedRows = new List<IReadOnlyDictionary<string, object?>>(filteredRows.Count);
-        foreach (var r in filteredRows)
-        {
-            var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var col in metadata.Columns)
-            {
-                var access = decision.GetColumnAccess(col.ColumnName);
-                if (access == ColumnAccessLevel.Deny)
-                {
-                    continue; // Strip denied columns completely
-                }
-
-                // Zero-Trust Hardening: Sensitive columns in catalog NEVER output cleartext without explicit Clear rule
-                bool isSensitiveInCatalog = col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName);
-                if (isSensitiveInCatalog && !decision.HasExplicitClear(col.ColumnName))
-                {
-                    access = ColumnAccessLevel.Mask;
-                }
-
-                if (r.TryGetValue(col.ColumnName, out var rawVal))
-                {
-                    if (access == ColumnAccessLevel.Mask && _options?.IsColumnMaskingDisabled != true)
-                    {
-                        if (!inDbMaskingAlreadyOccurred)
-                        {
-                            var rule = metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule) ? mRule : new MaskingRule { RuleType = "REDACT" };
-                            if (IsHmacRule(rule))
-                            {
-                                rule = CreateTenantScopedHmacRule(rule, tenantId.Value, _options?.DataMasking?.HmacKeyId);
-                            }
-                            rawVal = _maskingProvider.MaskValue(col.ColumnName, rawVal, rule);
-                        }
-                    }
-                    dict[col.ColumnName] = rawVal;
-                }
-                else
-                {
-                    dict[col.ColumnName] = null;
-                }
-            }
-            processedRows.Add(dict);
-        }
-
-        // Central Zero-Trust Pipeline: Step 3: Hard Response Size Cap Enforcement
+        // Architecture 2: row filter (unless pushed down), masking exactly once and the response byte cap are the
+        // same steps for connector and executor rows, and for every other connector caller (OLAP).
         var maxBytes = _options?.GraphQL?.MaxResponseBytes > 0 ? _options.GraphQL.MaxResponseBytes : 10 * 1024 * 1024;
-        long estimatedBytes = 0;
-
-        foreach (var row in processedRows)
-        {
-            foreach (var (key, val) in row)
-            {
-                estimatedBytes += key.Length * 2;
-                if (val is string s)
-                {
-                    estimatedBytes += s.Length * 2;
-                }
-                else if (val is byte[] b)
-                {
-                    estimatedBytes += b.Length;
-                }
-                else if (val != null)
-                {
-                    estimatedBytes += 16;
-                }
-            }
-        }
-
-        if (estimatedBytes > maxBytes)
-        {
-            throw new GatewaySecurityException($"Antwortgröße ({estimatedBytes} Bytes) überschreitet das konfigurierte Limit von {maxBytes} Bytes.", "RESPONSE_TOO_LARGE");
-        }
+        var processedRows = Autheris.Application.Connectors.GovernedConnectorReader.Apply(
+            rawRows,
+            metadata,
+            decision,
+            tenantId.Value,
+            rlsPushdownAlreadyOccurred,
+            inDbMaskingAlreadyOccurred,
+            new Autheris.Application.Connectors.GovernedRowPolicy(
+                _maskingProvider,
+                _options?.DataMasking?.HmacKeyId,
+                MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
+                MaxBytes: maxBytes));
 
         return (processedRows, decision);
     }
