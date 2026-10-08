@@ -15,6 +15,23 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Oracle;
 
+    protected override string SubstringFunctionName => "SUBSTR";
+
+    /// <summary>Oracle's CURRENT_DATE carries a time of day; Oracle has no TIME type.</summary>
+    protected override void FormatCurrentDateTime(ref ValueStringBuilder builder, CurrentDateTimeKind kind, SqlEmitterContext context)
+    {
+        builder.Append(kind switch
+        {
+            CurrentDateTimeKind.CurrentDate => "TRUNC(CURRENT_DATE)",
+            CurrentDateTimeKind.CurrentTimestamp => "CURRENT_TIMESTAMP",
+            CurrentDateTimeKind.LocalTimestamp => "LOCALTIMESTAMP",
+            _ => throw UnsupportedConstruct("current_time/localtime (no TIME type)", TargetDialect)
+        });
+    }
+
+    protected override void FormatPosition(ref ValueStringBuilder builder, PositionExpression position, SqlEmitterContext context) =>
+        FormatInstr(ref builder, position, context);
+
     /// <summary>
     /// Wunsch 4: Oracle EXTRACT knows YEAR…SECOND (time fields only from TIMESTAMP); quarter, ISO week and day of year via
     /// TO_CHAR. The day of week depends on NLS settings and is rejected.

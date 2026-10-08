@@ -30,13 +30,11 @@ public sealed class AstBuilderFailLoudTests
     // window details that are still not representable
     [InlineData("SELECT lag(amount) IGNORE NULLS OVER (ORDER BY id) FROM t")]
     [InlineData("SELECT SUM(amount) OVER w FROM t WINDOW w AS (ORDER BY id)")]
-    // INTERVAL arithmetic on current_date (current_date has no visitor yet, Phase 6)
-    [InlineData("SELECT id FROM t WHERE created_at > current_date - INTERVAL '1' DAY")]
-    // special forms without a visitor (previously: ArgumentNullException → 500)
-    [InlineData("SELECT trim(name) FROM t")]
-    [InlineData("SELECT substring(name FROM 2 FOR 3) FROM t")]
-    [InlineData("SELECT position('a' IN name) FROM t")]
-    [InlineData("SELECT current_timestamp FROM t")]
+    // special forms that stay unsupported (session information, JSON, overlay, listagg)
+    [InlineData("SELECT current_user FROM t")]
+    [InlineData("SELECT json_value(payload, 'lax $.a') FROM t")]
+    [InlineData("SELECT overlay(name PLACING 'x' FROM 2) FROM t")]
+    [InlineData("SELECT listagg(name, ',') WITHIN GROUP (ORDER BY name) FROM t")]
     public void Unsupported_Construct_IsRejected(string sql)
     {
         var ex = Assert.Throws<AstBuildException>(() => Build(sql));
@@ -55,6 +53,12 @@ public sealed class AstBuilderFailLoudTests
     [InlineData("SELECT COUNT(id) FILTER (WHERE amount > 1) FROM t")]
     [InlineData("SELECT array_agg(id ORDER BY amount) FROM t")]
     [InlineData("SELECT SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t")]
+    // Phase 6b
+    [InlineData("SELECT id FROM t WHERE created_at > current_date - INTERVAL '1' DAY")]
+    [InlineData("SELECT trim(name) FROM t")]
+    [InlineData("SELECT substring(name FROM 2 FOR 3) FROM t")]
+    [InlineData("SELECT position('a' IN name) FROM t")]
+    [InlineData("SELECT current_timestamp FROM t")]
     // Phase 5
     [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY ROLLUP (dept)")]
     [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY CUBE (dept)")]

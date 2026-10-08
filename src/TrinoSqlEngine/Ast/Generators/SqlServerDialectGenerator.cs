@@ -15,6 +15,56 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.SqlServer;
 
+    protected override void FormatCurrentDateTime(ref ValueStringBuilder builder, CurrentDateTimeKind kind, SqlEmitterContext context)
+    {
+        builder.Append(kind switch
+        {
+            CurrentDateTimeKind.CurrentDate => "CAST(SYSDATETIME() AS date)",
+            CurrentDateTimeKind.CurrentTimestamp => "SYSDATETIMEOFFSET()",
+            CurrentDateTimeKind.LocalTimestamp => "SYSDATETIME()",
+            _ => "CAST(SYSDATETIME() AS time)"
+        });
+    }
+
+    /// <summary>T-SQL SUBSTRING requires a length.</summary>
+    protected override void FormatSubstring(ref ValueStringBuilder builder, SubstringExpression substring, SqlEmitterContext context) =>
+        base.FormatSubstring(ref builder, substring.Length != null ? substring : substring with { Length = new LiteralExpression(2147483647L, LiteralType.Integer) }, context);
+
+    /// <summary>
+    /// TRIM(x) and TRIM(chars FROM x) exist from SQL Server 2017; LTRIM/RTRIM with characters only from 2022, so leading or
+    /// trailing trims of characters other than spaces are rejected.
+    /// </summary>
+    protected override void FormatTrim(ref ValueStringBuilder builder, TrimExpression trim, SqlEmitterContext context)
+    {
+        if (trim.Specification != TrimSpecification.Both && trim.Characters != null)
+        {
+            throw UnsupportedConstruct("TRIM(LEADING|TRAILING chars FROM …)", TargetDialect);
+        }
+
+        builder.Append(trim.Specification switch
+        {
+            TrimSpecification.Leading => "LTRIM(",
+            TrimSpecification.Trailing => "RTRIM(",
+            _ => "TRIM("
+        });
+        if (trim.Characters != null)
+        {
+            GenerateExpression(trim.Characters, ref builder, context);
+            builder.Append(" FROM ");
+        }
+        GenerateExpression(trim.Source, ref builder, context);
+        builder.Append(')');
+    }
+
+    protected override void FormatPosition(ref ValueStringBuilder builder, PositionExpression position, SqlEmitterContext context)
+    {
+        builder.Append("CHARINDEX(");
+        GenerateExpression(position.Needle, ref builder, context);
+        builder.Append(", ");
+        GenerateExpression(position.Haystack, ref builder, context);
+        builder.Append(')');
+    }
+
     /// <summary>Wunsch 4: T-SQL has no EXTRACT; DATEPART, with the ISO day of week independent of @@DATEFIRST.</summary>
     protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
     {

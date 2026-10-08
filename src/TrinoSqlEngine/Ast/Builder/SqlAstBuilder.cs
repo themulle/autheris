@@ -867,6 +867,73 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         }
     }
 
+    private void EnsureFunctionAllowed(string name)
+    {
+        if (_options.EnforceFunctionPolicy &&
+            !SqlFunctionPolicy.IsFunctionAllowed(name, _options.AllowedFunctions, _options.AdditionalDeniedFunctions))
+        {
+            throw new SecurityException($"Function '{name}' is not permitted by the SQL function policy.");
+        }
+    }
+
+    // Wunsch 4: SQL special forms (no visitor before: ArgumentNullException → 500). They follow the function policy
+    // under their usual function names.
+
+    public override SqlNode VisitCurrentDate(SqlBaseParser.CurrentDateContext context) => CurrentDateTime("current_date", null, CurrentDateTimeKind.CurrentDate);
+
+    public override SqlNode VisitCurrentTime(SqlBaseParser.CurrentTimeContext context) => CurrentDateTime("current_time", context.precision, CurrentDateTimeKind.CurrentTime);
+
+    public override SqlNode VisitCurrentTimestamp(SqlBaseParser.CurrentTimestampContext context) => CurrentDateTime("current_timestamp", context.precision, CurrentDateTimeKind.CurrentTimestamp);
+
+    public override SqlNode VisitLocalTime(SqlBaseParser.LocalTimeContext context) => CurrentDateTime("localtime", context.precision, CurrentDateTimeKind.LocalTime);
+
+    public override SqlNode VisitLocalTimestamp(SqlBaseParser.LocalTimestampContext context) => CurrentDateTime("localtimestamp", context.precision, CurrentDateTimeKind.LocalTimestamp);
+
+    private CurrentDateTimeExpression CurrentDateTime(string name, IToken? precision, CurrentDateTimeKind kind)
+    {
+        EnsureFunctionAllowed(name);
+        if (precision != null)
+        {
+            throw Unsupported($"{name}(precision)");
+        }
+
+        return new CurrentDateTimeExpression(kind);
+    }
+
+    public override SqlNode VisitSubstring(SqlBaseParser.SubstringContext context)
+    {
+        using var _ = EnterScope();
+        EnsureFunctionAllowed("substring");
+        var parts = context.valueExpression();
+        return new SubstringExpression(
+            (Expression)Visit(parts[0]),
+            (Expression)Visit(parts[1]),
+            parts.Length > 2 ? (Expression)Visit(parts[2]) : null);
+    }
+
+    public override SqlNode VisitTrim(SqlBaseParser.TrimContext context)
+    {
+        using var _ = EnterScope();
+        EnsureFunctionAllowed("trim");
+        var spec = context.trimsSpecification() switch
+        {
+            null => TrimSpecification.Both,
+            var s when s.LEADING() != null => TrimSpecification.Leading,
+            var s when s.TRAILING() != null => TrimSpecification.Trailing,
+            _ => TrimSpecification.Both
+        };
+        var chars = context.trimChar != null ? (Expression)Visit(context.trimChar) : null;
+        return new TrimExpression(spec, (Expression)Visit(context.trimSource), chars);
+    }
+
+    public override SqlNode VisitPosition(SqlBaseParser.PositionContext context)
+    {
+        using var _ = EnterScope();
+        EnsureFunctionAllowed("position");
+        var parts = context.valueExpression();
+        return new PositionExpression((Expression)Visit(parts[0]), (Expression)Visit(parts[1]));
+    }
+
     private IReadOnlyList<Expression> BuildGroupingSet(SqlBaseParser.GroupingSetContext set) =>
         set.expression().Select(e => (Expression)Visit(e)).ToList();
 
@@ -941,11 +1008,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     {
         using var _ = EnterScope();
         string name = SqlIdentifierHelper.NormalizeQualifiedName(context.qualifiedName());
-        if (_options.EnforceFunctionPolicy &&
-            !SqlFunctionPolicy.IsFunctionAllowed(name, _options.AllowedFunctions, _options.AdditionalDeniedFunctions))
-        {
-            throw new SecurityException($"Function '{name}' is not permitted by the SQL function policy.");
-        }
+        EnsureFunctionAllowed(name);
 
         // Wunsch 4: modifiers the AST cannot represent yet are rejected instead of being dropped.
         if (context.processingMode() != null) throw Unsupported("RUNNING/FINAL");

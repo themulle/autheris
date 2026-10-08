@@ -164,6 +164,34 @@ public enum FrameBoundKind
     UnboundedFollowing
 }
 
+/// <summary>Wunsch 4: <c>current_date</c>, <c>current_time</c>, <c>current_timestamp</c>, <c>localtime</c>, <c>localtimestamp</c>.</summary>
+public sealed record CurrentDateTimeExpression(CurrentDateTimeKind Kind) : Expression;
+
+public enum CurrentDateTimeKind
+{
+    CurrentDate,
+    CurrentTime,
+    CurrentTimestamp,
+    LocalTime,
+    LocalTimestamp
+}
+
+/// <summary>Wunsch 4: <c>substring(x FROM start [FOR length])</c>.</summary>
+public sealed record SubstringExpression(Expression Source, Expression Start, Expression? Length) : Expression;
+
+/// <summary>Wunsch 4: <c>trim([BOTH|LEADING|TRAILING] [chars] FROM x)</c> and <c>trim(x[, chars])</c>.</summary>
+public sealed record TrimExpression(TrimSpecification Specification, Expression Source, Expression? Characters) : Expression;
+
+public enum TrimSpecification
+{
+    Both,
+    Leading,
+    Trailing
+}
+
+/// <summary>Wunsch 4: <c>position(needle IN haystack)</c>, 1-based, 0 when not found.</summary>
+public sealed record PositionExpression(Expression Needle, Expression Haystack) : Expression;
+
 /// <summary>Wunsch 4: <c>GROUPING(col, …)</c>; with several columns a bitmask (SQL Server: GROUPING_ID).</summary>
 public sealed record GroupingOperationExpression(IReadOnlyList<ColumnReference> Columns) : Expression;
 

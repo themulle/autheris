@@ -491,6 +491,18 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             case FunctionCallExpression fn:
                 GenerateFunctionCall(fn, ref builder, context);
                 break;
+            case CurrentDateTimeExpression current:
+                FormatCurrentDateTime(ref builder, current.Kind, context);
+                break;
+            case SubstringExpression substring:
+                FormatSubstring(ref builder, substring, context);
+                break;
+            case TrimExpression trim:
+                FormatTrim(ref builder, trim, context);
+                break;
+            case PositionExpression position:
+                FormatPosition(ref builder, position, context);
+                break;
             case GroupingOperationExpression grouping:
                 FormatGroupingOperation(ref builder, grouping, context);
                 break;
@@ -739,6 +751,79 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         });
         builder.Append(" FROM ");
         GenerateExpression(source, ref builder, context);
+        builder.Append(')');
+    }
+
+    protected static TrinoSqlEngine.Ast.Builder.AstBuildException UnsupportedConstruct(string construct, TargetSqlDialect dialect) =>
+        new($"SQL construct {construct} is not supported for {dialect}.");
+
+    /// <summary>Wunsch 4: ANSI <c>CURRENT_DATE</c> … <c>LOCALTIMESTAMP</c>.</summary>
+    protected virtual void FormatCurrentDateTime(ref ValueStringBuilder builder, CurrentDateTimeKind kind, SqlEmitterContext context)
+    {
+        builder.Append(kind switch
+        {
+            CurrentDateTimeKind.CurrentDate => "CURRENT_DATE",
+            CurrentDateTimeKind.CurrentTime => "CURRENT_TIME",
+            CurrentDateTimeKind.CurrentTimestamp => "CURRENT_TIMESTAMP",
+            CurrentDateTimeKind.LocalTime => "LOCALTIME",
+            _ => "LOCALTIMESTAMP"
+        });
+    }
+
+    protected virtual string SubstringFunctionName => "SUBSTRING";
+
+    /// <summary>Wunsch 4: <c>SUBSTRING(x, start[, length])</c>.</summary>
+    protected virtual void FormatSubstring(ref ValueStringBuilder builder, SubstringExpression substring, SqlEmitterContext context)
+    {
+        builder.Append(SubstringFunctionName);
+        builder.Append('(');
+        GenerateExpression(substring.Source, ref builder, context);
+        builder.Append(", ");
+        GenerateExpression(substring.Start, ref builder, context);
+        if (substring.Length != null)
+        {
+            builder.Append(", ");
+            GenerateExpression(substring.Length, ref builder, context);
+        }
+        builder.Append(')');
+    }
+
+    /// <summary>Wunsch 4: ANSI <c>TRIM(BOTH|LEADING|TRAILING [chars] FROM x)</c>.</summary>
+    protected virtual void FormatTrim(ref ValueStringBuilder builder, TrimExpression trim, SqlEmitterContext context)
+    {
+        builder.Append(trim.Specification switch
+        {
+            TrimSpecification.Leading => "TRIM(LEADING ",
+            TrimSpecification.Trailing => "TRIM(TRAILING ",
+            _ => "TRIM(BOTH "
+        });
+        if (trim.Characters != null)
+        {
+            GenerateExpression(trim.Characters, ref builder, context);
+            builder.Append(' ');
+        }
+        builder.Append("FROM ");
+        GenerateExpression(trim.Source, ref builder, context);
+        builder.Append(')');
+    }
+
+    /// <summary>Wunsch 4: ANSI <c>POSITION(needle IN haystack)</c>.</summary>
+    protected virtual void FormatPosition(ref ValueStringBuilder builder, PositionExpression position, SqlEmitterContext context)
+    {
+        builder.Append("POSITION(");
+        GenerateExpression(position.Needle, ref builder, context);
+        builder.Append(" IN ");
+        GenerateExpression(position.Haystack, ref builder, context);
+        builder.Append(')');
+    }
+
+    /// <summary>INSTR(haystack, needle), used by SQLite and Oracle for POSITION.</summary>
+    protected void FormatInstr(ref ValueStringBuilder builder, PositionExpression position, SqlEmitterContext context)
+    {
+        builder.Append("INSTR(");
+        GenerateExpression(position.Haystack, ref builder, context);
+        builder.Append(", ");
+        GenerateExpression(position.Needle, ref builder, context);
         builder.Append(')');
     }
 

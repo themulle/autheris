@@ -619,6 +619,19 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             case ExtractExpression ext:
                 stack.Push(ext.Source);
                 break;
+            case SubstringExpression sub:
+                stack.Push(sub.Source);
+                stack.Push(sub.Start);
+                if (sub.Length != null) stack.Push(sub.Length);
+                break;
+            case TrimExpression trim:
+                stack.Push(trim.Source);
+                if (trim.Characters != null) stack.Push(trim.Characters);
+                break;
+            case PositionExpression pos:
+                stack.Push(pos.Needle);
+                stack.Push(pos.Haystack);
+                break;
             case SelectStatement s:
                 stack.Push(s.Body);
                 if (s.OrderBy != null) stack.Push(s.OrderBy);

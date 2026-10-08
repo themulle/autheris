@@ -16,6 +16,41 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     protected override bool SupportsAggregateFilter => true;
     protected override bool SupportsGroupingSets => false;
 
+    protected override string SubstringFunctionName => "SUBSTR";
+
+    protected override void FormatCurrentDateTime(ref ValueStringBuilder builder, CurrentDateTimeKind kind, SqlEmitterContext context)
+    {
+        builder.Append(kind switch
+        {
+            CurrentDateTimeKind.CurrentDate => "CURRENT_DATE",
+            CurrentDateTimeKind.CurrentTime => "CURRENT_TIME",
+            CurrentDateTimeKind.CurrentTimestamp => "CURRENT_TIMESTAMP",
+            CurrentDateTimeKind.LocalTime => "time('now', 'localtime')",
+            _ => "datetime('now', 'localtime')"
+        });
+    }
+
+    /// <summary>SQLite: TRIM/LTRIM/RTRIM(x[, chars]).</summary>
+    protected override void FormatTrim(ref ValueStringBuilder builder, TrimExpression trim, SqlEmitterContext context)
+    {
+        builder.Append(trim.Specification switch
+        {
+            TrimSpecification.Leading => "LTRIM(",
+            TrimSpecification.Trailing => "RTRIM(",
+            _ => "TRIM("
+        });
+        GenerateExpression(trim.Source, ref builder, context);
+        if (trim.Characters != null)
+        {
+            builder.Append(", ");
+            GenerateExpression(trim.Characters, ref builder, context);
+        }
+        builder.Append(')');
+    }
+
+    protected override void FormatPosition(ref ValueStringBuilder builder, PositionExpression position, SqlEmitterContext context) =>
+        FormatInstr(ref builder, position, context);
+
     /// <summary>Wunsch 4: SQLite has no EXTRACT; strftime on ISO text, with the ISO day of week (%w counts Sunday = 0).</summary>
     protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
     {

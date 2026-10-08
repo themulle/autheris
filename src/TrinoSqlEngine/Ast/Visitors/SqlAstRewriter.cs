@@ -59,6 +59,10 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             ExtractExpression ext => VisitExtractExpression(ext),
             TrustedSqlExpression trusted => trusted,
             TypedLiteralExpression typed => typed,
+            CurrentDateTimeExpression current => current,
+            SubstringExpression substring => VisitSubstring(substring),
+            TrimExpression trim => VisitTrim(trim),
+            PositionExpression position => VisitPosition(position),
             GroupingOperationExpression grouping => VisitGroupingOperation(grouping),
             IntervalLiteralExpression interval => interval,
             OrderByClause ord => VisitOrderByClause(ord),
@@ -488,6 +492,30 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             : null;
         if (exprs == node.GroupingExpressions && advanced == node.AdvancedElements) return node;
         return node with { GroupingExpressions = exprs, AdvancedElements = advanced };
+    }
+
+    public virtual SqlNode VisitSubstring(SubstringExpression node)
+    {
+        var source = (Expression)Visit(node.Source);
+        var start = (Expression)Visit(node.Start);
+        var length = node.Length != null ? (Expression)Visit(node.Length) : null;
+        return source == node.Source && start == node.Start && length == node.Length
+            ? node
+            : node with { Source = source, Start = start, Length = length };
+    }
+
+    public virtual SqlNode VisitTrim(TrimExpression node)
+    {
+        var source = (Expression)Visit(node.Source);
+        var chars = node.Characters != null ? (Expression)Visit(node.Characters) : null;
+        return source == node.Source && chars == node.Characters ? node : node with { Source = source, Characters = chars };
+    }
+
+    public virtual SqlNode VisitPosition(PositionExpression node)
+    {
+        var needle = (Expression)Visit(node.Needle);
+        var haystack = (Expression)Visit(node.Haystack);
+        return needle == node.Needle && haystack == node.Haystack ? node : node with { Needle = needle, Haystack = haystack };
     }
 
     public virtual SqlNode VisitGroupingOperation(GroupingOperationExpression node)
