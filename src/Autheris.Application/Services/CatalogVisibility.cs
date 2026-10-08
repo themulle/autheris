@@ -61,11 +61,21 @@ public static class CatalogVisibility
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             var deniedColumns = tableConsents
-                .Where(c => c.Effect == ConsentEffect.Deny)
                 .SelectMany(c => c.ColumnRules)
                 .Where(cr => cr.AccessLevel == ColumnAccessLevel.Deny)
                 .Select(cr => cr.ColumnName)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (table.ColumnMaskingRules != null)
+            {
+                foreach (var (colName, rule) in table.ColumnMaskingRules)
+                {
+                    if (string.Equals(rule.RuleType, "DENY", StringComparison.OrdinalIgnoreCase))
+                    {
+                        deniedColumns.Add(colName);
+                    }
+                }
+            }
 
             var visibleColumns = table.Columns
                 .Where(c => !deniedColumns.Contains(c.ColumnName) &&

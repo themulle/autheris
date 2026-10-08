@@ -109,9 +109,16 @@ public sealed class SemanticMcpCompiler(
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         // SEC H-02: OpenSchema no longer opens MCP resources; only the explicit (production-blocked) MCP auth bypass does.
         var isMcpAuthBypassed = _options?.Value.IsMcpAuthBypassed == true;
-        if (_consentRepo != null && !isMcpAuthBypassed)
+        if (!isMcpAuthBypassed)
         {
-            allTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepo, ct).ConfigureAwait(false);
+            if (_consentRepo != null)
+            {
+                allTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepo, ct).ConfigureAwait(false);
+            }
+            else if (principal != null)
+            {
+                allTables = Array.Empty<TableMetadata>();
+            }
         }
 
         var filtered = string.IsNullOrWhiteSpace(domainScope)
