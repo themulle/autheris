@@ -36,10 +36,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     /// </summary>
     internal const string InternalParameterPrefix = "__gql_";
 
-    /// <summary>
-    /// SEC P-05 / SQ-01: Second line of defense against backslash-escape lexer differentials on PostgreSQL sessions.
-    /// </summary>
-    internal const string PostgreSqlSessionInitializationSql = "SET standard_conforming_strings = on";
 
     /// <summary>
     /// SQ-01/02/10/11/13: Token checks applied already during the analysis step (dollar quoting is decided per dialect
@@ -1357,10 +1353,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     /// <summary>SEC P-05: Dialects with a dedicated, tested WebSQL rewrite.</summary>
     internal static bool IsWebSqlSupportedDialect(DatabaseDialect dialect) =>
         dialect is DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer or DatabaseDialect.Sqlite;
-
-    /// <summary>SEC P-05 / SQ-01: Session initialization statement executed before every WebSQL statement (null = none).</summary>
-    internal static string? GetSessionInitializationSql(DatabaseDialect dialect) =>
-        dialect == DatabaseDialect.PostgreSql ? PostgreSqlSessionInitializationSql : null;
 
     // SEC M-10: Identical message for "unknown table" and "access denied" (no catalog enumeration oracle, no policy details)
     private static WebSqlPolicyException TableDenied(TableAccessTarget target) =>

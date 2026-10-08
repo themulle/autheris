@@ -1,7 +1,7 @@
 # F-PERF-09: GraphQL-to-SQL AST Single-Query Compiler
 
 **Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`ISingleQueryAstCompiler.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Sql/ISingleQueryAstCompiler.cs), [`SingleQueryAstCompiler.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Sql/SingleQueryAstCompiler.cs)
+**Components:** `src/Autheris.Application/Sql/Tree/TreeSqlCompiler.cs`, `src/Autheris.Application/Sql/Tree/GovernedTreeQueryService.cs` (the former `SingleQueryAstCompiler` was removed)
 
 ---
 
@@ -23,7 +23,7 @@ Standard GraphQL gateways suffer from the notorious N+1 query problem when fetch
 
 - Dialect-aware compilation for SQL Server (`FOR JSON PATH`), PostgreSQL (`json_build_object`, `json_agg`), and SQLite (`json_group_array`).
 - Injects RLS filters and column masking directly into sub-select JSON projections.
-- Fallback to optimized DataLoader batching if single-query complexity exceeds configured limits.
+- Queries beyond the configured row budget or offset are rejected (no silent fallback).
 
 ---
 
@@ -53,17 +53,8 @@ query GetCustomersWithOrdersAndItems {
 
 ---
 
-## 5. Configuration Example
+## 5. Configuration
 
-```json
-{
-  "Gateway": {
-    "SingleQueryPushdown": {
-      "Enabled": true,
-      "MaxNestingDepth": 4,
-      "SupportedDialects": ["SqlServer", "PostgreSql", "Sqlite"],
-      "FallbackToDataLoaderOnLimit": true
-    }
-  }
-}
-```
+There is no separate switch: every GraphQL catalog query runs as one statement. Limits come from the `GraphQL` options
+(`MaxResponseRows`, `MaxAggregateRowBudget`, `MaxAllowedOffset`, `MaxResponseBytes`). The former
+`SingleQueryPushdown` options section was never read and has been removed (R-SQL-12).

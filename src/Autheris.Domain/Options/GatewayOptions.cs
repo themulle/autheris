@@ -35,7 +35,6 @@ public sealed class GatewayOptions
     [Required] public ParquetEgressOptions ParquetEgress { get; init; } = new();
     [Required] public OutboundEgressOptions Egress { get; init; } = new();
     [Required] public HitLStepUpOptions HitLStepUp { get; init; } = new();
-    [Required] public SingleQueryPushdownOptions SingleQueryPushdown { get; init; } = new();
     [Required] public WebSqlOptions WebSql { get; init; } = new();
     [Required] public SqlEndpointsOptions SqlEndpoints { get; init; } = new();
     [Required] public InsecureGettingStartedOptions Insecure { get; init; } = new();
@@ -1245,19 +1244,6 @@ public sealed class HitLStepUpOptions
     public bool RequireDifferentApprover { get; init; } = true;
     public bool AutoCreateItsmTicket { get; init; } = true;
     public ItsmSystemType PreferredItsmSystem { get; init; } = ItsmSystemType.ServiceNow;
-}
-
-public sealed class SingleQueryPushdownOptions
-{
-    public bool Enabled { get; init; } = true;
-    public int MaxSubqueryDepth { get; init; } = 5;
-    public bool FallbackToBatchingOnUnsupportedDialect { get; init; } = true;
-    public List<DatabaseDialect> SupportedDialects { get; init; } =
-    [
-        DatabaseDialect.SqlServer,
-        DatabaseDialect.PostgreSql,
-        DatabaseDialect.Sqlite
-    ];
 }
 
 public sealed class WebSqlOptions
