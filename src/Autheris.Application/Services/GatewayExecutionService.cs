@@ -522,6 +522,20 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         new(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, _clientIpResolver, _options,
             _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
 
+    /// <summary>
+    /// Virtual filters: an in-memory row filter cannot evaluate their subqueries (it would return nothing and look like
+    /// "no data"). Sources that filter in memory refuse the request instead (403 with reason).
+    /// </summary>
+    public static void EnsureInMemoryFilterIsEnforceable(TableAccessDecision decision)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        if (decision.MandatoryRowPredicateSql != null)
+        {
+            throw new GatewayForbiddenException(
+                $"Virtual filters ({string.Join(", ", decision.AppliedVirtualFilters ?? [])}) cannot be enforced on this data source; it does not filter in the database.");
+        }
+    }
+
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
         List<IReadOnlyDictionary<string, object?>> rows,
         string rowFilterSql,
@@ -926,6 +940,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
                         if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
                         {
+                            EnsureInMemoryFilterIsEnforceable(decision);
                             var rawRow = (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
                             {
                                 ["id"] = $"{invId}-ITEM-{i}",

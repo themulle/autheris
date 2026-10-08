@@ -264,8 +264,11 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         }
     }
 
-    public sealed class Fixture : IAsyncLifetime
+    public class Fixture : IAsyncLifetime
     {
+        /// <summary>Virtual filters, phase 5: the David case as an access profile instead of a consent row filter.</summary>
+        protected virtual bool UseVirtualFilters => false;
+
         public const string DavidSid = "S-1-5-21-LWE-DAVID";
         public const string Tenant = "tenant_parity";
 
@@ -417,6 +420,72 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
             var client = await RegisterAsync(ClientTable, ("client_id", "integer"), ("crane_serial_number", "varchar"));
             await RegisterAsync(Crane, ("serial_number", "varchar"), ("is_delivered", "integer"));
 
+            if (UseVirtualFilters)
+            {
+                await SeedVirtualFiltersAsync(repo, air1, client);
+            }
+            else
+            {
+                await SeedConsentRowFilterAsync(repo, air1, client);
+            }
+
+            var relations = scope.ServiceProvider.GetRequiredService<ITableRelationRepository>();
+            await relations.CreateRelationAsync(new TableRelation
+            {
+                ParentTableId = client.Table.Id,
+                ParentTableIdentifier = ClientTable,
+                ChildTableId = air1.Table.Id,
+                ChildTableIdentifier = Air1,
+                RelationName = "measurements",
+                JoinKeysParent = ["client_id"],
+                JoinKeysChild = ["client_id"],
+                Cardinality = RelationCardinality.OneToMany
+            });
+        }
+
+        /// <summary>
+        /// Phase 5: unrestricted consents (two on air1: the second is the attempt to lift the filter) plus a profile that
+        /// binds the David filter to every object with client_id; crane has no client_id and is uncovered (deny).
+        /// </summary>
+        private async Task SeedVirtualFiltersAsync(IGovernanceRepository repo, TableMetadata air1, TableMetadata client)
+        {
+            await repo.CreateConsentAsync(Consent(air1, Air1, []));
+            await repo.CreateConsentAsync(Consent(air1, Air1, []));
+            await repo.CreateConsentAsync(Consent(client, ClientTable, []));
+            var crane = (await repo.GetTableMetadataAsync(Crane))!;
+            await repo.CreateConsentAsync(Consent(crane, Crane, []));
+
+            using var scope = _factory!.Services.CreateScope();
+            var admin = scope.ServiceProvider.GetRequiredService<Autheris.Application.VirtualFilters.VirtualFilterAdministrationService>();
+            var actor = new Autheris.Application.VirtualFilters.VirtualFilterActor(new Sid("S-1-5-21-FILTER-ADMIN"), IsSync: false);
+            await admin.SaveFilterAsync(new VirtualFilter
+            {
+                TenantId = new TenantId(Tenant),
+                Name = "nicht_ausgelieferte_krane",
+                Source = "default",
+                KeyColumns = ["client.client_id"],
+                Structured = new StructuredFilterDefinition
+                {
+                    From = ClientTable,
+                    FromAlias = "client",
+                    Joins = [new FilterJoin(Crane, "crane", "crane.serial_number", "client.crane_serial_number")],
+                    Where = [new FilterCondition("crane.is_delivered", FilterConditionOperator.IsNull)]
+                }
+            }, actor);
+            await admin.SaveProfileAsync(new AccessProfile
+            {
+                TenantId = new TenantId(Tenant),
+                Name = "david",
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid(DavidSid),
+                Scope = "default.main.*",
+                Uncovered = UncoveredPolicy.Deny,
+                Bindings = [new FilterBinding { FilterName = "nicht_ausgelieferte_krane", TargetPattern = "default.*.*.client_id" }]
+            }, actor);
+        }
+
+        private static async Task SeedConsentRowFilterAsync(IGovernanceRepository repo, TableMetadata air1, TableMetadata client)
+        {
             // The David case as a consent row filter: air1 rows of clients whose crane is not delivered yet.
             await repo.CreateConsentAsync(Consent(air1, Air1,
             [
@@ -437,19 +506,6 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
 
             // The client table is readable without filter: it is the parent of the nested GraphQL query.
             await repo.CreateConsentAsync(Consent(client, ClientTable, []));
-
-            var relations = scope.ServiceProvider.GetRequiredService<ITableRelationRepository>();
-            await relations.CreateRelationAsync(new TableRelation
-            {
-                ParentTableId = client.Table.Id,
-                ParentTableIdentifier = ClientTable,
-                ChildTableId = air1.Table.Id,
-                ChildTableIdentifier = Air1,
-                RelationName = "measurements",
-                JoinKeysParent = ["client_id"],
-                JoinKeysChild = ["client_id"],
-                Cardinality = RelationCardinality.OneToMany
-            });
         }
 
         private static Consent Consent(TableMetadata meta, TableIdentifier id, IReadOnlyList<ConsentRowFilter> rowFilters) => new()

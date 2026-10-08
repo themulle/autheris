@@ -122,6 +122,7 @@ public static class GovernedConnectorReader
         var filtered = rawRows as List<IReadOnlyDictionary<string, object?>> ?? new List<IReadOnlyDictionary<string, object?>>(rawRows);
         if (!rlsPushdownExecuted && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
         {
+            GatewayExecutionService.EnsureInMemoryFilterIsEnforceable(decision);
             filtered = GatewayExecutionService.FilterRows(filtered, decision.CombinedRowFilterSql, metadata);
         }
 

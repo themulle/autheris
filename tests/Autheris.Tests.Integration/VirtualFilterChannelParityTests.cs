@@ -1,0 +1,51 @@
+namespace Autheris.Tests.Integration;
+
+using System.Net;
+using System.Net.Http.Json;
+using System.Threading.Tasks;
+using Shouldly;
+using Xunit;
+
+/// <summary>
+/// Virtual filters, phase 5: the David case as an access profile. Every channel returns exactly the rows the filter
+/// allows, although David holds two unrestricted consents on air1 (the second one used to lift any consent filter),
+/// and an object in scope that no filter covers (crane) is denied.
+/// </summary>
+public sealed class VirtualFilterChannelParityTests : IClassFixture<VirtualFilterChannelParityTests.VirtualFilterFixture>
+{
+    public sealed class VirtualFilterFixture : RowFilterChannelParityTests.Fixture
+    {
+        protected override bool UseVirtualFilters => true;
+    }
+
+    private readonly VirtualFilterFixture _fixture;
+
+    public VirtualFilterChannelParityTests(VirtualFilterFixture fixture) => _fixture = fixture;
+
+    [Theory]
+    [InlineData("websql")]
+    [InlineData("trino")]
+    [InlineData("sql-endpoint")]
+    [InlineData("odata")]
+    [InlineData("graphql")]
+    [InlineData("graphql-tree")]
+    [InlineData("mcp-sample-rows")]
+    [InlineData("mcp-query-graphql")]
+    [InlineData("arrow-export")]
+    [InlineData("flight-sql")]
+    [InlineData("olap")]
+    public async Task Channel_ReturnsExactlyTheRowsOfTheVirtualFilter(string channel)
+    {
+        var ids = await RowFilterChannelParityTests.ChannelMatrix.Channels[channel](_fixture);
+
+        ids.ShouldBe(_fixture.ExpectedIds, ignoreOrder: true, customMessage: $"channel '{channel}'");
+    }
+
+    [Fact]
+    public async Task UncoveredObject_IsDenied()
+    {
+        var response = await _fixture.Client().PostAsJsonAsync("/api/v1/sql", new { sql = "SELECT serial_number FROM crane" });
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+}
