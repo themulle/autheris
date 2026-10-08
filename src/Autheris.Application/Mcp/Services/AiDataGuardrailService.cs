@@ -27,6 +27,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<AiDataGuardrailService> _logger;
     private readonly IMcpQueryExecutor? _queryExecutor;
+    private readonly IConsentRepository? _consentRepository;
     private readonly IAuditLogRepository? _auditLogRepository;
     private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly ITableMetadataRepository? _tableMetadataRepository;
@@ -66,7 +67,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         ISemanticPromptGuardrail? promptGuardrail = null,
         IGoldenQueryService? goldenQueryService = null,
         IHitLStepUpApprovalService? stepUpApprovalService = null,
-        IGraphQlCatalogMap? graphQlCatalogMap = null)
+        IGraphQlCatalogMap? graphQlCatalogMap = null,
+        IConsentRepository? consentRepository = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -80,6 +82,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         _goldenQueryService = goldenQueryService;
         _stepUpApprovalService = stepUpApprovalService;
         _graphQlCatalogMap = graphQlCatalogMap;
+        _consentRepository = consentRepository;
     }
 
 
@@ -377,6 +380,34 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             }
 
             var queries = await _goldenQueryService.GetGoldenQueriesAsync(domain, tableName, cancellationToken).ConfigureAwait(false);
+
+            // MCP-5: Consent and visibility filtering for golden queries (fail-closed)
+            var isMcpAuthBypassed = _options.Value.IsMcpAuthBypassed;
+            var roles = sessionContext.Roles ?? [];
+            bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
+                           roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+
+            if (_consentRepository != null && !isMcpAuthBypassed && !isAdmin)
+            {
+                var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+                var allTables = _tableMetadataRepository != null
+                    ? await _tableMetadataRepository.GetAllTablesAsync(cancellationToken).ConfigureAwait(false)
+                    : Array.Empty<TableMetadata>();
+
+                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, cancellationToken).ConfigureAwait(false);
+                var visibleKeys = visibleTables
+                    .Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant()))
+                    .ToHashSet();
+
+                queries = queries
+                    .Where(q => visibleKeys.Contains((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant())))
+                    .ToList();
+            }
+            else if (!isMcpAuthBypassed && !isAdmin && string.Equals(sessionContext.UserSid, "ANONYMOUS_MCP_CLIENT", StringComparison.OrdinalIgnoreCase))
+            {
+                queries = Array.Empty<GoldenQuery>();
+            }
+
             rawDataJson = JsonSerializer.Serialize(new { tenantId = sessionContext.TenantId, queries });
         }
         else if (_queryExecutor != null)

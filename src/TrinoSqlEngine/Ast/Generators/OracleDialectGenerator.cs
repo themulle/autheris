@@ -14,6 +14,93 @@ using TrinoSqlEngine.Ast.Nodes;
 public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Oracle;
+
+    protected override string SubstringFunctionName => "SUBSTR";
+
+    /// <summary>Wunsch 4: Oracle has no IS DISTINCT FROM; DECODE treats two NULLs as equal.</summary>
+    protected override void FormatIsDistinctFrom(ref ValueStringBuilder builder, IsDistinctFromExpression dist, SqlEmitterContext context)
+    {
+        builder.Append("DECODE(");
+        GenerateExpression(dist.Left, ref builder, context);
+        builder.Append(", ");
+        GenerateExpression(dist.Right, ref builder, context);
+        builder.Append(dist.IsNotDistinctFrom ? ", 0, 1) = 0" : ", 0, 1) = 1");
+    }
+
+    /// <summary>Wunsch 4: Oracle spellings (VARCHAR2, NUMBER, BINARY_DOUBLE); no BOOLEAN or TIME before 23ai.</summary>
+    protected override string FormatTypeName(TrinoType type) => type.Name switch
+    {
+        "double" or "double precision" => "BINARY_DOUBLE",
+        "real" => "BINARY_FLOAT",
+        "varchar" => "VARCHAR2" + (type.Arguments ?? "(4000)"),
+        "char" => "CHAR" + type.Arguments,
+        "tinyint" => "NUMBER(3)",
+        "smallint" => "NUMBER(5)",
+        "integer" or "int" => "NUMBER(10)",
+        "bigint" => "NUMBER(19)",
+        "decimal" or "numeric" => "NUMBER" + type.Arguments,
+        "date" => "DATE",
+        "timestamp" => "TIMESTAMP" + type.Arguments + (type.WithTimeZone ? " WITH TIME ZONE" : string.Empty),
+        _ => throw UnsupportedConstruct($"CAST(… AS {type.Normalized})", TargetDialect)
+    };
+
+    /// <summary>Oracle's CURRENT_DATE carries a time of day; Oracle has no TIME type.</summary>
+    protected override void FormatCurrentDateTime(ref ValueStringBuilder builder, CurrentDateTimeKind kind, SqlEmitterContext context)
+    {
+        builder.Append(kind switch
+        {
+            CurrentDateTimeKind.CurrentDate => "TRUNC(CURRENT_DATE)",
+            CurrentDateTimeKind.CurrentTimestamp => "CURRENT_TIMESTAMP",
+            CurrentDateTimeKind.LocalTimestamp => "LOCALTIMESTAMP",
+            _ => throw UnsupportedConstruct("current_time/localtime (no TIME type)", TargetDialect)
+        });
+    }
+
+    protected override void FormatPosition(ref ValueStringBuilder builder, PositionExpression position, SqlEmitterContext context) =>
+        FormatInstr(ref builder, position, context);
+
+    /// <summary>
+    /// Wunsch 4: Oracle EXTRACT knows YEAR…SECOND (time fields only from TIMESTAMP); quarter, ISO week and day of year via
+    /// TO_CHAR. The day of week depends on NLS settings and is rejected.
+    /// </summary>
+    protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
+    {
+        switch (field)
+        {
+            case "YEAR" or "MONTH" or "DAY":
+                builder.Append("EXTRACT(");
+                builder.Append(field);
+                builder.Append(" FROM ");
+                GenerateExpression(source, ref builder, context);
+                builder.Append(')');
+                return;
+            case "HOUR" or "MINUTE" or "SECOND":
+                builder.Append("EXTRACT(");
+                builder.Append(field);
+                builder.Append(" FROM CAST(");
+                GenerateExpression(source, ref builder, context);
+                builder.Append(" AS TIMESTAMP))");
+                return;
+            case "QUARTER" or "WEEK" or "DAY_OF_YEAR":
+                builder.Append("TO_NUMBER(TO_CHAR(");
+                GenerateExpression(source, ref builder, context);
+                builder.Append(field switch { "QUARTER" => ", 'Q'))", "WEEK" => ", 'IW'))", _ => ", 'DDD'))" });
+                return;
+            default:
+                throw UnsupportedExtract(field, TargetDialect);
+        }
+    }
+
+    /// <summary>Wunsch 4: Oracle has DATE and TIMESTAMP literals but no TIME type.</summary>
+    protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context)
+    {
+        if (literal.Kind == TypedLiteralKind.Time)
+        {
+            throw new TrinoSqlEngine.Ast.Builder.AstBuildException("SQL construct TIME literal is not supported for Oracle (no TIME type).");
+        }
+
+        base.FormatTypedLiteral(ref builder, literal, context);
+    }
     public override int MaxParameterBudget => 1000;
 
     protected override string TableAliasKeyword => " ";

@@ -561,10 +561,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                     {
                         isUsedInJoin = metadata.JoinColumnReferences.Any(jc => ReferencesColumn(jc.TableOrAlias, jc.ColumnName, col.ColumnName, target));
                     }
-                    else if (metadata.JoinConditionColumns != null && metadata.JoinConditionColumns.Contains(col.ColumnName))
-                    {
-                        isUsedInJoin = true;
-                    }
 
                     if (isUsedInJoin)
                     {
@@ -705,6 +701,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             PolicyProvider = policyProvider,
             TableColumnsProvider = tbl => tableColumnsMap.TryGetValue(tbl, out var cols) ? cols : null,
             ColumnMaskingProvider = maskingProvider,
+            // Wunsch 4: tenant and consent filters are rendered by the gateway in the target dialect and validated by
+            // ValidatePredicateSql above; the AST compiler splices them in like the legacy rewriter (no client input).
+            PolicyFiltersAreTargetDialectSql = true,
             RewriterEngine = _options.Value.WebSql.SqlRewriterEngine
         };
 
@@ -752,6 +751,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             throw new WebSqlPolicyException(
                 "UPDATE/DELETE statements in WebSQL require a restricting WHERE clause (statements without WHERE or with a trivially true condition such as 'WHERE 1=1' are rejected).",
                 unfilteredEx);
+        }
+        catch (TrinoSqlEngine.Ast.Builder.AstBuildException astEx)
+        {
+            // Wunsch 4: a construct the AST compiler cannot translate is a client error (400), not a server error.
+            throw new ArgumentException($"The SQL statement could not be compiled: {astEx.Message}", nameof(rawSql), astEx);
         }
         catch (SecurityException secEx)
         {
@@ -1527,15 +1531,20 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     /// </summary>
     private static TableIdentifier ResolveTableIdentifier(TableAccessTarget target, string? dataSourceName)
     {
+        // Only schema-qualified names use the data source's domain; unqualified names keep their "default" resolution.
+        // This must precede TryParse, which maps every two-part name to the "default" domain (WebSQL findings 2.1).
+        if (string.IsNullOrWhiteSpace(target.Catalog) && !string.IsNullOrWhiteSpace(target.Schema) &&
+            !string.IsNullOrWhiteSpace(dataSourceName))
+        {
+            return new TableIdentifier(dataSourceName, target.Schema, target.TableName);
+        }
+
         if (TableIdentifier.TryParse(target.FullName, out var parsed))
         {
             return parsed;
         }
 
-        // Only schema-qualified names use the data source's domain; unqualified names keep their "default" resolution.
-        string domain = !string.IsNullOrWhiteSpace(target.Catalog)
-            ? target.Catalog
-            : !string.IsNullOrWhiteSpace(target.Schema) && !string.IsNullOrWhiteSpace(dataSourceName) ? dataSourceName : "default";
+        string domain = !string.IsNullOrWhiteSpace(target.Catalog) ? target.Catalog : "default";
         string schema = !string.IsNullOrWhiteSpace(target.Schema) ? target.Schema : "public";
         return new TableIdentifier(domain, schema, target.TableName);
     }

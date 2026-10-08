@@ -440,15 +440,4 @@ public sealed class Phase1AndPhase2SecurityExpertTests
         var query = new OlapQueryRequest("SET threads = 16; SELECT 1 AS num", new[] { source });
         await Should.ThrowAsync<Exception>(() => engine.ExecuteOlapQueryAsync(query, CancellationToken.None));
     }
-
-    private static SecurityPrincipalContext CreateTestSecurityContext(string tenant, string user) => new()
-    {
-        UserSid = new Sid(user),
-        TenantId = new TenantId(tenant),
-        GroupSids = new HashSet<Sid>(),
-        TenantRoles = new HashSet<string> { "DataViewer" },
-        ClusterRoles = new HashSet<string>(),
-        AuthenticationScheme = "Bearer",
-        IsAuthenticated = true
-    };
 }

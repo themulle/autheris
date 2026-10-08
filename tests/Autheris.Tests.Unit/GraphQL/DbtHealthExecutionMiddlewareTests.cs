@@ -29,12 +29,18 @@ public class DbtHealthExecutionMiddlewareTests
     private static async Task<IRequestExecutor> CreateExecutorAsync(
         IDbtHealthCircuitBreaker circuitBreaker,
         ITableMetadataRepository tableRepo,
-        ITableAccessResolver accessResolver)
+        ITableAccessResolver? accessResolver = null)
     {
-        return await new ServiceCollection()
+        var services = new ServiceCollection()
             .AddSingleton(circuitBreaker)
-            .AddSingleton(tableRepo)
-            .AddSingleton(accessResolver)
+            .AddSingleton(tableRepo);
+
+        if (accessResolver != null)
+        {
+            services.AddSingleton(accessResolver);
+        }
+
+        return await services
             .AddGraphQLServer()
             .AddQueryType<DummyQuery>()
             .UseRequest<DbtHealthExecutionMiddleware>()
@@ -149,5 +155,36 @@ public class DbtHealthExecutionMiddlewareTests
         // Assert: authorized callers SHOULD be blocked by TABLE_IN_QUARANTINE
         json.ShouldContain("TABLE_IN_QUARANTINE");
         json.ShouldContain("Quarantined");
+    }
+
+    [Fact]
+    public async Task UnprivilegedCaller_WhenAccessResolverNull_DoesNotDiscloseQuarantineStatus()
+    {
+        // GQL-12: If access cannot be verified (e.g. accessResolver is null), do not disclose quarantine status to unprivileged caller
+        var circuitBreaker = Substitute.For<IDbtHealthCircuitBreaker>();
+        var tableRepo = Substitute.For<ITableMetadataRepository>();
+
+        var tableId = new TableIdentifier("finance", "dbo", "orders");
+        tableRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(new[] { new TableMetadata { Identifier = tableId, Table = new Table { TableName = "orders", SchemaName = "dbo", SourceName = "finance" } } });
+
+        circuitBreaker.GetTableHealthAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(new DbtHealthState(tableId, DbtModelHealthStatus.Quarantined, Array.Empty<DbtTestFailure>(), DateTimeOffset.UtcNow));
+
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.Name, "Alice") }, "TestAuth"));
+
+        // Do not register accessResolver
+        var executor = await CreateExecutorAsync(circuitBreaker, tableRepo, accessResolver: null);
+
+        var request = OperationRequestBuilder.New()
+            .SetDocument("{ orders }")
+            .SetGlobalState("ClaimsPrincipal", principal)
+            .Build();
+
+        await using var result = await executor.ExecuteAsync(request);
+        var json = result.ToJson();
+
+        json.ShouldNotContain("TABLE_IN_QUARANTINE");
+        json.ShouldNotContain("Quarantined");
     }
 }

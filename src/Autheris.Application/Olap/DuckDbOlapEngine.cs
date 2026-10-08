@@ -20,7 +20,6 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
 {
     private readonly DuckDbOlapOptions _options;
     private readonly ILogger<DuckDbOlapEngine>? _logger;
-    private static readonly Regex SafeIdentifierRegex = new(@"^[a-zA-Z0-9_]+$", RegexOptions.Compiled);
 
     public DuckDbOlapEngine(
         IOptions<GatewayOptions> gatewayOptions,

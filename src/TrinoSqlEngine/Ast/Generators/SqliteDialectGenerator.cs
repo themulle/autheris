@@ -13,6 +13,84 @@ using TrinoSqlEngine.Ast.Nodes;
 public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Sqlite;
+    protected override bool SupportsAggregateFilter => true;
+    protected override bool SupportsGroupingSets => false;
+
+    protected override string SubstringFunctionName => "SUBSTR";
+
+    /// <summary>Wunsch 4: SQLite's null-safe comparison is IS / IS NOT.</summary>
+    protected override void FormatIsDistinctFrom(ref ValueStringBuilder builder, IsDistinctFromExpression dist, SqlEmitterContext context)
+    {
+        GenerateExpression(dist.Left, ref builder, context);
+        builder.Append(dist.IsNotDistinctFrom ? " IS " : " IS NOT ");
+        GenerateExpression(dist.Right, ref builder, context);
+    }
+
+    protected override void FormatCurrentDateTime(ref ValueStringBuilder builder, CurrentDateTimeKind kind, SqlEmitterContext context)
+    {
+        builder.Append(kind switch
+        {
+            CurrentDateTimeKind.CurrentDate => "CURRENT_DATE",
+            CurrentDateTimeKind.CurrentTime => "CURRENT_TIME",
+            CurrentDateTimeKind.CurrentTimestamp => "CURRENT_TIMESTAMP",
+            CurrentDateTimeKind.LocalTime => "time('now', 'localtime')",
+            _ => "datetime('now', 'localtime')"
+        });
+    }
+
+    /// <summary>SQLite: TRIM/LTRIM/RTRIM(x[, chars]).</summary>
+    protected override void FormatTrim(ref ValueStringBuilder builder, TrimExpression trim, SqlEmitterContext context)
+    {
+        builder.Append(trim.Specification switch
+        {
+            TrimSpecification.Leading => "LTRIM(",
+            TrimSpecification.Trailing => "RTRIM(",
+            _ => "TRIM("
+        });
+        GenerateExpression(trim.Source, ref builder, context);
+        if (trim.Characters != null)
+        {
+            builder.Append(", ");
+            GenerateExpression(trim.Characters, ref builder, context);
+        }
+        builder.Append(')');
+    }
+
+    protected override void FormatPosition(ref ValueStringBuilder builder, PositionExpression position, SqlEmitterContext context) =>
+        FormatInstr(ref builder, position, context);
+
+    /// <summary>Wunsch 4: SQLite has no EXTRACT; strftime on ISO text, with the ISO day of week (%w counts Sunday = 0).</summary>
+    protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
+    {
+        (string format, string prefix, string suffix) = field switch
+        {
+            "YEAR" => ("%Y", "", ""),
+            "MONTH" => ("%m", "", ""),
+            "DAY" => ("%d", "", ""),
+            "HOUR" => ("%H", "", ""),
+            "MINUTE" => ("%M", "", ""),
+            "SECOND" => ("%S", "", ""),
+            "DAY_OF_YEAR" => ("%j", "", ""),
+            "DAY_OF_WEEK" => ("%w", "((", " + 6) % 7 + 1)"),
+            "QUARTER" => ("%m", "((", " + 2) / 3)"),
+            _ => throw UnsupportedExtract(field, TargetDialect)
+        };
+        builder.Append(prefix);
+        builder.Append("CAST(strftime('");
+        builder.Append(format);
+        builder.Append("', ");
+        GenerateExpression(source, ref builder, context);
+        builder.Append(") AS INTEGER)");
+        builder.Append(suffix);
+    }
+
+    /// <summary>Wunsch 4: SQLite stores dates as ISO text and has no typed literals; the ISO string compares correctly.</summary>
+    protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context) =>
+        FormatStringLiteral(ref builder, literal.Value, context);
+
+    protected override void FormatIntervalLiteral(ref ValueStringBuilder builder, IntervalLiteralExpression interval, SqlEmitterContext context) =>
+        throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"SQL construct INTERVAL literal is not supported for {TargetDialect} (no interval type).");
+
     public override int MaxParameterBudget => 999;
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)

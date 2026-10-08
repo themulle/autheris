@@ -61,12 +61,9 @@ public static class IcebergRestCatalogEndpoints
                 var tableResponse = await catalogService.LoadTableAsync(tenantId, @namespace, table, context.User, context.RequestAborted);
                 return Results.Ok(tableResponse);
             }
-            catch (System.Collections.Generic.KeyNotFoundException ex)
-            {
-                return HandleIcebergError(context, ex);
-            }
             catch (SecurityException ex)
             {
+                // Wunsch 9: unknown, inactive and denied tables all surface as SecurityException (403).
                 return HandleIcebergError(context, ex);
             }
         }).RequireAuthorization();
@@ -105,7 +102,6 @@ public static class IcebergRestCatalogEndpoints
         var isProduction = context.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
         return ex switch
         {
-            System.Collections.Generic.KeyNotFoundException => Results.NotFound(new { error = isProduction ? "Resource not found." : ex.Message }),
             SecurityException => Results.Problem(detail: isProduction ? "Access denied." : ex.Message, statusCode: StatusCodes.Status403Forbidden),
             NotSupportedException => Results.Problem(detail: isProduction ? "Not implemented." : ex.Message, statusCode: StatusCodes.Status501NotImplemented),
             _ => Results.Problem(detail: isProduction ? "An unexpected error occurred." : ex.Message, statusCode: StatusCodes.Status500InternalServerError)

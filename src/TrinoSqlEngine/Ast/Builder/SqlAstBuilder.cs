@@ -107,6 +107,24 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         }
     }
 
+    /// <summary>
+    /// Wunsch 4: every grammar rule without an explicit visitor is rejected. The ANTLR default (visit all children and
+    /// return the last result) silently dropped constructs such as ROLLUP, FILTER or window frames, or returned null.
+    /// </summary>
+    public override SqlNode VisitChildren(IRuleNode node)
+    {
+        string rule = node.RuleContext.GetType().Name;
+        if (rule.EndsWith("Context", StringComparison.Ordinal))
+        {
+            rule = rule[..^"Context".Length];
+        }
+
+        throw Unsupported($"'{rule}'");
+    }
+
+    private static AstBuildException Unsupported(string construct) =>
+        new($"SQL construct {construct} is not supported by the AST compiler.");
+
     public override SqlNode VisitSingleStatement(SqlBaseParser.SingleStatementContext context)
     {
         using var _ = EnterScope();
@@ -198,27 +216,74 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         return BuildQueryNoWith(context.queryNoWith(), withClause);
     }
 
+    /// <summary>ORDER BY of a query, a window (Wunsch 4: was dropped) or inside an aggregate.</summary>
+    private OrderByClause BuildOrderBy(SqlBaseParser.OrderByContext context)
+    {
+        var sortItems = context.sortItem();
+        var elements = new List<OrderByElement>(sortItems.Length);
+        foreach (var item in sortItems)
+        {
+            var expr = (Expression)Visit(item.expression());
+            var dir = item.ordering?.Type == SqlBaseLexer.DESC ? SortDirection.Descending : SortDirection.Ascending;
+            var nullOrder = NullOrdering.Default;
+            if (item.nullOrdering?.Type == SqlBaseLexer.FIRST) nullOrder = NullOrdering.First;
+            else if (item.nullOrdering?.Type == SqlBaseLexer.LAST) nullOrder = NullOrdering.Last;
+
+            elements.Add(new OrderByElement(expr, dir, nullOrder));
+        }
+
+        return new OrderByClause(elements);
+    }
+
+    /// <summary>
+    /// Wunsch 4: ROWS/RANGE frames with UNBOUNDED, CURRENT ROW or a non-negative integer literal offset. GROUPS (no SQL
+    /// Server/Oracle support) and row pattern recognition are rejected.
+    /// </summary>
+    private WindowFrame BuildWindowFrame(SqlBaseParser.WindowFrameContext frame)
+    {
+        if (frame.measureDefinition().Length > 0 || frame.frameExclusion() != null || frame.skipTo() != null ||
+            frame.INITIAL() != null || frame.SEEK() != null || frame.rowPattern() != null ||
+            frame.subsetDefinition().Length > 0 || frame.variableDefinition().Length > 0)
+        {
+            throw Unsupported("row pattern recognition / frame exclusion in windows");
+        }
+
+        var extent = frame.frameExtent();
+        var type = extent.frameType.Type switch
+        {
+            SqlBaseLexer.ROWS => WindowFrameType.Rows,
+            SqlBaseLexer.RANGE => WindowFrameType.Range,
+            _ => throw Unsupported("GROUPS window frames")
+        };
+
+        return new WindowFrame(type, BuildFrameBound(extent.start), extent.end != null ? BuildFrameBound(extent.end) : null);
+    }
+
+    private FrameBound BuildFrameBound(SqlBaseParser.FrameBoundContext bound)
+    {
+        switch (bound)
+        {
+            case SqlBaseParser.UnboundedFrameContext u:
+                return new FrameBound(u.boundType.Type == SqlBaseLexer.PRECEDING ? FrameBoundKind.UnboundedPreceding : FrameBoundKind.UnboundedFollowing);
+            case SqlBaseParser.CurrentRowBoundContext:
+                return new FrameBound(FrameBoundKind.CurrentRow);
+            case SqlBaseParser.BoundedFrameContext b:
+                if (Visit(b.expression()) is not LiteralExpression { Type: LiteralType.Integer, Value: long offset } || offset < 0)
+                {
+                    throw Unsupported("window frame offsets other than non-negative integer literals");
+                }
+
+                return new FrameBound(b.boundType.Type == SqlBaseLexer.PRECEDING ? FrameBoundKind.Preceding : FrameBoundKind.Following, offset);
+            default:
+                throw Unsupported("window frame bound");
+        }
+    }
+
     private SelectStatement BuildQueryNoWith(SqlBaseParser.QueryNoWithContext context, WithClause? withClause)
     {
         var body = (QueryBody)Visit(context.queryTerm());
 
-        OrderByClause? orderBy = null;
-        if (context.orderBy() != null)
-        {
-            var sortItems = context.orderBy().sortItem();
-            var elements = new List<OrderByElement>(sortItems.Length);
-            foreach (var item in sortItems)
-            {
-                var expr = (Expression)Visit(item.expression());
-                var dir = item.ordering?.Type == SqlBaseLexer.DESC ? SortDirection.Descending : SortDirection.Ascending;
-                var nullOrder = NullOrdering.Default;
-                if (item.nullOrdering?.Type == SqlBaseLexer.FIRST) nullOrder = NullOrdering.First;
-                else if (item.nullOrdering?.Type == SqlBaseLexer.LAST) nullOrder = NullOrdering.Last;
-
-                elements.Add(new OrderByElement(expr, dir, nullOrder));
-            }
-            orderBy = new OrderByClause(elements);
-        }
+        OrderByClause? orderBy = context.orderBy() != null ? BuildOrderBy(context.orderBy()) : null;
 
         PaginationClause? pagination = null;
         Expression? offset = null;
@@ -348,26 +413,40 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         Expression? where = context.where != null ? (Expression)Visit(context.where) : null;
 
+        if (context.windowDefinition() is { Length: > 0 })
+        {
+            throw Unsupported("WINDOW (named window definitions)");
+        }
+
         GroupByClause? groupBy = null;
         if (context.groupBy() != null)
         {
+            bool groupByDistinct = context.groupBy().setQuantifier()?.DISTINCT() != null;
             var groupingElements = context.groupBy().groupingElement();
             var groupingExpressions = new List<Expression>();
+            List<GroupingElement>? advanced = null;
             foreach (var ge in groupingElements)
             {
-                if (ge is SqlBaseParser.SingleGroupingSetContext sgs)
+                // Wunsch 4: ROLLUP/CUBE/GROUPING SETS used to fall through and remove the whole GROUP BY.
+                switch (ge)
                 {
-                    var exprs = sgs.groupingSet().expression();
-                    if (exprs != null)
-                    {
-                        foreach (var e in exprs)
-                        {
-                            groupingExpressions.Add((Expression)Visit(e));
-                        }
-                    }
+                    case SqlBaseParser.SingleGroupingSetContext sgs:
+                        groupingExpressions.AddRange(BuildGroupingSet(sgs.groupingSet()));
+                        break;
+                    case SqlBaseParser.RollupContext rollup:
+                        (advanced ??= []).Add(new GroupingElement(GroupingElementKind.Rollup, rollup.groupingSet().Select(BuildGroupingSet).ToList()));
+                        break;
+                    case SqlBaseParser.CubeContext cube:
+                        (advanced ??= []).Add(new GroupingElement(GroupingElementKind.Cube, cube.groupingSet().Select(BuildGroupingSet).ToList()));
+                        break;
+                    case SqlBaseParser.MultipleGroupingSetsContext sets:
+                        (advanced ??= []).Add(new GroupingElement(GroupingElementKind.GroupingSets, sets.groupingSet().Select(BuildGroupingSet).ToList()));
+                        break;
+                    default:
+                        throw Unsupported($"GROUP BY {ge.GetChild(0).GetText().ToUpperInvariant()}");
                 }
             }
-            groupBy = new GroupByClause(groupingExpressions);
+            groupBy = new GroupByClause(groupingExpressions, advanced, groupByDistinct);
         }
 
         Expression? having = context.having != null ? (Expression)Visit(context.having) : null;
@@ -778,24 +857,169 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                 }
             case SqlBaseParser.NullLiteralContext:
                 return new LiteralExpression(null, LiteralType.Null);
+            case SqlBaseParser.TypeConstructorContext typed:
+                return BuildTypedLiteral(typed);
+            case SqlBaseParser.IntervalLiteralContext interval:
+                return BuildIntervalLiteral(interval.interval());
             default:
-                return new LiteralExpression(lit.GetText(), LiteralType.String);
+                // Wunsch 4: typed literals (DATE '…', INTERVAL …), binary and unicode literals are not plain strings.
+                throw Unsupported($"literal '{lit.GetType().Name.Replace("Context", string.Empty, StringComparison.Ordinal)}'");
         }
+    }
+
+    private void EnsureFunctionAllowed(string name)
+    {
+        if (_options.EnforceFunctionPolicy &&
+            !SqlFunctionPolicy.IsFunctionAllowed(name, _options.AllowedFunctions, _options.AdditionalDeniedFunctions))
+        {
+            throw new SecurityException($"Function '{name}' is not permitted by the SQL function policy.");
+        }
+    }
+
+    // Wunsch 4: SQL special forms (no visitor before: ArgumentNullException → 500). They follow the function policy
+    // under their usual function names.
+
+    public override SqlNode VisitCurrentDate(SqlBaseParser.CurrentDateContext context) => CurrentDateTime("current_date", null, CurrentDateTimeKind.CurrentDate);
+
+    public override SqlNode VisitCurrentTime(SqlBaseParser.CurrentTimeContext context) => CurrentDateTime("current_time", context.precision, CurrentDateTimeKind.CurrentTime);
+
+    public override SqlNode VisitCurrentTimestamp(SqlBaseParser.CurrentTimestampContext context) => CurrentDateTime("current_timestamp", context.precision, CurrentDateTimeKind.CurrentTimestamp);
+
+    public override SqlNode VisitLocalTime(SqlBaseParser.LocalTimeContext context) => CurrentDateTime("localtime", context.precision, CurrentDateTimeKind.LocalTime);
+
+    public override SqlNode VisitLocalTimestamp(SqlBaseParser.LocalTimestampContext context) => CurrentDateTime("localtimestamp", context.precision, CurrentDateTimeKind.LocalTimestamp);
+
+    private CurrentDateTimeExpression CurrentDateTime(string name, IToken? precision, CurrentDateTimeKind kind)
+    {
+        EnsureFunctionAllowed(name);
+        if (precision != null)
+        {
+            throw Unsupported($"{name}(precision)");
+        }
+
+        return new CurrentDateTimeExpression(kind);
+    }
+
+    public override SqlNode VisitSubstring(SqlBaseParser.SubstringContext context)
+    {
+        using var _ = EnterScope();
+        EnsureFunctionAllowed("substring");
+        var parts = context.valueExpression();
+        return new SubstringExpression(
+            (Expression)Visit(parts[0]),
+            (Expression)Visit(parts[1]),
+            parts.Length > 2 ? (Expression)Visit(parts[2]) : null);
+    }
+
+    public override SqlNode VisitTrim(SqlBaseParser.TrimContext context)
+    {
+        using var _ = EnterScope();
+        EnsureFunctionAllowed("trim");
+        var spec = context.trimsSpecification() switch
+        {
+            null => TrimSpecification.Both,
+            var s when s.LEADING() != null => TrimSpecification.Leading,
+            var s when s.TRAILING() != null => TrimSpecification.Trailing,
+            _ => TrimSpecification.Both
+        };
+        var chars = context.trimChar != null ? (Expression)Visit(context.trimChar) : null;
+        return new TrimExpression(spec, (Expression)Visit(context.trimSource), chars);
+    }
+
+    public override SqlNode VisitPosition(SqlBaseParser.PositionContext context)
+    {
+        using var _ = EnterScope();
+        EnsureFunctionAllowed("position");
+        var parts = context.valueExpression();
+        return new PositionExpression((Expression)Visit(parts[0]), (Expression)Visit(parts[1]));
+    }
+
+    private IReadOnlyList<Expression> BuildGroupingSet(SqlBaseParser.GroupingSetContext set) =>
+        set.expression().Select(e => (Expression)Visit(e)).ToList();
+
+    /// <summary>Wunsch 4: <c>GROUPING(col, …)</c> (was: no visitor, ArgumentNullException → 500).</summary>
+    public override SqlNode VisitGroupingOperation(SqlBaseParser.GroupingOperationContext context)
+    {
+        var columns = context.qualifiedName().Select(q => new ColumnReference(ToSqlQualifiedName(q))).ToList();
+        if (columns.Count == 0)
+        {
+            throw Unsupported("GROUPING() without columns");
+        }
+
+        return new GroupingOperationExpression(columns);
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex DateValue = new(@"^\d{4}-\d{2}-\d{2}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    private static readonly System.Text.RegularExpressions.Regex TimeValue = new(@"^\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    private static readonly System.Text.RegularExpressions.Regex TimestampValue = new(@"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>Wunsch 4: DATE/TIME/TIMESTAMP literals (was: turned into a string literal containing the keyword).</summary>
+    private static TypedLiteralExpression BuildTypedLiteral(SqlBaseParser.TypeConstructorContext typed)
+    {
+        if (typed.@string() is not SqlBaseParser.BasicStringLiteralContext str || typed.identifier() == null)
+        {
+            throw Unsupported("typed literal");
+        }
+
+        string type = typed.identifier().GetText().ToUpperInvariant();
+        string value = SqlIdentifierHelper.UnquoteStringLiteral(str.GetText());
+        var (kind, pattern) = type switch
+        {
+            "DATE" => (TypedLiteralKind.Date, DateValue),
+            "TIME" => (TypedLiteralKind.Time, TimeValue),
+            "TIMESTAMP" => (TypedLiteralKind.Timestamp, TimestampValue),
+            _ => throw Unsupported($"{type} literal")
+        };
+
+        if (!pattern.IsMatch(value))
+        {
+            throw Unsupported($"{type} literal '{value}' (expected ISO format without time zone)");
+        }
+
+        return new TypedLiteralExpression(kind, value);
+    }
+
+    /// <summary>Wunsch 4: <c>INTERVAL 'n' FIELD</c> with one unsigned field and an integer value.</summary>
+    private static IntervalLiteralExpression BuildIntervalLiteral(SqlBaseParser.IntervalContext interval)
+    {
+        if (interval.sign != null || interval.@string() is not SqlBaseParser.BasicStringLiteralContext str)
+        {
+            throw Unsupported("signed or unicode INTERVAL literal");
+        }
+
+        string field = interval.intervalQualifier() switch
+        {
+            SqlBaseParser.SimpleYearMonthIntervalContext ym when ym.precision == null => ym.field.Text,
+            SqlBaseParser.SimpleDayTimeIntervalContext dt when dt.precision == null => dt.field.Text,
+            SqlBaseParser.SecondsDayTimeIntervalContext s when s.leadingPrecision == null => "SECOND",
+            _ => throw Unsupported("INTERVAL with a composite or precision qualifier")
+        };
+
+        string value = SqlIdentifierHelper.UnquoteStringLiteral(str.GetText());
+        if (!System.Text.RegularExpressions.Regex.IsMatch(value, @"^\d{1,9}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+        {
+            throw Unsupported($"INTERVAL value '{value}' (expected a non-negative integer)");
+        }
+
+        return new IntervalLiteralExpression(value, field.ToUpperInvariant());
     }
 
     public override SqlNode VisitFunctionCall(SqlBaseParser.FunctionCallContext context)
     {
         using var _ = EnterScope();
         string name = SqlIdentifierHelper.NormalizeQualifiedName(context.qualifiedName());
-        if (_options.EnforceFunctionPolicy &&
-            !SqlFunctionPolicy.IsFunctionAllowed(name, _options.AllowedFunctions, _options.AdditionalDeniedFunctions))
-        {
-            throw new SecurityException($"Function '{name}' is not permitted by the SQL function policy.");
-        }
+        EnsureFunctionAllowed(name);
+
+        // Wunsch 4: modifiers the AST cannot represent yet are rejected instead of being dropped.
+        if (context.processingMode() != null) throw Unsupported("RUNNING/FINAL");
+        if (context.label != null) throw Unsupported("label.* in function calls");
+        if (context.nullTreatment() != null) throw Unsupported("IGNORE/RESPECT NULLS");
 
         var qName = ToSqlQualifiedName(context.qualifiedName());
         var args = new List<Expression>();
-        if (context.argument() != null)
+        // Wunsch 4: argument() is an empty array (never null) for COUNT(*), so the star must be checked first.
+        bool isStar = context.ASTERISK() != null;
+        if (!isStar)
         {
             foreach (var arg in context.argument())
             {
@@ -810,27 +1034,32 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                 }
             }
         }
-        else if (context.ASTERISK() != null)
-        {
-            args.Add(new ColumnReference(new SqlQualifiedName("*")));
-        }
 
         WindowSpecification? window = null;
         var overCtx = context.over();
+        if (overCtx != null && overCtx.windowSpecification() == null)
+        {
+            throw Unsupported("OVER <window name>");
+        }
+
         if (overCtx?.windowSpecification() != null)
         {
             var winSpec = overCtx.windowSpecification();
+            if (winSpec.existingWindowName != null) throw Unsupported("window inheritance");
+
             var partitionExprs = winSpec._partition != null && winSpec._partition.Count > 0
                 ? winSpec._partition.Select(p => (Expression)Visit(p)).ToList().AsReadOnly()
                 : null;
-            var orderBy = winSpec.orderBy() != null
-                ? (OrderByClause)Visit(winSpec.orderBy())
-                : null;
-            window = new WindowSpecification(partitionExprs, orderBy);
+            var orderBy = winSpec.orderBy() != null ? BuildOrderBy(winSpec.orderBy()) : null;
+            var frame = winSpec.windowFrame() != null ? BuildWindowFrame(winSpec.windowFrame()) : null;
+            window = new WindowSpecification(partitionExprs, orderBy, frame);
         }
 
+        var filter = context.filter() != null ? (Expression)Visit(context.filter().booleanExpression()) : null;
+        var orderWithin = context.orderBy() != null ? BuildOrderBy(context.orderBy()) : null;
+
         bool distinct = context.setQuantifier()?.DISTINCT() != null;
-        return new FunctionCallExpression(qName, args, distinct, window);
+        return new FunctionCallExpression(qName, args, distinct, window, isStar, filter, orderWithin);
     }
 
     public override SqlNode VisitMethodCall(SqlBaseParser.MethodCallContext context)

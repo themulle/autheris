@@ -59,7 +59,11 @@ public partial class SqliteGovernanceRepository
                     var validFrom = DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture);
                     var validTo = DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture);
 
-                    if (atTime < validFrom || atTime >= validTo) continue;
+                    if (atTime >= validTo) continue;
+
+                    var gEffectStr = reader.GetString(3);
+                    var isDeny = Enum.TryParse<ConsentEffect>(gEffectStr, true, out var parsedEffect) && parsedEffect == ConsentEffect.Deny;
+                    if (atTime < validFrom && !isDeny) continue;
 
                     var gTypeStr = reader.GetString(4);
                     var granteeType = Enum.Parse<GranteeType>(gTypeStr, true);
@@ -857,9 +861,6 @@ public partial class SqliteGovernanceRepository
                 await ruleCmd.ExecuteNonQueryAsync(ct);
             }
 
-            await IncrementTableEpochInternalAsync(req.TableIdentifier, tx, ct);
-            await tx.CommitAsync(ct);
-
             var auditEntry = new AuditLogEntry
             {
                 TenantId = req.TenantId,
@@ -877,7 +878,10 @@ public partial class SqliteGovernanceRepository
                     ValidTo = req.RequestedValidTo
                 })
             };
-            await RecordAuditEventInternalAsync(auditEntry, ct);
+            await RecordAuditEventInternalAsync(auditEntry, ct, tx);
+
+            await IncrementTableEpochInternalAsync(req.TableIdentifier, tx, ct);
+            await tx.CommitAsync(ct);
 
             await _epochValidationService.InvalidateEpochAsync(req.TableIdentifier, ct);
         }
@@ -1138,11 +1142,11 @@ public partial class SqliteGovernanceRepository
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
-            tx.Commit();
-
             req.Status = newStatus;
             await RecordAuditEventInternalAsync(
-                ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null), ct);
+                ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null), ct, tx);
+
+            tx.Commit();
             return req;
         }
         finally
@@ -1215,11 +1219,11 @@ public partial class SqliteGovernanceRepository
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
-            tx.Commit();
-
             req.Status = "REJECTED";
             await RecordAuditEventInternalAsync(
-                ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason), ct);
+                ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason), ct, tx);
+
+            tx.Commit();
             return req;
         }
         finally
@@ -1309,9 +1313,6 @@ public partial class SqliteGovernanceRepository
                 await filterCmd.ExecuteNonQueryAsync(ct);
             }
 
-            await IncrementTableEpochInternalAsync(consent.TableIdentifier, tx, ct);
-            await tx.CommitAsync(ct);
-
             var auditEntry = new AuditLogEntry
             {
                 TenantId = consent.TenantId,
@@ -1329,7 +1330,10 @@ public partial class SqliteGovernanceRepository
                     ValidTo = consent.ValidTo
                 })
             };
-            await RecordAuditEventInternalAsync(auditEntry, ct);
+            await RecordAuditEventInternalAsync(auditEntry, ct, tx);
+
+            await IncrementTableEpochInternalAsync(consent.TableIdentifier, tx, ct);
+            await tx.CommitAsync(ct);
 
             // Invalidate cache after successful commit
             await _epochValidationService.InvalidateEpochAsync(consent.TableIdentifier, ct);

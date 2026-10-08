@@ -33,6 +33,15 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         _cteScopeStack.Push(new HashSet<string>(StringComparer.Ordinal));
     }
 
+    /// <summary>
+    /// A policy filter as an expression: verbatim and parenthesized when it is gateway-rendered target-dialect SQL
+    /// (<see cref="RlsOptions.PolicyFiltersAreTargetDialectSql"/>), otherwise parsed as Trino SQL.
+    /// </summary>
+    private Expression PolicyFilterExpression(string filterSql) =>
+        _options.PolicyFiltersAreTargetDialectSql
+            ? new TrustedSqlExpression($"({filterSql})")
+            : ParseFilterExpression(filterSql);
+
     private Expression ParseFilterExpression(string filterSql)
     {
         var tokenOptions = SqlTokenSecurityOptions.FromRlsOptions(_options);
@@ -187,7 +196,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         var innerSource = new NamedTableSource(node.Name, innerTableAlias);
 
         Expression? whereClause = !string.IsNullOrWhiteSpace(policyFilter)
-            ? ParseFilterExpression(policyFilter)
+            ? PolicyFilterExpression(policyFilter)
             : null;
 
         var subqueryBody = new QuerySpecification(
@@ -257,7 +266,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             throw new SecurityException("Correlated row filters are not supported for UPDATE/DELETE statements.");
         }
 
-        var rlsFilter = ParseFilterExpression(policyFilter);
+        var rlsFilter = PolicyFilterExpression(policyFilter);
         var combinedWhere = visitedWhere != null
             ? new BinaryExpression(visitedWhere, BinaryOperator.And, rlsFilter)
             : rlsFilter;
@@ -334,7 +343,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             throw new SecurityException("Correlated row filters are not supported for UPDATE/DELETE statements.");
         }
 
-        var rlsFilter = ParseFilterExpression(policyFilter);
+        var rlsFilter = PolicyFilterExpression(policyFilter);
         var combinedWhere = visitedWhere != null
             ? new BinaryExpression(visitedWhere, BinaryOperator.And, rlsFilter)
             : rlsFilter;
@@ -587,6 +596,10 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 break;
             case FunctionCallExpression fn:
                 foreach (var arg in fn.Arguments) stack.Push(arg);
+                if (fn.Filter != null) stack.Push(fn.Filter);
+                if (fn.OrderWithin != null) stack.Push(fn.OrderWithin);
+                if (fn.Window?.PartitionBy != null) foreach (var p in fn.Window.PartitionBy) stack.Push(p);
+                if (fn.Window?.OrderBy != null) stack.Push(fn.Window.OrderBy);
                 break;
             case CaseExpression cs:
                 if (cs.ElseResult != null) stack.Push(cs.ElseResult);
@@ -605,6 +618,19 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 break;
             case ExtractExpression ext:
                 stack.Push(ext.Source);
+                break;
+            case SubstringExpression sub:
+                stack.Push(sub.Source);
+                stack.Push(sub.Start);
+                if (sub.Length != null) stack.Push(sub.Length);
+                break;
+            case TrimExpression trim:
+                stack.Push(trim.Source);
+                if (trim.Characters != null) stack.Push(trim.Characters);
+                break;
+            case PositionExpression pos:
+                stack.Push(pos.Needle);
+                stack.Push(pos.Haystack);
                 break;
             case SelectStatement s:
                 stack.Push(s.Body);
@@ -656,15 +682,5 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         }
 
         return false;
-    }
-
-    private static bool IsQuotedIdentifier(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        text = text.Trim();
-        return text.Length >= 2 &&
-               ((text[0] == '"' && text[^1] == '"') ||
-                (text[0] == '`' && text[^1] == '`') ||
-                (text[0] == '[' && text[^1] == ']'));
     }
 }
