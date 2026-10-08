@@ -332,5 +332,68 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
         result.ShouldNotBeNull();
         (await _repository.LoadSnapshotAsync()).Filters.ShouldHaveSingleItem();
     }
+
+    [Fact]
+    public async Task SaveFilter_StructuredFilter_ReferencingUnknownCatalogTable_IsRejected()
+    {
+        var filter = VirtualFilterModelTests.DavidFilter() with
+        {
+            Structured = new StructuredFilterDefinition
+            {
+                From = new TableIdentifier("lwetem_prod", "conf", "unknown_table"),
+                FromAlias = "client",
+                Joins = [],
+                Where = []
+            }
+        };
+
+        var ex = await Should.ThrowAsync<ArgumentException>(() => _service.SaveFilterAsync(filter, Admin));
+        ex.Message.ShouldContain("unknown in the catalog");
+    }
+
+    [Fact]
+    public async Task SaveFilter_WhenAllowedReferenceTablesSpecified_ReferencingUnallowedTable_IsRejected()
+    {
+        var catalog = Substitute.For<ITableMetadataRepository>();
+        catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new System.Collections.Generic.List<TableMetadata>
+        {
+            MandatoryRowFilterResolverTests.Table("conf", "client", "client_id", "crane_serial_number"),
+            MandatoryRowFilterResolverTests.Table("md", "crane", "serial_number", "is_delivered")
+        });
+
+        // Allowlist only permits conf.client, not md.crane
+        var serviceWithAllowlist = new VirtualFilterAdministrationService(_repository, _audit,
+            Options.Create(new GatewayOptions
+            {
+                VirtualFilters = new VirtualFilterOptions
+                {
+                    AllowedReferenceTables = ["conf.client"]
+                }
+            }), catalog: catalog);
+
+        // DavidFilter joins md.crane
+        var filter = VirtualFilterModelTests.DavidFilter();
+
+        var ex = await Should.ThrowAsync<ArgumentException>(() => serviceWithAllowlist.SaveFilterAsync(filter, Admin));
+        ex.Message.ShouldContain("not in the allowed reference tables list");
+    }
+
+    [Fact]
+    public void StructuredFilter_WithReservedAutherisTargetAlias_IsRejectedDuringValidation()
+    {
+        var filter = VirtualFilterModelTests.DavidFilter() with
+        {
+            Structured = new StructuredFilterDefinition
+            {
+                From = new TableIdentifier("lwetem_prod", "conf", "client"),
+                FromAlias = "autheris_target",
+                Joins = [],
+                Where = []
+            }
+        };
+
+        var ex = Should.Throw<ArgumentException>(() => filter.Validate());
+        ex.Message.ShouldContain("reserved for the protected object");
+    }
 }
 

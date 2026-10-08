@@ -37,7 +37,10 @@ public static partial class SqlFilterCompiler
 
     /// <summary>Validates <paramref name="filter"/>'s SQL against <paramref name="catalog"/> and returns it with the derived target columns.</summary>
     /// <exception cref="ArgumentException">The definition is not acceptable (the message says why).</exception>
-    public static VirtualFilter Validate(VirtualFilter filter, IReadOnlyList<TableMetadata> catalog)
+    public static VirtualFilter Validate(
+        VirtualFilter filter,
+        IReadOnlyList<TableMetadata> catalog,
+        IReadOnlyList<string>? allowedReferenceTables = null)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(catalog);
@@ -79,9 +82,11 @@ public static partial class SqlFilterCompiler
         foreach (var table in metadata.ReferencedTables)
         {
             if (string.Equals(table.Alias, TargetAlias, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(table.TableName, TargetAlias, StringComparison.OrdinalIgnoreCase))
+                string.Equals(table.TableName, TargetAlias, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(table.Alias, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(table.TableName, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase))
             {
-                throw Reject(filter, "'target' is reserved for the protected object and cannot be a table or alias.");
+                throw Reject(filter, $"'target' and '{RowFilterAliases.Target}' are reserved for the protected object and cannot be a table or alias.");
             }
 
             if (!string.IsNullOrWhiteSpace(table.Catalog) && !string.Equals(table.Catalog, filter.Source, StringComparison.OrdinalIgnoreCase))
@@ -94,11 +99,39 @@ public static partial class SqlFilterCompiler
                 throw Reject(filter, $"the table '{table.FullName}' must be written as schema.table.");
             }
 
+            if (allowedReferenceTables is { Count: > 0 } allowed)
+            {
+                bool isAllowed = allowed.Any(a =>
+                    string.Equals(a, table.FullName, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(a, $"{table.Schema}.{table.TableName}", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(a, table.TableName, StringComparison.OrdinalIgnoreCase));
+                if (!isAllowed)
+                {
+                    throw Reject(filter, $"the table '{table.FullName}' is not in the allowed reference tables list.");
+                }
+            }
+
             var catalogued = catalog.FirstOrDefault(t =>
                 string.Equals(t.Identifier.Domain, filter.Source, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(t.Identifier.Schema, table.Schema, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(t.Identifier.TableName, table.TableName, StringComparison.OrdinalIgnoreCase));
             sourceTables.Add(catalogued ?? throw Reject(filter, $"the table '{table.FullName}' is unknown in the catalog of '{filter.Source}'."));
+
+            // SR15-11: If reference table has a tenant isolation column, verify the filter constrains it
+            var tenantCol = catalogued.Columns.FirstOrDefault(c =>
+                string.Equals(c.ColumnName, "tenant_id", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c.ColumnName, "tenantid", StringComparison.OrdinalIgnoreCase))?.ColumnName;
+            if (tenantCol != null)
+            {
+                bool hasTenantFilter = (metadata.FilterColumnReferences ?? []).Any(r =>
+                    (string.Equals(r.TableOrAlias, table.Alias ?? table.TableName, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(r.TableOrAlias, table.TableName, StringComparison.OrdinalIgnoreCase)) &&
+                    string.Equals(r.ColumnName, tenantCol, StringComparison.OrdinalIgnoreCase));
+                if (!hasTenantFilter)
+                {
+                    throw Reject(filter, $"the subquery table '{table.FullName}' has tenant column '{tenantCol}' which must be constrained in the WHERE clause.");
+                }
+            }
         }
 
         foreach (var function in metadata.FunctionCalls ?? [])

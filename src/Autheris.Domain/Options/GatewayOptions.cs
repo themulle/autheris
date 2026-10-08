@@ -1650,6 +1650,12 @@ public sealed class VirtualFilterOptions
     /// When enabled, manual changes to virtual filters and access profiles require four-eyes approval by a distinct approver.
     /// </summary>
     public bool RequireApproval { get; init; } = false;
+
+    /// <summary>
+    /// SR15-11: Optional allowlist of table names or qualified identifiers allowed in virtual filter subqueries.
+    /// When non-empty, any table referenced in a virtual filter subquery must be present in this list.
+    /// </summary>
+    public IReadOnlyList<string>? AllowedReferenceTables { get; init; } = null;
 }
 
 /// <summary>

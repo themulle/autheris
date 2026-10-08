@@ -246,6 +246,13 @@ public sealed record VirtualFilter
         VirtualFilterNames.ValidateIdentifier(table.Schema, nameof(Structured));
         VirtualFilterNames.ValidateIdentifier(table.TableName, nameof(Structured));
         VirtualFilterNames.ValidateIdentifier(alias, nameof(Structured));
+        if (string.Equals(alias, "target", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(alias, "autheris_target", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(table.TableName, "target", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(table.TableName, "autheris_target", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException($"The name or alias '{alias}' is reserved for the protected object and cannot be used in virtual filters.", nameof(alias));
+        }
         if (!aliases.Add(alias))
         {
             throw new ArgumentException($"The alias '{alias}' is used more than once.", nameof(alias));

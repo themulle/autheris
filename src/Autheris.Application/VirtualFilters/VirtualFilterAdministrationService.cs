@@ -81,17 +81,64 @@ public sealed class VirtualFilterAdministrationService
 
     public Task<VirtualFilterSnapshot> GetSnapshotAsync(CancellationToken ct = default) => _repository.LoadSnapshotAsync(ct);
 
-    /// <summary>Phase 7: a sql definition is checked against the catalog and gets its derived target columns.</summary>
+    /// <summary>Phase 7: sql and structured definitions are checked against the catalog and allowed reference tables.</summary>
     private async Task<VirtualFilter> ValidateDefinitionAsync(VirtualFilter filter, CancellationToken ct)
     {
         filter.Validate();
-        if (filter.Sql == null)
+        if (filter.Sql == null && filter.Structured == null)
         {
             return filter;
         }
 
-        var catalog = _catalog ?? throw new ArgumentException("Virtual filters with a sql definition need the catalog to be validated.", nameof(filter));
-        return SqlFilterCompiler.Validate(filter, await catalog.GetAllTablesAsync(ct).ConfigureAwait(false));
+        if (filter.Sql != null)
+        {
+            var catalog = _catalog ?? throw new ArgumentException("Virtual filters with a sql definition need the catalog to be validated.", nameof(filter));
+            var tables = await catalog.GetAllTablesAsync(ct).ConfigureAwait(false);
+            return SqlFilterCompiler.Validate(filter, tables, _options.AllowedReferenceTables);
+        }
+
+        if (filter.Structured != null && _catalog != null)
+        {
+            var tables = await _catalog.GetAllTablesAsync(ct).ConfigureAwait(false);
+            ValidateStructuredTablesAgainstCatalog(filter, tables);
+        }
+
+        return filter;
+    }
+
+    private void ValidateStructuredTablesAgainstCatalog(VirtualFilter filter, IReadOnlyList<TableMetadata> catalog)
+    {
+        var def = filter.Structured;
+        if (def == null) return;
+
+        var allTables = new List<TableIdentifier> { def.From };
+        allTables.AddRange(def.Joins.Select(j => j.Table));
+
+        foreach (var table in allTables)
+        {
+            var catalogued = catalog.FirstOrDefault(t =>
+                string.Equals(t.Identifier.Domain, filter.Source, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(t.Identifier.Schema, table.Schema, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(t.Identifier.TableName, table.TableName, StringComparison.OrdinalIgnoreCase));
+
+            if (catalogued == null)
+            {
+                throw new ArgumentException($"The virtual filter '{filter.Name}' references table '{table}' which is unknown in the catalog of '{filter.Source}'.", nameof(filter));
+            }
+
+            if (_options.AllowedReferenceTables is { Count: > 0 } allowed)
+            {
+                bool isAllowed = allowed.Any(a =>
+                    string.Equals(a, table.ToString(), StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(a, $"{table.Schema}.{table.TableName}", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(a, table.TableName, StringComparison.OrdinalIgnoreCase));
+
+                if (!isAllowed)
+                {
+                    throw new ArgumentException($"The virtual filter '{filter.Name}' references table '{table}' which is not in the allowed reference tables list.", nameof(filter));
+                }
+            }
+        }
     }
 
     public async Task<VirtualFilter> SaveFilterAsync(VirtualFilter filter, VirtualFilterActor actor, CancellationToken ct = default)
