@@ -43,14 +43,14 @@ Jeder Test muss ohne Fix rot werden.
 
 | ID | Befund | Status / Commit |
 |---|---|---|
-| POL-19 | `ChunkPiiRedactor` ist ohne Katalogspalten nicht fail-closed. | Offen |
-| SQL-6 | Join-Guardrail arbeitet ohne Tabellenbezug. | Offen |
 | DEP-9 | `--vulnerable`-Schritt in CI ist wirkungslos. | Offen |
 | DEP-10 | Kein Locked-Mode, keine `NuGet.config`. | Offen |
 | DEP-11 | `workflow_dispatch` überschreibt `latest`; Release ohne Tests und Signatur. | Offen |
 | DEP-12 | Alte Benchmark-Secrets in der Git-History (HEAD sauber). | Offen |
 | DEP-15 | Benchmark-Images mit `:latest` und `sa`. | Offen |
 | F-8 (info) | Jede Casbin-Änderung baut alle Enforcer neu; viele `AddPolicy`-Aufrufe kosten O(n²). | Offen |
+| POL-19 | `ChunkPiiRedactor` ist ohne Katalogspalten nicht fail-closed. | Behoben in `aa2f851` (RAG-Pfad entfernt in `dd0dc03`) |
+| SQL-6 | Join-Guardrail arbeitet ohne Tabellenbezug. | Behoben in `fee1544` |
 | API-13 | BasicAuth-Lockout nicht atomar und synchron. | Behoben in `ccb6ec5` |
 | INF-2 | CDN-Purge und Shadowing nutzen einen ungehärteten HttpClient. | Behoben in `140df9c` |
 | INF-3 | Secret-Referenzen landen im Klartext im Log. | Behoben in `fa02ffd` |
