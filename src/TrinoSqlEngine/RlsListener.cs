@@ -957,7 +957,7 @@ public sealed class RlsListener : SqlBaseBaseListener
             {
                 // SQ-05: Table aliases cannot be dot-qualified (e.g. AS schema.table is invalid across DBs).
                 // Use dialect-compliant unqualified table alias.
-                string alias = FastSqlEngine.FormatTableAlias(normalizedTableName, _options.TargetDialect);
+                string alias = FastSqlEngine.FormatTableAlias(rawTableName, normalizedTableName, _options.TargetDialect);
                 return $"{subquery} AS {alias}";
             }
         }
