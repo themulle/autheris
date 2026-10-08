@@ -63,6 +63,8 @@ Jeder Test muss ohne Fix rot werden.
 | API-17 | WASM-Plugin `:latest` ungepinnt. | Erledigt in `dac0940` (`fix(mesh): pin default wasm plugin image tag in envoy export (API-17)`) |
 | DEP-14 | Klartext-BasicAuth-Passwörter werden erst beim Login abgelehnt. | Erledigt in `15fe567` (`fix(auth): reject plaintext basic auth passwords during startup validation (DEP-14)`) |
 | DEP-16 | Kein `AllowedHosts`, CORS-localhost-Fallback in Production. | Erledigt in `7cf19f6` (`fix(cors): remove localhost fallback in production cors policy (DEP-16)`) |
+| MCP-7 | `catch (Exception)` beim Argument-Parsing ist fail-open. | Erledigt in `ccf4a49` (`fix(mcp): fail closed on argument parsing errors in query executor (MCP-7)`) |
+| MCP-4 | Synthetische Rollen `AiAgent`/`Reader` im Fast-Path. | Erledigt in `2069074` (`fix(mcp): do not synthesize reader roles in fast path (MCP-4)`) |
 | POL-11 | ReBAC-Objekt-ID enthält kein Schema. | Erledigt in `b9937cd` (`refactor(policy): one table access decision for all paths (Architecture 1, SQL2-6, POL-6, API-10, POL-11)`) |
 | SQL2-10 | CrossDomainJoin baut den IN-Filter per String (toter Code). | Erledigt in `7ffa9fe` (`refactor: remove unwired prototype code (Architecture 3, SQL2-10)`) |
 
@@ -79,10 +81,8 @@ Jeder Test muss ohne Fix rot werden.
 | GQL-5 | `FORBIDDEN`-Meldung verrät Existenz von Tabellen und Ablehnungsgrund. |
 | GQL-6 | `tableConsumers` ohne Consent- und Tenant-Filter. |
 | GQL-12 | dbt-Quarantäne-Status vor der Autorisierung. |
-| MCP-4 | Synthetische Rollen `AiAgent`/`Reader` im Fast-Path. |
 | MCP-5 | Golden Queries ohne Consent-Filter. |
 | MCP-6 | `@mcpTool` mit geratener `TargetTable` (latent). |
-| MCP-7 | `catch (Exception)` beim Argument-Parsing ist fail-open. |
 | API-13 | BasicAuth-Lockout nicht atomar und synchron. |
 | EXT-6 | OpenMetadata-User-Pfad ignoriert das Rollen-Mapping. |
 | EXT-7 | DataCatalog legt neue Tabellen sofort aktiv an. |
