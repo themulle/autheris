@@ -833,7 +833,9 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         var qName = ToSqlQualifiedName(context.qualifiedName());
         var args = new List<Expression>();
-        if (context.argument() != null)
+        // Wunsch 4: argument() is an empty array (never null) for COUNT(*), so the star must be checked first.
+        bool isStar = context.ASTERISK() != null;
+        if (!isStar)
         {
             foreach (var arg in context.argument())
             {
@@ -847,10 +849,6 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                     args.Add((Expression)Visit(exprCtx));
                 }
             }
-        }
-        else if (context.ASTERISK() != null)
-        {
-            args.Add(new ColumnReference(new SqlQualifiedName("*")));
         }
 
         WindowSpecification? window = null;
@@ -876,7 +874,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         }
 
         bool distinct = context.setQuantifier()?.DISTINCT() != null;
-        return new FunctionCallExpression(qName, args, distinct, window);
+        return new FunctionCallExpression(qName, args, distinct, window, isStar);
     }
 
     public override SqlNode VisitMethodCall(SqlBaseParser.MethodCallContext context)

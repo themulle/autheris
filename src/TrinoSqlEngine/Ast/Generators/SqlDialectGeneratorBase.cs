@@ -494,9 +494,10 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(" END");
                 break;
             case FunctionCallExpression fn:
-                FormatQualifiedName(ref builder, fn.Name, context);
+                FormatFunctionName(ref builder, fn.Name, context);
                 builder.Append('(');
                 if (fn.Distinct) builder.Append("DISTINCT ");
+                if (fn.IsStar) builder.Append('*');
                 for (int i = 0; i < fn.Arguments.Count; i++)
                 {
                     if (i > 0) builder.Append(", ");
@@ -723,6 +724,25 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
     };
 
     public abstract void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context);
+
+    /// <summary>
+    /// Wunsch 4: a function name is not an identifier. Quoting it (<c>"coalesce"</c>, <c>[SUM]</c>) makes PostgreSQL and
+    /// SQL Server look for a user-defined object, so built-ins fail. An unquoted one-part name (it passed
+    /// <see cref="SqlFunctionPolicy"/> in the builder) is emitted bare and upper-case; quoted or qualified names keep
+    /// delimited parts.
+    /// </summary>
+    public virtual void FormatFunctionName(ref ValueStringBuilder builder, SqlQualifiedName name, SqlEmitterContext context)
+    {
+        if (name.Parts.Count == 1 && !name.Parts[0].IsQuoted && BareFunctionName.IsMatch(name.Parts[0].Value))
+        {
+            builder.Append(name.Parts[0].Value.ToUpperInvariant());
+            return;
+        }
+
+        FormatQualifiedName(ref builder, name, context);
+    }
+
+    private static readonly Regex BareFunctionName = new("^[A-Za-z_][A-Za-z0-9_]{0,127}$", RegexOptions.CultureInvariant);
 
     public virtual void FormatQualifiedName(ref ValueStringBuilder builder, SqlQualifiedName name, SqlEmitterContext context)
     {

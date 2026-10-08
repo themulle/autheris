@@ -91,4 +91,17 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
 
         ex.Message.ShouldContain("not supported");
     }
+
+    [Theory]
+    [InlineData("PostgreSQL", "COALESCE(\"amount\", 0)")]
+    [InlineData("SqlServer", "COALESCE([amount], 0)")]
+    [InlineData("Sqlite", "COALESCE(\"amount\", 0)")]
+    public async Task Aggregates_AndBuiltins_AreEmittedUnquoted(string sourceType, string coalesce)
+    {
+        var sql = await RewriteAsync(sourceType, "SELECT dept, COUNT(*) AS n, SUM(COALESCE(amount, 0)) FROM orders GROUP BY dept HAVING COUNT(*) > 1");
+
+        sql.ShouldContain("COUNT(*)");
+        sql.ShouldContain("HAVING COUNT(*) > 1");
+        sql.ShouldContain($"SUM({coalesce})");
+    }
 }

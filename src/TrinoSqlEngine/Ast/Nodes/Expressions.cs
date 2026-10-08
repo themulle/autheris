@@ -127,11 +127,13 @@ public sealed record WhenClause(
     Expression Condition,
     Expression Result) : SqlNode;
 
+/// <param name="IsStar">Wunsch 4: the call takes <c>*</c> as its only argument (<c>COUNT(*)</c>); <see cref="Arguments"/> is empty.</param>
 public sealed record FunctionCallExpression(
     SqlQualifiedName Name,
     IReadOnlyList<Expression> Arguments,
     bool Distinct = false,
-    WindowSpecification? Window = null) : Expression;
+    WindowSpecification? Window = null,
+    bool IsStar = false) : Expression;
 
 public sealed record WindowSpecification(
     IReadOnlyList<Expression>? PartitionBy,

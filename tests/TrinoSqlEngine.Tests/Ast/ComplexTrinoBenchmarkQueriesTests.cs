@@ -48,7 +48,7 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("\"invoices\"", pgSql);
         Assert.Contains("\"tenant_id\" = 'tenant-test-01'", pgSql);
         Assert.Contains("GROUP BY \"department\"", pgSql);
-        Assert.Contains("HAVING \"count\"() > 5", pgSql);
+        Assert.Contains("HAVING COUNT(*) > 5", pgSql);
         Assert.Contains("LIMIT 10 OFFSET 0", pgSql);
 
         // 2. SQL Server (T-SQL)
@@ -60,7 +60,7 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("[invoices]", msSql);
         Assert.Contains("[tenant_id] = N'tenant-test-01'", msSql);
         Assert.Contains("GROUP BY [department]", msSql);
-        Assert.Contains("HAVING [COUNT]() > 5", msSql);
+        Assert.Contains("HAVING COUNT(*) > 5", msSql);
         Assert.Contains("OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY", msSql);
     }
 
@@ -90,10 +90,10 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("\"customers\"", pgSql);
         Assert.Contains("\"orders\"", pgSql);
         Assert.Contains("\"tenant_id\" = 'tenant-test-01'", pgSql);
-        Assert.Contains("\"sum\"(\"o\".\"total_amount\")", pgSql);
+        Assert.Contains("SUM(\"o\".\"total_amount\")", pgSql);
         Assert.Contains("\"o\".\"customer_id\" = \"c\".\"id\"", pgSql);
         Assert.Contains("GROUP BY \"o\".\"customer_id\"", pgSql);
-        Assert.Contains("HAVING \"count\"(\"o\".\"id\") >= 3", pgSql);
+        Assert.Contains("HAVING COUNT(\"o\".\"id\") >= 3", pgSql);
 
         // 2. SQL Server (T-SQL)
         var msOptions = CreateOptions(TargetSqlDialect.SqlServer);
@@ -102,10 +102,10 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("[customers]", msSql);
         Assert.Contains("[orders]", msSql);
         Assert.Contains("[tenant_id] = N'tenant-test-01'", msSql);
-        Assert.Contains("[SUM]([o].[total_amount])", msSql);
+        Assert.Contains("SUM([o].[total_amount])", msSql);
         Assert.Contains("[o].[customer_id] = [c].[id]", msSql);
         Assert.Contains("GROUP BY [o].[customer_id]", msSql);
-        Assert.Contains("HAVING [COUNT]([o].[id]) >= 3", msSql);
+        Assert.Contains("HAVING COUNT([o].[id]) >= 3", msSql);
     }
 
     [Fact]
@@ -224,8 +224,8 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("\"customers\"", pgSql);
         Assert.Contains("\"orders\"", pgSql);
         Assert.Contains("GROUP BY \"c\".\"id\", \"c\".\"name\"", pgSql);
-        Assert.Contains("HAVING \"sum\"(\"o\".\"total_amount\") > 10000", pgSql);
-        Assert.Contains("HAVING \"count\"(\"o\".\"id\") >= 5", pgSql);
+        Assert.Contains("HAVING SUM(\"o\".\"total_amount\") > 10000", pgSql);
+        Assert.Contains("HAVING COUNT(\"o\".\"id\") >= 5", pgSql);
         Assert.Contains("\"tenant_id\" = 'tenant-test-01'", pgSql);
 
         // 2. SQL Server (T-SQL)
@@ -236,8 +236,8 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("[customers]", msSql);
         Assert.Contains("[orders]", msSql);
         Assert.Contains("GROUP BY [c].[id], [c].[name]", msSql);
-        Assert.Contains("HAVING [SUM]([o].[total_amount]) > 10000", msSql);
-        Assert.Contains("HAVING [COUNT]([o].[id]) >= 5", msSql);
+        Assert.Contains("HAVING SUM([o].[total_amount]) > 10000", msSql);
+        Assert.Contains("HAVING COUNT([o].[id]) >= 5", msSql);
         Assert.Contains("[tenant_id] = N'tenant-test-01'", msSql);
     }
 }
