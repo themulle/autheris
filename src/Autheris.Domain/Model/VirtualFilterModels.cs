@@ -102,6 +102,9 @@ public sealed record VirtualFilter
     public Sid? CreatedBy { get; init; }
     public Sid? ApprovedBy { get; init; }
     public DateTimeOffset? ApprovedAt { get; init; }
+    public bool PendingDeletion { get; init; } = false;
+    public Sid? DeletionRequestedBy { get; init; }
+    public VirtualFilter? Draft { get; init; }
 
     /// <summary>Hash stored with the row (set by the repository); differs from <see cref="ComputeDefinitionHash"/> after a write outside Autheris.</summary>
     public string? StoredDefinitionHash { get; init; }
@@ -329,6 +332,9 @@ public sealed record AccessProfile
     public Sid? CreatedBy { get; init; }
     public Sid? ApprovedBy { get; init; }
     public DateTimeOffset? ApprovedAt { get; init; }
+    public bool PendingDeletion { get; init; } = false;
+    public Sid? DeletionRequestedBy { get; init; }
+    public AccessProfile? Draft { get; init; }
 
     /// <summary>Hash stored with the row (set by the repository).</summary>
     public string? StoredDefinitionHash { get; init; }

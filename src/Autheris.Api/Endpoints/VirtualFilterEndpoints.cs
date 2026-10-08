@@ -91,7 +91,8 @@ public static class VirtualFilterEndpoints
                 return Forbidden();
             }
 
-            var approved = await service.ApproveFilterAsync(tenant.Value, name, actor, context.RequestAborted).ConfigureAwait(false);
+            var expectedHash = context.Request.Query["hash"].FirstOrDefault() ?? context.Request.Query["expected_hash"].FirstOrDefault();
+            var approved = await service.ApproveFilterAsync(tenant.Value, name, actor, expectedHash, context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(FilterView(approved));
         });
 
@@ -125,7 +126,8 @@ public static class VirtualFilterEndpoints
                 return Forbidden();
             }
 
-            var approved = await service.ApproveProfileAsync(tenant.Value, name, actor, context.RequestAborted).ConfigureAwait(false);
+            var expectedHash = context.Request.Query["hash"].FirstOrDefault() ?? context.Request.Query["expected_hash"].FirstOrDefault();
+            var approved = await service.ApproveProfileAsync(tenant.Value, name, actor, expectedHash, context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(ProfileView(approved));
         });
 
@@ -422,6 +424,9 @@ public static class VirtualFilterEndpoints
         managed_by = f.ManagedBy,
         definition_hash = f.ComputeDefinitionHash(),
         status = f.Status.ToString(),
+        pending_deletion = f.PendingDeletion,
+        has_draft = f.Draft != null,
+        draft_hash = f.Draft?.ComputeDefinitionHash(),
         created_by = f.CreatedBy?.Value,
         approved_by = f.ApprovedBy?.Value,
         approved_at = f.ApprovedAt,
@@ -448,6 +453,9 @@ public static class VirtualFilterEndpoints
         managed_by = p.ManagedBy,
         definition_hash = p.ComputeDefinitionHash(),
         status = p.Status.ToString(),
+        pending_deletion = p.PendingDeletion,
+        has_draft = p.Draft != null,
+        draft_hash = p.Draft?.ComputeDefinitionHash(),
         created_by = p.CreatedBy?.Value,
         approved_by = p.ApprovedBy?.Value,
         approved_at = p.ApprovedAt,

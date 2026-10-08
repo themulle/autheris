@@ -21,12 +21,14 @@ internal static class VirtualFilterStore
         TableDto? From, string? FromAlias, List<JoinDto>? Joins, List<ConditionDto>? Where,
         List<string> KeyColumns, string? ValidFrom, string? ValidTo, List<string> Supersedes,
         string? Sql = null, List<string>? SqlTargetColumns = null,
-        FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null);
+        FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
+        FilterDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null);
     private sealed record BindingDto(
         string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap);
     private sealed record ProfileDto(
         GranteeType GranteeType, string? GranteeSid, string? RoleName, string Scope, UncoveredPolicy? Uncovered, List<BindingDto> Bindings,
-        FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null);
+        FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
+        ProfileDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null);
 
     public static async Task<VirtualFilterSnapshot> LoadSnapshotAsync(DbConnection connection, CancellationToken ct)
     {
@@ -175,7 +177,10 @@ internal static class VirtualFilterStore
         filter.Status,
         filter.CreatedBy?.Value,
         filter.ApprovedBy?.Value,
-        filter.ApprovedAt);
+        filter.ApprovedAt,
+        filter.Draft == null ? null : FilterToDto(filter.Draft),
+        filter.PendingDeletion,
+        filter.DeletionRequestedBy?.Value);
 
     private static ProfileDto ProfileToDto(AccessProfile profile) => new(
         profile.GranteeType,
@@ -187,39 +192,81 @@ internal static class VirtualFilterStore
         profile.Status,
         profile.CreatedBy?.Value,
         profile.ApprovedBy?.Value,
-        profile.ApprovedAt);
+        profile.ApprovedAt,
+        profile.Draft == null ? null : ProfileToDto(profile.Draft),
+        profile.PendingDeletion,
+        profile.DeletionRequestedBy?.Value);
+
+    private static VirtualFilter DtoToFilter(FilterDto dto, Guid id, TenantId tenantId, string name, string source) => new()
+    {
+        Id = id,
+        TenantId = tenantId,
+        Name = name,
+        Source = source,
+        Structured = dto.From == null ? null : new StructuredFilterDefinition
+        {
+            From = Identifier(dto.From),
+            FromAlias = dto.FromAlias ?? string.Empty,
+            Joins = (dto.Joins ?? []).Select(j => new FilterJoin(Identifier(j.Table), j.Alias, j.Left, j.Right)).ToList(),
+            Where = (dto.Where ?? []).Select(w => new FilterCondition(w.Column, w.Operator, w.Value)).ToList()
+        },
+        Sql = dto.Sql,
+        SqlTargetColumns = dto.SqlTargetColumns ?? [],
+        KeyColumns = dto.KeyColumns ?? [],
+        ValidFromColumn = dto.ValidFrom,
+        ValidToColumn = dto.ValidTo,
+        Supersedes = dto.Supersedes ?? [],
+        Status = dto.Status ?? FilterApprovalStatus.Active,
+        CreatedBy = string.IsNullOrWhiteSpace(dto.CreatedBy) ? (Sid?)null : new Sid(dto.CreatedBy!),
+        ApprovedBy = string.IsNullOrWhiteSpace(dto.ApprovedBy) ? (Sid?)null : new Sid(dto.ApprovedBy!),
+        ApprovedAt = dto.ApprovedAt,
+        Draft = dto.Draft == null ? null : DtoToFilter(dto.Draft, Guid.NewGuid(), tenantId, name, source),
+        PendingDeletion = dto.PendingDeletion,
+        DeletionRequestedBy = string.IsNullOrWhiteSpace(dto.DeletionRequestedBy) ? (Sid?)null : new Sid(dto.DeletionRequestedBy!)
+    };
+
+    private static AccessProfile DtoToProfile(ProfileDto dto, Guid id, TenantId tenantId, string name) => new()
+    {
+        Id = id,
+        TenantId = tenantId,
+        Name = name,
+        GranteeType = dto.GranteeType,
+        GranteeSid = string.IsNullOrWhiteSpace(dto.GranteeSid) ? (Sid?)null : new Sid(dto.GranteeSid!),
+        RoleName = dto.RoleName,
+        Scope = dto.Scope,
+        Uncovered = dto.Uncovered,
+        Bindings = (dto.Bindings ?? []).Select(b => new FilterBinding
+        {
+            FilterName = b.Filter,
+            TargetPattern = b.Target,
+            ObjectKinds = b.ObjectKinds,
+            TimeColumn = b.TimeColumn,
+            ColumnMap = b.ColumnMap
+        }).ToList(),
+        Status = dto.Status ?? FilterApprovalStatus.Active,
+        CreatedBy = string.IsNullOrWhiteSpace(dto.CreatedBy) ? (Sid?)null : new Sid(dto.CreatedBy!),
+        ApprovedBy = string.IsNullOrWhiteSpace(dto.ApprovedBy) ? (Sid?)null : new Sid(dto.ApprovedBy!),
+        ApprovedAt = dto.ApprovedAt,
+        Draft = dto.Draft == null ? null : DtoToProfile(dto.Draft, Guid.NewGuid(), tenantId, name),
+        PendingDeletion = dto.PendingDeletion,
+        DeletionRequestedBy = string.IsNullOrWhiteSpace(dto.DeletionRequestedBy) ? (Sid?)null : new Sid(dto.DeletionRequestedBy!)
+    };
 
     private static VirtualFilter ReadFilter(DbDataReader reader)
     {
         var dto = JsonSerializer.Deserialize<FilterDto>(reader.GetString(4))
             ?? throw new InvalidOperationException("Virtual filter definition is empty.");
-        return new VirtualFilter
+        var id = Guid.Parse(reader.GetString(0));
+        var tenantId = new TenantId(reader.GetString(1));
+        var name = reader.GetString(2);
+        var source = reader.GetString(3);
+        var filter = DtoToFilter(dto, id, tenantId, name, source);
+        return filter with
         {
-            Id = Guid.Parse(reader.GetString(0)),
-            TenantId = new TenantId(reader.GetString(1)),
-            Name = reader.GetString(2),
-            Source = reader.GetString(3),
-            Structured = dto.From == null ? null : new StructuredFilterDefinition
-            {
-                From = Identifier(dto.From),
-                FromAlias = dto.FromAlias ?? string.Empty,
-                Joins = (dto.Joins ?? []).Select(j => new FilterJoin(Identifier(j.Table), j.Alias, j.Left, j.Right)).ToList(),
-                Where = (dto.Where ?? []).Select(w => new FilterCondition(w.Column, w.Operator, w.Value)).ToList()
-            },
-            Sql = dto.Sql,
-            SqlTargetColumns = dto.SqlTargetColumns ?? [],
-            KeyColumns = dto.KeyColumns,
-            ValidFromColumn = dto.ValidFrom,
-            ValidToColumn = dto.ValidTo,
-            Supersedes = dto.Supersedes,
             StoredDefinitionHash = reader.GetString(5),
             ManagedBy = ReadManagedBy(reader, 6),
             UpdatedBy = reader.IsDBNull(8) ? null : reader.GetString(8),
-            UpdatedAt = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture),
-            Status = dto.Status ?? FilterApprovalStatus.Active,
-            CreatedBy = string.IsNullOrWhiteSpace(dto.CreatedBy) ? (Sid?)null : new Sid(dto.CreatedBy!),
-            ApprovedBy = string.IsNullOrWhiteSpace(dto.ApprovedBy) ? (Sid?)null : new Sid(dto.ApprovedBy!),
-            ApprovedAt = dto.ApprovedAt
+            UpdatedAt = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture)
         };
     }
 
@@ -227,32 +274,16 @@ internal static class VirtualFilterStore
     {
         var dto = JsonSerializer.Deserialize<ProfileDto>(reader.GetString(3))
             ?? throw new InvalidOperationException("Access profile definition is empty.");
-        return new AccessProfile
+        var id = Guid.Parse(reader.GetString(0));
+        var tenantId = new TenantId(reader.GetString(1));
+        var name = reader.GetString(2);
+        var profile = DtoToProfile(dto, id, tenantId, name);
+        return profile with
         {
-            Id = Guid.Parse(reader.GetString(0)),
-            TenantId = new TenantId(reader.GetString(1)),
-            Name = reader.GetString(2),
-            GranteeType = dto.GranteeType,
-            GranteeSid = string.IsNullOrWhiteSpace(dto.GranteeSid) ? (Sid?)null : new Sid(dto.GranteeSid!),
-            RoleName = dto.RoleName,
-            Scope = dto.Scope,
-            Uncovered = dto.Uncovered,
-            Bindings = dto.Bindings.Select(b => new FilterBinding
-            {
-                FilterName = b.Filter,
-                TargetPattern = b.Target,
-                ObjectKinds = b.ObjectKinds,
-                TimeColumn = b.TimeColumn,
-                ColumnMap = b.ColumnMap
-            }).ToList(),
             StoredDefinitionHash = reader.GetString(4),
             ManagedBy = ReadManagedBy(reader, 5),
             UpdatedBy = reader.IsDBNull(7) ? null : reader.GetString(7),
-            UpdatedAt = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
-            Status = dto.Status ?? FilterApprovalStatus.Active,
-            CreatedBy = string.IsNullOrWhiteSpace(dto.CreatedBy) ? (Sid?)null : new Sid(dto.CreatedBy!),
-            ApprovedBy = string.IsNullOrWhiteSpace(dto.ApprovedBy) ? (Sid?)null : new Sid(dto.ApprovedBy!),
-            ApprovedAt = dto.ApprovedAt
+            UpdatedAt = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture)
         };
     }
 
