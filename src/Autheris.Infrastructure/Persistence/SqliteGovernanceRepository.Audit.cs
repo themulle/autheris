@@ -205,8 +205,60 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
     private const string AuditGenesisHash = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
 
-    private Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct, SqliteTransaction? existingTx = null) =>
+    internal Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct, SqliteTransaction? existingTx = null) =>
         RecordAuditEventsBatchInternalAsync([entry], ct, existingTx);
+
+    private sealed class AuditTxPendingState
+    {
+        public required long PreTxSeq { get; init; }
+        public required string PreTxHash { get; init; }
+        public required long LastSeq { get; set; }
+        public required string LastHash { get; set; }
+    }
+
+    private readonly Dictionary<SqliteTransaction, AuditTxPendingState> _pendingAuditTxStates = new();
+
+    internal void OnTransactionCommitted(SqliteTransaction tx)
+    {
+        if (_pendingAuditTxStates.Remove(tx, out var state))
+        {
+            _lastAuditSeq = state.LastSeq;
+            _lastAuditHash = state.LastHash;
+
+            if (Volatile.Read(ref _auditChainViolation) == null)
+            {
+                try
+                {
+                    _auditAnchorStore.Save(CreateSignedAnchor(state.LastSeq, state.LastHash));
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Failed to persist the external audit chain anchor (seq {Sequence}).", state.LastSeq);
+                }
+            }
+        }
+    }
+
+    internal void OnTransactionRolledBack(SqliteTransaction tx)
+    {
+        if (_pendingAuditTxStates.Remove(tx, out var state))
+        {
+            _lastAuditSeq = state.PreTxSeq;
+            _lastAuditHash = state.PreTxHash;
+        }
+    }
+
+    internal void RollbackPendingAuditTransactions()
+    {
+        if (_pendingAuditTxStates.Count == 0) return;
+
+        foreach (var state in _pendingAuditTxStates.Values)
+        {
+            _lastAuditSeq = state.PreTxSeq;
+            _lastAuditHash = state.PreTxHash;
+        }
+        _pendingAuditTxStates.Clear();
+    }
 
     private async Task RecordAuditEventsBatchInternalAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct, SqliteTransaction? existingTx = null)
     {
@@ -225,21 +277,34 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
         if (!FixedTimeEqualsString(effectiveDbHash, _lastAuditHash) || dbTailSeq != _lastAuditSeq)
         {
-            var anchor = TryLoadVerifiedAnchor(out _);
-            var explainedByAnchor = anchor != null
-                                    && dbTailSeq > _lastAuditSeq
-                                    && anchor.Sequence == dbTailSeq
-                                    && FixedTimeEqualsString(anchor.EntryHash, effectiveDbHash);
-            if (!explainedByAnchor)
+            // SEC-CRYPTO-01 / SR15-24: If an uncommitted transaction was rolled back without calling OnTransactionRolledBack,
+            // clean up pending states and revert in-memory pointers to the committed DB tail.
+            if (_pendingAuditTxStates.Count > 0 && dbTailSeq < _lastAuditSeq)
             {
-                FlagAuditChainViolation(
-                    $"Audit chain tail in DB (seq {dbTailSeq}) diverges from the in-memory reference (seq {_lastAuditSeq}) without a matching signed anchor - possible truncation or rewrite.");
+                RollbackPendingAuditTransactions();
             }
 
-            // Keep the chain linear; verification stays failed while a violation is flagged.
-            _lastAuditHash = effectiveDbHash;
-            _lastAuditSeq = dbTailSeq;
+            if (!FixedTimeEqualsString(effectiveDbHash, _lastAuditHash) || dbTailSeq != _lastAuditSeq)
+            {
+                var anchor = TryLoadVerifiedAnchor(out _);
+                var explainedByAnchor = anchor != null
+                                        && dbTailSeq > _lastAuditSeq
+                                        && anchor.Sequence == dbTailSeq
+                                        && FixedTimeEqualsString(anchor.EntryHash, effectiveDbHash);
+                if (!explainedByAnchor)
+                {
+                    FlagAuditChainViolation(
+                        $"Audit chain tail in DB (seq {dbTailSeq}) diverges from the in-memory reference (seq {_lastAuditSeq}) without a matching signed anchor - possible truncation or rewrite.");
+                }
+
+                // Keep the chain linear; verification stays failed while a violation is flagged.
+                _lastAuditHash = effectiveDbHash;
+                _lastAuditSeq = dbTailSeq;
+            }
         }
+
+        long preTxSeq = _lastAuditSeq;
+        string preTxHash = _lastAuditHash;
 
         long lastSequence = _lastAuditSeq;
         string lastEntryHash = _lastAuditHash;
@@ -304,26 +369,52 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         {
             await ownedTx.CommitAsync(ct).ConfigureAwait(false);
             ownedTx.Dispose();
+
+            _lastAuditHash = lastEntryHash;
+            _lastAuditSeq = lastSequence;
+
+            // SEC H-17 / E-11: advance the external signed anchor only AFTER the commit while the write lock is still
+            // held. Append-only (WORM) anchor stores cannot take an anchor back, so an anchor that is ahead of the
+            // database must never exist; a crash between commit and anchor only leaves the anchor behind the tail,
+            // which is harmless. An anchor is never advanced while a violation is flagged (it would otherwise
+            // "launder" a truncated chain).
+            if (Volatile.Read(ref _auditChainViolation) == null)
+            {
+                try
+                {
+                    _auditAnchorStore.Save(CreateSignedAnchor(lastSequence, lastEntryHash));
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Failed to persist the external audit chain anchor (seq {Sequence}).", lastSequence);
+                }
+            }
         }
-
-        _lastAuditHash = lastEntryHash;
-        _lastAuditSeq = lastSequence;
-
-        // SEC H-17 / E-11: advance the external signed anchor only AFTER the commit while the write lock is still
-        // held. Append-only (WORM) anchor stores cannot take an anchor back, so an anchor that is ahead of the
-        // database must never exist; a crash between commit and anchor only leaves the anchor behind the tail,
-        // which is harmless. An anchor is never advanced while a violation is flagged (it would otherwise
-        // "launder" a truncated chain).
-        if (Volatile.Read(ref _auditChainViolation) == null)
+        else
         {
-            try
+            // SEC-CRYPTO-01 / SR15-24: Caller-managed transaction (e.g. Consent approval/creation).
+            // Do NOT advance the external signed anchor until the caller explicitly commits the transaction!
+            // Append-only (WORM) anchor stores cannot take an anchor back, so writing the anchor before commit
+            // causes permanent chain violation if the transaction rolls back.
+            if (!_pendingAuditTxStates.TryGetValue(existingTx!, out var pendingState))
             {
-                _auditAnchorStore.Save(CreateSignedAnchor(lastSequence, lastEntryHash));
+                _pendingAuditTxStates[existingTx!] = new AuditTxPendingState
+                {
+                    PreTxSeq = preTxSeq,
+                    PreTxHash = preTxHash,
+                    LastSeq = lastSequence,
+                    LastHash = lastEntryHash
+                };
             }
-            catch (Exception ex)
+            else
             {
-                _logger?.LogError(ex, "Failed to persist the external audit chain anchor (seq {Sequence}).", lastSequence);
+                pendingState.LastSeq = lastSequence;
+                pendingState.LastHash = lastEntryHash;
             }
+
+            // Tentatively advance in-memory pointers so consecutive writes within this transaction chain correctly
+            _lastAuditHash = lastEntryHash;
+            _lastAuditSeq = lastSequence;
         }
     }
 
@@ -451,6 +542,15 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         await _lock.WaitAsync(ct);
         try
         {
+            if (_pendingAuditTxStates.Count > 0)
+            {
+                var (_, tailSeq) = ReadAuditTail(null);
+                if (tailSeq < _lastAuditSeq)
+                {
+                    RollbackPendingAuditTransactions();
+                }
+            }
+
             var violation = Volatile.Read(ref _auditChainViolation);
             if (violation != null)
             {

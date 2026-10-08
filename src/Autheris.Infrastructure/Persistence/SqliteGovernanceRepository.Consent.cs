@@ -882,11 +882,13 @@ public partial class SqliteGovernanceRepository
 
             await IncrementTableEpochInternalAsync(req.TableIdentifier, tx, ct);
             await tx.CommitAsync(ct);
+            OnTransactionCommitted(tx);
 
             await _epochValidationService.InvalidateEpochAsync(req.TableIdentifier, ct);
         }
         finally
         {
+            RollbackPendingAuditTransactions();
             _lock.Release();
         }
     }
@@ -1147,10 +1149,12 @@ public partial class SqliteGovernanceRepository
                 ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null), ct, tx);
 
             tx.Commit();
+            OnTransactionCommitted(tx);
             return req;
         }
         finally
         {
+            RollbackPendingAuditTransactions();
             _lock.Release();
         }
     }
@@ -1224,10 +1228,12 @@ public partial class SqliteGovernanceRepository
                 ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason), ct, tx);
 
             tx.Commit();
+            OnTransactionCommitted(tx);
             return req;
         }
         finally
         {
+            RollbackPendingAuditTransactions();
             _lock.Release();
         }
     }
@@ -1334,6 +1340,7 @@ public partial class SqliteGovernanceRepository
 
             await IncrementTableEpochInternalAsync(consent.TableIdentifier, tx, ct);
             await tx.CommitAsync(ct);
+            OnTransactionCommitted(tx);
 
             // Invalidate cache after successful commit
             await _epochValidationService.InvalidateEpochAsync(consent.TableIdentifier, ct);
@@ -1342,6 +1349,7 @@ public partial class SqliteGovernanceRepository
         }
         finally
         {
+            RollbackPendingAuditTransactions();
             _lock.Release();
         }
     }

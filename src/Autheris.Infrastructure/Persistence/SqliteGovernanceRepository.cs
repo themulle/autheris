@@ -21,6 +21,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
     internal SqliteConnection Connection => _connection;
     private readonly IEpochValidationService _epochValidationService;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    internal Task LockAsync(CancellationToken ct = default) => _lock.WaitAsync(ct);
+    internal void ReleaseLock() => _lock.Release();
     private readonly ConcurrentDictionary<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
     private volatile bool _isAuditPipelineFaulted = false;
