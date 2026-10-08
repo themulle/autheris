@@ -92,6 +92,9 @@ public sealed class MaskingRule
     public string? Replacement { get; init; }
     public string? HmacKeyId { get; init; }
 
+    /// <summary>R-POL-12: the one definition of a keyed pseudonymization rule (HMAC, HMAC_SHA256 and the HASH alias).</summary>
+    public bool IsHmac => (RuleType ?? string.Empty).Trim().ToUpperInvariant() is "HMAC" or "HMAC_SHA256" or "HASH";
+
     /// <summary>
     /// SEC H-13 / SEC D-3: Creates a tenant-scoped copy of an HMAC masking rule, keyed as {baseKeyId}|tenant:{tenant}.
     /// Idempotent: a rule that is already scoped to the requested tenant is returned unchanged.

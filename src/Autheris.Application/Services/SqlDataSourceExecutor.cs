@@ -505,8 +505,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         return $"{maskExpr} AS {quotedCol}";
     }
 
-    private static bool IsHmacRule(MaskingRule rule) =>
-        rule.RuleType?.ToUpperInvariant() is "HMAC" or "HMAC_SHA256" or "HASH";
+    private static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;
 
     /// <summary>
     /// SEC H-13: Derives a tenant-scoped HMAC key id so pseudonyms cannot be correlated across tenants.

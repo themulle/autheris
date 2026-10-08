@@ -247,7 +247,6 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
         return predicates;
     }
 
-    private static bool IsHmacRule(MaskingRule rule) =>
-        rule.RuleType != null &&
-        rule.RuleType.StartsWith("HMAC", StringComparison.OrdinalIgnoreCase);
+    // R-POL-12: same rule set as the SQL paths (HASH included).
+    private static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;
 }
