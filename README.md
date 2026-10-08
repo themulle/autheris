@@ -233,9 +233,9 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
 
 | Configuration Switch | Classification | Behavior |
 |---|---|---|
-| `danger_allow_anonymous_access`, `danger_bypass_consent_checks`, `danger_disable_column_masking`, `danger_allow_insecure_transport`, `danger_bypass_webhook_signature_validation`, `danger_bypass_mcp_auth`, `danger_bypass_websql_governance`, `OpenSchema` | DANGER | Outside of `Development`, the gateway strictly refuses to start (`ValidateGatewayOptions`). `/health/ready` reports 503 Unhealthy. |
-| `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests` | DANGER (Legacy Prefix) | Fatal startup error outside of `Development`. |
-| `warn_allow_all_cors_origins`, `warn_relaxed_query_limits`, `warn_enable_introspection`, `warn_fallback_default_tenant_for_webhooks`, `Catalog.AllowLegacyPayloadOnlySignature`, `Itsm.LegacyGlobalWebhookSecret` | WARN | Permitted in production, but generates console warning banners and marks health status as `degraded`. |
+| `danger_allow_anonymous_access`, `danger_bypass_consent_checks`, `danger_disable_column_masking`, `danger_allow_insecure_transport`, `danger_bypass_webhook_signature_validation`, `danger_bypass_mcp_auth`, `danger_bypass_websql_governance`, `OpenSchema`, `Itsm.LegacyGlobalWebhookSecret` | DANGER | Outside of `Development`, the gateway strictly refuses to start (`ValidateGatewayOptions`). `/health/ready` reports 503 Unhealthy. |
+| `warn_allow_unmasked_ai_access`, `warn_mock_external_systems_if_unreachable`, `warn_auto_approve_access_requests`, `warn_disable_rate_limiting`, `warn_allow_unsigned_s3_requests`, `warn_fallback_default_tenant_for_webhooks` | DANGER (Legacy Prefix) | Fatal startup error outside of `Development`. |
+| `warn_allow_all_cors_origins`, `warn_relaxed_query_limits`, `warn_enable_introspection`, `Catalog.AllowLegacyPayloadOnlySignature` | WARN | Permitted in production, but generates console warning banners and marks health status as `degraded`. |
 | `WebSql.AllowDml` (+ mandatory `WebSql.DmlWriterRoles`) | Regular Option | Transactional DML execution with automated rollback and cryptographic audit trail logging. |
 
 ---

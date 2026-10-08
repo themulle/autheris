@@ -83,9 +83,9 @@ The Gateway mediates all queries to enterprise data stores. The caller's identit
    - Distributed sliding-window rate limiters and token buckets protect against cluster-wide DoS attacks.
    - Distributed mutation idempotency deduplicates governance operations across replicas.
 6. **Tamper-Evident Audit Hash Chaining (F-DATA-09)**:
-   - Every mutation and policy transition generates an audit record whose SHA-256 hash incorporates the previous record's hash, forming an unbroken cryptographic chain.
+   - Every mutation and policy transition generates an audit record whose SHA-256 hash incorporates the previous record's hash, forming an unbroken cryptographic chain. Outside Development, HMAC keys require at least 32 UTF-8 bytes (minimum 256 bits of entropy, recommended as Base64, R-DEP-2).
 7. **Enforced Four-Eyes Lifecycle & Separation of Duties (F-CONS-05)**:
-   - High-sensitivity tables require two distinct approvers (`RequiresFourEyes = true`).
+   - High-sensitivity tables require two distinct approvers (`RequiresFourEyes = true`). Under D-4 (ADR-010), high sensitivity applies to `CONFIDENTIAL` and higher (rank >= 3) as well as unknown values; `MEDIUM` is not high sensitivity.
    - Self-approval by requesters and duplicate approvals by the same approver are strictly prohibited.
 
 ---
@@ -254,7 +254,7 @@ sequenceDiagram
 - **Apache Iceberg v2 Lakehouse Engine**: Direct querying of tabular datasets stored in open table formats on object storage (Amazon S3 with SigV4, Azure Blob, and local filesystems).
 - **Vectorized Partition & Stats Pruning**: Evaluates table snapshot manifests and column min/max statistics to prune unneeded Parquet files prior to data loading.
 - **Lakehouse Metadata Caching**: Two-tier caching of table metadata and manifest lists with configurable TTL (`MetadataCacheTtlMinutes`).
-- **Pushdown Zero-Trust Governance**: Applies column-level masking and Casbin ABAC row-level security pushdown directly to lakehouse execution plans.
+- **Pushdown Zero-Trust Governance**: Applies column-level masking and Casbin ABAC row-level security pushdown directly to lakehouse execution plans (`Casbin:Enabled` defaults to `false` and validates against `CasbinModelContract`).
 
 ### 8.7 Realtime Event Subscriptions & In-Stream Casbin RLS
 - **GraphQL Subscriptions Engine**: WebSocket (`graphql-transport-ws`) and Server-Sent Events (SSE) streaming.

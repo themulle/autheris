@@ -16,16 +16,16 @@ Regeln: Ein Thema pro Commit. TDD: Jeder Sicherheitstest muss ohne Fix rot sein.
 | DEP-5-Rest | Altes ghcr-Paket (`…/gql`) manuell löschen; das Image heißt jetzt `ghcr.io/themulle/autheris`. |
 | CI | PR nach `main` öffnen, damit die CI läuft (läuft nur auf `main`/PRs). |
 
-## 2. Dokumentation
+## 2. Dokumentation (Completed / Erledigt)
 
-| ID | Punkt |
-|---|---|
-| F-6 | `configuration-guide.md` (Casbin, ca. Z. 750–790): Probe-Tabelle an `CasbinModelContract` angleichen (M1 Grund-Allow, M2 Mandanten-Trennung, M3 Subjekt, M4 Objekt, M5 Deny gewinnt, M6 `sub_rule`, M7 Rollen über `g`, M8 Rolle nicht für andere Nutzer; W1 Wildcard-Fähigkeit, W2–W6 nur wenn W1). `ModelPath` ist bei `Enabled=true` Pflicht und wird geprüft, sobald gesetzt. Semantikabschnitt: globale `*`-Regeln gelten für alle Mandanten, Deny gewinnt dateiübergreifend, Mandanten-Datei braucht `p`-Regeln (F-1). |
-| E-6 | Dokumentieren: Eine leere Mandanten-Datei wird abgelehnt, solange `*`-Regeln aktiv sind. |
-| R-API-1 | Migrationshinweis: `Itsm.LegacyGlobalWebhookSecret=true` und die DANGER-Schalter verhindern den Start außerhalb Development. |
-| R-DEP-2 | Schlüsselformat dokumentieren: geprüft werden UTF-8-Bytes des Textes (32 Hex-Zeichen = 16 Byte Entropie); Empfehlung Base64 aus 32 Zufallsbytes. |
-| R-SQL-10 / SQL2-1 | Test „maskierte Spalte, als `clear` deklariert, bleibt Mask“ und „ohne Browse-Quellinfo wird `clear`-Spalte entfernt“; ADR-018 ergänzen. |
-| Arch 6 | Doku generell an die Optionsklassen angleichen (Casbin `Enabled`, 32-Byte-Schlüssel, D-4-Sensitivität ist in ADR-010). |
+| ID | Item / Punkt | Status |
+|---|---|---|
+| F-6 | Aligned Casbin probe table in `configuration-guide.md` to `CasbinModelContract` (M1–M8 mandatory, W1–W6 wildcard probes). Documented that `Casbin:ModelPath` is mandatory when `Casbin:Enabled=true` and validated as soon as set. Added Policy Semantics section covering global `*` rules, cross-file deny precedence, and tenant policy `p`-rule requirement (F-1). | Completed ✔ |
+| E-6 | Documented that an empty tenant policy file is rejected whenever global `*` rules are active. | Completed ✔ |
+| R-API-1 | Added migration notice in `configuration-guide.md` and `developer-guide.md`: `Itsm.LegacyGlobalWebhookSecret=true` and `DANGER:` bypass flags strictly block startup outside Development with `ValidationException`. | Completed ✔ |
+| R-DEP-2 | Documented secret key format and requirements across guides and threat model: validation checks UTF-8 bytes (>= 32 bytes required); noted that 32 hex chars yield only 16 bytes of entropy; recommended Base64 from >= 32 random bytes. | Completed ✔ |
+| R-SQL-10 / SQL2-1 | Updated `ADR-018-governed-stored-procedures.md`: documented that a masked column declared as `clear` remains masked, and without browse source info the clear column is removed fail-closed. | Completed ✔ |
+| Arch 6 | Aligned documentation across files with options classes: `Casbin:Enabled` default `false`, >= 32-byte secret requirement, and D-4 sensitivity ranking (ADR-010). | Completed ✔ |
 
 ## 3. Tests nachziehen (Phase 2)
 
