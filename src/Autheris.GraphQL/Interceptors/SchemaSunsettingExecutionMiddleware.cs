@@ -111,8 +111,8 @@ public sealed class SchemaSunsettingExecutionMiddleware
 
             if (httpContext != null && !string.IsNullOrWhiteSpace(eval.HttpSunsetHeader))
             {
-                httpContext.Response.Headers["Sunset"] = eval.HttpSunsetHeader;
-                httpContext.Response.Headers["Deprecation"] = "@" + eval.SunsetDate.ToUnixTimeSeconds();
+                HttpResponseGuard.SetHeader(httpContext, "Sunset", eval.HttpSunsetHeader);
+                HttpResponseGuard.SetHeader(httpContext, "Deprecation", "@" + eval.SunsetDate.ToUnixTimeSeconds());
             }
 
             activeNotices.Add(eval);
