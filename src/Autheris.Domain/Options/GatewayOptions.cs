@@ -527,6 +527,22 @@ public sealed class EntraIdAuthOptions
     public string SidClaimType { get; init; } = "oid";
     public string GroupsClaimType { get; init; } = "groups";
     public string RolesClaimType { get; init; } = "roles";
+
+    /// <summary>
+    /// Delegated scopes (<c>scp</c>) that only permit reading, e.g. an agent scope. A user token whose scopes all appear
+    /// here is read-only: writes over HTTP, GraphQL mutations and WebSQL DML are rejected.
+    /// </summary>
+    public List<string> ReadOnlyScopes { get; init; } = ["Agent.Read"];
+
+    /// <summary>How app-only tokens (client credentials, no signed-in person) are treated.</summary>
+    public AppOnlyTokenAccess AppOnlyTokens { get; init; } = AppOnlyTokenAccess.ReadWrite;
+}
+
+public enum AppOnlyTokenAccess
+{
+    ReadWrite,
+    ReadOnly,
+    Deny
 }
 
 public sealed class AdfsAuthOptions
