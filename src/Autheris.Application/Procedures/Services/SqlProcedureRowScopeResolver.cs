@@ -146,6 +146,16 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
             ? await connection.BeginTransactionAsync(ct).ConfigureAwait(false)
             : null;
 
+        if (tx != null)
+        {
+            // R-SQL-4: the lookup must not change data, also not through a function in a consent filter. SET TRANSACTION
+            // must precede every query of the transaction, so it runs before the session initializer.
+            await using var readOnly = connection.CreateCommand();
+            readOnly.Transaction = tx;
+            readOnly.CommandText = "SET TRANSACTION READ ONLY";
+            await readOnly.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
         await _sessionInitializer.InitializeSessionAsync(
             connection,
             tx,
