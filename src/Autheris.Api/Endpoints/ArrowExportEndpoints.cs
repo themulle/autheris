@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
@@ -68,18 +69,45 @@ public static class ArrowExportEndpoints
 
         if (string.IsNullOrWhiteSpace(table))
         {
-            try
+            if (httpContext.Request.ContentType != null &&
+                httpContext.Request.ContentType.Contains("json", StringComparison.OrdinalIgnoreCase))
             {
-                var body = await httpContext.Request.ReadFromJsonAsync<ArrowExportPayload>(cancellationToken: ct).ConfigureAwait(false);
-                if (body != null)
+                httpContext.Request.EnableBuffering();
+                try
                 {
-                    table = body.Table;
-                    sql = body.Sql;
+                    using var doc = await JsonDocument.ParseAsync(httpContext.Request.Body, cancellationToken: ct).ConfigureAwait(false);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                    {
+                        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var prop in doc.RootElement.EnumerateObject())
+                        {
+                            if (!seen.Add(prop.Name))
+                            {
+                                return Results.Problem(
+                                    statusCode: StatusCodes.Status400BadRequest,
+                                    title: "Bad Request",
+                                    detail: "Duplicate properties in JSON request body are not permitted.");
+                            }
+
+                            if (string.Equals(prop.Name, "table", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
+                            {
+                                table = prop.Value.GetString();
+                            }
+                            else if (string.Equals(prop.Name, "sql", StringComparison.OrdinalIgnoreCase) && prop.Value.ValueKind == JsonValueKind.String)
+                            {
+                                sql = prop.Value.GetString();
+                            }
+                        }
+                    }
                 }
-            }
-            catch
-            {
-                // Fall-through
+                catch (JsonException)
+                {
+                    // Fall-through
+                }
+                finally
+                {
+                    httpContext.Request.Body.Position = 0;
+                }
             }
         }
 
@@ -104,6 +132,19 @@ public static class ArrowExportEndpoints
                     statusCode: StatusCodes.Status400BadRequest,
                     title: "Bad Request",
                     detail: $"Invalid table identifier '{table}'.");
+            }
+        }
+
+        // WebSQL finding 4.3 & SR15-21: Ensure target table matches ReBAC-authorized table if checked by route filter
+        if (httpContext.Items.TryGetValue("RebacValidated:table", out var rebacTableObj) && rebacTableObj is string rebacTable && !string.IsNullOrWhiteSpace(table))
+        {
+            var normRebac = TableIdentifierNormalizer.Normalize(rebacTable).ToQualifiedName();
+            if (!string.Equals(table, normRebac, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Problem(
+                    statusCode: StatusCodes.Status403Forbidden,
+                    title: "Forbidden",
+                    detail: "Access denied by ReBAC policy.");
             }
         }
 
@@ -149,6 +190,7 @@ public static class ArrowExportEndpoints
             // RR-L3-03: never echo exception, parser or database messages (table/column oracle, backend details).
             var logger = httpContext.RequestServices?.GetService<ILoggerFactory>()?.CreateLogger("Autheris.Api.Endpoints.ArrowExport");
             var traceId = httpContext.TraceIdentifier;
+            var isProduction = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
             switch (ex)
             {
                 case System.Security.SecurityException secEx:
@@ -156,7 +198,7 @@ public static class ArrowExportEndpoints
                     return Results.Problem(
                         statusCode: StatusCodes.Status403Forbidden,
                         title: "Forbidden",
-                        detail: secEx is Autheris.Application.Sql.WebSqlPolicyException ? secEx.Message : WebSqlEndpoints.GenericForbiddenMessage,
+                        detail: (!isProduction && secEx is Autheris.Application.Sql.WebSqlPolicyException) ? secEx.Message : WebSqlEndpoints.GenericForbiddenMessage,
                         extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
                 case ArgumentException argEx:
                     logger?.LogWarning(argEx, "Arrow export bad request. TraceId={TraceId}", traceId);

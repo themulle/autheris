@@ -154,4 +154,63 @@ public sealed class ArrowExportRebacBodyTests
         await sql.Received(1).ExecuteQueryBufferedAsync(
             Arg.Is<GovernedSqlQueryRequest>(r => r.Sql == "SELECT id FROM sales.public.orders"), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task Filter_DuplicateKeysInBody_Returns400BadRequest()
+    {
+        var services = await CreateServicesAsync("sales.public.orders");
+        // Attacker payload: first key is allowed, second key is sensitive hr.dbo.salaries
+        var context = CreateContext(services, "{\"table\":\"sales.public.orders\",\"Table\":\"hr.dbo.salaries\"}");
+
+        var (result, nextCalled) = await RunFilterAsync(context);
+
+        nextCalled.ShouldBeFalse();
+        var problem = result.ShouldBeOfType<ProblemHttpResult>();
+        problem.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        problem.ProblemDetails.Detail.ShouldNotBeNull().ShouldContain("Duplicate");
+    }
+
+    [Fact]
+    public async Task Handler_DuplicateKeysInBody_Returns400BadRequest()
+    {
+        var services = await CreateServicesAsync("sales.public.orders");
+        var context = CreateContext(services, "{\"table\":\"sales.public.orders\",\"Table\":\"hr.dbo.salaries\"}");
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+
+        var result = await ArrowExportEndpoints.HandleArrowExportAsync(
+            context, new ArrowExportService(services.GetRequiredService<IOptions<GatewayOptions>>(), NullLogger<ArrowExportService>.Instance), sql, CancellationToken.None);
+
+        var problem = result.ShouldBeOfType<ProblemHttpResult>();
+        problem.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        problem.ProblemDetails.Detail.ShouldNotBeNull().ShouldContain("Duplicate");
+        await sql.DidNotReceiveWithAnyArgs().ExecuteQueryBufferedAsync(default!, default!, default, default);
+    }
+
+    [Fact]
+    public async Task Handler_InProduction_SanitizesWebSqlPolicyException()
+    {
+        var prodEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        prodEnv.EnvironmentName.Returns("Production");
+
+        var services = new ServiceCollection();
+        services.AddSingleton(prodEnv);
+        services.AddLogging();
+        services.AddSingleton(Options.Create(new GatewayOptions()));
+        var sp = services.BuildServiceProvider();
+
+        var context = CreateContext(sp, "{\"table\":\"sales.public.orders\"}");
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<GovernedSqlResult>(new Autheris.Application.Sql.WebSqlPolicyException("Sensitive internal table structure revealed")));
+
+        var result = await ArrowExportEndpoints.HandleArrowExportAsync(
+            context, new ArrowExportService(Options.Create(new GatewayOptions()), NullLogger<ArrowExportService>.Instance), sql, CancellationToken.None);
+
+        var problem = result.ShouldBeOfType<ProblemHttpResult>();
+        problem.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        problem.ProblemDetails.Detail.ShouldBe(WebSqlEndpoints.GenericForbiddenMessage);
+        problem.ProblemDetails.Detail.ShouldNotBeNull().ShouldNotContain("Sensitive internal table structure revealed");
+        problem.ProblemDetails.Extensions.ShouldContainKey("traceId");
+    }
 }
+

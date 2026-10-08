@@ -327,14 +327,22 @@ public static class SqlEndpointRoutes
         }
         catch (ArgumentException argEx)
         {
+            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = argEx.Message }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = !isProd ? argEx.Message : WebSqlEndpoints.GenericBadRequestMessage
+            }, ct).ConfigureAwait(false);
         }
         catch (SecurityException secEx)
         {
             logger.LogWarning(secEx, "Security policy violation when executing endpoint '{EndpointName}'.", name);
+            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
             httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await httpContext.Response.WriteAsJsonAsync(new { error = secEx.Message }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = (!isProd && secEx is Autheris.Application.Sql.WebSqlPolicyException) ? secEx.Message : WebSqlEndpoints.GenericForbiddenMessage
+            }, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -398,14 +406,22 @@ public static class SqlEndpointRoutes
         }
         catch (ArgumentException argEx)
         {
+            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = argEx.Message }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = !isProd ? argEx.Message : WebSqlEndpoints.GenericBadRequestMessage
+            }, ct).ConfigureAwait(false);
         }
         catch (SecurityException secEx)
         {
             logger.LogWarning(secEx, "Security policy violation when executing endpoint '{EndpointName}'.", name);
+            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
             httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await httpContext.Response.WriteAsJsonAsync(new { error = secEx.Message }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = (!isProd && secEx is Autheris.Application.Sql.WebSqlPolicyException) ? secEx.Message : WebSqlEndpoints.GenericForbiddenMessage
+            }, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

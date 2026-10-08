@@ -93,9 +93,23 @@ public sealed class RebacEndpointFilter : IEndpointFilter
         }
         else if (_source == RebacParameterSource.QueryOrJsonBody)
         {
-            objectId = httpContext.Request.Query.TryGetValue(_paramName, out var queryOrBodyVal) && !string.IsNullOrWhiteSpace(queryOrBodyVal)
-                ? queryOrBodyVal.ToString()
-                : await ReadJsonBodyPropertyAsync(httpContext.Request, _paramName, httpContext.RequestAborted).ConfigureAwait(false);
+            if (httpContext.Request.Query.TryGetValue(_paramName, out var queryOrBodyVal) && !string.IsNullOrWhiteSpace(queryOrBodyVal))
+            {
+                objectId = queryOrBodyVal.ToString();
+            }
+            else
+            {
+                var bodyResult = await ReadJsonBodyPropertyAsync(httpContext.Request, _paramName, httpContext.RequestAborted).ConfigureAwait(false);
+                if (bodyResult.HasDuplicateProperties)
+                {
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status400BadRequest,
+                        title: "Bad Request",
+                        detail: "Duplicate properties in JSON request body are not permitted.");
+                }
+
+                objectId = bodyResult.Value;
+            }
         }
 
         if (string.IsNullOrWhiteSpace(objectId))
@@ -137,18 +151,22 @@ public sealed class RebacEndpointFilter : IEndpointFilter
                 detail: "Access denied by ReBAC policy.");
         }
 
+        httpContext.Items[$"RebacValidated:{_paramName}"] = objectId;
+
         return await next(context).ConfigureAwait(false);
     }
 
+    private readonly record struct JsonBodyReadResult(string? Value, bool HasDuplicateProperties);
+
     /// <summary>
-    /// Top-level string property <paramref name="name"/> (case-insensitive) of a JSON body; null when the body is not a
-    /// JSON object or lacks the property. The body is rewound for the handler.
+    /// Top-level string property <paramref name="name"/> (case-insensitive) of a JSON body; returns result indicating
+    /// matched value and whether duplicate properties were detected. The body is rewound for the handler.
     /// </summary>
-    private static async Task<string?> ReadJsonBodyPropertyAsync(HttpRequest request, string name, CancellationToken ct)
+    private static async Task<JsonBodyReadResult> ReadJsonBodyPropertyAsync(HttpRequest request, string name, CancellationToken ct)
     {
         if (request.ContentType == null || !request.ContentType.Contains("json", StringComparison.OrdinalIgnoreCase))
         {
-            return null;
+            return default;
         }
 
         request.EnableBuffering();
@@ -157,22 +175,30 @@ public sealed class RebacEndpointFilter : IEndpointFilter
             using var document = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct).ConfigureAwait(false);
             if (document.RootElement.ValueKind != JsonValueKind.Object)
             {
-                return null;
+                return default;
             }
+
+            string? matchedValue = null;
+            var seenProperties = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var property in document.RootElement.EnumerateObject())
             {
+                if (!seenProperties.Add(property.Name))
+                {
+                    return new JsonBodyReadResult(null, HasDuplicateProperties: true);
+                }
+
                 if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind == JsonValueKind.String)
                 {
-                    return property.Value.GetString();
+                    matchedValue = property.Value.GetString();
                 }
             }
 
-            return null;
+            return new JsonBodyReadResult(matchedValue, HasDuplicateProperties: false);
         }
         catch (JsonException)
         {
-            return null;
+            return default;
         }
         finally
         {
