@@ -462,7 +462,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             case JsonObject obj:
                 if (obj.TryGetPropertyValue(column, out var value) && value != null)
                 {
-                    var raw = value.GetValueKind() == JsonValueKind.String ? value.GetValue<string>() : value.ToJsonString();
+                    // SQL2-12: same canonical input as the REST paths, so a value gets the same pseudonym on every API.
+                    var raw = Autheris.Application.Services.MaskingInputCanonicalizer.FromJson(value);
                     var masked = _maskingProvider.MaskValue(column, raw, rule);
                     obj[column] = masked == null ? null : JsonValue.Create(Convert.ToString(masked, System.Globalization.CultureInfo.InvariantCulture));
                 }

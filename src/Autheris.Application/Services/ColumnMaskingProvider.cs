@@ -82,19 +82,8 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
             }
         }
 
-        // SEC-SPEC-04: Deterministic culture-invariant UTC normalization for timestamps
-        string textValue = rawValue switch
-        {
-            DateTime dt => (dt.Kind == DateTimeKind.Unspecified
-                ? DateTime.SpecifyKind(dt, DateTimeKind.Utc)
-                : dt.ToUniversalTime()).ToString("O", CultureInfo.InvariantCulture),
-            DateTimeOffset dto => dto.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
-            DateOnly d => d.ToString("O", CultureInfo.InvariantCulture),
-            TimeOnly t => t.ToString("O", CultureInfo.InvariantCulture),
-            TimeSpan ts => ts.ToString("c", CultureInfo.InvariantCulture),
-            string s when s.Length >= 19 && s[10] == 'T' && !s.EndsWith('Z') && !s.Contains('+') && s.IndexOf('-', 11) == -1 => s + "Z",
-            _ => rawValue.ToString() ?? string.Empty
-        };
+        // SEC-SPEC-04 / SQL2-12: culture-invariant canonical text (UTC timestamps), shared with the GraphQL tree path
+        string textValue = MaskingInputCanonicalizer.ToCanonicalString(rawValue);
 
         switch (ruleType)
         {
