@@ -173,4 +173,26 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         var polled = await _manager.GetStatusOrWaitAsync(status.StatementId, TestUser, TestTenant, TimeSpan.FromMilliseconds(10));
         polled.State.ShouldBe("CANCELED");
     }
+
+    [Fact]
+    public async Task SubmitOrWaitAsync_WhenExecutionFaultsWithDatabaseError_SanitizesErrorMessage()
+    {
+        // Arrange
+        var request = new GovernedSqlQueryRequest("SELECT secret_iban FROM default.dbo.users");
+        var tcs = new TaskCompletionSource<GovernedSqlResult>();
+        tcs.SetException(new InvalidOperationException("Conversion failed when converting the varchar value 'SECRET_IBAN_99999' to data type int"));
+
+        _sqlExecutionService.ExecuteQueryBufferedAsync(request, TestUser, TestTenant, Arg.Any<CancellationToken>())
+            .Returns(tcs.Task);
+
+        // Act
+        var status = await _manager.SubmitOrWaitAsync(request, TestUser, TestTenant, TimeSpan.FromSeconds(2));
+
+        // Assert
+        status.ShouldNotBeNull();
+        status.State.ShouldBe("FAILED");
+        status.ErrorMessage.ShouldNotBeNull();
+        status.ErrorMessage.ShouldNotContain("SECRET_IBAN");
+        status.ErrorMessage.ShouldBe("The SQL statement could not be executed. Contact support with the trace id.");
+    }
 }

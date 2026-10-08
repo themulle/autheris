@@ -925,12 +925,17 @@ public static class WebSqlEndpoints
         object? trinoError = null;
         if (status.State == "FAILED")
         {
+            var msg = status.ErrorMessage ?? GenericServerErrorMessage;
+            bool isInternalError = msg.Contains("Contact support", StringComparison.OrdinalIgnoreCase) ||
+                                   msg.Equals(GenericServerErrorMessage, StringComparison.OrdinalIgnoreCase) ||
+                                   msg.Equals("Statement execution failed.", StringComparison.OrdinalIgnoreCase);
+
             trinoError = new
             {
-                message = status.ErrorMessage ?? "Statement execution failed.",
-                errorCode = 1,
-                errorName = "SYNTAX_ERROR",
-                errorType = "USER_ERROR"
+                message = msg,
+                errorCode = isInternalError ? 2 : 1,
+                errorName = isInternalError ? "INTERNAL_ERROR" : "SYNTAX_ERROR",
+                errorType = isInternalError ? "INTERNAL_ERROR" : "USER_ERROR"
             };
         }
 

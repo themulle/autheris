@@ -158,7 +158,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         return BuildStatus(session);
     }
 
-    private static StatementExecutionStatus BuildStatus(StatementSession session)
+    private StatementExecutionStatus BuildStatus(StatementSession session)
     {
         long elapsedMillis = session.Stopwatch.ElapsedMilliseconds;
 
@@ -189,13 +189,15 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         if (session.ExecutionTask.IsFaulted)
         {
             var ex = session.ExecutionTask.Exception?.InnerException ?? session.ExecutionTask.Exception;
+            _logger?.LogError(ex, "WebSQL async execution faulted for statement {StatementId}", session.StatementId);
+
             return new StatementExecutionStatus(
                 session.StatementId,
                 "FAILED",
                 Columns: null,
                 Data: null,
                 NextUri: null,
-                ErrorMessage: ex?.Message ?? "Query execution failed.",
+                ErrorMessage: SanitizeErrorMessage(ex),
                 ElapsedTimeMillis: elapsedMillis);
         }
 
@@ -338,6 +340,34 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             try { session.Cts.Dispose(); } catch { }
         }
         _sessions.Clear();
+    }
+
+    private static string SanitizeErrorMessage(Exception? ex)
+    {
+        if (ex == null)
+        {
+            return "Statement execution failed.";
+        }
+
+        if (ex is OperationCanceledException or TimeoutException)
+        {
+            return "Query execution timed out or was canceled.";
+        }
+
+        if (ex is Autheris.Domain.Exceptions.GatewayInvalidQueryException or
+                  Antlr4.Runtime.Misc.ParseCanceledException or
+                  ArgumentException)
+        {
+            return ex.Message;
+        }
+
+        if (ex is Autheris.Domain.Exceptions.GatewaySecurityException or
+                  System.Security.SecurityException)
+        {
+            return "Access denied.";
+        }
+
+        return "The SQL statement could not be executed. Contact support with the trace id.";
     }
 
     private sealed class StatementSession

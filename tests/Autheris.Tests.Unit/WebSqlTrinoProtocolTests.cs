@@ -281,4 +281,59 @@ public sealed class WebSqlTrinoProtocolTests
         // Assert
         cancelContext.Response.StatusCode.ShouldBe(StatusCodes.Status204NoContent);
     }
+
+    [Fact]
+    public async Task HandleTrinoQueuedStatementRequest_WhenStatementFailed_MasksInternalErrorMessage()
+    {
+        // Arrange
+        var sqlExecutionService = Substitute.For<IGovernedSqlExecutionService>();
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+        var scope = Substitute.For<IServiceScope>();
+        var serviceProvider = Substitute.For<IServiceProvider>();
+
+        scopeFactory.CreateScope().Returns(scope);
+        scope.ServiceProvider.Returns(serviceProvider);
+        serviceProvider.GetService(typeof(IGovernedSqlExecutionService)).Returns(sqlExecutionService);
+
+        var statementManager = new WebSqlStatementManager(scopeFactory, NullLogger<WebSqlStatementManager>.Instance);
+        var tcs = new TaskCompletionSource<GovernedSqlResult>();
+        tcs.SetException(new InvalidOperationException("Conversion failed when converting the varchar value 'SECRET_IBAN_42' to data type int"));
+
+        sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(tcs.Task);
+
+        var status = await statementManager.SubmitOrWaitAsync(
+            new GovernedSqlQueryRequest("SELECT 1"),
+            TestUser,
+            TestTenant,
+            TimeSpan.FromMilliseconds(10));
+
+        var pollContext = new DefaultHttpContext
+        {
+            User = TestUser
+        };
+        pollContext.Request.Headers["X-Tenant-Id"] = TestTenant.Value;
+        pollContext.Response.Body = new MemoryStream();
+
+        // Act
+        await WebSqlEndpoints.HandleTrinoQueuedStatementRequest(
+            status.StatementId,
+            pollContext,
+            statementManager,
+            NullLoggerFactory.Instance);
+
+        // Assert
+        pollContext.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
+        pollContext.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var doc = await JsonDocument.ParseAsync(pollContext.Response.Body);
+        var root = doc.RootElement;
+        root.GetProperty("stats").GetProperty("state").GetString().ShouldBe("FAILED");
+        var error = root.GetProperty("error");
+        var msg = error.GetProperty("message").GetString();
+        msg.ShouldNotBeNull();
+        msg.ShouldNotContain("SECRET_IBAN");
+        msg.ShouldBe("The SQL statement could not be executed. Contact support with the trace id.");
+        error.GetProperty("errorType").GetString().ShouldBe("INTERNAL_ERROR");
+        error.GetProperty("errorName").GetString().ShouldBe("INTERNAL_ERROR");
+    }
 }
