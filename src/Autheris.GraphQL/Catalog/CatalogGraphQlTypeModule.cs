@@ -21,34 +21,116 @@ using Microsoft.Extensions.Options;
 
 namespace Autheris.GraphQL.Catalog;
 
-public sealed class CatalogGraphQlTypeModule : ITypeModule
+public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
 {
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly ITableRelationRepository _relationRepo;
     private readonly Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? _logger;
+    private readonly TimeSpan _refreshInterval;
+    private readonly object _timerLock = new();
+    private Timer? _refreshTimer;
+    private volatile string? _builtFingerprint;
+    private int _checking;
 
     public CatalogGraphQlTypeModule(
         ITableMetadataRepository metadataRepo,
         ITableRelationRepository relationRepo,
-        Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? logger = null)
+        Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? logger = null,
+        TimeSpan? refreshInterval = null)
     {
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _relationRepo = relationRepo ?? throw new ArgumentNullException(nameof(relationRepo));
         _logger = logger;
+        _refreshInterval = refreshInterval ?? TimeSpan.Zero;
     }
 
-    public event EventHandler<EventArgs>? TypesChanged
+    /// <summary>
+    /// R-GQL-12: raised when the catalog changed (or became reachable again) since the schema was built, so
+    /// HotChocolate rebuilds the schema without a restart. Detection polls a catalog fingerprint.
+    /// </summary>
+    public event EventHandler<EventArgs>? TypesChanged;
+
+    internal string? BuiltFingerprint => _builtFingerprint;
+
+    /// <summary>Compares the current catalog with the one the schema was built from; raises TypesChanged on a difference.</summary>
+    internal async Task<bool> CheckForCatalogChangesAsync(CancellationToken ct = default)
     {
-        add { }
-        remove { }
+        if (Interlocked.Exchange(ref _checking, 1) == 1)
+        {
+            return false;
+        }
+
+        try
+        {
+            string current;
+            try
+            {
+                current = (await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, null, ct).ConfigureAwait(false)).Fingerprint();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger?.LogDebug(ex, "GraphQL catalog change check failed; retrying with the next interval.");
+                return false;
+            }
+
+            if (string.Equals(current, _builtFingerprint, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            _logger?.LogInformation("GraphQL catalog changed; rebuilding the GraphQL schema.");
+            TypesChanged?.Invoke(this, EventArgs.Empty);
+            return true;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _checking, 0);
+        }
+    }
+
+    private void EnsureRefreshTimer()
+    {
+        if (_refreshInterval <= TimeSpan.Zero || _refreshTimer != null)
+        {
+            return;
+        }
+
+        lock (_timerLock)
+        {
+            _refreshTimer ??= new Timer(_ => _ = CheckForCatalogChangesAsync(), null, _refreshInterval, _refreshInterval);
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (_timerLock)
+        {
+            _refreshTimer?.Dispose();
+            _refreshTimer = null;
+        }
     }
 
     public async ValueTask<IReadOnlyCollection<ITypeSystemMember>> CreateTypesAsync(
         IDescriptorContext context,
         CancellationToken cancellationToken)
     {
-        var schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, cancellationToken)
-            .ConfigureAwait(false);
+        // R-GQL-12: an unreachable governance database must not take down the whole GraphQL endpoint; the schema is built
+        // without catalog tables and rebuilt once the catalog can be read (change detection).
+        CatalogSchemaModel schemaModel;
+        try
+        {
+            schemaModel = await CatalogSchemaModel.BuildAsync(_metadataRepo, _relationRepo, _logger, cancellationToken)
+                .ConfigureAwait(false);
+            _builtFingerprint = schemaModel.Fingerprint();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogError(ex, "GraphQL catalog schema could not be built; serving the schema without catalog tables until the catalog is reachable.");
+            schemaModel = CatalogSchemaModel.Empty;
+            _builtFingerprint = null;
+        }
+
+        EnsureRefreshTimer();
 
         var types = new List<ITypeSystemMember>();
 

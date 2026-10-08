@@ -51,6 +51,37 @@ public sealed partial class CatalogSchemaModel
     public IReadOnlyDictionary<string, CatalogTableType> TablesByTypeName { get; }
     public IReadOnlyDictionary<string, CatalogTableType> TablesByQueryFieldName { get; }
 
+    /// <summary>R-GQL-12: catalog without tables, used while the governance database is unreachable.</summary>
+    public static CatalogSchemaModel Empty { get; } = new([]);
+
+    /// <summary>
+    /// R-GQL-12: stable fingerprint of everything the generated GraphQL types depend on (type and field names, column
+    /// types, masking-driven typing and relations). A different fingerprint means the schema must be rebuilt.
+    /// </summary>
+    public string Fingerprint()
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach (var t in Tables)
+        {
+            sb.Append(t.TypeName).Append('|').Append(t.Metadata.Table.SourceType).Append('{');
+            foreach (var c in t.Columns)
+            {
+                sb.Append(c.FieldName).Append(':').Append(c.ColumnName).Append(':').Append(c.FieldType).Append(',');
+            }
+
+            sb.Append('}').Append('[');
+            foreach (var r in t.Relations)
+            {
+                sb.Append(r.FieldName).Append('>').Append(r.TargetTypeName).Append(r.IsList ? "*" : "1")
+                  .Append('(').Append(string.Join(',', r.ParentColumns)).Append('=').Append(string.Join(',', r.ChildColumns)).Append(')');
+            }
+
+            sb.Append("];");
+        }
+
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(sb.ToString())));
+    }
+
     private CatalogSchemaModel(List<CatalogTableType> tables)
     {
         Tables = tables;
