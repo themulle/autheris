@@ -298,9 +298,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
         var userSid = userSidNullable.Value;
 
-        var groupSids = principal.GetGroupSids();
-        var roles = principal.GetUserRoles();
-
         // Resolve TenantId upfront for cache and consent isolation
         // RR-L4-02: identical semantics to SecurityContextFactory (single source of truth for HTTP ingress):
         // a tenant header may only select a tenant for canonical cluster admins whose identity was not asserted
@@ -327,89 +324,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             throw new TableNotFoundException(table);
         }
 
-        // POL-6: optional ReBAC gate on the query paths (OData, GraphQL tree, table queries).
-        if (RebacTableGate.IsEnforcedOnQueryPaths(_options) &&
-            !await RebacTableGate.IsAllowedAsync(_rebacEvaluator, tenantId, userSid, table, ct).ConfigureAwait(false))
-        {
-            return new ResolvedTableAccess(metadata, TableAccessDecision.Denied(table, "ReBAC Access Denied: Not authorized by relationship graph."), tenantId, userSid, principal);
-        }
-
-        TableAccessDecision decision;
-        if (_options?.IsConsentBypassed == true)
-        {
-            decision = TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
-        }
-        else
-        {
-            // Check Consent Cache (L1/L2 with Epoch Validation & Group/Role Context Hash, strictly tenant-isolated)
-            var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles);
-            var cached = await _cacheService.GetCachedDecisionAsync(tenantId, userSid, table, contextHash, ct);
-            if (cached == null)
-            {
-                // Cache Miss -> Load from Governance DB
-                var allSubjects = groupSids.Append(userSid).ToList();
-                // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
-                var epochAtLoad = await _cacheService.GetEpochSnapshotAsync(table, ct);
-                var activeConsents = await _consentRepository.GetActiveConsentsForSubjectsAsync(allSubjects, table, DateTimeOffset.UtcNow, tenantId, ct);
-
-                // Multi-Tenancy Isolation: Filter active consents strictly for current tenant
-                activeConsents = activeConsents
-                    .Where(c => c.TenantId == tenantId)
-                    .ToList();
-
-                decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, activeConsents, metadata.Dialect);
-
-                // Cache decision (SEC: TTL bounded by the earliest consent ValidTo, as in CheckTableAccessAsync)
-                var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(metadata.Table.IsHighlySensitive, activeConsents, DateTimeOffset.UtcNow);
-                await _cacheService.SetCachedDecisionAsync(tenantId, userSid, table, decision, ttl, contextHash, epochAtLoad, ct);
-            }
-            else
-            {
-                decision = cached;
-            }
-        }
-
-        // Casbin ABAC & Row-Level Security (RLS) Pushdown Evaluation
-        if (_policyEnforcementService != null && _policyEnforcementService.HasPolicies(tenantId) && _options?.IsConsentBypassed != true)
-        {
-            var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var claim in principal.Claims)
-            {
-                attributes[claim.Type] = claim.Value;
-            }
-
-            // SEC H-4: Fail closed to IPAddress.None; never trust 'ip' claims from tokens or loopback fallback
-            var clientIp = _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
-
-            var purpose = principal.FindFirst("purpose")?.Value ?? principal.FindFirst("purpose_id")?.Value;
-
-            var secContext = new SecurityEvaluationContext(
-                UserSid: userSid,
-                GroupSids: groupSids,
-                Tenant: tenantId,
-                TargetTable: table,
-                RequestedColumns: requestedFields ?? metadata.Columns.Select(c => c.ColumnName).ToList(),
-                ClientIp: clientIp,
-                Timestamp: DateTimeOffset.UtcNow,
-                PurposeId: purpose,
-                Attributes: attributes,
-                TargetDialect: metadata.Dialect
-            );
-
-            var casbinDecision = await _policyEnforcementService.EvaluatePolicyAsync(secContext, ct);
-            if (!casbinDecision.IsAllowed)
-            {
-                decision = TableAccessDecision.Denied(table, $"Casbin ABAC Policy Denial: Access denied for subject '{userSid.Value}' in tenant '{tenantId.Value}'.");
-            }
-            else if (!string.IsNullOrWhiteSpace(casbinDecision.CombinedRowFilterSql))
-            {
-                var mergedFilter = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)
-                    ? $"({decision.CombinedRowFilterSql}) AND ({casbinDecision.CombinedRowFilterSql})"
-                    : casbinDecision.CombinedRowFilterSql;
-
-                decision = decision with { CombinedRowFilterSql = mergedFilter };
-            }
-        }
+        // Architecture 1: the shared access decision (ReBAC on query paths, consents with the decision cache, Casbin).
+        var decision = await AccessPolicy().DecideAsync(
+            TableAccessQuery.ForPrincipal(principal, userSid, tenantId, metadata, requestedFields), ct).ConfigureAwait(false);
 
         return new ResolvedTableAccess(metadata, decision, tenantId, userSid, principal);
     }
@@ -449,6 +366,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         return _concurrencyGate.TryEnter(key, maxConcurrentReads)
                ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
     }
+
+    private TableAccessPolicy AccessPolicy() =>
+        new(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, _clientIpResolver, _options);
 
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
         List<IReadOnlyDictionary<string, object?>> rows,
@@ -786,9 +706,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
         var userSid = userSidNullable.Value;
 
-        var groupSids = principal.GetGroupSids();
-        var roles = principal.GetUserRoles();
-
         var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct);
         if (metadata == null)
         {
@@ -797,91 +714,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
         var tenantId = principal.GetTenantId();
 
-        // POL-6: optional ReBAC gate on the query paths.
-        if (RebacTableGate.IsEnforcedOnQueryPaths(_options) &&
-            !await RebacTableGate.IsAllowedAsync(_rebacEvaluator, tenantId, userSid, table, ct).ConfigureAwait(false))
-        {
-            return TableAccessDecision.Denied(table, "ReBAC Access Denied: Not authorized by relationship graph.");
-        }
-
-        var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles);
-        var decision = await _cacheService.GetCachedDecisionAsync(tenantId, userSid, table, contextHash, ct);
-        if (decision == null)
-        {
-            var allSubjects = groupSids.Append(userSid).ToList();
-            // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
-            var epochAtLoad = await _cacheService.GetEpochSnapshotAsync(table, ct);
-            var activeConsents = await _consentRepository.GetActiveConsentsForSubjectsAsync(allSubjects, table, DateTimeOffset.UtcNow, tenantId, ct);
-
-            activeConsents = activeConsents
-                .Where(c => c.TenantId == tenantId)
-                .ToList();
-
-            decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, activeConsents, metadata.Dialect);
-
-            var ttl = metadata.Table.IsHighlySensitive
-                ? TimeSpan.FromSeconds(60)
-                : TimeSpan.FromMinutes(10);
-
-            var now = DateTimeOffset.UtcNow;
-            if (activeConsents.Count > 0)
-            {
-                var earliestExpiry = activeConsents
-                    .Where(c => c.ValidTo > now)
-                    .Select(c => c.ValidTo - now)
-                    .DefaultIfEmpty(ttl)
-                    .Min();
-
-                if (earliestExpiry < ttl)
-                {
-                    ttl = earliestExpiry > TimeSpan.FromSeconds(1) ? earliestExpiry : TimeSpan.FromSeconds(1);
-                }
-            }
-
-            await _cacheService.SetCachedDecisionAsync(tenantId, userSid, table, decision, ttl, contextHash, epochAtLoad, ct);
-        }
-
-        // Casbin ABAC & Row-Level Security (RLS) Pushdown Evaluation for Child/Relation Access
-        if (_policyEnforcementService != null && _policyEnforcementService.HasPolicies(tenantId) && _options?.IsConsentBypassed != true)
-        {
-            var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var claim in principal.Claims)
-            {
-                attributes[claim.Type] = claim.Value;
-            }
-
-            // SEC H-4: Fail closed to IPAddress.None; never trust 'ip' claims from tokens or loopback fallback
-            var clientIp = _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
-
-            var purpose = principal.FindFirst("purpose")?.Value ?? principal.FindFirst("purpose_id")?.Value;
-
-            var secContext = new SecurityEvaluationContext(
-                UserSid: userSid,
-                GroupSids: groupSids,
-                Tenant: tenantId,
-                TargetTable: table,
-                RequestedColumns: metadata.Columns.Select(c => c.ColumnName).ToList(),
-                ClientIp: clientIp,
-                Timestamp: DateTimeOffset.UtcNow,
-                PurposeId: purpose,
-                Attributes: attributes,
-                TargetDialect: metadata.Dialect
-            );
-
-            var casbinDecision = await _policyEnforcementService.EvaluatePolicyAsync(secContext, ct);
-            if (!casbinDecision.IsAllowed)
-            {
-                decision = TableAccessDecision.Denied(table, $"Casbin ABAC Policy Denial: Access denied for subject '{userSid.Value}' in tenant '{tenantId.Value}'.");
-            }
-            else if (!string.IsNullOrWhiteSpace(casbinDecision.CombinedRowFilterSql))
-            {
-                var mergedFilter = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)
-                    ? $"({decision.CombinedRowFilterSql}) AND ({casbinDecision.CombinedRowFilterSql})"
-                    : casbinDecision.CombinedRowFilterSql;
-
-                decision = decision with { CombinedRowFilterSql = mergedFilter };
-            }
-        }
+        // Architecture 1: same decision as ResolveTableAccessAsync (OData metadata must not show more than a query returns).
+        var decision = await AccessPolicy().DecideAsync(TableAccessQuery.ForPrincipal(principal, userSid, tenantId, metadata), ct).ConfigureAwait(false);
 
         // F-OPS-02: W3C Trace Correlation
         var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();

@@ -522,7 +522,7 @@ public sealed class GovernedDataPathsG4Tests
 
         await DuckDbOlapEndpoints.HandleOlapQueryAsync(
             context, engine, Substitute.For<ITableMetadataRepository>(), Substitute.For<IAutherisConnectorRegistry>(),
-            Substitute.For<ICrossDomainAccessResolver>(), Substitute.For<IColumnMaskingProvider>(), Substitute.For<IRebacEvaluator>(),
+            Substitute.For<ICrossDomainAccessResolver>(), Substitute.For<IColumnMaskingProvider>(),
             Options.Create(new GatewayOptions { DuckDbOlap = new DuckDbOlapOptions { Enabled = true } }), NullLoggerFactory.Instance);
         return (context, engine);
     }

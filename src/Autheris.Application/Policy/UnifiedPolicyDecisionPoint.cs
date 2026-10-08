@@ -60,99 +60,26 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(securityContext);
 
-        var tenantId = securityContext.TenantId;
-        var userSid = securityContext.UserSid;
-        var groupSids = securityContext.GroupSids;
+        // Architecture 1: the shared access decision. ReBAC applies whenever it is enabled on this path; the caller's
+        // roles are its tenant and cluster roles; there are no token claims, so Casbin sees no purpose or attributes.
         var roles = new HashSet<string>(securityContext.TenantRoles.Concat(securityContext.ClusterRoles), StringComparer.OrdinalIgnoreCase);
+        var query = new TableAccessQuery(
+            securityContext.UserSid,
+            securityContext.TenantId,
+            securityContext.GroupSids,
+            roles,
+            metadata,
+            Claims: null,
+            RequestedColumns: requestedColumns,
+            Rebac: RebacEnforcement.WhenEnabled,
+            // RV-01: unknown client IP must never satisfy loopback/internal-network allow rules (fail-closed).
+            ClientIp: securityContext.ClientIp ?? IPAddress.None);
 
-        // 1. ReBAC Evaluation Gate
-        if (_rebacEvaluator != null && _rebacEvaluator.IsEnabled)
-        {
-            var rebacRequest = new RebacCheckRequest(
-                tenantId.Value,
-                userSid.Value,
-                RebacTableGate.Relation,
-                RebacTableGate.ObjectId(table));
-
-            var rebacResult = await _rebacEvaluator.CheckAsync(rebacRequest, ct).ConfigureAwait(false);
-            if (!rebacResult.Allowed)
-            {
-                _logger.LogWarning(
-                    "ReBAC authorization denied for subject {Subject} on table {Table}. Reason: {Reason}",
-                    userSid.Value, table, rebacResult.Reason);
-
-                return TableAccessDecision.Denied(table, "ReBAC Access Denied: Not authorized by relationship graph.");
-            }
-        }
-
-        // 2. Consent Engine Resolution
-        TableAccessDecision decision;
-        if (_options.Value.IsConsentBypassed)
-        {
-            decision = TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
-        }
-        else
-        {
-            var contextHash = IConsentCacheService.ComputeSubjectContextHash(groupSids, roles);
-            var cached = await _cacheService.GetCachedDecisionAsync(tenantId, userSid, table, contextHash, ct).ConfigureAwait(false);
-
-            if (cached == null)
-            {
-                var allSubjects = groupSids.Append(userSid).ToList();
-                // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
-                var epochAtLoad = await _cacheService.GetEpochSnapshotAsync(table, ct).ConfigureAwait(false);
-                var activeConsents = await _consentRepository.GetActiveConsentsForSubjectsAsync(allSubjects, table, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
-
-                // Multi-tenancy isolation filter
-                activeConsents = activeConsents.Where(c => c.TenantId == tenantId).ToList();
-
-                decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, activeConsents, metadata.Dialect);
-
-                var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(metadata.Table.IsHighlySensitive, activeConsents, DateTimeOffset.UtcNow);
-                await _cacheService.SetCachedDecisionAsync(tenantId, userSid, table, decision, ttl, contextHash, epochAtLoad, ct).ConfigureAwait(false);
-            }
-            else
-            {
-                decision = cached;
-            }
-        }
-
+        var decision = await new TableAccessPolicy(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, clientIpResolver: null, _options.Value)
+            .DecideAsync(query, ct).ConfigureAwait(false);
         if (!decision.IsAllowed)
         {
-            return decision;
-        }
-
-        // 3. Casbin ABAC & Row-Level Security Evaluation Gate
-        if (_policyEnforcementService != null && _policyEnforcementService.HasPolicies(tenantId) && !_options.Value.IsConsentBypassed)
-        {
-            var secEvaluationContext = new SecurityEvaluationContext(
-                UserSid: userSid,
-                GroupSids: groupSids.ToList(),
-                Tenant: tenantId,
-                TargetTable: table,
-                RequestedColumns: requestedColumns ?? metadata.Columns.Select(c => c.ColumnName).ToList(),
-                // RV-01: unknown client IP must never satisfy loopback/internal-network allow rules (fail-closed).
-                ClientIp: securityContext.ClientIp ?? IPAddress.None,
-                Timestamp: DateTimeOffset.UtcNow,
-                PurposeId: null,
-                Attributes: null,
-                TargetDialect: metadata.Dialect
-            );
-
-            var casbinDecision = await _policyEnforcementService.EvaluatePolicyAsync(secEvaluationContext, ct).ConfigureAwait(false);
-            if (!casbinDecision.IsAllowed)
-            {
-                return TableAccessDecision.Denied(table, $"Casbin ABAC Policy Denial: Access denied for subject '{userSid.Value}' in tenant '{tenantId.Value}'.");
-            }
-
-            if (!string.IsNullOrWhiteSpace(casbinDecision.CombinedRowFilterSql))
-            {
-                var mergedFilter = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)
-                    ? $"({decision.CombinedRowFilterSql}) AND ({casbinDecision.CombinedRowFilterSql})"
-                    : casbinDecision.CombinedRowFilterSql;
-
-                decision = decision with { CombinedRowFilterSql = mergedFilter };
-            }
+            _logger.LogWarning("Access to table {Table} denied for subject {Subject}: {Reasons}", table, securityContext.UserSid.Value, string.Join("; ", decision.DeniedReasons));
         }
 
         return decision;

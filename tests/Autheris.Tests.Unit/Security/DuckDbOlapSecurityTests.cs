@@ -340,7 +340,6 @@ public sealed class DuckDbOlapSecurityTests
             connectorRegistry: null!,
             accessResolver: null!,
             maskingProvider: null!,
-            rebacEvaluator: null!,
             gatewayOptions: options,
             loggerFactory: Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
 
@@ -370,7 +369,6 @@ public sealed class DuckDbOlapSecurityTests
             connectorRegistry: null!,
             accessResolver: null!,
             maskingProvider: null!,
-            rebacEvaluator: null!,
             gatewayOptions: options,
             loggerFactory: Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance);
 
@@ -469,7 +467,6 @@ public sealed class DuckDbOlapSecurityTests
             registry,
             accessResolver,
             Substitute.For<IColumnMaskingProvider>(),
-            rebac,
             options,
             NullLoggerFactory.Instance);
 

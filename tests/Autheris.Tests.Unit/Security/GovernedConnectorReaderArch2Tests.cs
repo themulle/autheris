@@ -114,7 +114,6 @@ public sealed class GovernedConnectorReaderArch2Tests
             registry,
             accessResolver,
             Substitute.For<IColumnMaskingProvider>(),
-            rebac,
             Options.Create(new GatewayOptions { DuckDbOlap = new DuckDbOlapOptions { Enabled = true, MaxStagedRowsPerTable = 100 } }),
             NullLoggerFactory.Instance);
 

@@ -227,23 +227,27 @@ public sealed class RepeatedReviewRound3Tests
             AuthenticationScheme = "Bearer"
         };
         context.Items["SecurityPrincipalContext"] = secContext;
-        context.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("user_sid", "S-1-U1") }, "Bearer"));
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.PrimarySid, "S-1-U1"), new Claim("tenant_id", "tenant-t1") }, "Bearer"));
 
         var body = Encoding.UTF8.GetBytes("{\"sql\":\"SELECT 1\",\"tableNames\":[\"analytics.finance.reports\"]}");
         context.Request.Body = new MemoryStream(body);
 
         var engine = Substitute.For<IDuckDbOlapEngine>();
         var connectorRegistry = Substitute.For<IAutherisConnectorRegistry>();
-        var accessResolver = Substitute.For<ICrossDomainAccessResolver>();
         var masking = Substitute.For<IColumnMaskingProvider>();
         var options = Options.Create(new GatewayOptions { DuckDbOlap = new DuckDbOlapOptions { Enabled = true } });
 
+        // Architecture 1: the endpoint's single access decision (the real resolver) applies ReBAC on the fully qualified
+        // object id (POL-11); the endpoint has no check of its own.
+        var accessResolver = new DefaultCrossDomainAccessResolver(
+            Substitute.For<IConsentRepository>(), Substitute.For<IConsentResolutionService>(), options: options, rebacEvaluator: rebac);
+
         await DuckDbOlapEndpoints.HandleOlapQueryAsync(
-            context, engine, metadataRepo, connectorRegistry, accessResolver, masking, rebac, options, NullLoggerFactory.Instance);
+            context, engine, metadataRepo, connectorRegistry, accessResolver, masking, options, NullLoggerFactory.Instance);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
         capturedRebac.ShouldNotBeNull();
-        capturedRebac.Object.ShouldBe("table:finance.reports");
+        capturedRebac.Object.ShouldBe("table:analytics.finance.reports");
     }
 
     [Fact]
@@ -283,7 +287,7 @@ public sealed class RepeatedReviewRound3Tests
         var options = Options.Create(new GatewayOptions { DuckDbOlap = new DuckDbOlapOptions { Enabled = true } });
 
         await DuckDbOlapEndpoints.HandleOlapQueryAsync(
-            context, engine, metadataRepo, connectorRegistry, accessResolver, masking, null!, options, NullLoggerFactory.Instance);
+            context, engine, metadataRepo, connectorRegistry, accessResolver, masking, options, NullLoggerFactory.Instance);
 
         // Anti-oracle: returns 403 Forbidden with generic access denied (not 404 Table Not Found)
         context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);

@@ -64,6 +64,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     private readonly IHostEnvironment? _environment;
     private readonly ILogger<GovernedSqlExecutionService>? _logger;
     private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
+    private readonly IConsentCacheService? _consentCache;
     private readonly IConsentRepository? _consentRepository;
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
@@ -91,7 +92,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         ISqlSecurityValidator? sqlSecurityValidator = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
-        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null)
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
+        IConsentCacheService? consentCache = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement;
@@ -110,6 +112,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         _concurrencyGate = concurrencyGate;
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
         _rebacEvaluator = rebacEvaluator;
+        _consentCache = consentCache;
     }
 
     public async Task<string> RewriteSqlAsync(
@@ -271,16 +274,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         var groupSids = user.GetGroupSids();
         var roles = user.GetUserRoles();
         var clientIp = ResolveClientIp(user);
-        var purpose = user.FindFirst("purpose")?.Value ?? user.FindFirst("purpose_id")?.Value;
 
-        var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        foreach (var claim in user.Claims)
-        {
-            attributes[claim.Type] = claim.Value;
-        }
-
-        // SEC M-20: Make the requested action visible to ABAC sub-rules (set after claims so it cannot be spoofed).
-        attributes["gql.action"] = isDml ? "write" : "read";
+        // SEC M-20: Make the requested action visible to ABAC sub-rules (applied after claims so it cannot be spoofed).
+        var actionAttribute = new Dictionary<string, object?> { ["gql.action"] = isDml ? "write" : "read" };
 
         // 5. Resolve RLS filters and Column Masking for all referenced physical tables
         var tableRlsFilters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -425,62 +421,24 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 accessedTables.Add(resolvedId);
             }
 
-            // SEC C-03: Consent model (same truth table as the GraphQL path)
-            TableAccessDecision decision;
-            if (consentBypassed)
-            {
-                decision = TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
-            }
-            else if (_consentRepository == null || _consentResolution == null)
+            // SEC C-03 / Architecture 1: the shared access decision (ReBAC on query paths, consents with the decision
+            // cache, Casbin as an additional restriction). The merged row filter is validated below.
+            if (!consentBypassed && (_consentRepository == null || _consentResolution == null))
             {
                 _logger?.LogError("WebSQL cannot evaluate consents (consent services not available); denying access (fail-closed).");
                 throw TableDenied(target);
             }
-            else
-            {
-                var allSubjects = groupSids.Append(userSid).ToList();
-                var activeConsents = await _consentRepository.GetActiveConsentsForSubjectsAsync(allSubjects, resolvedId, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
-                var tenantConsents = activeConsents.Where(c => c.TenantId == tenantId).ToList();
-                decision = _consentResolution.ResolveAccess(userSid, groupSids, roles, resolvedId, tenantConsents, tableMeta.Dialect);
-            }
+
+            var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
+                ? TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
+                : await AccessPolicy().DecideAsync(
+                    new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute),
+                    ct).ConfigureAwait(false);
 
             if (!decision.IsAllowed)
             {
-                _logger?.LogWarning("WebSQL access to table {Table} denied by consent model.", target.FullName);
+                _logger?.LogWarning("WebSQL access to table {Table} denied: {Reasons}", target.FullName, string.Join("; ", decision.DeniedReasons));
                 throw TableDenied(target);
-            }
-
-            // POL-6: optional ReBAC gate on the query paths.
-            if (RebacTableGate.IsEnforcedOnQueryPaths(_options.Value) &&
-                !await RebacTableGate.IsAllowedAsync(_rebacEvaluator, tenantId, userSid, resolvedId, ct).ConfigureAwait(false))
-            {
-                _logger?.LogWarning("WebSQL access to table {Table} denied by ReBAC.", target.FullName);
-                throw TableDenied(target);
-            }
-
-            // ABAC (Casbin) is applied as an additional restriction only
-            if (_policyEnforcement != null && _policyEnforcement.HasPolicies(tenantId))
-            {
-                var secContext = new SecurityEvaluationContext(
-                    UserSid: userSid,
-                    GroupSids: groupSids,
-                    Tenant: tenantId,
-                    TargetTable: resolvedId,
-                    RequestedColumns: colList,
-                    ClientIp: clientIp,
-                    Timestamp: DateTimeOffset.UtcNow,
-                    PurposeId: purpose,
-                    Attributes: attributes,
-                    TargetDialect: tableMeta.Dialect);
-
-                var policyDecision = await _policyEnforcement.EvaluatePolicyAsync(secContext, ct).ConfigureAwait(false);
-                if (!policyDecision.IsAllowed)
-                {
-                    _logger?.LogWarning("WebSQL access to table {Table} denied by ABAC policy.", target.FullName);
-                    throw TableDenied(target);
-                }
-
-                decision = RestrictWithPolicy(decision, policyDecision, tableMeta);
             }
 
             // Row-level security: tenant isolation (defense in depth) AND consent/ABAC row filters
@@ -1231,55 +1189,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
     }
 
-    /// <summary>
-    /// SEC C-03: Applies an ABAC (Casbin) decision as an additional restriction on top of the consent decision.
-    /// Column levels can only be lowered; an explicit Clear can only come from the consent decision.
-    /// Row filters are combined with AND.
-    /// </summary>
-    private static TableAccessDecision RestrictWithPolicy(TableAccessDecision consentDecision, TableAccessDecision policyDecision, TableMetadata tableMeta)
-    {
-        var mergedColumns = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
-        foreach (var col in tableMeta.Columns)
-        {
-            var policyLevel = policyDecision.GetColumnAccess(col.ColumnName);
-            if (consentDecision.ColumnAccess.TryGetValue(col.ColumnName, out var explicitLevel))
-            {
-                mergedColumns[col.ColumnName] = explicitLevel < policyLevel ? explicitLevel : policyLevel;
-            }
-            else if (consentDecision.HasUnconstrainedColumnAllow)
-            {
-                if (policyLevel != ColumnAccessLevel.Clear)
-                {
-                    mergedColumns[col.ColumnName] = policyLevel;
-                }
-            }
-        }
-
-        string? mergedFilter = consentDecision.CombinedRowFilterSql;
-        if (!string.IsNullOrWhiteSpace(policyDecision.CombinedRowFilterSql))
-        {
-            SqlSecurityValidator.ValidatePredicateSql(policyDecision.CombinedRowFilterSql, "CombinedRowFilterSql");
-            mergedFilter = !string.IsNullOrWhiteSpace(mergedFilter)
-                ? $"({mergedFilter}) AND ({policyDecision.CombinedRowFilterSql})"
-                : policyDecision.CombinedRowFilterSql;
-        }
-
-        Dictionary<string, object?>? mergedParameters = null;
-        if (consentDecision.RowFilterParameters != null || policyDecision.RowFilterParameters != null)
-        {
-            mergedParameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            AddInternalRowFilterParameters(consentDecision.RowFilterParameters, mergedParameters);
-            AddInternalRowFilterParameters(policyDecision.RowFilterParameters, mergedParameters);
-        }
-
-        return consentDecision with
-        {
-            ColumnAccess = mergedColumns,
-            CombinedRowFilterSql = mergedFilter,
-            RowFilterParameters = mergedParameters ?? consentDecision.RowFilterParameters
-        };
-    }
-
+    /// <summary>Row filters of different tables share one parameter set; the same name with two values is refused.</summary>
     private static void AddInternalRowFilterParameters(IReadOnlyDictionary<string, object?>? source, Dictionary<string, object?> target)
     {
         if (source == null)
@@ -1298,6 +1208,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             target[name] = value;
         }
     }
+
+    /// <summary>Architecture 1: the shared table access decision; only called with consent services present.</summary>
+    private TableAccessPolicy AccessPolicy() =>
+        new(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value);
 
     /// <summary>
     /// SEC P-05: Dialect of the configured connection for <paramref name="dataSourceName"/>, or null when no connection
