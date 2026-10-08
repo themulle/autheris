@@ -219,6 +219,10 @@ public static class WebSqlEndpoints
             return;
         }
 
+        var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
+        var sqlEngine = httpContext.RequestServices?.GetService<TrinoSqlEngine.ISqlEngine>();
+        long effectiveLimit = DetermineEffectiveLimit(sql, webSqlOptions, sqlEngine);
+
         // SEC M-10: The JSON writer is created lazily when the first result arrives. Policy/parse errors raised while the
         // statement is governed therefore never start the response, so the 4xx/5xx status and the curated body can still be sent.
         Utf8JsonWriter? writer = null;
@@ -305,8 +309,14 @@ public static class WebSqlEndpoints
                 writer.WriteEndArray();
             }
 
+            bool truncated = rowCount >= effectiveLimit;
             writer.WriteNumber("rowCount", rowCount);
+            writer.WriteBoolean("truncated", truncated);
             writer.WriteEndObject();
+            if (truncated && !httpContext.Response.HasStarted)
+            {
+                httpContext.Response.Headers["X-Autheris-Truncated"] = "true";
+            }
             await writer.FlushAsync(ct);
             await httpContext.Response.Body.FlushAsync(ct);
         }
@@ -941,5 +951,48 @@ public static class WebSqlEndpoints
         }
 
         await httpContext.Response.WriteAsJsonAsync(responseObj, ct);
+    }
+
+    private static long DetermineEffectiveLimit(string sql, WebSqlOptions webSqlOptions, TrinoSqlEngine.ISqlEngine? sqlEngine)
+    {
+        long? explicitLimit = null;
+        if (sqlEngine != null)
+        {
+            try
+            {
+                var meta = sqlEngine.Analyze(sql.AsMemory());
+                if (meta.HasExplicitLimit && meta.ExplicitLimitValue is > 0)
+                {
+                    explicitLimit = meta.ExplicitLimitValue;
+                }
+            }
+            catch
+            {
+                // Fallback to regex if parse fails or engine throws
+            }
+        }
+
+        if (explicitLimit == null)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(sql, @"\bLIMIT\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+            if (match.Success && long.TryParse(match.Groups[1].ValueSpan, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsedLimit))
+            {
+                explicitLimit = parsedLimit;
+            }
+        }
+
+        if (explicitLimit is > 0)
+        {
+            return webSqlOptions.MaxAllowedRows > 0
+                ? Math.Min(explicitLimit.Value, webSqlOptions.MaxAllowedRows)
+                : explicitLimit.Value;
+        }
+
+        var defaultLimit = webSqlOptions.DefaultMaxRows > 0 ? webSqlOptions.DefaultMaxRows : 1000;
+        if (webSqlOptions.MaxAllowedRows > 0 && defaultLimit > webSqlOptions.MaxAllowedRows)
+        {
+            defaultLimit = webSqlOptions.MaxAllowedRows;
+        }
+        return defaultLimit;
     }
 }

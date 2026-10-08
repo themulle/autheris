@@ -346,8 +346,32 @@ public static class SqlEndpointRoutes
             return;
         }
 
+        bool rawRows = httpContext.Request.Query.TryGetValue("format", out var formatVal) &&
+                       (string.Equals(formatVal.ToString(), "rows", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(formatVal.ToString(), "raw", StringComparison.OrdinalIgnoreCase));
+
         httpContext.Response.ContentType = "application/json; charset=utf-8";
         httpContext.Response.StatusCode = StatusCodes.Status200OK;
-        await JsonSerializer.SerializeAsync(httpContext.Response.Body, result.Rows, JsonOptions, ct).ConfigureAwait(false);
+
+        if (result.Truncated && !httpContext.Response.HasStarted)
+        {
+            httpContext.Response.Headers["X-Autheris-Truncated"] = "true";
+        }
+
+        if (rawRows)
+        {
+            await JsonSerializer.SerializeAsync(httpContext.Response.Body, result.Rows, JsonOptions, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            var responseObj = new
+            {
+                columns = result.Columns,
+                rows = result.Rows,
+                rowCount = result.RowCount,
+                truncated = result.Truncated
+            };
+            await JsonSerializer.SerializeAsync(httpContext.Response.Body, responseObj, JsonOptions, ct).ConfigureAwait(false);
+        }
     }
 }
