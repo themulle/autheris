@@ -113,13 +113,13 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
             {
                 key = secretProvider.GetSecretBytes(auditSecretRef);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 var env = environment?.EnvironmentName ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
                 bool isDev = string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase);
                 if (!isDev)
                 {
-                    throw new InvalidOperationException($"Security critical: Failed to load AuditHmacKeyVaultRef '{auditSecretRef}' from Key Vault in non-development environment.", ex);
+                    throw new InvalidOperationException("Security critical: Failed to load AuditHmacKeyVaultRef from Key Vault in non-development environment.");
                 }
             }
         }

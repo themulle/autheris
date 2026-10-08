@@ -479,7 +479,7 @@ public sealed class ItsmWebhookHandler(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "Webhook secret '{SecretRef}' could not be loaded.", secretRef);
+            logger.LogDebug("Webhook secret could not be loaded ({ExceptionType}).", ex.GetType().Name);
             return null;
         }
     }
