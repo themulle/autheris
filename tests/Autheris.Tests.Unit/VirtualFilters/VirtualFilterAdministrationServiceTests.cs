@@ -297,4 +297,40 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
         await Should.ThrowAsync<ArgumentException>(() => _service.ApplySyncAsync(Desired("c1", invalid), Sync));
         (await _repository.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task SaveFilter_WithRequireApproval_RequiresDistinctApprover()
+    {
+        var serviceWithApproval = new VirtualFilterAdministrationService(_repository, _audit,
+            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }));
+
+        var creatorActor = new VirtualFilterActor(new Sid("S-1-5-21-CREATOR"), IsSync: false);
+        var approverActor = new VirtualFilterActor(new Sid("S-1-5-21-APPROVER"), IsSync: false);
+
+        var filter = VirtualFilterModelTests.DavidFilter();
+        var saved = await serviceWithApproval.SaveFilterAsync(filter, creatorActor);
+        saved.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+        saved.ApprovedBy.ShouldBeNull();
+
+        // Self-approval must fail (four-eyes principle)
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            serviceWithApproval.ApproveFilterAsync(filter.TenantId, filter.Name, creatorActor));
+
+        // Distinct approver succeeds
+        var approved = await serviceWithApproval.ApproveFilterAsync(filter.TenantId, filter.Name, approverActor);
+        approved.Status.ShouldBe(FilterApprovalStatus.Active);
+        approved.ApprovedBy.ShouldBe(approverActor.Sid);
+    }
+
+    [Fact]
+    public async Task SaveFilter_WithRequireApproval_SyncActor_BypassesLocalApproval()
+    {
+        var serviceWithApproval = new VirtualFilterAdministrationService(_repository, _audit,
+            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }));
+
+        var result = await serviceWithApproval.ApplySyncAsync(Desired("c1", VirtualFilterModelTests.DavidFilter()), Sync);
+        result.ShouldNotBeNull();
+        (await _repository.LoadSnapshotAsync()).Filters.ShouldHaveSingleItem();
+    }
 }
+

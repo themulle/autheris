@@ -194,4 +194,43 @@ public sealed class SqlFilterDefinitionTests : IDisposable
 
         rows.Select(r => Convert.ToInt64(r["id"])).ShouldBe([11L]);   // undelivered crane, within the last day
     }
+
+    [Fact]
+    public void SqlFilterCompiler_DisjunctionWithTautology_IsRejected()
+    {
+        var ex = Should.Throw<ArgumentException>(() =>
+            Validate("from conf.client client where 1=1 or target.client_id = 0"));
+        ex.Message.ShouldContain("disjunction (OR) branches must all constrain the protected 'target' entity");
+    }
+
+    [Fact]
+    public void SqlFilterCompiler_TautologicalComparison_IsRejected()
+    {
+        var ex = Should.Throw<ArgumentException>(() =>
+            Validate("from conf.client client where target.client_id = target.client_id"));
+        ex.Message.ShouldContain("tautological comparison");
+    }
+
+    [Fact]
+    public void SqlFilterCompiler_ValidCorrelatedDisjunction_IsAllowed()
+    {
+        var filter = Validate("from conf.client client where target.client_id = 1 or target.client_id = 2");
+        filter.SqlTargetColumns.ShouldBe(["client_id"]);
+    }
+
+    [Fact]
+    public void SqlFilterCompiler_LiteralComparison_IsRejected()
+    {
+        var ex = Should.Throw<ArgumentException>(() =>
+            Validate("from conf.client client where 1 = 2 and target.client_id = client.client_id"));
+        ex.Message.ShouldContain("comparison between literals is prohibited");
+    }
+
+    [Fact]
+    public void SqlFilterCompiler_LiteralTrue_IsRejected()
+    {
+        var ex = Should.Throw<ArgumentException>(() =>
+            Validate("from conf.client client where true and target.client_id = client.client_id"));
+        ex.Message.ShouldContain("literal TRUE in filter predicate is prohibited");
+    }
 }

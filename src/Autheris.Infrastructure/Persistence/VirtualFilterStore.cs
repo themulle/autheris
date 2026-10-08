@@ -20,11 +20,13 @@ internal static class VirtualFilterStore
     private sealed record FilterDto(
         TableDto? From, string? FromAlias, List<JoinDto>? Joins, List<ConditionDto>? Where,
         List<string> KeyColumns, string? ValidFrom, string? ValidTo, List<string> Supersedes,
-        string? Sql = null, List<string>? SqlTargetColumns = null);
+        string? Sql = null, List<string>? SqlTargetColumns = null,
+        FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null);
     private sealed record BindingDto(
         string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap);
     private sealed record ProfileDto(
-        GranteeType GranteeType, string? GranteeSid, string? RoleName, string Scope, UncoveredPolicy? Uncovered, List<BindingDto> Bindings);
+        GranteeType GranteeType, string? GranteeSid, string? RoleName, string Scope, UncoveredPolicy? Uncovered, List<BindingDto> Bindings,
+        FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null);
 
     public static async Task<VirtualFilterSnapshot> LoadSnapshotAsync(DbConnection connection, CancellationToken ct)
     {
@@ -169,7 +171,11 @@ internal static class VirtualFilterStore
         filter.ValidToColumn,
         filter.Supersedes.ToList(),
         filter.Sql,
-        filter.Sql == null ? null : filter.SqlTargetColumns.ToList());
+        filter.Sql == null ? null : filter.SqlTargetColumns.ToList(),
+        filter.Status,
+        filter.CreatedBy?.Value,
+        filter.ApprovedBy?.Value,
+        filter.ApprovedAt);
 
     private static ProfileDto ProfileToDto(AccessProfile profile) => new(
         profile.GranteeType,
@@ -177,7 +183,11 @@ internal static class VirtualFilterStore
         profile.RoleName,
         profile.Scope,
         profile.Uncovered,
-        profile.Bindings.Select(b => new BindingDto(b.FilterName, b.TargetPattern, b.ObjectKinds, b.TimeColumn, b.ColumnMap?.ToDictionary(p => p.Key, p => p.Value))).ToList());
+        profile.Bindings.Select(b => new BindingDto(b.FilterName, b.TargetPattern, b.ObjectKinds, b.TimeColumn, b.ColumnMap?.ToDictionary(p => p.Key, p => p.Value))).ToList(),
+        profile.Status,
+        profile.CreatedBy?.Value,
+        profile.ApprovedBy?.Value,
+        profile.ApprovedAt);
 
     private static VirtualFilter ReadFilter(DbDataReader reader)
     {
@@ -205,7 +215,11 @@ internal static class VirtualFilterStore
             StoredDefinitionHash = reader.GetString(5),
             ManagedBy = ReadManagedBy(reader, 6),
             UpdatedBy = reader.IsDBNull(8) ? null : reader.GetString(8),
-            UpdatedAt = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture)
+            UpdatedAt = DateTimeOffset.Parse(reader.GetString(9), CultureInfo.InvariantCulture),
+            Status = dto.Status ?? FilterApprovalStatus.Active,
+            CreatedBy = string.IsNullOrWhiteSpace(dto.CreatedBy) ? (Sid?)null : new Sid(dto.CreatedBy!),
+            ApprovedBy = string.IsNullOrWhiteSpace(dto.ApprovedBy) ? (Sid?)null : new Sid(dto.ApprovedBy!),
+            ApprovedAt = dto.ApprovedAt
         };
     }
 
@@ -219,7 +233,7 @@ internal static class VirtualFilterStore
             TenantId = new TenantId(reader.GetString(1)),
             Name = reader.GetString(2),
             GranteeType = dto.GranteeType,
-            GranteeSid = dto.GranteeSid == null ? (Sid?)null : new Sid(dto.GranteeSid),
+            GranteeSid = string.IsNullOrWhiteSpace(dto.GranteeSid) ? (Sid?)null : new Sid(dto.GranteeSid!),
             RoleName = dto.RoleName,
             Scope = dto.Scope,
             Uncovered = dto.Uncovered,
@@ -234,7 +248,11 @@ internal static class VirtualFilterStore
             StoredDefinitionHash = reader.GetString(4),
             ManagedBy = ReadManagedBy(reader, 5),
             UpdatedBy = reader.IsDBNull(7) ? null : reader.GetString(7),
-            UpdatedAt = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture)
+            UpdatedAt = DateTimeOffset.Parse(reader.GetString(8), CultureInfo.InvariantCulture),
+            Status = dto.Status ?? FilterApprovalStatus.Active,
+            CreatedBy = string.IsNullOrWhiteSpace(dto.CreatedBy) ? (Sid?)null : new Sid(dto.CreatedBy!),
+            ApprovedBy = string.IsNullOrWhiteSpace(dto.ApprovedBy) ? (Sid?)null : new Sid(dto.ApprovedBy!),
+            ApprovedAt = dto.ApprovedAt
         };
     }
 

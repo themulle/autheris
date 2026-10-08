@@ -245,4 +245,69 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         GatewayRole.ClusterAdmin.Implies(admin).ShouldBeTrue();
         admin.Implies(sync).ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task ConfigSyncStatus_ReturnsMetadataAndCounts()
+    {
+        await _service.SaveFilterAsync(VirtualFilterModelTests.DavidFilter(), new VirtualFilterActor(new Sid("S-1-5-21-A"), false));
+        var context = Context(Tenant, null, "GovernanceAdmin");
+
+        var result = await VirtualFilterEndpoints.ConfigSyncStatusAsync(context, _service);
+        var status = await StatusAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status200OK);
+        context.Response.Body.Position = 0;
+        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("status").GetString().ShouldBe("InSync");
+        doc.RootElement.GetProperty("filterCount").GetInt32().ShouldBe(1);
+        doc.RootElement.GetProperty("profileCount").GetInt32().ShouldBe(0);
+        doc.RootElement.GetProperty("requireApproval").GetBoolean().ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ConfigSyncStatus_Forbidden_ForUnauthorizedRoles()
+    {
+        var context = Context(Tenant, null, "Consumer");
+        var result = await VirtualFilterEndpoints.ConfigSyncStatusAsync(context, _service);
+        var status = await StatusAsync(result, context);
+        status.ShouldBe(StatusCodes.Status403Forbidden);
+    }
+
+    [Fact]
+    public async Task PutFilter_WithRequireApproval_SavesPendingAndRequiresDistinctApprover()
+    {
+        var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
+        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
+
+        // FilterAdmin creates filter -> saved as PendingApproval (HTTP 200)
+        var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
+        var putResult = await VirtualFilterEndpoints.PutFilterAsync("filter_test", createContext, approvalService);
+        var putStatus = await StatusAsync(putResult, createContext);
+        putStatus.ShouldBe(StatusCodes.Status200OK);
+
+        // Creator attempts to approve -> HTTP 400 (Four-eyes principle violation)
+        var selfApproveContext = Context(Tenant, null, "GovernanceAdmin"); // UserSid is "S-1-5-21-CALLER" by default in Context()
+        var selfApproveResult = await VirtualFilterEndpoints.ApproveFilterAsync("filter_test", selfApproveContext, approvalService);
+        var selfApproveStatus = await StatusAsync(selfApproveResult, selfApproveContext);
+        selfApproveStatus.ShouldBe(StatusCodes.Status400BadRequest);
+
+        // Non-admin attempts to approve -> HTTP 403 Forbidden
+        var unauthorizedContext = Context(Tenant, null, "Consumer");
+        var unauthResult = await VirtualFilterEndpoints.ApproveFilterAsync("filter_test", unauthorizedContext, approvalService);
+        var unauthStatus = await StatusAsync(unauthResult, unauthorizedContext);
+        unauthStatus.ShouldBe(StatusCodes.Status403Forbidden);
+
+        // Distinct GovernanceAdmin approves -> HTTP 200 OK
+        var supervisorContext = Context(Tenant, null, "GovernanceAdmin");
+        var supervisorSec = (SecurityPrincipalContext)supervisorContext.Items[SecurityPrincipalContext.ItemKey]!;
+        supervisorContext.Items[SecurityPrincipalContext.ItemKey] = supervisorSec with { UserSid = new Sid("S-1-5-21-SUPERVISOR") };
+        var approveResult = await VirtualFilterEndpoints.ApproveFilterAsync("filter_test", supervisorContext, approvalService);
+        var approveStatus = await StatusAsync(approveResult, supervisorContext);
+        approveStatus.ShouldBe(StatusCodes.Status200OK);
+
+        var snapshot = await _repository.LoadSnapshotAsync();
+        var stored = snapshot.Filters.ShouldHaveSingleItem();
+        stored.Status.ShouldBe(FilterApprovalStatus.Active);
+        stored.ApprovedBy.ShouldBe(new Sid("S-1-5-21-SUPERVISOR"));
+    }
 }

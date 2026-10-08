@@ -5,7 +5,9 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using TrinoSqlEngine;
+using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
 /// Virtual filters, phase 7: stage 2 definitions, a correlated predicate in Trino syntax
@@ -130,6 +132,19 @@ public static partial class SqlFilterCompiler
             VirtualFilterNames.ValidateIdentifier(column, nameof(filter));
         }
 
+        var (tree, _) = new FastSqlEngine().Parse(Statement(fragment).AsMemory(), null, CancellationToken.None);
+        var astBuilder = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder();
+        var ast = astBuilder.BuildStatement(tree);
+        if (ast is not SelectStatement select || select.Body is not QuerySpecification spec)
+        {
+            throw Reject(filter, $"AST did not produce a query specification (got {ast?.GetType().Name} / {(ast as SelectStatement)?.Body?.GetType().Name}).");
+        }
+        if (spec.Where == null)
+        {
+            throw Reject(filter, "virtual filter definition must contain a WHERE predicate.");
+        }
+        ValidateAstPredicates(spec.Where, filter);
+
         var validated = filter with { SqlTargetColumns = targetColumns };
         var dialect = sourceTables.Count > 0 ? sourceTables[0].Dialect : DatabaseDialect.SqlServer;
         try
@@ -142,6 +157,159 @@ public static partial class SqlFilterCompiler
         }
 
         return validated;
+    }
+
+    private static void ValidateAstPredicates(Expression expr, VirtualFilter filter)
+    {
+        switch (expr)
+        {
+            case BinaryExpression orExpr when orExpr.Operator == BinaryOperator.Or:
+                if (!ReferencesTarget(orExpr.Left) || !ReferencesTarget(orExpr.Right))
+                {
+                    throw Reject(filter, "disjunction (OR) branches must all constrain the protected 'target' entity. Unbound conditions like 'OR 1=1' are prohibited.");
+                }
+                ValidateAstPredicates(orExpr.Left, filter);
+                ValidateAstPredicates(orExpr.Right, filter);
+                break;
+
+            case BinaryExpression bin:
+                if (bin.Operator is BinaryOperator.Equal or BinaryOperator.NotEqual or
+                    BinaryOperator.LessThan or BinaryOperator.LessThanOrEqual or
+                    BinaryOperator.GreaterThan or BinaryOperator.GreaterThanOrEqual)
+                {
+                    if (ExpressionEquals(bin.Left, bin.Right))
+                    {
+                        throw Reject(filter, "tautological comparison (e.g. col = col or 1 = 1) is prohibited.");
+                    }
+                    if (bin.Left is LiteralExpression && bin.Right is LiteralExpression)
+                    {
+                        throw Reject(filter, "comparison between literals is prohibited.");
+                    }
+                }
+                ValidateAstPredicates(bin.Left, filter);
+                ValidateAstPredicates(bin.Right, filter);
+                break;
+
+            case LiteralExpression lit when lit.Type == LiteralType.Boolean && lit.Value is true:
+                throw Reject(filter, "literal TRUE in filter predicate is prohibited.");
+
+            case UnaryExpression un:
+                ValidateAstPredicates(un.Operand, filter);
+                break;
+
+            case InListExpression inList:
+                ValidateAstPredicates(inList.Operand, filter);
+                foreach (var item in inList.Items)
+                {
+                    ValidateAstPredicates(item, filter);
+                }
+                break;
+
+            case BetweenExpression bet:
+                ValidateAstPredicates(bet.Operand, filter);
+                ValidateAstPredicates(bet.Lower, filter);
+                ValidateAstPredicates(bet.Upper, filter);
+                break;
+
+            case LikeExpression like:
+                ValidateAstPredicates(like.Operand, filter);
+                ValidateAstPredicates(like.Pattern, filter);
+                break;
+
+            case FunctionCallExpression fn:
+                foreach (var arg in fn.Arguments)
+                {
+                    ValidateAstPredicates(arg, filter);
+                }
+                break;
+
+            case CastExpression cast:
+                ValidateAstPredicates(cast.Operand, filter);
+                break;
+
+            case CaseExpression cs:
+                if (cs.Operand != null) ValidateAstPredicates(cs.Operand, filter);
+                foreach (var whenClause in cs.WhenClauses)
+                {
+                    ValidateAstPredicates(whenClause.Condition, filter);
+                    ValidateAstPredicates(whenClause.Result, filter);
+                }
+                if (cs.ElseResult != null) ValidateAstPredicates(cs.ElseResult, filter);
+                break;
+        }
+    }
+
+    private static bool ReferencesTarget(Expression? expr)
+    {
+        if (expr == null) return false;
+        switch (expr)
+        {
+            case ColumnReference col:
+                return col.Name.Parts.Count >= 2 &&
+                       col.Name.Parts.Take(col.Name.Parts.Count - 1).Any(p => string.Equals(p.Value, TargetAlias, StringComparison.OrdinalIgnoreCase));
+
+            case BinaryExpression bin:
+                return ReferencesTarget(bin.Left) || ReferencesTarget(bin.Right);
+
+            case UnaryExpression un:
+                return ReferencesTarget(un.Operand);
+
+            case InListExpression inList:
+                return ReferencesTarget(inList.Operand) || inList.Items.Any(ReferencesTarget);
+
+            case BetweenExpression bet:
+                return ReferencesTarget(bet.Operand) || ReferencesTarget(bet.Lower) || ReferencesTarget(bet.Upper);
+
+            case LikeExpression like:
+                return ReferencesTarget(like.Operand) || ReferencesTarget(like.Pattern);
+
+            case FunctionCallExpression fn:
+                return fn.Arguments.Any(ReferencesTarget);
+
+            case CastExpression cast:
+                return ReferencesTarget(cast.Operand);
+
+            case CaseExpression cs:
+                return (cs.Operand != null && ReferencesTarget(cs.Operand)) ||
+                       cs.WhenClauses.Any(w => ReferencesTarget(w.Condition) || ReferencesTarget(w.Result)) ||
+                       (cs.ElseResult != null && ReferencesTarget(cs.ElseResult));
+
+            case SubstringExpression sub:
+                return ReferencesTarget(sub.Source) || ReferencesTarget(sub.Start) || (sub.Length != null && ReferencesTarget(sub.Length));
+
+            case TrimExpression trim:
+                return ReferencesTarget(trim.Source) || (trim.Characters != null && ReferencesTarget(trim.Characters));
+
+            case PositionExpression pos:
+                return ReferencesTarget(pos.Needle) || ReferencesTarget(pos.Haystack);
+
+            case SubscriptExpression s:
+                return ReferencesTarget(s.Target) || ReferencesTarget(s.Index);
+
+            case ExtractExpression ext:
+                return ReferencesTarget(ext.Source);
+
+            default:
+                return false;
+        }
+    }
+
+    private static bool ExpressionEquals(Expression a, Expression b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a == null || b == null) return false;
+
+        if (a is ColumnReference colA && b is ColumnReference colB)
+        {
+            return string.Equals(colA.Name.NormalizedName, colB.Name.NormalizedName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (a is LiteralExpression litA && b is LiteralExpression litB)
+        {
+            return litA.Type == litB.Type && Equals(litA.Value, litB.Value);
+        }
+
+        return false;
     }
 
     /// <summary>EXISTS predicate of the SQL definition in <paramref name="dialect"/>, correlated with <c>autheris_target</c>.</summary>

@@ -9,10 +9,12 @@ using System.Threading.Tasks;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Virtual filters (docs/plans/2026-10-08-umsetzungsplan-virtuelle-filter.md, phase 2): administration API.
@@ -30,11 +32,17 @@ public static class VirtualFilterEndpoints
 
         group.MapGet("/virtual-filters", (HttpContext context, VirtualFilterAdministrationService service) => ListAsync(context, service));
         group.MapPut("/virtual-filters/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutFilterAsync(name, context, service));
+        group.MapPost("/virtual-filters/{name}/approve", (string name, HttpContext context, VirtualFilterAdministrationService service) => ApproveFilterAsync(name, context, service));
         group.MapDelete("/virtual-filters/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => DeleteFilterAsync(name, context, service));
         group.MapPut("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutProfileAsync(name, context, service));
+        group.MapPost("/access-profiles/{name}/approve", (string name, HttpContext context, VirtualFilterAdministrationService service) => ApproveProfileAsync(name, context, service));
         group.MapDelete("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => DeleteProfileAsync(name, context, service));
         group.MapPost("/virtual-filters/sync/plan", (HttpContext context, VirtualFilterAdministrationService service) => PlanSyncAsync(context, service));
         group.MapPost("/virtual-filters/sync/apply", (HttpContext context, VirtualFilterAdministrationService service) => ApplySyncAsync(context, service));
+        group.MapGet("/config-sync/status", (HttpContext context, VirtualFilterAdministrationService service, IOptions<GatewayOptions>? options) =>
+            ConfigSyncStatusAsync(context, service, options));
+        group.MapGet("/virtual-filters/sync/status", (HttpContext context, VirtualFilterAdministrationService service, IOptions<GatewayOptions>? options) =>
+            ConfigSyncStatusAsync(context, service, options));
         group.MapGet("/effective-filters", (HttpContext context, MandatoryRowFilterResolver resolver, Autheris.Application.Interfaces.ITableMetadataRepository catalog) =>
             EffectiveFiltersAsync(context, resolver, catalog));
         return app;
@@ -74,6 +82,19 @@ public static class VirtualFilterEndpoints
             return Results.Ok(FilterView(saved));
         });
 
+    internal static Task<IResult> ApproveFilterAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
+        ExecuteAsync(context, GatewayRole.GovernanceAdmin, async (security, actor) =>
+        {
+            var tenant = ResolveTenant(security, context.Request.Query["tenant"]);
+            if (tenant == null)
+            {
+                return Forbidden();
+            }
+
+            var approved = await service.ApproveFilterAsync(tenant.Value, name, actor, context.RequestAborted).ConfigureAwait(false);
+            return Results.Ok(FilterView(approved));
+        });
+
     internal static Task<IResult> DeleteFilterAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
         ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
         {
@@ -93,6 +114,19 @@ public static class VirtualFilterEndpoints
 
             var saved = await service.SaveProfileAsync(body.ToModel(name, tenant.Value), actor, context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(ProfileView(saved));
+        });
+
+    internal static Task<IResult> ApproveProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
+        ExecuteAsync(context, GatewayRole.GovernanceAdmin, async (security, actor) =>
+        {
+            var tenant = ResolveTenant(security, context.Request.Query["tenant"]);
+            if (tenant == null)
+            {
+                return Forbidden();
+            }
+
+            var approved = await service.ApproveProfileAsync(tenant.Value, name, actor, context.RequestAborted).ConfigureAwait(false);
+            return Results.Ok(ProfileView(approved));
         });
 
     internal static Task<IResult> DeleteProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
@@ -247,6 +281,50 @@ public static class VirtualFilterEndpoints
 
     // ------------------------------------------------------------------ helpers
 
+    internal static async Task<IResult> ConfigSyncStatusAsync(
+        HttpContext context,
+        VirtualFilterAdministrationService service,
+        IOptions<GatewayOptions>? options = null)
+    {
+        var security = EndpointSecurity.GetSecurityContext(context);
+        if (!CanRead(security))
+        {
+            return Forbidden();
+        }
+
+        var snapshot = await service.GetSnapshotAsync(context.RequestAborted).ConfigureAwait(false);
+        var opt = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
+
+        var filters = snapshot.Filters.Where(f => security.IsClusterAdmin || f.TenantId == security.TenantId).ToList();
+        var profiles = snapshot.Profiles.Where(p => security.IsClusterAdmin || p.TenantId == security.TenantId).ToList();
+
+        var managedFilters = filters.Where(f => f.ManagedBy != null).ToList();
+        var managedProfiles = profiles.Where(p => p.ManagedBy != null).ToList();
+
+        var latestCommit = managedFilters.Select(f => f.ManagedBy!.Commit)
+            .Concat(managedProfiles.Select(p => p.ManagedBy!.Commit))
+            .LastOrDefault() ?? "none";
+
+        var latestSyncAt = managedFilters.Select(f => (DateTimeOffset?)f.UpdatedAt)
+            .Concat(managedProfiles.Select(p => (DateTimeOffset?)p.UpdatedAt))
+            .DefaultIfEmpty(null)
+            .Max();
+
+        return Results.Ok(new
+        {
+            generation = snapshot.Generation,
+            status = "InSync",
+            lastSyncAt = latestSyncAt,
+            lastCommit = latestCommit,
+            filterCount = filters.Count,
+            profileCount = profiles.Count,
+            managedFilterCount = managedFilters.Count,
+            managedProfileCount = managedProfiles.Count,
+            maxRemovals = opt.MaxRemovals,
+            requireApproval = opt.RequireApproval
+        });
+    }
+
     private static bool CanRead(SecurityPrincipalContext security) =>
         security.HasRole(GatewayRole.FilterAdmin) || security.HasRole(GatewayRole.FilterSync) ||
         security.HasRole(GatewayRole.GovernanceAdmin) || security.HasRole(GatewayRole.SecurityAuditor);
@@ -280,7 +358,7 @@ public static class VirtualFilterEndpoints
         {
             return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status404NotFound);
         }
-        catch (Exception ex) when (ex is ArgumentException or JsonException or FormatException)
+        catch (Exception ex) when (ex is ArgumentException or JsonException or FormatException or InvalidOperationException)
         {
             return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status400BadRequest);
         }
@@ -343,6 +421,10 @@ public static class VirtualFilterEndpoints
         supersedes = f.Supersedes,
         managed_by = f.ManagedBy,
         definition_hash = f.ComputeDefinitionHash(),
+        status = f.Status.ToString(),
+        created_by = f.CreatedBy?.Value,
+        approved_by = f.ApprovedBy?.Value,
+        approved_at = f.ApprovedAt,
         updated_by = f.UpdatedBy,
         updated_at = f.UpdatedAt
     };
@@ -364,7 +446,13 @@ public static class VirtualFilterEndpoints
             map = b.ColumnMap
         }),
         managed_by = p.ManagedBy,
-        definition_hash = p.ComputeDefinitionHash()
+        definition_hash = p.ComputeDefinitionHash(),
+        status = p.Status.ToString(),
+        created_by = p.CreatedBy?.Value,
+        approved_by = p.ApprovedBy?.Value,
+        approved_at = p.ApprovedAt,
+        updated_by = p.UpdatedBy,
+        updated_at = p.UpdatedAt
     };
 
     private static string ConditionOperatorName(FilterConditionOperator op) => op switch

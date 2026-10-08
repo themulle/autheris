@@ -4,6 +4,14 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
+/// <summary>Approval status for virtual filters and access profiles when RequireApproval is active.</summary>
+public enum FilterApprovalStatus
+{
+    Active = 0,
+    PendingApproval = 1,
+    Rejected = 2
+}
+
 /// <summary>What an object in a profile's scope that no binding covers means for the grantee.</summary>
 public enum UncoveredPolicy
 {
@@ -90,6 +98,10 @@ public sealed record VirtualFilter
     public ManagedBy? ManagedBy { get; init; }
     public string? UpdatedBy { get; init; }
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public FilterApprovalStatus Status { get; init; } = FilterApprovalStatus.Active;
+    public Sid? CreatedBy { get; init; }
+    public Sid? ApprovedBy { get; init; }
+    public DateTimeOffset? ApprovedAt { get; init; }
 
     /// <summary>Hash stored with the row (set by the repository); differs from <see cref="ComputeDefinitionHash"/> after a write outside Autheris.</summary>
     public string? StoredDefinitionHash { get; init; }
@@ -313,6 +325,10 @@ public sealed record AccessProfile
     public ManagedBy? ManagedBy { get; init; }
     public string? UpdatedBy { get; init; }
     public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
+    public FilterApprovalStatus Status { get; init; } = FilterApprovalStatus.Active;
+    public Sid? CreatedBy { get; init; }
+    public Sid? ApprovedBy { get; init; }
+    public DateTimeOffset? ApprovedAt { get; init; }
 
     /// <summary>Hash stored with the row (set by the repository).</summary>
     public string? StoredDefinitionHash { get; init; }
