@@ -332,10 +332,12 @@ public static class VirtualFilterEndpoints
         tenant = f.TenantId.Value,
         name = f.Name,
         source = f.Source,
+        sql = f.Sql,
+        target_columns = f.TargetKeyColumns,
         key_columns = f.KeyColumns,
-        from = new { table = $"{f.Structured!.From.Schema}.{f.Structured.From.TableName}", alias = f.Structured.FromAlias },
-        joins = f.Structured.Joins.Select(j => new { table = $"{j.Table.Schema}.{j.Table.TableName}", alias = j.Alias, left = j.LeftColumn, right = j.RightColumn }),
-        where = f.Structured.Where.Select(w => new { column = w.Column, op = ConditionOperatorName(w.Operator), value = w.Value }),
+        from = f.Structured == null ? null : new { table = $"{f.Structured.From.Schema}.{f.Structured.From.TableName}", alias = f.Structured.FromAlias },
+        joins = f.Structured?.Joins.Select(j => new { table = $"{j.Table.Schema}.{j.Table.TableName}", alias = j.Alias, left = j.LeftColumn, right = j.RightColumn }),
+        where = f.Structured?.Where.Select(w => new { column = w.Column, op = ConditionOperatorName(w.Operator), value = w.Value }),
         valid_from = f.ValidFromColumn,
         valid_to = f.ValidToColumn,
         supersedes = f.Supersedes,
@@ -407,12 +409,29 @@ public static class VirtualFilterEndpoints
         [JsonPropertyName("valid_from")] public string? ValidFrom { get; set; }
         [JsonPropertyName("valid_to")] public string? ValidTo { get; set; }
         [JsonPropertyName("supersedes")] public List<string>? Supersedes { get; set; }
+        [JsonPropertyName("sql")] public string? Sql { get; set; }
 
         public VirtualFilter ToModel(string name, TenantId tenant)
         {
+            if (Sql != null)
+            {
+                return new VirtualFilter
+                {
+                    TenantId = tenant,
+                    Name = name,
+                    Source = Source,
+                    Sql = Sql,
+                    KeyColumns = KeyColumns ?? [],
+                    ValidFromColumn = ValidFrom,
+                    ValidToColumn = ValidTo,
+                    Structured = From == null ? null : new StructuredFilterDefinition(),
+                    Supersedes = Supersedes ?? []
+                };
+            }
+
             if (From == null)
             {
-                throw new ArgumentException("A virtual filter needs 'from'.");
+                throw new ArgumentException("A virtual filter needs 'from' or 'sql'.");
             }
 
             return new VirtualFilter

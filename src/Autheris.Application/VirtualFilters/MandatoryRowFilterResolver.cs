@@ -96,6 +96,16 @@ public static class VirtualFilterColumns
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(binding);
 
+        if (filter.Sql != null)
+        {
+            if (binding.ColumnMap is { Count: > 0 } || binding.TimeColumn != null)
+            {
+                throw new InvalidOperationException($"The virtual filter '{filter.Name}' is defined in sql; a column map or time column does not apply to it.");
+            }
+
+            return filter.SqlTargetColumns;
+        }
+
         var columns = filter.TargetKeyColumns
             .Select(key => binding.ColumnMap != null && binding.ColumnMap.TryGetValue(key, out var mapped) ? mapped : key)
             .ToList();

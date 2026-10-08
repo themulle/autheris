@@ -68,6 +68,15 @@ public sealed record VirtualFilter
 
     public StructuredFilterDefinition? Structured { get; init; }
 
+    /// <summary>
+    /// Stage 2 definition (design 3.7): <c>from ... [join ...] where ...</c> in Trino syntax, addressing the protected
+    /// object as <c>target</c>. Exclusive with <see cref="Structured"/>.
+    /// </summary>
+    public string? Sql { get; init; }
+
+    /// <summary>Columns of <c>target</c> the SQL definition uses; derived and stored when the definition is validated.</summary>
+    public IReadOnlyList<string> SqlTargetColumns { get; init; } = [];
+
     /// <summary>Qualified key columns of the definition (<c>alias.column</c>); the protected object needs columns of the same name.</summary>
     public IReadOnlyList<string> KeyColumns { get; init; } = [];
 
@@ -86,7 +95,11 @@ public sealed record VirtualFilter
     public string? StoredDefinitionHash { get; init; }
 
     /// <summary>Column names the protected object must have (the unqualified key columns).</summary>
-    public IReadOnlyList<string> TargetKeyColumns => KeyColumns.Select(k => VirtualFilterNames.ColumnOf(k)).ToList();
+    public IReadOnlyList<string> TargetKeyColumns =>
+        Sql != null ? SqlTargetColumns : KeyColumns.Select(k => VirtualFilterNames.ColumnOf(k)).ToList();
+
+    /// <summary>Maximum length of a SQL definition.</summary>
+    public const int MaxSqlLength = 4000;
 
     public void Validate()
     {
@@ -96,12 +109,28 @@ public sealed record VirtualFilter
             throw new ArgumentException("A virtual filter needs a data source.", nameof(Source));
         }
 
-        if (Structured == null)
+        if ((Structured == null) == (Sql == null))
         {
-            throw new ArgumentException("A virtual filter needs a definition.", nameof(Structured));
+            throw new ArgumentException("A virtual filter needs exactly one definition: structured or sql.", nameof(Structured));
         }
 
-        var aliases = ValidateDefinition(Structured);
+        if (Sql != null)
+        {
+            if (string.IsNullOrWhiteSpace(Sql) || Sql.Length > MaxSqlLength || Sql.Contains('\0'))
+            {
+                throw new ArgumentException($"The sql definition must be non-empty and at most {MaxSqlLength} characters.", nameof(Sql));
+            }
+
+            if (KeyColumns.Count > 0 || ValidFromColumn != null || ValidToColumn != null)
+            {
+                throw new ArgumentException("A sql definition states keys and time windows in the predicate (target.<column>), not in key_columns or valid_from/valid_to.", nameof(Sql));
+            }
+
+            ValidateSupersedesNames();
+            return;
+        }
+
+        var aliases = ValidateDefinition(Structured!);
 
         if (KeyColumns.Count == 0)
         {
@@ -121,6 +150,11 @@ public sealed record VirtualFilter
         if (ValidFromColumn != null) VirtualFilterNames.ValidateQualifiedColumn(ValidFromColumn, aliases, nameof(ValidFromColumn));
         if (ValidToColumn != null) VirtualFilterNames.ValidateQualifiedColumn(ValidToColumn, aliases, nameof(ValidToColumn));
 
+        ValidateSupersedesNames();
+    }
+
+    private void ValidateSupersedesNames()
+    {
         foreach (var superseded in Supersedes)
         {
             VirtualFilterNames.ValidateFilterName(superseded, nameof(Supersedes));
@@ -149,6 +183,11 @@ public sealed record VirtualFilter
             {
                 sb.Append("where=").Append(condition.Column).Append(' ').Append(condition.Operator).Append(' ').Append(condition.Value ?? "\\0").Append('\n');
             }
+        }
+
+        if (Sql != null)
+        {
+            sb.Append("sql=").Append(Sql.ReplaceLineEndings("\n").Trim()).Append('\n');
         }
 
         sb.Append("keys=").AppendJoin(',', KeyColumns).Append('\n')

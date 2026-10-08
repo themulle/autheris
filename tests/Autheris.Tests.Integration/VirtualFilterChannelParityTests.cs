@@ -65,3 +65,36 @@ public sealed class VirtualFilterChannelParityTests : IClassFixture<VirtualFilte
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 }
+
+/// <summary>Virtual filters, phase 7: the David filter as a sql definition gives the same rows in every channel.</summary>
+public sealed class SqlVirtualFilterChannelParityTests : IClassFixture<SqlVirtualFilterChannelParityTests.SqlFixture>
+{
+    public sealed class SqlFixture : RowFilterChannelParityTests.Fixture
+    {
+        protected override bool UseVirtualFilters => true;
+        protected override bool UseSqlDefinition => true;
+    }
+
+    private readonly SqlFixture _fixture;
+
+    public SqlVirtualFilterChannelParityTests(SqlFixture fixture) => _fixture = fixture;
+
+    [Theory]
+    [InlineData("websql")]
+    [InlineData("trino")]
+    [InlineData("sql-endpoint")]
+    [InlineData("odata")]
+    [InlineData("graphql")]
+    [InlineData("graphql-tree")]
+    [InlineData("mcp-sample-rows")]
+    [InlineData("mcp-query-graphql")]
+    [InlineData("arrow-export")]
+    [InlineData("flight-sql")]
+    [InlineData("olap")]
+    public async Task Channel_ReturnsExactlyTheRowsOfTheSqlFilter(string channel)
+    {
+        var ids = await RowFilterChannelParityTests.ChannelMatrix.Channels[channel](_fixture);
+
+        ids.ShouldBe(_fixture.ExpectedIds, ignoreOrder: true, customMessage: $"channel '{channel}'");
+    }
+}

@@ -35,8 +35,14 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
 
     public VirtualFilterAdministrationServiceTests()
     {
+        var catalog = Substitute.For<ITableMetadataRepository>();
+        catalog.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns(new System.Collections.Generic.List<TableMetadata>
+        {
+            MandatoryRowFilterResolverTests.Table("conf", "client", "client_id", "crane_serial_number"),
+            MandatoryRowFilterResolverTests.Table("md", "crane", "serial_number", "is_delivered")
+        });
         _service = new VirtualFilterAdministrationService(_repository, _audit,
-            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { MaxRemovals = 2 } }));
+            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { MaxRemovals = 2 } }), catalog: catalog);
     }
 
     public void Dispose() => _repository.Dispose();
@@ -259,5 +265,36 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
         plan.RemovedBindings.ShouldBe(1);
         plan.RequiresForce.ShouldBeTrue();
         await Should.ThrowAsync<VirtualFilterConflictException>(() => _service.ApplySyncAsync(Desired("c2"), Sync));
+    }
+
+    // ------------------------------------------------------------------ sql definitions (phase 7)
+
+    private static VirtualFilter SqlFilter(string sql) => new()
+    {
+        TenantId = Tenant,
+        Name = "letzter_tag",
+        Source = "lwetem_prod",
+        Sql = sql
+    };
+
+    [Fact]
+    public async Task SqlFilter_IsValidatedAndStoredWithItsTargetColumns()
+    {
+        await _service.SaveFilterAsync(SqlFilter("from conf.client client where target.client_id = client.client_id and target.ts > date_add('day', -1, current_timestamp)"), Admin);
+
+        var stored = (await _repository.LoadSnapshotAsync()).Filters.ShouldHaveSingleItem();
+        stored.Sql.ShouldNotBeNull();
+        stored.SqlTargetColumns.ShouldBe(["client_id", "ts"], ignoreOrder: true);
+        stored.StoredDefinitionHash.ShouldBe(stored.ComputeDefinitionHash());
+    }
+
+    [Fact]
+    public async Task InvalidSqlFilter_IsRejected_AlsoInTheSync()
+    {
+        var invalid = SqlFilter("from conf.secrets s where target.client_id = s.client_id");
+
+        await Should.ThrowAsync<ArgumentException>(() => _service.SaveFilterAsync(invalid, Admin));
+        await Should.ThrowAsync<ArgumentException>(() => _service.ApplySyncAsync(Desired("c1", invalid), Sync));
+        (await _repository.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
     }
 }

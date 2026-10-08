@@ -32,7 +32,17 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(binding);
         ArgumentNullException.ThrowIfNull(target);
-        var definition = filter.Structured ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no structured definition.");
+        if (filter.Sql != null)
+        {
+            if (binding.ColumnMap is { Count: > 0 } || binding.TimeColumn != null)
+            {
+                throw new NotSupportedException($"The virtual filter '{filter.Name}' is defined in sql; a column map or time column does not apply to it.");
+            }
+
+            return SqlFilterCompiler.Compile(filter, dialect);
+        }
+
+        var definition = filter.Structured ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no definition.");
 
         string targetAlias = dialect.QuoteIdentifier(TrinoSqlEngine.RowFilterAliases.Target);
         string Target(string column) => $"{targetAlias}.{dialect.QuoteIdentifier(target.GetColumn(column)?.ColumnName ?? column)}";

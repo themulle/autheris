@@ -56,13 +56,16 @@ public sealed class VirtualFilterAdministrationService
     private readonly IAuditLogRepository _audit;
     private readonly VirtualFilterOptions _options;
     private readonly IVirtualFilterSnapshotProvider? _snapshots;
+    private readonly ITableMetadataRepository? _catalog;
 
     public VirtualFilterAdministrationService(
         IVirtualFilterRepository repository,
         IAuditLogRepository audit,
         IOptions<GatewayOptions>? options = null,
-        IVirtualFilterSnapshotProvider? snapshots = null)
+        IVirtualFilterSnapshotProvider? snapshots = null,
+        ITableMetadataRepository? catalog = null)
     {
+        _catalog = catalog;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _options = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
@@ -78,11 +81,24 @@ public sealed class VirtualFilterAdministrationService
 
     public Task<VirtualFilterSnapshot> GetSnapshotAsync(CancellationToken ct = default) => _repository.LoadSnapshotAsync(ct);
 
+    /// <summary>Phase 7: a sql definition is checked against the catalog and gets its derived target columns.</summary>
+    private async Task<VirtualFilter> ValidateDefinitionAsync(VirtualFilter filter, CancellationToken ct)
+    {
+        filter.Validate();
+        if (filter.Sql == null)
+        {
+            return filter;
+        }
+
+        var catalog = _catalog ?? throw new ArgumentException("Virtual filters with a sql definition need the catalog to be validated.", nameof(filter));
+        return SqlFilterCompiler.Validate(filter, await catalog.GetAllTablesAsync(ct).ConfigureAwait(false));
+    }
+
     public async Task<VirtualFilter> SaveFilterAsync(VirtualFilter filter, VirtualFilterActor actor, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(actor);
-        filter.Validate();
+        filter = await ValidateDefinitionAsync(filter, ct).ConfigureAwait(false);
 
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var existing = FindFilter(snapshot, filter.TenantId, filter.Name);
@@ -153,7 +169,18 @@ public sealed class VirtualFilterAdministrationService
     {
         ArgumentNullException.ThrowIfNull(request);
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
-        return BuildPlan(request, snapshot, out _);
+        return BuildPlan(await ValidateSqlDefinitionsAsync(request, ct).ConfigureAwait(false), snapshot, out _);
+    }
+
+    private async Task<VirtualFilterSyncRequest> ValidateSqlDefinitionsAsync(VirtualFilterSyncRequest request, CancellationToken ct)
+    {
+        var validated = new List<VirtualFilter>(request.Filters.Count);
+        foreach (var filter in request.Filters)
+        {
+            validated.Add(await ValidateDefinitionAsync(filter with { TenantId = request.TenantId }, ct).ConfigureAwait(false));
+        }
+
+        return request with { Filters = validated };
     }
 
     /// <summary>
@@ -169,6 +196,7 @@ public sealed class VirtualFilterAdministrationService
             throw new ManagedResourceLockedException("Only the virtual filter sync may apply the file repository state.");
         }
 
+        request = await ValidateSqlDefinitionsAsync(request, ct).ConfigureAwait(false);
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var plan = BuildPlan(request, snapshot, out var changes);
         if (plan.RequiresForce && !force)

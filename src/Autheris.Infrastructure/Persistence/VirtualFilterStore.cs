@@ -18,8 +18,9 @@ internal static class VirtualFilterStore
     private sealed record JoinDto(TableDto Table, string Alias, string Left, string Right);
     private sealed record ConditionDto(string Column, FilterConditionOperator Operator, string? Value);
     private sealed record FilterDto(
-        TableDto From, string FromAlias, List<JoinDto> Joins, List<ConditionDto> Where,
-        List<string> KeyColumns, string? ValidFrom, string? ValidTo, List<string> Supersedes);
+        TableDto? From, string? FromAlias, List<JoinDto>? Joins, List<ConditionDto>? Where,
+        List<string> KeyColumns, string? ValidFrom, string? ValidTo, List<string> Supersedes,
+        string? Sql = null, List<string>? SqlTargetColumns = null);
     private sealed record BindingDto(
         string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap);
     private sealed record ProfileDto(
@@ -159,14 +160,16 @@ internal static class VirtualFilterStore
     }
 
     private static FilterDto FilterToDto(VirtualFilter filter) => new(
-        Dto(filter.Structured!.From),
-        filter.Structured.FromAlias,
-        filter.Structured.Joins.Select(j => new JoinDto(Dto(j.Table), j.Alias, j.LeftColumn, j.RightColumn)).ToList(),
-        filter.Structured.Where.Select(w => new ConditionDto(w.Column, w.Operator, w.Value)).ToList(),
+        filter.Structured == null ? null : Dto(filter.Structured.From),
+        filter.Structured?.FromAlias,
+        filter.Structured?.Joins.Select(j => new JoinDto(Dto(j.Table), j.Alias, j.LeftColumn, j.RightColumn)).ToList(),
+        filter.Structured?.Where.Select(w => new ConditionDto(w.Column, w.Operator, w.Value)).ToList(),
         filter.KeyColumns.ToList(),
         filter.ValidFromColumn,
         filter.ValidToColumn,
-        filter.Supersedes.ToList());
+        filter.Supersedes.ToList(),
+        filter.Sql,
+        filter.Sql == null ? null : filter.SqlTargetColumns.ToList());
 
     private static ProfileDto ProfileToDto(AccessProfile profile) => new(
         profile.GranteeType,
@@ -186,13 +189,15 @@ internal static class VirtualFilterStore
             TenantId = new TenantId(reader.GetString(1)),
             Name = reader.GetString(2),
             Source = reader.GetString(3),
-            Structured = new StructuredFilterDefinition
+            Structured = dto.From == null ? null : new StructuredFilterDefinition
             {
                 From = Identifier(dto.From),
-                FromAlias = dto.FromAlias,
-                Joins = dto.Joins.Select(j => new FilterJoin(Identifier(j.Table), j.Alias, j.Left, j.Right)).ToList(),
-                Where = dto.Where.Select(w => new FilterCondition(w.Column, w.Operator, w.Value)).ToList()
+                FromAlias = dto.FromAlias ?? string.Empty,
+                Joins = (dto.Joins ?? []).Select(j => new FilterJoin(Identifier(j.Table), j.Alias, j.Left, j.Right)).ToList(),
+                Where = (dto.Where ?? []).Select(w => new FilterCondition(w.Column, w.Operator, w.Value)).ToList()
             },
+            Sql = dto.Sql,
+            SqlTargetColumns = dto.SqlTargetColumns ?? [],
             KeyColumns = dto.KeyColumns,
             ValidFromColumn = dto.ValidFrom,
             ValidToColumn = dto.ValidTo,

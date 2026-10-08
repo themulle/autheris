@@ -269,6 +269,9 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         /// <summary>Virtual filters, phase 5: the David case as an access profile instead of a consent row filter.</summary>
         protected virtual bool UseVirtualFilters => false;
 
+        /// <summary>Virtual filters, phase 7: the same filter written as a sql definition (predicate with target).</summary>
+        protected virtual bool UseSqlDefinition => false;
+
         public const string DavidSid = "S-1-5-21-LWE-DAVID";
         public const string Tenant = "tenant_parity";
 
@@ -458,20 +461,32 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
             using var scope = _factory!.Services.CreateScope();
             var admin = scope.ServiceProvider.GetRequiredService<Autheris.Application.VirtualFilters.VirtualFilterAdministrationService>();
             var actor = new Autheris.Application.VirtualFilters.VirtualFilterActor(new Sid("S-1-5-21-FILTER-ADMIN"), IsSync: false);
-            await admin.SaveFilterAsync(new VirtualFilter
-            {
-                TenantId = new TenantId(Tenant),
-                Name = "nicht_ausgelieferte_krane",
-                Source = "default",
-                KeyColumns = ["client.client_id"],
-                Structured = new StructuredFilterDefinition
+            await admin.SaveFilterAsync(UseSqlDefinition
+                ? new VirtualFilter
                 {
-                    From = ClientTable,
-                    FromAlias = "client",
-                    Joins = [new FilterJoin(Crane, "crane", "crane.serial_number", "client.crane_serial_number")],
-                    Where = [new FilterCondition("crane.is_delivered", FilterConditionOperator.IsNull)]
+                    TenantId = new TenantId(Tenant),
+                    Name = "nicht_ausgelieferte_krane",
+                    Source = "default",
+                    Sql = """
+                        from main.client client
+                        join main.crane crane on crane.serial_number = client.crane_serial_number
+                        where crane.is_delivered is null and target.client_id = client.client_id
+                        """
                 }
-            }, actor);
+                : new VirtualFilter
+                {
+                    TenantId = new TenantId(Tenant),
+                    Name = "nicht_ausgelieferte_krane",
+                    Source = "default",
+                    KeyColumns = ["client.client_id"],
+                    Structured = new StructuredFilterDefinition
+                    {
+                        From = ClientTable,
+                        FromAlias = "client",
+                        Joins = [new FilterJoin(Crane, "crane", "crane.serial_number", "client.crane_serial_number")],
+                        Where = [new FilterCondition("crane.is_delivered", FilterConditionOperator.IsNull)]
+                    }
+                }, actor);
             await admin.SaveProfileAsync(new AccessProfile
             {
                 TenantId = new TenantId(Tenant),
