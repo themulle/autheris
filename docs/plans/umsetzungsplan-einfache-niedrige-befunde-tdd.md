@@ -69,7 +69,16 @@ flowchart TD
 
 ---
 
-### Block A: Authentifizierung & API-Härtung
+### Block A: Authentifizierung & API-Härtung (Completed ✔)
+
+*Alle 7 Befunde aus Block A wurden vollständig per TDD umgesetzt, durch Unit-Tests abgesichert und in separaten Commits festgehalten:*
+- **API-9:** Erledigt in `7269212` (`fix(auth): forbid DataProtectionOfficer from proxy headers (API-9)`)
+- **API-8:** Erledigt in `981fc7e` (`fix(config): validate ForwardAuth trusted networks and reject wildcard CIDRs (API-8)`)
+- **API-16:** Erledigt in `b8fbba6` (`fix(cors): reject warn_allow_all_cors_origins outside development without opt-in (API-16)`)
+- **API-17:** Erledigt in `dac0940` (`fix(mesh): pin default wasm plugin image tag in envoy export (API-17)`)
+- **API-11:** Erledigt in `86a6d89` (`fix(api): sanitize error messages in WebSql, Arrow Flight and Iceberg endpoints (API-11)`)
+- **DEP-14:** Erledigt in `15fe567` (`fix(auth): reject plaintext basic auth passwords during startup validation (DEP-14)`)
+- **DEP-16:** Erledigt in `7cf19f6` (`fix(cors): remove localhost fallback in production cors policy (DEP-16)`)
 
 #### 1. API-9: `DataProtectionOfficer` in Header-Rollen-Denylist
 * **Befund:** In `ForwardAuthAuthenticationHandler.cs` werden administrative Rollen (`ClusterAdmin`, `GovernanceAdmin`, `PrivacyAdmin`, `BreakGlassOperator`) verworfen, wenn sie über Reverse-Proxy-Header (`X-Forwarded-Roles`) eintreffen. Die Rolle `DataProtectionOfficer` (DPO mit DSGVO-Sonderrechten) fehlt in `HeaderForbiddenRoles`.
@@ -337,19 +346,16 @@ flowchart TD
 
 ---
 
-#### 15. POL-11: Schema in ReBAC-Objekt-ID
-* **Befund:** `RebacTableGate.ObjectId(TableIdentifier table)` bildet die ID als `$"table:{table.Domain}.{table.TableName}"` ohne `table.Schema`. Tabellen mit gleichem Namen in unterschiedlichen Schemas kollidieren.
+#### 15. POL-11: Schema in ReBAC-Objekt-ID (Completed ✔)
+* **Status:** Erledigt im Rahmen von Architektur-Refactoring 1 in Commit `b9937cd` (`refactor(policy): one table access decision for all paths (Architecture 1, SQL2-6, POL-6, API-10, POL-11)`).
+* **Befund:** `RebacTableGate.ObjectId(TableIdentifier table)` bildete die ID als `$"table:{table.Domain}.{table.TableName}"` ohne `table.Schema`. Tabellen mit gleichem Namen in unterschiedlichen Schemas kollidierten.
 * **Betroffene Komponenten:**
   - `src/Autheris.Application/Policy/RebacTableGate.cs`
-  - `tests/Autheris.Tests.Unit/RebacTableGateTests.cs`
+  - `src/Autheris.Application/Policy/TableAccessPolicy.cs`
+  - `tests/Autheris.Tests.Unit/Security/TableAccessPolicyArch1Tests.cs`
 * **Architektonische Lösung:**  
-  ID auf `$"table:{table.Domain}.{table.Schema}.{table.TableName}"` bzw. `$"table:{table}"` aktualisieren.
-* **TDD-Ablauf:**
-  1. **RED:** Test mit zwei Tabellen identischen Namens in unterschiedlichen Schemas (`crm.dbo.customers` vs `crm.archive.customers`).
-     *Erwarteter Fehler:* Beide Tabellen liefern denselben ReBAC-ObjectId-String.
-  2. **GREEN:** Aufnahme von `table.Schema` in `RebacTableGate.ObjectId`.
-  3. **Regression:** ReBAC-Checks evaluieren nun schema-spezifisch.
-* **Commit-Message:** `fix(rebac): include schema in rebac table object identifier (POL-11)`
+  ID auf `$"table:{table.Domain}.{table.Schema}.{table.TableName}"` unifiziert und in allen Pfaden (Query-Pfade, OLAP, Streaming, Unified PDP) konsistent verankert.
+* **Commit:** `b9937cd` (`refactor(policy): one table access decision for all paths (Architecture 1, SQL2-6, POL-6, API-10, POL-11)`)
 
 ---
 
@@ -447,25 +453,25 @@ Die Abarbeitung erfolgt streng sequenziell in 20 Einzelschritten. Vor jedem Comm
 2. Der neu geschriebene Test muss vor der Code-Änderung nachweislich rot gewesen sein.
 3. Exakt ein Befund pro Commit.
 
-| Schritt | Befund | Scope | Commit-Titel |
+| Schritt | Befund | Scope | Status / Commit-Titel |
 |---|---|---|---|
-| 1 | API-9 | Auth | `fix(auth): forbid DataProtectionOfficer from proxy headers (API-9)` |
-| 2 | API-8 | Config | `fix(config): validate ForwardAuth trusted networks and reject wildcard CIDRs (API-8)` |
-| 3 | API-16 | CORS | `fix(cors): reject warn_allow_all_cors_origins outside development without opt-in (API-16)` |
-| 4 | API-17 | Mesh | `fix(mesh): pin default wasm plugin image tag in envoy export (API-17)` |
-| 5 | API-11 | API | `fix(api): sanitize error messages in Arrow Flight, Iceberg and WebSql endpoints (API-11)` |
-| 6 | DEP-14 | Auth | `fix(auth): reject plaintext basic auth passwords during startup validation (DEP-14)` |
-| 7 | DEP-16 | CORS | `fix(cors): remove localhost fallback in production cors policy (DEP-16)` |
-| 8 | MCP-7 | MCP | `fix(mcp): fail closed on argument parsing errors in query executor (MCP-7)` |
-| 9 | MCP-4 | MCP | `fix(mcp): do not synthesize reader roles in fast path (MCP-4)` |
-| 10 | SQL2-14 | OLAP | `fix(olap): support comments in DuckDB query validator (SQL2-14)` |
-| 11 | SQL2-15 | SQL | `fix(sql): use dialect-escaped masking literals and N-prefix for sql server (SQL2-15)` |
-| 12 | SQL2-16 | Audit | `fix(procedures): fail closed when audit repository is unavailable (SQL2-16)` |
-| 13 | SQL2-19 | RLS | `fix(rls): qualify unqualified column names in subquery filter predicates (SQL2-19)` |
-| 14 | POL-10 | Policy | `fix(policy): include requested columns in Casbin cache key (POL-10)` |
-| 15 | POL-11 | ReBAC | `fix(rebac): include schema in rebac table object identifier (POL-11)` |
-| 16 | POL-13 | ABAC | `fix(federation): evaluate admin roles via role evaluator before bypassing mask (POL-13)` |
-| 17 | INF-3 | Secrets | `fix(secrets): redact secret references in log statements (INF-3)` |
-| 18 | EXT-6 | Catalog | `fix(catalog): enforce role mapping for user policies in OpenMetadata sync (EXT-6)` |
-| 19 | EXT-7 | Catalog | `fix(catalog): do not activate newly discovered tables by default in data catalog (EXT-7)` |
-| 20 | WF-1 | Workflow | `fix(workflow): validate parameters and status in ExtendConsentExpiryAsync (WF-1)` |
+| 1 | API-9 | Auth | Erledigt in `7269212` (`fix(auth): forbid DataProtectionOfficer from proxy headers (API-9)`) |
+| 2 | API-8 | Config | Erledigt in `981fc7e` (`fix(config): validate ForwardAuth trusted networks and reject wildcard CIDRs (API-8)`) |
+| 3 | API-16 | CORS | Erledigt in `b8fbba6` (`fix(cors): reject warn_allow_all_cors_origins outside development without opt-in (API-16)`) |
+| 4 | API-17 | Mesh | Erledigt in `dac0940` (`fix(mesh): pin default wasm plugin image tag in envoy export (API-17)`) |
+| 5 | API-11 | API | Erledigt in `86a6d89` (`fix(api): sanitize error messages in WebSql, Arrow Flight and Iceberg endpoints (API-11)`) |
+| 6 | DEP-14 | Auth | Erledigt in `15fe567` (`fix(auth): reject plaintext basic auth passwords during startup validation (DEP-14)`) |
+| 7 | DEP-16 | CORS | Erledigt in `7cf19f6` (`fix(cors): remove localhost fallback in production cors policy (DEP-16)`) |
+| 8 | MCP-7 | MCP | `fix(mcp): fail closed on argument parsing errors in query executor (MCP-7)` (Offen) |
+| 9 | MCP-4 | MCP | `fix(mcp): do not synthesize reader roles in fast path (MCP-4)` (Offen) |
+| 10 | SQL2-14 | OLAP | `fix(olap): support comments in DuckDB query validator (SQL2-14)` (Offen) |
+| 11 | SQL2-15 | SQL | `fix(sql): use dialect-escaped masking literals and N-prefix for sql server (SQL2-15)` (Offen) |
+| 12 | SQL2-16 | Audit | `fix(procedures): fail closed when audit repository is unavailable (SQL2-16)` (Offen) |
+| 13 | SQL2-19 | RLS | `fix(rls): qualify unqualified column names in subquery filter predicates (SQL2-19)` (Offen) |
+| 14 | POL-10 | Policy | `fix(policy): include requested columns in Casbin cache key (POL-10)` (Offen) |
+| 15 | POL-11 | ReBAC | Erledigt in `b9937cd` (`refactor(policy): one table access decision for all paths (Architecture 1, SQL2-6, POL-6, API-10, POL-11)`) |
+| 16 | POL-13 | ABAC | `fix(federation): evaluate admin roles via role evaluator before bypassing mask (POL-13)` (Offen) |
+| 17 | INF-3 | Secrets | `fix(secrets): redact secret references in log statements (INF-3)` (Offen) |
+| 18 | EXT-6 | Catalog | `fix(catalog): enforce role mapping for user policies in OpenMetadata sync (EXT-6)` (Offen) |
+| 19 | EXT-7 | Catalog | `fix(catalog): do not activate newly discovered tables by default in data catalog (EXT-7)` (Offen) |
+| 20 | WF-1 | Workflow | `fix(workflow): validate parameters and status in ExtendConsentExpiryAsync (WF-1)` (Offen) |

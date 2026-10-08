@@ -52,12 +52,27 @@ Jeder Test muss ohne Fix rot werden.
 
 ## 4. Niedrige Befunde (Gesamt-Review)
 
+### Bereits umgesetzte Befunde (Completed ✔)
+
+| ID | Befund | Status / Commit |
+|---|---|---|
+| API-8 | `TrustedNetworks` wird nicht validiert (`0.0.0.0/0` möglich). | Erledigt in `981fc7e` (`fix(config): validate ForwardAuth trusted networks and reject wildcard CIDRs (API-8)`) |
+| API-9 | `DataProtectionOfficer` fehlt in der Header-Rollen-Denylist. | Erledigt in `7269212` (`fix(auth): forbid DataProtectionOfficer from proxy headers (API-9)`) |
+| API-11 | Rohe Exception-Texte in WebSQL, Arrow-Flight und Iceberg. | Erledigt in `86a6d89` (`fix(api): sanitize error messages in WebSql, Arrow Flight and Iceberg endpoints (API-11)`) |
+| API-16 | `warn_allow_all_cors_origins` ist in Production erlaubt. | Erledigt in `b8fbba6` (`fix(cors): reject warn_allow_all_cors_origins outside development without opt-in (API-16)`) |
+| API-17 | WASM-Plugin `:latest` ungepinnt. | Erledigt in `dac0940` (`fix(mesh): pin default wasm plugin image tag in envoy export (API-17)`) |
+| DEP-14 | Klartext-BasicAuth-Passwörter werden erst beim Login abgelehnt. | Erledigt in `15fe567` (`fix(auth): reject plaintext basic auth passwords during startup validation (DEP-14)`) |
+| DEP-16 | Kein `AllowedHosts`, CORS-localhost-Fallback in Production. | Erledigt in `7cf19f6` (`fix(cors): remove localhost fallback in production cors policy (DEP-16)`) |
+| POL-11 | ReBAC-Objekt-ID enthält kein Schema. | Erledigt in `b9937cd` (`refactor(policy): one table access decision for all paths (Architecture 1, SQL2-6, POL-6, API-10, POL-11)`) |
+| SQL2-10 | CrossDomainJoin baut den IN-Filter per String (toter Code). | Erledigt in `7ffa9fe` (`refactor: remove unwired prototype code (Architecture 3, SQL2-10)`) |
+
+### Noch offene niedrige Befunde
+
 | ID | Befund |
 |---|---|
 | POL-8 | Vorab terminierte DENY-Consents greifen bis zu 10 min verspätet. |
 | POL-9 | Degraded-Mode bestimmt Sensitivität per Substring im Tabellennamen; L1 wird bei Reconnect nicht geleert. |
 | POL-10 | Casbin-Cache-Key enthält `RequestedColumns` nicht. |
-| POL-11 | ReBAC-Objekt-ID enthält kein Schema. |
 | POL-12 | Audit der Freigabeschritte nach dem Commit, Fehler werden verschluckt. |
 | POL-13 | Federation-Masking-Bypass über rohe Admin-Rollen-Claims. |
 | POL-19 | `ChunkPiiRedactor` ist ohne Katalogspalten nicht fail-closed. |
@@ -68,18 +83,12 @@ Jeder Test muss ohne Fix rot werden.
 | MCP-5 | Golden Queries ohne Consent-Filter. |
 | MCP-6 | `@mcpTool` mit geratener `TargetTable` (latent). |
 | MCP-7 | `catch (Exception)` beim Argument-Parsing ist fail-open. |
-| API-8 | `TrustedNetworks` wird nicht validiert (`0.0.0.0/0` möglich). |
-| API-9 | `DataProtectionOfficer` fehlt in der Header-Rollen-Denylist. |
-| API-11 | Rohe Exception-Texte in WebSQL, Arrow-Flight und Iceberg. |
 | API-13 | BasicAuth-Lockout nicht atomar und synchron. |
-| API-16 | `warn_allow_all_cors_origins` ist in Production erlaubt. |
-| API-17 | WASM-Plugin `:latest` ungepinnt. |
 | EXT-6 | OpenMetadata-User-Pfad ignoriert das Rollen-Mapping. |
 | EXT-7 | DataCatalog legt neue Tabellen sofort aktiv an. |
 | INF-2 | CDN-Purge und Shadowing nutzen einen ungehärteten HttpClient. |
 | INF-3 | Secret-Referenzen landen im Klartext im Log. |
 | SQL-6 | Join-Guardrail arbeitet ohne Tabellenbezug. |
-| SQL2-10 | CrossDomainJoin baut den IN-Filter per String (toter Code). |
 | SQL2-14 | DuckDB-Validator kennt keine Kommentare. |
 | SQL2-15 | Maskentext ohne `EscapeSqlLiteral` und ohne `N`-Präfix. |
 | SQL2-16 | Prozeduren ohne Audit-Repository liefern trotzdem aus. |
@@ -89,16 +98,16 @@ Jeder Test muss ohne Fix rot werden.
 | DEP-10 | Kein Locked-Mode, keine `NuGet.config`. |
 | DEP-11 | `workflow_dispatch` überschreibt `latest`; Release ohne Tests und Signatur. |
 | DEP-12 | Alte Benchmark-Secrets in der Git-History (HEAD sauber). |
-| DEP-14 | Klartext-BasicAuth-Passwörter werden erst beim Login abgelehnt. |
 | DEP-15 | Benchmark-Images mit `:latest` und `sa`. |
-| DEP-16 | Kein `AllowedHosts`, CORS-localhost-Fallback in Production. |
 | F-8 (info) | Jede Casbin-Änderung baut alle Enforcer neu; viele `AddPolicy`-Aufrufe kosten O(n²). |
 
-## 5. Architektur
+## 5. Architektur (Completed / Erledigt)
 
-| Nr. | Punkt |
-|---|---|
-| 1 | Eine zentrale Zugriffsentscheidung (`ITableAccessResolver`); löst POL-6 (heute `RebacTableGate`, Default aus), SQL2-6 und API-10 strukturell. |
-| 2 | Gemeinsamer Lesepfad für Konnektoren (`GovernedConnectorReader`). |
-| 3 | Restlichen toten Code entfernen (u. a. `CompositeKeySqlGenerator`, `PushdownPlanner`). |
-| 5 | Provider-Namen und Session-Init an einer Stelle (Provider-Namen stehen noch an mehreren Stellen). |
+Alle architektonischen Kernrefactorings aus Abschnitt 5 wurden umgesetzt:
+
+| Nr. | Punkt | Status / Commit |
+|---|---|---|
+| 1 | Eine zentrale Zugriffsentscheidung (`ITableAccessResolver` / `TableAccessPolicy`); löst POL-6 (`RebacTableGate`), SQL2-6 und API-10 strukturell. | Erledigt in `b9937cd` (`refactor(policy): one table access decision for all paths (Architecture 1, SQL2-6, POL-6, API-10, POL-11)`) |
+| 2 | Gemeinsamer Lesepfad für Konnektoren (`GovernedConnectorReader`); löst SQL2-5. | Erledigt in `3957c24` (`refactor(connectors): one governed read path for connector rows (Architecture 2, SQL2-5)`) |
+| 3 | Restlichen toten Code entfernen (`CompositeKeySqlGenerator`, `PushdownPlanner`, unverdrahtete Typen). | Erledigt in `7ffa9fe` & `17f8c08` (`refactor: remove unwired prototype code` / `refactor: remove dead code that only unit tests still used`) |
+| 5 | Provider-Namen und Session-Init an einer Stelle unifiziert. | Erledigt in `7359c5e` (`refactor(sql): unify data source provider resolution (Architecture 5, SQL2-22)`) |
