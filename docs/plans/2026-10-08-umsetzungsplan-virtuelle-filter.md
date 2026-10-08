@@ -9,6 +9,15 @@
 
 Jede Phase ist ein Commit und beginnt mit fehlschlagenden Tests.
 
+**Anpassung an den erweiterten Entwurf (faa3be5):**
+- **Profile:** Berechtigter, Bereich (`scope`) und `uncovered` stehen am Profil (`AccessProfile`). Die Bindungen eines Profils tragen nur Filter, Muster (ohne Muster gilt der Bereich), Objektarten, Zeitspalte und Zuordnung. `on_unmatched` je Bindung entfällt.
+- **Regel für die Auflösung (Phase 3):** Ein Objekt im Bereich, auf das **kein** Filter des Profils zutrifft, wird nach `uncovered` behandelt. Treffen mehrere, gilt ihr AND.
+- **API:** `/api/v1/governance/access-profiles/{name}` statt `/filter-bindings`.
+- **Abgleich:**
+  - Er wendet eine Änderungsmenge in **einer Transaktion** an (alles oder nichts, die Generation steigt einmal).
+  - Entfernt er mehr als `VirtualFilters:MaxRemovals` Bindungen (Standard 10) oder alle, wird er nur mit `force` angewendet. `force` erfordert `FilterAdmin`.
+- **Noch nicht umgesetzt:** Neuladen aus GitHub (Entwurf 4.2: Takt, Webhook, `config-sync/status`) und Freigabe per `RequireApproval`. Beides ist ein eigener Schritt nach Phase 6.
+
 ---
 
 ## Befunde aus dem Code

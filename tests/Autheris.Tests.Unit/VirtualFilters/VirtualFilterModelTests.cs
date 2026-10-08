@@ -1,6 +1,8 @@
 namespace Autheris.Tests.Unit.VirtualFilters;
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Shouldly;
@@ -29,21 +31,23 @@ public sealed class VirtualFilterModelTests
         }
     };
 
-    internal static FilterBinding DavidBinding(string filter = "nicht_ausgelieferte_krane") => new()
+    internal static AccessProfile DavidProfile(string name = "david", params string[] filters) => new()
     {
         TenantId = Tenant,
-        FilterName = filter,
-        TargetPattern = "lwetem_prod.*.*.client_id",
+        Name = name,
         GranteeType = GranteeType.User,
         GranteeSid = new Sid("S-1-5-21-LWE-DAVID"),
-        OnUnmatched = OnUnmatched.Deny
+        Scope = "lwetem_prod.*.*",
+        Uncovered = UncoveredPolicy.Deny,
+        Bindings = (filters.Length == 0 ? ["nicht_ausgelieferte_krane"] : filters)
+            .Select(f => new FilterBinding { FilterName = f, TargetPattern = "lwetem_prod.*.*.client_id" }).ToList()
     };
 
     [Fact]
     public void DavidCase_IsValid()
     {
         Should.NotThrow(() => DavidFilter().Validate());
-        Should.NotThrow(() => DavidBinding().Validate());
+        Should.NotThrow(() => DavidProfile().Validate());
         DavidFilter().TargetKeyColumns.ShouldBe(["client_id"]);
     }
 
@@ -110,32 +114,37 @@ public sealed class VirtualFilterModelTests
     }
 
     [Fact]
-    public void Binding_OnUnmatched_IsMandatory()
+    public void Profile_Uncovered_IsMandatory()
     {
-        Should.Throw<ArgumentException>(() => (DavidBinding() with { OnUnmatched = null }).Validate());
+        Should.Throw<ArgumentException>(() => (DavidProfile() with { Uncovered = null }).Validate());
     }
 
     [Fact]
-    public void Binding_PatternMustParse_AndGranteeMustMatchItsType()
+    public void Profile_ScopeAddressesObjects_AndGranteeMustMatchItsType()
     {
-        Should.Throw<ArgumentException>(() => (DavidBinding() with { TargetPattern = "a.b" }).Validate());
-        Should.Throw<ArgumentException>(() => (DavidBinding() with { GranteeSid = null }).Validate());
-        Should.Throw<ArgumentException>(() => (DavidBinding() with { GranteeType = GranteeType.Role, GranteeSid = null, RoleName = null }).Validate());
-        Should.NotThrow(() => (DavidBinding() with { GranteeType = GranteeType.Role, GranteeSid = null, RoleName = "Analyst" }).Validate());
+        Should.Throw<ArgumentException>(() => (DavidProfile() with { Scope = "a.b" }).Validate());
+        Should.Throw<ArgumentException>(() => (DavidProfile() with { Scope = "lwetem_prod.*.*.client_id" }).Validate());
+        Should.Throw<ArgumentException>(() => (DavidProfile() with { GranteeSid = null }).Validate());
+        Should.Throw<ArgumentException>(() => (DavidProfile() with { GranteeType = GranteeType.Role, GranteeSid = null, RoleName = null }).Validate());
+        Should.NotThrow(() => (DavidProfile() with { GranteeType = GranteeType.Role, GranteeSid = null, RoleName = "Analyst" }).Validate());
     }
 
     [Fact]
-    public void Binding_ObjectKinds_MustNotBeEmpty()
+    public void Profile_NeedsBindings_EachValid_AndNotTwiceOnTheSameTarget()
     {
-        Should.Throw<ArgumentException>(() => (DavidBinding() with { ObjectKinds = FilterObjectKinds.None }).Validate());
-        DavidBinding().ObjectKinds.ShouldBe(FilterObjectKinds.Relation | FilterObjectKinds.ProcedureResult);
+        Should.Throw<ArgumentException>(() => (DavidProfile() with { Bindings = [] }).Validate());
+        Should.Throw<ArgumentException>(() => (DavidProfile() with { Bindings = [new FilterBinding { FilterName = "f", TargetPattern = "a.b" }] }).Validate());
+        Should.Throw<ArgumentException>(() => (DavidProfile() with { Bindings = [new FilterBinding { FilterName = "f", ObjectKinds = FilterObjectKinds.None }] }).Validate());
+        Should.Throw<ArgumentException>(() => (DavidProfile() with { Bindings = [new FilterBinding { FilterName = "f" }, new FilterBinding { FilterName = "f" }] }).Validate());
+        Should.NotThrow(() => (DavidProfile() with { Bindings = [new FilterBinding { FilterName = "f" }, new FilterBinding { FilterName = "f", TargetPattern = "lwetem_prod.fms.*" }] }).Validate());
+        new FilterBinding { FilterName = "f" }.ObjectKinds.ShouldBe(FilterObjectKinds.Relation | FilterObjectKinds.ProcedureResult);
     }
 
     [Fact]
     public void Binding_ColumnMap_TargetsSimpleNames()
     {
-        Should.NotThrow(() => (DavidBinding() with { ColumnMap = new System.Collections.Generic.Dictionary<string, string> { ["client_id"] = "cid" } }).Validate());
-        Should.Throw<ArgumentException>(() => (DavidBinding() with { ColumnMap = new System.Collections.Generic.Dictionary<string, string> { ["client_id"] = "c id" } }).Validate());
+        Should.NotThrow(() => new FilterBinding { FilterName = "f", ColumnMap = new Dictionary<string, string> { ["client_id"] = "cid" } }.Validate());
+        Should.Throw<ArgumentException>(() => new FilterBinding { FilterName = "f", ColumnMap = new Dictionary<string, string> { ["client_id"] = "c id" } }.Validate());
     }
 
     [Fact]
@@ -143,7 +152,9 @@ public sealed class VirtualFilterModelTests
     {
         DavidFilter().ComputeDefinitionHash().ShouldBe(DavidFilter().ComputeDefinitionHash());
         (DavidFilter() with { ValidToColumn = "crane.date_of_delivery" }).ComputeDefinitionHash().ShouldNotBe(DavidFilter().ComputeDefinitionHash());
-        DavidBinding().ComputeDefinitionHash().ShouldBe(DavidBinding().ComputeDefinitionHash());
-        (DavidBinding() with { OnUnmatched = OnUnmatched.Skip }).ComputeDefinitionHash().ShouldNotBe(DavidBinding().ComputeDefinitionHash());
+        DavidProfile().ComputeDefinitionHash().ShouldBe(DavidProfile().ComputeDefinitionHash());
+        (DavidProfile() with { Uncovered = UncoveredPolicy.Skip }).ComputeDefinitionHash().ShouldNotBe(DavidProfile().ComputeDefinitionHash());
+        (DavidProfile() with { Bindings = [new FilterBinding { FilterName = "nicht_ausgelieferte_krane", TimeColumn = "ts" }] })
+            .ComputeDefinitionHash().ShouldNotBe(DavidProfile().ComputeDefinitionHash());
     }
 }

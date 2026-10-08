@@ -16,7 +16,7 @@ using Microsoft.AspNetCore.Routing;
 
 /// <summary>
 /// Virtual filters (docs/plans/2026-10-08-umsetzungsplan-virtuelle-filter.md, phase 2): administration API.
-/// FilterAdmin maintains filters and bindings, FilterSync applies the state of the file repository (Talos),
+/// FilterAdmin maintains filters and access profiles, FilterSync applies the state of the file repository (Talos),
 /// GovernanceAdmin and SecurityAuditor read. Callers stay within their tenant; only ClusterAdmin acts across tenants.
 /// </summary>
 public static class VirtualFilterEndpoints
@@ -31,8 +31,8 @@ public static class VirtualFilterEndpoints
         group.MapGet("/virtual-filters", (HttpContext context, VirtualFilterAdministrationService service) => ListAsync(context, service));
         group.MapPut("/virtual-filters/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutFilterAsync(name, context, service));
         group.MapDelete("/virtual-filters/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => DeleteFilterAsync(name, context, service));
-        group.MapPut("/filter-bindings/{id:guid}", (Guid id, HttpContext context, VirtualFilterAdministrationService service) => PutBindingAsync(id, context, service));
-        group.MapDelete("/filter-bindings/{id:guid}", (Guid id, HttpContext context, VirtualFilterAdministrationService service) => DeleteBindingAsync(id, context, service));
+        group.MapPut("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutProfileAsync(name, context, service));
+        group.MapDelete("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => DeleteProfileAsync(name, context, service));
         group.MapPost("/virtual-filters/sync/plan", (HttpContext context, VirtualFilterAdministrationService service) => PlanSyncAsync(context, service));
         group.MapPost("/virtual-filters/sync/apply", (HttpContext context, VirtualFilterAdministrationService service) => ApplySyncAsync(context, service));
         return app;
@@ -54,7 +54,7 @@ public static class VirtualFilterEndpoints
         {
             generation = snapshot.Generation,
             filters = snapshot.Filters.Where(f => all || f.TenantId == security.TenantId).Select(FilterView),
-            bindings = snapshot.Bindings.Where(b => all || b.TenantId == security.TenantId).Select(BindingView)
+            profiles = snapshot.Profiles.Where(p => all || p.TenantId == security.TenantId).Select(ProfileView)
         });
     }
 
@@ -79,24 +79,24 @@ public static class VirtualFilterEndpoints
             return Results.NoContent();
         });
 
-    internal static Task<IResult> PutBindingAsync(Guid id, HttpContext context, VirtualFilterAdministrationService service) =>
+    internal static Task<IResult> PutProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
         ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
         {
-            var body = await ReadAsync<BindingBody>(context).ConfigureAwait(false);
+            var body = await ReadAsync<ProfileBody>(context).ConfigureAwait(false);
             var tenant = ResolveTenant(security, body.Tenant);
             if (tenant == null)
             {
                 return Forbidden();
             }
 
-            var saved = await service.SaveBindingAsync(body.ToModel(id, tenant.Value), actor, context.RequestAborted).ConfigureAwait(false);
-            return Results.Ok(BindingView(saved));
+            var saved = await service.SaveProfileAsync(body.ToModel(name, tenant.Value), actor, context.RequestAborted).ConfigureAwait(false);
+            return Results.Ok(ProfileView(saved));
         });
 
-    internal static Task<IResult> DeleteBindingAsync(Guid id, HttpContext context, VirtualFilterAdministrationService service) =>
+    internal static Task<IResult> DeleteProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
         ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
         {
-            await service.DeleteBindingAsync(security.TenantId, id, actor, context.RequestAborted).ConfigureAwait(false);
+            await service.DeleteProfileAsync(security.TenantId, name, actor, context.RequestAborted).ConfigureAwait(false);
             return Results.NoContent();
         });
 
@@ -115,8 +115,20 @@ public static class VirtualFilterEndpoints
         }).ConfigureAwait(false);
     }
 
-    internal static Task<IResult> ApplySyncAsync(HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.FilterSync, async (security, actor) =>
+    /// <summary>
+    /// Applies the file repository state. FilterSync applies; a sync that removes many bindings (see
+    /// <c>VirtualFilters:MaxRemovals</c>) only goes through with <c>?force=true</c>, which needs FilterAdmin.
+    /// </summary>
+    internal static async Task<IResult> ApplySyncAsync(HttpContext context, VirtualFilterAdministrationService service)
+    {
+        var security = EndpointSecurity.GetSecurityContext(context);
+        bool force = string.Equals(context.Request.Query["force"], "true", StringComparison.OrdinalIgnoreCase);
+        if (force ? !security.HasRole(GatewayRole.FilterAdmin) : !security.HasRole(GatewayRole.FilterSync))
+        {
+            return Forbidden();
+        }
+
+        return await MapErrorsAsync(async () =>
         {
             var request = await ReadSyncRequestAsync(context, security).ConfigureAwait(false);
             if (request == null)
@@ -124,8 +136,10 @@ public static class VirtualFilterEndpoints
                 return Forbidden();
             }
 
-            return Results.Ok(await service.ApplySyncAsync(request, actor with { IsSync = true }, context.RequestAborted).ConfigureAwait(false));
-        });
+            var actor = new VirtualFilterActor(security.UserSid, IsSync: true);
+            return Results.Ok(await service.ApplySyncAsync(request, actor, force, context.RequestAborted).ConfigureAwait(false));
+        }).ConfigureAwait(false);
+    }
 
     // ------------------------------------------------------------------ helpers
 
@@ -203,7 +217,7 @@ public static class VirtualFilterEndpoints
             tenant.Value,
             new ManagedBy(body.Path, body.Commit),
             (body.Filters ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList(),
-            (body.Bindings ?? []).Select(b => b.ToModel(Guid.NewGuid(), tenant.Value)).ToList());
+            (body.Profiles ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList());
     }
 
     private static IResult Forbidden() => Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -227,19 +241,24 @@ public static class VirtualFilterEndpoints
         updated_at = f.UpdatedAt
     };
 
-    private static object BindingView(FilterBinding b) => new
+    private static object ProfileView(AccessProfile p) => new
     {
-        id = b.Id,
-        tenant = b.TenantId.Value,
-        filter = b.FilterName,
-        target = b.TargetPattern,
-        grantee = new { type = b.GranteeType.ToString().ToLowerInvariant(), sid = b.GranteeSid?.Value, role = b.RoleName },
-        object_kinds = b.ObjectKinds.ToString(),
-        time_column = b.TimeColumn,
-        map = b.ColumnMap,
-        on_unmatched = b.OnUnmatched?.ToString().ToLowerInvariant(),
-        managed_by = b.ManagedBy,
-        definition_hash = b.ComputeDefinitionHash()
+        id = p.Id,
+        tenant = p.TenantId.Value,
+        name = p.Name,
+        grantee = new { type = p.GranteeType.ToString().ToLowerInvariant(), sid = p.GranteeSid?.Value, role = p.RoleName },
+        scope = p.Scope,
+        uncovered = p.Uncovered?.ToString().ToLowerInvariant(),
+        bindings = p.Bindings.Select(b => new
+        {
+            filter = b.FilterName,
+            target = b.TargetPattern,
+            object_kinds = b.ObjectKinds.ToString(),
+            time_column = b.TimeColumn,
+            map = b.ColumnMap
+        }),
+        managed_by = p.ManagedBy,
+        definition_hash = p.ComputeDefinitionHash()
     };
 
     private static string ConditionOperatorName(FilterConditionOperator op) => op switch
@@ -341,27 +360,14 @@ public static class VirtualFilterEndpoints
 
     internal sealed class BindingBody
     {
-        [JsonPropertyName("tenant")] public string? Tenant { get; set; }
         [JsonPropertyName("filter")] public string Filter { get; set; } = string.Empty;
-        [JsonPropertyName("target")] public string Target { get; set; } = string.Empty;
-        [JsonPropertyName("grantee")] public GranteeBody? Grantee { get; set; }
+        [JsonPropertyName("target")] public string? Target { get; set; }
         [JsonPropertyName("object_kinds")] public List<string>? ObjectKinds { get; set; }
         [JsonPropertyName("time_column")] public string? TimeColumn { get; set; }
         [JsonPropertyName("map")] public Dictionary<string, string>? Map { get; set; }
-        [JsonPropertyName("on_unmatched")] public string? OnUnmatched { get; set; }
 
-        public FilterBinding ToModel(Guid id, TenantId tenant)
+        public FilterBinding ToModel()
         {
-            var grantee = Grantee ?? throw new ArgumentException("A binding needs a grantee.");
-            var type = grantee.Type.ToLowerInvariant() switch
-            {
-                "user" => GranteeType.User,
-                "group" => GranteeType.Group,
-                "role" => GranteeType.Role,
-                "service_principal" => GranteeType.ServicePrincipal,
-                _ => throw new ArgumentException($"Unknown grantee type '{grantee.Type}'.")
-            };
-
             var kinds = FilterObjectKinds.None;
             foreach (var kind in ObjectKinds ?? ["relation", "procedure_result"])
             {
@@ -375,23 +381,51 @@ public static class VirtualFilterEndpoints
 
             return new FilterBinding
             {
-                Id = id,
-                TenantId = tenant,
                 FilterName = Filter,
                 TargetPattern = Target,
+                ObjectKinds = kinds,
+                TimeColumn = TimeColumn,
+                ColumnMap = Map
+            };
+        }
+    }
+
+    internal sealed class ProfileBody
+    {
+        [JsonPropertyName("tenant")] public string? Tenant { get; set; }
+        [JsonPropertyName("grantee")] public GranteeBody? Grantee { get; set; }
+        [JsonPropertyName("scope")] public string Scope { get; set; } = string.Empty;
+        [JsonPropertyName("uncovered")] public string? Uncovered { get; set; }
+        [JsonPropertyName("bindings")] public List<BindingBody>? Bindings { get; set; }
+
+        public AccessProfile ToModel(string name, TenantId tenant)
+        {
+            var grantee = Grantee ?? throw new ArgumentException("A profile needs a grantee.");
+            var type = grantee.Type.ToLowerInvariant() switch
+            {
+                "user" => GranteeType.User,
+                "group" => GranteeType.Group,
+                "role" => GranteeType.Role,
+                "service_principal" => GranteeType.ServicePrincipal,
+                _ => throw new ArgumentException($"Unknown grantee type '{grantee.Type}'.")
+            };
+
+            return new AccessProfile
+            {
+                TenantId = tenant,
+                Name = name,
                 GranteeType = type,
                 GranteeSid = string.IsNullOrWhiteSpace(grantee.Sid) ? (Sid?)null : new Sid(grantee.Sid),
                 RoleName = grantee.Role,
-                ObjectKinds = kinds,
-                TimeColumn = TimeColumn,
-                ColumnMap = Map,
-                OnUnmatched = OnUnmatched?.ToLowerInvariant() switch
+                Scope = Scope,
+                Uncovered = Uncovered?.ToLowerInvariant() switch
                 {
                     null => null,
-                    "deny" => Domain.Model.OnUnmatched.Deny,
-                    "skip" => Domain.Model.OnUnmatched.Skip,
-                    _ => throw new ArgumentException($"Unknown on_unmatched '{OnUnmatched}' (deny, skip).")
-                }
+                    "deny" => UncoveredPolicy.Deny,
+                    "skip" => UncoveredPolicy.Skip,
+                    _ => throw new ArgumentException($"Unknown uncovered '{Uncovered}' (deny, skip).")
+                },
+                Bindings = (Bindings ?? []).Select(b => b.ToModel()).ToList()
             };
         }
     }
@@ -402,6 +436,6 @@ public static class VirtualFilterEndpoints
         [JsonPropertyName("path")] public string Path { get; set; } = string.Empty;
         [JsonPropertyName("commit")] public string Commit { get; set; } = string.Empty;
         [JsonPropertyName("filters")] public Dictionary<string, FilterBody>? Filters { get; set; }
-        [JsonPropertyName("bindings")] public List<BindingBody>? Bindings { get; set; }
+        [JsonPropertyName("profiles")] public Dictionary<string, ProfileBody>? Profiles { get; set; }
     }
 }

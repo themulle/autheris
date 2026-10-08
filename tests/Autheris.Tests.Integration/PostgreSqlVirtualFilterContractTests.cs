@@ -80,43 +80,55 @@ public sealed class PostgreSqlVirtualFilterContractTests : IAsyncLifetime
         ManagedBy = new ManagedBy("governance/access", "c1")
     };
 
-    private static FilterBinding Binding() => new()
+    private static AccessProfile Profile() => new()
     {
         TenantId = Tenant,
-        FilterName = "nicht_ausgelieferte_krane",
-        TargetPattern = "lwetem_prod.*.*.client_id",
+        Name = "david",
         GranteeSid = new Sid("S-1-5-21-LWE-DAVID"),
-        OnUnmatched = OnUnmatched.Deny,
-        TimeColumn = "ts"
+        Scope = "lwetem_prod.*.*",
+        Uncovered = UncoveredPolicy.Deny,
+        Bindings = [new FilterBinding { FilterName = "nicht_ausgelieferte_krane", TargetPattern = "lwetem_prod.*.*.client_id", TimeColumn = "ts" }]
     };
 
     [Fact]
-    public async Task FiltersAndBindings_RoundTrip_AndEveryWriteIncrementsTheGeneration()
+    public async Task FiltersAndProfiles_RoundTrip_AndEachChangeSetIncrementsTheGenerationOnce()
     {
         if (!_available) return;
         await using var repository = NewRepository();
         IVirtualFilterRepository store = repository;
         var start = await store.GetGenerationAsync();
 
-        await store.SaveFilterAsync(Filter());
-        await store.SaveFilterAsync(Filter() with { ValidToColumn = null });   // same tenant and name: replaced
-        var binding = Binding();
-        await store.SaveBindingAsync(binding);
+        await store.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [Filter()], SaveProfiles = [Profile()] });
+        await store.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [Filter() with { Id = Guid.NewGuid(), ValidToColumn = null }] });   // replaced by name
 
         var snapshot = await store.LoadSnapshotAsync();
-        snapshot.Generation.ShouldBe(start + 3);
+        snapshot.Generation.ShouldBe(start + 2);
         var filter = snapshot.Filters.ShouldHaveSingleItem();
         filter.ValidToColumn.ShouldBeNull();
         filter.ManagedBy.ShouldBe(new ManagedBy("governance/access", "c1"));
         filter.StoredDefinitionHash.ShouldBe(filter.ComputeDefinitionHash());
-        var loaded = snapshot.Bindings.ShouldHaveSingleItem();
-        loaded.ComputeDefinitionHash().ShouldBe(binding.ComputeDefinitionHash());
+        snapshot.Profiles.ShouldHaveSingleItem().ComputeDefinitionHash().ShouldBe(Profile().ComputeDefinitionHash());
 
-        (await store.DeleteBindingAsync(new TenantId("other"), binding.Id)).ShouldBeFalse();
-        (await store.DeleteBindingAsync(Tenant, binding.Id)).ShouldBeTrue();
-        (await store.DeleteFilterAsync(Tenant, "nicht_ausgelieferte_krane")).ShouldBeTrue();
-        (await store.DeleteFilterAsync(Tenant, "nicht_ausgelieferte_krane")).ShouldBeFalse();
-        (await store.GetGenerationAsync()).ShouldBe(start + 5);
+        await store.ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(Tenant, "david")], DeleteFilters = [(Tenant, "nicht_ausgelieferte_krane")] });
+        var after = await store.LoadSnapshotAsync();
+        after.Filters.ShouldBeEmpty();
+        after.Profiles.ShouldBeEmpty();
+        after.Generation.ShouldBe(start + 3);
+    }
+
+    [Fact]
+    public async Task AFailingChangeSet_WritesNothing()
+    {
+        if (!_available) return;
+        await using var repository = NewRepository();
+        IVirtualFilterRepository store = repository;
+        var start = await store.GetGenerationAsync();
+        var duplicate = Filter("zweiter_filter");
+
+        await Should.ThrowAsync<Exception>(() => store.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [duplicate, duplicate with { Name = "dritter_filter" }] }));
+
+        (await store.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
+        (await store.GetGenerationAsync()).ShouldBe(start);
     }
 
     [Fact]
@@ -126,8 +138,7 @@ public sealed class PostgreSqlVirtualFilterContractTests : IAsyncLifetime
         await using var repository = NewRepository();
         IVirtualFilterRepository store = repository;
 
-        await store.SaveFilterAsync(Filter());
-        await store.SaveFilterAsync(Filter() with { Id = Guid.NewGuid(), TenantId = new TenantId("other") });
+        await store.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [Filter(), Filter() with { Id = Guid.NewGuid(), TenantId = new TenantId("other") }] });
 
         (await store.LoadSnapshotAsync()).Filters.Count.ShouldBe(2);
     }

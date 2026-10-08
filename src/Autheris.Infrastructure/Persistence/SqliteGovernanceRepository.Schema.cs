@@ -274,16 +274,17 @@ public partial class SqliteGovernanceRepository
                 UNIQUE (tenant_id, name)
             );
 
-            CREATE TABLE IF NOT EXISTS FILTER_BINDINGS (
+            CREATE TABLE IF NOT EXISTS ACCESS_PROFILES (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
-                filter_name TEXT NOT NULL,
+                name TEXT NOT NULL,
                 definition_json TEXT NOT NULL,
                 definition_hash TEXT NOT NULL,
                 managed_path TEXT,
                 managed_commit TEXT,
                 updated_by TEXT,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                UNIQUE (tenant_id, name)
             );
 
             CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_GENERATION (

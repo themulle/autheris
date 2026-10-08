@@ -4,8 +4,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
-/// <summary>What an unmatched object (pattern hit, but required columns missing) means for a binding's grantees.</summary>
-public enum OnUnmatched
+/// <summary>What an object in a profile's scope that no binding covers means for the grantee.</summary>
+public enum UncoveredPolicy
 {
     /// <summary>The object is denied for the grantees (fail closed).</summary>
     Deny = 1,
@@ -200,18 +200,17 @@ public sealed record VirtualFilter
 }
 
 /// <summary>
-/// Applies a virtual filter to the objects matched by <see cref="TargetPattern"/> for one grantee. A binding only
-/// restricts: it is combined with AND with the consent decision and never grants access.
+/// One filter of an <see cref="AccessProfile"/>: applies the virtual filter to the objects matched by
+/// <see cref="TargetPattern"/> (or the profile's scope). A binding only restricts: it is combined with AND with the
+/// consent decision and never grants access.
 /// </summary>
 public sealed record FilterBinding
 {
-    public Guid Id { get; init; } = Guid.NewGuid();
-    public TenantId TenantId { get; init; } = TenantId.LegacySingleTenant;
     public string FilterName { get; init; } = string.Empty;
-    public string TargetPattern { get; init; } = string.Empty;
-    public GranteeType GranteeType { get; init; } = GranteeType.User;
-    public Sid? GranteeSid { get; init; }
-    public string? RoleName { get; init; }
+
+    /// <summary>Pattern <c>source.schema.object[.column]</c>; null means the profile's scope.</summary>
+    public string? TargetPattern { get; init; }
+
     public FilterObjectKinds ObjectKinds { get; init; } = FilterObjectKinds.Relation | FilterObjectKinds.ProcedureResult;
 
     /// <summary>Column of the protected object compared with the filter's validity window.</summary>
@@ -220,43 +219,17 @@ public sealed record FilterBinding
     /// <summary>Key column name of the filter → column name of the protected object (default: same name).</summary>
     public IReadOnlyDictionary<string, string>? ColumnMap { get; init; }
 
-    /// <summary>Mandatory: there is no silent default (design 3.9).</summary>
-    public OnUnmatched? OnUnmatched { get; init; }
-
-    public ManagedBy? ManagedBy { get; init; }
-    public string? UpdatedBy { get; init; }
-    public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
-
-    /// <summary>Hash stored with the row (set by the repository).</summary>
-    public string? StoredDefinitionHash { get; init; }
-
-    /// <summary>Identity of a binding for the sync from the file repository: filter, target and grantee.</summary>
-    public string NaturalKey => string.Join('|', FilterName, TargetPattern, GranteeType, GranteeSid?.Value, RoleName);
-
     public void Validate()
     {
         VirtualFilterNames.ValidateFilterName(FilterName, nameof(FilterName));
-        if (!ObjectPattern.TryParse(TargetPattern, out _, out var patternError))
+        if (TargetPattern != null && !ObjectPattern.TryParse(TargetPattern, out _, out var patternError))
         {
-            throw new ArgumentException($"Invalid target pattern: {patternError}", nameof(TargetPattern));
-        }
-
-        switch (GranteeType)
-        {
-            case GranteeType.Role when string.IsNullOrWhiteSpace(RoleName):
-                throw new ArgumentException("A role binding needs a role name.", nameof(RoleName));
-            case GranteeType.User or GranteeType.Group or GranteeType.ServicePrincipal when GranteeSid == null:
-                throw new ArgumentException("A user, group or service principal binding needs a SID.", nameof(GranteeSid));
+            throw new ArgumentException($"Invalid target pattern of '{FilterName}': {patternError}", nameof(TargetPattern));
         }
 
         if (ObjectKinds == FilterObjectKinds.None)
         {
-            throw new ArgumentException("A binding needs at least one object kind.", nameof(ObjectKinds));
-        }
-
-        if (OnUnmatched == null)
-        {
-            throw new ArgumentException("A binding must state on_unmatched (deny or skip).", nameof(OnUnmatched));
+            throw new ArgumentException($"The binding of '{FilterName}' needs at least one object kind.", nameof(ObjectKinds));
         }
 
         if (TimeColumn != null) VirtualFilterNames.ValidateIdentifier(TimeColumn, nameof(TimeColumn));
@@ -267,22 +240,104 @@ public sealed record FilterBinding
         }
     }
 
+    internal void AppendCanonical(StringBuilder sb) =>
+        sb.Append("binding=").Append(FilterName)
+          .Append(" target=").Append(TargetPattern)
+          .Append(" kinds=").Append((int)ObjectKinds)
+          .Append(" time=").Append(TimeColumn)
+          .Append(" map=").AppendJoin(',', (ColumnMap ?? new Dictionary<string, string>())
+              .OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value))
+          .Append('\n');
+}
+
+/// <summary>
+/// The virtual filters of one grantee (design 3.1): grantee, scope, bindings and what applies to objects in the scope
+/// that no binding covers (<see cref="Uncovered"/>, on the profile because filters of one grantee complement each other).
+/// </summary>
+public sealed record AccessProfile
+{
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public TenantId TenantId { get; init; } = TenantId.LegacySingleTenant;
+    public string Name { get; init; } = string.Empty;
+    public GranteeType GranteeType { get; init; } = GranteeType.User;
+    public Sid? GranteeSid { get; init; }
+    public string? RoleName { get; init; }
+
+    /// <summary>Pattern <c>source.schema.object</c> (three segments) the profile governs.</summary>
+    public string Scope { get; init; } = string.Empty;
+
+    /// <summary>Mandatory: objects in the scope no binding covers are denied or left to the consents (no silent default).</summary>
+    public UncoveredPolicy? Uncovered { get; init; }
+
+    public IReadOnlyList<FilterBinding> Bindings { get; init; } = [];
+
+    public ManagedBy? ManagedBy { get; init; }
+    public string? UpdatedBy { get; init; }
+    public DateTimeOffset UpdatedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>Hash stored with the row (set by the repository).</summary>
+    public string? StoredDefinitionHash { get; init; }
+
+    public void Validate()
+    {
+        VirtualFilterNames.ValidateFilterName(Name, nameof(Name));
+        switch (GranteeType)
+        {
+            case GranteeType.Role when string.IsNullOrWhiteSpace(RoleName):
+                throw new ArgumentException("A role profile needs a role name.", nameof(RoleName));
+            case GranteeType.User or GranteeType.Group or GranteeType.ServicePrincipal when GranteeSid == null:
+                throw new ArgumentException("A user, group or service principal profile needs a SID.", nameof(GranteeSid));
+        }
+
+        if (!ObjectPattern.TryParse(Scope, out var scope, out var scopeError))
+        {
+            throw new ArgumentException($"Invalid scope: {scopeError}", nameof(Scope));
+        }
+
+        if (scope!.HasColumnSegment)
+        {
+            throw new ArgumentException("The scope addresses objects (source.schema.object), not columns.", nameof(Scope));
+        }
+
+        if (Uncovered == null)
+        {
+            throw new ArgumentException("A profile must state uncovered (deny or skip).", nameof(Uncovered));
+        }
+
+        if (Bindings.Count == 0)
+        {
+            throw new ArgumentException("A profile needs at least one binding.", nameof(Bindings));
+        }
+
+        foreach (var binding in Bindings)
+        {
+            binding.Validate();
+        }
+
+        var duplicate = Bindings.GroupBy(b => (b.FilterName, b.TargetPattern)).FirstOrDefault(g => g.Count() > 1);
+        if (duplicate != null)
+        {
+            throw new ArgumentException($"The filter '{duplicate.Key.FilterName}' is bound twice to the same target.", nameof(Bindings));
+        }
+    }
+
     public string ComputeDefinitionHash()
     {
         var sb = new StringBuilder()
-            .Append("filter=").Append(FilterName).Append('\n')
-            .Append("target=").Append(TargetPattern).Append('\n')
+            .Append("name=").Append(Name).Append('\n')
             .Append("grantee=").Append(GranteeType).Append(':').Append(GranteeSid?.Value).Append(':').Append(RoleName).Append('\n')
-            .Append("kinds=").Append((int)ObjectKinds).Append('\n')
-            .Append("time=").Append(TimeColumn).Append('\n')
-            .Append("unmatched=").Append(OnUnmatched).Append('\n')
-            .Append("map=").AppendJoin(',', (ColumnMap ?? new Dictionary<string, string>())
-                .OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value));
+            .Append("scope=").Append(Scope).Append('\n')
+            .Append("uncovered=").Append(Uncovered).Append('\n');
+        foreach (var binding in Bindings.OrderBy(b => b.FilterName, StringComparer.Ordinal).ThenBy(b => b.TargetPattern, StringComparer.Ordinal))
+        {
+            binding.AppendCanonical(sb);
+        }
+
         return VirtualFilterNames.Sha256(sb.ToString());
     }
 }
 
-/// <summary>Name rules shared by filters and bindings.</summary>
+/// <summary>Name rules shared by filters and profiles.</summary>
 public static partial class VirtualFilterNames
 {
     [GeneratedRegex("^[a-z][a-z0-9_]{0,63}$")]

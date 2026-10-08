@@ -9,8 +9,8 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Virtual filters: storage shared by the SQLite and PostgreSQL governance repositories (portable SQL: ON CONFLICT,
-/// named parameters). Definitions are stored as JSON with their hash; every write increments the generation in the
-/// same transaction.
+/// named parameters). Definitions are stored as JSON with their hash; a change set is one transaction and increments
+/// the generation once.
 /// </summary>
 internal static class VirtualFilterStore
 {
@@ -21,8 +21,9 @@ internal static class VirtualFilterStore
         TableDto From, string FromAlias, List<JoinDto> Joins, List<ConditionDto> Where,
         List<string> KeyColumns, string? ValidFrom, string? ValidTo, List<string> Supersedes);
     private sealed record BindingDto(
-        string TargetPattern, GranteeType GranteeType, string? GranteeSid, string? RoleName, FilterObjectKinds ObjectKinds,
-        string? TimeColumn, Dictionary<string, string>? ColumnMap, OnUnmatched? OnUnmatched);
+        string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap);
+    private sealed record ProfileDto(
+        GranteeType GranteeType, string? GranteeSid, string? RoleName, string Scope, UncoveredPolicy? Uncovered, List<BindingDto> Bindings);
 
     public static async Task<VirtualFilterSnapshot> LoadSnapshotAsync(DbConnection connection, CancellationToken ct)
     {
@@ -32,7 +33,7 @@ internal static class VirtualFilterStore
         var filters = new List<VirtualFilter>();
         await using (var cmd = Command(connection, tx, @"
             SELECT id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at
-            FROM VIRTUAL_FILTERS ORDER BY tenant_id, name;"))
+            FROM VIRTUAL_FILTERS ORDER BY tenant_id, name;", []))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -41,136 +42,107 @@ internal static class VirtualFilterStore
             }
         }
 
-        var bindings = new List<FilterBinding>();
+        var profiles = new List<AccessProfile>();
         await using (var cmd = Command(connection, tx, @"
-            SELECT id, tenant_id, filter_name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at
-            FROM FILTER_BINDINGS ORDER BY tenant_id, filter_name, id;"))
+            SELECT id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at
+            FROM ACCESS_PROFILES ORDER BY tenant_id, name;", []))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
-                bindings.Add(ReadBinding(reader));
+                profiles.Add(ReadProfile(reader));
             }
         }
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
-        return new VirtualFilterSnapshot(generation, filters, bindings);
+        return new VirtualFilterSnapshot(generation, filters, profiles);
     }
 
-    public static async Task<long> GetGenerationAsync(DbConnection connection, CancellationToken ct) =>
-        await ReadGenerationAsync(connection, null, ct).ConfigureAwait(false);
+    public static Task<long> GetGenerationAsync(DbConnection connection, CancellationToken ct) => ReadGenerationAsync(connection, null, ct);
 
-    public static async Task SaveFilterAsync(DbConnection connection, VirtualFilter filter, CancellationToken ct)
+    public static async Task ApplyAsync(DbConnection connection, VirtualFilterChangeSet changes, CancellationToken ct)
     {
-        var definition = new FilterDto(
-            Dto(filter.Structured!.From),
-            filter.Structured.FromAlias,
-            filter.Structured.Joins.Select(j => new JoinDto(Dto(j.Table), j.Alias, j.LeftColumn, j.RightColumn)).ToList(),
-            filter.Structured.Where.Select(w => new ConditionDto(w.Column, w.Operator, w.Value)).ToList(),
-            filter.KeyColumns.ToList(),
-            filter.ValidFromColumn,
-            filter.ValidToColumn,
-            filter.Supersedes.ToList());
-
-        await WriteAsync(connection, @"
-            INSERT INTO VIRTUAL_FILTERS (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
-            VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at)
-            ON CONFLICT (tenant_id, name) DO UPDATE SET
-                source = excluded.source, definition_json = excluded.definition_json, definition_hash = excluded.definition_hash,
-                managed_path = excluded.managed_path, managed_commit = excluded.managed_commit,
-                updated_by = excluded.updated_by, updated_at = excluded.updated_at;",
-            [
-                ("@id", filter.Id.ToString()),
-                ("@tenant", filter.TenantId.Value),
-                ("@name", filter.Name),
-                ("@source", filter.Source),
-                ("@json", JsonSerializer.Serialize(definition)),
-                ("@hash", filter.ComputeDefinitionHash()),
-                ("@path", filter.ManagedBy?.Path),
-                ("@commit", filter.ManagedBy?.Commit),
-                ("@by", filter.UpdatedBy),
-                ("@at", filter.UpdatedAt.ToString("O", CultureInfo.InvariantCulture))
-            ], ct).ConfigureAwait(false);
-    }
-
-    public static Task<bool> DeleteFilterAsync(DbConnection connection, TenantId tenantId, string name, CancellationToken ct) =>
-        DeleteAsync(connection, "DELETE FROM VIRTUAL_FILTERS WHERE tenant_id = @tenant AND name = @key;", tenantId, name, ct);
-
-    public static async Task SaveBindingAsync(DbConnection connection, FilterBinding binding, CancellationToken ct)
-    {
-        var definition = new BindingDto(
-            binding.TargetPattern, binding.GranteeType, binding.GranteeSid?.Value, binding.RoleName, binding.ObjectKinds,
-            binding.TimeColumn, binding.ColumnMap?.ToDictionary(p => p.Key, p => p.Value), binding.OnUnmatched);
-
-        await WriteAsync(connection, @"
-            INSERT INTO FILTER_BINDINGS (id, tenant_id, filter_name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
-            VALUES (@id, @tenant, @filter, @json, @hash, @path, @commit, @by, @at)
-            ON CONFLICT (id) DO UPDATE SET
-                tenant_id = excluded.tenant_id, filter_name = excluded.filter_name, definition_json = excluded.definition_json,
-                definition_hash = excluded.definition_hash, managed_path = excluded.managed_path, managed_commit = excluded.managed_commit,
-                updated_by = excluded.updated_by, updated_at = excluded.updated_at;",
-            [
-                ("@id", binding.Id.ToString()),
-                ("@tenant", binding.TenantId.Value),
-                ("@filter", binding.FilterName),
-                ("@json", JsonSerializer.Serialize(definition)),
-                ("@hash", binding.ComputeDefinitionHash()),
-                ("@path", binding.ManagedBy?.Path),
-                ("@commit", binding.ManagedBy?.Commit),
-                ("@by", binding.UpdatedBy),
-                ("@at", binding.UpdatedAt.ToString("O", CultureInfo.InvariantCulture))
-            ], ct).ConfigureAwait(false);
-    }
-
-    public static Task<bool> DeleteBindingAsync(DbConnection connection, TenantId tenantId, Guid id, CancellationToken ct) =>
-        DeleteAsync(connection, "DELETE FROM FILTER_BINDINGS WHERE tenant_id = @tenant AND id = @key;", tenantId, id.ToString(), ct);
-
-    private static async Task WriteAsync(DbConnection connection, string sql, (string Name, object? Value)[] parameters, CancellationToken ct)
-    {
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-        await using (var cmd = Command(connection, tx, sql, parameters))
+        if (changes.IsEmpty)
         {
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            return;
         }
 
-        await IncrementGenerationAsync(connection, tx, ct).ConfigureAwait(false);
+        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        foreach (var filter in changes.SaveFilters)
+        {
+            await ExecuteAsync(connection, tx, @"
+                INSERT INTO VIRTUAL_FILTERS (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
+                VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at)
+                ON CONFLICT (tenant_id, name) DO UPDATE SET
+                    source = excluded.source, definition_json = excluded.definition_json, definition_hash = excluded.definition_hash,
+                    managed_path = excluded.managed_path, managed_commit = excluded.managed_commit,
+                    updated_by = excluded.updated_by, updated_at = excluded.updated_at;",
+                [
+                    ("@id", filter.Id.ToString()),
+                    ("@tenant", filter.TenantId.Value),
+                    ("@name", filter.Name),
+                    ("@source", filter.Source),
+                    ("@json", JsonSerializer.Serialize(FilterToDto(filter))),
+                    ("@hash", filter.ComputeDefinitionHash()),
+                    ("@path", filter.ManagedBy?.Path),
+                    ("@commit", filter.ManagedBy?.Commit),
+                    ("@by", filter.UpdatedBy),
+                    ("@at", filter.UpdatedAt.ToString("O", CultureInfo.InvariantCulture))
+                ], ct).ConfigureAwait(false);
+        }
+
+        foreach (var profile in changes.SaveProfiles)
+        {
+            await ExecuteAsync(connection, tx, @"
+                INSERT INTO ACCESS_PROFILES (id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
+                VALUES (@id, @tenant, @name, @json, @hash, @path, @commit, @by, @at)
+                ON CONFLICT (tenant_id, name) DO UPDATE SET
+                    definition_json = excluded.definition_json, definition_hash = excluded.definition_hash,
+                    managed_path = excluded.managed_path, managed_commit = excluded.managed_commit,
+                    updated_by = excluded.updated_by, updated_at = excluded.updated_at;",
+                [
+                    ("@id", profile.Id.ToString()),
+                    ("@tenant", profile.TenantId.Value),
+                    ("@name", profile.Name),
+                    ("@json", JsonSerializer.Serialize(ProfileToDto(profile))),
+                    ("@hash", profile.ComputeDefinitionHash()),
+                    ("@path", profile.ManagedBy?.Path),
+                    ("@commit", profile.ManagedBy?.Commit),
+                    ("@by", profile.UpdatedBy),
+                    ("@at", profile.UpdatedAt.ToString("O", CultureInfo.InvariantCulture))
+                ], ct).ConfigureAwait(false);
+        }
+
+        foreach (var (tenant, name) in changes.DeleteProfiles)
+        {
+            await ExecuteAsync(connection, tx, "DELETE FROM ACCESS_PROFILES WHERE tenant_id = @tenant AND name = @name;",
+                [("@tenant", tenant.Value), ("@name", name)], ct).ConfigureAwait(false);
+        }
+
+        foreach (var (tenant, name) in changes.DeleteFilters)
+        {
+            await ExecuteAsync(connection, tx, "DELETE FROM VIRTUAL_FILTERS WHERE tenant_id = @tenant AND name = @name;",
+                [("@tenant", tenant.Value), ("@name", name)], ct).ConfigureAwait(false);
+        }
+
+        await ExecuteAsync(connection, tx, "UPDATE VIRTUAL_FILTER_GENERATION SET generation = generation + 1 WHERE id = 1;", [], ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
-    private static async Task<bool> DeleteAsync(DbConnection connection, string sql, TenantId tenantId, string key, CancellationToken ct)
+    private static async Task ExecuteAsync(DbConnection connection, DbTransaction tx, string sql, (string Name, object? Value)[] parameters, CancellationToken ct)
     {
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-        int affected;
-        await using (var cmd = Command(connection, tx, sql, ("@tenant", tenantId.Value), ("@key", key)))
-        {
-            affected = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-        }
-
-        if (affected == 0)
-        {
-            await tx.RollbackAsync(ct).ConfigureAwait(false);
-            return false;
-        }
-
-        await IncrementGenerationAsync(connection, tx, ct).ConfigureAwait(false);
-        await tx.CommitAsync(ct).ConfigureAwait(false);
-        return true;
-    }
-
-    private static async Task IncrementGenerationAsync(DbConnection connection, DbTransaction tx, CancellationToken ct)
-    {
-        await using var cmd = Command(connection, tx, "UPDATE VIRTUAL_FILTER_GENERATION SET generation = generation + 1 WHERE id = 1;");
+        await using var cmd = Command(connection, tx, sql, parameters);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
     private static async Task<long> ReadGenerationAsync(DbConnection connection, DbTransaction? tx, CancellationToken ct)
     {
-        await using var cmd = Command(connection, tx, "SELECT generation FROM VIRTUAL_FILTER_GENERATION WHERE id = 1;");
+        await using var cmd = Command(connection, tx, "SELECT generation FROM VIRTUAL_FILTER_GENERATION WHERE id = 1;", []);
         var value = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return value is null or DBNull ? 0 : Convert.ToInt64(value, CultureInfo.InvariantCulture);
     }
 
-    private static DbCommand Command(DbConnection connection, DbTransaction? tx, string sql, params (string Name, object? Value)[] parameters)
+    private static DbCommand Command(DbConnection connection, DbTransaction? tx, string sql, (string Name, object? Value)[] parameters)
     {
         var cmd = connection.CreateCommand();
         cmd.Transaction = tx;
@@ -185,6 +157,24 @@ internal static class VirtualFilterStore
 
         return cmd;
     }
+
+    private static FilterDto FilterToDto(VirtualFilter filter) => new(
+        Dto(filter.Structured!.From),
+        filter.Structured.FromAlias,
+        filter.Structured.Joins.Select(j => new JoinDto(Dto(j.Table), j.Alias, j.LeftColumn, j.RightColumn)).ToList(),
+        filter.Structured.Where.Select(w => new ConditionDto(w.Column, w.Operator, w.Value)).ToList(),
+        filter.KeyColumns.ToList(),
+        filter.ValidFromColumn,
+        filter.ValidToColumn,
+        filter.Supersedes.ToList());
+
+    private static ProfileDto ProfileToDto(AccessProfile profile) => new(
+        profile.GranteeType,
+        profile.GranteeSid?.Value,
+        profile.RoleName,
+        profile.Scope,
+        profile.Uncovered,
+        profile.Bindings.Select(b => new BindingDto(b.FilterName, b.TargetPattern, b.ObjectKinds, b.TimeColumn, b.ColumnMap?.ToDictionary(p => p.Key, p => p.Value))).ToList());
 
     private static VirtualFilter ReadFilter(DbDataReader reader)
     {
@@ -214,23 +204,28 @@ internal static class VirtualFilterStore
         };
     }
 
-    private static FilterBinding ReadBinding(DbDataReader reader)
+    private static AccessProfile ReadProfile(DbDataReader reader)
     {
-        var dto = JsonSerializer.Deserialize<BindingDto>(reader.GetString(3))
-            ?? throw new InvalidOperationException("Filter binding definition is empty.");
-        return new FilterBinding
+        var dto = JsonSerializer.Deserialize<ProfileDto>(reader.GetString(3))
+            ?? throw new InvalidOperationException("Access profile definition is empty.");
+        return new AccessProfile
         {
             Id = Guid.Parse(reader.GetString(0)),
             TenantId = new TenantId(reader.GetString(1)),
-            FilterName = reader.GetString(2),
-            TargetPattern = dto.TargetPattern,
+            Name = reader.GetString(2),
             GranteeType = dto.GranteeType,
             GranteeSid = dto.GranteeSid == null ? (Sid?)null : new Sid(dto.GranteeSid),
             RoleName = dto.RoleName,
-            ObjectKinds = dto.ObjectKinds,
-            TimeColumn = dto.TimeColumn,
-            ColumnMap = dto.ColumnMap,
-            OnUnmatched = dto.OnUnmatched,
+            Scope = dto.Scope,
+            Uncovered = dto.Uncovered,
+            Bindings = dto.Bindings.Select(b => new FilterBinding
+            {
+                FilterName = b.Filter,
+                TargetPattern = b.Target,
+                ObjectKinds = b.ObjectKinds,
+                TimeColumn = b.TimeColumn,
+                ColumnMap = b.ColumnMap
+            }).ToList(),
             StoredDefinitionHash = reader.GetString(4),
             ManagedBy = ReadManagedBy(reader, 5),
             UpdatedBy = reader.IsDBNull(7) ? null : reader.GetString(7),

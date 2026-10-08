@@ -50,6 +50,7 @@ public sealed class GatewayOptions
     [Required] public ArrowExportOptions Arrow { get; init; } = new();
     [Required] public DuckDbOlapOptions DuckDbOlap { get; init; } = new();
     [Required] public RowFilterOptions RowFilters { get; init; } = new();
+    [Required] public VirtualFilterOptions VirtualFilters { get; init; } = new();
     [Required] public LoggingOptions Logging { get; init; } = new();
 
     /// <summary>
@@ -1604,6 +1605,16 @@ public sealed class DuckDbOlapOptions
     public int MaxResultRows { get; init; } = 50000;
     public int QueryTimeoutSeconds { get; init; } = 60;
     public int MaxThreads { get; init; } = 2;
+}
+
+/// <summary>Virtual filters (docs/plans/2026-10-08-virtuelle-filter.md).</summary>
+public sealed class VirtualFilterOptions
+{
+    /// <summary>
+    /// A sync that removes more bindings than this (or all of them) is not applied without <c>force</c>: removing a
+    /// binding widens what its grantee sees. 0 disables the check.
+    /// </summary>
+    public int MaxRemovals { get; init; } = 10;
 }
 
 /// <summary>

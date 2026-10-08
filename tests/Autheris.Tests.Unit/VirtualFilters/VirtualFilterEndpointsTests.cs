@@ -85,12 +85,12 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         where = new[] { new { column = "crane.is_delivered", op = "is_null" } }
     };
 
-    private static object DavidBindingBody() => new
+    private static object DavidProfileBody(string filter = "nicht_ausgelieferte_krane") => new
     {
-        filter = "nicht_ausgelieferte_krane",
-        target = "lwetem_prod.*.*.client_id",
         grantee = new { type = "user", sid = "S-1-5-21-LWE-DAVID" },
-        on_unmatched = "deny"
+        scope = "lwetem_prod.*.*",
+        uncovered = "deny",
+        bindings = new[] { new { filter, target = "lwetem_prod.*.*.client_id" } }
     };
 
     [Theory]
@@ -109,24 +109,24 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     }
 
     [Fact]
-    public async Task PutFilterAndBinding_AsFilterAdmin_AreStoredInTheCallersTenant()
+    public async Task PutFilterAndProfile_AsFilterAdmin_AreStoredInTheCallersTenant()
     {
         var putFilter = Context(Tenant, DavidFilterBody(), "FilterAdmin");
         (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("nicht_ausgelieferte_krane", putFilter, _service), putFilter)).ShouldBe(StatusCodes.Status200OK);
 
-        var putBinding = Context(Tenant, DavidBindingBody(), "FilterAdmin");
-        var id = Guid.NewGuid();
-        (await StatusAsync(await VirtualFilterEndpoints.PutBindingAsync(id, putBinding, _service), putBinding)).ShouldBe(StatusCodes.Status200OK);
+        var putProfile = Context(Tenant, DavidProfileBody(), "FilterAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", putProfile, _service), putProfile)).ShouldBe(StatusCodes.Status200OK);
 
         var snapshot = await _repository.LoadSnapshotAsync();
         var filter = snapshot.Filters.ShouldHaveSingleItem();
         filter.TenantId.ShouldBe(new TenantId(Tenant));
         filter.Structured!.From.ShouldBe(new TableIdentifier("lwetem_prod", "conf", "client"));
         filter.Structured.Where.ShouldHaveSingleItem().Operator.ShouldBe(FilterConditionOperator.IsNull);
-        var binding = snapshot.Bindings.ShouldHaveSingleItem();
-        binding.Id.ShouldBe(id);
-        binding.OnUnmatched.ShouldBe(OnUnmatched.Deny);
-        binding.GranteeSid.ShouldBe(new Sid("S-1-5-21-LWE-DAVID"));
+        var profile = snapshot.Profiles.ShouldHaveSingleItem();
+        profile.Name.ShouldBe("david");
+        profile.Uncovered.ShouldBe(UncoveredPolicy.Deny);
+        profile.GranteeSid.ShouldBe(new Sid("S-1-5-21-LWE-DAVID"));
+        profile.Bindings.ShouldHaveSingleItem().TargetPattern.ShouldBe("lwetem_prod.*.*.client_id");
     }
 
     [Fact]
@@ -143,9 +143,9 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     [Fact]
     public async Task InvalidInput_Returns400_WithReason()
     {
-        var context = Context(Tenant, DavidBindingBody(), "FilterAdmin");   // binding on an unknown filter
+        var context = Context(Tenant, DavidProfileBody(), "FilterAdmin");   // binds an unknown filter
 
-        var status = await StatusAsync(await VirtualFilterEndpoints.PutBindingAsync(Guid.NewGuid(), context, _service), context);
+        var status = await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, _service), context);
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
         context.Response.Body.Position = 0;
@@ -193,7 +193,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         path = "governance/access",
         commit,
         filters = new Dictionary<string, object> { ["nicht_ausgelieferte_krane"] = DavidFilterBody() },
-        bindings = new[] { DavidBindingBody() }
+        profiles = new Dictionary<string, object> { ["david"] = DavidProfileBody() }
     };
 
     [Fact]
@@ -211,7 +211,27 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(apply, _service), apply)).ShouldBe(StatusCodes.Status200OK);
         var snapshot = await _repository.LoadSnapshotAsync();
         snapshot.Filters.ShouldHaveSingleItem().ManagedBy.ShouldBe(new ManagedBy("governance/access", "c1"));
-        snapshot.Bindings.ShouldHaveSingleItem();
+        snapshot.Profiles.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task ApplySync_WithForce_NeedsFilterAdmin()
+    {
+        var apply = Context(Tenant, SyncBody("c1"), "FilterSync");
+        await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(apply, _service), apply);
+        object emptied = new { path = "governance/access", commit = "c2" };
+
+        var refused = Context(Tenant, emptied, "FilterSync");
+        (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(refused, _service), refused)).ShouldBe(StatusCodes.Status409Conflict);
+
+        var forcedBySync = Context(Tenant, emptied, "FilterSync");
+        forcedBySync.Request.QueryString = new QueryString("?force=true");
+        (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(forcedBySync, _service), forcedBySync)).ShouldBe(StatusCodes.Status403Forbidden);
+
+        var forcedByAdmin = Context(Tenant, emptied, "FilterAdmin");
+        forcedByAdmin.Request.QueryString = new QueryString("?force=true");
+        (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(forcedByAdmin, _service), forcedByAdmin)).ShouldBe(StatusCodes.Status200OK);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
     }
 
     [Fact]

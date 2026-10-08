@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Options;
 
 /// <summary>Who changes virtual filters; <see cref="IsSync"/> is the file repository sync (the only writer of managed rows).</summary>
 public sealed record VirtualFilterActor(Sid Sid, bool IsSync);
@@ -13,7 +14,7 @@ public sealed record VirtualFilterActor(Sid Sid, bool IsSync);
 /// <summary>A row managed by the file repository was changed outside the sync (HTTP 409).</summary>
 public sealed class ManagedResourceLockedException(string message) : InvalidOperationException(message);
 
-/// <summary>The change conflicts with existing rows (HTTP 409).</summary>
+/// <summary>The change conflicts with existing rows or needs <c>force</c> (HTTP 409).</summary>
 public sealed class VirtualFilterConflictException(string message) : InvalidOperationException(message);
 
 /// <summary>Desired state of one tenant from the file repository.</summary>
@@ -21,38 +22,45 @@ public sealed record VirtualFilterSyncRequest(
     TenantId TenantId,
     ManagedBy ManagedBy,
     IReadOnlyList<VirtualFilter> Filters,
-    IReadOnlyList<FilterBinding> Bindings);
+    IReadOnlyList<AccessProfile> Profiles);
 
-/// <summary>Differences between the file repository and Autheris; drift = a stored row changed outside Autheris.</summary>
+/// <summary>
+/// Differences between the file repository and Autheris. Drift = a stored row changed outside Autheris.
+/// <see cref="RemovedBindings"/> counts bindings that disappear (they widen what grantees see).
+/// </summary>
 public sealed record VirtualFilterSyncPlan(
     IReadOnlyList<string> CreateFilters,
     IReadOnlyList<string> UpdateFilters,
     IReadOnlyList<string> DeleteFilters,
     IReadOnlyList<string> DriftedFilters,
-    IReadOnlyList<string> CreateBindings,
-    IReadOnlyList<string> UpdateBindings,
-    IReadOnlyList<string> DeleteBindings,
-    IReadOnlyList<string> DriftedBindings)
+    IReadOnlyList<string> CreateProfiles,
+    IReadOnlyList<string> UpdateProfiles,
+    IReadOnlyList<string> DeleteProfiles,
+    IReadOnlyList<string> DriftedProfiles,
+    int RemovedBindings,
+    bool RequiresForce)
 {
     public bool HasChanges =>
         CreateFilters.Count + UpdateFilters.Count + DeleteFilters.Count +
-        CreateBindings.Count + UpdateBindings.Count + DeleteBindings.Count > 0;
+        CreateProfiles.Count + UpdateProfiles.Count + DeleteProfiles.Count > 0;
 }
 
 /// <summary>
-/// Virtual filters: the rules for changing filters and bindings. Every change is validated, audited and
-/// increments the generation (through the repository). Rows managed by the file repository (Talos) only change
+/// Virtual filters: the rules for changing filters and access profiles. Every change is validated, audited and applied
+/// in one transaction (which increments the generation). Rows managed by the file repository (Talos) only change
 /// through <see cref="ApplySyncAsync"/>.
 /// </summary>
 public sealed class VirtualFilterAdministrationService
 {
     private readonly IVirtualFilterRepository _repository;
     private readonly IAuditLogRepository _audit;
+    private readonly VirtualFilterOptions _options;
 
-    public VirtualFilterAdministrationService(IVirtualFilterRepository repository, IAuditLogRepository audit)
+    public VirtualFilterAdministrationService(IVirtualFilterRepository repository, IAuditLogRepository audit, IOptions<GatewayOptions>? options = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
+        _options = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
     }
 
     public Task<VirtualFilterSnapshot> GetSnapshotAsync(CancellationToken ct = default) => _repository.LoadSnapshotAsync(ct);
@@ -66,14 +74,12 @@ public sealed class VirtualFilterAdministrationService
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var existing = FindFilter(snapshot, filter.TenantId, filter.Name);
         EnsureWritable(existing?.ManagedBy, filter.ManagedBy, actor, $"virtual filter '{filter.Name}'");
-
-        var tenantFilters = snapshot.Filters.Where(f => f.TenantId == filter.TenantId && f.Name != filter.Name).Append(filter).ToList();
-        ValidateSupersedes(tenantFilters);
+        ValidateSupersedes(snapshot.Filters.Where(f => f.TenantId == filter.TenantId && f.Name != filter.Name).Append(filter).ToList());
 
         var toStore = filter with { Id = existing?.Id ?? filter.Id, UpdatedBy = actor.Sid.Value, UpdatedAt = DateTimeOffset.UtcNow };
-        await _repository.SaveFilterAsync(toStore, ct).ConfigureAwait(false);
+        await _repository.ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [toStore] }, ct).ConfigureAwait(false);
         await AuditAsync(filter.TenantId, actor, existing == null ? "VIRTUAL_FILTER_CREATED" : "VIRTUAL_FILTER_UPDATED",
-            $"virtual_filter:{filter.Name}", new { name = filter.Name, before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash(), managed_by = filter.ManagedBy }, ct).ConfigureAwait(false);
+            $"virtual_filter:{filter.Name}", new { name = filter.Name, before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
         return toStore;
     }
 
@@ -84,9 +90,10 @@ public sealed class VirtualFilterAdministrationService
         var existing = FindFilter(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The virtual filter '{name}' does not exist.");
         EnsureWritable(existing.ManagedBy, null, actor, $"virtual filter '{name}'");
 
-        if (snapshot.Bindings.Any(b => b.TenantId == tenantId && b.FilterName == name))
+        var user = snapshot.Profiles.FirstOrDefault(p => p.TenantId == tenantId && p.Bindings.Any(b => b.FilterName == name));
+        if (user != null)
         {
-            throw new VirtualFilterConflictException($"The virtual filter '{name}' still has bindings.");
+            throw new VirtualFilterConflictException($"The virtual filter '{name}' is still bound in the profile '{user.Name}'.");
         }
 
         if (snapshot.Filters.Any(f => f.TenantId == tenantId && f.Supersedes.Contains(name)))
@@ -94,44 +101,37 @@ public sealed class VirtualFilterAdministrationService
             throw new VirtualFilterConflictException($"The virtual filter '{name}' is superseded by another filter.");
         }
 
-        await _repository.DeleteFilterAsync(tenantId, name, ct).ConfigureAwait(false);
-        await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_DELETED", $"virtual_filter:{name}",
-            new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
+        await _repository.ApplyAsync(new VirtualFilterChangeSet { DeleteFilters = [(tenantId, name)] }, ct).ConfigureAwait(false);
+        await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_DELETED", $"virtual_filter:{name}", new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
     }
 
-    public async Task<FilterBinding> SaveBindingAsync(FilterBinding binding, VirtualFilterActor actor, CancellationToken ct = default)
+    public async Task<AccessProfile> SaveProfileAsync(AccessProfile profile, VirtualFilterActor actor, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(binding);
+        ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(actor);
-        binding.Validate();
+        profile.Validate();
 
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
-        if (FindFilter(snapshot, binding.TenantId, binding.FilterName) == null)
-        {
-            throw new ArgumentException($"The binding refers to the unknown virtual filter '{binding.FilterName}'.", nameof(binding));
-        }
+        EnsureFiltersExist(profile, snapshot.Filters.Where(f => f.TenantId == profile.TenantId).Select(f => f.Name));
+        var existing = FindProfile(snapshot, profile.TenantId, profile.Name);
+        EnsureWritable(existing?.ManagedBy, profile.ManagedBy, actor, $"access profile '{profile.Name}'");
 
-        var existing = snapshot.Bindings.FirstOrDefault(b => b.Id == binding.Id && b.TenantId == binding.TenantId);
-        EnsureWritable(existing?.ManagedBy, binding.ManagedBy, actor, $"filter binding '{binding.Id}'");
-
-        var toStore = binding with { UpdatedBy = actor.Sid.Value, UpdatedAt = DateTimeOffset.UtcNow };
-        await _repository.SaveBindingAsync(toStore, ct).ConfigureAwait(false);
-        await AuditAsync(binding.TenantId, actor, existing == null ? "FILTER_BINDING_CREATED" : "FILTER_BINDING_UPDATED",
-            $"filter_binding:{binding.Id}", new { id = binding.Id, filter = binding.FilterName, target = binding.TargetPattern, before = existing?.ComputeDefinitionHash(), after = binding.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
+        var toStore = profile with { Id = existing?.Id ?? profile.Id, UpdatedBy = actor.Sid.Value, UpdatedAt = DateTimeOffset.UtcNow };
+        await _repository.ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [toStore] }, ct).ConfigureAwait(false);
+        await AuditAsync(profile.TenantId, actor, existing == null ? "ACCESS_PROFILE_CREATED" : "ACCESS_PROFILE_UPDATED",
+            $"access_profile:{profile.Name}", new { name = profile.Name, before = existing?.ComputeDefinitionHash(), after = profile.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
         return toStore;
     }
 
-    public async Task DeleteBindingAsync(TenantId tenantId, Guid id, VirtualFilterActor actor, CancellationToken ct = default)
+    public async Task DeleteProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(actor);
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
-        var existing = snapshot.Bindings.FirstOrDefault(b => b.Id == id && b.TenantId == tenantId)
-            ?? throw new KeyNotFoundException($"The filter binding '{id}' does not exist.");
-        EnsureWritable(existing.ManagedBy, null, actor, $"filter binding '{id}'");
+        var existing = FindProfile(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The access profile '{name}' does not exist.");
+        EnsureWritable(existing.ManagedBy, null, actor, $"access profile '{name}'");
 
-        await _repository.DeleteBindingAsync(tenantId, id, ct).ConfigureAwait(false);
-        await AuditAsync(tenantId, actor, "FILTER_BINDING_DELETED", $"filter_binding:{id}",
-            new { id, filter = existing.FilterName, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
+        await _repository.ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)] }, ct).ConfigureAwait(false);
+        await AuditAsync(tenantId, actor, "ACCESS_PROFILE_DELETED", $"access_profile:{name}", new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
     }
 
     // ------------------------------------------------------------------ sync from the file repository
@@ -143,7 +143,11 @@ public sealed class VirtualFilterAdministrationService
         return BuildPlan(request, snapshot, out _);
     }
 
-    public async Task<VirtualFilterSyncPlan> ApplySyncAsync(VirtualFilterSyncRequest request, VirtualFilterActor actor, CancellationToken ct = default)
+    /// <summary>
+    /// Validates everything first, then applies the differences in one transaction (all or nothing). A plan that
+    /// removes more than <see cref="VirtualFilterOptions.MaxRemovals"/> bindings, or all of them, needs <paramref name="force"/>.
+    /// </summary>
+    public async Task<VirtualFilterSyncPlan> ApplySyncAsync(VirtualFilterSyncRequest request, VirtualFilterActor actor, bool force = false, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(actor);
@@ -153,131 +157,152 @@ public sealed class VirtualFilterAdministrationService
         }
 
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
-        var plan = BuildPlan(request, snapshot, out var work);
-
-        foreach (var filter in work.FiltersToWrite)
+        var plan = BuildPlan(request, snapshot, out var changes);
+        if (plan.RequiresForce && !force)
         {
-            await _repository.SaveFilterAsync(filter with { UpdatedBy = actor.Sid.Value, UpdatedAt = DateTimeOffset.UtcNow }, ct).ConfigureAwait(false);
+            throw new VirtualFilterConflictException(
+                $"The sync would remove {plan.RemovedBindings} binding(s) (limit {_options.MaxRemovals}, or all bindings); apply it with force.");
         }
 
-        foreach (var binding in work.BindingsToWrite)
+        var stamp = DateTimeOffset.UtcNow;
+        await _repository.ApplyAsync(changes with
         {
-            await _repository.SaveBindingAsync(binding with { UpdatedBy = actor.Sid.Value, UpdatedAt = DateTimeOffset.UtcNow }, ct).ConfigureAwait(false);
-        }
-
-        foreach (var binding in work.BindingsToDelete)
-        {
-            await _repository.DeleteBindingAsync(request.TenantId, binding.Id, ct).ConfigureAwait(false);
-        }
-
-        foreach (var name in plan.DeleteFilters)
-        {
-            await _repository.DeleteFilterAsync(request.TenantId, name, ct).ConfigureAwait(false);
-        }
-
-        await AuditAsync(request.TenantId, actor, "VIRTUAL_FILTER_SYNC_APPLIED", "virtual_filter:*", new
-        {
-            path = request.ManagedBy.Path,
-            commit = request.ManagedBy.Commit,
-            plan
+            SaveFilters = changes.SaveFilters.Select(f => f with { UpdatedBy = actor.Sid.Value, UpdatedAt = stamp }).ToList(),
+            SaveProfiles = changes.SaveProfiles.Select(p => p with { UpdatedBy = actor.Sid.Value, UpdatedAt = stamp }).ToList()
         }, ct).ConfigureAwait(false);
+
+        await AuditAsync(request.TenantId, actor, "VIRTUAL_FILTER_SYNC_APPLIED", "virtual_filter:*",
+            new { path = request.ManagedBy.Path, commit = request.ManagedBy.Commit, force, plan }, ct).ConfigureAwait(false);
         return plan;
     }
 
-    private sealed record SyncWork(List<VirtualFilter> FiltersToWrite, List<FilterBinding> BindingsToWrite, List<FilterBinding> BindingsToDelete);
-
-    private static VirtualFilterSyncPlan BuildPlan(VirtualFilterSyncRequest request, VirtualFilterSnapshot snapshot, out SyncWork work)
+    private VirtualFilterSyncPlan BuildPlan(VirtualFilterSyncRequest request, VirtualFilterSnapshot snapshot, out VirtualFilterChangeSet changes)
     {
         var tenant = request.TenantId;
         var desiredFilters = request.Filters.Select(f => f with { TenantId = tenant, ManagedBy = request.ManagedBy }).ToList();
-        var desiredBindings = request.Bindings.Select(b => b with { TenantId = tenant, ManagedBy = request.ManagedBy }).ToList();
+        var desiredProfiles = request.Profiles.Select(p => p with { TenantId = tenant, ManagedBy = request.ManagedBy }).ToList();
         foreach (var filter in desiredFilters) filter.Validate();
-        foreach (var binding in desiredBindings) binding.Validate();
-
-        var duplicateName = desiredFilters.GroupBy(f => f.Name).FirstOrDefault(g => g.Count() > 1);
-        if (duplicateName != null)
-        {
-            throw new ArgumentException($"The virtual filter '{duplicateName.Key}' is defined more than once.", nameof(request));
-        }
+        foreach (var profile in desiredProfiles) profile.Validate();
+        EnsureUnique(desiredFilters.Select(f => f.Name), "virtual filter");
+        EnsureUnique(desiredProfiles.Select(p => p.Name), "access profile");
 
         var existingFilters = snapshot.Filters.Where(f => f.TenantId == tenant).ToList();
-        var existingBindings = snapshot.Bindings.Where(b => b.TenantId == tenant).ToList();
+        var existingProfiles = snapshot.Profiles.Where(p => p.TenantId == tenant).ToList();
         var unmanagedFilters = existingFilters.Where(f => f.ManagedBy == null).ToList();
+        var unmanagedProfiles = existingProfiles.Where(p => p.ManagedBy == null).ToList();
 
-        foreach (var filter in desiredFilters.Where(d => unmanagedFilters.Any(u => u.Name == d.Name)))
+        var clash = desiredFilters.Select(f => f.Name).Intersect(unmanagedFilters.Select(f => f.Name)).FirstOrDefault()
+                    ?? desiredProfiles.Select(p => p.Name).Intersect(unmanagedProfiles.Select(p => p.Name)).FirstOrDefault();
+        if (clash != null)
         {
-            throw new VirtualFilterConflictException($"The virtual filter '{filter.Name}' exists and is not managed by the file repository.");
+            throw new VirtualFilterConflictException($"'{clash}' exists and is not managed by the file repository.");
         }
 
         ValidateSupersedes(unmanagedFilters.Concat(desiredFilters).ToList());
-        var knownNames = unmanagedFilters.Concat(desiredFilters).Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
-        foreach (var binding in desiredBindings.Where(b => !knownNames.Contains(b.FilterName)))
+        var availableFilters = unmanagedFilters.Concat(desiredFilters).Select(f => f.Name).ToList();
+        foreach (var profile in desiredProfiles)
         {
-            throw new ArgumentException($"The binding refers to the unknown virtual filter '{binding.FilterName}'.", nameof(request));
+            EnsureFiltersExist(profile, availableFilters);
         }
 
         var managedFilters = existingFilters.Where(f => f.ManagedBy != null).ToDictionary(f => f.Name, StringComparer.Ordinal);
+        var managedProfiles = existingProfiles.Where(p => p.ManagedBy != null).ToDictionary(p => p.Name, StringComparer.Ordinal);
+
+        var (createFilters, updateFilters, saveFilters) = Diff(desiredFilters, managedFilters, f => f.Name, f => f.ComputeDefinitionHash(), f => f.StoredDefinitionHash, (f, id) => f with { Id = id }, f => f.Id);
+        var (createProfiles, updateProfiles, saveProfiles) = Diff(desiredProfiles, managedProfiles, p => p.Name, p => p.ComputeDefinitionHash(), p => p.StoredDefinitionHash, (p, id) => p with { Id = id }, p => p.Id);
+
+        var desiredFilterNames = desiredFilters.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+        var desiredProfileNames = desiredProfiles.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+        var deleteFilters = managedFilters.Keys.Where(n => !desiredFilterNames.Contains(n)).OrderBy(n => n, StringComparer.Ordinal).ToList();
+        var deleteProfiles = managedProfiles.Keys.Where(n => !desiredProfileNames.Contains(n)).OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+        var stillBound = unmanagedProfiles.SelectMany(p => p.Bindings.Select(b => (Profile: p.Name, b.FilterName)))
+            .FirstOrDefault(x => deleteFilters.Contains(x.FilterName));
+        if (stillBound != default)
+        {
+            throw new VirtualFilterConflictException($"The virtual filter '{stillBound.FilterName}' would be removed but is bound in the unmanaged profile '{stillBound.Profile}'.");
+        }
+
+        // Removing a binding widens what its grantee sees: count them for the safety check.
+        static IEnumerable<string> Keys(AccessProfile p) => p.Bindings.Select(b => p.Name + "|" + b.FilterName + "|" + b.TargetPattern);
+        var existingKeys = managedProfiles.Values.SelectMany(Keys).ToHashSet(StringComparer.Ordinal);
+        var desiredKeys = desiredProfiles.SelectMany(Keys).ToHashSet(StringComparer.Ordinal);
+        int removed = existingKeys.Count(k => !desiredKeys.Contains(k));
+        bool requiresForce = removed > 0 && ((_options.MaxRemovals > 0 && removed > _options.MaxRemovals) || desiredKeys.Count == 0);
+
+        changes = new VirtualFilterChangeSet
+        {
+            SaveFilters = saveFilters,
+            SaveProfiles = saveProfiles,
+            DeleteProfiles = deleteProfiles.Select(n => (tenant, n)).ToList(),
+            DeleteFilters = deleteFilters.Select(n => (tenant, n)).ToList()
+        };
+
+        return new VirtualFilterSyncPlan(
+            createFilters, updateFilters, deleteFilters, Drifted(managedFilters.Values, f => f.Name, f => f.ComputeDefinitionHash(), f => f.StoredDefinitionHash),
+            createProfiles, updateProfiles, deleteProfiles, Drifted(managedProfiles.Values, p => p.Name, p => p.ComputeDefinitionHash(), p => p.StoredDefinitionHash),
+            removed, requiresForce);
+    }
+
+    private static (List<string> Create, List<string> Update, List<T> Save) Diff<T>(
+        IEnumerable<T> desired,
+        IReadOnlyDictionary<string, T> managed,
+        Func<T, string> name,
+        Func<T, string> hash,
+        Func<T, string?> storedHash,
+        Func<T, Guid, T> withId,
+        Func<T, Guid> id)
+    {
         var create = new List<string>();
         var update = new List<string>();
-        var filtersToWrite = new List<VirtualFilter>();
-        foreach (var filter in desiredFilters)
+        var save = new List<T>();
+        foreach (var item in desired)
         {
-            if (!managedFilters.TryGetValue(filter.Name, out var current))
+            if (!managed.TryGetValue(name(item), out var current))
             {
-                create.Add(filter.Name);
-                filtersToWrite.Add(filter);
+                create.Add(name(item));
+                save.Add(item);
             }
-            else if (current.StoredDefinitionHash != filter.ComputeDefinitionHash())
+            else if (storedHash(current) != hash(item))
             {
-                update.Add(filter.Name);
-                filtersToWrite.Add(filter with { Id = current.Id });
+                // also repairs drift: the stored hash no longer matches the stored definition
+                update.Add(name(item));
+                save.Add(withId(item, id(current)));
             }
         }
 
-        var desiredNames = desiredFilters.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
-        var deleteFilters = managedFilters.Keys.Where(n => !desiredNames.Contains(n)).OrderBy(n => n, StringComparer.Ordinal).ToList();
-        var driftedFilters = managedFilters.Values.Where(f => f.StoredDefinitionHash != f.ComputeDefinitionHash()).Select(f => f.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
-
-        var managedBindings = existingBindings.Where(b => b.ManagedBy != null).ToList();
-        var managedByKey = managedBindings.GroupBy(b => b.NaturalKey).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
-        var createBindings = new List<string>();
-        var updateBindings = new List<string>();
-        var bindingsToWrite = new List<FilterBinding>();
-        foreach (var binding in desiredBindings)
-        {
-            if (!managedByKey.TryGetValue(binding.NaturalKey, out var current))
-            {
-                createBindings.Add(binding.NaturalKey);
-                bindingsToWrite.Add(binding);
-            }
-            else if (current.StoredDefinitionHash != binding.ComputeDefinitionHash())
-            {
-                updateBindings.Add(binding.NaturalKey);
-                bindingsToWrite.Add(binding with { Id = current.Id });
-            }
-        }
-
-        var desiredKeys = desiredBindings.Select(b => b.NaturalKey).ToHashSet(StringComparer.Ordinal);
-        var bindingsToDelete = managedBindings.Where(b => !desiredKeys.Contains(b.NaturalKey)).ToList();
-        var deleteSet = deleteFilters.ToHashSet(StringComparer.Ordinal);
-        var blocking = existingBindings.FirstOrDefault(b => b.ManagedBy == null && deleteSet.Contains(b.FilterName));
-        if (blocking != null)
-        {
-            throw new VirtualFilterConflictException($"The virtual filter '{blocking.FilterName}' would be removed but still has an unmanaged binding.");
-        }
-
-        var driftedBindings = managedBindings.Where(b => b.StoredDefinitionHash != b.ComputeDefinitionHash()).Select(b => b.NaturalKey).ToList();
-
-        work = new SyncWork(filtersToWrite, bindingsToWrite, bindingsToDelete);
-        return new VirtualFilterSyncPlan(
-            create, update, deleteFilters, driftedFilters,
-            createBindings, updateBindings, bindingsToDelete.Select(b => b.NaturalKey).ToList(), driftedBindings);
+        return (create, update, save);
     }
+
+    private static List<string> Drifted<T>(IEnumerable<T> managed, Func<T, string> name, Func<T, string> hash, Func<T, string?> storedHash) =>
+        managed.Where(m => storedHash(m) != hash(m)).Select(name).OrderBy(n => n, StringComparer.Ordinal).ToList();
 
     // ------------------------------------------------------------------ helpers
 
     private static VirtualFilter? FindFilter(VirtualFilterSnapshot snapshot, TenantId tenantId, string name) =>
         snapshot.Filters.FirstOrDefault(f => f.TenantId == tenantId && string.Equals(f.Name, name, StringComparison.Ordinal));
+
+    private static AccessProfile? FindProfile(VirtualFilterSnapshot snapshot, TenantId tenantId, string name) =>
+        snapshot.Profiles.FirstOrDefault(p => p.TenantId == tenantId && string.Equals(p.Name, name, StringComparison.Ordinal));
+
+    private static void EnsureFiltersExist(AccessProfile profile, IEnumerable<string> filterNames)
+    {
+        var known = filterNames.ToHashSet(StringComparer.Ordinal);
+        var unknown = profile.Bindings.FirstOrDefault(b => !known.Contains(b.FilterName));
+        if (unknown != null)
+        {
+            throw new ArgumentException($"The profile '{profile.Name}' binds the unknown virtual filter '{unknown.FilterName}'.", nameof(profile));
+        }
+    }
+
+    private static void EnsureUnique(IEnumerable<string> names, string what)
+    {
+        var duplicate = names.GroupBy(n => n, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1);
+        if (duplicate != null)
+        {
+            throw new ArgumentException($"The {what} '{duplicate.Key}' is defined more than once.", nameof(names));
+        }
+    }
 
     private static void EnsureWritable(ManagedBy? stored, ManagedBy? incoming, VirtualFilterActor actor, string what)
     {
