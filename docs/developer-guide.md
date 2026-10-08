@@ -250,10 +250,13 @@ During early development or when onboarding third-party webhooks (e.g. ServiceNo
 ```
 
 - `Insecure` is the **only** place for `warn_*` / `danger_*` flags. The former domain-local copies (e.g. `Mcp:danger_bypass_mcp_auth`, `GraphQL:warn_allow_all_cors_origins`, `WebSql:warn_allow_dml`) were removed in ADR-012 phase 4. If an old key is still set to `true`, the gateway refuses to start and names the replacement (`LegacySwitchGuard`); `WebSql:warn_allow_dml` became `WebSql:AllowDml`. Environment variables follow the same rule: use `Gateway__Insecure__<name>`.
-- `danger_*` flags are forbidden outside Development. Some `warn_*` flags (e.g. `warn_enable_introspection`) additionally need the explicit opt-in `AllowInsecureWarnFlagsInProduction`.
+- `danger_*` flags are forbidden outside Development. Any active `DANGER:` switch causes an immediate, fail-fast process startup crash via `ValidationException`. Some `warn_*` flags (e.g. `warn_enable_introspection`) additionally need the explicit opt-in `AllowInsecureWarnFlagsInProduction`.
 
 > [!WARNING]
-> Never commit `danger_* = true` in production configuration files. CI audits reject it.
+> **Migration Notice (R-API-1 / API-1)**:
+> Outside of the `Development` environment, setting `Itsm.LegacyGlobalWebhookSecret = true` or enabling any `DANGER:` bypass flags strictly blocks application startup with a `ValidationException`.
+> Deployments that previously relied on the global ITSM webhook secret must migrate to per-instance webhook secrets (`itsm:webhook-secret:<instanceId>`).
+> Never commit `danger_* = true` or `Itsm.LegacyGlobalWebhookSecret = true` in non-development configuration files.
 
 ---
 
