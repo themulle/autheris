@@ -82,6 +82,10 @@ services:
       - gateway-bench-net
     volumes:
       - governance-data:/data:z
+    environment:
+      ENABLE_DEMO_GOVERNANCE_SEED: "${ENABLE_DEMO_GOVERNANCE_SEED:-false}"
+      ENABLE_DEMO_REBAC_SEED: "${ENABLE_DEMO_REBAC_SEED:-false}"
+      ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Development}"
     healthcheck:
       test: ["CMD-SHELL", "test -f /data/.seed_complete || exit 1"]
       interval: 2s
