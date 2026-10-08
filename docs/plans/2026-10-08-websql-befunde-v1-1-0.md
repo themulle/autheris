@@ -11,7 +11,7 @@ Alle behobenen Punkte (2.1, 2.2, 2.3, 2.4, 4.1, 4.2, 4.3-ReBAC-Body, 4a.1, 4a.2,
 |---|---|---|---|---|
 | 4.3 | Auffälligkeit | Parquet über OData liefert Datums- und Zeitspalten als `string` (über WebSQL als `timestamp`) | Typverlust in Parquet-Clients | 1.1 |
 | 4.3 | Auffälligkeit | `Accept: text/csv`, `x-ndjson`, Arrow bei OData wird ignoriert (JSON mit 200); `?format=parquet` bei WebSQL ebenso | falsches Format ohne Fehler (strikte Content-Negotiation fehlt) | 1.2 |
-| 4a.3 | Lücke | `$filter`, `$orderby`, `$count` geben 501 NotImplemented | Query Folding in Power Query / Excel schlägt fehl | 2.1 |
+| 4a.3 | Lücke | `$filter` gibt 501 NotImplemented (`$orderby`, `$count`, `/$count` sind umgesetzt) | Query Folding von Filtern in Power Query / Excel schlägt fehl | 2.1 |
 | 4 | PoC-Konfiguration | Arrow-Export und OLAP: 403 mangels ReBAC-Beziehungen; Iceberg ohne Tabellen | im PoC nicht prüfbar, Einrichtung/Seed fehlt | 3.1 |
 | 4b.4 | Konfiguration / Auth | Offene Restpunkte MCP (OAuth-Discovery 401 ohne Auth, CORS im Dev-Betrieb, JSON-RPC-Batches) | Härtung für Staging/Produktion | 3.2 |
 
@@ -38,12 +38,12 @@ Alle behobenen Punkte (2.1, 2.2, 2.3, 2.4, 4.1, 4.2, 4.3-ReBAC-Body, 4a.1, 4a.2,
 
 ## 2. OData Minimal Conformance
 
-### 2.1 OData `$filter`, `$orderby`, `$count` geben HTTP 501
-- **Beobachtung:** `$filter`, `$orderby`, `$count` (auch `/$count`) antworten mit HTTP 501 NotImplemented.
+### 2.1 OData `$filter` gibt HTTP 501
+- **Status `$orderby`/`$count`:** Umgesetzt. `$orderby` nimmt `eigenschaft [asc|desc]` (nur Spalten mit Clear-Zugriff); `$count=true` und `/$count` liefern die Gesamtzahl unter demselben Zeilenfilter (`COUNT(*)` in derselben Transaktion), nie die Seitengröße. Quellen ohne SQL antworten 501. Tests: `ODataOrderByCountTests`, `ODataCountSegmentTests`.
+- **Beobachtung:** `$filter` antwortet weiterhin mit HTTP 501 NotImplemented.
 - **Folge:** Nach OData-Spezifikation ist 501 zwar formell zulässig, verhindert jedoch die OData „Minimal Conformance“ (erfordert `$top`, `$skip`, `$filter`, `$orderby`, `$select`, `$count`). Power Query schiebt im Editor gesetzte Filter per Query Folding als `$filter` an den Server und bricht mit 501 ab.
 - **Handlungsempfehlung:**
-  - Grundlegende `$filter`-Unterstützung (Gleichheit, Vergleiche, logische Operatoren) und `$orderby` auf Tabellenabfragen abbilden.
-  - `$count` bzw. `/$count` über `COUNT(*)` in der Abfragepipeline beantworten.
+  - Grundlegende `$filter`-Unterstützung (Gleichheit, Vergleiche, logische Operatoren) auf Tabellenabfragen abbilden; Filter nur auf Spalten mit Clear-Zugriff (wie `$orderby`).
 
 ---
 
