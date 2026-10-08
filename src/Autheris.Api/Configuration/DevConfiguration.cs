@@ -95,6 +95,49 @@ public static class DevConfiguration
             }
         }
 
+        // Dev personas: only supply default development personas if no BasicAuth users were configured
+        // in any custom configuration source or environment variable. This prevents ASP.NET Core list
+        // index-merging where custom env users (e.g. Users:0:Username) would inherit roles/tenants from dev personas.
+        var usersSection = configuration.GetSection(G + "Authentication:BasicAuth:Users");
+        if (!usersSection.GetChildren().Any())
+        {
+            var defaultUsers = new Dictionary<string, string?>
+            {
+                [G + "Authentication:BasicAuth:Users:0:Username"] = "dev-admin",
+                [G + "Authentication:BasicAuth:Users:0:Password"] = "dev",
+                [G + "Authentication:BasicAuth:Users:0:Roles:0"] = "ClusterAdmin",
+
+                [G + "Authentication:BasicAuth:Users:1:Username"] = "owner",
+                [G + "Authentication:BasicAuth:Users:1:Password"] = "dev",
+                [G + "Authentication:BasicAuth:Users:1:Sid"] = "S-1-5-21-DATAOWNER-1",
+                [G + "Authentication:BasicAuth:Users:1:Roles:0"] = "DataOwner",
+
+                [G + "Authentication:BasicAuth:Users:2:Username"] = "approver-a",
+                [G + "Authentication:BasicAuth:Users:2:Password"] = "dev",
+                [G + "Authentication:BasicAuth:Users:2:Sid"] = "S-1-5-21-APPROVER-A",
+                [G + "Authentication:BasicAuth:Users:2:Roles:0"] = "DataOwner",
+
+                [G + "Authentication:BasicAuth:Users:3:Username"] = "approver-b",
+                [G + "Authentication:BasicAuth:Users:3:Password"] = "dev",
+                [G + "Authentication:BasicAuth:Users:3:Sid"] = "S-1-5-21-APPROVER-B",
+                [G + "Authentication:BasicAuth:Users:3:Roles:0"] = "DataOwner",
+
+                [G + "Authentication:BasicAuth:Users:4:Username"] = "analyst",
+                [G + "Authentication:BasicAuth:Users:4:Password"] = "dev",
+                [G + "Authentication:BasicAuth:Users:4:Roles:0"] = "Analyst",
+
+                [G + "Authentication:BasicAuth:Users:5:Username"] = "analyst-b",
+                [G + "Authentication:BasicAuth:Users:5:Password"] = "dev",
+                [G + "Authentication:BasicAuth:Users:5:TenantId"] = "tenant-b",
+                [G + "Authentication:BasicAuth:Users:5:Roles:0"] = "Analyst",
+            };
+
+            foreach (var (k, v) in defaultUsers)
+            {
+                Fill(k, v!);
+            }
+        }
+
         var builder = (IConfigurationBuilder)configuration;
         if (fill.Count > 0)
         {

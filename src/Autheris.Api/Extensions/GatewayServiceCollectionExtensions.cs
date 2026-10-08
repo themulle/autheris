@@ -1284,12 +1284,12 @@ public static class GatewayServiceCollectionExtensions
 
         if (!environment.IsDevelopment())
         {
-            // RR-L3-05: warn_enable_introspection is prohibited outside Development without explicit opt-in
-            if (options.IsIntrospectionForced && !options.AllowInsecureWarnFlagsInProduction)
+            // RR-L3-05: warn_enable_introspection and GraphQL:EnableIntrospection are prohibited outside Development without explicit opt-in
+            if ((options.IsIntrospectionForced || options.GraphQL.EnableIntrospection) && !options.AllowInsecureWarnFlagsInProduction)
             {
                 throw new ValidationException(
-                    "Security violation: Outside Development, warn_enable_introspection may be active only with an explicit " +
-                    "opt-in (AllowInsecureWarnFlagsInProduction = true).");
+                    "Security violation: Outside Development, GraphQL introspection (GraphQL:EnableIntrospection or warn_enable_introspection) " +
+                    "may be active only with an explicit opt-in (AllowInsecureWarnFlagsInProduction = true).");
             }
 
             // API-16: warn_allow_all_cors_origins is prohibited outside Development without explicit opt-in

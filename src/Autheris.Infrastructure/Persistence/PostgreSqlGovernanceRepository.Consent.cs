@@ -258,13 +258,16 @@ public partial class PostgreSqlGovernanceRepository
                 var cId = reader.GetString(0);
                 if (rulesMap.TryGetValue(cId, out var ruleList))
                 {
+                    var rawLevel = reader.GetInt32(3);
                     ruleList.Add(new ConsentColumnRule
                     {
                         Id = Guid.NewGuid(),
                         ConsentId = Guid.Parse(cId),
                         TableColumnId = Guid.Parse(reader.GetString(1)),
                         ColumnName = reader.GetString(2),
-                        AccessLevel = (ColumnAccessLevel)reader.GetInt32(3)
+                        AccessLevel = Enum.IsDefined((ColumnAccessLevel)rawLevel)
+                            ? (ColumnAccessLevel)rawLevel
+                            : ColumnAccessLevel.Deny
                     });
                 }
             }
