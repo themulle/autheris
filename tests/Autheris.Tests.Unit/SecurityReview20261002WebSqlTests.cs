@@ -1114,6 +1114,32 @@ public sealed class SecurityReview20261002WebSqlTests
         msg.ShouldNotContain("unexpected token");
     }
 
+    [Fact]
+    public async Task API_11_WriteWebSqlErrorAsync_PolicyException_InProduction_SanitizesMessage()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var env = NSubstitute.Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+        services.AddSingleton(env);
+        var sp = services.BuildServiceProvider();
+
+        var context = new DefaultHttpContext { RequestServices = sp };
+        context.Response.Body = new MemoryStream();
+        context.TraceIdentifier = "trace-403";
+
+        var ex = new WebSqlPolicyException("Confidential table schema leak in policy denial");
+        await WebSqlEndpoints.WriteWebSqlErrorAsync(context, ex, NullLogger.Instance, CancellationToken.None);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        context.Response.Body.Position = 0;
+        using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("error").GetString().ShouldBe("Forbidden");
+        var msg = doc.RootElement.GetProperty("message").GetString();
+        msg.ShouldNotBeNull();
+        msg.ShouldBe(WebSqlEndpoints.GenericForbiddenMessage);
+        msg.ShouldNotContain("Confidential table schema leak");
+    }
+
     #endregion
 
     #region D-6 Tenant Identity Sanitization Tests
