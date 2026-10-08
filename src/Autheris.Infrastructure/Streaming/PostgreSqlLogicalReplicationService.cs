@@ -163,8 +163,10 @@ public sealed class PostgreSqlLogicalReplicationService : IPostgreSqlCdcService,
                     continue;
                 }
 
-                // Periodic lag check and acknowledgement
-                await Task.Delay(options.AckIntervalMilliseconds, ct).ConfigureAwait(false);
+                // EXT-4: logical replication (Npgsql.Replication) is not implemented. Do not pretend to stream changes.
+                _logger.LogError("F-CDC-03 PostgreSQL logical replication is not implemented; no change events are captured. The CDC worker stops.");
+                _isRunning = false;
+                break;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
