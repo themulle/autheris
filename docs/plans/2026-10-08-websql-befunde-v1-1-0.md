@@ -17,15 +17,13 @@
 | 2.4 | Ungenau | `truncated` heißt „Limit erreicht“, nicht „es gibt mehr“ | bei genau `n` Zeilen `true` | 2.4 |
 | 4 | PoC-Konfiguration | Arrow-Export und OLAP: 403 mangels ReBAC-Beziehungen; Iceberg ohne Tabellen | im PoC nicht prüfbar, Einrichtung fehlt | 4.3 |
 
-| 4a.1 | Fehler | OData kürzt auf 100 (Standard) beziehungsweise 1000 Zeilen (`$top`-Grenze) ohne `@odata.nextLink` | Excel lädt still unvollständig | 4a.1 |
-| 4a.2 | Abweichung | Pfad `lwetem_prod/md/crane` ≠ Mengenname `lwetem_prod_md_crane` (flacher Pfad 404) | Clients, die den Pfad aus dem Namen bilden, scheitern | 4a.2 |
+| 4a.1 | Behoben (Commit `0c43ae3`) | OData `$top`/`$skip` liefert nun `@odata.nextLink` bei Vorhandensein weiterer Zeilen | Paginierung in Power Query/Excel funktioniert | 4a.1 |
+| 4a.2 | Behoben (Commit `a55057e`) | Flacher Pfad `/odata/v4/{entitySetName}` hinzugefügt (leitet auf `domain/schema/table`) | Kompatibel mit flachen EntitySet-Clients | 4a.2 |
 | 4a.3 | Lücke | `$filter`, `$orderby`, `$count` geben 501 | Query Folding in Power Query schlägt fehl | 4a.3 |
-
-| 4a.4 | Fehler | `$metadata`: bei 73 von 124 Typen zeigt der `Key` auf eine nicht vorhandene Eigenschaft `id` | Excel: „Metadatendokument des Feeds ist offenbar ungültig“; Feed nicht ladbar | 4a.4 |
-
-| 4b.1 | Fehler | MCP `list_datasets` wird beim Token-Budget mitten im JSON abgeschnitten, ohne Seitenwechsel (25 von 124 Tabellen, `md.crane` fehlt) | KI-Agenten sehen den Katalog unvollständig und unlesbar | 4b.1 |
-| 4b.2 | Fehler | MCP `query_data_catalog` scheitert immer (GraphQL-Feld `catalogAssets` fehlt) | Werkzeug angeboten, aber nicht nutzbar | 4b.2 |
-| 4b.3 | Auffälligkeit | GraphQL über MCP: `first: $n` rechnet mit Kosten 110 000 (Budget 5 000), `first: 1000` mit 12 000 | parametrisierte Abfragen unbenutzbar | 4b.3 |
+| 4a.4 | Behoben (Commit `a9fc97f`) | `$metadata`: EntityType Key zeigt auf existierende Keys (ohne Alias-Kollision) & `Org.OData.Core.V1` eingebunden | Excel liest CSDL fehlerfrei | 4a.4 |
+| 4b.1 | Behoben (Commit `a0b577f`) | MCP `list_datasets` unterstützt Paginierung (`offset`, `limit`, `nextOffset`), Kurzbeschreibungen & sauberes JSON bei Token-Truncation | KI-Agenten blättern durch gesamten Katalog | 4b.1 |
+| 4b.2 | Behoben (Commit `a0b577f`) | MCP `query_data_catalog` liest Katalogeinträge nun über `_datasetCatalog` | Werkzeug funktioniert für KI-Agenten | 4b.2 |
+| 4b.3 | Behoben (Commit `51f2b7b`) | GraphQL `QueryCostAnalyzerRule` wertet Variablen-Defaults aus; MCP `query_graphql` reichert Variablen an; Fehlermeldung präzisiert | Parametrisierte Abfragen mit Variablen nutzbar | 4b.3 |
 
 Nicht als Fehler gewertet: MCP ohne SSE (Absicht), Trino synchron (gültig), Parquet bei Prozeduren 406 (gewollt).
 
@@ -221,25 +219,26 @@ Geprüft per JSON-RPC (`POST /mcp`, Streamable HTTP, Protokoll 2025-03-26) als `
 - **Beobachtung:** Die Antwort ist auf rund 4096 Token (16 424 Zeichen) begrenzt, endet mit `… [TRUNCATED DUE TO MCP TOKEN BUDGET]` mitten in einer Beschreibung und ist kein gültiges JSON mehr (`json.loads` scheitert). Ohne Filter sind **25 von 124 Tabellen** sichtbar (`conf.attribute` bis `fms.eec3_mot`, alphabetisch); `md.crane` fehlt. Auch `search=crane` (28 Treffer) und `domain=lwetem_prod` werden abgeschnitten. Nur ein enger Filter (`search=md.`, `search=air1`) liefert vollständige Antworten. Die Kennzeichnung steht nur in `_meta.truncated: true`; es gibt weder `offset`/Seitenwechsel noch einen Hinweis im Text auf weitere Tabellen.
 - **Ursache:** Jede Tabelle bringt den kompletten Langtext (`description` mit Protobuf-Quelle, Go-Modell, Herkunft usw.) mit; das Token-Budget wird nach etwa 25 Tabellen erreicht.
 - **Folge:** Ein KI-Agent, der wie in den Anweisungen des Servers mit `list_datasets` beginnt, sieht weniger als ein Fünftel der Tabellen und bekommt unlesbares JSON.
-- **Fix:** In der Liste nur die Kurzbeschreibung (`Core.Description`) liefern, Langtext nur in `describe_dataset`; Seitenwechsel (`offset`, `limit`, `nextOffset`) ergänzen; beim Abschneiden gültiges JSON mit `truncated: true` und `total` liefern, statt Text abzuhacken.
-- **Test:** Katalog mit mehr Tabellen als das Budget: Antwort ist gültiges JSON, `total` stimmt, mit `offset` sind alle Tabellen erreichbar.
+- **Fix (Behoben in Commit `a0b577f`):** In der Liste wird nur die Kurzbeschreibung (`t.Table.Description`) geliefert; Seitenwechsel (`offset`, `limit`, `nextOffset`) wurde in `IMcpDatasetCatalog`, `McpDatasetCatalog` und `McpDatasetTools` implementiert; beim Überschreiten des Token-Budgets wird in `AiDataGuardrailService` ein valides JSON-Objekt mit `_meta.truncated: true` serialisiert statt Text abzuscheiden.
+- **Test:** `ListDatasets_SupportsPaging_WithOffsetAndLimit` in `McpDatasetCatalogTests` sowie Truncation-Tests in `McpServerTests` bestätigen valides JSON und korrekte Offsets.
 
 ### 4b.2 Fehler: `query_data_catalog` funktioniert nicht
 
 - **Beobachtung:** Jeder Aufruf scheitert mit `EXECUTION_FAILED`: „The field `catalogAssets` does not exist on the type `Query`“ (außerdem „The following variables were no…“, vermutlich nicht verwendete Variablen).
 - **Ursache:** Das Werkzeug setzt eine GraphQL-Abfrage auf ein Feld `catalogAssets` ab, das im Schema nicht vorhanden ist. Das Werkzeug wird trotzdem in `tools/list` angeboten.
-- **Fix:** Entweder das Feld im Schema bereitstellen oder das Werkzeug erst anbieten, wenn es funktioniert (und vorher aus `tools/list` entfernen).
-- **Test:** `query_data_catalog` mit `tableName=crane` liefert Katalogeinträge oder ist nicht in `tools/list`.
+- **Fix (Behoben in Commit `a0b577f`):** In `GatewayMcpQueryExecutor.ExecuteQueryDataCatalogAsync` wird der Aufruf nun direkt über `_datasetCatalog.ListDatasetsAsync` bedient und liefert echte Governance-Katalog-Assets passend zur Tabelle.
+- **Test:** `GatewayMcpQueryExecutor_QueryDataCatalog_ReturnsCatalogAssets` in `McpServerTests`.
 
 ### 4b.3 Auffälligkeit: `first` über eine Variable ist praktisch unbenutzbar
 
 - **Beobachtung:** `first: 100` (ein Feld) geht, `first: 1000` scheitert mit `QUERY_TOO_COMPLEX` (Kosten 12 000, Budget 5 000), und `first: $n` mit Variable rechnet mit Kosten 110 000, auch bei `n = 2`. Mit Variablen lässt sich `first` also gar nicht verwenden.
 - **Folge:** Parametrisierte Abfragen (was MCP-Clients üblicherweise tun) scheitern; die Fehlermeldung nennt die Ursache (Variable) nicht.
-- **Fix:** Bei einer Variable deren Wert (`variables`) für die Kostenberechnung verwenden, nicht den Höchstwert; Fehlertext mit dem Hinweis ergänzen.
+- **Fix (Behoben in Commit `51f2b7b`):** In `QueryCostAnalyzerRule` werden Default-Werte aus den Variablen-Definitionen der Operation (`VariableDefinitionNode.DefaultValue`) ausgelesen und als Limit verwendet. In `GatewayMcpQueryExecutor.ExecuteGraphQlQueryAsync` werden bei `query_graphql` die übergebenen `variables` automatisch in die AST-Variablen-Definitionen als Default-Werte angereichert, sodass die Kostenanalyse mit dem tatsächlichen Limit rechnet. Die Fehlermeldung bei Überschreitung wurde um einen konkreten Hinweis zur Deklaration von Default-Werten ergänzt.
+- **Test:** `M13_VariableRowLimit_WithDefaultValue_UsesDefaultLimit` in `SecurityReview20261002GraphQLTests` und `Executor_QueryGraphQl_WithVariables_AugmentsDefaultValues` in `McpDatasetToolWiringTests`.
 
 ### 4b.4 Kleinere Auffälligkeiten
 
-- `describe_dataset` ohne Argument meldet „Access denied … (fail-closed)“ statt eines Parameterfehlers (-32602); das ist irreführend.
+- `describe_dataset` und `sample_rows` ohne Argument `dataset`: **Behoben in Commit `a0b577f`** – In `AiDataGuardrailService` wird das Fehlen des Pflichtarguments vor der Fail-Closed ABAC-Prüfung validiert und mit einer klaren Meldung `Missing or invalid required argument 'dataset'` zurückgewiesen (Unit-Test in `McpServerTests`).
 - JSON-RPC-Batches (Array im Body) werden mit 400 abgelehnt. Das Protokoll 2025-03-26 erlaubt Batches, spätere Fassungen nicht mehr; für aktuelle Clients unkritisch.
 - `/.well-known/oauth-protected-resource` und `/.well-known/oauth-authorization-server` antworten ohne Anmeldung mit 401. MCP-Clients mit OAuth-Erkennung rufen diese Adressen anonym ab; im PoC gibt es nur Basic-Authentifizierung, daher nicht geprüft, ob sie bei aktivierter Entra-Anmeldung anonym erreichbar sind.
 - Der PoC setzt `allow_all_cors_origins` (Header `X-Gateway-Insecure-Mode`); ein fremder `Origin` wird entsprechend zurückgespiegelt (`Access-Control-Allow-Origin`). Nur Entwicklungsbetrieb, aber der MCP-Endpunkt nimmt Basic-Anmeldedaten an; für einen Betrieb ist das zu schließen.
