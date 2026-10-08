@@ -9,9 +9,11 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
 using Autheris.Api.Serialization;
+using Autheris.Application.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.Serialization;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Extensions.OData;
 using Microsoft.AspNetCore.Builder;
@@ -280,7 +282,36 @@ public static class ODataEndpoints
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .RequireAuthorization();
 
+        app.MapGet("/odata/v4/{entitySetName}", HandleFlatEntitySetRequestAsync)
+           .WithMetadata(new ParquetOutputSupportedMetadata())
+           .RequireAuthorization();
+
         return app;
+    }
+
+    /// <summary>
+    /// Befund 4a.2: Support single-segment entity set name path (/odata/v4/lwetem_prod_md_crane) as an alias
+    /// matching the OData 4.0 CSDL EntitySet name.
+    /// </summary>
+    internal static async Task<IResult> HandleFlatEntitySetRequestAsync(
+        string entitySetName,
+        IODataHandler odataHandler,
+        ITableMetadataRepository metadataRepo,
+        HttpContext context)
+    {
+        var tables = await metadataRepo.GetAllTablesAsync(context.RequestAborted).ConfigureAwait(false);
+        var table = tables.FirstOrDefault(t => string.Equals(ODataCsdlGenerator.GetEntityName(t), entitySetName, StringComparison.OrdinalIgnoreCase));
+        if (table == null)
+        {
+            return Results.NotFound(new { error = new { code = "ResourceNotFound", message = $"The entity set '{entitySetName}' was not found." } });
+        }
+
+        return await HandleEntitySetRequestAsync(
+            table.Identifier.Domain,
+            table.Identifier.Schema,
+            table.Identifier.TableName,
+            odataHandler,
+            context).ConfigureAwait(false);
     }
 
     /// <summary>

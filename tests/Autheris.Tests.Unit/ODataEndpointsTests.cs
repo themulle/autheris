@@ -383,4 +383,64 @@ public sealed class ODataEndpointsTests
         ODataEndpoints.IsOpenApiAdmin(anonymous).ShouldBeFalse();
         ODataEndpoints.IsOpenApiAdmin(null).ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task HandleFlatEntitySetRequestAsync_ResolvesEntitySetName_AndExecutesQuery()
+    {
+        var context = CreateHttpContext(path: "/odata/v4/sales_dbo_invoices");
+        var table = new Autheris.Domain.Model.TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "dbo", "invoices"),
+            Table = new Autheris.Domain.Model.Table { SchemaName = "dbo", TableName = "invoices" }
+        };
+
+        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table]));
+
+        var rows = new List<IReadOnlyDictionary<string, object?>> { new Dictionary<string, object?> { ["id"] = 1 } };
+        var payload = ODataResponseFormatter.FormatEntitySetResponse("http://localhost:8080/odata/v4", table.Identifier, rows);
+        var handler = CreateMockHandler(new ODataQueryResult(true, StatusCodes.Status200OK, payload));
+
+        var result = await ODataEndpoints.HandleFlatEntitySetRequestAsync(
+            "sales_dbo_invoices",
+            handler,
+            metadataRepo,
+            context
+        );
+
+        result.ShouldBeOfType<JsonHttpResult<object>>();
+        await handler.Received(1).ExecuteEntitySetQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(),
+            "http://localhost:8080/odata/v4",
+            Arg.Is<TableIdentifier>(t => t.Domain == "sales" && t.Schema == "dbo" && t.TableName == "invoices"),
+            Arg.Any<int?>(),
+            Arg.Any<int?>(),
+            Arg.Any<string?>(),
+            Arg.Any<bool>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<CancellationToken>()
+        );
+    }
+
+    [Fact]
+    public async Task HandleFlatEntitySetRequestAsync_WhenNotFound_Returns404()
+    {
+        var context = CreateHttpContext(path: "/odata/v4/unknown_table");
+        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([]));
+
+        var handler = CreateMockHandler(new ODataQueryResult(true, StatusCodes.Status200OK, new { }));
+
+        var result = await ODataEndpoints.HandleFlatEntitySetRequestAsync(
+            "unknown_table",
+            handler,
+            metadataRepo,
+            context
+        );
+
+        var notFound = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        notFound.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+    }
 }
