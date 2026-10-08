@@ -431,7 +431,9 @@ Neuer Dienst `IMandatoryRowFilterResolver` (Application). Er arbeitet auf einem 
 
 ---
 
-## Offene Entscheidungen
+## Entscheidungen
+
+**Entschieden (08.10.2026, Manuel Müller):** Alle zehn Empfehlungen sind angenommen.
 
 | Nr. | Frage | Empfehlung |
 | :--- | :--- | :--- |
