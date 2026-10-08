@@ -494,35 +494,13 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(" END");
                 break;
             case FunctionCallExpression fn:
-                FormatFunctionName(ref builder, fn.Name, context);
-                builder.Append('(');
-                if (fn.Distinct) builder.Append("DISTINCT ");
-                if (fn.IsStar) builder.Append('*');
-                for (int i = 0; i < fn.Arguments.Count; i++)
-                {
-                    if (i > 0) builder.Append(", ");
-                    GenerateExpression(fn.Arguments[i], ref builder, context);
-                }
-                builder.Append(')');
-                if (fn.Window != null)
-                {
-                    builder.Append(" OVER (");
-                    if (fn.Window.PartitionBy != null && fn.Window.PartitionBy.Count > 0)
-                    {
-                        builder.Append("PARTITION BY ");
-                        for (int i = 0; i < fn.Window.PartitionBy.Count; i++)
-                        {
-                            if (i > 0) builder.Append(", ");
-                            GenerateExpression(fn.Window.PartitionBy[i], ref builder, context);
-                        }
-                    }
-                    if (fn.Window.OrderBy != null)
-                    {
-                        if (fn.Window.PartitionBy != null && fn.Window.PartitionBy.Count > 0) builder.Append(' ');
-                        GenerateOrderBy(fn.Window.OrderBy, ref builder, context);
-                    }
-                    builder.Append(')');
-                }
+                GenerateFunctionCall(fn, ref builder, context);
+                break;
+            case TypedLiteralExpression typed:
+                FormatTypedLiteral(ref builder, typed, context);
+                break;
+            case IntervalLiteralExpression interval:
+                FormatIntervalLiteral(ref builder, interval, context);
                 break;
             case CastExpression cast:
                 builder.Append(cast.IsTryCast ? "TRY_CAST(" : "CAST(");
@@ -734,6 +712,168 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
     };
 
     public abstract void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context);
+
+    /// <summary>Wunsch 4: the dialect evaluates <c>agg(…) FILTER (WHERE …)</c> natively; otherwise it is emulated with CASE.</summary>
+    protected virtual bool SupportsAggregateFilter => false;
+
+    /// <summary>Wunsch 4: the dialect accepts <c>ORDER BY</c> inside an aggregate's argument list.</summary>
+    protected virtual bool SupportsOrderedAggregates => false;
+
+    protected virtual void GenerateFunctionCall(FunctionCallExpression fn, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        FormatFunctionName(ref builder, fn.Name, context);
+        builder.Append('(');
+        if (fn.Distinct) builder.Append("DISTINCT ");
+
+        bool emulateFilter = fn.Filter != null && !SupportsAggregateFilter;
+        if (emulateFilter)
+        {
+            // agg(x) FILTER (WHERE c) == agg(CASE WHEN c THEN x END): aggregates ignore NULL; COUNT(*) counts 1 per row.
+            if (!fn.IsStar && fn.Arguments.Count != 1)
+            {
+                throw new TrinoSqlEngine.Ast.Builder.AstBuildException(
+                    $"SQL construct FILTER (WHERE …) on {fn.Name.NormalizedName} with {fn.Arguments.Count} arguments is not supported for {TargetDialect}.");
+            }
+
+            builder.Append("CASE WHEN ");
+            GeneratePredicate(fn.Filter!, ref builder, context);
+            builder.Append(" THEN ");
+            if (fn.IsStar) builder.Append('1');
+            else GenerateExpression(fn.Arguments[0], ref builder, context);
+            builder.Append(" END");
+        }
+        else
+        {
+            if (fn.IsStar) builder.Append('*');
+            for (int i = 0; i < fn.Arguments.Count; i++)
+            {
+                if (i > 0) builder.Append(", ");
+                GenerateExpression(fn.Arguments[i], ref builder, context);
+            }
+        }
+
+        if (fn.OrderWithin != null)
+        {
+            if (!SupportsOrderedAggregates)
+            {
+                throw new TrinoSqlEngine.Ast.Builder.AstBuildException(
+                    $"SQL construct ORDER BY inside {fn.Name.NormalizedName}(…) is not supported for {TargetDialect}.");
+            }
+
+            builder.Append(' ');
+            GenerateOrderBy(fn.OrderWithin, ref builder, context);
+        }
+
+        builder.Append(')');
+
+        if (fn.Filter != null && !emulateFilter)
+        {
+            builder.Append(" FILTER (WHERE ");
+            GeneratePredicate(fn.Filter, ref builder, context);
+            builder.Append(')');
+        }
+
+        if (fn.Window != null)
+        {
+            GenerateWindow(fn.Window, ref builder, context);
+        }
+    }
+
+    private void GenerateWindow(WindowSpecification window, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        builder.Append(" OVER (");
+        bool needsSpace = false;
+        if (window.PartitionBy != null && window.PartitionBy.Count > 0)
+        {
+            builder.Append("PARTITION BY ");
+            for (int i = 0; i < window.PartitionBy.Count; i++)
+            {
+                if (i > 0) builder.Append(", ");
+                GenerateExpression(window.PartitionBy[i], ref builder, context);
+            }
+            needsSpace = true;
+        }
+
+        if (window.OrderBy != null)
+        {
+            if (needsSpace) builder.Append(' ');
+            GenerateOrderBy(window.OrderBy, ref builder, context);
+            needsSpace = true;
+        }
+
+        if (window.Frame != null)
+        {
+            if (needsSpace) builder.Append(' ');
+            builder.Append(window.Frame.Type == WindowFrameType.Rows ? "ROWS " : "RANGE ");
+            if (window.Frame.End != null)
+            {
+                builder.Append("BETWEEN ");
+                FormatFrameBound(ref builder, window.Frame.Start);
+                builder.Append(" AND ");
+                FormatFrameBound(ref builder, window.Frame.End);
+            }
+            else
+            {
+                FormatFrameBound(ref builder, window.Frame.Start);
+            }
+        }
+
+        builder.Append(')');
+    }
+
+    private static void FormatFrameBound(ref ValueStringBuilder builder, FrameBound bound)
+    {
+        switch (bound.Kind)
+        {
+            case FrameBoundKind.UnboundedPreceding: builder.Append("UNBOUNDED PRECEDING"); break;
+            case FrameBoundKind.UnboundedFollowing: builder.Append("UNBOUNDED FOLLOWING"); break;
+            case FrameBoundKind.CurrentRow: builder.Append("CURRENT ROW"); break;
+            case FrameBoundKind.Preceding:
+                builder.Append(bound.Offset.ToString(CultureInfo.InvariantCulture));
+                builder.Append(" PRECEDING");
+                break;
+            case FrameBoundKind.Following:
+                builder.Append(bound.Offset.ToString(CultureInfo.InvariantCulture));
+                builder.Append(" FOLLOWING");
+                break;
+        }
+    }
+
+    /// <summary>
+    /// A boolean condition (CASE WHEN, FILTER): generated outside the projection context, so dialects that wrap predicates
+    /// in projections (SQL Server, Oracle) do not wrap it a second time.
+    /// </summary>
+    protected void GeneratePredicate(Expression predicate, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        bool prevProjection = context.InProjectionContext;
+        bool prevPredicate = context.InPredicateContext;
+        context.InProjectionContext = false;
+        context.InPredicateContext = true;
+        GenerateExpression(predicate, ref builder, context);
+        context.InProjectionContext = prevProjection;
+        context.InPredicateContext = prevPredicate;
+    }
+
+    /// <summary>Wunsch 4: ANSI <c>DATE '…'</c>, <c>TIME '…'</c>, <c>TIMESTAMP '…'</c>.</summary>
+    protected virtual void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context)
+    {
+        builder.Append(literal.Kind switch
+        {
+            TypedLiteralKind.Date => "DATE ",
+            TypedLiteralKind.Time => "TIME ",
+            _ => "TIMESTAMP "
+        });
+        FormatStringLiteral(ref builder, literal.Value, context);
+    }
+
+    /// <summary>Wunsch 4: ANSI <c>INTERVAL '…' FIELD</c>.</summary>
+    protected virtual void FormatIntervalLiteral(ref ValueStringBuilder builder, IntervalLiteralExpression interval, SqlEmitterContext context)
+    {
+        builder.Append("INTERVAL ");
+        FormatStringLiteral(ref builder, interval.Value, context);
+        builder.Append(' ');
+        builder.Append(interval.Field);
+    }
 
     /// <summary>
     /// Wunsch 4: a function name is not an identifier. Quoting it (<c>"coalesce"</c>, <c>[SUM]</c>) makes PostgreSQL and

@@ -58,6 +58,8 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             SubscriptExpression sub => VisitSubscriptExpression(sub),
             ExtractExpression ext => VisitExtractExpression(ext),
             TrustedSqlExpression trusted => trusted,
+            TypedLiteralExpression typed => typed,
+            IntervalLiteralExpression interval => interval,
             OrderByClause ord => VisitOrderByClause(ord),
             OrderByElement el => VisitOrderByElement(el),
             PaginationClause pag => VisitPaginationClause(pag),
@@ -393,11 +395,13 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
         var name = (SqlQualifiedName)Visit(node.Name);
         var args = RewriteList(node.Arguments, a => (Expression)Visit(a));
         var win = node.Window != null ? (WindowSpecification)Visit(node.Window) : null;
+        var filter = node.Filter != null ? (Expression)Visit(node.Filter) : null;
+        var orderWithin = node.OrderWithin != null ? (OrderByClause)Visit(node.OrderWithin) : null;
 
-        if (name == node.Name && args == node.Arguments && win == node.Window)
+        if (name == node.Name && args == node.Arguments && win == node.Window && filter == node.Filter && orderWithin == node.OrderWithin)
             return node;
 
-        return node with { Name = name, Arguments = args, Window = win };
+        return node with { Name = name, Arguments = args, Window = win, Filter = filter, OrderWithin = orderWithin };
     }
 
     public virtual SqlNode VisitWindowSpecification(WindowSpecification node)

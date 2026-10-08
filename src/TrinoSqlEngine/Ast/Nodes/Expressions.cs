@@ -128,16 +128,54 @@ public sealed record WhenClause(
     Expression Result) : SqlNode;
 
 /// <param name="IsStar">Wunsch 4: the call takes <c>*</c> as its only argument (<c>COUNT(*)</c>); <see cref="Arguments"/> is empty.</param>
+/// <param name="Filter">Wunsch 4: aggregate <c>FILTER (WHERE …)</c>.</param>
+/// <param name="OrderWithin">Wunsch 4: <c>ORDER BY</c> inside the argument list of an aggregate (<c>array_agg(x ORDER BY y)</c>).</param>
 public sealed record FunctionCallExpression(
     SqlQualifiedName Name,
     IReadOnlyList<Expression> Arguments,
     bool Distinct = false,
     WindowSpecification? Window = null,
-    bool IsStar = false) : Expression;
+    bool IsStar = false,
+    Expression? Filter = null,
+    OrderByClause? OrderWithin = null) : Expression;
 
 public sealed record WindowSpecification(
     IReadOnlyList<Expression>? PartitionBy,
-    OrderByClause? OrderBy) : SqlNode;
+    OrderByClause? OrderBy,
+    WindowFrame? Frame = null) : SqlNode;
+
+/// <summary>Wunsch 4: <c>ROWS|RANGE [BETWEEN] start [AND end]</c>; offsets are non-negative integer literals only.</summary>
+public sealed record WindowFrame(WindowFrameType Type, FrameBound Start, FrameBound? End) : SqlNode;
+
+public sealed record FrameBound(FrameBoundKind Kind, long Offset = 0) : SqlNode;
+
+public enum WindowFrameType
+{
+    Rows,
+    Range
+}
+
+public enum FrameBoundKind
+{
+    UnboundedPreceding,
+    Preceding,
+    CurrentRow,
+    Following,
+    UnboundedFollowing
+}
+
+/// <summary>Wunsch 4: <c>DATE '…'</c>, <c>TIME '…'</c>, <c>TIMESTAMP '…'</c>; the value is validated by the builder.</summary>
+public sealed record TypedLiteralExpression(TypedLiteralKind Kind, string Value) : Expression;
+
+public enum TypedLiteralKind
+{
+    Date,
+    Time,
+    Timestamp
+}
+
+/// <summary>Wunsch 4: <c>INTERVAL '<Value>' <Field></c> with a single unsigned field.</summary>
+public sealed record IntervalLiteralExpression(string Value, string Field) : Expression;
 
 public sealed record CastExpression(
     Expression Operand,

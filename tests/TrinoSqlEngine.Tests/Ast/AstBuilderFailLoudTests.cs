@@ -27,16 +27,11 @@ public sealed class AstBuilderFailLoudTests
     [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY CUBE (dept)")]
     [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY GROUPING SETS ((dept), ())")]
     [InlineData("SELECT dept, COUNT(id) FROM t GROUP BY DISTINCT dept")]
-    // aggregate modifiers (previously: dropped, the aggregate ran over all rows / unordered)
-    [InlineData("SELECT COUNT(id) FILTER (WHERE amount > 1) FROM t")]
-    [InlineData("SELECT array_agg(id ORDER BY amount) FROM t")]
-    // window details (previously: frame dropped)
-    [InlineData("SELECT SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t")]
+    // aggregate modifiers that are still not representable
+    // window details that are still not representable
     [InlineData("SELECT lag(amount) IGNORE NULLS OVER (ORDER BY id) FROM t")]
     [InlineData("SELECT SUM(amount) OVER w FROM t WINDOW w AS (ORDER BY id)")]
-    // typed literals (previously: turned into a string literal 'DATE''2024-01-01''')
-    [InlineData("SELECT id FROM t WHERE created_at > DATE '2024-01-01'")]
-    [InlineData("SELECT id FROM t WHERE created_at > TIMESTAMP '2024-01-01 00:00:00'")]
+    // INTERVAL arithmetic on current_date (current_date has no visitor yet, Phase 6)
     [InlineData("SELECT id FROM t WHERE created_at > current_date - INTERVAL '1' DAY")]
     // special forms without a visitor (previously: ArgumentNullException → 500)
     [InlineData("SELECT trim(name) FROM t")]
@@ -57,6 +52,12 @@ public sealed class AstBuilderFailLoudTests
     [InlineData("SELECT CASE WHEN a > 1 THEN 'x' ELSE 'y' END FROM t WHERE b IN (SELECT b FROM u) AND c LIKE 'a%' ESCAPE '!'")]
     [InlineData("SELECT CAST(created_at AS date), EXTRACT(YEAR FROM created_at) FROM t")]
     [InlineData("WITH x AS (SELECT a FROM t) SELECT a FROM x WHERE EXISTS (SELECT 1 FROM u WHERE u.a = x.a)")]
+    // Phase 4
+    [InlineData("SELECT COUNT(id) FILTER (WHERE amount > 1) FROM t")]
+    [InlineData("SELECT array_agg(id ORDER BY amount) FROM t")]
+    [InlineData("SELECT SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM t")]
+    [InlineData("SELECT id FROM t WHERE created_at > DATE '2024-01-01'")]
+    [InlineData("SELECT id FROM t WHERE created_at > TIMESTAMP '2024-01-01 00:00:00'")]
     public void Supported_Construct_StillBuilds(string sql)
     {
         Assert.IsType<SelectStatement>(Build(sql));

@@ -14,6 +14,17 @@ using TrinoSqlEngine.Ast.Nodes;
 public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Oracle;
+
+    /// <summary>Wunsch 4: Oracle has DATE and TIMESTAMP literals but no TIME type.</summary>
+    protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context)
+    {
+        if (literal.Kind == TypedLiteralKind.Time)
+        {
+            throw new TrinoSqlEngine.Ast.Builder.AstBuildException("SQL construct TIME literal is not supported for Oracle (no TIME type).");
+        }
+
+        base.FormatTypedLiteral(ref builder, literal, context);
+    }
     public override int MaxParameterBudget => 1000;
 
     protected override string TableAliasKeyword => " ";

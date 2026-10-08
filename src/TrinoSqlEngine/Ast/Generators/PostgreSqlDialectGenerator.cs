@@ -13,6 +13,8 @@ using TrinoSqlEngine.Ast.Nodes;
 public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.PostgreSql;
+    protected override bool SupportsAggregateFilter => true;
+    protected override bool SupportsOrderedAggregates => true;
     public override int MaxParameterBudget => 65535;
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)

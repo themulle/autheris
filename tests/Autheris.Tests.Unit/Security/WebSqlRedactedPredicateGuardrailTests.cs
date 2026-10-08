@@ -114,6 +114,8 @@ public sealed class WebSqlRedactedPredicateGuardrailTests
     [InlineData("SELECT id FROM dbo.people ORDER BY email", "email")]
     [InlineData("SELECT id FROM dbo.people p ORDER BY p.salary DESC", "salary")]
     [InlineData("SELECT id FROM dbo.people WHERE id IN (SELECT id FROM dbo.people WHERE salary > 1)", "salary")]
+    [InlineData("SELECT COUNT(*) FILTER (WHERE email = 'anna@example.com') FROM dbo.people", "email")]
+    [InlineData("SELECT id, row_number() OVER (ORDER BY salary) FROM dbo.people", "salary")]
     public async Task Predicate_OnRedactedColumn_IsRejectedWithPolicyViolation(string sql, string column)
     {
         var service = CreateSingleTableService();

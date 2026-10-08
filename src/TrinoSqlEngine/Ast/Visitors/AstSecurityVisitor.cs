@@ -596,6 +596,10 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 break;
             case FunctionCallExpression fn:
                 foreach (var arg in fn.Arguments) stack.Push(arg);
+                if (fn.Filter != null) stack.Push(fn.Filter);
+                if (fn.OrderWithin != null) stack.Push(fn.OrderWithin);
+                if (fn.Window?.PartitionBy != null) foreach (var p in fn.Window.PartitionBy) stack.Push(p);
+                if (fn.Window?.OrderBy != null) stack.Push(fn.Window.OrderBy);
                 break;
             case CaseExpression cs:
                 if (cs.ElseResult != null) stack.Push(cs.ElseResult);

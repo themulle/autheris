@@ -13,6 +13,15 @@ using TrinoSqlEngine.Ast.Nodes;
 public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Sqlite;
+    protected override bool SupportsAggregateFilter => true;
+
+    /// <summary>Wunsch 4: SQLite stores dates as ISO text and has no typed literals; the ISO string compares correctly.</summary>
+    protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context) =>
+        FormatStringLiteral(ref builder, literal.Value, context);
+
+    protected override void FormatIntervalLiteral(ref ValueStringBuilder builder, IntervalLiteralExpression interval, SqlEmitterContext context) =>
+        throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"SQL construct INTERVAL literal is not supported for {TargetDialect} (no interval type).");
+
     public override int MaxParameterBudget => 999;
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)

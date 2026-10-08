@@ -390,11 +390,23 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         }
     }
 
+    /// <summary>
+    /// Befund 3.6: sorting on a redacted column orders by the replacement value; guarded like WHERE/HAVING. Covers the
+    /// ORDER BY of queries, windows and aggregates.
+    /// </summary>
+    public override void EnterOrderBy(SqlBaseParser.OrderByContext context)
+    {
+        ExtractFilterColumnReferences(context, _filterColumnReferences);
+    }
+
+    /// <summary>Wunsch 4 / Befund 3.6: an aggregate <c>FILTER (WHERE …)</c> filters rows like WHERE.</summary>
+    public override void EnterFilter(SqlBaseParser.FilterContext context)
+    {
+        ExtractFilterColumnReferences(context.booleanExpression(), _filterColumnReferences);
+    }
+
     public override void EnterQueryNoWith(SqlBaseParser.QueryNoWithContext context)
     {
-        // Befund 3.6: sorting on a redacted column orders by the replacement value; guarded like WHERE/HAVING.
-        ExtractFilterColumnReferences(context.orderBy(), _filterColumnReferences);
-
         // Check top-level limit only on the root query (SEC M-22: CTE bodies and subqueries do not count)
         bool isRoot = context.Parent is SqlBaseParser.QueryContext query && query.Parent is SqlBaseParser.RootQueryContext;
         if (isRoot && _currentSubqueryDepth == 0 && context.limit != null)

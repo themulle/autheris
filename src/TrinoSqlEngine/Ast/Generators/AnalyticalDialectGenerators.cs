@@ -11,6 +11,7 @@ using TrinoSqlEngine.Ast.Nodes;
 public sealed class AnsiDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Ansi;
+    protected override bool SupportsAggregateFilter => true;
     public override int MaxParameterBudget => int.MaxValue;
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
@@ -55,6 +56,8 @@ public sealed class AnsiDialectGenerator : SqlDialectGeneratorBase
 public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.DuckDb;
+    protected override bool SupportsAggregateFilter => true;
+    protected override bool SupportsOrderedAggregates => true;
     public override int MaxParameterBudget => 65535;
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)

@@ -216,27 +216,74 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         return BuildQueryNoWith(context.queryNoWith(), withClause);
     }
 
+    /// <summary>ORDER BY of a query, a window (Wunsch 4: was dropped) or inside an aggregate.</summary>
+    private OrderByClause BuildOrderBy(SqlBaseParser.OrderByContext context)
+    {
+        var sortItems = context.sortItem();
+        var elements = new List<OrderByElement>(sortItems.Length);
+        foreach (var item in sortItems)
+        {
+            var expr = (Expression)Visit(item.expression());
+            var dir = item.ordering?.Type == SqlBaseLexer.DESC ? SortDirection.Descending : SortDirection.Ascending;
+            var nullOrder = NullOrdering.Default;
+            if (item.nullOrdering?.Type == SqlBaseLexer.FIRST) nullOrder = NullOrdering.First;
+            else if (item.nullOrdering?.Type == SqlBaseLexer.LAST) nullOrder = NullOrdering.Last;
+
+            elements.Add(new OrderByElement(expr, dir, nullOrder));
+        }
+
+        return new OrderByClause(elements);
+    }
+
+    /// <summary>
+    /// Wunsch 4: ROWS/RANGE frames with UNBOUNDED, CURRENT ROW or a non-negative integer literal offset. GROUPS (no SQL
+    /// Server/Oracle support) and row pattern recognition are rejected.
+    /// </summary>
+    private WindowFrame BuildWindowFrame(SqlBaseParser.WindowFrameContext frame)
+    {
+        if (frame.measureDefinition().Length > 0 || frame.frameExclusion() != null || frame.skipTo() != null ||
+            frame.INITIAL() != null || frame.SEEK() != null || frame.rowPattern() != null ||
+            frame.subsetDefinition().Length > 0 || frame.variableDefinition().Length > 0)
+        {
+            throw Unsupported("row pattern recognition / frame exclusion in windows");
+        }
+
+        var extent = frame.frameExtent();
+        var type = extent.frameType.Type switch
+        {
+            SqlBaseLexer.ROWS => WindowFrameType.Rows,
+            SqlBaseLexer.RANGE => WindowFrameType.Range,
+            _ => throw Unsupported("GROUPS window frames")
+        };
+
+        return new WindowFrame(type, BuildFrameBound(extent.start), extent.end != null ? BuildFrameBound(extent.end) : null);
+    }
+
+    private FrameBound BuildFrameBound(SqlBaseParser.FrameBoundContext bound)
+    {
+        switch (bound)
+        {
+            case SqlBaseParser.UnboundedFrameContext u:
+                return new FrameBound(u.boundType.Type == SqlBaseLexer.PRECEDING ? FrameBoundKind.UnboundedPreceding : FrameBoundKind.UnboundedFollowing);
+            case SqlBaseParser.CurrentRowBoundContext:
+                return new FrameBound(FrameBoundKind.CurrentRow);
+            case SqlBaseParser.BoundedFrameContext b:
+                if (Visit(b.expression()) is not LiteralExpression { Type: LiteralType.Integer, Value: long offset } || offset < 0)
+                {
+                    throw Unsupported("window frame offsets other than non-negative integer literals");
+                }
+
+                return new FrameBound(b.boundType.Type == SqlBaseLexer.PRECEDING ? FrameBoundKind.Preceding : FrameBoundKind.Following, offset);
+            default:
+                throw Unsupported("window frame bound");
+        }
+    }
+
     private SelectStatement BuildQueryNoWith(SqlBaseParser.QueryNoWithContext context, WithClause? withClause)
     {
         var body = (QueryBody)Visit(context.queryTerm());
 
-        OrderByClause? orderBy = null;
-        if (context.orderBy() != null)
-        {
-            var sortItems = context.orderBy().sortItem();
-            var elements = new List<OrderByElement>(sortItems.Length);
-            foreach (var item in sortItems)
-            {
-                var expr = (Expression)Visit(item.expression());
-                var dir = item.ordering?.Type == SqlBaseLexer.DESC ? SortDirection.Descending : SortDirection.Ascending;
-                var nullOrder = NullOrdering.Default;
-                if (item.nullOrdering?.Type == SqlBaseLexer.FIRST) nullOrder = NullOrdering.First;
-                else if (item.nullOrdering?.Type == SqlBaseLexer.LAST) nullOrder = NullOrdering.Last;
-
-                elements.Add(new OrderByElement(expr, dir, nullOrder));
-            }
-            orderBy = new OrderByClause(elements);
-        }
+        OrderByClause? orderBy = context.orderBy() != null ? BuildOrderBy(context.orderBy()) : null;
 
         PaginationClause? pagination = null;
         Expression? offset = null;
@@ -808,10 +855,69 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                 }
             case SqlBaseParser.NullLiteralContext:
                 return new LiteralExpression(null, LiteralType.Null);
+            case SqlBaseParser.TypeConstructorContext typed:
+                return BuildTypedLiteral(typed);
+            case SqlBaseParser.IntervalLiteralContext interval:
+                return BuildIntervalLiteral(interval.interval());
             default:
                 // Wunsch 4: typed literals (DATE '…', INTERVAL …), binary and unicode literals are not plain strings.
                 throw Unsupported($"literal '{lit.GetType().Name.Replace("Context", string.Empty, StringComparison.Ordinal)}'");
         }
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex DateValue = new(@"^\d{4}-\d{2}-\d{2}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    private static readonly System.Text.RegularExpressions.Regex TimeValue = new(@"^\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    private static readonly System.Text.RegularExpressions.Regex TimestampValue = new(@"^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?$", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+    /// <summary>Wunsch 4: DATE/TIME/TIMESTAMP literals (was: turned into a string literal containing the keyword).</summary>
+    private static TypedLiteralExpression BuildTypedLiteral(SqlBaseParser.TypeConstructorContext typed)
+    {
+        if (typed.@string() is not SqlBaseParser.BasicStringLiteralContext str || typed.identifier() == null)
+        {
+            throw Unsupported("typed literal");
+        }
+
+        string type = typed.identifier().GetText().ToUpperInvariant();
+        string value = SqlIdentifierHelper.UnquoteStringLiteral(str.GetText());
+        var (kind, pattern) = type switch
+        {
+            "DATE" => (TypedLiteralKind.Date, DateValue),
+            "TIME" => (TypedLiteralKind.Time, TimeValue),
+            "TIMESTAMP" => (TypedLiteralKind.Timestamp, TimestampValue),
+            _ => throw Unsupported($"{type} literal")
+        };
+
+        if (!pattern.IsMatch(value))
+        {
+            throw Unsupported($"{type} literal '{value}' (expected ISO format without time zone)");
+        }
+
+        return new TypedLiteralExpression(kind, value);
+    }
+
+    /// <summary>Wunsch 4: <c>INTERVAL 'n' FIELD</c> with one unsigned field and an integer value.</summary>
+    private static IntervalLiteralExpression BuildIntervalLiteral(SqlBaseParser.IntervalContext interval)
+    {
+        if (interval.sign != null || interval.@string() is not SqlBaseParser.BasicStringLiteralContext str)
+        {
+            throw Unsupported("signed or unicode INTERVAL literal");
+        }
+
+        string field = interval.intervalQualifier() switch
+        {
+            SqlBaseParser.SimpleYearMonthIntervalContext ym when ym.precision == null => ym.field.Text,
+            SqlBaseParser.SimpleDayTimeIntervalContext dt when dt.precision == null => dt.field.Text,
+            SqlBaseParser.SecondsDayTimeIntervalContext s when s.leadingPrecision == null => "SECOND",
+            _ => throw Unsupported("INTERVAL with a composite or precision qualifier")
+        };
+
+        string value = SqlIdentifierHelper.UnquoteStringLiteral(str.GetText());
+        if (!System.Text.RegularExpressions.Regex.IsMatch(value, @"^\d{1,9}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+        {
+            throw Unsupported($"INTERVAL value '{value}' (expected a non-negative integer)");
+        }
+
+        return new IntervalLiteralExpression(value, field.ToUpperInvariant());
     }
 
     public override SqlNode VisitFunctionCall(SqlBaseParser.FunctionCallContext context)
@@ -827,8 +933,6 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         // Wunsch 4: modifiers the AST cannot represent yet are rejected instead of being dropped.
         if (context.processingMode() != null) throw Unsupported("RUNNING/FINAL");
         if (context.label != null) throw Unsupported("label.* in function calls");
-        if (context.filter() != null) throw Unsupported("FILTER (WHERE …) in aggregates");
-        if (context.orderBy() != null) throw Unsupported("ORDER BY inside aggregates");
         if (context.nullTreatment() != null) throw Unsupported("IGNORE/RESPECT NULLS");
 
         var qName = ToSqlQualifiedName(context.qualifiedName());
@@ -862,19 +966,20 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             var winSpec = overCtx.windowSpecification();
             if (winSpec.existingWindowName != null) throw Unsupported("window inheritance");
-            if (winSpec.windowFrame() != null) throw Unsupported("window frames (ROWS/RANGE/GROUPS)");
 
             var partitionExprs = winSpec._partition != null && winSpec._partition.Count > 0
                 ? winSpec._partition.Select(p => (Expression)Visit(p)).ToList().AsReadOnly()
                 : null;
-            var orderBy = winSpec.orderBy() != null
-                ? (OrderByClause)Visit(winSpec.orderBy())
-                : null;
-            window = new WindowSpecification(partitionExprs, orderBy);
+            var orderBy = winSpec.orderBy() != null ? BuildOrderBy(winSpec.orderBy()) : null;
+            var frame = winSpec.windowFrame() != null ? BuildWindowFrame(winSpec.windowFrame()) : null;
+            window = new WindowSpecification(partitionExprs, orderBy, frame);
         }
 
+        var filter = context.filter() != null ? (Expression)Visit(context.filter().booleanExpression()) : null;
+        var orderWithin = context.orderBy() != null ? BuildOrderBy(context.orderBy()) : null;
+
         bool distinct = context.setQuantifier()?.DISTINCT() != null;
-        return new FunctionCallExpression(qName, args, distinct, window, isStar);
+        return new FunctionCallExpression(qName, args, distinct, window, isStar, filter, orderWithin);
     }
 
     public override SqlNode VisitMethodCall(SqlBaseParser.MethodCallContext context)

@@ -14,6 +14,23 @@ using TrinoSqlEngine.Ast.Nodes;
 public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.SqlServer;
+
+    /// <summary>Wunsch 4: T-SQL has no DATE/TIMESTAMP literal syntax; <c>timestamp</c> would even mean rowversion.</summary>
+    protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context)
+    {
+        builder.Append("CAST(");
+        FormatStringLiteral(ref builder, literal.Value, context);
+        builder.Append(literal.Kind switch
+        {
+            TypedLiteralKind.Date => " AS date)",
+            TypedLiteralKind.Time => " AS time)",
+            _ => " AS datetime2)"
+        });
+    }
+
+    protected override void FormatIntervalLiteral(ref ValueStringBuilder builder, IntervalLiteralExpression interval, SqlEmitterContext context) =>
+        throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"SQL construct INTERVAL literal is not supported for {TargetDialect} (no interval type).");
+
     public override int MaxParameterBudget => 2100;
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)

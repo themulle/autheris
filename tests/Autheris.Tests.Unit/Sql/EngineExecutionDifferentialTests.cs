@@ -56,9 +56,11 @@ public sealed class EngineExecutionDifferentialTests(ITestOutputHelper output)
         ["SELECT dept, COUNT(*) FROM orders GROUP BY dept", Outcome.Same],
         ["SELECT id, COALESCE(dept, 'none') FROM orders", Outcome.Same],
 
-        // Phase 4: window ORDER BY, FILTER
-        ["SELECT id, row_number() OVER (PARTITION BY dept ORDER BY amount DESC) FROM orders", Outcome.AstRejects],
-        ["SELECT COUNT(id) FILTER (WHERE amount > 100) FROM orders", Outcome.AstRejects],
+        // Phase 4: window ORDER BY and frames, FILTER
+        ["SELECT id, row_number() OVER (PARTITION BY dept ORDER BY amount DESC, id) FROM orders", Outcome.Same],
+        ["SELECT id, SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM orders", Outcome.Same],
+        ["SELECT COUNT(id) FILTER (WHERE amount > 100), COUNT(*) FILTER (WHERE dept = 'Sales') FROM orders", Outcome.Same],
+        // DATE '…' is not in the corpus: the legacy rewriter passes it through verbatim and SQLite rejects it.
     ];
 
     [Theory]
