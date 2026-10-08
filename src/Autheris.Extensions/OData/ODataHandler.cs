@@ -373,7 +373,7 @@ public sealed partial class ODataHandler(
         string? nextLink = null;
         if (rows.Count > effectiveTop)
         {
-            nextLink = BuildNextLink(serviceRootUrl, table, effectiveSkip + effectiveTop, top, select, orderBy, includeCount);
+            nextLink = BuildNextLink(serviceRootUrl, table, effectiveSkip + effectiveTop, top, select, orderBy, filter, includeCount);
             rows = rows.Take(effectiveTop).ToList();
         }
 
@@ -386,7 +386,7 @@ public sealed partial class ODataHandler(
         );
     }
 
-    private static string BuildNextLink(string serviceRootUrl, TableIdentifier table, int nextSkip, int? top, string? select, string? orderBy, bool includeCount)
+    private static string BuildNextLink(string serviceRootUrl, TableIdentifier table, int nextSkip, int? top, string? select, string? orderBy, string? filter, bool includeCount)
     {
         var cleanRoot = serviceRootUrl.TrimEnd('/');
         var sb = new System.Text.StringBuilder();
@@ -395,6 +395,10 @@ public sealed partial class ODataHandler(
         if (top.HasValue)
         {
             sb.Append("&$top=").Append(top.Value);
+        }
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            sb.Append("&$filter=").Append(Uri.EscapeDataString(filter));
         }
         if (!string.IsNullOrWhiteSpace(select))
         {

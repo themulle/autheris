@@ -271,6 +271,23 @@ INSERT INTO invoices VALUES (1, 'CH', 300, 'CH01'), (2, 'DE', 100, 'DE02'), (3, 
     }
 
     [Fact]
+    public async Task Handler_KeepsFilterInTheNextLink()
+    {
+        var rows = Enumerable.Range(1, 3).Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["id"] = i }).ToList();
+        var (handler, _) = Handler(new TableQueryPage(rows, TableAccessDecision.Allowed(Invoices, Access), TotalCount: 100));
+
+        var result = await handler.ExecuteEntitySetQueryAsync(User(), "https://gw/odata/v4", Invoices, top: 2, skip: null, select: null,
+            includeCount: false, headers: null, orderBy: null, filter: "status eq 'active'");
+
+        result.StatusCode.ShouldBe(200);
+        var payload = (IReadOnlyDictionary<string, object?>)result.Payload;
+        payload.ShouldContainKey("@odata.nextLink");
+        payload["@odata.nextLink"]!.ToString()!.ShouldContain("$filter=status%20eq%20%27active%27");
+        payload["@odata.nextLink"]!.ToString()!.ShouldContain("$skip=2");
+        payload["@odata.nextLink"]!.ToString()!.ShouldContain("$top=2");
+    }
+
+    [Fact]
     public async Task Handler_InvalidOrderBy_Returns400WithoutQuerying()
     {
         var (handler, execution) = Handler(new TableQueryPage([], TableAccessDecision.Allowed(Invoices, Access), null));
