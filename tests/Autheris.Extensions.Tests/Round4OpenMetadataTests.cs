@@ -617,6 +617,38 @@ public sealed class Round4OpenMetadataTests
         meta.Table.IsActive.ShouldBeFalse();
     }
 
+    private static TableMetadata OrdersBoundTo(string sourceName) => new()
+    {
+        Identifier = OrdersId,
+        Table = new Table { SourceName = sourceName, SchemaName = "dbo", TableName = "orders", IsActive = true },
+        Columns = [new TableColumn { ColumnName = "id", DataType = "INT" }]
+    };
+
+    [Fact]
+    public async Task EXT2_Sync_KeepsThePersistedSourceName()
+    {
+        var f = CreateOm(Om(), [Orders()], existingMetadata: _ => OrdersBoundTo("sales_readonly_conn"));
+
+        await f.Service.SyncPermissionsAsync();
+
+        f.Upserted.ShouldHaveSingleItem().Table.SourceName.ShouldBe("sales_readonly_conn");
+    }
+
+    [Fact]
+    public async Task EXT2_Webhook_KeepsThePersistedSourceName()
+    {
+        const string secret = "r4-om-webhook-secret-ext2";
+        var orders = Orders();
+        var f = CreateOm(Om(serviceFilter: "sales_svc", webhookSecret: secret), [], existingMetadata: _ => OrdersBoundTo("sales_readonly_conn"));
+        f.Client.GetTableByFqnAsync(orders.FullyQualifiedName, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<OpenMetadataTable?>(orders));
+
+        var payload = SignedTableEvent(orders.FullyQualifiedName, secret, out var signature);
+        (await f.Service.HandleWebhookEventAsync(payload, signature)).ShouldBeTrue();
+
+        f.Upserted.ShouldHaveSingleItem().Table.SourceName.ShouldBe("sales_readonly_conn");
+    }
+
     // ------------------------------------------------------------------ E-09 / EX-06 (OpenMetadata catalog provider)
 
     private static OpenMetadataCatalogAdapter CreateAdapter(OpenMetadataOptions omOptions, IReadOnlyList<OpenMetadataTable> tables)

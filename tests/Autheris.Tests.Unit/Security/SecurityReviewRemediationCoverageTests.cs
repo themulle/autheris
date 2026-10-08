@@ -230,6 +230,28 @@ public sealed class SecurityReviewRemediationCoverageTests
         merged.Table.SourceName.ShouldBe("physical_mssql_cluster_01");
     }
 
+    [Theory]
+    [InlineData("hr_admin_connection", "")]
+    [InlineData("sales", "sales")]
+    [InlineData("SALES", "SALES")]
+    public void EXT_2_CatalogGovernanceRatchet_UnboundTable_AcceptsOnlyItsOwnDomainAsSourceName(string incomingSourceName, string expected)
+    {
+        // A table without SourceName runs on the connection of its domain. A sync may bind it to exactly that source,
+        // but never to another connection (which might carry other database rights).
+        var existingMeta = new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), SourceName = string.Empty, SchemaName = "dbo", TableName = "invoices" },
+            Identifier = new TableIdentifier("sales", "dbo", "invoices")
+        };
+        var incomingMeta = new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), SourceName = incomingSourceName, SchemaName = "dbo", TableName = "invoices" },
+            Identifier = new TableIdentifier("sales", "dbo", "invoices")
+        };
+
+        CatalogGovernanceRatchet.Merge(incomingMeta, existingMeta).Table.SourceName.ShouldBe(expected);
+    }
+
     // =========================================================================
     // DEP-6 / POL-14 (Medium): Cryptographic secret length >= 32 bytes enforced
     // =========================================================================
