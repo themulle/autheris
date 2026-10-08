@@ -375,6 +375,56 @@ public sealed class Phase1AndPhase2SecurityExpertTests
     }
 
     [Fact]
+    public void DEP_14_StartupValidation_RejectsPlaintextBasicAuthPasswordOutsideDevelopment()
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "https://vault.azure.net/secrets/hmac-secret" },
+            Authentication = new Autheris.Domain.Options.AuthenticationOptions
+            {
+                RequireKerberosOnly = false,
+                BasicAuth = new BasicAuthOptions
+                {
+                    Enabled = true,
+                    Users = [new BasicAuthUserConfig { Username = "admin", Password = "PlainTextPassword123!" }]
+                }
+            }
+        };
+
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+
+        var ex = Should.Throw<ValidationException>(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+
+        ex.Message.ShouldContain("Klartext-Passwörter sind verboten");
+    }
+
+    [Fact]
+    public void DEP_14_StartupValidation_AcceptsArgon2idBasicAuthPasswordOutsideDevelopment()
+    {
+        var options = new GatewayOptions
+        {
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "https://vault.azure.net/secrets/hmac-secret" },
+            Authentication = new Autheris.Domain.Options.AuthenticationOptions
+            {
+                RequireKerberosOnly = false,
+                BasicAuth = new BasicAuthOptions
+                {
+                    Enabled = true,
+                    Users = [new BasicAuthUserConfig { Username = "admin", Password = "$argon2id$v=19$m=65536,t=3,p=1$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNo" }]
+                }
+            }
+        };
+
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+
+        Should.NotThrow(() =>
+            GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
+    }
+
+    [Fact]
     public void SEC_EXP_HA_01_Rebac_MultiNode_Requires_Redis()
     {
         var options = new GatewayOptions
