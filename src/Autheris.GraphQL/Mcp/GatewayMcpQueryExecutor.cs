@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -35,6 +36,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     private readonly IPreFlightQuerySimulator? _querySimulator;
     private readonly IMcpProvenanceEnricher? _provenanceEnricher;
     private readonly IPersistedToolValidator? _persistedToolValidator;
+    private readonly IMcpDatasetCatalog? _datasetCatalog;
     private readonly ILogger<GatewayMcpQueryExecutor> _logger;
 
     public GatewayMcpQueryExecutor(
@@ -43,7 +45,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         ILogger<GatewayMcpQueryExecutor> logger,
         IPreFlightQuerySimulator? querySimulator = null,
         IMcpProvenanceEnricher? provenanceEnricher = null,
-        IPersistedToolValidator? persistedToolValidator = null)
+        IPersistedToolValidator? persistedToolValidator = null,
+        IMcpDatasetCatalog? datasetCatalog = null)
     {
         _executorProvider = executorProvider ?? throw new ArgumentNullException(nameof(executorProvider));
         _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
@@ -51,6 +54,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         _querySimulator = querySimulator;
         _provenanceEnricher = provenanceEnricher;
         _persistedToolValidator = persistedToolValidator;
+        _datasetCatalog = datasetCatalog;
     }
 
     public async Task<string> ExecuteOperationAsync(
@@ -145,6 +149,12 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "Query simulator is not available.");
         }
 
+        // Dataset tools: catalog discovery and governed sample rows
+        if (McpDatasetTools.IsDatasetTool(tool.Name))
+        {
+            return await ExecuteDatasetToolAsync(tool, principal, sessionContext, variables, cancellationToken).ConfigureAwait(false);
+        }
+
         // Fast-path / Specialized execution for registered tables if operation is standard table query
         if (tool.Name.Equals("query_customers", StringComparison.OrdinalIgnoreCase) ||
             tool.Name.Equals("query_invoices", StringComparison.OrdinalIgnoreCase))
@@ -226,6 +236,65 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         _logger.LogWarning("MCP tool '{ToolName}' has no executable target operation.", tool.Name);
         return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "Tool has no executable target operation.");
     }
+
+    private async Task<string> ExecuteDatasetToolAsync(
+        McpToolDefinition tool,
+        ClaimsPrincipal principal,
+        McpSessionContext sessionContext,
+        Dictionary<string, object?> variables,
+        CancellationToken cancellationToken)
+    {
+        if (_datasetCatalog == null)
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "The dataset catalog is not available.");
+        }
+
+        string? Text(string name) => variables.TryGetValue(name, out var v) ? v as string : null;
+
+        try
+        {
+            object result = tool.Name.ToLowerInvariant() switch
+            {
+                McpDatasetTools.ListDatasets => await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), cancellationToken).ConfigureAwait(false),
+                McpDatasetTools.DescribeDataset => await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, cancellationToken).ConfigureAwait(false),
+                _ => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables), cancellationToken).ConfigureAwait(false)
+            };
+
+            return JsonSerializer.Serialize(result, CamelCaseJsonOptions);
+        }
+        catch (TableNotFoundException)
+        {
+            // Hidden and missing datasets look the same to the agent.
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotFound, "Dataset not found or not visible.");
+        }
+        catch (GatewayForbiddenException ex)
+        {
+            _logger.LogWarning(ex, "MCP tool '{ToolName}' was denied by governance policy.", tool.Name);
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Access denied by data governance policy.");
+        }
+        catch (ArgumentException ex)
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, ex.Message);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Dataset tool '{ToolName}' failed.", tool.Name);
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "Tool execution failed.");
+        }
+    }
+
+    private static int? ToCount(Dictionary<string, object?> variables) =>
+        variables.TryGetValue("count", out var v) ? v switch
+        {
+            int i => i,
+            long l => (int)Math.Clamp(l, int.MinValue, int.MaxValue),
+            double d => (int)Math.Clamp(d, int.MinValue, int.MaxValue),
+            _ => null
+        } : null;
 
     private async Task<string> EnrichWithProvenanceAsync(McpToolDefinition tool, string json, CancellationToken cancellationToken)
     {
@@ -355,6 +424,7 @@ public static class McpErrorCodes
     public const string InvalidParams = "INVALID_PARAMS";
     public const string ExecutionFailed = "EXECUTION_FAILED";
     public const string NotAvailable = "NOT_AVAILABLE";
+    public const string NotFound = "NOT_FOUND";
 }
 
 internal sealed record McpToolError(string Code, string Message);
