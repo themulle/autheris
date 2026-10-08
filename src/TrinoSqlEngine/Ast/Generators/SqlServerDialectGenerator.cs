@@ -15,6 +15,26 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.SqlServer;
 
+    protected override bool SupportsTryCast => true;
+
+    /// <summary>Wunsch 4: T-SQL names; <c>timestamp</c> would be rowversion, so it maps to datetime2.</summary>
+    protected override string FormatTypeName(TrinoType type) => type.Name switch
+    {
+        "double" or "double precision" => "float",
+        "boolean" => "bit",
+        "timestamp" when type.WithTimeZone => "datetimeoffset" + type.Arguments,
+        "timestamp" => "datetime2" + type.Arguments,
+        "varchar" => "nvarchar" + (type.Arguments ?? "(max)"),
+        "char" => "nchar" + (type.Arguments ?? "(1)"),
+        "varbinary" => "varbinary" + (type.Arguments ?? "(max)"),
+        "integer" => "int",
+        "uuid" => "uniqueidentifier",
+        "json" => "nvarchar(max)",
+        "tinyint" or "smallint" or "int" or "bigint" or "real" or "decimal" or "numeric" or "date" or "time" when !type.WithTimeZone
+            => type.Name + type.Arguments,
+        _ => throw UnsupportedConstruct($"CAST(… AS {type.Normalized})", TargetDialect)
+    };
+
     protected override void FormatCurrentDateTime(ref ValueStringBuilder builder, CurrentDateTimeKind kind, SqlEmitterContext context)
     {
         builder.Append(kind switch

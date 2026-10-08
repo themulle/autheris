@@ -17,6 +17,23 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 
     protected override string SubstringFunctionName => "SUBSTR";
 
+    /// <summary>Wunsch 4: Oracle spellings (VARCHAR2, NUMBER, BINARY_DOUBLE); no BOOLEAN or TIME before 23ai.</summary>
+    protected override string FormatTypeName(TrinoType type) => type.Name switch
+    {
+        "double" or "double precision" => "BINARY_DOUBLE",
+        "real" => "BINARY_FLOAT",
+        "varchar" => "VARCHAR2" + (type.Arguments ?? "(4000)"),
+        "char" => "CHAR" + type.Arguments,
+        "tinyint" => "NUMBER(3)",
+        "smallint" => "NUMBER(5)",
+        "integer" or "int" => "NUMBER(10)",
+        "bigint" => "NUMBER(19)",
+        "decimal" or "numeric" => "NUMBER" + type.Arguments,
+        "date" => "DATE",
+        "timestamp" => "TIMESTAMP" + type.Arguments + (type.WithTimeZone ? " WITH TIME ZONE" : string.Empty),
+        _ => throw UnsupportedConstruct($"CAST(… AS {type.Normalized})", TargetDialect)
+    };
+
     /// <summary>Oracle's CURRENT_DATE carries a time of day; Oracle has no TIME type.</summary>
     protected override void FormatCurrentDateTime(ref ValueStringBuilder builder, CurrentDateTimeKind kind, SqlEmitterContext context)
     {

@@ -16,6 +16,15 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
     protected override bool SupportsAggregateFilter => true;
     protected override bool SupportsOrderedAggregates => true;
     protected override bool SupportsGroupByDistinct => true;
+
+    /// <summary>Wunsch 4: PostgreSQL has no double, tinyint or varbinary.</summary>
+    protected override string FormatTypeName(TrinoType type) => type.Name switch
+    {
+        "double" => "double precision",
+        "tinyint" => "smallint",
+        "varbinary" => "bytea",
+        _ => type.Normalized
+    };
     public override int MaxParameterBudget => 65535;
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)

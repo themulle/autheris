@@ -513,10 +513,15 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 FormatIntervalLiteral(ref builder, interval, context);
                 break;
             case CastExpression cast:
+                if (cast.IsTryCast && !SupportsTryCast)
+                {
+                    throw UnsupportedConstruct("TRY_CAST", TargetDialect);
+                }
+
                 builder.Append(cast.IsTryCast ? "TRY_CAST(" : "CAST(");
                 GenerateExpression(cast.Operand, ref builder, context);
                 builder.Append(" AS ");
-                builder.Append(TrinoSqlEngine.Ast.SqlSafeTokens.EnsureTypeName(cast.TargetType));
+                builder.Append(FormatTypeName(ParseTypeName(cast.TargetType)));
                 builder.Append(')');
                 break;
             case RowValueExpression row:
@@ -753,6 +758,35 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         GenerateExpression(source, ref builder, context);
         builder.Append(')');
     }
+
+    /// <summary>Wunsch 4: the dialect has TRY_CAST (SQL Server, DuckDB, Snowflake).</summary>
+    protected virtual bool SupportsTryCast => false;
+
+    /// <summary>A validated Trino type: lower-case base name (e.g. <c>timestamp</c>), argument list without spaces, time zone flag.</summary>
+    protected readonly record struct TrinoType(string Name, string? Arguments, bool WithTimeZone, string Normalized);
+
+    private static readonly Regex TypeNameParts = new(@"^(?<name>[a-z][a-z0-9_]*(?: [a-z][a-z0-9_]*)*?)(?<args>\([0-9, ]+\))?(?<tz> with time zone)?$", RegexOptions.CultureInvariant);
+
+    protected static TrinoType ParseTypeName(string type)
+    {
+        // SQL-3: only plain tokens reach the target database.
+        string normalized = TrinoSqlEngine.Ast.SqlSafeTokens.EnsureTypeName(type);
+        string lower = normalized.ToLowerInvariant();
+        var match = TypeNameParts.Match(lower);
+        if (!match.Success)
+        {
+            return new TrinoType(lower, null, false, normalized);
+        }
+
+        string? args = match.Groups["args"].Success ? match.Groups["args"].Value.Replace(" ", string.Empty, StringComparison.Ordinal) : null;
+        return new TrinoType(match.Groups["name"].Value, args, match.Groups["tz"].Success, normalized);
+    }
+
+    /// <summary>
+    /// Wunsch 4: CAST target type in the dialect's spelling. The default keeps the (validated) Trino spelling, which is valid
+    /// for SQLite, DuckDB, Snowflake and ANSI.
+    /// </summary>
+    protected virtual string FormatTypeName(TrinoType type) => type.Normalized;
 
     protected static TrinoSqlEngine.Ast.Builder.AstBuildException UnsupportedConstruct(string construct, TargetSqlDialect dialect) =>
         new($"SQL construct {construct} is not supported for {dialect}.");

@@ -56,6 +56,7 @@ public sealed class AnsiDialectGenerator : SqlDialectGeneratorBase
 public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.DuckDb;
+    protected override bool SupportsTryCast => true;
     protected override bool SupportsAggregateFilter => true;
     protected override bool SupportsOrderedAggregates => true;
     protected override bool SupportsGroupByDistinct => true;
@@ -104,6 +105,7 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
 public sealed class SnowflakeDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Snowflake;
+    protected override bool SupportsTryCast => true;
 
     /// <summary>Wunsch 4: Snowflake names the ISO fields DAYOFWEEKISO, WEEKISO, YEAROFWEEKISO.</summary>
     protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
