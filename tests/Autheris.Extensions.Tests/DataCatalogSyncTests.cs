@@ -180,4 +180,70 @@ public class DataCatalogSyncTests
         await Should.ThrowAsync<InvalidOperationException>(() => _sut.SyncCatalogAsync(dryRun: false));
         await _tableRepo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task EXT_7_SyncCatalogAsync_NewTableWithoutActivateNewTables_LeavesTableInactive()
+    {
+        var tableId = new TableIdentifier("sales", "dbo", "leads");
+        var catalogTable = new CatalogTableAsset
+        {
+            Identifier = tableId,
+            DisplayName = "Leads",
+            Tags = [],
+            Columns = [new() { ColumnName = "id", DataType = "int" }]
+        };
+
+        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<CatalogTableAsset> { catalogTable });
+        _tableRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
+            .Returns((TableMetadata?)null); // New table
+
+        var result = await _sut.SyncCatalogAsync(dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        await _tableRepo.Received(1).UpsertTableMetadataAsync(
+            Arg.Is<TableMetadata>(m => m.Identifier.Equals(tableId) && m.Table.IsActive == false),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task EXT_7_SyncCatalogAsync_WhenActivateNewTablesIsTrue_ActivatesTable()
+    {
+        var gatewayOptions = new GatewayOptions
+        {
+            Catalog = new DataCatalogOptions
+            {
+                Provider = DataCatalogProviderType.MicrosoftPurview,
+                ActivateNewTables = true
+            }
+        };
+
+        var sut = new DataCatalogSyncService(
+            _clientFactory,
+            _tableRepo,
+            _epochService,
+            Options.Create(gatewayOptions),
+            NullLogger<DataCatalogSyncService>.Instance);
+
+        var tableId = new TableIdentifier("sales", "dbo", "leads_active");
+        var catalogTable = new CatalogTableAsset
+        {
+            Identifier = tableId,
+            DisplayName = "Leads Active",
+            Tags = [],
+            Columns = [new() { ColumnName = "id", DataType = "int" }]
+        };
+
+        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<CatalogTableAsset> { catalogTable });
+        _tableRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
+            .Returns((TableMetadata?)null);
+
+        var result = await sut.SyncCatalogAsync(dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        await _tableRepo.Received(1).UpsertTableMetadataAsync(
+            Arg.Is<TableMetadata>(m => m.Identifier.Equals(tableId) && m.Table.IsActive == true),
+            Arg.Any<CancellationToken>());
+    }
 }

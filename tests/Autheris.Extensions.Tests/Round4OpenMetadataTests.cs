@@ -655,7 +655,8 @@ public sealed class Round4OpenMetadataTests
     [Theory]
     [InlineData(DataCatalogProviderType.OpenMetadata, false, false)]
     [InlineData(DataCatalogProviderType.OpenMetadata, true, true)]
-    [InlineData(DataCatalogProviderType.Collibra, false, true)]
+    [InlineData(DataCatalogProviderType.Collibra, false, false)]
+    [InlineData(DataCatalogProviderType.Collibra, true, true)]
     public async Task E09_CatalogSync_NewOpenMetadataTables_AreInactiveByDefault(DataCatalogProviderType provider, bool activateNewTables, bool expectedActive)
     {
         var client = Substitute.For<IDataCatalogClient>();
@@ -681,7 +682,7 @@ public sealed class Round4OpenMetadataTests
             Substitute.For<IEpochValidationService>(),
             Options.Create(new GatewayOptions
             {
-                Catalog = new DataCatalogOptions { Provider = provider },
+                Catalog = new DataCatalogOptions { Provider = provider, ActivateNewTables = activateNewTables },
                 OpenMetadata = new OpenMetadataOptions { ActivateNewTables = activateNewTables }
             }),
             NullLogger<DataCatalogSyncService>.Instance);
