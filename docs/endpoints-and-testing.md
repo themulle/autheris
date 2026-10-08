@@ -15,7 +15,8 @@ CSRF: GraphQL immer, REST bei Browser-Indikatoren (Cookie/Origin/Referer) -> Hea
 | WebSQL | `POST /api/v1/sql`, `/api/sql` | Auth | `WebSql.Enabled` | GovernedWebSql, **EndToEndSqlite** |
 | Deklarative SQL-Endpunkte | `/api/v1/queries/` (non-admins see name, summary, parameters only), `/openapi.json`, `/{name}` GET/POST | Auth | `SqlEndpoints.Enabled` + `WebSql.Enabled` | **EndToEndSqlite** |
 | Stored Procedures | `/api/v1/procedures/*` | Auth | `SqlEndpoints.Procedures.Enabled` (nur SQL Server) | nur Unit |
-| OData / OpenAPI | `/odata/v4`, `$metadata`, `$openapi[/index]`, `{domain}/openapi.json|yaml`, `/api/v1/openapi/index`, `/ui/swagger` (Swagger UI, lokal ausgeliefert, offline-faehig; `/docs` und `$swagger` sind Aliase) | Auth (GovernanceAdmin/ClusterAdmin for the spec routes) oder anonym bei `OpenSchema` | immer | ODataIntegration, OpenApiIntegration, **EndToEndSqlite**, **OpenApiDocsEndToEnd** (Index-Crawl, Spec-Validitaet, Docs-UI-Links) |
+| OData / OpenAPI | `/odata/v4`, `$metadata`, `$openapi[/index]`, `/{domain}/{schema}/{table}[/$count]`, `?$count=true`, `?$orderby=...`, `{domain}/openapi.json|yaml`, `/api/v1/openapi/index`, `/ui/swagger` (Swagger UI, lokal ausgeliefert, offline-faehig; `/docs` und `$swagger` sind Aliase) | Auth (GovernanceAdmin/ClusterAdmin for the spec routes) oder anonym bei `OpenSchema` | immer | ODataIntegration, OpenApiIntegration, **EndToEndSqlite**, **OpenApiDocsEndToEnd** (Index-Crawl, Spec-Validitaet, Docs-UI-Links) |
+| Virtuelle Filter | `/api/v1/governance/virtual-filters[/{name}]`, `/access-profiles[/{name}]`, `/virtual-filters/sync/{plan,apply}`, `/effective-filters` | Rollen (`FilterAdmin`, `FilterSync`, `GovernanceAdmin`, `SecurityAuditor`) | immer | CrossChannelVirtualFilterParity, VirtualFilterAdministration, EndToEndSqlite (+Unit) |
 | MCP | `/mcp` (Streamable HTTP), `/.well-known/oauth-protected-resource/mcp` | Auth | `Mcp.Enabled` | McpIntegration, McpSdkTransport, McpDatasetTools, **EndToEndSqlite** |
 | Backstage | `/api/integrations/backstage/catalog-entities[/{name}]`, `catalog-info.yaml` | Auth | `Backstage.Enabled` | BackstageIntegration, **EndToEndSqlite** |
 | dbt | `/api/extensions/dbt/*` (sync, exposures, proposals, validate-contract, run-results, health, webhook) | Rollen (global dbt state: GovernanceAdmin/ClusterAdmin, DbtAdmin for sync/run-results; a plain DataOwner has no access, E-7) | immer | DbtIntegration |
@@ -32,7 +33,7 @@ CSRF: GraphQL immer, REST bei Browser-Indikatoren (Cookie/Origin/Referer) -> Hea
 | Iceberg REST | `/v1/{prefix}/namespaces/...` | Auth | Lakehouse-Config | LakehouseIntegration |
 | Envoy ExtAuthz | `/api/v1/envoy/{authz,check,export/*.yaml}` | Auth | immer | nur Unit |
 
-Insgesamt ca. 104 Routen (5 nur Dev, 4 MCP, 3 Backstage, 4 Procedures).
+Insgesamt ca. 112 Routen (5 nur Dev, 4 MCP, 3 Backstage, 4 Procedures, 8 Virtual Filters).
 
 ## Testen
 

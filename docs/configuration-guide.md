@@ -828,6 +828,30 @@ Autheris unterstützt das native Trino REST Client Protokoll, womit Standard-Tri
   - `X-Trino-Wait-Timeout`: Wartefenster für synchrone Fertigstellung (z. B. `5s`, `500ms`, `1m`).
   - `X-Trino-User` & `X-Trino-Source`: Identitäts- und Auditierungskontext.
 
+### 2.20 `VirtualFilters` (Virtuelle Filter & Access Profiles)
+
+Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilter ([`F-GOV-09`](features/f-gov-09-virtual-filters.md)).
+
+| Eigenschaft | Typ | Standard | Beschreibung |
+| :--- | :--- | :--- | :--- |
+| `VirtualFilters:MaxRemovals` | `int` | `10` | Maximale Anzahl an Bindungen, die ein GitOps-Sync ohne `?force=true` entfernen darf. Das Entfernen erweitert die Sichtrechte des Berechtigten; `0` deaktiviert die Schranke. |
+| `VirtualFilters:GenerationCheckSeconds` | `int` | `5` | Intervall in Sekunden, in dem eine Gateway-Instanz die Generation mit der Datenbank abgleicht. `0` prüft bei jedem Zugriff. |
+| `RowFilter:SubqueryStrategy` | `enum` | `Exists` | SQL-Strategie für RLS-Unterabfragen: `Exists` (`EXISTS (SELECT 1 ...)`), `InCorrelated` oder `In`. |
+| `Logging:LogGeneratedSql` | `bool` | `false` | Diagnoseschalter zur Protokollierung generierter Ziel-SQL-Abfragen inklusive RLS- und Virtual-Filter-Prädikate. |
+
+```json
+"VirtualFilters": {
+  "MaxRemovals": 10,
+  "GenerationCheckSeconds": 5
+},
+"RowFilter": {
+  "SubqueryStrategy": "Exists"
+},
+"Logging": {
+  "LogGeneratedSql": false
+}
+```
+
 ---
 
 

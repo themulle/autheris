@@ -1,7 +1,7 @@
 # F-API-04: Upstream Web API & Microservice Ingestion via OpenAPI
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`IOpenApiIngestionService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/DataCatalog/Interfaces/IOpenApiIngestionService.cs), [`OpenApiIngestionService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/DataCatalog/Services/OpenApiIngestionService.cs)
+**Components:** [`IOpenApiIngestionService.cs`](file:///root/autheris/src/Autheris.Application/DataCatalog/Interfaces/IOpenApiIngestionService.cs), [`OpenApiIngestionService.cs`](file:///root/autheris/src/Autheris.Application/DataCatalog/Services/OpenApiIngestionService.cs)
 
 ---
 

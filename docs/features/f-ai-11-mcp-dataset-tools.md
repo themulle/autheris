@@ -22,10 +22,11 @@ The dataset description is also available as an MCP resource: the resource templ
 
 | Tool | Arguments | Returns |
 | :--- | :--- | :--- |
-| `list_datasets` | `search?`, `domain?` | Up to 200 datasets: `id` (`domain.schema.table`), description, sensitivity, number of visible columns and the `graphQlField`. `total` and `truncated` tell whether more matched. `guidance` says to query with GraphQL; `endpoints` lists every enabled protocol of the gateway, GraphQL first and marked `preferred`. |
-| `describe_dataset` | `dataset` | Visible columns with database type, GraphQL field and GraphQL type, `sensitive` and `primaryKey`; table description, sensitivity, `requiresApproval` (four-eyes); `graphQl` with endpoint, query field, filter and sort types, the argument syntax, an example query and relations to other datasets the caller can see; `otherAccess` (OData, OpenAPI, `sample_rows`, Arrow export); the curated golden queries as `examples`. |
+| `list_datasets` | `search?`, `domain?`, `offset?`, `limit?` | Paginated datasets (default 50, max 100): `id` (`domain.schema.table`), description, sensitivity, number of visible columns and the `graphQlField`. `total` and `truncated` indicate whether further items exist. `guidance` instructs using GraphQL; `endpoints` lists all enabled protocols, GraphQL marked `preferred`. |
+| `describe_dataset` | `dataset` | Visible columns with database type, GraphQL field and GraphQL type, `sensitive` and `primaryKey`; table description, sensitivity, `requiresApproval` (four-eyes); `graphQl` with endpoint, query field, filter and sort types, argument syntax, example query and relations to visible datasets; `otherAccess` (OData, OpenAPI, `sample_rows`, Arrow export); curated golden queries as `examples`. |
 | `query_graphql` | `query`, `variables?` | The GraphQL response (`data`, or `errors` as an error result). Exactly one query operation per call; mutations and subscriptions are rejected. |
 | `sample_rows` | `dataset`, `count?` (1–20, default 5) | Rows read through the governed table path. Works for datasets outside the GraphQL schema too (HTTP and lakehouse sources). |
+| `query_data_catalog` | `tableName?` | Enterprise data catalog assets, governance classifications, tags, and designated data stewards (`governance.catalog.assets`). |
 
 `endpoints` contains, depending on the configuration: GraphQL, OData v4, OpenAPI, WebSQL (`WebSql:Enabled`), saved SQL queries (`SqlEndpoints:Enabled`), stored procedures (`SqlEndpoints:Procedures:Enabled`), DuckDB OLAP (`DuckDbOlap:Enabled`) and Arrow IPC export (`Arrow:Enabled`).
 
@@ -33,11 +34,12 @@ The dataset description is also available as an MCP resource: the resource templ
 
 - **Visibility** is the same as for the GraphQL `catalog` query and the MCP resources: a table is listed when the caller has an active Allow consent in its tenant and no unconditional Deny; only granted columns are shown, and relations only to datasets the caller can see. `GovernanceAdmin` and `ClusterAdmin` see the whole catalog; anonymous callers see nothing.
 - **No enumeration oracle:** a dataset the caller may not see returns the same `NOT_FOUND` error as one that does not exist.
-- **Same enforcement as the HTTP APIs:** `query_graphql` runs on the gateway's GraphQL executor, `sample_rows` on the governed table path. Consent, ReBAC, Casbin, row filters and column masking apply with the caller's identity exactly as for `POST /graphql` and REST. Over the stdio transport there is no HTTP caller, so GraphQL queries are denied.
+- **Same enforcement as the HTTP APIs:** `query_graphql` runs on the gateway's GraphQL executor, `sample_rows` on the governed table path. Consent, ReBAC, Casbin, row filters, Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md)), and column masking apply with the caller's identity exactly as for `POST /graphql` and REST. Over the stdio transport there is no HTTP caller, so GraphQL queries are denied.
 - **Guardrails:** like all MCP tools, the calls pass the prompt-injection guardrail, PII scrubbing, the token budget and the audit log.
   - Casbin ABAC (when `Casbin:Enabled`) runs on the requested table (`describe_dataset`, `sample_rows`), on every table a GraphQL document reads (root fields and nested relations, fragments expanded), or on `governance.catalog.datasets` (`list_datasets`, pure introspection).
   - A GraphQL document that is not one query on catalog fields is denied before execution (fail-closed).
   - The `dataset` and `query` arguments must occur exactly once (case-insensitive), so the guardrail always checks what is executed.
+  - Truncated results return valid, parseable JSON payloads with `truncated: true`.
 - **Four-eyes:** `sample_rows` and `query_graphql` on a four-eyes table need step-up approval ([F-AI-05](f-ai-05-hitl-step-up-approval.md)); `describe_dataset` returns no rows and needs none.
 - **Complexity:** GraphQL queries are subject to the gateway's complexity budget; agents should always pass a small `first`.
 

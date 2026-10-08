@@ -1,7 +1,7 @@
 # F-OPS-01: AST-Aware Production Traffic Shadowing & Dark Replay
 
 **Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`TrafficShadowingMiddleware.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Middleware/TrafficShadowingMiddleware.cs), [`ITrafficShadowEngine.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Operations/ITrafficShadowEngine.cs)
+**Components:** [`TrafficShadowingMiddleware.cs`](file:///root/autheris/src/Autheris.Api/Middleware/TrafficShadowingMiddleware.cs), [`ITrafficShadowEngine.cs`](file:///root/autheris/src/Autheris.Application/Operations/ITrafficShadowEngine.cs)
 
 ---
 

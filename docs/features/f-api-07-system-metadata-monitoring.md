@@ -1,7 +1,7 @@
 # F-API-07: Canonical System Metadata & Monitoring Schema ($system)
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`SystemMonitoringEndpoints.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Endpoints/SystemMonitoringEndpoints.cs), [`IGatewayHealthCheckService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Interfaces/IGatewayHealthCheckService.cs)
+**Components:** [`SystemMonitoringEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/SystemMonitoringEndpoints.cs), [`IGatewayHealthCheckService.cs`](file:///root/autheris/src/Autheris.Application/Interfaces/IGatewayHealthCheckService.cs)
 
 ---
 

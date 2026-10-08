@@ -1,7 +1,7 @@
 # F-PERF-11: Multi-Tenant Isolated Query Plan Cache & Kestrel Tuning
 
 **Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`CompiledSqlQueryPlanCache.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Sql/CompiledSqlQueryPlanCache.cs), [`IQueryPlanCache.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Sql/IQueryPlanCache.cs)
+**Components:** [`CompiledSqlQueryPlanCache.cs`](file:///root/autheris/src/Autheris.Application/Sql/CompiledSqlQueryPlanCache.cs), [`IQueryPlanCache.cs`](file:///root/autheris/src/Autheris.Application/Sql/IQueryPlanCache.cs)
 
 ---
 

@@ -240,20 +240,26 @@ Parameters marked with `@context` or under the `context:` block are resolved dir
 
 These parameters are omitted from the public OpenAPI specification to prevent confusion and tampering.
 
-### 6. Post-Execution Row Scope Filtering (`row_scope_key`)
+### 6. Post-Execution Row Scope Filtering & Virtual Filters (`row_scope_key`)
 
 Because stored procedures encapsulate their own SQL queries, database Row-Level Security (RLS) filters cannot be directly rewritten into the procedure's internal `WHERE` clauses.
 
-To enforce row-level security on procedure outputs:
-1. The declaration defines a unique key: `row_scope_key: order_id` (or composite `[client_id, order_id]`).
-2. The key columns are verified against database unique indexes (`sys.indexes`).
-3. After the procedure executes, Autheris extracts the distinct key values from the result rows.
-4. Autheris issues an authoritative secondary verification query against the data source using the caller's RLS policy:
+To enforce row-level security and cross-channel policy parity on procedure outputs:
+1. The declaration defines a unique key: `row_scope_key: order_id` (or composite `[client_id, order_id]`) pointing to the primary key or unique index of `result_table`.
+2. The key columns are verified against database unique indexes (`sys.indexes` or declared contract).
+3. **Data-Owner Consents & Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md))**:
+   - `GovernedProcedureExecutionService` evaluates active data-owner row filters as well as `AccessProfile` virtual filter bindings for `FilterObjectKinds.ProcedureResult`.
+   - If the procedure result table is in a profile's scope with `UncoveredPolicy.Deny` and no virtual filter binding covers it, execution is rejected immediately (fail-closed).
+4. After the procedure executes, Autheris extracts the distinct key values from the result rows.
+5. Autheris issues an authoritative secondary verification query against the data source combining tenant isolation, consent RLS, and effective virtual filter predicates:
    ```sql
    SELECT order_id FROM sales.orders AS autheris_target
-   WHERE tenant_id = @TenantId AND (<Row-Level Security Predicate>) AND order_id IN (@k0, @k1, ...)
+   WHERE tenant_id = @TenantId 
+     AND (<Data-Owner Consent RLS Predicate>)
+     AND (<Virtual Filter Predicates>)
+     AND order_id IN (@k0, @k1, ...)
    ```
-5. Result rows whose keys do not appear in the authoritative filtered set are stripped from the response.
+6. Result rows whose keys do not appear in the authoritative filtered set are stripped from the response. Any applied virtual filters are logged to the cryptographic WORM audit trail.
 
 ---
 

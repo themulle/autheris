@@ -1,7 +1,7 @@
 # F-AI-07: Dynamic Semantic Schema Pruning & Just-in-Time MCP Tools
 
 **Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`IDynamicSemanticSchemaPruner.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Interfaces/IDynamicSemanticSchemaPruner.cs), [`DynamicSemanticSchemaPruner.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Services/DynamicSemanticSchemaPruner.cs)
+**Components:** [`IDynamicSemanticSchemaPruner.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Interfaces/IDynamicSemanticSchemaPruner.cs), [`DynamicSemanticSchemaPruner.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/DynamicSemanticSchemaPruner.cs)
 
 ---
 

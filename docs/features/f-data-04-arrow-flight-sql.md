@@ -1,7 +1,7 @@
 # F-DATA-04: Native Apache Arrow Flight SQL Egress & Zero-Copy Analytics Pipeline
 
 **Status:** [Done] (100% GA – Next-Gen)  
-**Components:** [`ArrowFlightSqlEndpoints.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Endpoints/ArrowFlightSqlEndpoints.cs), [`IArrowFlightSqlService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Arrow/IArrowFlightSqlService.cs), [`ArrowRecordBatchConverter.cs`](file:///root/lis-git/autheris/src/Autheris.Infrastructure/Arrow/ArrowRecordBatchConverter.cs)
+**Components:** [`ArrowFlightSqlEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/ArrowFlightSqlEndpoints.cs), [`IArrowFlightSqlService.cs`](file:///root/autheris/src/Autheris.Application/Arrow/IArrowFlightSqlService.cs), [`ArrowRecordBatchConverter.cs`](file:///root/autheris/src/Autheris.Infrastructure/Arrow/ArrowRecordBatchConverter.cs)
 
 ---
 

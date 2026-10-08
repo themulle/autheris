@@ -1,7 +1,7 @@
 # F-PERF-12: Incremental Delivery via @defer & @stream
 
 **Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`IncrementalDeliveryMiddleware.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Middleware/IncrementalDeliveryMiddleware.cs), [`IncrementalResponseFormatter.cs`](file:///root/lis-git/autheris/src/Autheris.GraphQL/Execution/IncrementalResponseFormatter.cs)
+**Components:** [`IncrementalDeliveryMiddleware.cs`](file:///root/autheris/src/Autheris.Api/Middleware/IncrementalDeliveryMiddleware.cs), [`IncrementalResponseFormatter.cs`](file:///root/autheris/src/Autheris.GraphQL/Execution/IncrementalResponseFormatter.cs)
 
 ---
 

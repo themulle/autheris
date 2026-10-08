@@ -1,7 +1,7 @@
 # F-DATA-03: Embedded In-Memory OLAP via DuckDB.NET
 
 **Status:** [Done] (100% GA – Next-Gen)  
-**Components:** [`DuckDbOlapEndpoints.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Endpoints/DuckDbOlapEndpoints.cs), [`IDuckDbOlapEngine.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Olap/IDuckDbOlapEngine.cs), [`DuckDbOlapEngine.cs`](file:///root/lis-git/autheris/src/Autheris.Infrastructure/Olap/DuckDbOlapEngine.cs)
+**Components:** [`DuckDbOlapEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/DuckDbOlapEndpoints.cs), [`IDuckDbOlapEngine.cs`](file:///root/autheris/src/Autheris.Application/Olap/IDuckDbOlapEngine.cs), [`DuckDbOlapEngine.cs`](file:///root/autheris/src/Autheris.Infrastructure/Olap/DuckDbOlapEngine.cs)
 
 ---
 

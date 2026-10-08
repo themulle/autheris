@@ -1,7 +1,7 @@
 # F-OPEN-01: OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`CatalogSlicingService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Catalog/CatalogSlicingService.cs), [`OpenSchemaMiddleware.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Middleware/OpenSchemaMiddleware.cs)
+**Components:** [`CatalogSlicingService.cs`](file:///root/autheris/src/Autheris.Application/Catalog/CatalogSlicingService.cs), [`OpenSchemaMiddleware.cs`](file:///root/autheris/src/Autheris.Api/Middleware/OpenSchemaMiddleware.cs)
 
 ---
 
