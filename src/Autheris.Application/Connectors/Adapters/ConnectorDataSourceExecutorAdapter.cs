@@ -42,21 +42,8 @@ public sealed class ConnectorDataSourceExecutorAdapter : IDataSourceExecutor
             RequestHeaders: context.RequestHeaders,
             Items: context.Items);
 
-        session.Items["TableMetadata"] = context.Metadata;
-
-        var splits = await _connector.SplitManager.GetSplitsAsync(context.Metadata, session, ct);
-        if (splits.Count == 0)
-        {
-            return Array.Empty<IReadOnlyDictionary<string, object?>>();
-        }
-
-        var results = new List<IReadOnlyDictionary<string, object?>>();
-        foreach (var split in splits)
-        {
-            var batch = await _connector.RecordSource.ReadBatchAsync(split, session, ct);
-            results.AddRange(batch);
-        }
-
-        return results;
+        // Architecture 2: raw rows only; GatewayExecutionService applies the governed pipeline (filter, masking, byte cap)
+        // using the flags the connector leaves in the shared Items.
+        return await GovernedConnectorReader.ReadRawAsync(_connector, session, context.Metadata, maxRows: null, ct).ConfigureAwait(false);
     }
 }
