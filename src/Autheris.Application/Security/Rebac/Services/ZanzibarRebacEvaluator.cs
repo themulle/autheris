@@ -328,7 +328,9 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         // Standard Enterprise Hierarchy:
         // "viewer" is inherited by "editor" and "owner"
         // "editor" is inherited by "owner"
+        // "can_query" is inherited by "viewer", "editor" and "owner" (POL-6 / OLAP / Arrow)
         RegisterInheritance("viewer", "editor", "owner");
         RegisterInheritance("editor", "owner");
+        RegisterInheritance("can_query", "viewer", "editor", "owner");
     }
 }

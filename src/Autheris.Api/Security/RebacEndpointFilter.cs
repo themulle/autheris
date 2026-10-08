@@ -57,8 +57,9 @@ public sealed class RebacEndpointFilter : IEndpointFilter
         ArgumentNullException.ThrowIfNull(next);
 
         var httpContext = context.HttpContext;
-        var options = httpContext.RequestServices.GetService<IOptions<GatewayOptions>>()?.Value?.Rebac;
-        if (options is not null && !options.Enabled)
+        var gatewayOptions = httpContext.RequestServices.GetService<IOptions<GatewayOptions>>()?.Value;
+        var options = gatewayOptions?.Rebac;
+        if ((options is not null && !options.Enabled) || gatewayOptions?.IsRebacBypassed == true)
         {
             return await next(context).ConfigureAwait(false);
         }

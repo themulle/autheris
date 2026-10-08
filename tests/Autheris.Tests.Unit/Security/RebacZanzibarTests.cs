@@ -172,4 +172,22 @@ public sealed class RebacZanzibarTests
         batchDecisions[req2].ShouldBeTrue();
         batchDecisions[req3].ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task CanQuery_IsInheritedFrom_Viewer_Editor_And_Owner()
+    {
+        await _store.AddTupleAsync(new RebacTuple("tenant-test", "user:david", "viewer", "table:lakehouse.dbo.orders"));
+        await _store.AddTupleAsync(new RebacTuple("tenant-test", "user:ed", "editor", "table:sales.public.orders"));
+        await _store.AddTupleAsync(new RebacTuple("tenant-test", "user:owen", "owner", "table:conf.client"));
+
+        var davidCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:david", "can_query", "table:lakehouse.dbo.orders"));
+        var edCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:ed", "can_query", "table:sales.public.orders"));
+        var owenCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:owen", "can_query", "table:conf.client"));
+        var strangerCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-test", "user:stranger", "can_query", "table:lakehouse.dbo.orders"));
+
+        davidCheck.Allowed.ShouldBeTrue();
+        edCheck.Allowed.ShouldBeTrue();
+        owenCheck.Allowed.ShouldBeTrue();
+        strangerCheck.Allowed.ShouldBeFalse();
+    }
 }
