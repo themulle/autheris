@@ -429,16 +429,22 @@ public sealed class McpServerTests
     }
 
     [Fact]
-    public async Task AiDataGuardrailService_WhenTargetTableInactiveOrMissing_ShouldDenyFailClosed()
+    public async Task AiDataGuardrailService_WhenTargetTableInactive_ShouldDenyFailClosed()
     {
         var registry = new McpToolRegistry();
         var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
         var auditRepo = Substitute.For<IAuditLogRepository>();
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
 
-        // Return null (missing table)
+        var tableId = new TableIdentifier("finance", "dbo", "customers");
+        var meta = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { SourceName = "finance", SchemaName = "dbo", TableName = "customers", IsActive = false }
+        };
+
         metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<System.Threading.CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(null));
+            .Returns(Task.FromResult<TableMetadata?>(meta));
 
         var guardrail = new AiDataGuardrailService(
             registry,

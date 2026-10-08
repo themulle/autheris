@@ -467,4 +467,78 @@ public sealed class ODataEndpointsTests
         var notFound = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
         notFound.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
     }
+
+    [Fact]
+    public async Task HandleFlatEntitySetRequestAsync_WhenEntitySetBelongsToDifferentTenant_Returns404NotFound()
+    {
+        // SR15-31: User is in tenant "sales", but entity set belongs to tenant "finance"
+        var context = CreateHttpContext(path: "/odata/v4/finance_dbo_invoices");
+        var table = new Autheris.Domain.Model.TableMetadata
+        {
+            Identifier = new TableIdentifier("finance", "dbo", "invoices"),
+            Table = new Autheris.Domain.Model.Table { SchemaName = "dbo", TableName = "invoices" }
+        };
+
+        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table]));
+
+        var handler = CreateMockHandler(new ODataQueryResult(true, StatusCodes.Status200OK, new { }));
+
+        var result = await ODataEndpoints.HandleFlatEntitySetRequestAsync(
+            "finance_dbo_invoices",
+            handler,
+            metadataRepo,
+            context
+        );
+
+        var notFound = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        notFound.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+        await handler.DidNotReceive().ExecuteEntitySetQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(),
+            Arg.Any<string>(),
+            Arg.Any<TableIdentifier>(),
+            Arg.Any<int?>(),
+            Arg.Any<int?>(),
+            Arg.Any<string?>(),
+            Arg.Any<bool>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleFlatEntitySetRequestAsync_WhenEntityNameIsAmbiguousWithinTenant_Returns404NotFound()
+    {
+        // SR15-31: Ambiguous match within tenant returns 404
+        var context = CreateHttpContext(path: "/odata/v4/sales_invoices");
+        var table1 = new Autheris.Domain.Model.TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "dbo", "invoices"),
+            Table = new Autheris.Domain.Model.Table { SchemaName = "dbo", TableName = "invoices" }
+        };
+        var table2 = new Autheris.Domain.Model.TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "archive", "invoices"),
+            Table = new Autheris.Domain.Model.Table { SchemaName = "archive", TableName = "invoices" }
+        };
+
+        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table1, table2]));
+
+        var handler = CreateMockHandler(new ODataQueryResult(true, StatusCodes.Status200OK, new { }));
+
+        var result = await ODataEndpoints.HandleFlatEntitySetRequestAsync(
+            "sales_invoices",
+            handler,
+            metadataRepo,
+            context
+        );
+
+        var notFound = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        notFound.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+    }
 }
+

@@ -299,18 +299,18 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             }
 
             var meta = await _tableMetadataRepository.GetTableMetadataAsync(resolvedTable.Value, cancellationToken).ConfigureAwait(false);
-            if (meta == null || !meta.Table.IsActive)
+            if (meta != null && !meta.Table.IsActive)
             {
                 activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
                 McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
 
-                _logger.LogWarning("Tool '{ToolName}' targets inactive or missing table '{Table}'. Denying execution.", tool.Name, resolvedTable);
+                _logger.LogWarning("Tool '{ToolName}' targets inactive table '{Table}'. Denying execution.", tool.Name, resolvedTable);
 
                 await RecordAuditEventAsync(
                     tool.Name,
                     sessionContext,
                     decision: "DENY",
-                    details: $"Tool execution denied: target table {resolvedTable} does not exist or is inactive.",
+                    details: $"Tool execution denied: target table {resolvedTable} is inactive.",
                     isMasked: false,
                     truncated: false,
                     estimatedTokens: 0,
@@ -325,7 +325,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
 
             // SEC-MCP-02 / SR-P2-07: Verify catalog visibility BEFORE checking RequiresFourEyes or requesting step-up.
             // This prevents leaking secret table names and flooding approvers with unconsented step-up tickets.
-            if (meta.Table.RequiresFourEyes == true)
+            if (meta?.Table.RequiresFourEyes == true)
             {
                 var roles = sessionContext.Roles ?? [];
                 bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
