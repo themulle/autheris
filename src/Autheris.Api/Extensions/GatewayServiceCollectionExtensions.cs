@@ -437,10 +437,7 @@ public static class GatewayServiceCollectionExtensions
             return registry;
         });
 
-        services.AddSingleton<Autheris.Application.Connectors.Pushdown.IPushdownPlanner, Autheris.Application.Connectors.Pushdown.PushdownPlanner>();
         services.AddScoped<Autheris.Application.Connectors.CrossDomain.ICrossDomainAccessResolver, Autheris.Application.Connectors.CrossDomain.DefaultCrossDomainAccessResolver>();
-        services.AddScoped<Autheris.Application.Connectors.CrossDomain.ICrossDomainJoinEngine, Autheris.Application.Connectors.CrossDomain.CrossDomainJoinEngine>();
-        services.AddSingleton<Autheris.Application.Connectors.Streaming.IStreamingResultPipeline, Autheris.Application.Connectors.Streaming.StreamingResultPipeline>();
 
         services.AddScoped<IClientIpResolver, Autheris.Api.Security.HttpContextClientIpResolver>();
         // O10: process-wide counter of running table reads per tenant, user and table

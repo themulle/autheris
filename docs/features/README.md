@@ -33,13 +33,13 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DBT-6** | Policy & RLS Auto-Sync from dbt Metadata | [f-dbt-06-policy-rls-sync.md](f-dbt-06-policy-rls-sync.md) |
 | **F-DOC-01** | Omnichannel Semantic Documentation Passthrough | [f-doc-01-omnichannel-documentation.md](f-doc-01-omnichannel-documentation.md) |
 | **F-DX-01** | Zero-Config Developer Quickstart & Dev Portal Hub | [f-dx-01-developer-quickstart.md](f-dx-01-developer-quickstart.md) |
-| **F-GOV-06** | Multi-Stage Pushdown Cascades & Cross-Domain Joins | [f-gov-06-cross-domain-joins.md](f-gov-06-cross-domain-joins.md) |
+| **F-GOV-06** | Multi-Stage Pushdown Cascades & Cross-Domain Joins (not implemented) | [f-gov-06-cross-domain-joins.md](f-gov-06-cross-domain-joins.md) |
 | **F-GOV-08** | Dynamic Schema Contracts & Tag-Based Projection (@tag) | [f-gov-08-schema-contracts-tag-projection.md](f-gov-08-schema-contracts-tag-projection.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |
 | **F-OPS-01** | AST-Aware Production Traffic Shadowing & Dark Replay | [f-ops-01-traffic-shadowing-dark-replay.md](f-ops-01-traffic-shadowing-dark-replay.md) |
 | **F-PERF-08** | Hierarchical Resource Groups & Workload Queuing | [f-perf-08-hierarchical-resource-groups.md](f-perf-08-hierarchical-resource-groups.md) |
 | **F-PERF-09** | GraphQL-to-SQL AST Single-Query Compiler | [f-perf-09-single-query-pushdown.md](f-perf-09-single-query-pushdown.md) |
-| **F-PERF-10** | Split-Engine & Zero-LOH Streaming Result Pipelining | [f-perf-10-streaming-pipelining.md](f-perf-10-streaming-pipelining.md) |
+| **F-PERF-10** | Split-Engine & Zero-LOH Streaming Result Pipelining (not implemented) | [f-perf-10-streaming-pipelining.md](f-perf-10-streaming-pipelining.md) |
 | **F-PERF-11** | Multi-Tenant Isolated Query Plan Cache & Kestrel Tuning | [f-perf-11-query-plan-cache.md](f-perf-11-query-plan-cache.md) |
 | **F-PERF-12** | Incremental Delivery via @defer & @stream | [f-perf-12-incremental-delivery.md](f-perf-12-incremental-delivery.md) |
 | **F-SEC-04** | Relationship-Based Access Control (ReBAC via OpenFGA / Zanzibar) | [f-sec-04-rebac-openfga.md](f-sec-04-rebac-openfga.md) |

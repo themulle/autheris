@@ -7,7 +7,6 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Application.Connectors;
 using Autheris.Application.Connectors.CrossDomain;
-using Autheris.Application.Connectors.Pushdown;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Application.Security.Rebac.Interfaces;
