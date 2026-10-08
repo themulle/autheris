@@ -67,6 +67,16 @@ Jeder Test muss ohne Fix rot werden.
 | MCP-4 | Synthetische Rollen `AiAgent`/`Reader` im Fast-Path. | Erledigt in `2069074` (`fix(mcp): do not synthesize reader roles in fast path (MCP-4)`) |
 | POL-11 | ReBAC-Objekt-ID enthält kein Schema. | Erledigt in `b9937cd` (`refactor(policy): one table access decision for all paths (Architecture 1, SQL2-6, POL-6, API-10, POL-11)`) |
 | SQL2-10 | CrossDomainJoin baut den IN-Filter per String (toter Code). | Erledigt in `7ffa9fe` (`refactor: remove unwired prototype code (Architecture 3, SQL2-10)`) |
+| SQL2-14 | DuckDB-Validator kennt keine Kommentare. | Erledigt in `fb71ad1` (`fix(olap): support comments in duckdb olap query validator (SQL2-14)`) |
+| SQL2-15 | Maskentext ohne `EscapeSqlLiteral` und ohne `N`-Präfix. | Erledigt in `1ac38f8` (`fix(sql): use dialect-escaped masking literals and N prefix for sql server (SQL2-15)`) |
+| SQL2-16 | Prozeduren ohne Audit-Repository liefern trotzdem aus. | Erledigt in `0afb7a5` (`fix(procedures): fail closed when audit repository is unavailable (SQL2-16)`) |
+| SQL2-19 | Unqualifizierte Spalten in RLS-Subqueries. | Erledigt in `963a8ea` (`fix(rls): qualify unqualified column names in subquery filter predicates (SQL2-19)`) |
+| POL-10 | Casbin-Cache-Key enthält `RequestedColumns` nicht. | Erledigt in `6c3ed38` (`fix(policy): include requested columns in Casbin cache key (POL-10)`) |
+| POL-13 | Federation-Masking-Bypass über rohe Admin-Rollen-Claims. | Erledigt in `8f371b5` (`fix(federation): evaluate admin roles via role evaluator before bypassing mask (POL-13)`) |
+| INF-3 | Secret-Referenzen landen im Klartext im Log. | Erledigt in `ca64652` (`fix(secrets): redact secret references in log statements (INF-3)`) |
+| EXT-6 | OpenMetadata-User-Pfad ignoriert das Rollen-Mapping. | Erledigt in `aa47e96` (`fix(catalog): enforce role mapping for user policies in OpenMetadata sync (EXT-6)`) |
+| EXT-7 | DataCatalog legt neue Tabellen sofort aktiv an. | Erledigt in `445fd0a` (`fix(catalog): do not activate newly discovered tables by default in data catalog (EXT-7)`) |
+| WF-1 | `ExtendConsentExpiryAsync` ohne Prüfungen (ohne Aufrufer). | Erledigt in `fc0b9f0` (`fix(workflow): validate parameters and status in ExtendConsentExpiryAsync (WF-1)`) |
 
 ### Noch offene niedrige Befunde
 
@@ -74,9 +84,7 @@ Jeder Test muss ohne Fix rot werden.
 |---|---|
 | POL-8 | Vorab terminierte DENY-Consents greifen bis zu 10 min verspätet. |
 | POL-9 | Degraded-Mode bestimmt Sensitivität per Substring im Tabellennamen; L1 wird bei Reconnect nicht geleert. |
-| POL-10 | Casbin-Cache-Key enthält `RequestedColumns` nicht. |
 | POL-12 | Audit der Freigabeschritte nach dem Commit, Fehler werden verschluckt. |
-| POL-13 | Federation-Masking-Bypass über rohe Admin-Rollen-Claims. |
 | POL-19 | `ChunkPiiRedactor` ist ohne Katalogspalten nicht fail-closed. |
 | GQL-5 | `FORBIDDEN`-Meldung verrät Existenz von Tabellen und Ablehnungsgrund. |
 | GQL-6 | `tableConsumers` ohne Consent- und Tenant-Filter. |
@@ -84,16 +92,8 @@ Jeder Test muss ohne Fix rot werden.
 | MCP-5 | Golden Queries ohne Consent-Filter. |
 | MCP-6 | `@mcpTool` mit geratener `TargetTable` (latent). |
 | API-13 | BasicAuth-Lockout nicht atomar und synchron. |
-| EXT-6 | OpenMetadata-User-Pfad ignoriert das Rollen-Mapping. |
-| EXT-7 | DataCatalog legt neue Tabellen sofort aktiv an. |
 | INF-2 | CDN-Purge und Shadowing nutzen einen ungehärteten HttpClient. |
-| INF-3 | Secret-Referenzen landen im Klartext im Log. |
 | SQL-6 | Join-Guardrail arbeitet ohne Tabellenbezug. |
-| SQL2-14 | DuckDB-Validator kennt keine Kommentare. |
-| SQL2-15 | Maskentext ohne `EscapeSqlLiteral` und ohne `N`-Präfix. |
-| SQL2-16 | Prozeduren ohne Audit-Repository liefern trotzdem aus. |
-| SQL2-19 | Unqualifizierte Spalten in RLS-Subqueries. |
-| WF-1 | `ExtendConsentExpiryAsync` ohne Prüfungen (ohne Aufrufer). |
 | DEP-9 | `--vulnerable`-Schritt in CI ist wirkungslos. |
 | DEP-10 | Kein Locked-Mode, keine `NuGet.config`. |
 | DEP-11 | `workflow_dispatch` überschreibt `latest`; Release ohne Tests und Signatur. |
