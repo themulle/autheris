@@ -52,6 +52,42 @@ public sealed class AstSecurityVisitorDmlTests
         Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 1 = 1", options));
         Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 'a' = 'a'", options));
         Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE true", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 1 < 2", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE 10 > 5", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 5 <= 5", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE 5 >= 2", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 1 != 2", options));
+    }
+
+    [Fact]
+    public void Dml_WhereWithoutColumnReference_ThrowsUnfilteredDmlException()
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            RejectUnfilteredDml = true
+        };
+
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE 'a' != 'b'", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 100 + 200 = 300", options));
+    }
+
+    [Fact]
+    public void Dml_LegitimateColumnFilter_Passes()
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            RejectUnfilteredDml = true
+        };
+
+        var deleteResult = SecureAndGenerate("DELETE FROM orders WHERE id = 1", options);
+        Assert.Contains("DELETE FROM", deleteResult, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orders", deleteResult, StringComparison.OrdinalIgnoreCase);
+
+        var updateResult = SecureAndGenerate("UPDATE orders SET x = 1 WHERE amount > 100", options);
+        Assert.Contains("UPDATE", updateResult, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orders", updateResult, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

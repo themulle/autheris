@@ -472,10 +472,62 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             throw new UnfilteredDmlException($"{operation} without a WHERE clause is not permitted.");
         }
 
+        // Plan 1: DML statement WHERE clause must reference at least one table column; literal-only predicates are forbidden
+        if (!ContainsColumnReference(where))
+        {
+            throw new UnfilteredDmlException($"{operation} statement WHERE clause must reference at least one table column; literal-only predicates are forbidden.");
+        }
+
         if (IsTriviallyTrue(where))
         {
             throw new UnfilteredDmlException($"{operation} with a trivially true WHERE clause is not permitted.");
         }
+    }
+
+    private static bool ContainsColumnReference(Expression? expr)
+    {
+        if (expr == null) return false;
+
+        return expr switch
+        {
+            ColumnReference => true,
+            BinaryExpression b => ContainsColumnReference(b.Left) || ContainsColumnReference(b.Right),
+            UnaryExpression u => ContainsColumnReference(u.Operand),
+            LikeExpression l => ContainsColumnReference(l.Operand) || ContainsColumnReference(l.Pattern) || (l.Escape != null && ContainsColumnReference(l.Escape)),
+            InListExpression inList => ContainsColumnReference(inList.Operand) || inList.Items.Any(ContainsColumnReference),
+            InSubqueryExpression => true,
+            ExistsExpression => true,
+            ScalarSubqueryExpression => true,
+            BetweenExpression between => ContainsColumnReference(between.Operand) || ContainsColumnReference(between.Lower) || ContainsColumnReference(between.Upper),
+            CaseExpression caseExpr => (caseExpr.Operand != null && ContainsColumnReference(caseExpr.Operand)) ||
+                                       caseExpr.WhenClauses.Any(w => ContainsColumnReference(w.Condition) || ContainsColumnReference(w.Result)) ||
+                                       (caseExpr.ElseResult != null && ContainsColumnReference(caseExpr.ElseResult)),
+            FunctionCallExpression func => func.Arguments.Any(ContainsColumnReference),
+            SubstringExpression sub => ContainsColumnReference(sub.Source) || ContainsColumnReference(sub.Start) || (sub.Length != null && ContainsColumnReference(sub.Length)),
+            TrimExpression trim => ContainsColumnReference(trim.Source) || (trim.Characters != null && ContainsColumnReference(trim.Characters)),
+            PositionExpression pos => ContainsColumnReference(pos.Needle) || ContainsColumnReference(pos.Haystack),
+            CastExpression cast => ContainsColumnReference(cast.Operand),
+            DateFunctionExpression dateFunc => ContainsColumnReference(dateFunc.Source),
+            ExtractExpression extract => ContainsColumnReference(extract.Source),
+            IsDistinctFromExpression distinct => ContainsColumnReference(distinct.Left) || ContainsColumnReference(distinct.Right),
+            QuantifiedComparisonExpression quant => ContainsColumnReference(quant.Left),
+            _ => false
+        };
+    }
+
+    private static bool TryCompareNumericLiterals(LiteralExpression left, LiteralExpression right, out int comparison)
+    {
+        comparison = 0;
+        if (left.Value == null || right.Value == null) return false;
+
+        if (double.TryParse(left.Value.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d1) &&
+            double.TryParse(right.Value.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d2))
+        {
+            comparison = d1.CompareTo(d2);
+            return true;
+        }
+
+        return false;
     }
 
     private static bool IsTriviallyTrue(Expression? expr)
@@ -490,20 +542,54 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 return IsTriviallyTrue(b.Left) || IsTriviallyTrue(b.Right);
             case BinaryExpression b when b.Operator == BinaryOperator.And:
                 return IsTriviallyTrue(b.Left) && IsTriviallyTrue(b.Right);
-            case BinaryExpression b when b.Operator is BinaryOperator.Equal or BinaryOperator.LessThanOrEqual or BinaryOperator.GreaterThanOrEqual:
-                if (b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2)
+            case BinaryExpression b when b.Operator == BinaryOperator.Equal:
+                if (b.Left is LiteralExpression el1 && b.Right is LiteralExpression el2)
                 {
-                    return Equals(l1.Value?.ToString(), l2.Value?.ToString());
+                    if (TryCompareNumericLiterals(el1, el2, out int cmpEq))
+                        return cmpEq == 0;
+                    return Equals(el1.Value?.ToString(), el2.Value?.ToString());
                 }
-                if (b.Left is ColumnReference c1 && b.Right is ColumnReference c2)
+                if (b.Left is ColumnReference ec1 && b.Right is ColumnReference ec2)
                 {
-                    return c1.Name.NormalizedName.Equals(c2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase);
+                    return ec1.Name.NormalizedName.Equals(ec2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase);
                 }
                 return false;
             case BinaryExpression b when b.Operator == BinaryOperator.NotEqual:
                 if (b.Left is LiteralExpression nl1 && b.Right is LiteralExpression nl2)
                 {
+                    if (TryCompareNumericLiterals(nl1, nl2, out int cmpNeq))
+                        return cmpNeq != 0;
                     return !Equals(nl1.Value?.ToString(), nl2.Value?.ToString());
+                }
+                return false;
+            case BinaryExpression b when b.Operator == BinaryOperator.LessThan:
+                if (b.Left is LiteralExpression ltl && b.Right is LiteralExpression ltr &&
+                    TryCompareNumericLiterals(ltl, ltr, out int cmpLt))
+                {
+                    return cmpLt < 0;
+                }
+                return false;
+            case BinaryExpression b when b.Operator == BinaryOperator.LessThanOrEqual:
+                if (b.Left is LiteralExpression le1 && b.Right is LiteralExpression le2)
+                {
+                    if (TryCompareNumericLiterals(le1, le2, out int cmpLe))
+                        return cmpLe <= 0;
+                    return Equals(le1.Value?.ToString(), le2.Value?.ToString());
+                }
+                return false;
+            case BinaryExpression b when b.Operator == BinaryOperator.GreaterThan:
+                if (b.Left is LiteralExpression gtl && b.Right is LiteralExpression gtr &&
+                    TryCompareNumericLiterals(gtl, gtr, out int cmpGt))
+                {
+                    return cmpGt > 0;
+                }
+                return false;
+            case BinaryExpression b when b.Operator == BinaryOperator.GreaterThanOrEqual:
+                if (b.Left is LiteralExpression ge1 && b.Right is LiteralExpression ge2)
+                {
+                    if (TryCompareNumericLiterals(ge1, ge2, out int cmpGe))
+                        return cmpGe >= 0;
+                    return Equals(ge1.Value?.ToString(), ge2.Value?.ToString());
                 }
                 return false;
             case UnaryExpression u when u.Operator == UnaryOperator.Not:
