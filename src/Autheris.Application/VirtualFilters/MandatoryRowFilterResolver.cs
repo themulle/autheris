@@ -136,7 +136,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
 {
     private readonly IVirtualFilterSnapshotProvider _snapshots;
     private readonly IVirtualFilterPredicateBuilder _predicates;
-    private readonly ConcurrentDictionary<string, MandatoryFilterOutcome> _memo = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<VirtualFilterMemoKey, MandatoryFilterOutcome> _memo = new();
     private readonly ConcurrentDictionary<string, ObjectPattern> _patterns = new(StringComparer.Ordinal);
     private long _memoGeneration = -1;
 
@@ -170,12 +170,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             _memo.Clear();
         }
 
-        var key = string.Join('\u001f',
-            snapshot.Generation, query.Tenant.Value, query.UserSid.Value,
-            string.Join(',', query.GroupSids.Select(s => s.Value).Order(StringComparer.Ordinal)),
-            string.Join(',', query.Roles.Order(StringComparer.Ordinal)),
-            query.Metadata.Identifier.ToString(), query.Metadata.Dialect, (int)query.ObjectKind,
-            string.Join(',', query.Metadata.Columns.Select(c => c.ColumnName)));
+        var key = new VirtualFilterMemoKey(snapshot.Generation, query);
         if (_memo.TryGetValue(key, out var cached))
         {
             return cached;
