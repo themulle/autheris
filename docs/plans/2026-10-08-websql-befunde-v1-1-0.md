@@ -137,7 +137,7 @@ Geprüft mit Python (`urllib`, `pyarrow` zum Dekodieren) als `david` (Zeilenfilt
 ### 4.3 Auffälligkeiten ohne Entscheidung
 
 - **Typen in Parquet über OData:** Zeit- und Datumsspalten (`created_at`, `date_of_delivery`) kommen als `string`, über WebSQL als `timestamp`. Ob das von der OData-Schicht kommt, ist nicht geprüft.
-- **Arrow-Export mit Body:** Die ReBAC-Prüfung liest den Tabellennamen nur aus der Query. Ein Aufruf nur mit Body (`{"table": …}`, wie das Schema `ArrowExportPayload` es zulässt) scheitert immer mit 403. Entweder die Prüfung aus dem Body speisen oder den Body-Fall entfernen.
+- **Arrow-Export mit Body (behoben):** Der ReBAC-Filter liest den Tabellennamen aus Query oder JSON-Body (`RebacParameterSource.QueryOrJsonBody`, Body wird gepuffert und zurückgespult). SQL im Body wird zusätzlich für jede referenzierte Tabelle gegen `viewer` geprüft (fail-closed, wenn die Analyse scheitert). Tests: `ArrowExportRebacBodyTests`. Ursprünglicher Befund: Die ReBAC-Prüfung liest den Tabellennamen nur aus der Query. Ein Aufruf nur mit Body (`{"table": …}`, wie das Schema `ArrowExportPayload` es zulässt) scheitert immer mit 403. Entweder die Prüfung aus dem Body speisen oder den Body-Fall entfernen.
 - **ReBAC im PoC:** Für Arrow-Export und OLAP fehlen Beziehungen. Wenn diese Wege im PoC gebraucht werden, muss die Einrichtung (Beziehung `viewer` auf `table`) dokumentiert und im PoC angelegt werden.
 
 ## 4a. OData für Excel (08.10.2026)

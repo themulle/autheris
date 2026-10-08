@@ -7,14 +7,17 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
+using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Serialization;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// F-DATA-04: HTTP endpoints for streaming governed relational data directly in Apache Arrow IPC columnar format.
@@ -32,7 +35,7 @@ public static class ArrowExportEndpoints
         endpoints.MapPost("/api/v1/export/arrow", HandleArrowExportAsync)
             .WithName("ExportTableToArrow")
             .WithSummary("Exports governed tabular rows directly into Apache Arrow IPC streaming format")
-            .RequireRebac("viewer", "table", paramName: "table", source: RebacParameterSource.Query);
+            .RequireRebac("viewer", "table", paramName: "table", source: RebacParameterSource.QueryOrJsonBody);
 
         return endpoints;
     }
@@ -103,6 +106,17 @@ public static class ArrowExportEndpoints
             }
         }
 
+        // WebSQL findings 4.3: the route filter checks the table named in the query or body. SQL from the body may read
+        // other tables, so every table it references needs the same relation (fail-closed when it cannot be analyzed).
+        if (!string.IsNullOrWhiteSpace(sql) &&
+            !await IsSqlPermittedByRebacAsync(httpContext, sql, caller, tenant, ct).ConfigureAwait(false))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Forbidden",
+                detail: "Access denied by ReBAC policy.");
+        }
+
         var effectiveSql = !string.IsNullOrWhiteSpace(sql) ? sql : $"SELECT * FROM {table}";
 
         // 3. Execute Governed Query (RLS + Masking + AST Security)
@@ -167,5 +181,52 @@ public static class ArrowExportEndpoints
             bytes,
             contentType: IArrowExportService.ArrowStreamContentType,
             fileDownloadName: fileName);
+    }
+
+    /// <summary>
+    /// True when ReBAC is disabled or the caller holds the "viewer" relation on every table <paramref name="sql"/>
+    /// references. A statement that cannot be analyzed, or references no table, is not permitted.
+    /// </summary>
+    private static async Task<bool> IsSqlPermittedByRebacAsync(HttpContext httpContext, string sql, string caller, TenantId tenant, CancellationToken ct)
+    {
+        var services = httpContext.RequestServices;
+        var rebacOptions = services?.GetService<IOptions<GatewayOptions>>()?.Value?.Rebac;
+        if (rebacOptions is not null && !rebacOptions.Enabled)
+        {
+            return true;
+        }
+
+        var engine = services?.GetService<TrinoSqlEngine.ISqlEngine>();
+        var loader = services?.GetService<IRebacBatchDataLoader>();
+        if (engine == null || loader == null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<TrinoSqlEngine.Analysis.TableAccessTarget> referencedTables;
+        try
+        {
+            referencedTables = engine.Analyze(sql.AsMemory()).ReferencedTables;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return false;
+        }
+
+        if (referencedTables.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var target in referencedTables)
+        {
+            if (!TableIdentifierNormalizer.TryNormalize(target.FullName, out var normalized) ||
+                !await loader.CheckAsync(tenant.Value, caller, "viewer", "table:" + normalized.ToQualifiedName(), ct).ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

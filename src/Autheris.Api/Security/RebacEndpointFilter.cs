@@ -1,6 +1,8 @@
 namespace Autheris.Api.Security;
 
 using System;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Security.Rebac.Interfaces;
@@ -18,7 +20,13 @@ public enum RebacParameterSource
 {
     Route,
     Query,
-    Header
+    Header,
+
+    /// <summary>
+    /// The query string first, otherwise a top-level string property of the JSON request body (WebSQL findings 4.3).
+    /// The body is buffered and rewound, so the handler can read it again.
+    /// </summary>
+    QueryOrJsonBody
 }
 
 /// <summary>
@@ -82,6 +90,12 @@ public sealed class RebacEndpointFilter : IEndpointFilter
         {
             objectId = headerVal.ToString();
         }
+        else if (_source == RebacParameterSource.QueryOrJsonBody)
+        {
+            objectId = httpContext.Request.Query.TryGetValue(_paramName, out var queryOrBodyVal) && !string.IsNullOrWhiteSpace(queryOrBodyVal)
+                ? queryOrBodyVal.ToString()
+                : await ReadJsonBodyPropertyAsync(httpContext.Request, _paramName, httpContext.RequestAborted).ConfigureAwait(false);
+        }
 
         if (string.IsNullOrWhiteSpace(objectId))
         {
@@ -123,6 +137,46 @@ public sealed class RebacEndpointFilter : IEndpointFilter
         }
 
         return await next(context).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Top-level string property <paramref name="name"/> (case-insensitive) of a JSON body; null when the body is not a
+    /// JSON object or lacks the property. The body is rewound for the handler.
+    /// </summary>
+    private static async Task<string?> ReadJsonBodyPropertyAsync(HttpRequest request, string name, CancellationToken ct)
+    {
+        if (request.ContentType == null || !request.ContentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        request.EnableBuffering();
+        try
+        {
+            using var document = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct).ConfigureAwait(false);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind == JsonValueKind.String)
+                {
+                    return property.Value.GetString();
+                }
+            }
+
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        finally
+        {
+            request.Body.Position = 0;
+        }
     }
 }
 
