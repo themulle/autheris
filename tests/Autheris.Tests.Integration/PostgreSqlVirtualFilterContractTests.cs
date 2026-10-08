@@ -142,4 +142,42 @@ public sealed class PostgreSqlVirtualFilterContractTests : IAsyncLifetime
 
         (await store.LoadSnapshotAsync()).Filters.Count.ShouldBe(2);
     }
+
+    [Fact]
+    public async Task POL_15_ActivateConsent_ForGroupAndServicePrincipal_PersistsGranteeSid()
+    {
+        if (!_available) return;
+        await using var repo = NewRepository();
+        var tableId = new TableIdentifier("sales", "public", "orders");
+        var table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "public", TableName = "orders" };
+        await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = table,
+            Identifier = tableId,
+            Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "int" }]
+        });
+
+        var groupSid = new Sid("S-1-5-21-GROUP-ANALYTICS");
+        var reqGroup = await repo.CreateConsentRequestAsync(new ConsentRequest
+        {
+            TableId = table.Id,
+            TableIdentifier = tableId,
+            RequesterSid = new Sid("S-1-5-21-REQ"),
+            RequestedGranteeType = GranteeType.Group,
+            RequestedGranteeRef = groupSid.Value,
+            BusinessJustification = "POL-15 Group Test",
+            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
+            Status = "PENDING",
+            TenantId = Tenant
+        });
+
+        await repo.ActivateConsentForAutoApproveAsync(reqGroup.Id);
+
+        var activeConsents = await repo.GetActiveConsentsForSubjectsAsync(
+            [groupSid], tableId, DateTimeOffset.UtcNow, Tenant);
+
+        var groupConsent = activeConsents.ShouldHaveSingleItem();
+        groupConsent.GranteeType.ShouldBe(GranteeType.Group);
+        groupConsent.GranteeSid.ShouldBe(groupSid);
+    }
 }

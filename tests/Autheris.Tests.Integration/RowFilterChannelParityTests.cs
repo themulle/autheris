@@ -64,6 +64,23 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         ids.ShouldBe(_fixture.ExpectedIds, ignoreOrder: true, customMessage: $"channel '{channel}'");
     }
 
+    [Fact]
+    public async Task GraphQl_E2E_SQLite_Air1_ReturnsSameRowsAsODataAndWebSql_UnderTwoSeconds()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        var webSqlIds = await ChannelMatrix.Channels["websql"](_fixture);
+        var oDataIds = await ChannelMatrix.Channels["odata"](_fixture);
+        var graphQlIds = await ChannelMatrix.Channels["graphql"](_fixture);
+
+        sw.Stop();
+
+        graphQlIds.ShouldBe(webSqlIds);
+        graphQlIds.ShouldBe(oDataIds);
+        graphQlIds.ShouldBe(_fixture.ExpectedIds);
+        sw.ElapsedMilliseconds.ShouldBeLessThan(2000, $"Total execution took {sw.ElapsedMilliseconds} ms, expected under 2000 ms");
+    }
+
     /// <summary>One delegate per transport; each returns the <c>air1.id</c> values the caller received.</summary>
     public static class ChannelMatrix
     {
