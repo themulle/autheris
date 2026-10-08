@@ -559,26 +559,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                     bool isUsedInJoin = false;
                     if (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Count > 0)
                     {
-                        foreach (var jc in metadata.JoinColumnReferences)
-                        {
-                            if (string.Equals(jc.ColumnName, col.ColumnName, StringComparison.OrdinalIgnoreCase))
-                            {
-                                if (jc.TableOrAlias == null)
-                                {
-                                    // Unqualified reference: applies if this column matches
-                                    isUsedInJoin = true;
-                                    break;
-                                }
-                                else if (string.Equals(jc.TableOrAlias, target.Alias, StringComparison.OrdinalIgnoreCase) ||
-                                         string.Equals(jc.TableOrAlias, target.TableName, StringComparison.OrdinalIgnoreCase) ||
-                                         string.Equals(jc.TableOrAlias, target.FullName, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    // Qualified reference matches this specific table or alias
-                                    isUsedInJoin = true;
-                                    break;
-                                }
-                            }
-                        }
+                        isUsedInJoin = metadata.JoinColumnReferences.Any(jc => ReferencesColumn(jc.TableOrAlias, jc.ColumnName, col.ColumnName, target));
                     }
                     else if (metadata.JoinConditionColumns != null && metadata.JoinConditionColumns.Contains(col.ColumnName))
                     {
@@ -595,28 +576,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                             $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
                     }
 
-                    // SEC-FILTER-01 / Befund 3.6: Zero-Trust Guardrail: Check if any masked or denied column is used in WHERE / HAVING filter predicates
+                    // SEC-FILTER-01 / Befund 3.6: Zero-Trust Guardrail: Check if any masked or denied column is used in WHERE / HAVING / ORDER BY
                     bool isUsedInFilter = false;
                     if (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Count > 0)
                     {
-                        foreach (var fc in metadata.FilterColumnReferences)
-                        {
-                            if (string.Equals(fc.ColumnName, col.ColumnName, StringComparison.OrdinalIgnoreCase))
-                            {
-                                if (fc.TableOrAlias == null)
-                                {
-                                    isUsedInFilter = true;
-                                    break;
-                                }
-                                else if (string.Equals(fc.TableOrAlias, target.Alias, StringComparison.OrdinalIgnoreCase) ||
-                                         string.Equals(fc.TableOrAlias, target.TableName, StringComparison.OrdinalIgnoreCase) ||
-                                         string.Equals(fc.TableOrAlias, target.FullName, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    isUsedInFilter = true;
-                                    break;
-                                }
-                            }
-                        }
+                        isUsedInFilter = metadata.FilterColumnReferences.Any(fc => ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, target));
                     }
 
                     if (isUsedInFilter)
@@ -626,7 +590,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                             : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
 
                         throw new WebSqlPolicyException(
-                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING). Filtering on masked or denied columns is forbidden to prevent oracle inference attacks.");
+                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING/ORDER BY). Filtering or sorting on masked or denied columns would run against the redacted value and is forbidden to prevent oracle inference attacks.");
                     }
                 }
             }
@@ -1324,6 +1288,21 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         }
 
         throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
+    }
+
+    /// <summary>
+    /// SQL-6: true when a column reference (<paramref name="tableOrAlias"/>, <paramref name="referencedColumn"/>) names
+    /// <paramref name="columnName"/> unqualified or qualified with the alias, table name or full name of <paramref name="target"/>.
+    /// </summary>
+    private static bool ReferencesColumn(string? tableOrAlias, string referencedColumn, string columnName, TableAccessTarget target)
+    {
+        if (!string.Equals(referencedColumn, columnName, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        return tableOrAlias == null ||
+               string.Equals(tableOrAlias, target.Alias, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(tableOrAlias, target.TableName, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(tableOrAlias, target.FullName, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
