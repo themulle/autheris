@@ -180,7 +180,15 @@ Geprüft als `david` gegen `http://127.0.0.1:8080/odata/v4/`. Die Tabelle unten 
   `<edmx:Reference Uri="https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Core.V1.xml"><edmx:Include Namespace="Org.OData.Core.V1" Alias="Core" /></edmx:Reference>`
 - **Fix:** Den Schlüssel nur auf vorhandene Eigenschaften setzen. Reihenfolge: Primärschlüssel aus dem Katalog (nur Spalten, die in `table.Columns` stehen), sonst eine vorhandene Spalte `id`, sonst alle Spalten als zusammengesetzter Schlüssel (mit `Nullable="false"`; nur Lesezugriff, deshalb unkritisch, aber die Eindeutigkeit ist nicht garantiert) oder eine synthetische Zeilennummer. Zusätzlich die `edmx:Reference` ergänzen.
 - **Test:** Metadaten für Tabellen mit und ohne Primärschlüssel erzeugen und prüfen, dass jede `PropertyRef` auf eine `Property` desselben Typs zeigt; XML gegen das CSDL-Schema (XSD) oder mit einem OData-4-Parser (z. B. Microsoft.OData.Edm `CsdlReader.TryParse`) validieren.
-- **Umgehung im PoC (nicht umgesetzt):** `AUTHERIS_OPEN_SCHEMA=false` setzen. Dann enthält `$metadata` nur die Tabellen, für die die Person eine Einwilligung hat (Kommentar `ODataEndpoints.cs:63`). Sind das nur Tabellen mit Primärschlüssel (z. B. `md.crane`), wäre das Dokument gültig. Das wirkt auf alle Schnittstellen (auch Katalog, Swagger, GraphQL-Schema) und ist nicht geprüft.
+- **Status:** **BEHOBEN** (Commit `a9fc97f`).
+  1. `<edmx:Reference>` für `Org.OData.Core.V1` mit Alias `Core` im EDMX-Header ergänzt.
+  2. EntityType-Keys werden in `ResolveEntityKeys` streng validiert:
+     - Primärschlüssel aus dem Katalog nur, wenn die Spalte tatsächlich in `table.Columns` existiert.
+     - Fallback auf vorhandene Spalte `id` (case-insensitiv).
+     - Fallback auf alle vorhandenen Spalten als zusammengesetzter Schlüssel (alle mit `Nullable="false"`).
+     - Fallback auf `["id"]` nur bei 0 deklarierten Spalten (wo auch `<Property Name="id" ... />` emittiert wird).
+  3. Verifiziert durch Unit-Tests in `Autheris.Extensions.Tests/ODataTests.cs` (214/214 Tests grün).
+- **Umgehung im PoC (nicht mehr erforderlich):** `AUTHERIS_OPEN_SCHEMA=false` setzen. Dann enthält `$metadata` nur die Tabellen, für die die Person eine Einwilligung hat (Kommentar `ODataEndpoints.cs:63`). Sind das nur Tabellen mit Primärschlüssel (z. B. `md.crane`), wäre das Dokument gültig. Das wirkt auf alle Schnittstellen (auch Katalog, Swagger, GraphQL-Schema) und ist nicht geprüft.
 
 ## 4b. MCP-Schnittstelle (E2E, 08.10.2026)
 
