@@ -16,14 +16,16 @@ public static class GranteeMatcher
         Guid? roleId,
         Sid userSid,
         IReadOnlySet<Sid> groupSids,
-        IReadOnlySet<string> roles)
+        IReadOnlySet<string> roles,
+        IReadOnlySet<Sid>? allUserSids = null)
     {
         ArgumentNullException.ThrowIfNull(groupSids);
         ArgumentNullException.ThrowIfNull(roles);
 
         return granteeType switch
         {
-            GranteeType.User or GranteeType.ServicePrincipal => granteeSid.HasValue && granteeSid.Value == userSid,
+            GranteeType.User or GranteeType.ServicePrincipal =>
+                granteeSid.HasValue && (granteeSid.Value == userSid || (allUserSids != null && allUserSids.Contains(granteeSid.Value))),
             GranteeType.Group => granteeSid.HasValue && groupSids.Contains(granteeSid.Value),
             GranteeType.Role => (!string.IsNullOrEmpty(roleName) && roles.Contains(roleName)) ||
                                 (roleId.HasValue && roles.Contains(roleId.Value.ToString())),

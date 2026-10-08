@@ -40,7 +40,8 @@ public sealed record TableAccessQuery(
     RebacEnforcement Rebac = RebacEnforcement.QueryPaths,
     IPAddress? ClientIp = null,
     IReadOnlyDictionary<string, object?>? ExtraAttributes = null,
-    FilterObjectKinds ObjectKind = FilterObjectKinds.Relation)
+    FilterObjectKinds ObjectKind = FilterObjectKinds.Relation,
+    IReadOnlySet<Sid>? AllUserSids = null)
 {
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,
@@ -62,7 +63,8 @@ public sealed record TableAccessQuery(
             requestedColumns,
             rebac,
             ClientIp: null,
-            extraAttributes);
+            extraAttributes,
+            AllUserSids: principal.GetAllUserSids());
     }
 }
 
@@ -135,7 +137,7 @@ public sealed class TableAccessPolicy
         if (decision.IsAllowed)
         {
             var mandatory = await _mandatoryFilters.ResolveAsync(
-                new Autheris.Application.VirtualFilters.MandatoryFilterQuery(query.UserSid, query.GroupSids, query.Roles, query.Tenant, query.Metadata, query.ObjectKind),
+                new Autheris.Application.VirtualFilters.MandatoryFilterQuery(query.UserSid, query.GroupSids, query.Roles, query.Tenant, query.Metadata, query.ObjectKind, query.AllUserSids),
                 ct).ConfigureAwait(false);
             if (mandatory.IsDenied)
             {
@@ -298,12 +300,18 @@ public sealed class TableAccessPolicy
 
         // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
         var epochAtLoad = _cacheService != null ? await _cacheService.GetEpochSnapshotAsync(table, ct).ConfigureAwait(false) : 0;
-        var subjects = query.GroupSids.Append(query.UserSid).ToList();
+        IEnumerable<Sid> userSids = query.AllUserSids != null && query.AllUserSids.Count > 0
+            ? query.AllUserSids
+            : [query.UserSid];
+        var subjects = userSids
+            .Concat(query.GroupSids)
+            .Distinct()
+            .ToList();
         var activeConsents = (await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, DateTimeOffset.UtcNow, query.Tenant, ct).ConfigureAwait(false))
             .Where(c => c.TenantId == query.Tenant) // multi-tenancy isolation
             .ToList();
 
-        var decision = _resolutionService.ResolveAccess(query.UserSid, query.GroupSids, query.Roles, table, activeConsents, query.Metadata.Dialect);
+        var decision = _resolutionService.ResolveAccess(query.UserSid, query.GroupSids, query.Roles, table, activeConsents, query.Metadata.Dialect, query.AllUserSids);
 
         if (_cacheService != null)
         {

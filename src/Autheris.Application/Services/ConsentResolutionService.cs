@@ -22,13 +22,14 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         IReadOnlySet<string> userRoles,
         TableIdentifier table,
         IReadOnlyList<Consent> activeConsents,
-        DatabaseDialect dialect = DatabaseDialect.SqlServer)
+        DatabaseDialect dialect = DatabaseDialect.SqlServer,
+        IReadOnlySet<Sid>? allUserSids = null)
     {
         var now = DateTimeOffset.UtcNow;
 
         // 1. Identify applicable active consents for Subject Set S
         var applicable = activeConsents
-            .Where(c => c.IsActive(now) && c.TableIdentifier == table && IsSubjectMatch(c, userSid, subjectGroupSids, userRoles))
+            .Where(c => c.IsActive(now) && c.TableIdentifier == table && IsSubjectMatch(c, userSid, subjectGroupSids, userRoles, allUserSids))
             .ToList();
 
         // Separate into A (ALLOW) and D (DENY)
@@ -236,7 +237,8 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         Consent consent,
         Sid userSid,
         IReadOnlySet<Sid> subjectGroupSids,
-        IReadOnlySet<string> userRoles) =>
+        IReadOnlySet<string> userRoles,
+        IReadOnlySet<Sid>? allUserSids = null) =>
         Autheris.Application.Policy.GranteeMatcher.Matches(
-            consent.GranteeType, consent.GranteeSid, consent.RoleName, consent.RoleId, userSid, subjectGroupSids, userRoles);
+            consent.GranteeType, consent.GranteeSid, consent.RoleName, consent.RoleId, userSid, subjectGroupSids, userRoles, allUserSids);
 }

@@ -19,6 +19,7 @@ public readonly struct VirtualFilterMemoKey : IEquatable<VirtualFilterMemoKey>
     private readonly TableIdentifier _tableId;
     private readonly DatabaseDialect _dialect;
     private readonly FilterObjectKinds _objectKind;
+    private readonly IReadOnlySet<Sid>? _allUserSids;
     private readonly int _hashCode;
 
     public VirtualFilterMemoKey(long generation, MandatoryFilterQuery query)
@@ -33,6 +34,7 @@ public readonly struct VirtualFilterMemoKey : IEquatable<VirtualFilterMemoKey>
         _tableId = query.Metadata.Identifier;
         _dialect = query.Metadata.Dialect;
         _objectKind = query.ObjectKind;
+        _allUserSids = query.AllUserSids;
 
         var hc = new HashCode();
         hc.Add(_generation);
@@ -57,6 +59,16 @@ public readonly struct VirtualFilterMemoKey : IEquatable<VirtualFilterMemoKey>
         }
         hc.Add(rolesHash);
 
+        if (_allUserSids != null)
+        {
+            int allSidsHash = 0;
+            foreach (var sid in _allUserSids)
+            {
+                allSidsHash ^= sid.GetHashCode();
+            }
+            hc.Add(allSidsHash);
+        }
+
         _hashCode = hc.ToHashCode();
     }
 
@@ -78,7 +90,25 @@ public readonly struct VirtualFilterMemoKey : IEquatable<VirtualFilterMemoKey>
             return false;
         }
 
-        return _roles.SetEquals(other._roles) && _groupSids.SetEquals(other._groupSids);
+        if (!_roles.SetEquals(other._roles) || !_groupSids.SetEquals(other._groupSids))
+        {
+            return false;
+        }
+
+        if ((_allUserSids == null) != (other._allUserSids == null))
+        {
+            return false;
+        }
+
+        if (_allUserSids != null && other._allUserSids != null)
+        {
+            if (_allUserSids.Count != other._allUserSids.Count || !_allUserSids.SetEquals(other._allUserSids))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public override bool Equals(object? obj) => obj is VirtualFilterMemoKey other && Equals(other);

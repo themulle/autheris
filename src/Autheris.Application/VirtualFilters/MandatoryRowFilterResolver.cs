@@ -16,7 +16,8 @@ public sealed record MandatoryFilterQuery(
     IReadOnlySet<string> Roles,
     TenantId Tenant,
     TableMetadata Metadata,
-    FilterObjectKinds ObjectKind = FilterObjectKinds.Relation);
+    FilterObjectKinds ObjectKind = FilterObjectKinds.Relation,
+    IReadOnlySet<Sid>? AllUserSids = null);
 
 /// <summary>
 /// Result of the virtual filter resolution: nothing, a deny (object uncovered, or a filter could not be evaluated),
@@ -197,7 +198,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         var profiles = snapshot.Profiles
             .Where(p => p.TenantId == query.Tenant &&
                         p.Status == FilterApprovalStatus.Active &&
-                        GranteeMatcher.Matches(p.GranteeType, p.GranteeSid, p.RoleName, null, query.UserSid, query.GroupSids, query.Roles))
+                        GranteeMatcher.Matches(p.GranteeType, p.GranteeSid, p.RoleName, null, query.UserSid, query.GroupSids, query.Roles, query.AllUserSids))
             .OrderBy(p => p.Name, StringComparer.Ordinal)
             .ToList();
 

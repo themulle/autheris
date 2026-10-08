@@ -317,5 +317,60 @@ public sealed class MandatoryRowFilterResolverTests
         outcome.IsDenied.ShouldBeTrue();
         outcome.DenyReason.ShouldNotBeNull().ShouldContain("lacks required column");
     }
+
+    [Fact]
+    public async Task ResolveAsync_WhenProfileBoundToOnPremSid_AndCallerHasOidPrimary_WithOnPremSidInAllUserSids_ShouldMatchProfile()
+    {
+        var onpremSid = new Sid("S-1-5-21-LWE-DAVID");
+        var entraOid = new Sid("c032cb03-518d-4e92-9430-803513a96860");
+
+        var filter = Filter("filter_david", "client_id");
+        var profile = Profile(UncoveredPolicy.Skip, new FilterBinding { FilterName = "filter_david" }) with
+        {
+            GranteeSid = onpremSid
+        };
+
+        var resolver = Resolver(Snapshot([filter], profile));
+
+        // Caller has entraOid as UserSid, but onpremSid in AllUserSids
+        var query = new MandatoryFilterQuery(
+            UserSid: entraOid,
+            GroupSids: new HashSet<Sid>(),
+            Roles: new HashSet<string>(),
+            Tenant: Tenant,
+            Metadata: Table("fms", "air1", "client_id"),
+            AllUserSids: new HashSet<Sid> { entraOid, onpremSid });
+
+        var outcome = await resolver.ResolveAsync(query);
+
+        outcome.AppliedFilters.ShouldContain("filter_david");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WhenProfileBoundToOnPremSid_AndCallerHasOidPrimary_WithoutMatchingSid_ShouldNotMatchProfile()
+    {
+        var onpremSid = new Sid("S-1-5-21-LWE-DAVID");
+        var entraOid = new Sid("c032cb03-518d-4e92-9430-803513a96860");
+
+        var filter = Filter("filter_david", "client_id");
+        var profile = Profile(UncoveredPolicy.Skip, new FilterBinding { FilterName = "filter_david" }) with
+        {
+            GranteeSid = onpremSid
+        };
+
+        var resolver = Resolver(Snapshot([filter], profile));
+
+        var query = new MandatoryFilterQuery(
+            UserSid: entraOid,
+            GroupSids: new HashSet<Sid>(),
+            Roles: new HashSet<string>(),
+            Tenant: Tenant,
+            Metadata: Table("fms", "air1", "client_id"),
+            AllUserSids: new HashSet<Sid> { entraOid });
+
+        var outcome = await resolver.ResolveAsync(query);
+
+        outcome.AppliedFilters.ShouldNotContain("filter_david");
+    }
 }
 

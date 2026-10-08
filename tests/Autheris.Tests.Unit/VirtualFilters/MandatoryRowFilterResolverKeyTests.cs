@@ -76,6 +76,33 @@ public sealed class MandatoryRowFilterResolverKeyTests
     }
 
     [Fact]
+    public void VirtualFilterMemoKey_DifferentAllUserSids_AreNotEqual()
+    {
+        var meta = CreateTableMetadata();
+        var q1 = new MandatoryFilterQuery(
+            new Sid("S-1-5-21-USER1"),
+            new HashSet<Sid>(),
+            new HashSet<string> { "Viewer" },
+            new TenantId("tenant_a"),
+            meta,
+            AllUserSids: new HashSet<Sid> { new("S-1-5-21-USER1"), new("oid-1") });
+
+        var q2 = new MandatoryFilterQuery(
+            new Sid("S-1-5-21-USER1"),
+            new HashSet<Sid>(),
+            new HashSet<string> { "Viewer" },
+            new TenantId("tenant_a"),
+            meta,
+            AllUserSids: new HashSet<Sid> { new("S-1-5-21-USER1"), new("oid-2") });
+
+        var key1 = new VirtualFilterMemoKey(100, q1);
+        var key2 = new VirtualFilterMemoKey(100, q2);
+
+        key1.ShouldNotBe(key2);
+        (key1 != key2).ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task MandatoryRowFilterResolver_UsesMemoKey_AndReturnsCachedOutcome()
     {
         var snapshotProvider = Substitute.For<IVirtualFilterSnapshotProvider>();
