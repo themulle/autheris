@@ -161,6 +161,50 @@ public sealed class TableAccessPolicy
     }
 
     /// <summary>
+    /// Evaluates whether the given principal has permission to perform write / DML operations on the specified table.
+    /// Requires an explicit Casbin action "write" (or "*") and consent clearance where applicable.
+    /// </summary>
+    public async Task<bool> CanWriteTableAsync(
+        ClaimsPrincipal user,
+        TenantId tenant,
+        TableMetadata metadata,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        ArgumentNullException.ThrowIfNull(metadata);
+
+        var userSid = user.GetUserSid() ?? new Sid(user.Identity?.Name ?? "anonymous");
+        var query = TableAccessQuery.ForPrincipal(
+            user,
+            userSid,
+            tenant,
+            metadata,
+            extraAttributes: new Dictionary<string, object?>
+            {
+                ["gql.action"] = "write",
+                ["action"] = "write"
+            });
+
+        var decision = await DecideAsync(query, ct).ConfigureAwait(false);
+        return decision.IsAllowed;
+    }
+
+    /// <summary>
+    /// Evaluates whether the given principal has permission to perform write / DML operations on the specified table identifier.
+    /// </summary>
+    public Task<bool> CanWriteTableAsync(
+        ClaimsPrincipal user,
+        TenantId tenant,
+        TableIdentifier table,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+
+        var metadata = new TableMetadata { Identifier = table };
+        return CanWriteTableAsync(user, tenant, metadata, ct);
+    }
+
+    /// <summary>
     /// SEC C-03: applies a Casbin decision as an additional restriction on the consent decision. Column levels can only be
     /// lowered (an explicit Clear can only come from consent), row filters are combined with AND, and row filter parameters
     /// are merged; two filters binding the same name to different values deny (ambiguous, fail-closed).
@@ -223,6 +267,11 @@ public sealed class TableAccessPolicy
 
     private async Task<bool> IsRebacDeniedAsync(TableAccessQuery query, CancellationToken ct)
     {
+        if (_options?.IsRebacBypassed == true)
+        {
+            return false;
+        }
+
         var enforced = query.Rebac switch
         {
             RebacEnforcement.WhenEnabled => _rebacEvaluator is { IsEnabled: true },
