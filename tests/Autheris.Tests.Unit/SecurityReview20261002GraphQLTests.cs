@@ -134,6 +134,23 @@ public sealed class SecurityReview20261002GraphQLTests
     }
 
     [Fact]
+    public async Task SEC_GQL_01_VariableRowLimit_WithSmallDefault_ButLargeRuntimeVariable_CalculatesByRuntimeVariable()
+    {
+        var schema = await BuildQuerySchemaAsync();
+        var rule = new QueryCostAnalyzerRule(maxAllowedCost: 500, maxResponseRows: 5000);
+        var doc = Utf8GraphQLParser.Parse("query($n: Int = 1) { table(domain: \"hr\", name: \"hr_table_1\", first: $n) { tableName } }");
+
+        // Without runtime variables, default of 1 is used
+        var costDefault = rule.ComputeCost(doc, schema);
+        costDefault.ShouldBeLessThanOrEqualTo(500);
+
+        // With runtime variables ($n = 5000), runtime value MUST override default and exceed 500
+        var runtimeVars = new Dictionary<string, object?> { ["n"] = 5000 };
+        var costRuntime = rule.ComputeCost(doc, schema, runtimeVars);
+        costRuntime.ShouldBeGreaterThan(500);
+    }
+
+    [Fact]
     public async Task M13_DefaultTableQuery_StaysWithinDefaultBudget()
     {
         var schema = await BuildQuerySchemaAsync();
