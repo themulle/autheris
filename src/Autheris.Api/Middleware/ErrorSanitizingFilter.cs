@@ -88,6 +88,24 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         {
             var cleanError = error.WithException(null);
 
+            // GQL-5: Outside Development, FORBIDDEN and ACCESS_DENIED messages must not disclose table names or denial reasons
+            if (!_environment.IsDevelopment() &&
+                (string.Equals(cleanError.Code, "FORBIDDEN", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(cleanError.Code, "ACCESS_DENIED", StringComparison.OrdinalIgnoreCase)))
+            {
+                var builder = ErrorBuilder.FromError(cleanError)
+                    .SetMessage("Access denied.");
+
+                if (cleanError.Extensions != null)
+                {
+                    builder.RemoveExtension("table")
+                           .RemoveExtension("deniedReasons")
+                           .RemoveExtension("activeFailures");
+                }
+
+                return builder.Build();
+            }
+
             // R-ERR-1: INVALID_QUERY messages name tables and columns; outside Development they stay generic so the
             // catalog cannot be enumerated (same text as GraphQlEnumerationShieldMiddleware).
             if (string.Equals(cleanError.Code, GraphQlEnumerationShieldMiddleware.Code, StringComparison.OrdinalIgnoreCase))
