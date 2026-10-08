@@ -93,23 +93,97 @@ public static partial class TreeSqlCompiler
             return name;
         }
 
-        public void MergeRowFilterParameters(IReadOnlyDictionary<string, object?>? parameters)
+        /// <summary>
+        /// SQL2-11: binds the parameters of one table's row filter. Row filters of different tables may use the same
+        /// parameter name with different values (each consent names its own parameters); such a parameter gets a name
+        /// unique to this query and the filter SQL is rewritten accordingly, instead of rejecting the whole query.
+        /// </summary>
+        public string BindRowFilter(string filterSql, IReadOnlyDictionary<string, object?>? parameters)
         {
-            if (parameters == null)
+            if (parameters == null || parameters.Count == 0)
             {
-                return;
+                return filterSql;
             }
+
+            var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (name, value) in parameters)
             {
                 var bound = value ?? DBNull.Value;
                 if (Parameters.TryGetValue(name, out var existing) && !Equals(existing, bound))
                 {
-                    // Two row filters bind the same parameter name to different values: ambiguous -> fail closed.
-                    throw new GatewaySecurityException("Conflicting row-level security parameters; the query cannot be governed safely.");
+                    string unique;
+                    do
+                    {
+                        unique = "@rf" + (_parameterCounter++).ToString(CultureInfo.InvariantCulture) + "_" + name.TrimStart('@');
+                    }
+                    while (Parameters.ContainsKey(unique));
+
+                    renames[name.TrimStart('@')] = unique;
+                    Parameters[unique] = bound;
+                    continue;
                 }
+
                 Parameters[name] = bound;
             }
+
+            return renames.Count == 0 ? filterSql : RenameParameters(filterSql, renames);
         }
+    }
+
+    /// <summary>SQL2-11: replaces @name parameter tokens outside string literals and quoted identifiers.</summary>
+    internal static string RenameParameters(string sql, IReadOnlyDictionary<string, string> renames)
+    {
+        var sb = new System.Text.StringBuilder(sql.Length + 16);
+        int i = 0;
+        while (i < sql.Length)
+        {
+            char c = sql[i];
+            if (c is '\'' or '"' or '[')
+            {
+                char close = c == '[' ? ']' : c;
+                int end = i + 1;
+                while (end < sql.Length)
+                {
+                    if (sql[end] == close)
+                    {
+                        if (close != ']' && end + 1 < sql.Length && sql[end + 1] == close)
+                        {
+                            end += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    end++;
+                }
+                end = Math.Min(end + 1, sql.Length);
+                sb.Append(sql, i, end - i);
+                i = end;
+                continue;
+            }
+
+            if (c == '@')
+            {
+                int start = i + 1;
+                int end = start;
+                while (end < sql.Length && (char.IsLetterOrDigit(sql[end]) || sql[end] == '_'))
+                {
+                    end++;
+                }
+
+                var name = sql[start..end];
+                if (name.Length > 0 && renames.TryGetValue(name, out var replacement))
+                {
+                    sb.Append(replacement);
+                    i = end;
+                    continue;
+                }
+            }
+
+            sb.Append(c);
+            i++;
+        }
+
+        return sb.ToString();
     }
 
     private sealed record OutputColumn(string Key, string? SourceColumn, string? LiteralExpression);
@@ -387,8 +461,7 @@ public static partial class TreeSqlCompiler
         if (!string.IsNullOrWhiteSpace(rowFilter))
         {
             SqlSecurityValidator.ValidatePredicateSql(rowFilter, "CombinedRowFilterSql");
-            context.MergeRowFilterParameters(plan.Access.Decision.RowFilterParameters);
-            where.Add($"({rowFilter})");
+            where.Add($"({context.BindRowFilter(rowFilter, plan.Access.Decision.RowFilterParameters)})");
         }
 
         if (parent != null && relation != null)
