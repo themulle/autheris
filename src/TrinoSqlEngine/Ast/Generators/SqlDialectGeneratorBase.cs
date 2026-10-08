@@ -548,6 +548,10 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 GenerateExpression(sub.Index, ref builder, context);
                 builder.Append(']');
                 break;
+            case TrustedSqlExpression trusted:
+                // Only used as a projection item (column masks), so no precedence parentheses are needed.
+                builder.Append(trusted.Sql);
+                break;
             case ExtractExpression ext:
                 builder.Append("EXTRACT(");
                 builder.Append(TrinoSqlEngine.Ast.SqlSafeTokens.EnsureExtractField(ext.Field));
