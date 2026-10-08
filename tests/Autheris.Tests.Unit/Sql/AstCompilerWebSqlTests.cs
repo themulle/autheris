@@ -104,4 +104,27 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
         sql.ShouldContain("HAVING COUNT(*) > 1");
         sql.ShouldContain($"SUM({coalesce})");
     }
+
+    [Theory]
+    [InlineData("PostgreSQL")]
+    [InlineData("SqlServer")]
+    [InlineData("Sqlite")]
+    public async Task ClientParameters_SurviveTheRewrite_AndAreBoundByName(string sourceType)
+    {
+        // Wunsch 4, Phase 2: @name → __param_name → AST → must come back as @name (also the path of declared queries).
+        var parameters = new Dictionary<string, object?> { ["d"] = "Sales", ["m"] = 10 };
+        string normalized = GovernedSqlExecutionService.NormalizeClientParameters(
+            "SELECT id FROM orders WHERE dept = @d AND amount > @m", parameters, out var names);
+
+        string rewritten = await RewriteAsync(sourceType, normalized);
+        string restored = GovernedSqlExecutionService.RestoreClientParameters(rewritten, names);
+        output.WriteLine(restored);
+
+        restored.ShouldContain("@d");
+        restored.ShouldContain("@m");
+        restored.ShouldNotContain("__param_");
+        restored.ShouldNotContain("$1");
+        restored.ShouldNotContain("@p0");
+        restored.ShouldNotContain("?1");
+    }
 }

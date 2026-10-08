@@ -588,6 +588,16 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void FormatParameter(ref ValueStringBuilder builder, ParameterReference param, SqlEmitterContext context)
     {
+        // Wunsch 4: a client parameter (@name → __param_name) stays a named placeholder. The caller binds by name and
+        // restores @name after the rewrite (GovernedSqlExecutionService.RestoreClientParameters); a positional marker
+        // ($1, @p0, ?1) could not be bound, because no mapping is returned.
+        if (param.IsSynthetic && SafeParamIdentifierRegex.IsMatch(param.Name))
+        {
+            builder.Append("__param_");
+            builder.Append(param.Name);
+            return;
+        }
+
         if (!string.IsNullOrWhiteSpace(param.Name) && param.Name != "?" && !param.Name.StartsWith('$') && !param.IsSynthetic)
         {
             var rawName = param.Name.TrimStart('@', ':');
