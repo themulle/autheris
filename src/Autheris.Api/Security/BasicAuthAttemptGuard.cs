@@ -82,6 +82,16 @@ internal sealed class BasicAuthAttemptGuard
     /// </summary>
     public static string BuildIpKey(string? clientIp) => "*IP*|" + NormalizeIp(clientIp);
 
+    /// <summary>
+    /// SR-P2-04 / SR15-11: Formats Redis failure counter key with hash tags {...} to prevent CROSSSLOT errors in Redis Cluster.
+    /// </summary>
+    public static string BuildFailKey(string attemptKey) => $"autheris:fail:{{{attemptKey}}}";
+
+    /// <summary>
+    /// SR-P2-04 / SR15-11: Formats Redis lockout flag key with hash tags {...} to prevent CROSSSLOT errors in Redis Cluster.
+    /// </summary>
+    public static string BuildLockoutKey(string attemptKey) => $"autheris:lockout:{{{attemptKey}}}";
+
     /// <summary>The (higher) failure limit that applies to <see cref="BuildIpKey"/>.</summary>
     public int MaxFailedAttemptsPerIp => _maxFailedAttemptsPerIp;
 
@@ -122,7 +132,7 @@ internal sealed class BasicAuthAttemptGuard
             try
             {
                 var db = _redis.GetDatabase();
-                if (await db.KeyExistsAsync("autheris:lockout:" + attemptKey).ConfigureAwait(false))
+                if (await db.KeyExistsAsync(BuildLockoutKey(attemptKey)).ConfigureAwait(false))
                 {
                     return true;
                 }
@@ -136,7 +146,7 @@ internal sealed class BasicAuthAttemptGuard
         {
             try
             {
-                var val = await _distributedCache.GetStringAsync("autheris:lockout:" + attemptKey, ct).ConfigureAwait(false);
+                var val = await _distributedCache.GetStringAsync(BuildLockoutKey(attemptKey), ct).ConfigureAwait(false);
                 if (!string.IsNullOrEmpty(val))
                 {
                     return true;
@@ -186,8 +196,8 @@ internal sealed class BasicAuthAttemptGuard
             try
             {
                 var db = _redis.GetDatabase();
-                var failKey = "autheris:fail:" + attemptKey;
-                var lockoutKey = "autheris:lockout:" + attemptKey;
+                var failKey = BuildFailKey(attemptKey);
+                var lockoutKey = BuildLockoutKey(attemptKey);
                 var windowSeconds = (long)Math.Max(1, _window.TotalSeconds);
 
                 StackExchange.Redis.RedisKey[] keys = [failKey, lockoutKey];
@@ -203,7 +213,7 @@ internal sealed class BasicAuthAttemptGuard
         {
             try
             {
-                string key = "autheris:fail:" + attemptKey;
+                string key = BuildFailKey(attemptKey);
                 string? current = await _distributedCache.GetStringAsync(key, ct).ConfigureAwait(false);
                 int count = int.TryParse(current, out int c) ? c + 1 : 1;
                 await _distributedCache.SetStringAsync(key, count.ToString(), new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
@@ -213,7 +223,7 @@ internal sealed class BasicAuthAttemptGuard
 
                 if (count >= limit)
                 {
-                    await _distributedCache.SetStringAsync("autheris:lockout:" + attemptKey, "1", new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
+                    await _distributedCache.SetStringAsync(BuildLockoutKey(attemptKey), "1", new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
                     {
                         AbsoluteExpirationRelativeToNow = _window
                     }, ct).ConfigureAwait(false);
@@ -259,7 +269,7 @@ internal sealed class BasicAuthAttemptGuard
             try
             {
                 var db = _redis.GetDatabase();
-                await db.KeyDeleteAsync(["autheris:fail:" + attemptKey, "autheris:lockout:" + attemptKey]).ConfigureAwait(false);
+                await db.KeyDeleteAsync([BuildFailKey(attemptKey), BuildLockoutKey(attemptKey)]).ConfigureAwait(false);
             }
             catch
             {
@@ -269,8 +279,8 @@ internal sealed class BasicAuthAttemptGuard
         {
             try
             {
-                await _distributedCache.RemoveAsync("autheris:fail:" + attemptKey, ct).ConfigureAwait(false);
-                await _distributedCache.RemoveAsync("autheris:lockout:" + attemptKey, ct).ConfigureAwait(false);
+                await _distributedCache.RemoveAsync(BuildFailKey(attemptKey), ct).ConfigureAwait(false);
+                await _distributedCache.RemoveAsync(BuildLockoutKey(attemptKey), ct).ConfigureAwait(false);
             }
             catch
             {

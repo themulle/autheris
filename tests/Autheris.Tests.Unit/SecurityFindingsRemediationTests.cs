@@ -1347,7 +1347,7 @@ public class SecurityFindingsRemediationTests
 
         await db.Received(1).ScriptEvaluateAsync(
             Arg.Is<string>(s => s.Contains("redis.call('INCR'") && s.Contains("redis.call('EXPIRE'")),
-            Arg.Is<StackExchange.Redis.RedisKey[]>(keys => keys.Length == 2 && keys[0].ToString() == "autheris:fail:TESTUSER|127.0.0.1"),
+            Arg.Is<StackExchange.Redis.RedisKey[]>(keys => keys.Length == 2 && keys[0].ToString() == "autheris:fail:{TESTUSER|127.0.0.1}"),
             Arg.Is<StackExchange.Redis.RedisValue[]>(vals => vals.Length == 2 && (long)vals[0] == 60 && (int)vals[1] == 5));
     }
 
