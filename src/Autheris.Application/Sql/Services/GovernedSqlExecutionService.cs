@@ -487,6 +487,20 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 throw TableDenied(target);
             }
 
+            // SR15-43 / SEC C-03: Restrict domain 'default' fallback and enforce source matching.
+            // If table was resolved from fallback domain 'default', it must explicitly specify a matching SourceName.
+            if (string.Equals(resolvedId.Domain, "default", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(tableId.Domain, "default", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(tableMeta.Table.SourceName) ||
+                    !string.Equals(tableMeta.Table.SourceName, effectiveDataSourceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger?.LogWarning("WebSQL rejected table {Table}: uncatalogued under data source '{DataSource}' and fallback 'default' does not match source.",
+                        target.FullName, effectiveDataSourceName);
+                    throw TableDenied(target);
+                }
+            }
+
             // SEC C-03 / SQ-09: A catalog table bound to a specific data source must only be queried through that source.
             if (!string.IsNullOrWhiteSpace(tableMeta.Table.SourceName) &&
                 !string.Equals(tableMeta.Table.SourceName, effectiveDataSourceName, StringComparison.OrdinalIgnoreCase))
