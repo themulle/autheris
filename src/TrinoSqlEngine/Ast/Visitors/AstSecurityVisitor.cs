@@ -148,9 +148,11 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                     var colId = new SqlIdentifier(col, IsQuoted: true);
                     if (_options.ColumnMaskingProvider != null && _options.ColumnMaskingProvider.HasMask(normalizedName, col))
                     {
+                        // SQL-4: mask expressions are rendered by the gateway for the target dialect (bound key parameters,
+                        // T-SQL brackets); re-parsing them as Trino SQL failed for every HMAC column. They are emitted
+                        // verbatim, exactly like the legacy rewriter does.
                         string maskExpr = _options.ColumnMaskingProvider.GetMaskedExpression(normalizedName, col);
-                        var maskAst = ParseFilterExpression(maskExpr);
-                        list.Add(new ColumnSelectItem(maskAst, colId));
+                        list.Add(new ColumnSelectItem(new TrustedSqlExpression(maskExpr), colId));
                     }
                     else
                     {

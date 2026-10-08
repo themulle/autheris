@@ -57,6 +57,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             ArrayConstructorExpression arr => VisitArrayConstructorExpression(arr),
             SubscriptExpression sub => VisitSubscriptExpression(sub),
             ExtractExpression ext => VisitExtractExpression(ext),
+            TrustedSqlExpression trusted => trusted,
             OrderByClause ord => VisitOrderByClause(ord),
             OrderByElement el => VisitOrderByElement(el),
             PaginationClause pag => VisitPaginationClause(pag),
