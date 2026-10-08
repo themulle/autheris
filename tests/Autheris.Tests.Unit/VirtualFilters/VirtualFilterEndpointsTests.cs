@@ -316,4 +316,58 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         stored.Status.ShouldBe(FilterApprovalStatus.Active);
         stored.ApprovedBy.ShouldBe(new Sid("S-1-5-21-SUPERVISOR"));
     }
+
+    [Fact]
+    public async Task ConfigSyncStatus_WithPendingApproval_ReturnsPendingApprovalStatus()
+    {
+        // SR15-47: Dynamic status reporting based on filter states
+        var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
+        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
+
+        var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
+        await VirtualFilterEndpoints.PutFilterAsync("filter_pending", createContext, approvalService);
+
+        var context = Context(Tenant, null, "GovernanceAdmin");
+        var result = await VirtualFilterEndpoints.ConfigSyncStatusAsync(context, approvalService);
+        await StatusAsync(result, context);
+
+        context.Response.Body.Position = 0;
+        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("status").GetString().ShouldBe("PendingApproval");
+    }
+
+    [Fact]
+    public async Task PutFilter_InProduction_SanitizesInvalidOperationException()
+    {
+        // SR15-49: InvalidOperationException messages should not leak internal database details in production
+        var prodEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        prodEnv.EnvironmentName.Returns("Production");
+
+        var services = new ServiceCollection();
+        services.AddSingleton(prodEnv);
+        services.AddLogging();
+        var sp = services.BuildServiceProvider();
+
+        var context = Context(Tenant, DavidFilterBody(), "FilterAdmin");
+        context.RequestServices = sp;
+
+        var failingRepo = Substitute.For<IVirtualFilterRepository>();
+        failingRepo.LoadSnapshotAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new VirtualFilterSnapshot(0, Array.Empty<VirtualFilter>(), Array.Empty<AccessProfile>())));
+        failingRepo.When(r => r.ApplyAsync(Arg.Any<VirtualFilterChangeSet>(), Arg.Any<CancellationToken>()))
+            .Do(_ => throw new InvalidOperationException("internal database connection string or schema leak"));
+
+        var adminService = new VirtualFilterAdministrationService(failingRepo, Substitute.For<IAuditLogRepository>());
+
+        var result = await VirtualFilterEndpoints.PutFilterAsync("test_filter", context, adminService);
+        var status = await StatusAsync(result, context);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        context.Response.Body.Position = 0;
+        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
+        var error = doc.RootElement.GetProperty("error").GetString();
+        error.ShouldNotBeNull();
+        error.ShouldBe("The requested virtual filter operation is invalid.");
+        error.ShouldNotContain("internal database connection string or schema leak");
+    }
 }
