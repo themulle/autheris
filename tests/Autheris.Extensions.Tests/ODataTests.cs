@@ -65,6 +65,55 @@ public sealed class ODataTests
     }
 
     [Fact]
+    public void ODataCsdlGenerator_MetadataConformsToOasisXsdSchemas()
+    {
+        var schemas = new System.Xml.Schema.XmlSchemaSet();
+        var edmPath = Path.Combine(AppContext.BaseDirectory, "Schemas", "edm.xsd");
+        var edmxPath = Path.Combine(AppContext.BaseDirectory, "Schemas", "edmx.xsd");
+
+        File.Exists(edmPath).ShouldBeTrue();
+        File.Exists(edmxPath).ShouldBeTrue();
+
+        schemas.Add("http://docs.oasis-open.org/odata/ns/edm", edmPath);
+        schemas.Add("http://docs.oasis-open.org/odata/ns/edmx", edmxPath);
+        schemas.Compile();
+
+        var sampleTable = CreateSampleTable();
+        var telemetryTable = new TableMetadata
+        {
+            Identifier = new TableIdentifier("lwetem_prod", "fms", "air1"),
+            Table = new Table { SchemaName = "fms", TableName = "air1" },
+            PrimaryKeyColumns = [],
+            Columns =
+            [
+                new TableColumn { ColumnName = "timestamp", DataType = "timestamp" },
+                new TableColumn { ColumnName = "vehicle_id", DataType = "varchar" },
+                new TableColumn { ColumnName = "pressure", DataType = "double" }
+            ]
+        };
+
+        var xml = ODataCsdlGenerator.GenerateMetadataXml([sampleTable, telemetryTable]);
+
+        var settings = new System.Xml.XmlReaderSettings
+        {
+            ValidationType = System.Xml.ValidationType.Schema,
+            Schemas = schemas
+        };
+
+        var errors = new List<string>();
+        settings.ValidationEventHandler += (sender, args) =>
+        {
+            errors.Add($"{args.Severity}: {args.Message} (Line {args.Exception?.LineNumber})");
+        };
+
+        using var stringReader = new StringReader(xml);
+        using var xmlReader = System.Xml.XmlReader.Create(stringReader, settings);
+        while (xmlReader.Read()) { }
+
+        errors.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void ODataCsdlGenerator_WhenTableHasNoPrimaryKeyAndNoIdColumn_UsesExistingColumnsAsKeyWithNullableFalse()
     {
         var table = new TableMetadata
