@@ -185,15 +185,15 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
     }
 
     [Fact]
-    public async Task Gateway_FilteringOnMaskedColumn_ZeroTrust_ThrowsGatewayForbiddenException()
+    public async Task Gateway_FilteringOnMaskedColumn_ZeroTrust_ThrowsGatewayInvalidQueryException()
     {
         var (service, executor) = Gateway();
         var filter = ODataFilterParser.Parse("card_number eq '4111'", DatabaseDialect.Sqlite);
 
-        var ex = await Should.ThrowAsync<GatewayForbiddenException>(() => service.ExecuteTablePageAsync(User(), Orders,
+        var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() => service.ExecuteTablePageAsync(User(), Orders,
             new TablePageRequest(First: 10, After: 0, Filter: filter)));
 
-        ex.Message.ShouldContain("Filtering on column 'card_number' is not permitted");
+        ex.Message.ShouldContain("The column 'card_number' in '$filter' does not exist or cannot be used for filtering.");
         executor.Last.ShouldBeNull();
     }
 
@@ -206,7 +206,7 @@ INSERT INTO orders VALUES (1, 'pending', 100, '4111-1111'), (2, 'completed', 250
         var ex = await Should.ThrowAsync<GatewayInvalidQueryException>(() => service.ExecuteTablePageAsync(User(), Orders,
             new TablePageRequest(First: 10, After: 0, Filter: filter)));
 
-        ex.Message.ShouldContain("The column 'non_existent' in '$filter' does not exist.");
+        ex.Message.ShouldContain("The column 'non_existent' in '$filter' does not exist or cannot be used for filtering.");
         executor.Last.ShouldBeNull();
     }
 

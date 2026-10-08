@@ -356,23 +356,18 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     }
 
     /// <summary>
-    /// Befund 2.1: Zero-Trust filter column validation. Columns referenced in $filter must exist and be readable
+    /// Befund 2.1 & SR15-30: Zero-Trust filter column validation. Columns referenced in $filter must exist and be readable
     /// in clear text. Filtering on masked or denied columns would turn pushdown queries into an inference oracle.
+    /// Unknown and forbidden/masked columns return the exact same GatewayInvalidQueryException to prevent column existence oracles.
     /// </summary>
     private static void ValidateFilter(TableFilterClause filter, TableMetadata metadata, TableAccessDecision decision)
     {
         foreach (var colName in filter.ReferencedColumns)
         {
             var column = metadata.GetColumn(colName);
-            if (column == null)
+            if (column == null || decision.GetEffectiveColumnAccess(column.ColumnName, metadata) != ColumnAccessLevel.Clear)
             {
-                throw new GatewayInvalidQueryException($"The column '{colName}' in '$filter' does not exist.");
-            }
-
-            var access = decision.GetEffectiveColumnAccess(column.ColumnName, metadata);
-            if (access != ColumnAccessLevel.Clear)
-            {
-                throw new GatewayForbiddenException($"Filtering on column '{column.ColumnName}' is not permitted (access level: {access}).");
+                throw new GatewayInvalidQueryException($"The column '{colName}' in '$filter' does not exist or cannot be used for filtering.");
             }
         }
     }
