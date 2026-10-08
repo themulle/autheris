@@ -1093,8 +1093,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         return result;
     }
 
-    internal static bool IsHmacRule(MaskingRule rule) =>
-        rule.RuleType?.ToUpperInvariant() is "HMAC" or "HMAC_SHA256" or "HASH";
+    internal static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;
 
     /// <summary>
     /// SEC D-3: returns a tenant-scoped copy of HMAC rules and the rule itself for every other rule type.

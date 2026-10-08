@@ -182,9 +182,7 @@ public sealed partial class CatalogSchemaModel
                 var fieldType = MapDataType(col.DataType);
                 if (meta.ColumnMaskingRules != null &&
                     meta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var maskRule) &&
-                    (string.Equals(maskRule.RuleType, "HMAC", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(maskRule.RuleType, "HMAC_SHA256", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(maskRule.RuleType, "HASH", StringComparison.OrdinalIgnoreCase)))
+                    maskRule.IsHmac)
                 {
                     fieldType = CatalogFieldType.String;
                 }

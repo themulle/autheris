@@ -394,8 +394,7 @@ public static partial class TreeSqlCompiler
     private static string Echo(string? name) =>
         name != null && SafeNameRegex().IsMatch(name.Trim()) ? name.Trim() : "(invalid name)";
 
-    private static bool IsHmacRule(MaskingRule rule) =>
-        rule.RuleType?.ToUpperInvariant() is "HMAC" or "HMAC_SHA256" or "HASH";
+    private static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;
 
     private static bool IsStringType(string? dataType)
     {
