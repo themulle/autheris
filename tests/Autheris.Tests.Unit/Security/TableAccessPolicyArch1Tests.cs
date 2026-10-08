@@ -86,17 +86,6 @@ public sealed class TableAccessPolicyArch1Tests
         return cache;
     }
 
-    /// <summary>ReBAC that only knows the canonical tuple <c>table:{Domain}.{TableName}</c>.</summary>
-    private static IRebacEvaluator RebacForCanonicalObject()
-    {
-        var evaluator = Substitute.For<IRebacEvaluator>();
-        evaluator.IsEnabled.Returns(true);
-        evaluator.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns(ci => new ValueTask<RebacCheckResult>(
-                ci.Arg<RebacCheckRequest>().Object == RebacTableGate.ObjectId(Table) ? RebacCheckResult.Permitted : RebacCheckResult.Denied));
-        return evaluator;
-    }
-
     private static IRebacEvaluator RebacDenyingAll()
     {
         var evaluator = Substitute.For<IRebacEvaluator>();

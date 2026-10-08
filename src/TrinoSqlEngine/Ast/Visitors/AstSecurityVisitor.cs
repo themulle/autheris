@@ -657,14 +657,4 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
         return false;
     }
-
-    private static bool IsQuotedIdentifier(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        text = text.Trim();
-        return text.Length >= 2 &&
-               ((text[0] == '"' && text[^1] == '"') ||
-                (text[0] == '`' && text[^1] == '`') ||
-                (text[0] == '[' && text[^1] == ']'));
-    }
 }

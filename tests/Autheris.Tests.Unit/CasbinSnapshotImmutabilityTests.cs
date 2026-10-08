@@ -21,7 +21,6 @@ public sealed class CasbinSnapshotImmutabilityTests
     private static readonly TableIdentifier HrTable = new("hr", "dbo", "employees");
     private static readonly TableIdentifier SalariesTable = new("hr", "dbo", "salaries");
     private static readonly TenantId TenantA = new("tenant-a");
-    private static readonly TenantId TenantB = new("tenant-b");
 
     private static SecurityEvaluationContext CreateContext(
         TenantId tenant,

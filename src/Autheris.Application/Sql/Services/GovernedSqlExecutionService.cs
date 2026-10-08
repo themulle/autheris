@@ -561,10 +561,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                     {
                         isUsedInJoin = metadata.JoinColumnReferences.Any(jc => ReferencesColumn(jc.TableOrAlias, jc.ColumnName, col.ColumnName, target));
                     }
-                    else if (metadata.JoinConditionColumns != null && metadata.JoinConditionColumns.Contains(col.ColumnName))
-                    {
-                        isUsedInJoin = true;
-                    }
 
                     if (isUsedInJoin)
                     {

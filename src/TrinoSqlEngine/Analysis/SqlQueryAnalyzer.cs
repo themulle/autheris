@@ -11,7 +11,6 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     private readonly List<TableAccessTarget> _referencedTables = new();
     private readonly List<string> _projectedColumns = new();
     private readonly HashSet<string> _seenTableKeys = new(StringComparer.Ordinal);
-    private readonly HashSet<string> _joinConditionColumns = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<JoinColumnReference> _joinColumnReferences = new();
     private readonly List<FilterColumnReference> _filterColumnReferences = new();
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
@@ -48,7 +47,6 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             MaxSubqueryDepth: _maxSubqueryDepth,
             HasExplicitLimit: _hasExplicitLimit,
             ExplicitLimitValue: _explicitLimitValue,
-            JoinConditionColumns: new HashSet<string>(_joinConditionColumns, StringComparer.OrdinalIgnoreCase),
             FunctionCalls: _functionCalls.ToArray(),
             TableFunctionCalls: _tableFunctionCalls.ToArray(),
             HasSessionProperties: _hasSessionProperties,
@@ -63,7 +61,6 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         _referencedTables.Clear();
         _projectedColumns.Clear();
         _seenTableKeys.Clear();
-        _joinConditionColumns.Clear();
         _joinColumnReferences.Clear();
         _filterColumnReferences.Clear();
         _cteScopeStack.Clear();
@@ -273,7 +270,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
 
     public override void EnterJoinCriteria(SqlBaseParser.JoinCriteriaContext context)
     {
-        ExtractJoinColumnReferences(context, _joinColumnReferences, _joinConditionColumns);
+        ExtractJoinColumnReferences(context, _joinColumnReferences, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
     }
 
     public override void EnterComparison(SqlBaseParser.ComparisonContext context)
@@ -300,8 +297,6 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
                 {
                     _joinColumnReferences.AddRange(leftRefs);
                     _joinColumnReferences.AddRange(rightRefs);
-                    foreach (var id in leftIds) _joinConditionColumns.Add(id);
-                    foreach (var id in rightIds) _joinConditionColumns.Add(id);
                 }
             }
         }

@@ -12,7 +12,6 @@ public class ConsentResolutionTests
     private readonly TableIdentifier _testTable = new("finance", "dbo", "invoices");
     private readonly Sid _userSid = new("S-1-5-21-1001");
     private readonly Sid _groupFinance = new("S-1-5-21-2001");
-    private readonly Sid _groupManagers = new("S-1-5-21-2002");
     private readonly string _roleAnalyst = "FinanceAnalyst";
     private readonly ConsentResolutionService _service = new();
 
