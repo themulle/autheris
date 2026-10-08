@@ -22,15 +22,25 @@ public sealed class ItsmOutboxDispatcherHostedService : BackgroundService
     internal const string DispatchLockKey = "itsm:outbox:dispatch";
     internal static readonly TimeSpan DispatchLockExpiry = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// INF-4: upper bound of one ticket dispatch. A message is only started while a whole dispatch still fits into the
+    /// lock lease, so no dispatch runs after the lock expired (another instance would send the same message again).
+    /// </summary>
+    internal static readonly TimeSpan MaxDispatchDuration = TimeSpan.FromMinutes(1);
+    internal static readonly TimeSpan LockSafetyMargin = TimeSpan.FromSeconds(30);
+
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ItsmOutboxDispatcherHostedService> _logger;
     private readonly TimeSpan _pollingInterval;
+    private readonly TimeProvider _timeProvider;
 
     public ItsmOutboxDispatcherHostedService(
         IServiceProvider serviceProvider,
         ILogger<ItsmOutboxDispatcherHostedService> logger,
-        TimeSpan? pollingInterval = null)
+        TimeSpan? pollingInterval = null,
+        TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _pollingInterval = pollingInterval ?? TimeSpan.FromSeconds(5);
@@ -105,10 +115,18 @@ public sealed class ItsmOutboxDispatcherHostedService : BackgroundService
 
         _logger.LogDebug("Processing {Count} pending ITSM outbox messages.", pending.Count);
         int processedCount = 0;
+        var leaseStart = _timeProvider.GetTimestamp();
 
         foreach (var msg in pending)
         {
             if (cancellationToken.IsCancellationRequested) break;
+
+            // INF-4: stop before the next dispatch could outlive the lock lease; the rest is picked up next cycle.
+            if (dispatchLock != null && _timeProvider.GetElapsedTime(leaseStart) + MaxDispatchDuration + LockSafetyMargin > DispatchLockExpiry)
+            {
+                _logger.LogInformation("ITSM outbox dispatch lease nearly used up; remaining messages are dispatched in the next cycle.");
+                break;
+            }
 
             try
             {
@@ -124,7 +142,9 @@ public sealed class ItsmOutboxDispatcherHostedService : BackgroundService
                     continue;
                 }
 
-                var result = await dispatcher.DispatchTicketRequestAsync(ticketRequest, preferredSystem, cancellationToken).ConfigureAwait(false);
+                using var dispatchCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                dispatchCts.CancelAfter(MaxDispatchDuration);
+                var result = await dispatcher.DispatchTicketRequestAsync(ticketRequest, preferredSystem, dispatchCts.Token).ConfigureAwait(false);
                 if (result.Success && result.TicketReference != null)
                 {
                     await outboxRepo.MarkCompletedAsync(msg.Id, result.TicketReference.TicketId, cancellationToken).ConfigureAwait(false);
