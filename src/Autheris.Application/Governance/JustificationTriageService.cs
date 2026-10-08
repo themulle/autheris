@@ -51,7 +51,7 @@ public sealed class JustificationTriageService : IJustificationTriageService
         // 4. Audit & Alerting Logging
         if (triageResult.Category is JustificationCategory.Unjustified or JustificationCategory.SuspiciousExfiltration)
         {
-            _logger.LogWarning("Sicherheitswarnung: Justification für {Table} von {UserSid} als {Category} eingestuft",
+            _logger.LogWarning("Security warning: Justification for {Table} by {UserSid} classified as {Category}",
                 table, userSid, triageResult.Category);
 
             await _auditRepo.RecordAuditEventAsync(new AuditLogEntry

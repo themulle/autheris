@@ -323,7 +323,7 @@ public sealed class Phase1AndPhase2SecurityExpertTests
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
 
-        ex.Message.ShouldContain("Klartext-Passwörter sind verboten");
+        ex.Message.ShouldContain("Plaintext passwords are prohibited");
     }
 
     [Fact]
@@ -405,7 +405,7 @@ public sealed class Phase1AndPhase2SecurityExpertTests
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, env));
 
-        ex.Message.ShouldContain("ReBAC im MultiNodeClusterMode erfordert zwingend Caching.Redis.Enabled = true");
+        ex.Message.ShouldContain("ReBAC in MultiNodeClusterMode requires Caching.Redis.Enabled = true");
     }
 
     [Fact]

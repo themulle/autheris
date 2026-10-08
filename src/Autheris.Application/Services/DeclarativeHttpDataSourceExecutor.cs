@@ -60,7 +60,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         if (descriptor == null)
         {
             throw new InvalidOperationException(
-                $"Tabelle '{context.Metadata.Identifier}' ist als HttpDeclarative konfiguriert, besitzt aber keinen HttpEndpointDescriptor.");
+                $"Table '{context.Metadata.Identifier}' is configured as HttpDeclarative but has no HttpEndpointDescriptor.");
         }
 
         // Check if this execution is a batch request (e.g. an "ids" or "keys" array parameter)
@@ -313,14 +313,14 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
                 // SEC M-26: gateway-controlled parameters (tenant etc.) can never be supplied by the caller.
                 if (IsReservedParameter(k, pathReservedNames))
                 {
-                    throw new SecurityException($"Der Parameter '{k}' ist für das Gateway reserviert und darf nicht vom Aufrufer gesetzt werden.");
+                    throw new SecurityException($"Parameter '{k}' is reserved for the gateway and must not be set by the caller.");
                 }
 
                 var strVal = v?.ToString() ?? string.Empty;
                 // SEC-5: Disallow directory traversal sequences in path placeholder parameters
                 if (strVal.Contains("..") || strVal.Contains('/') || strVal.Contains('\\'))
                 {
-                    throw new System.Security.SecurityException($"Potenzieller Path-Traversal-Angriff im Parameter '{k}': Pfadtrennzeichen und '..' sind verboten.");
+                    throw new System.Security.SecurityException($"Potential path traversal attack in parameter '{k}': path separators and '..' are not allowed.");
                 }
                 expandedPath = expandedPath.Replace(placeholder, Uri.EscapeDataString(strVal), StringComparison.OrdinalIgnoreCase);
                 usedArgs.Add(k);
@@ -347,7 +347,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         if (!string.IsNullOrWhiteSpace(descriptor.TenantIdQueryParam))
         {
             var tenantClaim = ResolveTenantClaim(principal)
-                ?? throw new SecurityException($"Die HTTP-Datenquelle verlangt einen Tenant ('{descriptor.TenantIdQueryParam}'), der Aufrufer besitzt aber keinen Tenant-Claim.");
+                ?? throw new SecurityException($"The HTTP data source requires a tenant ('{descriptor.TenantIdQueryParam}'), but the caller has no tenant claim.");
             queryParams.Add($"{Uri.EscapeDataString(descriptor.TenantIdQueryParam)}={Uri.EscapeDataString(tenantClaim)}");
         }
 
@@ -476,7 +476,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
             request.Headers.Remove(descriptor.TenantIdHeaderName);
             // SEC M-26: fail-closed - never call a tenant-scoped API without the caller's tenant.
             var tenantClaim = ResolveTenantClaim(context.Principal)
-                ?? throw new SecurityException($"Die HTTP-Datenquelle verlangt einen Tenant-Header ('{descriptor.TenantIdHeaderName}'), der Aufrufer besitzt aber keinen Tenant-Claim.");
+                ?? throw new SecurityException($"The HTTP data source requires a tenant header ('{descriptor.TenantIdHeaderName}'), but the caller has no tenant claim.");
             request.Headers.TryAddWithoutValidation(descriptor.TenantIdHeaderName, tenantClaim);
         }
 

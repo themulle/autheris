@@ -21,7 +21,7 @@ public sealed class InMemoryConnectorRegistry : IAutherisConnectorRegistry
         ArgumentException.ThrowIfNullOrWhiteSpace(catalogName);
         if (!CatalogNameRegex.IsMatch(catalogName))
         {
-            throw new ArgumentException($"Ungültiger Katalogname '{catalogName}'. Nur alphanumerische Zeichen, Bindestriche, Punkte und Unterstriche sind erlaubt.", nameof(catalogName));
+            throw new ArgumentException($"Invalid catalog name '{catalogName}'. Only alphanumeric characters, hyphens, dots and underscores are allowed.", nameof(catalogName));
         }
     }
 

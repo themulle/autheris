@@ -99,10 +99,10 @@ public sealed class Round4OpenMetadataCoreTests : IDisposable
 
         var ex = Should.Throw<InvalidOperationException>(() => provider.GetSecretBytes(rawToken));
 
-        ex.Message.ShouldContain("Sicherheitsfehler");
+        ex.Message.ShouldContain("Security error");
         ex.Message.ShouldNotContain(rawToken);
         ex.Message.ShouldNotContain("r4-raw-token-value");
-        ex.Message.ShouldContain($"Länge {rawToken.Length}");
+        ex.Message.ShouldContain($"length {rawToken.Length}");
     }
 
     [Fact]

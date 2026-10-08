@@ -52,7 +52,7 @@ public class LineagePdfAndOpenLineageTests
                 "GDPR_ARTICLE_9 (Special Category: Health/Biometric/Financial Data)",
                 "PII (Personally Identifiable Information)"
             ],
-            LegalBasisNotice: "Art. 15 Abs. 1 Bst. c DSGVO"
+            LegalBasisNotice: "Art. 15(1)(c) GDPR (DSGVO)"
         );
 
         // Act

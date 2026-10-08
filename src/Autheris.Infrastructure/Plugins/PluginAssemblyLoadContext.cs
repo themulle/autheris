@@ -56,7 +56,7 @@ public sealed class PluginAssemblyLoadContext : AssemblyLoadContext
                 // loaded by path; keep the plugin directory read-only for the gateway process).
                 if (!_trustList.TryGetExpectedHash(libraryPath, out _))
                 {
-                    throw new SecurityException($"Sicherheitsfehler: Native Bibliothek '{Path.GetFileName(libraryPath)}' ist nicht in Plugins:TrustedPluginHashes verzeichnet.");
+                    throw new SecurityException($"Security error: Native library '{Path.GetFileName(libraryPath)}' is not listed in Plugins:TrustedPluginHashes.");
                 }
 
                 _trustList.VerifyFile(libraryPath);

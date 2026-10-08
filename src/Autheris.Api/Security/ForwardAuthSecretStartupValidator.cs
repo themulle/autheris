@@ -25,12 +25,12 @@ public sealed class ForwardAuthSecretStartupValidator(
 
         if (secretProvider == null)
         {
-            throw new InvalidOperationException("Sicherheitsfehler: ForwardAuth SharedSecretKeyVaultRef ist konfiguriert, aber kein IKeyVaultSecretProvider registriert.");
+            throw new InvalidOperationException("Security error: ForwardAuth SharedSecretKeyVaultRef is configured, but no IKeyVaultSecretProvider is registered.");
         }
 
         SecretKeyRequirements.EnsureMinimumLength(
             secretProvider.GetSecretBytes(forwardAuth.SharedSecretKeyVaultRef),
-            "Das ForwardAuth-Shared-Secret (SharedSecretKeyVaultRef)",
+            "The ForwardAuth shared secret (SharedSecretKeyVaultRef)",
             isDevelopment: false);
         return Task.CompletedTask;
     }

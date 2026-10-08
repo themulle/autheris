@@ -139,7 +139,7 @@ public sealed class DbtHealthExecutionMiddleware
                                     principal?.IsInRole("ClusterAdmin") == true;
 
                 var errBuilder = ErrorBuilder.New()
-                    .SetMessage($"Die angeforderte Tabelle/Modell '{modelName}' befindet sich in Quarantäne aufgrund fehlgeschlagener dbt-Tests.")
+                    .SetMessage($"The requested table/model '{modelName}' is quarantined due to failed dbt tests.")
                     .SetCode("TABLE_IN_QUARANTINE")
                     .SetExtension("table", modelName)
                     .SetExtension("dbtHealthStatus", "Quarantined");

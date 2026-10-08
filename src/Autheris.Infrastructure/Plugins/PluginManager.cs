@@ -90,7 +90,7 @@ public sealed class PluginManager : IPluginManager, IDisposable
         else if (_options?.Value.Plugins.RequireIntegrityManifest == true || !isDev)
         {
             throw new SecurityException(
-                $"Sicherheitsfehler: Für das Plugin-Verzeichnis '{fullDirectoryPath}' sind keine vertrauenswürdigen Hashes (Plugins:TrustedPluginHashes) konfiguriert. manifest.json wird nicht als Vertrauensanker akzeptiert.");
+                $"Security error: No trusted hashes (Plugins:TrustedPluginHashes) are configured for plugin directory '{fullDirectoryPath}'. manifest.json is not accepted as a trust anchor.");
         }
         else if (manifest != null)
         {

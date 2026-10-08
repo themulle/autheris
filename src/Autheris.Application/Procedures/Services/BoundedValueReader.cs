@@ -82,5 +82,5 @@ internal static class BoundedValueReader
     private static long Base64Length(long bytes) => (bytes + 2) / 3 * 4;
 
     private static Autheris.Domain.Exceptions.GatewaySecurityException TooLarge() =>
-        new("Die Antwortgröße überschreitet das konfigurierte Limit.", "RESPONSE_TOO_LARGE");
+        new("The response size exceeds the configured limit.", "RESPONSE_TOO_LARGE");
 }

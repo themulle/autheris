@@ -35,7 +35,7 @@ public static class RedisConnectionSecurity
         {
             if (secretProvider == null)
             {
-                throw new InvalidOperationException("Sicherheitsfehler: Caching.Redis.PasswordSecretRef ist gesetzt, aber kein IKeyVaultSecretProvider registriert.");
+                throw new InvalidOperationException("Security error: Caching.Redis.PasswordSecretRef is set, but no IKeyVaultSecretProvider is registered.");
             }
 
             configuration.Password = Encoding.UTF8.GetString(secretProvider.GetSecretBytes(redisOptions.PasswordSecretRef));
@@ -47,7 +47,7 @@ public static class RedisConnectionSecurity
         if (!isDevelopment && string.IsNullOrEmpty(configuration.Password))
         {
             throw new InvalidOperationException(
-                "Sicherheitsfehler: Redis ohne Authentifizierung ist außerhalb von Development nicht zulässig. Setzen Sie Caching.Redis.PasswordSecretRef oder ein Passwort im Verbindungsstring.");
+                "Security error: Redis without authentication is not allowed outside Development. Set Caching.Redis.PasswordSecretRef or a password in the connection string.");
         }
 
         // SEC H-01: transport encryption
@@ -66,7 +66,7 @@ public static class RedisConnectionSecurity
         if (!isDevelopment && !configuration.Ssl && HasNonLoopbackEndpoint(configuration))
         {
             throw new InvalidOperationException(
-                "Sicherheitsfehler: Redis-Verbindungen zu Nicht-Loopback-Hosts erfordern außerhalb von Development TLS. Setzen Sie Caching.Redis.UseTls = true (oder ssl=true im Verbindungsstring).");
+                "Security error: Redis connections to non-loopback hosts require TLS outside Development. Set Caching.Redis.UseTls = true (or ssl=true in the connection string).");
         }
 
         return configuration;
@@ -124,7 +124,7 @@ public static class RedisConnectionSecurity
             if ((normalized.Length != 40 && normalized.Length != 64) || !IsHex(normalized))
             {
                 throw new InvalidOperationException(
-                    $"Sicherheitsfehler: Ungültiger Zertifikat-Fingerabdruck in {settingName} (erwartet: SHA-1 oder SHA-256 als Hex).");
+                    $"Security error: Invalid certificate fingerprint in {settingName} (expected: SHA-1 or SHA-256 as hex).");
             }
 
             result.Add(normalized);
@@ -207,7 +207,7 @@ public static class RedisConnectionSecurity
         if (!configuration.Ssl)
         {
             throw new InvalidOperationException(
-                $"Sicherheitsfehler: {settingName} ist gesetzt, aber TLS ist für die Verbindung nicht aktiviert.");
+                $"Security error: {settingName} is set, but TLS is not enabled for the connection.");
         }
 
         configuration.CertificateValidation += CreatePinnedCertificateValidator(pins);

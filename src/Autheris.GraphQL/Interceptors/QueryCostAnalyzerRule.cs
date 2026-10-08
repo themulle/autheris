@@ -53,7 +53,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
             _onQueryTooComplex?.Invoke();
             context.ReportError(
                 ErrorBuilder.New()
-                    .SetMessage($"Die Abfrage überschreitet die maximale Anzahl von {_maxRootFields} Root-Feldern bzw. Aliasen pro Operation.")
+                    .SetMessage($"The query exceeds the maximum of {_maxRootFields} root fields or aliases per operation.")
                     .SetCode("QUERY_TOO_COMPLEX")
                     .SetExtension("maxRootFields", _maxRootFields)
                     .Build());
@@ -66,7 +66,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
             _onQueryTooComplex?.Invoke();
             context.ReportError(
                 ErrorBuilder.New()
-                    .SetMessage($"Die Abfrage überschreitet das Komplexitätsbudget von {_maxAllowedCost} (berechnete Kosten: {totalCost}).")
+                    .SetMessage($"The query exceeds the complexity budget of {_maxAllowedCost} (calculated cost: {totalCost}).")
                     .SetCode("QUERY_TOO_COMPLEX")
                     .SetExtension("calculatedCost", totalCost)
                     .SetExtension("maxAllowedCost", _maxAllowedCost)

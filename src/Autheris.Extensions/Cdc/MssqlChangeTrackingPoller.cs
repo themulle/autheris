@@ -65,7 +65,7 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
     {
         if (string.IsNullOrWhiteSpace(identifier) || !IdentifierRegex.IsMatch(identifier))
         {
-            throw new ArgumentException($"Sicherheitsfehler: Ungültiger SQL-Identifier '{identifier}'. Nur alphanumerische Zeichen und Unterstriche sind zulässig.", paramName);
+            throw new ArgumentException($"Security error: Invalid SQL identifier '{identifier}'. Only alphanumeric characters and underscores are allowed.", paramName);
         }
     }
 

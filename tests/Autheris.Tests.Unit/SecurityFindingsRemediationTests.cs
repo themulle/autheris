@@ -203,7 +203,7 @@ public class SecurityFindingsRemediationTests
         // Act & Assert
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, mockEnv));
-        ex.Message.ShouldContain("EnableTestAuthHandler darf AUSSCHLIESSLICH in der Development-Umgebung true sein");
+        ex.Message.ShouldContain("EnableTestAuthHandler may be true ONLY in the Development environment");
     }
 
     [Fact]
@@ -228,7 +228,7 @@ public class SecurityFindingsRemediationTests
         // Act & Assert: Finding 2 remediation ensures it is unconditionally forbidden
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, mockEnv));
-        ex.Message.ShouldContain("EnableTestAuthHandler darf AUSSCHLIESSLICH in der Development-Umgebung true sein");
+        ex.Message.ShouldContain("EnableTestAuthHandler may be true ONLY in the Development environment");
     }
 
     [Fact]
@@ -249,7 +249,7 @@ public class SecurityFindingsRemediationTests
         // Act & Assert
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, mockEnv));
-        ex.Message.ShouldContain("danger_allow_anonymous_access darf AUSSCHLIESSLICH in der Development-Umgebung true sein");
+        ex.Message.ShouldContain("danger_allow_anonymous_access may be true ONLY in the Development environment");
     }
 
     // =========================================================================
@@ -266,7 +266,7 @@ public class SecurityFindingsRemediationTests
         // Act & Assert
         var ex = Should.Throw<ArgumentException>(() =>
             service.AddPolicy(tenant, "attacker", "table", "read", "System.IO.File.ReadAllText(\"/etc/passwd\")", "allow"));
-        ex.Message.ShouldContain("Casbin sub_rule enthält nicht erlaubten Ausdruck");
+        ex.Message.ShouldContain("Casbin sub_rule contains disallowed expression");
     }
 
     [Fact]
@@ -707,7 +707,7 @@ public class SecurityFindingsRemediationTests
             });
             var manager = new Autheris.Infrastructure.Plugins.PluginManager(NullLogger<Autheris.Infrastructure.Plugins.PluginManager>.Instance, null, pluginOptions);
             var ex = Should.Throw<System.Security.SecurityException>(() => manager.LoadPluginsFromDirectory(tempDir));
-            ex.Message.ShouldContain("Integritätsprüfung fehlgeschlagen");
+            ex.Message.ShouldContain("Integrity check failed");
         }
         finally
         {
@@ -743,7 +743,7 @@ public class SecurityFindingsRemediationTests
 
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(async () =>
             await casbin.EvaluatePolicyAsync(context));
-        ex.Message.ShouldContain("Sicherheitsfehler");
+        ex.Message.ShouldContain("Security error");
         ex.Message.ShouldContain("department");
     }
 
@@ -786,7 +786,7 @@ public class SecurityFindingsRemediationTests
 
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv));
-        ex.Message.ShouldContain("TrustedOrigins '*' (Wildcard-CORS) ist außerhalb der Development-Umgebung aus Sicherheitsgründen (CSRF-Schutz) verboten");
+        ex.Message.ShouldContain("TrustedOrigins '*' (wildcard CORS) is prohibited outside the Development environment for security reasons (CSRF protection)");
     }
 
     [Theory]
@@ -815,7 +815,7 @@ public class SecurityFindingsRemediationTests
 
         var ex = Should.Throw<ArgumentException>(() =>
             casbin.AddPolicy(tenant, "user1", "table1", "read", longSubRule, "allow"));
-        ex.Message.ShouldContain("überschreitet die maximale Länge von 500 Zeichen");
+        ex.Message.ShouldContain("exceeds the maximum length of 500 characters");
     }
 
     [Theory]
@@ -829,7 +829,7 @@ public class SecurityFindingsRemediationTests
 
         var ex = Should.Throw<ArgumentException>(() =>
             casbin.AddPolicy(tenant, "user1", "table1", "read", illegalSubRule, "allow"));
-        ex.Message.ShouldContain("enthält nicht erlaubte Zeichen");
+        ex.Message.ShouldContain("contains disallowed characters");
     }
 
     [Fact]
@@ -961,7 +961,7 @@ public class SecurityFindingsRemediationTests
 
         var ex = Should.Throw<ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv));
-        ex.Message.ShouldContain("TrustedOrigins dürfen außerhalb von Development nur HTTPS-URLs enthalten");
+        ex.Message.ShouldContain("Outside Development, TrustedOrigins must contain only HTTPS URLs");
     }
 
     [Fact]
@@ -1030,7 +1030,7 @@ public class SecurityFindingsRemediationTests
         {
             msg.ShouldNotContain("audit-hmac-key");
         }
-        logger.Messages.ShouldContain(m => m.Contains("Referenz mit Länge 14"));
+        logger.Messages.ShouldContain(m => m.Contains("Reference with length 14"));
     }
 
     [Fact]
@@ -1049,7 +1049,7 @@ public class SecurityFindingsRemediationTests
         {
             msg.ShouldNotContain("itsm:webhook-secret:inst-xyz-987");
         }
-        logger.Messages.ShouldContain(m => m.Contains("Referenz mit Länge 32"));
+        logger.Messages.ShouldContain(m => m.Contains("Reference with length 32"));
     }
 
     private sealed class TestSecretProviderLogger : Microsoft.Extensions.Logging.ILogger<DefaultEnvironmentSecretProvider>
@@ -1184,8 +1184,8 @@ public class SecurityFindingsRemediationTests
 
         var ex = Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
             GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
-        ex.Message.ShouldContain("Casbin Model-Datei");
-        ex.Message.ShouldContain("wurde nicht gefunden");
+        ex.Message.ShouldContain("Casbin model file");
+        ex.Message.ShouldContain("was not found");
     }
 
     [Fact]
@@ -1219,7 +1219,7 @@ public class SecurityFindingsRemediationTests
 
             var ex = Should.Throw<System.ComponentModel.DataAnnotations.ValidationException>(() =>
                 GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, devEnv));
-            ex.Message.ShouldContain("enthält keine gültigen 'p'-Regeln");
+            ex.Message.ShouldContain("contains no valid 'p' rules");
         }
         finally
         {

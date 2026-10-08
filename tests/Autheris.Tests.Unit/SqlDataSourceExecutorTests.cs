@@ -91,7 +91,7 @@ public sealed class SqlDataSourceExecutorTests
         var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance);
 
         var ex = await Should.ThrowAsync<SecurityException>(() => executor.ExecuteAsync(context));
-        ex.Message.ShouldContain("Zero-Trust-Verletzung");
+        ex.Message.ShouldContain("Zero-Trust violation");
         ex.Message.ShouldContain("salary");
     }
 
@@ -115,7 +115,7 @@ public sealed class SqlDataSourceExecutorTests
         var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance);
 
         var ex = await Should.ThrowAsync<SecurityException>(() => executor.ExecuteAsync(context));
-        ex.Message.ShouldContain("Zero-Trust-Verletzung");
+        ex.Message.ShouldContain("Zero-Trust violation");
         ex.Message.ShouldContain("ssn");
     }
 
@@ -178,7 +178,7 @@ public sealed class SqlDataSourceExecutorTests
         var executor = new SqlDataSourceExecutor(connFactory, options, NullLogger<SqlDataSourceExecutor>.Instance);
 
         var ex = await Should.ThrowAsync<SecurityException>(() => executor.ExecuteAsync(context));
-        ex.Message.ShouldContain("Zero-Trust-Verletzung");
+        ex.Message.ShouldContain("Zero-Trust violation");
         ex.Message.ShouldContain("salary");
 
         // Verify that no database connection was ever opened due to early security rejection
@@ -243,7 +243,7 @@ public sealed class SqlDataSourceExecutorTests
         var ex = Should.Throw<SecurityException>(() =>
             SqlDataSourceExecutor.NormalizeReadValue(oversized, "huge_blob"));
 
-        ex.Message.ShouldContain("überschreitet die zulässige Maximalgröße");
+        ex.Message.ShouldContain("exceeds the maximum allowed size");
         ex.Message.ShouldContain("huge_blob");
     }
 
@@ -330,7 +330,7 @@ public sealed class SqlDataSourceExecutorTests
         var executor = new SqlDataSourceExecutor(logger: NullLogger<SqlDataSourceExecutor>.Instance);
 
         var ex = await Should.ThrowAsync<SecurityException>(() => executor.ExecuteAsync(context));
-        ex.Message.ShouldContain("Zero-Trust-Verletzung");
+        ex.Message.ShouldContain("Zero-Trust violation");
         ex.Message.ShouldContain("Casbin ABAC Policy Deny");
     }
 

@@ -218,6 +218,6 @@ public class TableDownstreamConsumersAndGdprTests
         docRecipient.MaskingRuleApplied.ShouldBe("diagnosis_code: REDACT");
 
         // Legal basis notice
-        report.LegalBasisNotice.ShouldContain("Art. 15 Abs. 1 Bst. c DSGVO");
+        report.LegalBasisNotice.ShouldContain("Art. 15(1)(c) GDPR (DSGVO)");
     }
 }
