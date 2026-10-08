@@ -164,8 +164,9 @@ public sealed class ArrowFlightSqlSecurityTests
             _options,
             NullLogger<ArrowFlightSqlServer>.Instance);
 
+        // Wunsch 9: a GovernanceAdmin sees the whole catalog of the tenant, but still never another tenant's tables
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Name, "user"), new Claim(ClaimTypes.Role, "Analyst")], "Bearer"));
+            [new Claim(ClaimTypes.Name, "user"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "Bearer"));
 
         // Act
         var tables = await server.GetTablesAsync(principal, new TenantId("tenant-1"));

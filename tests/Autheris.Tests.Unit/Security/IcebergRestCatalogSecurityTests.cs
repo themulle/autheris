@@ -162,7 +162,10 @@ public sealed class IcebergRestCatalogSecurityTests
             NullLogger<IcebergRestCatalogFederationService>.Instance);
 
         // Act
-        var tables = await catalogService.ListTablesAsync("tenant-1", "raw");
+        // Wunsch 9: a GovernanceAdmin sees the whole catalog of the tenant, but still never another tenant's tables
+        var admin = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.Name, "admin@corp.com"), new Claim(ClaimTypes.Role, "GovernanceAdmin") }, "Bearer"));
+        var tables = await catalogService.ListTablesAsync("tenant-1", "raw", admin);
 
         // Assert (SEC H-3: Only tenant-1 tables are returned, never tenant-2)
         tables.Count.ShouldBe(2);
