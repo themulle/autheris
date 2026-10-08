@@ -248,6 +248,7 @@ public sealed class ODataEndpointsTests
     [Theory]
     [InlineData(StatusCodes.Status429TooManyRequests, "TooManyRequests", 2)]
     [InlineData(StatusCodes.Status503ServiceUnavailable, "ServiceUnavailable", 5)]
+    [InlineData(StatusCodes.Status504GatewayTimeout, "ExecutionTimeout", 5)]
     public async Task HandleEntitySetRequestAsync_RetryAfter_IsSetFromHandlerResult(int statusCode, string errorCode, int retryAfter)
     {
         var context = CreateHttpContext();

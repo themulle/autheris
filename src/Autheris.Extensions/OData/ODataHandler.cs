@@ -27,8 +27,9 @@ public sealed partial class ODataHandler(
     /// </summary>
     public const int MaxSkip = 100_000;
 
-    /// <summary>O7: Retry-After for 503 responses (deadlock, failover, exhausted pool).</summary>
+    /// <summary>O7: Retry-After for 503/504 responses (deadlock, failover, exhausted pool, statement timeout).</summary>
     private const int UnavailableRetryAfterSeconds = 5;
+    private const int TimeoutRetryAfterSeconds = 5;
 
     // G3 / RR-L3: detailed denial and not-found messages are only returned in Development (fail-closed when unknown).
     private readonly bool _verboseErrors = string.Equals(environment?.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
@@ -280,13 +281,7 @@ public sealed partial class ODataHandler(
         catch (Exception ex) when (DataAccessErrorClassifier.Classify(ex) == DataAccessErrorKind.Timeout)
         {
             _logger.LogWarning(ex, "OData query for {Table} timed out.", table);
-            return new ODataQueryResult(
-                Success: false,
-                StatusCode: 504,
-                Payload: ODataResponseFormatter.FormatErrorResponse("ExecutionTimeout", "The query exceeded the execution time limit. Narrow the query or check database locks."),
-                ErrorCode: "ExecutionTimeout",
-                ErrorMessage: "The query exceeded the execution time limit."
-            );
+            return Error(504, "ExecutionTimeout", "The query exceeded the execution time limit. Narrow the query or check database locks.", TimeoutRetryAfterSeconds);
         }
         catch (Exception ex) when (DataAccessErrorClassifier.Classify(ex) == DataAccessErrorKind.Unavailable)
         {

@@ -267,5 +267,114 @@ public sealed class ODataHardeningTests
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
             Arg.Any<CancellationToken>());
     }
+
+    // ==============================================================
+    // O7: Timeout (504) and Unavailable (503) errors with Retry-After
+    // ==============================================================
+
+    private sealed class FakeDbException(int number, string message) : System.Data.Common.DbException(message)
+    {
+        public int Number { get; } = number;
+    }
+
+    [Theory]
+    [InlineData(-2, "Execution Timeout Expired. The timeout period elapsed prior to completion.")]
+    public async Task O7_ODataHandler_TimeoutError_Returns504WithRetryAfterAndCleanJson(int number, string internalDbMessage)
+    {
+        var execService = Substitute.For<IGatewayExecutionService>();
+        execService.ExecuteTableQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
+            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
+            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(_ =>
+                throw new FakeDbException(number, internalDbMessage));
+
+        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+
+        var result = await handler.ExecuteEntitySetQueryAsync(
+            CreateUser(),
+            "http://localhost/odata/v4",
+            Table,
+            top: 10,
+            skip: 0,
+            select: null,
+            includeCount: false,
+            headers: null);
+
+        result.Success.ShouldBeFalse();
+        result.StatusCode.ShouldBe(StatusCodes.Status504GatewayTimeout);
+        result.ErrorCode.ShouldBe("ExecutionTimeout");
+        result.RetryAfterSeconds.ShouldBe(5);
+
+        // Clean JSON without internal database details / stacktrace
+        var json = JsonSerializer.Serialize(result.Payload);
+        json.ShouldContain("ExecutionTimeout");
+        json.ShouldNotContain(internalDbMessage);
+        json.ShouldNotContain("FakeDbException");
+        json.ShouldNotContain("Stack");
+    }
+
+    [Theory]
+    [InlineData(1205, "Transaction was deadlocked on lock resources with another process.")]
+    [InlineData(40613, "Database 'lwetem_prod' on server is not currently available.")]
+    public async Task O7_ODataHandler_UnavailableError_Returns503WithRetryAfterAndCleanJson(int number, string internalDbMessage)
+    {
+        var execService = Substitute.For<IGatewayExecutionService>();
+        execService.ExecuteTableQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
+            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
+            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(_ =>
+                throw new FakeDbException(number, internalDbMessage));
+
+        var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
+
+        var result = await handler.ExecuteEntitySetQueryAsync(
+            CreateUser(),
+            "http://localhost/odata/v4",
+            Table,
+            top: 10,
+            skip: 0,
+            select: null,
+            includeCount: false,
+            headers: null);
+
+        result.Success.ShouldBeFalse();
+        result.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+        result.ErrorCode.ShouldBe("ServiceUnavailable");
+        result.RetryAfterSeconds.ShouldBe(5);
+
+        // Clean JSON without internal database details / stacktrace
+        var json = JsonSerializer.Serialize(result.Payload);
+        json.ShouldContain("ServiceUnavailable");
+        json.ShouldNotContain(internalDbMessage);
+        json.ShouldNotContain("FakeDbException");
+        json.ShouldNotContain("Stack");
+    }
+
+    [Fact]
+    public async Task O7_Endpoint_Propagates504WithRetryAfterHeader()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Scheme = "http";
+        context.Request.Host = new HostString("localhost", 8080);
+        context.Request.Path = "/odata/v4/sales/dbo/invoices";
+        context.User = CreateUser();
+
+        var payload = ODataResponseFormatter.FormatErrorResponse("ExecutionTimeout", "The query exceeded the execution time limit.");
+        var handler = Substitute.For<IODataHandler>();
+        handler.ExecuteEntitySetQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(),
+            Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<bool>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new ODataQueryResult(false, StatusCodes.Status504GatewayTimeout, payload, "ExecutionTimeout", "The query exceeded the execution time limit.", RetryAfterSeconds: 5)));
+
+        var result = await ODataEndpoints.HandleEntitySetRequestAsync("sales", "dbo", "invoices", handler, context);
+
+        context.Response.Headers.RetryAfter.ToString().ShouldBe("5");
+        var statusResult = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        statusResult!.StatusCode.ShouldBe(StatusCodes.Status504GatewayTimeout);
+    }
 }
+
 
