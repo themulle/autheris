@@ -197,7 +197,7 @@ public sealed partial class ODataHandler(
             (rows, decision) = await _executionService.ExecuteTableQueryAsync(
                 principal: principal,
                 table: table,
-                first: effectiveTop,
+                first: effectiveTop + 1,
                 after: effectiveSkip,
                 queryArguments: null,
                 requestedFields: requestedFields,
@@ -317,14 +317,38 @@ public sealed partial class ODataHandler(
             );
         }
 
+        string? nextLink = null;
+        if (rows.Count > effectiveTop)
+        {
+            nextLink = BuildNextLink(serviceRootUrl, table, effectiveSkip + effectiveTop, top, select);
+            rows = rows.Take(effectiveTop).ToList();
+        }
+
         int? totalCount = includeCount ? rows.Count : null;
-        var payload = ODataResponseFormatter.FormatEntitySetResponse(serviceRootUrl, table, rows, totalCount);
+        var payload = ODataResponseFormatter.FormatEntitySetResponse(serviceRootUrl, table, rows, totalCount, nextLink);
 
         return new ODataQueryResult(
             Success: true,
             StatusCode: 200,
             Payload: payload
         );
+    }
+
+    private static string BuildNextLink(string serviceRootUrl, TableIdentifier table, int nextSkip, int? top, string? select)
+    {
+        var cleanRoot = serviceRootUrl.TrimEnd('/');
+        var sb = new System.Text.StringBuilder();
+        sb.Append(cleanRoot).Append('/').Append(table.Domain).Append('/').Append(table.Schema).Append('/').Append(table.TableName);
+        sb.Append("?$skip=").Append(nextSkip);
+        if (top.HasValue)
+        {
+            sb.Append("&$top=").Append(top.Value);
+        }
+        if (!string.IsNullOrWhiteSpace(select))
+        {
+            sb.Append("&$select=").Append(Uri.EscapeDataString(select));
+        }
+        return sb.ToString();
     }
 
     private static ODataQueryResult Error(int statusCode, string errorCode, string message, int? retryAfterSeconds = null) =>

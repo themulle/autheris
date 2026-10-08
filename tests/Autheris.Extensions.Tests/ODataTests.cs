@@ -233,13 +233,69 @@ public sealed class ODataTests
         await execService.Received().ExecuteTableQueryAsync(
             Arg.Any<ClaimsPrincipal?>(),
             Arg.Is<TableIdentifier>(t => t.TableName == "invoices"),
-            first: 50,
+            first: 51,
             after: 0,
             queryArguments: null,
             requestedFields: Arg.Is<IReadOnlyList<string>?>(f => f != null && f.SequenceEqual(new[] { "id", "customer", "amount" })),
             requestHeaders: null,
             ct: Arg.Any<CancellationToken>()
         );
+    }
+
+    [Fact]
+    public async Task ODataHandler_ExecuteEntitySetQueryAsync_WhenMoreRowsExistThanTop_EmitsNextLink()
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var execService = Substitute.For<IGatewayExecutionService>();
+        var logger = NullLogger<ODataHandler>.Instance;
+
+        var sampleRows = new List<IReadOnlyDictionary<string, object?>>
+        {
+            new Dictionary<string, object?> { ["id"] = 1, ["customer"] = "Customer A" },
+            new Dictionary<string, object?> { ["id"] = 2, ["customer"] = "Customer B" },
+            new Dictionary<string, object?> { ["id"] = 3, ["customer"] = "Customer C" }
+        };
+
+        var decision = TableAccessDecision.Allowed(
+            new TableIdentifier("sales", "dbo", "invoices"),
+            new Dictionary<string, ColumnAccessLevel>(),
+            hasUnconstrainedColumnAllow: true
+        );
+
+        execService.ExecuteTableQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(),
+            Arg.Any<TableIdentifier>(),
+            Arg.Any<int?>(),
+            Arg.Any<int?>(),
+            Arg.Any<IReadOnlyDictionary<string, object?>?>(),
+            Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>((sampleRows, decision)));
+
+        var handler = new ODataHandler(metadataRepo, execService, logger);
+
+        var result = await handler.ExecuteEntitySetQueryAsync(
+            principal: null,
+            serviceRootUrl: "https://gateway/odata/v4",
+            table: new TableIdentifier("sales", "dbo", "invoices"),
+            top: 2,
+            skip: 0,
+            select: "id,customer",
+            includeCount: false,
+            headers: null
+        );
+
+        result.Success.ShouldBeTrue();
+        result.StatusCode.ShouldBe(200);
+
+        var payload = result.Payload.ShouldBeOfType<Dictionary<string, object?>>();
+        var rows = (payload["value"] as System.Collections.IEnumerable)?.Cast<object?>().ToList();
+        rows.ShouldNotBeNull();
+        rows.Count.ShouldBe(2);
+
+        payload.ShouldContainKey("@odata.nextLink");
+        payload["@odata.nextLink"]!.ToString().ShouldBe("https://gateway/odata/v4/sales/dbo/invoices?$skip=2&$top=2&$select=id%2Ccustomer");
     }
 
     [Fact]
@@ -529,7 +585,7 @@ public sealed class ODataTests
         await execService.Received().ExecuteTableQueryAsync(
             Arg.Any<ClaimsPrincipal?>(),
             Arg.Any<TableIdentifier>(),
-            first: 100,
+            first: 101,
             after: 0,
             queryArguments: null,
             requestedFields: null,
@@ -579,7 +635,7 @@ public sealed class ODataTests
         await execService.Received().ExecuteTableQueryAsync(
             Arg.Any<ClaimsPrincipal?>(),
             Arg.Any<TableIdentifier>(),
-            first: 1000,
+            first: 1001,
             after: 10,
             queryArguments: null,
             requestedFields: null,
