@@ -57,7 +57,7 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
   - Dynamic schema generation and type projection driven by the active governance catalog.
   - Incremental data delivery via `@defer` and `@stream` ([`F-PERF-12`](docs/features/f-perf-12-incremental-delivery.md)) to dramatically reduce Time-to-First-Byte (TTFB) for large payloads.
   - GraphQL-to-SQL AST Single-Query Compiler ([`F-PERF-09`](docs/features/f-perf-09-single-query-pushdown.md)): Compiles deeply nested GraphQL selections directly into a single optimized SQL statement with relational `JOIN`s, eliminating N+1 roundtrips.
-  - Multi-Stage Pushdown Cascades & Cross-Domain Joins ([`F-GOV-06`](docs/features/f-gov-06-cross-domain-joins.md)): Cross-domain joins across heterogeneous data sources with automated split execution.
+  - Cross-source joins run through the DuckDB OLAP endpoint; the multi-stage pushdown design ([`F-GOV-06`](docs/features/f-gov-06-cross-domain-joins.md)) is not implemented.
   - Dynamic Schema Contracts & Tag-Based Projection via `@tag` ([`F-GOV-08`](docs/features/f-gov-08-schema-contracts-tag-projection.md)).
   - OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing ([`F-OPEN-01`](docs/features/f-open-01-openschema-catalog-slicing.md)).
 - **Governed WebSQL Engine ([`F-DATA-02`](docs/features/f-data-02-governed-websql.md))**:
