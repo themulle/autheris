@@ -130,6 +130,23 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         var approver1 = new Sid("S-1-5-21-APP1");
         var approver2 = new Sid("S-1-5-21-APP2");
 
+        await using (var conn = new NpgsqlConnection(_container!.GetConnectionString()))
+        {
+            await conn.OpenAsync();
+            await using var roleCmd = new NpgsqlCommand(@"
+                INSERT INTO ROLES (id, role_name, description) VALUES (@rid, 'GovernanceAdmin', 'Governance Administrator')
+                ON CONFLICT (role_name) DO NOTHING;
+                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
+                SELECT @m1, id, 'User', 'S-1-5-21-APP1' FROM ROLES WHERE role_name = 'GovernanceAdmin';
+                INSERT INTO ROLE_MEMBERS (id, role_id, member_type, member_sid)
+                SELECT @m2, id, 'User', 'S-1-5-21-APP2' FROM ROLES WHERE role_name = 'GovernanceAdmin';
+            ", conn);
+            roleCmd.Parameters.AddWithValue("@rid", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@m1", Guid.NewGuid().ToString());
+            roleCmd.Parameters.AddWithValue("@m2", Guid.NewGuid().ToString());
+            await roleCmd.ExecuteNonQueryAsync();
+        }
+
         var step1 = await repo.ApproveConsentRequestStepAsync(request.Id, approver1);
         step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
 

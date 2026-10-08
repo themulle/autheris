@@ -48,6 +48,21 @@ public sealed class ODataEndpointsTests
             Arg.Any<string?>(),
             Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(result));
+
+        handler.ExecuteEntitySetQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(),
+            Arg.Any<string>(),
+            Arg.Any<TableIdentifier>(),
+            Arg.Any<int?>(),
+            Arg.Any<int?>(),
+            Arg.Any<string?>(),
+            Arg.Any<bool>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(result));
+
         return handler;
     }
 
@@ -119,14 +134,15 @@ public sealed class ODataEndpointsTests
 
         await handler.Received().ExecuteEntitySetQueryAsync(
             Arg.Any<ClaimsPrincipal?>(),
-            serviceRootUrl: "http://localhost:8080/odata/v4",
+            serviceRootUrl: Arg.Is("http://localhost:8080/odata/v4"),
             table: Arg.Is<TableIdentifier>(t => t.Domain == "sales" && t.Schema == "dbo" && t.TableName == "invoices"),
-            top: 25,
-            skip: 50,
-            select: null,
-            includeCount: false,
+            top: Arg.Is<int?>(25),
+            skip: Arg.Is<int?>(50),
+            select: Arg.Is<string?>(x => x == null),
+            includeCount: Arg.Is(false),
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-            orderBy: null,
+            orderBy: Arg.Is<string?>(x => x == null),
+            filter: Arg.Is<string?>(x => x == null),
             Arg.Any<CancellationToken>()
         );
     }
@@ -143,12 +159,13 @@ public sealed class ODataEndpointsTests
             Arg.Any<ClaimsPrincipal?>(),
             Arg.Any<string>(),
             Arg.Any<TableIdentifier>(),
-            top: null,
-            skip: null,
-            select: "id,customer,amount",
-            includeCount: false,
+            top: Arg.Is<int?>(x => x == null),
+            skip: Arg.Is<int?>(x => x == null),
+            select: Arg.Is("id,customer,amount"),
+            includeCount: Arg.Is(false),
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-            orderBy: null,
+            orderBy: Arg.Is<string?>(x => x == null),
+            filter: Arg.Is<string?>(x => x == null),
             Arg.Any<CancellationToken>()
         );
     }
@@ -175,6 +192,7 @@ public sealed class ODataEndpointsTests
             includeCount: expectedCount,
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
             Arg.Any<string?>(),
+            Arg.Any<string?>(),
             Arg.Any<CancellationToken>()
         );
     }
@@ -195,16 +213,15 @@ public sealed class ODataEndpointsTests
         handler.DidNotReceive().ExecuteEntitySetQueryAsync(
             Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(),
             Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<bool>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
 
     [Theory]
-    [InlineData("?$filter=amount gt 1000")]
     [InlineData("?$expand=client")]
     [InlineData("?$search=crane")]
     [InlineData("?$apply=aggregate(ts with max as m)")]
     [InlineData("?$compute=a add b as c")]
     [InlineData("?$skiptoken=abc")]
-    [InlineData("?$FILTER=amount gt 1")]
+    [InlineData("?$deltatoken=abc")]
     public async Task HandleEntitySetRequestAsync_UnsupportedSystemQueryOption_Returns501(string queryString)
     {
         var handler = CreateMockHandler(new ODataQueryResult(true, 200, new object()));
@@ -282,6 +299,7 @@ public sealed class ODataEndpointsTests
             Arg.Any<string?>(),
             Arg.Any<bool>(),
             headers: Arg.Is<IReadOnlyDictionary<string, string[]>?>(h => h != null && h.ContainsKey("X-Custom-Tenant") && h["X-Custom-Tenant"].Contains("tenant_123")),
+            Arg.Any<string?>(),
             Arg.Any<string?>(),
             Arg.Any<CancellationToken>()
         );
@@ -423,6 +441,7 @@ public sealed class ODataEndpointsTests
             Arg.Any<string?>(),
             Arg.Any<bool>(),
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
             Arg.Any<string?>(),
             Arg.Any<CancellationToken>()
         );

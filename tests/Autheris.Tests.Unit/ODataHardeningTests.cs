@@ -351,7 +351,7 @@ public sealed class ODataHardeningTests
         handler.ExecuteEntitySetQueryAsync(
             Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(),
             Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<bool>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new ODataQueryResult(false, StatusCodes.Status504GatewayTimeout, payload, "ExecutionTimeout", "The query exceeded the execution time limit.", RetryAfterSeconds: 5)));
 
         var result = await ODataEndpoints.HandleEntitySetRequestAsync("sales", "dbo", "invoices", handler, context);

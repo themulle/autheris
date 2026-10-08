@@ -998,6 +998,21 @@ public sealed class ParquetOutputNegotiationTests
                 Arg.Any<string?>(),
                 Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(result));
+
+        handler.ExecuteEntitySetQueryAsync(
+                Arg.Any<ClaimsPrincipal?>(),
+                Arg.Any<string>(),
+                Arg.Any<TableIdentifier>(),
+                Arg.Any<int?>(),
+                Arg.Any<int?>(),
+                Arg.Any<string?>(),
+                Arg.Any<bool>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(result));
+
         return handler;
     }
 
