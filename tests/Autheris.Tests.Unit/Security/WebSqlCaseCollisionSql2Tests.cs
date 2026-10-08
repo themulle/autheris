@@ -107,15 +107,37 @@ public sealed class WebSqlCaseCollisionSql2Tests
         sql.ShouldContain("tenant_id = 'tenant_a'");
     }
     // SQL-5: the catalog part of a 3-part name was only checked against the logical data source name but emitted
-    // verbatim. On SQL Server it names a database, so a data source named like another database reached that one.
-    [Theory]
-    [InlineData("SELECT id FROM default.dbo.Orders")]
-    [InlineData("SELECT id FROM otherdb.dbo.Orders")]
-    public async Task SqlServer_ThreePartName_IsRejected(string sql)
+    // SQ-09 / SQL-5 / Trino Compatibility: In Trino queries, 3-part names (catalog.schema.table) are allowed
+    // when the catalog matches the data source. The rewriter strips the catalog prefix when generating SQL Server
+    // SQL ([dbo].[Orders]) so no cross-database reference occurs. Mismatched or unallowed catalogs remain rejected.
+    [Fact]
+    public async Task SqlServer_MatchingCatalog_IsAllowedAndCatalogIsStripped()
+    {
+        var service = CreateService(CreateTable("dbo", "Orders", "SqlServer"));
+
+        var sql = await service.RewriteSqlAsync("SELECT id FROM default.dbo.Orders", CreateUser(), new TenantId(Tenant));
+
+        sql.ShouldContain("tenant_id = 'tenant_a'");
+        sql.ShouldNotContain("default.dbo.Orders");
+    }
+
+    [Fact]
+    public async Task SqlServer_MismatchedCatalog_IsRejected()
     {
         var service = CreateService(CreateTable("dbo", "Orders", "SqlServer"));
 
         await Should.ThrowAsync<WebSqlPolicyException>(() =>
-            service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant)));
+            service.RewriteSqlAsync("SELECT id FROM otherdb.dbo.Orders", CreateUser(), new TenantId(Tenant)));
+    }
+
+    [Fact]
+    public async Task SqlServer_CrossCatalogQuery_IsRejected()
+    {
+        var service = CreateService(CreateTable("dbo", "Orders", "SqlServer"));
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT a.id FROM cat1.dbo.Orders a JOIN cat2.dbo.Orders b ON a.id = b.id", CreateUser(), new TenantId(Tenant)));
+
+        ex.Message.ShouldContain("Cross-catalog");
     }
 }

@@ -139,4 +139,50 @@ public static class SqlIdentifierHelper
         }
         return string.Join(".", parts);
     }
+
+    /// <summary>
+    /// Strips the catalog part from a 3-part qualified table name (e.g. "catalog.schema.table" -> "schema.table",
+    /// "\"catalog\".\"schema\".\"table\"" -> "\"schema\".\"table\"").
+    /// Leaves 1-part and 2-part table names unchanged.
+    /// </summary>
+    public static string StripCatalogPrefix(string rawTableName)
+    {
+        if (string.IsNullOrWhiteSpace(rawTableName)) return rawTableName;
+
+        var parts = SplitDottedParts(rawTableName);
+        if (parts.Count == 3)
+        {
+            return rawTableName[parts[0].Length..].TrimStart('.');
+        }
+
+        return rawTableName;
+    }
+
+    private static System.Collections.Generic.List<string> SplitDottedParts(string text)
+    {
+        var parts = new System.Collections.Generic.List<string>(3);
+        int start = 0;
+        bool inDoubleQuotes = false;
+        bool inBackticks = false;
+        bool inBrackets = false;
+
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c == '"' && !inBackticks && !inBrackets) inDoubleQuotes = !inDoubleQuotes;
+            else if (c == '`' && !inDoubleQuotes && !inBrackets) inBackticks = !inBackticks;
+            else if (c == '[' && !inDoubleQuotes && !inBackticks) inBrackets = true;
+            else if (c == ']' && inBrackets) inBrackets = false;
+            else if (c == '.' && !inDoubleQuotes && !inBackticks && !inBrackets)
+            {
+                parts.Add(text[start..i]);
+                start = i + 1;
+            }
+        }
+        if (start <= text.Length)
+        {
+            parts.Add(text[start..]);
+        }
+        return parts;
+    }
 }

@@ -201,7 +201,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             case WildcardSelectItem wildcard:
                 if (wildcard.Qualifier != null)
                 {
-                    FormatQualifiedName(ref builder, wildcard.Qualifier, context);
+                    FormatTableName(ref builder, wildcard.Qualifier, context);
                     builder.Append(".*");
                 }
                 else
@@ -219,7 +219,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         switch (source)
         {
             case NamedTableSource named:
-                FormatQualifiedName(ref builder, named.Name, context);
+                FormatTableName(ref builder, named.Name, context);
                 if (named.Alias != null)
                 {
                     builder.Append(TableAliasKeyword);
@@ -320,7 +320,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
     protected virtual void GenerateTableQueryBody(TableQueryBody table, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
         builder.Append("TABLE ");
-        FormatQualifiedName(ref builder, table.TableName, context);
+        FormatTableName(ref builder, table.TableName, context);
     }
 
     protected virtual void GenerateOrderBy(OrderByClause orderBy, ref ValueStringBuilder builder, SqlEmitterContext context)
@@ -342,7 +342,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
     protected virtual void GenerateInsert(InsertStatement insert, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
         builder.Append("INSERT INTO ");
-        FormatQualifiedName(ref builder, insert.TargetTable.Name, context);
+        FormatTableName(ref builder, insert.TargetTable.Name, context);
         if (insert.Columns != null && insert.Columns.Count > 0)
         {
             builder.Append(" (");
@@ -360,7 +360,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
     protected virtual void GenerateUpdate(UpdateStatement update, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
         builder.Append("UPDATE ");
-        FormatQualifiedName(ref builder, update.TargetTable.Name, context);
+        FormatTableName(ref builder, update.TargetTable.Name, context);
         builder.Append(" SET ");
         for (int i = 0; i < update.Assignments.Count; i++)
         {
@@ -383,7 +383,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
     protected virtual void GenerateDelete(DeleteStatement delete, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
         builder.Append("DELETE FROM ");
-        FormatQualifiedName(ref builder, delete.TargetTable.Name, context);
+        FormatTableName(ref builder, delete.TargetTable.Name, context);
         if (delete.Where != null)
         {
             builder.Append(" WHERE ");
@@ -726,9 +726,24 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     public virtual void FormatQualifiedName(ref ValueStringBuilder builder, SqlQualifiedName name, SqlEmitterContext context)
     {
-        for (int i = 0; i < name.Parts.Count; i++)
+        int startIndex = name.Parts.Count == 4 ? 1 : 0;
+        for (int i = startIndex; i < name.Parts.Count; i++)
         {
-            if (i > 0) builder.Append('.');
+            if (i > startIndex) builder.Append('.');
+            FormatIdentifier(ref builder, name.Parts[i], context);
+        }
+    }
+
+    /// <summary>
+    /// Emits a table reference for the backend target dialect. If the table reference is a 3-part name
+    /// (catalog.schema.table), the catalog prefix is stripped to emit only schema.table.
+    /// </summary>
+    public virtual void FormatTableName(ref ValueStringBuilder builder, SqlQualifiedName name, SqlEmitterContext context)
+    {
+        int startIndex = name.Parts.Count == 3 ? 1 : 0;
+        for (int i = startIndex; i < name.Parts.Count; i++)
+        {
+            if (i > startIndex) builder.Append('.');
             FormatIdentifier(ref builder, name.Parts[i], context);
         }
     }

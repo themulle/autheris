@@ -751,6 +751,61 @@ If any mandatory probe (M1–M8) or, when W1 is supported, any wildcard safety p
 
 ---
 
+### 2.19 `WebSql` (Governed SQL & Trino REST Protocol)
+
+Autheris bietet eine integrierte, abgesicherte WebSQL-Schnittstelle, die 100% kompatibel zur Trino/Presto-SQL-Syntax und dem nativen Trino REST Client-Protokoll ist. Abfragen können über Standard-HTTP/HTTPS abgesetzt werden, ohne Datenbank-Ports nach außen zu öffnen.
+
+| Eigenschaft | Typ | Standard | Beschreibung |
+| :--- | :--- | :--- | :--- |
+| `WebSql:Enabled` | `bool` | `true` | Aktiviert die WebSQL- und Trino-Statement-Endpunkte. |
+| `WebSql:DefaultDataSourceName` | `string` | `"default"` | Standard-Datenquelle, wenn kein Catalog/DataSource explizit angegeben ist. |
+| `WebSql:AllowedDataSources` | `string[]` | `[]` | Liste global freigegebener Datenquellen für WebSQL-Abfragen. |
+| `WebSql:TenantDataSourceAllowlist` | `Dictionary<string, string[]>` | `{}` | Mandantenspezifische Einschränkung erlaubter Datenquellen. |
+| `WebSql:MaxResultRows` | `int` | `5000` | Maximale Zeilenanzahl bei synchronen Abfragen. |
+| `WebSql:ExecutionTimeoutSeconds` | `int` | `30` | Maximaler Timeout für die Abfrageausführung im Backend. |
+| `WebSql:AllowDml` | `bool` | `false` | Erlaubt schreibende Operationen (`INSERT`, `UPDATE`, `DELETE`). |
+| `WebSql:DmlWriterRoles` | `string[]` | `[]` | Rollen, die DML ausführen dürfen (Pflicht, wenn `AllowDml = true`). |
+| `WebSql:MaxAffectedRows` | `long` | `1000` | Maximal erlaubte Zeilenanzahl bei DML; Überschreitung triggert automatischen Rollback. |
+| `WebSql:RejectUnfilteredDml` | `bool` | `true` | Verhindert ungefilterte `UPDATE`/`DELETE`-Statements (`WHERE 1=1`, `WHERE true`). |
+
+```json
+"WebSql": {
+  "Enabled": true,
+  "DefaultDataSourceName": "default",
+  "AllowedDataSources": ["sales", "finance", "analytics"],
+  "MaxResultRows": 5000,
+  "ExecutionTimeoutSeconds": 30,
+  "AllowDml": false,
+  "DmlWriterRoles": ["DatabaseOperator"],
+  "MaxAffectedRows": 1000,
+  "RejectUnfilteredDml": true
+}
+```
+
+#### Trino REST Client Protokoll (`/v1/statement`) & `wait_timeout`
+
+Autheris unterstützt das native Trino REST Client Protokoll, womit Standard-Trino-Tools (Trino CLI, Python `trino-python-client`, DBeaver, Apache Superset) direkt angebunden werden können:
+
+- **Endpunkte:**
+  - `POST /v1/statement` (oder `POST /api/v1/sql`): Nimmt die Abfrage im Request-Body entgegen (Text oder JSON).
+  - `GET /v1/statement/queued/{id}` (oder `GET /api/sql/statements/{id}`): Pollt den Status langlaufender Abfragen.
+  - `DELETE /v1/statement/{id}` (oder `DELETE /api/sql/statements/{id}`): Bricht eine laufende Abfrage ab (`204 No Content`).
+- **Synchronous Fast-Path via `X-Trino-Wait-Timeout`:**
+  - Wird ein Timeout übergeben (z. B. `X-Trino-Wait-Timeout: 5s` oder URL-Parameter `?wait_timeout=5s`) und die Abfrage beendet innerhalb dieses Fensters, antwortet das Gateway sofort mit HTTP 200 und Status `FINISHED` inklusive aller Zeilen.
+- **Asynchronous Continuation Path:**
+  - Benötigt die Abfrage länger als der Timeout, antwortet das Gateway sofort mit Status `RUNNING` und einer `nextUri` (`/v1/statement/queued/{id}`), um Timeouts an Load-Balancern und Proxies zu verhindern.
+- **3-Teilige Bezeichner (`<catalog>.<schema>.<table>`):**
+  - Tabellen können standardmäßig als `catalog.schema.table` angesprochen werden.
+  - Der `catalog`-Teil wird gegen die Datenquelle validiert bzw. automatisch als Ziel-Datenquelle inferiert.
+  - Der Dialekt-Generator strippt den Catalog-Präfix vor der Ausführung auf PostgreSQL (`"schema"."table"`), SQL Server (`[schema].[table]`) oder SQLite (`[table]`), wodurch Cross-Database- und DB-Escape-Kollisionen verhindert werden.
+- **Header-Unterstützung:**
+  - `X-Trino-Catalog`: Wählt die Ziel-Datenquelle aus.
+  - `X-Trino-Schema`: Standard-Schema.
+  - `X-Trino-Wait-Timeout`: Wartefenster für synchrone Fertigstellung (z. B. `5s`, `500ms`, `1m`).
+  - `X-Trino-User` & `X-Trino-Source`: Identitäts- und Auditierungskontext.
+
+---
+
 
 
 

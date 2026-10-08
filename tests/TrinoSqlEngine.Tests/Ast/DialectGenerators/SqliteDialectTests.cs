@@ -55,4 +55,39 @@ public sealed class SqliteDialectTests
         Assert.Contains("?1", sql, StringComparison.Ordinal);
         Assert.Contains("LIMIT 10", sql, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Sqlite_ThreePartName_StripsCatalogPrefix()
+    {
+        var stmt = new SelectStatement(
+            With: null,
+            Body: new QuerySpecification(
+                Distinct: false,
+                Projections: new[]
+                {
+                    new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[]
+                    {
+                        new SqlIdentifier("finance", IsQuoted: false),
+                        new SqlIdentifier("main", IsQuoted: false),
+                        new SqlIdentifier("invoices", IsQuoted: false),
+                        new SqlIdentifier("id", IsQuoted: false)
+                    })), null)
+                },
+                From: new NamedTableSource(new SqlQualifiedName(new[]
+                {
+                    new SqlIdentifier("finance", IsQuoted: false),
+                    new SqlIdentifier("main", IsQuoted: false),
+                    new SqlIdentifier("invoices", IsQuoted: false)
+                }), null),
+                Where: null,
+                GroupBy: null,
+                Having: null),
+            OrderBy: null,
+            Pagination: null);
+
+        string sql = _generator.GenerateSql(stmt);
+        Assert.Contains("FROM \"main\".\"invoices\"", sql, StringComparison.Ordinal);
+        Assert.Contains("SELECT \"main\".\"invoices\".\"id\"", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("finance", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }
