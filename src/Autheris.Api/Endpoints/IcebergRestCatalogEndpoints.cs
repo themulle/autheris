@@ -24,7 +24,7 @@ public static class IcebergRestCatalogEndpoints
             var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
             if (string.IsNullOrWhiteSpace(tenantId)) tenantId = "default";
 
-            var namespaces = await catalogService.ListNamespacesAsync(tenantId, context.RequestAborted);
+            var namespaces = await catalogService.ListNamespacesAsync(tenantId, context.User, context.RequestAborted);
             var response = new IcebergListNamespacesResponse(namespaces.Select(ns => (IReadOnlyList<string>)new[] { ns }).ToList());
             return Results.Ok(response);
         }).RequireAuthorization();
@@ -39,7 +39,7 @@ public static class IcebergRestCatalogEndpoints
             var tenantId = EndpointSecurity.GetRequestTenant(context).Value;
             if (string.IsNullOrWhiteSpace(tenantId)) tenantId = "default";
 
-            var tables = await catalogService.ListTablesAsync(tenantId, @namespace, context.RequestAborted);
+            var tables = await catalogService.ListTablesAsync(tenantId, @namespace, context.User, context.RequestAborted);
             var response = new IcebergListTablesResponse(
                 tables.Select(t => new IcebergRestTableIdentifier(new[] { @namespace }, t)).ToList());
             return Results.Ok(response);

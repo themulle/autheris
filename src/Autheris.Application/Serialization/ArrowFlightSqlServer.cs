@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Apache.Arrow;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -26,18 +27,21 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<ArrowFlightSqlServer> _logger;
+    private readonly IConsentRepository? _consentRepository;
     private readonly string _signingSecret;
 
     public ArrowFlightSqlServer(
         IArrowExportService exportService,
         ITableMetadataRepository metadataRepo,
         IOptions<GatewayOptions> options,
-        ILogger<ArrowFlightSqlServer> logger)
+        ILogger<ArrowFlightSqlServer> logger,
+        IConsentRepository? consentRepository = null)
     {
         _exportService = exportService ?? throw new ArgumentNullException(nameof(exportService));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _consentRepository = consentRepository;
         // SEC (Low): dedicated signing key; the ForwardAuth shared secret is no longer reused for ticket signatures.
         var configuredSecret = _options.Value?.Arrow?.FlightTicketSigningKey;
         if (!string.IsNullOrWhiteSpace(configuredSecret))
@@ -100,8 +104,13 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
 
         // SEC M-7: Enforce strict tenant isolation; never expose tables belonging to other tenants
         var tables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var filtered = tables
+        var tenantTables = tables
             .Where(t => string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        // Wunsch 9: only tables the caller may discover (same rule as the GraphQL catalog and MCP).
+        var visible = await CatalogVisibility.VisibleTablesAsync(tenantTables, principal, tenant, _consentRepository, ct).ConfigureAwait(false);
+        var filtered = visible
             .Where(t => string.IsNullOrWhiteSpace(schemaPattern) ||
                         string.Equals(t.Identifier.Schema, schemaPattern, StringComparison.OrdinalIgnoreCase))
             .Select(t => new FlightSqlTableInfo(

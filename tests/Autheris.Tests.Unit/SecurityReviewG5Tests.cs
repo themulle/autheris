@@ -381,7 +381,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
     {
         var (svc, _) = IcebergService(tableActive: false, abacAllowed: true);
 
-        await Should.ThrowAsync<KeyNotFoundException>(() => svc.LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
+        await Should.ThrowAsync<System.Security.SecurityException>(() => svc.LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
     }
 
     [Fact]
