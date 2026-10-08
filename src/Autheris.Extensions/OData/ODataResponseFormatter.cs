@@ -37,7 +37,7 @@ public static class ODataResponseFormatter
         string serviceRootUrl,
         TableIdentifier table,
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
-        int? totalCount = null,
+        long? totalCount = null,
         string? nextLink = null)
     {
         var cleanRoot = serviceRootUrl.TrimEnd('/');

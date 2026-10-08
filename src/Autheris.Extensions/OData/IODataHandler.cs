@@ -28,5 +28,6 @@ public interface IODataHandler
         string? select,
         bool includeCount,
         IReadOnlyDictionary<string, string[]>? headers,
+        string? orderBy = null,
         CancellationToken ct = default);
 }

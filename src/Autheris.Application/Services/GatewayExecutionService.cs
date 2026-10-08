@@ -125,6 +125,35 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         CancellationToken ct = default)
     {
+        var page = await ExecutePageCoreAsync(principal, table, first, after, queryArguments, requestedFields, requestHeaders, orderBy: null, countTotal: false, ct)
+            .ConfigureAwait(false);
+        return (page.Rows, page.Decision);
+    }
+
+    public Task<TableQueryPage> ExecuteTablePageAsync(
+        ClaimsPrincipal? principal,
+        TableIdentifier table,
+        TablePageRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return ExecutePageCoreAsync(
+            principal, table, request.First, request.After, queryArguments: null, request.RequestedFields, request.RequestHeaders,
+            request.OrderBy, request.IncludeTotalCount, ct);
+    }
+
+    private async Task<TableQueryPage> ExecutePageCoreAsync(
+        ClaimsPrincipal? principal,
+        TableIdentifier table,
+        int? first,
+        int? after,
+        IReadOnlyDictionary<string, object?>? queryArguments,
+        IReadOnlyList<string>? requestedFields,
+        IReadOnlyDictionary<string, string[]>? requestHeaders,
+        IReadOnlyList<TableOrderBy>? orderBy,
+        bool countTotal,
+        CancellationToken ct)
+    {
         using var _ = _drainController?.TrackQuery();
         var resolved = await ResolveTableAccessAsync(principal, table, requestedFields, requestHeaders, ct);
         principal = resolved.Principal;
@@ -187,6 +216,26 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             ? await ResolveRequestedFieldsAsync(requestedFields, metadata, decision, authorizedColumns, tenantId, userSid, table, traceId, ct).ConfigureAwait(false)
             : authorizedColumns;
 
+        // 4a.3: ordering and counting are pushed into the SQL statement; other data sources cannot do it (never ignored).
+        var pageItems = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (orderBy is { Count: > 0 } || countTotal)
+        {
+            if (metadata.Table.DataSourceType != DataSourceType.Sql)
+            {
+                throw new GatewayNotImplementedException("Ordering and counting are only supported for SQL data sources.");
+            }
+
+            if (orderBy is { Count: > 0 })
+            {
+                pageItems[TableQueryItems.OrderBy] = ValidateOrderBy(orderBy, metadata, decision);
+            }
+
+            if (countTotal)
+            {
+                pageItems[TableQueryItems.CountTotal] = true;
+            }
+        }
+
         // O10: bound concurrent reads of the same table by the same user (each slow read holds a database worker).
         var maxConcurrentReads = _options?.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
         using var readLease = AcquireReadLease(tenantId, userSid, table, maxConcurrentReads);
@@ -214,7 +263,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 PushdownFilterSql: decision.CombinedRowFilterSql,
                 Limit: rowLimit,
                 Offset: after ?? 0,
-                RequestHeaders: requestHeaders);
+                RequestHeaders: requestHeaders,
+                Items: pageItems);
 
             rawRows = await Autheris.Application.Connectors.GovernedConnectorReader.ReadRawAsync(connector, session, metadata, maxRows: null, ct).ConfigureAwait(false);
 
@@ -233,7 +283,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 RequestHeaders: requestHeaders,
                 Limit: rowLimit,
                 Offset: after ?? 0,
-                Tenant: tenantId
+                Tenant: tenantId,
+                Items: pageItems
             );
 
             rawRows = await executor.ExecuteAsync(execContext, ct);
@@ -258,7 +309,41 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
                 MaxBytes: maxBytes));
 
-        return (processedRows, decision);
+        long? totalCount = null;
+        if (countTotal)
+        {
+            // The count is only exact when the row filter ran in the same statement (not applied afterwards in memory).
+            bool rowFilterInSql = rlsPushdownAlreadyOccurred || string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql);
+            if (!rowFilterInSql || !pageItems.TryGetValue(TableQueryItems.TotalCount, out var countObj) || countObj is not long count)
+            {
+                throw new GatewayNotImplementedException("The total row count cannot be determined for this data source.");
+            }
+
+            totalCount = count;
+        }
+
+        return new TableQueryPage(processedRows, decision, totalCount);
+    }
+
+    /// <summary>
+    /// 4a.3: ordering columns must exist and be readable in clear text. Ordering by a masked or denied column would
+    /// reveal the order of the protected values; unknown and forbidden columns get the same message (no oracle).
+    /// </summary>
+    private static IReadOnlyList<TableOrderBy> ValidateOrderBy(IReadOnlyList<TableOrderBy> orderBy, TableMetadata metadata, TableAccessDecision decision)
+    {
+        var validated = new List<TableOrderBy>(orderBy.Count);
+        foreach (var item in orderBy)
+        {
+            var column = metadata.GetColumn(item.Column);
+            if (column == null || decision.GetEffectiveColumnAccess(column.ColumnName, metadata) != ColumnAccessLevel.Clear)
+            {
+                throw new GatewayInvalidQueryException($"The column '{item.Column}' in '$orderby' does not exist or cannot be used for ordering.");
+            }
+
+            validated.Add(item with { Column = column.ColumnName });
+        }
+
+        return validated;
     }
 
     /// <summary>

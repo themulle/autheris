@@ -45,6 +45,7 @@ public sealed class ODataEndpointsTests
             Arg.Any<string?>(),
             Arg.Any<bool>(),
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
             Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(result));
         return handler;
@@ -84,7 +85,7 @@ public sealed class ODataEndpointsTests
         await handler.DidNotReceive().ExecuteEntitySetQueryAsync(
             Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(),
             Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<bool>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Theory]
@@ -105,7 +106,7 @@ public sealed class ODataEndpointsTests
         await handler.DidNotReceive().ExecuteEntitySetQueryAsync(
             Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(),
             Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<bool>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -125,6 +126,7 @@ public sealed class ODataEndpointsTests
             select: null,
             includeCount: false,
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            orderBy: null,
             Arg.Any<CancellationToken>()
         );
     }
@@ -146,6 +148,7 @@ public sealed class ODataEndpointsTests
             select: "id,customer,amount",
             includeCount: false,
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            orderBy: null,
             Arg.Any<CancellationToken>()
         );
     }
@@ -171,6 +174,7 @@ public sealed class ODataEndpointsTests
             Arg.Any<string?>(),
             includeCount: expectedCount,
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
             Arg.Any<CancellationToken>()
         );
     }
@@ -191,11 +195,10 @@ public sealed class ODataEndpointsTests
         handler.DidNotReceive().ExecuteEntitySetQueryAsync(
             Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(),
             Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<bool>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
 
     [Theory]
     [InlineData("?$filter=amount gt 1000")]
-    [InlineData("?$orderby=ts")]
     [InlineData("?$expand=client")]
     [InlineData("?$search=crane")]
     [InlineData("?$apply=aggregate(ts with max as m)")]
@@ -279,6 +282,7 @@ public sealed class ODataEndpointsTests
             Arg.Any<string?>(),
             Arg.Any<bool>(),
             headers: Arg.Is<IReadOnlyDictionary<string, string[]>?>(h => h != null && h.ContainsKey("X-Custom-Tenant") && h["X-Custom-Tenant"].Contains("tenant_123")),
+            Arg.Any<string?>(),
             Arg.Any<CancellationToken>()
         );
     }
@@ -419,6 +423,7 @@ public sealed class ODataEndpointsTests
             Arg.Any<string?>(),
             Arg.Any<bool>(),
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
             Arg.Any<CancellationToken>()
         );
     }

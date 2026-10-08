@@ -169,7 +169,7 @@ public sealed class ODataHardeningTests
         result.StatusCode.ShouldBe(400);
         result.ErrorCode.ShouldBe("InvalidQueryOption");
         result.ErrorMessage.ShouldNotBeNull().ShouldContain("$select");
-        await execService.DidNotReceiveWithAnyArgs().ExecuteTableQueryAsync(default, default, default, default, default, default, default, default);
+        await execService.DidNotReceiveWithAnyArgs().ExecuteTablePageAsync(default, default, default!, default);
     }
 
     [Fact]
@@ -233,6 +233,7 @@ public sealed class ODataHardeningTests
             Arg.Any<string?>(),
             Arg.Any<bool>(),
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
             Arg.Any<CancellationToken>());
     }
 
@@ -257,15 +258,7 @@ public sealed class ODataHardeningTests
         result.ErrorCode.ShouldBe("InvalidQueryOption");
         result.ErrorMessage.ShouldNotBeNull().ShouldContain("$skip");
         result.ErrorMessage.ShouldNotBeNull().ShouldContain(ODataHandler.MaxSkip.ToString());
-        await execService.DidNotReceive().ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(),
-            Arg.Any<TableIdentifier>(),
-            Arg.Any<int?>(),
-            Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(),
-            Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-            Arg.Any<CancellationToken>());
+        await execService.DidNotReceiveWithAnyArgs().ExecuteTablePageAsync(default, default, default!, default);
     }
 
     // ==============================================================
@@ -282,12 +275,8 @@ public sealed class ODataHardeningTests
     public async Task O7_ODataHandler_TimeoutError_Returns504WithRetryAfterAndCleanJson(int number, string internalDbMessage)
     {
         var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(_ =>
-                throw new FakeDbException(number, internalDbMessage));
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableQueryPage>>(_ => throw new FakeDbException(number, internalDbMessage));
 
         var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
 
@@ -320,12 +309,8 @@ public sealed class ODataHardeningTests
     public async Task O7_ODataHandler_UnavailableError_Returns503WithRetryAfterAndCleanJson(int number, string internalDbMessage)
     {
         var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(_ =>
-                throw new FakeDbException(number, internalDbMessage));
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableQueryPage>>(_ => throw new FakeDbException(number, internalDbMessage));
 
         var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
 
@@ -366,7 +351,7 @@ public sealed class ODataHardeningTests
         handler.ExecuteEntitySetQueryAsync(
             Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(),
             Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<bool>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new ODataQueryResult(false, StatusCodes.Status504GatewayTimeout, payload, "ExecutionTimeout", "The query exceeded the execution time limit.", RetryAfterSeconds: 5)));
 
         var result = await ODataEndpoints.HandleEntitySetRequestAsync("sales", "dbo", "invoices", handler, context);

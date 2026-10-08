@@ -26,6 +26,19 @@ public interface IGatewayExecutionService
         IReadOnlyDictionary<string, string[]>? requestHeaders = null,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// 4a.3: one page of a table with optional ordering and the total row count under the same row filter
+    /// (OData $orderby / $count). Ordering columns must be readable in clear text.
+    /// </summary>
+    /// <exception cref="Autheris.Domain.Exceptions.GatewayInvalidQueryException">An ordering column is unknown or not permitted.</exception>
+    /// <exception cref="Autheris.Domain.Exceptions.GatewayNotImplementedException">The data source cannot order or count.</exception>
+    Task<TableQueryPage> ExecuteTablePageAsync(
+        ClaimsPrincipal? principal,
+        TableIdentifier table,
+        TablePageRequest request,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("Paged table queries are not supported by this execution service.");
+
     Task<TableAccessDecision> CheckTableAccessAsync(
         ClaimsPrincipal? principal,
         TableIdentifier table,
@@ -35,4 +48,38 @@ public interface IGatewayExecutionService
         ClaimsPrincipal? principal,
         IReadOnlyList<string> invoiceIds,
         CancellationToken ct = default);
+}
+
+/// <summary>A column to order by (4a.3).</summary>
+public sealed record TableOrderBy(string Column, bool Descending = false);
+
+/// <summary>Page request of <see cref="IGatewayExecutionService.ExecuteTablePageAsync"/>.</summary>
+public sealed record TablePageRequest(
+    int First,
+    int After,
+    IReadOnlyList<string>? RequestedFields = null,
+    IReadOnlyList<TableOrderBy>? OrderBy = null,
+    bool IncludeTotalCount = false,
+    IReadOnlyDictionary<string, string[]>? RequestHeaders = null);
+
+/// <summary>Rows of the page, the access decision and (when requested) the total row count.</summary>
+public sealed record TableQueryPage(
+    IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
+    TableAccessDecision Decision,
+    long? TotalCount);
+
+/// <summary>
+/// Keys of <see cref="DataSourceExecutionContext.Items"/> that carry ordering and counting between the gateway and the
+/// SQL executor (4a.3). An executor that does not know them leaves <see cref="TotalCount"/> unset.
+/// </summary>
+public static class TableQueryItems
+{
+    /// <summary>Request: <see cref="IReadOnlyList{T}"/> of <see cref="TableOrderBy"/>.</summary>
+    public const string OrderBy = "TableQuery.OrderBy";
+
+    /// <summary>Request: <c>true</c> to count all rows under the same filters.</summary>
+    public const string CountTotal = "TableQuery.CountTotal";
+
+    /// <summary>Response: the total row count (<see cref="long"/>).</summary>
+    public const string TotalCount = "TableQuery.TotalCount";
 }

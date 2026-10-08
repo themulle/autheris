@@ -995,6 +995,7 @@ public sealed class ParquetOutputNegotiationTests
                 Arg.Any<string?>(),
                 Arg.Any<bool>(),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string?>(),
                 Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(result));
         return handler;

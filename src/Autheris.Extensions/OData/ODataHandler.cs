@@ -119,6 +119,7 @@ public sealed partial class ODataHandler(
         string? select,
         bool includeCount,
         IReadOnlyDictionary<string, string[]>? headers,
+        string? orderBy = null,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceRootUrl);
@@ -150,11 +151,16 @@ public sealed partial class ODataHandler(
             return Error(400, "InvalidQueryOption", $"The query parameter '$skip' must not exceed {MaxSkip}.");
         }
 
-        // O5: $count used to report the number of rows on the page, not the total. Until the engine reader can count
-        // with the same row filter, the option is answered with 501 instead of a wrong number.
-        if (includeCount)
+        // 4a.3: $orderby is a comma separated list of "property [asc|desc]".
+        IReadOnlyList<TableOrderBy>? orderByColumns = null;
+        if (orderBy != null)
         {
-            return Error(501, "NotImplemented", "The query option '$count' is not supported by this service.");
+            if (!TryParseOrderBy(orderBy, out var parsedOrder, out var orderError))
+            {
+                return Error(400, "InvalidQueryOption", orderError);
+            }
+
+            orderByColumns = parsedOrder;
         }
 
         // Safe limit handling: default top 100, max 1000
@@ -191,19 +197,28 @@ public sealed partial class ODataHandler(
 
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows;
         TableAccessDecision decision;
+        long? totalCount;
 
         try
         {
-            (rows, decision) = await _executionService.ExecuteTableQueryAsync(
-                principal: principal,
-                table: table,
-                first: effectiveTop + 1,
-                after: effectiveSkip,
-                queryArguments: null,
-                requestedFields: requestedFields,
-                requestHeaders: headers,
-                ct: ct
-            ).ConfigureAwait(false);
+            // O5 / 4a.3: $count is the total under the same row filter, counted by the data source in the same statement
+            // context; a source that cannot count answers 501, never the number of rows on the page.
+            var page = await _executionService.ExecuteTablePageAsync(
+                principal,
+                table,
+                new TablePageRequest(
+                    First: effectiveTop + 1,
+                    After: effectiveSkip,
+                    RequestedFields: requestedFields,
+                    OrderBy: orderByColumns,
+                    IncludeTotalCount: includeCount,
+                    RequestHeaders: headers),
+                ct).ConfigureAwait(false);
+            (rows, decision, totalCount) = (page.Rows, page.Decision, page.TotalCount);
+            if (includeCount && totalCount == null && decision.IsAllowed)
+            {
+                return Error(501, "NotImplemented", "The total row count cannot be determined for this data source.");
+            }
         }
         catch (Exception ex) when (ct.IsCancellationRequested)
         {
@@ -220,6 +235,11 @@ public sealed partial class ODataHandler(
         {
             _logger.LogWarning("OData query for {Table} throttled (too many concurrent reads).", table);
             return Error(429, "TooManyRequests", thEx.Message, thEx.RetryAfterSeconds);
+        }
+        catch (Autheris.Domain.Exceptions.GatewayNotImplementedException niEx)
+        {
+            _logger.LogWarning("OData query for {Table} uses an unsupported option: {Message}", table, niEx.Message);
+            return Error(501, "NotImplemented", niEx.Message);
         }
         catch (Autheris.Domain.Exceptions.GatewayUnsupportedColumnTypeException utEx)
         {
@@ -320,11 +340,10 @@ public sealed partial class ODataHandler(
         string? nextLink = null;
         if (rows.Count > effectiveTop)
         {
-            nextLink = BuildNextLink(serviceRootUrl, table, effectiveSkip + effectiveTop, top, select);
+            nextLink = BuildNextLink(serviceRootUrl, table, effectiveSkip + effectiveTop, top, select, orderBy, includeCount);
             rows = rows.Take(effectiveTop).ToList();
         }
 
-        int? totalCount = includeCount ? rows.Count : null;
         var payload = ODataResponseFormatter.FormatEntitySetResponse(serviceRootUrl, table, rows, totalCount, nextLink);
 
         return new ODataQueryResult(
@@ -334,7 +353,7 @@ public sealed partial class ODataHandler(
         );
     }
 
-    private static string BuildNextLink(string serviceRootUrl, TableIdentifier table, int nextSkip, int? top, string? select)
+    private static string BuildNextLink(string serviceRootUrl, TableIdentifier table, int nextSkip, int? top, string? select, string? orderBy, bool includeCount)
     {
         var cleanRoot = serviceRootUrl.TrimEnd('/');
         var sb = new System.Text.StringBuilder();
@@ -348,8 +367,71 @@ public sealed partial class ODataHandler(
         {
             sb.Append("&$select=").Append(Uri.EscapeDataString(select));
         }
+        if (!string.IsNullOrWhiteSpace(orderBy))
+        {
+            sb.Append("&$orderby=").Append(Uri.EscapeDataString(orderBy));
+        }
+        if (includeCount)
+        {
+            sb.Append("&$count=true");
+        }
         return sb.ToString();
     }
+
+    /// <summary>
+    /// 4a.3: parses "$orderby=a desc, b" into columns with direction. Only simple property names (no paths,
+    /// functions or expressions), each property at most once.
+    /// </summary>
+    internal static bool TryParseOrderBy(string orderBy, out IReadOnlyList<TableOrderBy> columns, out string error)
+    {
+        columns = Array.Empty<TableOrderBy>();
+        error = string.Empty;
+        var items = orderBy.Split(',', StringSplitOptions.TrimEntries);
+        if (items.Length == 0 || items.Any(string.IsNullOrEmpty))
+        {
+            error = "The query parameter '$orderby' must list at least one property.";
+            return false;
+        }
+
+        var parsed = new List<TableOrderBy>(items.Length);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items)
+        {
+            var parts = item.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length is < 1 or > 2 || !SafeIdentifierRegex().IsMatch(parts[0]))
+            {
+                error = $"The expression '{Truncate(item)}' in '$orderby' is not supported; use 'property [asc|desc]'.";
+                return false;
+            }
+
+            bool descending = false;
+            if (parts.Length == 2)
+            {
+                if (string.Equals(parts[1], "desc", StringComparison.OrdinalIgnoreCase))
+                {
+                    descending = true;
+                }
+                else if (!string.Equals(parts[1], "asc", StringComparison.OrdinalIgnoreCase))
+                {
+                    error = $"The direction '{Truncate(parts[1])}' in '$orderby' must be 'asc' or 'desc'.";
+                    return false;
+                }
+            }
+
+            if (!seen.Add(parts[0]))
+            {
+                error = $"The property '{parts[0]}' appears more than once in '$orderby'.";
+                return false;
+            }
+
+            parsed.Add(new TableOrderBy(parts[0], descending));
+        }
+
+        columns = parsed;
+        return true;
+    }
+
+    private static string Truncate(string value) => value.Length > 64 ? value[..64] : value;
 
     private static ODataQueryResult Error(int statusCode, string errorCode, string message, int? retryAfterSeconds = null) =>
         new(

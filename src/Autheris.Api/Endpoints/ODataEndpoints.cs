@@ -282,6 +282,9 @@ public static class ODataEndpoints
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .RequireAuthorization();
 
+        app.MapGet("/odata/v4/{domain}/{schema}/{tableName}/$count", HandleCountRequestAsync)
+           .RequireAuthorization();
+
         app.MapGet("/odata/v4/{entitySetName}", HandleFlatEntitySetRequestAsync)
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .RequireAuthorization();
@@ -375,6 +378,7 @@ public static class ODataEndpoints
         }
 
         string? select = context.Request.Query["$select"].FirstOrDefault();
+        string? orderBy = context.Request.Query.TryGetValue("$orderby", out var orderByVal) ? orderByVal.ToString() : null;
         bool includeCount = false;
         if (context.Request.Query.TryGetValue("$count", out var countVal))
         {
@@ -407,7 +411,8 @@ public static class ODataEndpoints
             select: select,
             includeCount: includeCount,
             headers: headers,
-            ct: context.RequestAborted
+            ct: context.RequestAborted,
+            orderBy: orderBy
         );
 
         if (result.RetryAfterSeconds is int retryAfter)
@@ -425,13 +430,62 @@ public static class ODataEndpoints
         return Results.Json(result.Payload, statusCode: result.StatusCode, contentType: "application/json;odata.metadata=minimal;charset=utf-8");
     }
 
+    /// <summary>
+    /// 4a.3: <c>/$count</c> answers the number of rows the caller may read (same row filter as the entity set) as plain
+    /// text, as OData 4.0 specifies for the count segment.
+    /// </summary>
+    internal static async Task<IResult> HandleCountRequestAsync(
+        string domain,
+        string schema,
+        string tableName,
+        IODataHandler odataHandler,
+        HttpContext context)
+    {
+        context.Response.Headers["OData-Version"] = "4.0";
+        foreach (var (key, _) in context.Request.Query)
+        {
+            if (key.StartsWith('$'))
+            {
+                return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", "The '/$count' segment takes no query options.");
+            }
+        }
+
+        var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
+        var headers = context.Request.Headers.ToDictionary(h => h.Key, h => h.Value.Select(v => v ?? string.Empty).ToArray());
+        var result = await odataHandler.ExecuteEntitySetQueryAsync(
+            principal: context.User,
+            serviceRootUrl: serviceRoot,
+            table: new TableIdentifier(domain, schema, tableName),
+            top: 1,
+            skip: null,
+            select: null,
+            includeCount: true,
+            headers: headers,
+            ct: context.RequestAborted).ConfigureAwait(false);
+
+        if (result.RetryAfterSeconds is int retryAfter)
+        {
+            context.Response.Headers.RetryAfter = retryAfter.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (result.StatusCode != StatusCodes.Status200OK ||
+            result.Payload is not IReadOnlyDictionary<string, object?> payload ||
+            !payload.TryGetValue("@odata.count", out var count) || count == null)
+        {
+            var status = result.StatusCode == StatusCodes.Status200OK ? StatusCodes.Status501NotImplemented : result.StatusCode;
+            return Results.Json(result.Payload, statusCode: status, contentType: "application/json;odata.metadata=minimal;charset=utf-8");
+        }
+
+        return Results.Text(Convert.ToString(count, CultureInfo.InvariantCulture), "text/plain; charset=utf-8");
+    }
+
     /// <summary>System query options the entity set endpoint implements.</summary>
     private static readonly FrozenSet<string> SupportedSystemQueryOptions =
-        new[] { "$top", "$skip", "$select", "$count", "$format" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        new[] { "$top", "$skip", "$select", "$count", "$orderby", "$format" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>OData v4 system query options that exist but are not implemented yet (answered with 501, never ignored).</summary>
     private static readonly FrozenSet<string> NotImplementedSystemQueryOptions =
-        new[] { "$filter", "$orderby", "$expand", "$search", "$apply", "$compute", "$skiptoken", "$deltatoken", "$levels", "$index", "$schemaversion", "$id" }
+        new[] { "$filter", "$expand", "$search", "$apply", "$compute", "$skiptoken", "$deltatoken", "$levels", "$index", "$schemaversion", "$id" }
             .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
