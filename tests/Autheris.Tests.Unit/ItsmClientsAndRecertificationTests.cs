@@ -317,6 +317,75 @@ public class ItsmClientsAndRecertificationTests
         fetched.GranteeSid.ShouldBe(new Sid("S-1-5-21-user-123"));
     }
 
+    [Fact]
+    public async Task WF_1_ExtendConsentExpiryAsync_InvalidParameters_ThrowsValidationExceptions()
+    {
+        var consentRepo = Substitute.For<IConsentRepository>();
+        var outboxRepo = Substitute.For<IItsmOutboxRepository>();
+        var options = Options.Create(new GatewayOptions());
+
+        var workflow = new ConsentRecertificationWorkflowService(
+            consentRepo,
+            outboxRepo,
+            options,
+            NullLogger<ConsentRecertificationWorkflowService>.Instance);
+
+        var consentId = Guid.NewGuid();
+        var approver = new Sid("S-1-5-21-approver");
+
+        // Non-positive duration
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() =>
+            workflow.ExtendConsentExpiryAsync(consentId, TimeSpan.Zero, approver, "Valid reason"));
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() =>
+            workflow.ExtendConsentExpiryAsync(consentId, TimeSpan.FromHours(-2), approver, "Valid reason"));
+
+        // Empty approver SID
+        await Should.ThrowAsync<ArgumentException>(() =>
+            workflow.ExtendConsentExpiryAsync(consentId, TimeSpan.FromDays(1), new Sid(""), "Valid reason"));
+
+        // Empty / whitespace justification
+        await Should.ThrowAsync<ArgumentException>(() =>
+            workflow.ExtendConsentExpiryAsync(consentId, TimeSpan.FromDays(1), approver, ""));
+        await Should.ThrowAsync<ArgumentException>(() =>
+            workflow.ExtendConsentExpiryAsync(consentId, TimeSpan.FromDays(1), approver, "   "));
+    }
+
+    [Fact]
+    public async Task WF_1_ExtendConsentExpiryAsync_RevokedConsent_ThrowsInvalidOperationException()
+    {
+        var consentRepo = Substitute.For<IConsentRepository>();
+        var outboxRepo = Substitute.For<IItsmOutboxRepository>();
+        var options = Options.Create(new GatewayOptions());
+
+        var revokedConsent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TableId = Guid.NewGuid(),
+            TableIdentifier = new TableIdentifier("crm", "dbo", "customers"),
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-1-5-21-user-123"),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-10),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            IsRevoked = true,
+            TenantId = new TenantId("tenant-primary")
+        };
+
+        consentRepo.GetConsentByIdAsync(revokedConsent.Id, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<Consent?>(revokedConsent));
+
+        var workflow = new ConsentRecertificationWorkflowService(
+            consentRepo,
+            outboxRepo,
+            options,
+            NullLogger<ConsentRecertificationWorkflowService>.Instance);
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
+            workflow.ExtendConsentExpiryAsync(revokedConsent.Id, TimeSpan.FromDays(7), new Sid("S-1-5-21-approver"), "Legitimate reason"));
+
+        ex.Message.ShouldContain("revoked");
+    }
+
     private sealed class StubEpochValidationService : IEpochValidationService
     {
         public Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default)
