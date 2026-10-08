@@ -404,6 +404,19 @@ public class ProcedureEndpointTests
     }
 
     [Fact]
+    public async Task SQL2_16_Execute_WhenAuditRepositoryIsNull_FailsClosed()
+    {
+        var f = Active();
+        var svc = new GovernedProcedureExecutionService(
+            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Tables, f.Consents, f.Resolution, f.Masking, audit: null);
+
+        var ex = await Should.ThrowAsync<SecurityException>(() =>
+            svc.ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
+
+        ex.Message.ShouldContain("audit repository is required but unavailable (SQL2-16)");
+    }
+
+    [Fact]
     public async Task Execute_BusinessError_IsRethrownAndAudited()
     {
         var f = Active();

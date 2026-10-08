@@ -88,6 +88,11 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(user);
 
+        if (_audit == null)
+        {
+            throw new SecurityException("Procedure execution rejected: audit repository is required but unavailable (SQL2-16).");
+        }
+
         if (!_registry.TryGet(name, out var registered) || registered == null)
         {
             throw new KeyNotFoundException($"Procedure endpoint '{name}' is not registered.");
@@ -606,8 +611,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     {
         if (_audit == null)
         {
-            _logger?.LogWarning("No audit repository available; {EventType} for '{Endpoint}' was not recorded.", eventType, definition.Name);
-            return;
+            throw new SecurityException("Procedure execution rejected: audit repository is required but unavailable (SQL2-16).");
         }
 
         await _audit.RecordAuditEventAsync(
