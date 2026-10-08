@@ -14,23 +14,32 @@ using ModelContextProtocol.Authentication;
 /// </summary>
 public static class GatewayMcpOAuth
 {
-    /// <summary>Only with MCP and at least one OAuth issuer enabled; Kerberos, Basic and ForwardAuth have nothing to discover.</summary>
+    /// <summary>Only with MCP and at least one OAuth issuer enabled and configured; Kerberos, Basic and ForwardAuth have nothing to discover.</summary>
     public static bool IsEnabled(GatewayOptions options) =>
-        options.Mcp.Enabled && (options.Authentication.EntraId.Enabled || options.Authentication.Adfs.Enabled);
+        options.Mcp.Enabled &&
+        (options.Authentication.EntraId.Enabled || options.Authentication.Adfs.Enabled) &&
+        AuthorizationServers(options).Count > 0;
+
+    public static List<string> GetSupportedScopes(GatewayOptions options)
+    {
+        var scopes = new List<string> { "Agent.Read" };
+        var entra = options.Authentication.EntraId;
+        if (entra.Enabled && !string.IsNullOrWhiteSpace(entra.Audience))
+        {
+            var aud = entra.Audience.TrimEnd('/');
+            scopes.Add($"{aud}/Agent.Read");
+        }
+        return scopes;
+    }
 
     public static AuthenticationBuilder AddGatewayMcpOAuth(this AuthenticationBuilder builder, GatewayOptions options)
     {
-        if (!IsEnabled(options) || AuthorizationServers(options).Count == 0)
+        if (!IsEnabled(options))
         {
             return builder;
         }
 
-        var scopes = new List<string>();
-        var entra = options.Authentication.EntraId;
-        if (entra.Enabled && !string.IsNullOrWhiteSpace(entra.Audience))
-        {
-            scopes.Add(entra.Audience.TrimEnd('/') + "/.default");
-        }
+        var scopes = GetSupportedScopes(options);
 
         return builder.AddMcp(o =>
         {

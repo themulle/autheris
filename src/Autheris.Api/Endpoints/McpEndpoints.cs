@@ -116,7 +116,7 @@ public static class McpEndpoints
                 return Results.Redirect(target, permanent: false);
             });
 
-            // RFC 8414: Authorization Server Discovery
+            // RFC 8414: Authorization Server Metadata Discovery
             discoveryGroup.MapGet("/oauth-authorization-server", () =>
             {
                 var servers = Autheris.Api.Mcp.GatewayMcpOAuth.AuthorizationServers(gatewayOptions);
@@ -124,10 +124,20 @@ public static class McpEndpoints
                 {
                     return Results.NotFound();
                 }
+
+                var issuer = servers[0];
+                var scopes = Autheris.Api.Mcp.GatewayMcpOAuth.GetSupportedScopes(gatewayOptions);
+
                 return Results.Ok(new
                 {
-                    authorization_servers = servers,
-                    issuer = servers.FirstOrDefault()
+                    issuer = issuer,
+                    authorization_endpoint = $"{issuer.TrimEnd('/')}/oauth2/v2.0/authorize",
+                    token_endpoint = $"{issuer.TrimEnd('/')}/oauth2/v2.0/token",
+                    scopes_supported = scopes,
+                    response_types_supported = new[] { "code", "token" },
+                    grant_types_supported = new[] { "client_credentials", "authorization_code" },
+                    token_endpoint_auth_methods_supported = new[] { "client_secret_post", "client_secret_basic", "private_key_jwt" },
+                    authorization_servers = servers
                 });
             });
         }
