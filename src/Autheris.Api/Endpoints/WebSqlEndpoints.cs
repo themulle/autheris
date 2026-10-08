@@ -220,6 +220,17 @@ public static class WebSqlEndpoints
         bool isParquet = ParquetContentNegotiation.IsParquetRequested(httpContext.Request) ||
             string.Equals(httpContext.Request.Query["format"], "parquet", StringComparison.OrdinalIgnoreCase);
 
+        // Befund 1.2: Strict Content Negotiation. If Accept header requests non-supported formats (CSV, NDJSON, etc.), reject with 406.
+        if (httpContext.Request.Headers.Accept.Count > 0)
+        {
+            var acceptEval = ParquetContentNegotiation.Evaluate(httpContext.Request);
+            if (!acceptEval.ParquetPreferred && !acceptEval.HasJsonAlternative && !isParquet)
+            {
+                httpContext.Response.StatusCode = StatusCodes.Status406NotAcceptable;
+                return;
+            }
+        }
+
         if (isParquet)
         {
             await HandleParquetWebSqlRequestAsync(httpContext, sqlService, gatewayOptions, logger, governedRequest, user, tenantId, ct);
@@ -782,10 +793,12 @@ public static class WebSqlEndpoints
             httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
             await httpContext.Response.WriteAsJsonAsync(new { error = "Statement not found or expired.", id = statementId }, ct);
         }
-        catch (SecurityException)
+        catch (SecurityException ex)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Forbidden", message = GenericForbiddenMessage }, ct);
+            // SEC-12H-06: Uniform 404 response to eliminate the enumeration oracle
+            logger.LogWarning(ex, "Unauthorized statement access attempt for {StatementId}", statementId);
+            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+            await httpContext.Response.WriteAsJsonAsync(new { error = "Statement not found or expired.", id = statementId }, ct);
         }
         catch (Exception ex)
         {
@@ -818,7 +831,8 @@ public static class WebSqlEndpoints
         }
         catch (SecurityException)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+            // SEC-12H-06: Uniform 404 response to eliminate the enumeration oracle
+            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
         }
     }
 

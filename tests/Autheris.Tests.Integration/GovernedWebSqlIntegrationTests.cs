@@ -415,4 +415,22 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
         ex.Message.ShouldContain("Security Policy Violation: Column 'ssn'");
         ex.Message.ShouldContain("protected by static redaction");
     }
+
+    [Fact]
+    public async Task WebSql_UnsupportedAcceptHeader_Returns406NotAcceptable()
+    {
+        var client = _factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/sql")
+        {
+            Content = new StringContent("""{"sql":"SELECT 1"}""", System.Text.Encoding.UTF8, "application/json")
+        };
+        request.Headers.Accept.Clear();
+        request.Headers.Accept.ParseAdd("text/csv");
+        request.Headers.Add("X-Test-User-Sid", "S-1-5-21-1");
+        request.Headers.Add("X-Test-Roles", "ClusterAdmin");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.NotAcceptable);
+    }
 }

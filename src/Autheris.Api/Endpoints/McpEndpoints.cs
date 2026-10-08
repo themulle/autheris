@@ -14,6 +14,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Autheris.Api.Mcp;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 public static class McpEndpoints
 {
@@ -31,7 +33,10 @@ public static class McpEndpoints
         IReadOnlyList<string> GroupSids,
         string? ClientIp = null);
 
-    public static IEndpointRouteBuilder MapMcpEndpoints(this IEndpointRouteBuilder app, GatewayOptions gatewayOptions)
+    public static IEndpointRouteBuilder MapMcpEndpoints(
+        this IEndpointRouteBuilder app,
+        GatewayOptions gatewayOptions,
+        IHostEnvironment? env = null)
     {
         if (!gatewayOptions.Mcp.Enabled)
         {
@@ -83,6 +88,44 @@ public static class McpEndpoints
                     // Order matters: the MCP challenge only sets its header; the gateway challenge then writes the body.
                     ? $"{ModelContextProtocol.AspNetCore.Authentication.McpAuthenticationDefaults.AuthenticationScheme},{Autheris.Api.Security.GatewayAuthSchemes.DefaultScheme}"
                     : Autheris.Api.Security.GatewayAuthSchemes.DefaultScheme
+            });
+        }
+
+        if (GatewayMcpOAuth.IsEnabled(gatewayOptions))
+        {
+            var hostEnv = env ?? app.ServiceProvider?.GetService<IHostEnvironment>();
+            bool isDev = hostEnv?.IsDevelopment() ?? false;
+
+            var discoveryGroup = app.MapGroup("/.well-known");
+            if (!gatewayOptions.Mcp.AllowAnonymousDiscovery && !isDev)
+            {
+                discoveryGroup.RequireAuthorization();
+            }
+            else
+            {
+                discoveryGroup.AllowAnonymous();
+            }
+
+            // RFC 9728: Root Protected Resource Metadata Fallback -> redirects to /mcp
+            discoveryGroup.MapGet("/oauth-protected-resource", (HttpContext context) =>
+            {
+                var target = $"{context.Request.PathBase}/.well-known/oauth-protected-resource{mcpBasePath}";
+                return Results.Redirect(target, permanent: false);
+            });
+
+            // RFC 8414: Authorization Server Discovery
+            discoveryGroup.MapGet("/oauth-authorization-server", () =>
+            {
+                var servers = Autheris.Api.Mcp.GatewayMcpOAuth.AuthorizationServers(gatewayOptions);
+                if (servers.Count == 0)
+                {
+                    return Results.NotFound();
+                }
+                return Results.Ok(new
+                {
+                    authorization_servers = servers,
+                    issuer = servers.FirstOrDefault()
+                });
             });
         }
 
