@@ -111,7 +111,7 @@ public sealed class SemanticMcpCompiler(
         var isMcpAuthBypassed = _options?.Value.IsMcpAuthBypassed == true;
         if (_consentRepo != null && !isMcpAuthBypassed)
         {
-            allTables = await FilterTablesForPrincipalAsync(allTables, principal, ct).ConfigureAwait(false);
+            allTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepo, ct).ConfigureAwait(false);
         }
 
         var filtered = string.IsNullOrWhiteSpace(domainScope)
@@ -242,45 +242,6 @@ public sealed class SemanticMcpCompiler(
         }
 
         return resources;
-    }
-
-    /// <summary>
-    /// SEC M-28: anonymous callers (no principal, no SID, the synthetic MCP anonymous SID) see no tables at all;
-    /// only explicit governance roles see the whole catalog; everybody else sees only tables with an active
-    /// Allow consent within the caller's own tenant.
-    /// </summary>
-    private async Task<IReadOnlyList<TableMetadata>> FilterTablesForPrincipalAsync(
-        IReadOnlyList<TableMetadata> allTables,
-        System.Security.Claims.ClaimsPrincipal? principal,
-        CancellationToken ct)
-    {
-        if (principal == null || _consentRepo == null)
-        {
-            return Array.Empty<TableMetadata>();
-        }
-
-        var userSid = principal.GetUserSid();
-        bool isAnonymous = userSid == null || string.Equals(userSid.Value.Value, "ANONYMOUS_MCP_CLIENT", StringComparison.OrdinalIgnoreCase);
-        if (isAnonymous)
-        {
-            return Array.Empty<TableMetadata>();
-        }
-
-        var roles = principal.GetUserRoles();
-        bool isGlobalAdmin = roles.Contains("GovernanceAdmin") || roles.Contains("ClusterAdmin");
-        if (isGlobalAdmin)
-        {
-            return allTables;
-        }
-
-        var groupSids = principal.GetGroupSids();
-        var tenantId = principal.GetTenantId();
-        var allSubjects = groupSids.Append(userSid!.Value).ToList();
-        var activeConsents = await _consentRepo.GetAllActiveConsentsForSubjectsAsync(
-            allSubjects, roles, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
-
-        // MCP-1: same table and column visibility as the GraphQL catalog (Deny consents, column grants).
-        return CatalogVisibility.FilterForSubject(allTables, activeConsents, tenantId);
     }
 
     private static string MapDataTypeToJsonType(string? dataType)

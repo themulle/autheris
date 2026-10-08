@@ -267,8 +267,9 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             }
         }
 
-        // 3. Four-Eyes Justification Gate
-        foreach (TableIdentifier? resolvedTable in resolvedTables ?? [])
+        // 3. Four-Eyes Justification Gate (dataset tools that return no rows, such as describe_dataset, need no approval)
+        var needsFourEyesCheck = !McpDatasetTools.IsDatasetTool(tool.Name) || McpDatasetTools.ReadsRows(tool.Name);
+        foreach (TableIdentifier? resolvedTable in needsFourEyesCheck ? resolvedTables ?? [] : [])
         {
             if (_tableMetadataRepository == null)
             {
@@ -581,7 +582,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         name.Equals("query_invoices", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("simulate_query", StringComparison.OrdinalIgnoreCase);
+        name.Equals("simulate_query", StringComparison.OrdinalIgnoreCase) ||
+        McpDatasetTools.IsDatasetTool(name);
 
     private static TableIdentifier? ParseTableIdentifierFromTool(McpToolDefinition tool, string? argumentsJson = null)
     {
@@ -596,6 +598,9 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             return new TableIdentifier("governance", "catalog", "assets");
         if (tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase))
             return new TableIdentifier("governance", "mcp", "golden_queries");
+
+        if (McpDatasetTools.IsDatasetTool(tool.Name))
+            return McpDatasetTools.TargetTable(tool.Name, argumentsJson);
 
         if (tool.Name.Equals("simulate_query", StringComparison.OrdinalIgnoreCase))
         {

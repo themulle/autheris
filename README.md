@@ -130,6 +130,8 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
 
 - **Enterprise MCP Server Gateway ([`ADR-014`](docs/adr/ADR-014-enterprise-model-context-protocol-and-ai-data-guardrails.md))**:
   - Standard I/O runner (`McpStdioRunner`) and streaming HTTP/SSE endpoints (`/mcp`, `/mcp/sse`) for AI agents (Claude, Cursor, LangChain).
+- **MCP Dataset Tools ([`F-AI-11`](docs/features/f-ai-11-mcp-dataset-tools.md))**:
+  - `list_datasets`, `describe_dataset` and `sample_rows` let agents discover every dataset they may use, with the same consent, row filter and masking rules as REST and GraphQL.
 - **Semantic MCP Compiler & Schema Grounding ([`F-AI-02`](docs/features/f-ai-02-semantic-mcp-compiler.md))**:
   - Automatically transforms GraphQL and relational database schemas into semantically enriched, LLM-optimized tool signatures.
 - **Dynamic Few-Shot Golden Query Injection ([`F-AI-03`](docs/features/f-ai-03-golden-queries.md))**:
