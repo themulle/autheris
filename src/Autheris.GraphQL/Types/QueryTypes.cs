@@ -102,9 +102,21 @@ public sealed class Query
             }
         }
 
+        Autheris.Application.Governance.Contracts.SchemaContractDefinition? contractDef = null;
+        if (httpContext?.Items.TryGetValue(Autheris.Application.Governance.Contracts.SchemaContractConstants.ContractItemKey, out var contractItem) == true &&
+            contractItem is string contractName &&
+            httpContext.RequestServices?.GetService(typeof(Autheris.Application.Governance.Contracts.ISchemaContractManager)) is Autheris.Application.Governance.Contracts.ISchemaContractManager contractMgr)
+        {
+            contractDef = contractMgr.GetContract(contractName);
+        }
+
         if (isOpenSchema)
         {
             var tables = await metadataRepository.GetAllTablesAsync(ct);
+            if (contractDef != null)
+            {
+                tables = Autheris.Application.Services.CatalogVisibility.FilterByContract(tables, contractDef);
+            }
             var dtos = tables.Select(t => new TableMetadataDto
             {
                 Domain = t.Identifier.Domain,
@@ -143,6 +155,10 @@ public sealed class Query
         var allowDiscovery = options?.Value?.Catalog?.AllowAuthenticatedCatalogDiscovery == true;
 
         var allTables = await metadataRepository.GetAllTablesAsync(ct);
+        if (contractDef != null)
+        {
+            allTables = Autheris.Application.Services.CatalogVisibility.FilterByContract(allTables, contractDef);
+        }
         if (isGlobalAdmin || allowDiscovery)
         {
             var dtos = allTables.Select(t => new TableMetadataDto

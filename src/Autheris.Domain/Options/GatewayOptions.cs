@@ -107,6 +107,7 @@ public sealed class GatewayOptions
     public bool IsMcpAuthBypassed => Insecure.danger_bypass_mcp_auth;
     public bool IsMcpUnmaskedAllowed => Insecure.warn_allow_unmasked_ai_access;
     public bool IsLakehouseAuthBypassed => Insecure.danger_bypass_lakehouse_auth;
+    public bool IsRebacBypassed => Insecure.danger_bypass_rebac;
     public bool AreUnsignedS3RequestsAllowed => Insecure.warn_allow_unsigned_s3_requests;
     public bool IsWebSqlDmlAllowed => WebSql.AllowDml || Insecure.warn_allow_websql_dml;
 
@@ -204,6 +205,7 @@ public sealed class GatewayOptions
         if (AreUntrustedCertificatesAllowed) list.Add("DANGER:danger_allow_untrusted_certificates");
         if (IsMcpAuthBypassed) list.Add("DANGER:danger_bypass_mcp_auth");
         if (IsLakehouseAuthBypassed) list.Add("DANGER:danger_bypass_lakehouse_auth");
+        if (IsRebacBypassed) list.Add("DANGER:danger_bypass_rebac");
         if (IsWebSqlGovernanceBypassed) list.Add("DANGER:danger_bypass_websql_governance");
         if (IsOpenSchemaExplicitlyEnabled) list.Add("DANGER:open_schema (OpenSchema / Catalog.OpenSchema)");
         if (IsMcpUnmaskedAllowed) list.Add("DANGER:warn_allow_unmasked_ai_access");
@@ -290,6 +292,11 @@ public sealed class InsecureGettingStartedOptions
     /// [DANGER] Umgeht Authentifizierung und Rollenprüfungen für Apache Iceberg / Lakehouse Tabellenabfragen.
     /// </summary>
     public bool danger_bypass_lakehouse_auth { get; init; } = false;
+
+    /// <summary>
+    /// [DANGER] Umgeht ReBAC (Relationship-Based Access Control) Autorisierungsprüfungen für Schnelleinstieg / PoC.
+    /// </summary>
+    public bool danger_bypass_rebac { get; init; } = false;
 
 
     // --- WARN: Mittlerer / Operativer Security-Impact (Lockert Limits und Schutzschilder) ---
@@ -1108,7 +1115,7 @@ public sealed class McpOptions
     [Range(1, 10000)] public int MaxResultRows { get; init; } = 100;
     public bool RequirePiiMasking { get; init; } = true;
     public List<string> AllowedOperations { get; init; } = [];
-
+    public bool AllowAnonymousDiscovery { get; init; } = false;
 }
 
 public sealed class LakehouseStorageOptions
@@ -1503,6 +1510,7 @@ public sealed class SchemaContractDefinitionOptions
     public List<string> IncludedTags { get; init; } = [];
     public List<string> ExcludedTags { get; init; } = [];
     public bool ExcludeInaccessible { get; init; } = true;
+    public List<string> AllowedTables { get; init; } = [];
 }
 
 /// <summary>
@@ -1573,6 +1581,11 @@ public sealed class RebacOptions
     public bool EnforceOnQueryPaths { get; init; } = false;
     public string? OpenFgaApiUrl { get; init; }
     public string? OpenFgaStoreId { get; init; }
+
+    /// <summary>
+    /// Initial relationship tuples seeded into the ReBAC store on startup (for Development, PoC, or testing).
+    /// </summary>
+    public List<RebacTuple> SeedTuples { get; init; } = [];
 }
 
 /// <summary>
@@ -1621,6 +1634,11 @@ public sealed class VirtualFilterOptions
     /// on another instance take effect within this time. 0 compares on every access.
     /// </summary>
     public int GenerationCheckSeconds { get; init; } = 5;
+
+    /// <summary>
+    /// When enabled, manual changes to virtual filters and access profiles require four-eyes approval by a distinct approver.
+    /// </summary>
+    public bool RequireApproval { get; init; } = false;
 }
 
 /// <summary>

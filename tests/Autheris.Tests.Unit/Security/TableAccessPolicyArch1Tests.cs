@@ -208,6 +208,19 @@ public sealed class TableAccessPolicyArch1Tests
     }
 
     [Fact]
+    public async Task Policy_WithDangerBypassRebac_AllowsQueryWhenEnabled()
+    {
+        var optionsWithBypass = new GatewayOptions
+        {
+            Rebac = new RebacOptions { Enabled = true, EnforceOnQueryPaths = true },
+            Insecure = new InsecureGettingStartedOptions { danger_bypass_rebac = true }
+        };
+        var policy = Policy(ResolvesTo(true), rebac: RebacDenyingAll(), options: optionsWithBypass);
+
+        (await policy.DecideAsync(Query(RebacEnforcement.WhenEnabled), default)).IsAllowed.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task Policy_CasbinReceivesPurposeAttributesAndDialect()
     {
         SecurityEvaluationContext? seen = null;
