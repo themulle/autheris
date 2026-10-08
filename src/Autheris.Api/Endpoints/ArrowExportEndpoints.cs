@@ -136,7 +136,7 @@ public static class ArrowExportEndpoints
             var gatewayOptions = httpContext.RequestServices?.GetService<IOptions<GatewayOptions>>()?.Value;
             var queryRequest = new GovernedSqlQueryRequest(
                 effectiveSql,
-                RowLimit: SqlRowLimit.For(gatewayOptions?.WebSql ?? new WebSqlOptions(), gatewayOptions?.RowLimits?.ArrowExport));
+                RowLimit: ArrowExportRowLimit(gatewayOptions));
             var queryResult = await sqlExecutionService.ExecuteQueryBufferedAsync(queryRequest, httpContext.User, tenant, ct).ConfigureAwait(false);
             rows = queryResult.Rows;
         }
@@ -186,6 +186,14 @@ public static class ArrowExportEndpoints
             bytes,
             contentType: IArrowExportService.ArrowStreamContentType,
             fileDownloadName: fileName);
+    }
+
+    /// <summary>Gateway:RowLimits:ArrowExport (falling back to WebSql), never above Arrow:MaxExportRows.</summary>
+    private static SqlRowLimit ArrowExportRowLimit(GatewayOptions? options)
+    {
+        var limit = SqlRowLimit.For(options?.WebSql ?? new WebSqlOptions(), options?.RowLimits?.ArrowExport);
+        long maxExportRows = options?.Arrow?.MaxExportRows ?? 0;
+        return maxExportRows > 0 ? limit.CappedAt(maxExportRows) : limit;
     }
 
     /// <summary>

@@ -35,6 +35,10 @@ public static class ArrowFlightSqlEndpoints
             {
                 return ForbidResult(context, ex);
             }
+            catch (ArgumentException)
+            {
+                return BadRequestResult();
+            }
         }).RequireAuthorization();
 
         app.MapGet("/api/v1/flight/sql/tables", async (
@@ -67,7 +71,17 @@ public static class ArrowFlightSqlEndpoints
                 ArrowStreamWriter? writer = null;
                 await foreach (var batch in server.DoGetStreamAsync(ticket, context.User, EndpointSecurity.GetRequestTenant(context), context.RequestAborted))
                 {
-                    writer ??= new ArrowStreamWriter(stream, batch.Schema, leaveOpen: true);
+                    if (writer == null)
+                    {
+                        // Same signal as the WebSQL JSON and Parquet paths: the row limit cut the result.
+                        if (batch.Schema.Metadata.TryGetValue(ArrowFlightSqlServer.TruncatedMetadataKey, out var truncated) && truncated == "true")
+                        {
+                            context.Response.Headers["X-Autheris-Truncated"] = "true";
+                        }
+
+                        writer = new ArrowStreamWriter(stream, batch.Schema, leaveOpen: true);
+                    }
+
                     await writer.WriteRecordBatchAsync(batch, context.RequestAborted);
                 }
 
@@ -77,10 +91,18 @@ public static class ArrowFlightSqlEndpoints
             {
                 return ForbidResult(context, ex);
             }
+            catch (ArgumentException)
+            {
+                return BadRequestResult();
+            }
         }).RequireAuthorization();
 
         return app;
     }
+
+    // RR-L3-03: parser and database details stay in the server log.
+    private static IResult BadRequestResult() =>
+        Results.Problem(detail: WebSqlEndpoints.GenericBadRequestMessage, statusCode: StatusCodes.Status400BadRequest);
 
     private static IResult ForbidResult(HttpContext context, SecurityException ex)
     {

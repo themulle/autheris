@@ -10,11 +10,16 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Apache.Arrow;
+using Apache.Arrow.Types;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
+using Autheris.Application.Sql;
+using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -23,11 +28,19 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
 {
+    /// <summary>Schema metadata key set to "true" when the result was cut by the row limit.</summary>
+    public const string TruncatedMetadataKey = "autheris.truncated";
+
+    // The schema is only known once the statement has run; it is part of the stream, not of the flight info.
+    private const string UnknownSchemaJson = "{\"type\":\"schema\",\"fields\":[]}";
+    private const long UnknownRowCount = -1;
+
     private readonly IArrowExportService _exportService;
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<ArrowFlightSqlServer> _logger;
     private readonly IConsentRepository? _consentRepository;
+    private readonly IServiceScopeFactory? _scopeFactory;
     private readonly string _signingSecret;
 
     public ArrowFlightSqlServer(
@@ -35,13 +48,15 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         ITableMetadataRepository metadataRepo,
         IOptions<GatewayOptions> options,
         ILogger<ArrowFlightSqlServer> logger,
-        IConsentRepository? consentRepository = null)
+        IConsentRepository? consentRepository = null,
+        IServiceScopeFactory? scopeFactory = null)
     {
         _exportService = exportService ?? throw new ArgumentNullException(nameof(exportService));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _consentRepository = consentRepository;
+        _scopeFactory = scopeFactory;
         // SEC (Low): dedicated signing key; the ForwardAuth shared secret is no longer reused for ticket signatures.
         var configuredSecret = _options.Value?.Arrow?.FlightTicketSigningKey;
         if (!string.IsNullOrWhiteSpace(configuredSecret))
@@ -70,6 +85,15 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
             throw new SecurityException("Authentication required for Arrow Flight SQL execution.");
         }
 
+        // WebSQL findings 4.1: the statement is governed before a ticket is issued (unknown or denied tables, DML,
+        // forbidden functions are rejected here already).
+        if (_scopeFactory != null)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
+            await sqlService.RewriteSqlAsync(query, principal, tenant, ct).ConfigureAwait(false);
+        }
+
         var ticketId = Guid.NewGuid().ToString("N");
         var now = DateTimeOffset.UtcNow;
         // SEC (Low): the ticket is bound to the issuing SID and tenant.
@@ -78,15 +102,7 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
 
         var ticket = new FlightSqlTicket(ticketId, tenant.Value, query, now, signature, userSid);
 
-        var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var columns = new List<string> { "id", "value" };
-
-        return new FlightSqlInfo(
-            query,
-            "{\"type\":\"schema\",\"fields\":[{\"name\":\"id\",\"type\":\"int\"},{\"name\":\"value\",\"type\":\"string\"}]}",
-            100,
-            ticket,
-            columns);
+        return new FlightSqlInfo(query, UnknownSchemaJson, UnknownRowCount, ticket, System.Array.Empty<string>());
     }
 
     public async ValueTask<IReadOnlyList<FlightSqlTableInfo>> GetTablesAsync(
@@ -165,15 +181,61 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
             throw new SecurityException("Flight SQL ticket has expired.");
         }
 
-        var sampleRows = new List<IReadOnlyDictionary<string, object?>>
+        // WebSQL findings 4.1: the ticket's statement runs through the governed WebSQL pipeline (catalog, consent, row
+        // filters, masks) with the Flight SQL row limit; without that pipeline there is nothing to serve (501).
+        if (_scopeFactory == null)
         {
-            new Dictionary<string, object?> { ["id"] = 1, ["value"] = "Flight-Result-1" },
-            new Dictionary<string, object?> { ["id"] = 2, ["value"] = "Flight-Result-2" }
-        };
+            throw new GatewayNotImplementedException("Arrow Flight SQL requires the governed SQL execution service.");
+        }
 
-        var batch = _exportService.BuildRecordBatch(sampleRows);
-        yield return batch;
-        await Task.CompletedTask;
+        GovernedSqlResult result;
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
+            var request = new GovernedSqlQueryRequest(ticket.Query, RowLimit: FlightSqlRowLimit());
+            result = await sqlService.ExecuteQueryBufferedAsync(request, principal, new TenantId(ticket.TenantId), ct).ConfigureAwait(false);
+        }
+
+        yield return BuildResultBatch(result);
+    }
+
+    /// <summary>Gateway:RowLimits:FlightSql (falling back to WebSql), never above Arrow:MaxExportRows.</summary>
+    private SqlRowLimit FlightSqlRowLimit()
+    {
+        var options = _options.Value;
+        var limit = SqlRowLimit.For(options.WebSql ?? new WebSqlOptions(), options.RowLimits?.FlightSql);
+        long maxExportRows = options.Arrow?.MaxExportRows ?? 0;
+        return maxExportRows > 0 ? limit.CappedAt(maxExportRows) : limit;
+    }
+
+    private RecordBatch BuildResultBatch(GovernedSqlResult result)
+    {
+        RecordBatch batch;
+        if (result.Rows.Count == 0)
+        {
+            // No row to infer types from: the result columns as nullable strings.
+            var schemaBuilder = new Schema.Builder();
+            var arrays = new List<IArrowArray>(result.Columns.Count);
+            foreach (var column in result.Columns)
+            {
+                schemaBuilder.Field(new Field(column, StringType.Default, nullable: true));
+                arrays.Add(new StringArray.Builder().Build());
+            }
+
+            batch = new RecordBatch(schemaBuilder.Build(), arrays, 0);
+        }
+        else
+        {
+            batch = _exportService.BuildRecordBatch(result.Rows);
+        }
+
+        if (!result.Truncated)
+        {
+            return batch;
+        }
+
+        var schema = new Schema(batch.Schema.FieldsList, new Dictionary<string, string> { [TruncatedMetadataKey] = "true" });
+        return new RecordBatch(schema, batch.Arrays, batch.Length);
     }
 
     public static string ComputeSignature(string ticketId, string tenantId, string query, DateTimeOffset createdAt, string secret, string userSid = "")

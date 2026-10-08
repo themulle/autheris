@@ -20,6 +20,11 @@ public sealed record SqlRowLimit(long DefaultMaxRows, long MaxAllowedRows)
             channel?.MaxAllowedRows ?? webSql.MaxAllowedRows);
     }
 
+    /// <summary>These limits, neither above <paramref name="maxRows"/> (a hard cap of the transport).</summary>
+    public SqlRowLimit CappedAt(long maxRows) => new(
+        DefaultMaxRows > 0 ? Math.Min(DefaultMaxRows, maxRows) : maxRows,
+        MaxAllowedRows > 0 ? Math.Min(MaxAllowedRows, maxRows) : maxRows);
+
     /// <summary>Rows the statement may return, given its explicit LIMIT (if any).</summary>
     public long Effective(long? explicitLimit)
     {
