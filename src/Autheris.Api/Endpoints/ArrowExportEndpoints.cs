@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Serialization;
+using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
@@ -131,7 +132,11 @@ public static class ArrowExportEndpoints
 
         try
         {
-            var queryRequest = new GovernedSqlQueryRequest(effectiveSql);
+            // Row limits of the Arrow transport (Gateway:RowLimits:ArrowExport, falling back to WebSql).
+            var gatewayOptions = httpContext.RequestServices?.GetService<IOptions<GatewayOptions>>()?.Value;
+            var queryRequest = new GovernedSqlQueryRequest(
+                effectiveSql,
+                RowLimit: SqlRowLimit.For(gatewayOptions?.WebSql ?? new WebSqlOptions(), gatewayOptions?.RowLimits?.ArrowExport));
             var queryResult = await sqlExecutionService.ExecuteQueryBufferedAsync(queryRequest, httpContext.User, tenant, ct).ConfigureAwait(false);
             rows = queryResult.Rows;
         }

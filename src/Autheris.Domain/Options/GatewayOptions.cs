@@ -36,6 +36,7 @@ public sealed class GatewayOptions
     [Required] public OutboundEgressOptions Egress { get; init; } = new();
     [Required] public HitLStepUpOptions HitLStepUp { get; init; } = new();
     [Required] public WebSqlOptions WebSql { get; init; } = new();
+    [Required] public TransportRowLimitsOptions RowLimits { get; init; } = new();
     [Required] public SqlEndpointsOptions SqlEndpoints { get; init; } = new();
     [Required] public InsecureGettingStartedOptions Insecure { get; init; } = new();
     [Required] public DevOptions Dev { get; init; } = new();
@@ -1285,6 +1286,38 @@ public sealed class HitLStepUpOptions
     public ItsmSystemType PreferredItsmSystem { get; init; } = ItsmSystemType.ServiceNow;
 }
 
+/// <summary>
+/// Row limits per SQL transport. Every channel runs the governed WebSQL pipeline; an unset value falls back to
+/// WebSql.DefaultMaxRows / WebSql.MaxAllowedRows (the limits of POST /api/v1/sql).
+/// </summary>
+public sealed class TransportRowLimitsOptions
+{
+    /// <summary>Trino client protocol (POST /v1/statement).</summary>
+    public ChannelRowLimitOptions Trino { get; init; } = new();
+
+    /// <summary>WebSQL with Accept: application/vnd.apache.parquet (ParquetEgress.MaxRowsPerFile still caps the file).</summary>
+    public ChannelRowLimitOptions Parquet { get; init; } = new();
+
+    /// <summary>Declared SQL endpoints (/api/v1/queries/...).</summary>
+    public ChannelRowLimitOptions SqlEndpoints { get; init; } = new();
+
+    /// <summary>Arrow IPC export (POST /api/v1/export/arrow; Arrow.MaxExportRows still caps the export).</summary>
+    public ChannelRowLimitOptions ArrowExport { get; init; } = new();
+
+    /// <summary>Arrow Flight SQL (/api/v1/flight/sql/*).</summary>
+    public ChannelRowLimitOptions FlightSql { get; init; } = new();
+}
+
+/// <summary>Row limits of one transport; null keeps the WebSql value.</summary>
+public sealed class ChannelRowLimitOptions
+{
+    /// <summary>Rows returned when the statement has no LIMIT.</summary>
+    public long? DefaultMaxRows { get; init; }
+
+    /// <summary>Upper bound for an explicit LIMIT (0 = no bound).</summary>
+    public long? MaxAllowedRows { get; init; }
+}
+
 public sealed class WebSqlOptions
 {
     // SEC C-01/C-03: WebSQL is opt-in (secure default).
@@ -1566,6 +1599,9 @@ public sealed class DuckDbOlapOptions
     public bool Enabled { get; init; } = true;
     public string MaxMemory { get; init; } = "1GB";
     public int MaxStagedRowsPerTable { get; init; } = 250000;
+
+    /// <summary>Maximum rows of an OLAP query result; a smaller requested limit is kept.</summary>
+    public int MaxResultRows { get; init; } = 50000;
     public int QueryTimeoutSeconds { get; init; } = 60;
     public int MaxThreads { get; init; } = 2;
 }

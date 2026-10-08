@@ -201,7 +201,11 @@ public static class WebSqlEndpoints
             var timeout = trinoWaitTimeout ?? TimeSpan.FromSeconds(5);
             try
             {
-                var status = await statementManager.SubmitOrWaitAsync(governedRequest, user, tenantId, timeout, ct);
+                var trinoRequest = governedRequest with
+                {
+                    RowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Trino)
+                };
+                var status = await statementManager.SubmitOrWaitAsync(trinoRequest, user, tenantId, timeout, ct);
                 await WriteTrinoStatementResponseAsync(httpContext, status, ct);
                 return;
             }
@@ -221,7 +225,7 @@ public static class WebSqlEndpoints
 
         var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
         var sqlEngine = httpContext.RequestServices?.GetService<TrinoSqlEngine.ISqlEngine>();
-        long effectiveLimit = DetermineEffectiveLimit(sql, webSqlOptions, sqlEngine);
+        long effectiveLimit = DetermineEffectiveLimit(sql, SqlRowLimit.For(webSqlOptions), sqlEngine);
 
         // SEC M-10: The JSON writer is created lazily when the first result arrives. Policy/parse errors raised while the
         // statement is governed therefore never start the response, so the 4xx/5xx status and the curated body can still be sent.
@@ -356,9 +360,11 @@ public static class WebSqlEndpoints
 
         // WebSQL findings 4.2: the WebSQL row limit cuts the result in the rewritten SQL, before the Parquet file limit
         // applies. Reaching it is reported as truncated, exactly like the JSON path.
-        var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
+        // Row limits of the Parquet transport (Gateway:RowLimits:Parquet, falling back to WebSql).
+        var rowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Parquet);
+        governedRequest = governedRequest with { RowLimit = rowLimit };
         var sqlEngine = httpContext.RequestServices?.GetService<TrinoSqlEngine.ISqlEngine>();
-        long effectiveLimit = DetermineEffectiveLimit(governedRequest.Sql, webSqlOptions, sqlEngine);
+        long effectiveLimit = DetermineEffectiveLimit(governedRequest.Sql, rowLimit, sqlEngine);
 
         var rows = new List<IReadOnlyDictionary<string, object?>>();
         string[] columnNames = Array.Empty<string>();
@@ -943,7 +949,7 @@ public static class WebSqlEndpoints
         await httpContext.Response.WriteAsJsonAsync(responseObj, ct);
     }
 
-    private static long DetermineEffectiveLimit(string sql, WebSqlOptions webSqlOptions, TrinoSqlEngine.ISqlEngine? sqlEngine)
+    private static long DetermineEffectiveLimit(string sql, SqlRowLimit rowLimit, TrinoSqlEngine.ISqlEngine? sqlEngine)
     {
         long? explicitLimit = null;
         if (sqlEngine != null)
@@ -971,18 +977,6 @@ public static class WebSqlEndpoints
             }
         }
 
-        if (explicitLimit is > 0)
-        {
-            return webSqlOptions.MaxAllowedRows > 0
-                ? Math.Min(explicitLimit.Value, webSqlOptions.MaxAllowedRows)
-                : explicitLimit.Value;
-        }
-
-        var defaultLimit = webSqlOptions.DefaultMaxRows > 0 ? webSqlOptions.DefaultMaxRows : 1000;
-        if (webSqlOptions.MaxAllowedRows > 0 && defaultLimit > webSqlOptions.MaxAllowedRows)
-        {
-            defaultLimit = webSqlOptions.MaxAllowedRows;
-        }
-        return defaultLimit;
+        return rowLimit.Effective(explicitLimit);
     }
 }

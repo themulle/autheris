@@ -27,12 +27,12 @@ using Xunit;
 /// </summary>
 public sealed class WebSqlTwoPartNameDataSourceTests
 {
-    private const string Tenant = "tenant_finance";
+    internal const string Tenant = "tenant_finance";
     private const string DataSource = "lwetem_prod";
 
-    private static readonly TableIdentifier CraneId = new(DataSource, "md", "crane");
+    internal static readonly TableIdentifier CraneId = new(DataSource, "md", "crane");
 
-    private static ClaimsPrincipal CreateUser() =>
+    internal static ClaimsPrincipal CreateUser() =>
         new(new ClaimsIdentity(
             [
                 new Claim(ClaimTypes.PrimarySid, "S-1-5-21-USER-1"),
@@ -53,6 +53,12 @@ public sealed class WebSqlTwoPartNameDataSourceTests
     };
 
     private static (GovernedSqlExecutionService Service, ITableMetadataRepository Repository) CreateService(params TableIdentifier[] catalogued)
+    {
+        var (service, repo, _) = CreateServiceWithCommand(catalogued);
+        return (service, repo);
+    }
+
+    internal static (GovernedSqlExecutionService Service, ITableMetadataRepository Repository, DbCommand Command) CreateServiceWithCommand(params TableIdentifier[] catalogued)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
@@ -122,7 +128,7 @@ public sealed class WebSqlTwoPartNameDataSourceTests
             consentRepository: consents,
             secretProvider: null,
             sessionInitializer: Substitute.For<IDbSessionContextInitializer>());
-        return (service, repo);
+        return (service, repo, command);
     }
 
     [Fact]

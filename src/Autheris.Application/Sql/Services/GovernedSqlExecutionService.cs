@@ -132,7 +132,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         TenantId tenantId,
         string? dataSourceName,
         DmlAuditContext? dmlContext,
-        CancellationToken ct)
+        CancellationToken ct,
+        SqlRowLimit? rowLimit = null)
     {
         if (string.IsNullOrWhiteSpace(rawSql))
         {
@@ -604,22 +605,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         }
 
         // 6. Construct RlsOptions
-        long maxRows;
-        if (metadata.HasExplicitLimit && metadata.ExplicitLimitValue is > 0)
-        {
-            var requestedLimit = metadata.ExplicitLimitValue.Value;
-            maxRows = webSqlOptions.MaxAllowedRows > 0
-                ? Math.Min(requestedLimit, webSqlOptions.MaxAllowedRows)
-                : requestedLimit;
-        }
-        else
-        {
-            maxRows = webSqlOptions.DefaultMaxRows > 0 ? webSqlOptions.DefaultMaxRows : 1000;
-            if (webSqlOptions.MaxAllowedRows > 0 && maxRows > webSqlOptions.MaxAllowedRows)
-            {
-                maxRows = webSqlOptions.MaxAllowedRows;
-            }
-        }
+        // The transport (Trino, Parquet, SQL endpoints, Arrow, Flight SQL) may carry its own configured row limit.
+        long maxRows = (rowLimit ?? SqlRowLimit.For(webSqlOptions))
+            .Effective(metadata.HasExplicitLimit ? metadata.ExplicitLimitValue : null);
 
         // SEC C-03: Any table name the rewriter encounters that was not resolved above is filtered to the empty set (fail-closed).
         const string denyAllFilter = "1 = 0";
@@ -825,7 +813,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         GovernedRewrite rewrite;
         try
         {
-            rewrite = await RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct).ConfigureAwait(false);
+            rewrite = await RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit).ConfigureAwait(false);
         }
         catch (SecurityException policyEx) when (dmlContext.IsDml)
         {

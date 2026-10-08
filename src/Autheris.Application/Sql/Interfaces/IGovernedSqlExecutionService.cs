@@ -11,7 +11,8 @@ using Autheris.Domain.Common;
 public sealed record GovernedSqlQueryRequest(
     string Sql,
     IReadOnlyDictionary<string, object?>? Parameters = null,
-    string? DataSourceName = null);
+    string? DataSourceName = null,
+    SqlRowLimit? RowLimit = null);
 
 public sealed record GovernedSqlResult(
     string OriginalSql,

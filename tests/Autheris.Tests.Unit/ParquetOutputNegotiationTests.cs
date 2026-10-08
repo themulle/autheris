@@ -726,9 +726,12 @@ public sealed class ParquetOutputNegotiationTests
     {
         public int Executions { get; private set; }
 
+        public GovernedSqlQueryRequest? LastRequest { get; private set; }
+
         public async Task ExecuteGovernedQueryAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, Func<DbDataReader, CancellationToken, Task> rowWriter, CancellationToken ct = default)
         {
             Executions++;
+            LastRequest = request;
             if (toThrow != null)
             {
                 throw toThrow;
@@ -853,6 +856,26 @@ public sealed class ParquetOutputNegotiationTests
         context.Response.Headers["X-Row-Count"].ToString().ShouldBe("5");
         context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("true");
         context.Response.Headers["X-Autheris-Truncated"].ToString().ShouldBe("true");
+    }
+
+    [Fact]
+    public async Task PARQ_WebSql_UsesParquetRowLimits()
+    {
+        // Gateway:RowLimits:Parquet raises the WebSQL limit for Parquet exports; reaching 5 rows is then not a cut.
+        var options = new GatewayOptions
+        {
+            ParquetEgress = CreateOptions(maxRows: 100).ParquetEgress,
+            WebSql = new WebSqlOptions { Enabled = true, MaxAllowedRows = 5, DefaultMaxRows = 5 },
+            RowLimits = new TransportRowLimitsOptions { Parquet = new ChannelRowLimitOptions { DefaultMaxRows = 50, MaxAllowedRows = 50 } }
+        };
+        using var services = BuildServices(options);
+        var context = CreateWebSqlContext(services, ParquetAccept);
+        var sqlService = new DataTableSqlService(CreateEmployeeTable(5));
+
+        await WebSqlEndpoints.HandleWebSqlRequest(context, sqlService, Options.Create(options), NullLoggerFactory.Instance);
+
+        sqlService.LastRequest!.RowLimit.ShouldBe(new SqlRowLimit(50, 50));
+        context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("false");
     }
 
     [Fact]

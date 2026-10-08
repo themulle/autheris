@@ -110,10 +110,11 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
                 columns.Add(reader.GetName(i));
             }
 
-            const int HardMaxLimit = 50000;
+            // Gateway:DuckDbOlap:MaxResultRows (default 50 000) bounds every OLAP result.
+            int maxResultRows = _options.MaxResultRows > 0 ? _options.MaxResultRows : 50000;
             int rowLimit = request.Limit.HasValue && request.Limit.Value > 0
-                ? Math.Min(request.Limit.Value, HardMaxLimit)
-                : HardMaxLimit;
+                ? Math.Min(request.Limit.Value, maxResultRows)
+                : maxResultRows;
 
             while (await reader.ReadAsync(cts.Token).ConfigureAwait(false) && rows.Count < rowLimit)
             {
