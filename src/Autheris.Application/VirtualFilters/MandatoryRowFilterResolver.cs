@@ -202,7 +202,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             .ToList();
 
         var filtersByName = snapshot.Filters.Where(f => f.TenantId == query.Tenant).ToDictionary(f => f.Name, StringComparer.Ordinal);
-        var applying = new Dictionary<string, (VirtualFilter Filter, FilterBinding Binding)>(StringComparer.Ordinal);
+        var applying = new Dictionary<string, (VirtualFilter Filter, FilterBinding Binding, AccessProfile Profile)>(StringComparer.Ordinal);
         string? currentFilter = null;
         try
         {
@@ -217,6 +217,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                 }
 
                 bool covered = false;
+                (VirtualFilter Filter, IReadOnlyList<string> Missing)? missingBinding = null;
                 var bindingTrace = new List<(VirtualFilter? Filter, FilterBinding Binding, string? Reason, IReadOnlyList<string> Missing)>();
                 foreach (var binding in profile.Bindings)
                 {
@@ -231,27 +232,53 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                     if (applies)
                     {
                         covered = true;
-                        applying.TryAdd(filter.Name + "|" + binding.TargetPattern, (filter, binding));
+                        applying.TryAdd(filter.Name + "|" + binding.TargetPattern, (filter, binding, profile));
+                    }
+                    else if (missing.Count > 0)
+                    {
+                        missingBinding ??= (filter, missing);
                     }
                 }
 
                 explained.Add((profile, bindingTrace));
-                if (!covered && profile.Uncovered == UncoveredPolicy.Deny && uncoveredDeny == null)
+                if (!covered && uncoveredDeny == null)
                 {
-                    uncoveredDeny = MandatoryFilterOutcome.Deny(
-                        $"Virtual filters: '{table.ToString()}' is in the scope of the profile '{profile.Name}' but no filter of the profile covers it (uncovered: deny).");
-                    if (trace == null)
+                    if (profile.Uncovered == UncoveredPolicy.Deny)
                     {
-                        return uncoveredDeny;
+                        uncoveredDeny = MandatoryFilterOutcome.Deny(
+                            $"Virtual filters: '{table.ToString()}' is in the scope of the profile '{profile.Name}' but no filter of the profile covers it (uncovered: deny).");
+                        if (trace == null)
+                        {
+                            return uncoveredDeny;
+                        }
+                    }
+                    else if (missingBinding != null)
+                    {
+                        // SR15-13: Matching binding lacks required columns, and profile is not covered by another filter -> fail-closed (Deny)
+                        uncoveredDeny = MandatoryFilterOutcome.Deny(
+                            $"Virtual filters: '{table.ToString()}' matches filter '{missingBinding.Value.Filter.Name}' in profile '{profile.Name}', but lacks required column(s): {string.Join(", ", missingBinding.Value.Missing)} (uncovered: deny, fail-closed).");
+                        if (trace == null)
+                        {
+                            return uncoveredDeny;
+                        }
                     }
                 }
             }
 
             var names = applying.Values.Select(a => a.Filter.Name).ToHashSet(StringComparer.Ordinal);
+            // SR15-12: supersedes may only supersede filters within the same profile or with the same managed_by context
             var supersededBy = applying.Values
-                .SelectMany(a => a.Filter.Supersedes.Where(names.Contains).Select(s => (Superseded: s, By: a.Filter.Name)))
+                .SelectMany(a => a.Filter.Supersedes.Where(names.Contains).Select(s => (Superseded: s, By: a)))
+                .Where(x =>
+                {
+                    var targetEntries = applying.Values.Where(v => v.Filter.Name.Equals(x.Superseded, StringComparison.Ordinal)).ToList();
+                    return targetEntries.Any(target =>
+                        string.Equals(x.By.Profile.Name, target.Profile.Name, StringComparison.Ordinal) ||
+                        (x.By.Filter.ManagedBy != null && target.Filter.ManagedBy != null && x.By.Filter.ManagedBy == target.Filter.ManagedBy) ||
+                        (x.By.Profile.ManagedBy != null && target.Profile.ManagedBy != null && x.By.Profile.ManagedBy == target.Profile.ManagedBy));
+                })
                 .GroupBy(x => x.Superseded, StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.First().By, StringComparer.Ordinal);
+                .ToDictionary(g => g.Key, g => g.First().By.Filter.Name, StringComparer.Ordinal);
 
             if (trace != null)
             {
@@ -284,7 +311,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                 .ToList();
 
             var parts = new List<string>(effective.Count);
-            foreach (var (filter, binding) in effective)
+            foreach (var (filter, binding, _) in effective)
             {
                 currentFilter = filter.Name;
                 parts.Add(_predicates.Build(filter, binding, query.Metadata, query.Metadata.Dialect));

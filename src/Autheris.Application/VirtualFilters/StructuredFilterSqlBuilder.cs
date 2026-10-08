@@ -24,7 +24,7 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
         _strategy = options?.Value?.RowFilters?.SubqueryStrategy ?? RowFilterSubqueryStrategy.Exists;
     }
 
-    [GeneratedRegex(@"^-?\d{1,18}(\.\d{1,18})?$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^-?(0|[1-9]\d{0,17})(\.\d{1,18})?$", RegexOptions.CultureInvariant)]
     private static partial Regex NumericLiteral();
 
     public string Build(VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect)

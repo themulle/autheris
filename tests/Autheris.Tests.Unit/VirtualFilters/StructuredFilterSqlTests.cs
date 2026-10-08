@@ -218,4 +218,27 @@ INSERT INTO air1 VALUES
 
         ids.ShouldBe([11L, 12L]);   // client 3: the row one minute after 2026-06-01 is cut off
     }
+
+    [Fact]
+    public void StructuredFilter_StringWithLeadingZero_IsQuotedAsStringLiteral()
+    {
+        var filter = new VirtualFilter
+        {
+            Name = "code_filter",
+            TenantId = new TenantId("t1"),
+            Source = "lwetem_prod",
+            KeyColumns = ["client.client_id"],
+            Structured = new StructuredFilterDefinition
+            {
+                From = new TableIdentifier("lwetem_prod", "conf", "client"),
+                FromAlias = "client",
+                Where = [new FilterCondition("client.status_code", FilterConditionOperator.Eq, "01")]
+            }
+        };
+
+        var sql = Build(RowFilterSubqueryStrategy.Exists, DatabaseDialect.SqlServer, filter);
+        sql.ShouldContain("[client].[status_code] = '01'");
+        sql.ShouldNotContain("[client].[status_code] = 1");
+    }
 }
+

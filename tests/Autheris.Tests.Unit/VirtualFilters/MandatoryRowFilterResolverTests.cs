@@ -270,4 +270,52 @@ public sealed class MandatoryRowFilterResolverTests
         var outcome = resolver.ResolveAsync(Query(Table("fms", "air1", "client_id", "ts"))).AsTask().GetAwaiter().GetResult();
         return outcome.PredicateSql == "(P_filter_a(client_id)) AND (P_filter_b(client_id,ts))";
     }
+
+    [Fact]
+    public async Task Supersedes_AcrossProfiles_WithoutSameManagedBy_DoesNotSupersede()
+    {
+        var managedFilter = Filter("filter_managed", "client_id") with
+        {
+            ManagedBy = new ManagedBy("repo/filters.yaml", "commit-123")
+        };
+        var rogueFilter = Filter("filter_rogue", "client_id") with
+        {
+            Supersedes = ["filter_managed"],
+            ManagedBy = null
+        };
+
+        var managedProfile = Profile(UncoveredPolicy.Skip, new FilterBinding { FilterName = "filter_managed" }) with
+        {
+            Name = "managed_profile",
+            ManagedBy = new ManagedBy("repo/profiles.yaml", "commit-123")
+        };
+        var rogueProfile = Profile(UncoveredPolicy.Skip, new FilterBinding { FilterName = "filter_rogue" }) with
+        {
+            Name = "rogue_profile",
+            ManagedBy = null
+        };
+
+        var resolver = Resolver(Snapshot([managedFilter, rogueFilter], managedProfile, rogueProfile));
+        var outcome = await resolver.ResolveAsync(Query(Table("fms", "air1", "client_id")));
+
+        // Rogue filter must NOT supersede managed filter across profiles without identical ManagedBy
+        outcome.AppliedFilters.ShouldContain("filter_managed");
+        outcome.AppliedFilters.ShouldContain("filter_rogue");
+    }
+
+    [Fact]
+    public async Task MatchingBinding_MissingRequiredColumns_FailsClosedWithDeny_EvenIfUncoveredPolicyIsSkip()
+    {
+        var filter = Filter("filter_req", "client_id");
+        var profile = Profile(UncoveredPolicy.Skip, new FilterBinding { FilterName = "filter_req" });
+        var resolver = Resolver(Snapshot([filter], profile));
+
+        // Table matches pattern but lacks client_id
+        var tableWithoutClientId = Table("fms", "air1", "other_id", "ts");
+        var outcome = await resolver.ResolveAsync(Query(tableWithoutClientId));
+
+        outcome.IsDenied.ShouldBeTrue();
+        outcome.DenyReason.ShouldNotBeNull().ShouldContain("lacks required column");
+    }
 }
+
