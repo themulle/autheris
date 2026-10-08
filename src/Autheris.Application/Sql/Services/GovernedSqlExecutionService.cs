@@ -22,6 +22,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -212,6 +213,12 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         {
             // SEC M-20: Consent and Casbin only grant 'read'. A DML statement therefore additionally requires an
             // explicitly configured writer role; without one, DML is rejected (fail-closed).
+            // Finding 3.3 / R13: a read-only token (agent scope, app-only) never writes, whatever its roles.
+            if (user.IsReadOnly())
+            {
+                throw new WebSqlPolicyException("This token only permits read access; DML statements are rejected.");
+            }
+
             var writerRoles = webSqlOptions.DmlWriterRoles;
             bool isWriter = writerRoles != null && writerRoles.Any(r => !string.IsNullOrWhiteSpace(r) && user.IsInRole(r));
             if (!isWriter)

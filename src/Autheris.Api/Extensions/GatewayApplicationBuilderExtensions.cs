@@ -116,9 +116,7 @@ public static class GatewayApplicationBuilderExtensions
             });
         }
 
-        var endpoint = gatewayOptions.GraphQL.EndpointPath.StartsWith('/')
-            ? gatewayOptions.GraphQL.EndpointPath
-            : "/" + gatewayOptions.GraphQL.EndpointPath;
+        var endpoint = ResolveGraphQlPath(gatewayOptions);
 
         var mcpBasePath = ResolveMcpBasePath(gatewayOptions);
 
@@ -301,6 +299,10 @@ public static class GatewayApplicationBuilderExtensions
         app.UseMiddleware<BasicAuthSessionMiddleware>();
         // ADR-017 / K-K10: Canonicalize AD Windows SIDs, OIDC claims, client certs, and GatewayRoles before authorization
         app.UseMiddleware<ClaimsNormalizationMiddleware>();
+        // Finding 3.3 / R13: read-only agent and app tokens may only reach the query endpoints
+        app.UseMiddleware<ReadOnlyTokenMiddleware>(
+            new PathString(ResolveGraphQlPath(gatewayOptions)),
+            new PathString(ResolveMcpBasePath(gatewayOptions)));
         app.UseAuthorization();
         app.UseMiddleware<PostAuthSidRateLimitingMiddleware>();
         app.UseMiddleware<SecurityContextResolutionMiddleware>();
@@ -317,6 +319,11 @@ public static class GatewayApplicationBuilderExtensions
 
         return app;
     }
+
+    internal static string ResolveGraphQlPath(GatewayOptions gatewayOptions) =>
+        gatewayOptions.GraphQL.EndpointPath.StartsWith('/')
+            ? gatewayOptions.GraphQL.EndpointPath
+            : "/" + gatewayOptions.GraphQL.EndpointPath;
 
     internal static string ResolveMcpBasePath(GatewayOptions gatewayOptions)
     {
@@ -349,9 +356,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapHealthEndpoints(gatewayOptions, app.Environment);
 
         // 2. Core GraphQL Engine & Dynamic Plugins
-        var endpoint = gatewayOptions.GraphQL.EndpointPath.StartsWith('/')
-            ? gatewayOptions.GraphQL.EndpointPath
-            : "/" + gatewayOptions.GraphQL.EndpointPath;
+        var endpoint = ResolveGraphQlPath(gatewayOptions);
 
         var pluginManager = app.Services.GetService<Autheris.Application.Plugins.IPluginManager>();
         if (pluginManager != null && !string.IsNullOrWhiteSpace(gatewayOptions.Plugins.Directory))

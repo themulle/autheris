@@ -736,6 +736,7 @@ public static class GatewayServiceCollectionExtensions
 
             var validIssuers = new List<string>();
             var validAudiences = new List<string>();
+            var entraIssuers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             if (useEntra)
             {
@@ -744,8 +745,9 @@ public static class GatewayServiceCollectionExtensions
                     var instance = string.IsNullOrWhiteSpace(entraConfig.Instance)
                         ? "https://login.microsoftonline.com/"
                         : entraConfig.Instance.TrimEnd('/') + "/";
-                    validIssuers.Add($"{instance}{entraConfig.TenantId}/v2.0");
-                    validIssuers.Add($"https://sts.windows.net/{entraConfig.TenantId}/");
+                    entraIssuers.Add($"{instance}{entraConfig.TenantId}/v2.0");
+                    entraIssuers.Add($"https://sts.windows.net/{entraConfig.TenantId}/");
+                    validIssuers.AddRange(entraIssuers);
                 }
                 if (!string.IsNullOrWhiteSpace(entraConfig.Audience)) validAudiences.Add(entraConfig.Audience);
                 if (!string.IsNullOrWhiteSpace(entraConfig.ClientId)) validAudiences.Add(entraConfig.ClientId);
@@ -773,6 +775,26 @@ public static class GatewayServiceCollectionExtensions
                 ValidateIssuerSigningKey = true,
                 ClockSkew = TimeSpan.FromMinutes(2)
             };
+
+            if (useEntra)
+            {
+                // Finding 3.3 / R13: scope and token-kind rules apply to Entra tokens only (ADFS may share this scheme).
+                options.Events ??= new Microsoft.AspNetCore.Authentication.JwtBearer.JwtBearerEvents();
+                options.Events.OnTokenValidated = ctx =>
+                {
+                    if (ctx.Principal != null && entraIssuers.Contains(ctx.SecurityToken?.Issuer ?? string.Empty))
+                    {
+                        var resolver = ctx.HttpContext.RequestServices.GetRequiredService<IIdentitySubjectResolver>();
+                        var failure = EntraTokenPolicy.Apply(ctx.Principal, entraConfig, resolver);
+                        if (failure != null)
+                        {
+                            ctx.Fail(failure);
+                        }
+                    }
+
+                    return Task.CompletedTask;
+                };
+            }
         }
 
         // 5. Smart Dynamic Policy Scheme: Route requests based on Authorization header or ForwardAuth
@@ -943,6 +965,7 @@ public static class GatewayServiceCollectionExtensions
         gqlBuilder
             .UseDocumentParser()
             .UseDocumentValidation()
+            .UseRequest<Autheris.GraphQL.Interceptors.ReadOnlyOperationMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.DbtHealthExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.SchemaSunsettingExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware>()
