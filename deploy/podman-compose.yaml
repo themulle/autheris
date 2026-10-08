@@ -105,6 +105,7 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env (see .env.example)}"
+      MSSQL_CRM_PASSWORD: "${MSSQL_CRM_PASSWORD:-${MSSQL_SA_PASSWORD}}"
       MSSQL_PID: "Developer"
     ports:
       - "${BIND_ADDR:-127.0.0.1}:1433:1433"
@@ -234,7 +235,7 @@ services:
       DOTNET_RUNNING_IN_CONTAINER: "true"
       # Overrides for Postgres and Redis connection
       Gateway__DataSources__Connections__finance__ConnectionString: "Host=postgres;Port=5432;Database=governancedb;Username=gqluser;Password=${GQL_PG_PASSWORD:?set GQL_PG_PASSWORD in .env (see .env.example)};Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100"
-      Gateway__DataSources__Connections__crm__ConnectionString: "Server=sqlserver,1433;Database=crmdb;User Id=crm_user;Password=${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env (see .env.example)};TrustServerCertificate=True;Connect Timeout=15;Pooling=true;Min Pool Size=3;Max Pool Size=50"
+      Gateway__DataSources__Connections__crm__ConnectionString: "Server=sqlserver,1433;Database=crmdb;User Id=crm_user;Password=${MSSQL_CRM_PASSWORD:-${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env (see .env.example)}};TrustServerCertificate=True;Connect Timeout=15;Pooling=true;Min Pool Size=3;Max Pool Size=50"
       Gateway__Caching__Redis__Configuration: "redis:6379,password=${REDIS_PASSWORD:?set REDIS_PASSWORD in .env (see .env.example)},abortConnect=false"
       # Extension feature flags toggled per scenario
       Gateway__Lakehouse__Enabled: "${ENABLE_LAKEHOUSE:-true}"
