@@ -33,6 +33,15 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         _cteScopeStack.Push(new HashSet<string>(StringComparer.Ordinal));
     }
 
+    /// <summary>
+    /// A policy filter as an expression: verbatim and parenthesized when it is gateway-rendered target-dialect SQL
+    /// (<see cref="RlsOptions.PolicyFiltersAreTargetDialectSql"/>), otherwise parsed as Trino SQL.
+    /// </summary>
+    private Expression PolicyFilterExpression(string filterSql) =>
+        _options.PolicyFiltersAreTargetDialectSql
+            ? new TrustedSqlExpression($"({filterSql})")
+            : ParseFilterExpression(filterSql);
+
     private Expression ParseFilterExpression(string filterSql)
     {
         var tokenOptions = SqlTokenSecurityOptions.FromRlsOptions(_options);
@@ -187,7 +196,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         var innerSource = new NamedTableSource(node.Name, innerTableAlias);
 
         Expression? whereClause = !string.IsNullOrWhiteSpace(policyFilter)
-            ? ParseFilterExpression(policyFilter)
+            ? PolicyFilterExpression(policyFilter)
             : null;
 
         var subqueryBody = new QuerySpecification(
@@ -257,7 +266,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             throw new SecurityException("Correlated row filters are not supported for UPDATE/DELETE statements.");
         }
 
-        var rlsFilter = ParseFilterExpression(policyFilter);
+        var rlsFilter = PolicyFilterExpression(policyFilter);
         var combinedWhere = visitedWhere != null
             ? new BinaryExpression(visitedWhere, BinaryOperator.And, rlsFilter)
             : rlsFilter;
@@ -334,7 +343,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             throw new SecurityException("Correlated row filters are not supported for UPDATE/DELETE statements.");
         }
 
-        var rlsFilter = ParseFilterExpression(policyFilter);
+        var rlsFilter = PolicyFilterExpression(policyFilter);
         var combinedWhere = visitedWhere != null
             ? new BinaryExpression(visitedWhere, BinaryOperator.And, rlsFilter)
             : rlsFilter;

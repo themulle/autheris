@@ -127,4 +127,31 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
         restored.ShouldNotContain("@p0");
         restored.ShouldNotContain("?1");
     }
+
+    [Fact]
+    public async Task SqlServer_ConsentRowFilter_InTargetDialect_IsApplied()
+    {
+        // Befund: "Gegen SQL Server: Abfrage mit Zeilenfilter als ungültig abgelehnt (400)".
+        var service = CreateService("SqlServer", rowFilter: "[dept] = N'Sales'");
+
+        var sql = await service.RewriteSqlAsync("SELECT id, amount FROM orders", User(), new TenantId(Tenant));
+        output.WriteLine(sql);
+
+        sql.ShouldContain("[dept] = N'Sales'");
+        sql.ShouldContain("tenant_a");
+    }
+
+    [Theory]
+    [InlineData("PostgreSQL")]
+    [InlineData("SqlServer")]
+    [InlineData("Sqlite")]
+    public async Task ParameterizedConsentRowFilter_IsApplied(string sourceType)
+    {
+        var service = CreateService(sourceType, rowFilter: "dept = @__gql_rf0", rowFilterParams: new Dictionary<string, object?> { ["@__gql_rf0"] = "Sales" });
+
+        var sql = await service.RewriteSqlAsync("SELECT id FROM orders", User(), new TenantId(Tenant));
+        output.WriteLine(sql);
+
+        sql.ShouldContain("@__gql_rf0");
+    }
 }

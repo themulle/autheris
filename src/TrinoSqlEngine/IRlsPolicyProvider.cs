@@ -140,6 +140,14 @@ public sealed class RlsOptions
     public bool EnforceReadOnlyQueries { get; set; } = true;
 
     /// <summary>
+    /// Wunsch 4: the policy filters returned by <see cref="PolicyProvider"/> are already rendered and validated SQL of
+    /// <see cref="TargetDialect"/> (e.g. T-SQL brackets, bound <c>@__gql_*</c> parameters). The AST compiler then splices
+    /// them in verbatim and parenthesized, as the legacy rewriter does, instead of parsing them again as Trino SQL.
+    /// Only set this when the filters never contain client input.
+    /// </summary>
+    public bool PolicyFiltersAreTargetDialectSql { get; set; }
+
+    /// <summary>
     /// SEC-02: When true, automatically appends "AS {tableName}" if the rewritten subquery does not already have an alias.
     /// Default is false to maintain backward-compatibility with step-8 simple rewrite format.
     /// </summary>

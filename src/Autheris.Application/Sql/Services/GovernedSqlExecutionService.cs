@@ -701,6 +701,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             PolicyProvider = policyProvider,
             TableColumnsProvider = tbl => tableColumnsMap.TryGetValue(tbl, out var cols) ? cols : null,
             ColumnMaskingProvider = maskingProvider,
+            // Wunsch 4: tenant and consent filters are rendered by the gateway in the target dialect and validated by
+            // ValidatePredicateSql above; the AST compiler splices them in like the legacy rewriter (no client input).
+            PolicyFiltersAreTargetDialectSql = true,
             RewriterEngine = _options.Value.WebSql.SqlRewriterEngine
         };
 
