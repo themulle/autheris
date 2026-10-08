@@ -271,8 +271,9 @@ public static class GraphQlTreeBuilder
 
                 if (valLiteral is ObjectValueNode notObj)
                 {
+                    // G-9: an empty filter matches every row, so not: {} matches none (it used to filter nothing).
                     var parsed = ParseObjectFilter(notObj, table, context);
-                    if (parsed != null) items.Add(new TreeNotFilter(parsed));
+                    items.Add(parsed != null ? new TreeNotFilter(parsed) : new TreeOrFilter([]));
                 }
                 continue;
             }
@@ -292,7 +293,8 @@ public static class GraphQlTreeBuilder
                     {
                         var opName = opField.Name.Value.ToLowerInvariant();
                         var opValLiteral = opField.Value is VariableNode opVn ? ResolveVariableLiteral(opVn, context) : opField.Value;
-                        if (opValLiteral is NullValueNode && opName != "isnull")
+                        // G-9: also isNull: null is rejected; it used to become IS NOT NULL.
+                        if (opValLiteral is NullValueNode)
                         {
                             throw new GatewayInvalidQueryException($"Value for operator '{opName}' on field '{fieldName}' cannot be null.");
                         }
@@ -352,60 +354,44 @@ public static class GraphQlTreeBuilder
                 var itemLit = item is VariableNode vn ? ResolveVariableLiteral(vn, context) : item;
                 if (itemLit is ObjectValueNode obj)
                 {
-                    if (obj.Fields.Count != 1)
-                    {
-                        throw new GatewayInvalidQueryException("Each orderBy entry must specify exactly one field.");
-                    }
-                    var f = obj.Fields[0];
-                    var col = table.Columns.FirstOrDefault(c => string.Equals(c.FieldName, f.Name.Value, StringComparison.Ordinal));
-                    if (col == null)
-                    {
-                        throw new GatewayInvalidQueryException($"Unknown sort column '{f.Name.Value}'.");
-                    }
-                    var dirVal = f.Value switch
-                    {
-                        EnumValueNode ev => ev.Value,
-                        StringValueNode sv => sv.Value,
-                        _ => throw new GatewayInvalidQueryException($"Invalid sort direction for '{f.Name.Value}'. Expected ASC or DESC.")
-                    };
-                    if (!string.Equals(dirVal, "ASC", StringComparison.OrdinalIgnoreCase) &&
-                        !string.Equals(dirVal, "DESC", StringComparison.OrdinalIgnoreCase))
-                    {
-                        throw new GatewayInvalidQueryException($"Invalid sort direction '{dirVal}' for '{f.Name.Value}'. Expected ASC or DESC.");
-                    }
-                    bool desc = string.Equals(dirVal, "DESC", StringComparison.OrdinalIgnoreCase);
-                    orders.Add(new TreeOrder(col.ColumnName, desc));
+                    orders.Add(ParseOrderEntry(obj, table, context));
                 }
             }
         }
         else if (literal is ObjectValueNode singleObj)
         {
-            if (singleObj.Fields.Count != 1)
-            {
-                throw new GatewayInvalidQueryException("Each orderBy entry must specify exactly one field.");
-            }
-            var f = singleObj.Fields[0];
-            var col = table.Columns.FirstOrDefault(c => string.Equals(c.FieldName, f.Name.Value, StringComparison.Ordinal));
-            if (col == null)
-            {
-                throw new GatewayInvalidQueryException($"Unknown sort column '{f.Name.Value}'.");
-            }
-            var dirVal = f.Value switch
-            {
-                EnumValueNode ev => ev.Value,
-                StringValueNode sv => sv.Value,
-                _ => throw new GatewayInvalidQueryException($"Invalid sort direction for '{f.Name.Value}'. Expected ASC or DESC.")
-            };
-            if (!string.Equals(dirVal, "ASC", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(dirVal, "DESC", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new GatewayInvalidQueryException($"Invalid sort direction '{dirVal}' for '{f.Name.Value}'. Expected ASC or DESC.");
-            }
-            bool desc = string.Equals(dirVal, "DESC", StringComparison.OrdinalIgnoreCase);
-            orders.Add(new TreeOrder(col.ColumnName, desc));
+            orders.Add(ParseOrderEntry(singleObj, table, context));
         }
 
         return orders;
+    }
+
+    /// <summary>G-5: one orderBy entry; the direction may also be a variable ({ id: $dir }).</summary>
+    private static TreeOrder ParseOrderEntry(ObjectValueNode entry, CatalogTableType table, IResolverContext context)
+    {
+        if (entry.Fields.Count != 1)
+        {
+            throw new GatewayInvalidQueryException("Each orderBy entry must specify exactly one field.");
+        }
+
+        var f = entry.Fields[0];
+        var col = table.Columns.FirstOrDefault(c => string.Equals(c.FieldName, f.Name.Value, StringComparison.Ordinal))
+            ?? throw new GatewayInvalidQueryException($"Unknown sort column '{f.Name.Value}'.");
+
+        var dirLiteral = f.Value is VariableNode dirVar ? ResolveVariableLiteral(dirVar, context) : f.Value;
+        var dirVal = dirLiteral switch
+        {
+            EnumValueNode ev => ev.Value,
+            StringValueNode sv => sv.Value,
+            _ => throw new GatewayInvalidQueryException($"Invalid sort direction for '{f.Name.Value}'. Expected ASC or DESC.")
+        };
+        if (!string.Equals(dirVal, "ASC", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(dirVal, "DESC", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new GatewayInvalidQueryException($"Invalid sort direction '{dirVal}' for '{f.Name.Value}'. Expected ASC or DESC.");
+        }
+
+        return new TreeOrder(col.ColumnName, string.Equals(dirVal, "DESC", StringComparison.OrdinalIgnoreCase));
     }
 
     private static IValueNode ResolveVariableLiteral(VariableNode varNode, IResolverContext context)
