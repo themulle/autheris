@@ -397,6 +397,9 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
 
     public override void EnterQueryNoWith(SqlBaseParser.QueryNoWithContext context)
     {
+        // Befund 3.6: sorting on a redacted column orders by the replacement value; guarded like WHERE/HAVING.
+        ExtractFilterColumnReferences(context.orderBy(), _filterColumnReferences);
+
         // Check top-level limit only on the root query (SEC M-22: CTE bodies and subqueries do not count)
         bool isRoot = context.Parent is SqlBaseParser.QueryContext query && query.Parent is SqlBaseParser.RootQueryContext;
         if (isRoot && _currentSubqueryDepth == 0 && context.limit != null)
