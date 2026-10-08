@@ -700,6 +700,23 @@ public sealed class RateLimitingOptions
 {
     [Required] public PreAuthIpRateLimitOptions PreAuthIpRateLimit { get; init; } = new();
     [Required] public PostAuthSidRateLimitOptions PostAuthSidRateLimit { get; init; } = new();
+    public ClientTierOptions ClientTiers { get; init; } = new();
+}
+
+public sealed class ClientTierOptions
+{
+    public Dictionary<string, ClientTierLimitOverride> TierLimits { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> RoleTierMappings { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> ApiKeys { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class ClientTierLimitOverride
+{
+    public int? MaxCostPerQuery { get; init; }
+    public int? MaxComplexityDepth { get; init; }
+    public int? MaxTokensCapacity { get; init; }
+    public double? TokenRefillRatePerSecond { get; init; }
+    public bool? ExposeCostExtensions { get; init; }
 }
 
 public sealed class PreAuthIpRateLimitOptions

@@ -610,10 +610,21 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         }
 
         // 6. Construct RlsOptions
-        long maxRows = webSqlOptions.DefaultMaxRows > 0 ? webSqlOptions.DefaultMaxRows : 1000;
-        if (webSqlOptions.MaxAllowedRows > 0 && maxRows > webSqlOptions.MaxAllowedRows)
+        long maxRows;
+        if (metadata.HasExplicitLimit && metadata.ExplicitLimitValue is > 0)
         {
-            maxRows = webSqlOptions.MaxAllowedRows;
+            var requestedLimit = metadata.ExplicitLimitValue.Value;
+            maxRows = webSqlOptions.MaxAllowedRows > 0
+                ? Math.Min(requestedLimit, webSqlOptions.MaxAllowedRows)
+                : requestedLimit;
+        }
+        else
+        {
+            maxRows = webSqlOptions.DefaultMaxRows > 0 ? webSqlOptions.DefaultMaxRows : 1000;
+            if (webSqlOptions.MaxAllowedRows > 0 && maxRows > webSqlOptions.MaxAllowedRows)
+            {
+                maxRows = webSqlOptions.MaxAllowedRows;
+            }
         }
 
         // SEC C-03: Any table name the rewriter encounters that was not resolved above is filtered to the empty set (fail-closed).
@@ -1179,13 +1190,21 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
         sw.Stop();
 
+        bool isTruncated = false;
+        var limitMatch = System.Text.RegularExpressions.Regex.Match(securedSql, @"\bLIMIT\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+        if (limitMatch.Success && long.TryParse(limitMatch.Groups[1].ValueSpan, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var limitVal) && limitVal > 0)
+        {
+            isTruncated = rows.Count >= limitVal;
+        }
+
         return new GovernedSqlResult(
             OriginalSql: request.Sql,
             RewrittenSql: securedSql,
             Columns: columns.AsReadOnly(),
             Rows: rows.AsReadOnly(),
             RowCount: rows.Count,
-            ElapsedMilliseconds: sw.ElapsedMilliseconds);
+            ElapsedMilliseconds: sw.ElapsedMilliseconds,
+            Truncated: isTruncated);
     }
 
     /// <summary>
@@ -1517,6 +1536,14 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 // SEC H-13: No resolvable HMAC secret -> redact (fail-closed), never fall back to an unkeyed hash
                 return "'***'";
             }
+            if (ruleType == "MASK_EMAIL")
+            {
+                return BuildEmailMaskExpression(columnName, tableMeta.Dialect);
+            }
+            if (ruleType == "MASK_IBAN")
+            {
+                return BuildIbanMaskExpression(columnName, tableMeta.Dialect);
+            }
             if (!string.IsNullOrWhiteSpace(rule.Replacement))
             {
                 var prefix = tableMeta.Dialect == DatabaseDialect.SqlServer ? "N" : string.Empty;
@@ -1524,6 +1551,40 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
         }
         return "'***'";
+    }
+
+    private static string BuildEmailMaskExpression(string columnName, DatabaseDialect dialect)
+    {
+        if (dialect == DatabaseDialect.SqlServer)
+        {
+            var col = $"[{columnName.Replace("]", "]]")}]";
+            return $"CASE WHEN CHARINDEX('@', CAST({col} AS NVARCHAR(MAX))) > 1 THEN SUBSTRING(CAST({col} AS NVARCHAR(MAX)), 1, 1) + '***@***' ELSE '***@***' END";
+        }
+
+        var quotedCol = $"\"{columnName.Replace("\"", "\"\"")}\"";
+        if (dialect == DatabaseDialect.Sqlite)
+        {
+            return $"CASE WHEN INSTR(CAST({quotedCol} AS TEXT), '@') > 1 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 1) || '***@***' ELSE '***@***' END";
+        }
+
+        return $"CASE WHEN POSITION('@' IN CAST({quotedCol} AS TEXT)) > 1 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 1) || '***@***' ELSE '***@***' END";
+    }
+
+    private static string BuildIbanMaskExpression(string columnName, DatabaseDialect dialect)
+    {
+        if (dialect == DatabaseDialect.SqlServer)
+        {
+            var col = $"[{columnName.Replace("]", "]]")}]";
+            return $"CASE WHEN LEN(CAST({col} AS NVARCHAR(MAX))) >= 8 THEN SUBSTRING(CAST({col} AS NVARCHAR(MAX)), 1, 2) + '** **** **** ' + RIGHT(CAST({col} AS NVARCHAR(MAX)), 4) ELSE '****' END";
+        }
+
+        var quotedCol = $"\"{columnName.Replace("\"", "\"\"")}\"";
+        if (dialect == DatabaseDialect.Sqlite)
+        {
+            return $"CASE WHEN LENGTH(CAST({quotedCol} AS TEXT)) >= 8 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 2) || '** **** **** ' || SUBSTR(CAST({quotedCol} AS TEXT), -4) ELSE '****' END";
+        }
+
+        return $"CASE WHEN LENGTH(CAST({quotedCol} AS TEXT)) >= 8 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 2) || '** **** **** ' || SUBSTR(CAST({quotedCol} AS TEXT), LENGTH(CAST({quotedCol} AS TEXT)) - 3, 4) ELSE '****' END";
     }
 
     /// <summary>
