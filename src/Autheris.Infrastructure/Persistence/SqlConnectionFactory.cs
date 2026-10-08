@@ -1,5 +1,6 @@
 using System.Data.Common;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
@@ -22,13 +23,18 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             throw new ArgumentException("Connection string cannot be empty for SQL data source.", nameof(options));
         }
 
-        var provider = options.Provider?.Trim().ToLowerInvariant() ?? "sqlite";
-        DbConnection connection = provider switch
+        if (!DataSourceProvider.TryResolveDialect(options.Provider, out var dialect))
         {
-            "sqlite" or "sqlite3" => new SqliteConnection(options.ConnectionString),
-            "sqlserver" or "mssql" or "microsoft sql server" => new SqlConnection(options.ConnectionString),
-            "postgres" or "postgresql" or "npgsql" => new Npgsql.NpgsqlConnection(options.ConnectionString),
-            _ => throw new NotSupportedException($"SQL provider '{options.Provider}' is not supported. Supported providers are: 'Sqlite', 'SqlServer', 'PostgreSql'.")
+            throw UnsupportedProvider(options.Provider);
+        }
+
+        // Architecture 5: Oracle and Databricks are dialects without a driver here.
+        DbConnection connection = dialect switch
+        {
+            DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),
+            DatabaseDialect.SqlServer => new SqlConnection(options.ConnectionString),
+            DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(options.ConnectionString),
+            _ => throw UnsupportedProvider(options.Provider)
         };
 
         try
@@ -73,4 +79,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             throw;
         }
     }
+
+    private static NotSupportedException UnsupportedProvider(string? provider) =>
+        new($"SQL provider '{provider}' is not supported. Supported providers are: 'Sqlite', 'SqlServer', 'PostgreSql'.");
 }

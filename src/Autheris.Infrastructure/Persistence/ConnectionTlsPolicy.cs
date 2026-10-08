@@ -1,3 +1,4 @@
+using Autheris.Domain.Common;
 using Microsoft.Data.SqlClient;
 using Npgsql;
 
@@ -18,15 +19,21 @@ public static class ConnectionTlsPolicy
             return null;
         }
 
-        switch (provider?.Trim().ToLowerInvariant())
+        // Architecture 5: same provider aliases as the connection factory; an unknown provider is not silently passed.
+        if (!DataSourceProvider.TryResolveDialect(provider, out var dialect))
         {
-            case "postgres" or "postgresql" or "npgsql":
+            return $"Unknown database provider '{provider}'.";
+        }
+
+        switch (dialect)
+        {
+            case DatabaseDialect.PostgreSql:
                 var pg = new NpgsqlConnectionStringBuilder(connectionString);
                 return pg.SslMode is SslMode.VerifyCA or SslMode.VerifyFull
                     ? null
                     : "PostgreSQL connections must use 'SSL Mode=VerifyFull' (or 'VerifyCA') outside Development.";
 
-            case "sqlserver" or "mssql" or "microsoft sql server":
+            case DatabaseDialect.SqlServer:
                 var sql = new SqlConnectionStringBuilder(connectionString);
                 if (sql.TrustServerCertificate)
                 {

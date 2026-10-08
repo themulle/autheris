@@ -221,8 +221,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             throw new InvalidOperationException($"The data source '{sourceName}' has no database connection.");
         }
 
-        var provider = string.IsNullOrWhiteSpace(connOptions.Provider) ? "sqlite" : connOptions.Provider.Trim();
-        if (!DatabaseDialectExtensions.TryParseDialect(provider, out var dialect))
+        var provider = connOptions.Provider;
+        if (!DataSourceProvider.TryResolveDialect(provider, out var dialect))
         {
             throw new InvalidOperationException($"The provider '{provider}' of data source '{sourceName}' is not supported.");
         }

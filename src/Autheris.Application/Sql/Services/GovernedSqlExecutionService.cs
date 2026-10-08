@@ -1323,32 +1323,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     }
 
     /// <summary>
-    /// SEC P-05: Maps DataSourceConnectionOptions.Provider to a dialect, using the same provider names as the SQL
-    /// connection factory. Returns false for unknown providers.
+    /// SEC P-05: Maps DataSourceConnectionOptions.Provider to a dialect WebSQL can rewrite for. Returns false for
+    /// unknown providers and for dialects without a dedicated WebSQL rewrite.
     /// </summary>
-    internal static bool TryMapProviderToDialect(string? provider, out DatabaseDialect dialect)
-    {
-        switch (provider?.Trim().ToLowerInvariant() ?? "sqlite")
-        {
-            case "sqlite":
-            case "sqlite3":
-                dialect = DatabaseDialect.Sqlite;
-                return true;
-            case "sqlserver":
-            case "mssql":
-            case "microsoft sql server":
-                dialect = DatabaseDialect.SqlServer;
-                return true;
-            case "postgres":
-            case "postgresql":
-            case "npgsql":
-                dialect = DatabaseDialect.PostgreSql;
-                return true;
-            default:
-                dialect = default;
-                return false;
-        }
-    }
+    internal static bool TryMapProviderToDialect(string? provider, out DatabaseDialect dialect) =>
+        DataSourceProvider.TryResolveDialect(provider, out dialect) && IsWebSqlSupportedDialect(dialect);
 
     /// <summary>SEC P-05: Dialects with a dedicated, tested WebSQL rewrite.</summary>
     internal static bool IsWebSqlSupportedDialect(DatabaseDialect dialect) =>

@@ -12,6 +12,7 @@ using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Tree;
+using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Kernel;
 using Autheris.Domain.Options;
@@ -133,14 +134,11 @@ public static class GatewayServiceCollectionExtensions
                 ) || opts.IsInsecureTransportAllowed || opts.IsColumnMaskingDisabled,
                 "NF-SEC-03 Verletzung: HmacSecretKeyVaultRef muss außerhalb von Development eine gültige Key Vault Secret-Referenz sein!")
             .Validate(opts =>
-                string.Equals(opts.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(opts.GovernanceDb.Provider, "PostgreSql", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(opts.GovernanceDb.Provider, "Postgres", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(opts.GovernanceDb.Provider, "PgSql", StringComparison.OrdinalIgnoreCase),
+                IsSupportedGovernanceDbProvider(opts.GovernanceDb.Provider),
                 "GovernanceDb Provider wird aktuell nur als 'Sqlite' oder 'PostgreSql' unterstützt.")
             .Validate(opts =>
                 !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) ||
-                !string.Equals(opts.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase),
+                !DataSourceProvider.Is(opts.GovernanceDb.Provider, DatabaseDialect.Sqlite),
                 "Sicherheitsverletzung (E-2): Multi-Node Cluster Mode und mehr als 1 Replika sind mit SQLite nicht zulässig, da SQLite lokale Datenbankdateien pro Instanz verwendet. Bitte konfigurieren Sie GovernanceDb.Provider = 'PostgreSql' für Cluster-Betrieb.")
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.OpenMetadata.Enabled ||
@@ -263,10 +261,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IEpochValidationService, EpochValidationService>();
         services.AddSingleton<IConsentCacheService, ConsentCacheService>();
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();
-        var dbProvider = gatewayOptions.GovernanceDb.Provider?.Trim() ?? "Sqlite";
-        if (string.Equals(dbProvider, "PostgreSql", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(dbProvider, "Postgres", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(dbProvider, "PgSql", StringComparison.OrdinalIgnoreCase))
+        if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
         {
             services.AddSingleton<PostgreSqlGovernanceRepository>();
             services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
@@ -1359,7 +1354,7 @@ public static class GatewayServiceCollectionExtensions
                 throw new ValidationException("Sicherheitsverletzung: Außerhalb von Development müssen für S3-WORM mit EnforceObjectLock zwingend S3AccessKey und S3SecretKey konfiguriert sein!");
             }
 
-            if (string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase) &&
+            if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
                 !string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString) &&
                 (options.GovernanceDb.ConnectionString.Contains(":memory:", StringComparison.OrdinalIgnoreCase) ||
                  options.GovernanceDb.ConnectionString.Contains("Mode=Memory", StringComparison.OrdinalIgnoreCase)))
@@ -1369,7 +1364,7 @@ public static class GatewayServiceCollectionExtensions
 
             // DEP-4: In container environments, a relative SQLite database path in /app is unwritable for non-root APP_UID
             if (IsTruthy(getEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER")) &&
-                string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+                DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite))
             {
                 try
                 {
@@ -1400,20 +1395,21 @@ public static class GatewayServiceCollectionExtensions
             }
         }
 
-        if (!string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(options.GovernanceDb.Provider, "PostgreSql", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(options.GovernanceDb.Provider, "Postgres", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(options.GovernanceDb.Provider, "PgSql", StringComparison.OrdinalIgnoreCase))
+        if (!IsSupportedGovernanceDbProvider(options.GovernanceDb.Provider))
         {
             throw new ValidationException($"GovernanceDb Provider '{options.GovernanceDb.Provider}' wird aktuell nicht unterstützt. Erlaubt sind 'Sqlite' oder 'PostgreSql'.");
         }
 
         if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) &&
-            string.Equals(options.GovernanceDb.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase))
+            DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite))
         {
             throw new ValidationException("Sicherheitsverletzung (E-2): Multi-Node Cluster Mode und mehr als 1 Replika sind mit SQLite nicht zulässig, da SQLite lokale Datenbankdateien pro Instanz verwendet. Bitte konfigurieren Sie GovernanceDb.Provider = 'PostgreSql' für Cluster-Betrieb.");
         }
     }
+
+    /// <summary>Architecture 5: the governance store runs on SQLite or PostgreSQL, under any provider alias.</summary>
+    private static bool IsSupportedGovernanceDbProvider(string? provider) =>
+        DataSourceProvider.Is(provider, DatabaseDialect.Sqlite) || DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql);
 
     private static bool IsTruthy(string? value)
     {

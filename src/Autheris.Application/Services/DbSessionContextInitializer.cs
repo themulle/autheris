@@ -16,7 +16,7 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
 {
     public static DatabaseDialect ResolveDialect(string? provider)
     {
-        if (ProcedureConnectionProvider.TryResolveDialect(provider ?? "sqlite", out var dialect))
+        if (ProcedureConnectionProvider.TryResolveDialect(provider, out var dialect))
         {
             return dialect;
         }

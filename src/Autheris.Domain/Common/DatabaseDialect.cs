@@ -188,3 +188,18 @@ public static class DatabaseDialectExtensions
         }
     }
 }
+
+/// <summary>
+/// Architecture 5 / SQL2-22: the one mapping from a data source provider name (<c>DataSources:Connections:*:Provider</c>,
+/// <c>GovernanceDb:Provider</c>) to a dialect. The connection factory, the TLS policy, WebSQL, procedures and the tree
+/// path all resolve through here, so an alias is either accepted everywhere or nowhere. An empty provider means SQLite,
+/// the option default.
+/// </summary>
+public static class DataSourceProvider
+{
+    public static bool TryResolveDialect(string? provider, out DatabaseDialect dialect) =>
+        DatabaseDialectExtensions.TryParseDialect(string.IsNullOrWhiteSpace(provider) ? "sqlite" : provider, out dialect);
+
+    public static bool Is(string? provider, DatabaseDialect expected) =>
+        TryResolveDialect(provider, out var dialect) && dialect == expected;
+}
