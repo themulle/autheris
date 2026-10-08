@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Application.Dbt.Interfaces;
+using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using HotChocolate.Execution;
@@ -66,6 +67,16 @@ public sealed class DbtHealthExecutionMiddleware
 
         var principal = httpContext?.User ?? (context.ContextData.TryGetValue("ClaimsPrincipal", out var cpObj) && cpObj is System.Security.Claims.ClaimsPrincipal cp ? cp : null);
 
+        // GQL-12: Do not disclose dbt quarantine status before authentication
+        if (principal == null || principal.Identity?.IsAuthenticated != true)
+        {
+            await _next(context).ConfigureAwait(false);
+            return;
+        }
+
+        var accessResolver = context.RequestServices.GetService<ITableAccessResolver>();
+        var tableRepo = context.RequestServices.GetService<ITableMetadataRepository>();
+
         // 1. Extract referenced models (field names, nested selections, and name arguments)
         var referencedModels = ExtractReferencedModels(doc);
         var degradedModels = new List<DbtHealthState>();
@@ -75,6 +86,51 @@ public sealed class DbtHealthExecutionMiddleware
         {
             var tableId = new TableIdentifier("default", "default", modelName);
             var health = await _circuitBreaker.GetTableHealthAsync(tableId, context.RequestAborted).ConfigureAwait(false);
+
+            if (health.Status == DbtModelHealthStatus.Quarantined || health.Status == DbtModelHealthStatus.Degraded)
+            {
+                bool isPrivileged = principal?.IsInRole("GovernanceAdmin") == true ||
+                                    principal?.IsInRole("DataOwner") == true ||
+                                    principal?.IsInRole("ClusterAdmin") == true;
+
+                if (!isPrivileged && accessResolver != null)
+                {
+                    var targetTable = tableId;
+                    if (tableRepo != null)
+                    {
+                        try
+                        {
+                            var allTables = await tableRepo.GetAllTablesAsync(context.RequestAborted).ConfigureAwait(false);
+                            var match = allTables.FirstOrDefault(t =>
+                                string.Equals(t.Identifier.TableName, modelName, StringComparison.OrdinalIgnoreCase) ||
+                                string.Equals(t.Identifier.ToString(), modelName, StringComparison.OrdinalIgnoreCase));
+                            if (match != null)
+                            {
+                                targetTable = match.Identifier;
+                            }
+                        }
+                        catch
+                        {
+                            // Ignore catalog lookup error
+                        }
+                    }
+
+                    try
+                    {
+                        var access = await accessResolver.ResolveTableAccessAsync(principal, targetTable, null, null, context.RequestAborted).ConfigureAwait(false);
+                        if (!access.Decision.IsAllowed)
+                        {
+                            // Do not disclose quarantine or degraded status to unauthorized callers; pass through to downstream pipeline
+                            continue;
+                        }
+                    }
+                    catch
+                    {
+                        // Table unknown or unresolvable; pass through to downstream
+                        continue;
+                    }
+                }
+            }
 
             if (health.Status == DbtModelHealthStatus.Quarantined)
             {
