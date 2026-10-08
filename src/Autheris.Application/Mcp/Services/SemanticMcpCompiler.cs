@@ -125,6 +125,17 @@ public sealed class SemanticMcpCompiler(
             var domain = t.Identifier.Domain;
             var table = t.Identifier.TableName;
 
+            var visibleColumns = t.Columns.Where(col =>
+            {
+                if (t.ColumnMaskingRules != null &&
+                    t.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule) &&
+                    string.Equals(rule.RuleType, "DENY", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+                return true;
+            }).ToList();
+
             // 1. Glossary Resource
             var glossaryText = $"# Business Glossary: {domain}.{table}\n\n" +
                                (!string.IsNullOrWhiteSpace(t.Table.Description) ? $"**Description**: {t.Table.Description}\n\n" : "") +
@@ -132,7 +143,7 @@ public sealed class SemanticMcpCompiler(
                                $"* **Table**: {table}\n" +
                                $"* **Sensitivity**: {t.Table.Sensitivity}\n" +
                                $"* **Columns**:\n" +
-                               string.Join("\n", t.Columns.Select(c =>
+                               string.Join("\n", visibleColumns.Select(c =>
                                {
                                    var sensitivityTag = c.IsSensitive ? " [SENSITIVE/MASKED]" : "";
                                    var descTag = !string.IsNullOrWhiteSpace(c.Description) ? $": {c.Description}" : "";
@@ -148,7 +159,7 @@ public sealed class SemanticMcpCompiler(
             ));
 
             // 2. Column-level Docs Resources on Demand
-            foreach (var col in t.Columns)
+            foreach (var col in visibleColumns)
             {
                 var hasDesc = !string.IsNullOrWhiteSpace(col.Description);
                 var hasLongDesc = !string.IsNullOrWhiteSpace(col.LongDescription);
