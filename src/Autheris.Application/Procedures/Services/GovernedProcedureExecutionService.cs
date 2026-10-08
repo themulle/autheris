@@ -305,7 +305,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     /// unless <paramref name="allowRowFilter"/> is set: the result table's filter is then enforced by a database key
     /// match after the call (<see cref="ApplyRowScopeAsync"/>).
     /// </summary>
-    private async Task<(TableAccessDecision Decision, TableMetadata Meta)?> EvaluateTableAsync(
+    internal async Task<(TableAccessDecision Decision, TableMetadata Meta)?> EvaluateTableAsync(
         string catalogDomain,
         string tableKey,
         ClaimsPrincipal user,
@@ -360,7 +360,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         if (!consentBypassed && _policyEnforcement != null && _policyEnforcement.HasPolicies(tenantId))
         {
             // With ABAC active every catalog column carries an explicit level; columns outside the catalog are denied.
-            var explicitLevels = meta.Columns.ToDictionary(c => c.ColumnName, c => decision.GetColumnAccess(c.ColumnName), StringComparer.OrdinalIgnoreCase);
+            var explicitLevels = meta.Columns.ToDictionary(c => c.ColumnName, c => decision.GetEffectiveColumnAccess(c.ColumnName, meta), StringComparer.OrdinalIgnoreCase);
             decision = decision with { ColumnAccess = explicitLevels, HasUnconstrainedColumnAllow = false };
         }
 

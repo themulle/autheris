@@ -273,6 +273,48 @@ public class ProcedureEndpointTests
     }
 
     [Fact]
+    public async Task ResolveResultAccess_WhenHasPoliciesAndUnconstrainedAllow_MasksSensitiveCatalogColumns()
+    {
+        var f = new Fixture();
+        var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
+        f.Registry.Register(def);
+        f.Registry.MarkActive(def.Name, new ProcedureValidationResult(true, [], ["order_id", "salary"], ["sales.orders"], new Dictionary<string, string>()));
+
+        var meta = new TableMetadata
+        {
+            Identifier = new TableIdentifier("default", "sales", "orders"),
+            Columns =
+            [
+                new TableColumn { ColumnName = "order_id" },
+                new TableColumn { ColumnName = "salary", IsSensitive = true }
+            ]
+        };
+
+        f.Tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
+        f.Consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<Consent>());
+
+        // Unconstrained allow (no explicit column rules)
+        f.Resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
+            .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
+
+        var policyEnforcement = Substitute.For<IPolicyEnforcementService>();
+        policyEnforcement.HasPolicies(Arg.Any<TenantId>()).Returns(true);
+        policyEnforcement.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+            .Returns(callInfo => ValueTask.FromResult(TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+
+        var svc = new GovernedProcedureExecutionService(
+            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Tables, f.Consents, f.Resolution, f.Masking,
+            policyEnforcement: policyEnforcement, audit: f.Audit);
+
+        var result = await svc.EvaluateTableAsync("default", "sales.orders", User(), new Sid("S-1-5-21-1001"), Tenant, consentBypassed: false, allowRowFilter: false, CancellationToken.None);
+
+        result.ShouldNotBeNull();
+        result.Value.Decision.ColumnAccess["order_id"].ShouldBe(ColumnAccessLevel.Clear);
+        result.Value.Decision.ColumnAccess["salary"].ShouldBe(ColumnAccessLevel.Mask);
+    }
+
+    [Fact]
     public void CatalogDomain_FallsBackToDefaultWithoutDataSource()
     {
         var def = ProcedureDefinitionParser.Parse(ValidHeader, "x", false, 60);
