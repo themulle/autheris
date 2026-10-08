@@ -132,7 +132,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
                            string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase);
         if (key != null)
         {
-            Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(key, "Der Audit-HMAC-Schlüssel (AuditHmacKeyVaultRef)", isDevOrTest);
+            Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(key, "The audit HMAC key (AuditHmacKeyVaultRef)", isDevOrTest);
         }
 
         if (key == null && secretProvider != null && !string.IsNullOrWhiteSpace(options?.Value?.DataMasking?.HmacSecretKeyVaultRef))
@@ -150,7 +150,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
             if (masterKey != null && masterKey.Length > 0)
             {
                 // R-DEP-1: HKDF does not add entropy; a short master key yields a weak audit key.
-                Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(masterKey, "Der HMAC-Masterschlüssel (HmacSecretKeyVaultRef)", isDevOrTest);
+                Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(masterKey, "The HMAC master key (HmacSecretKeyVaultRef)", isDevOrTest);
             }
 
             try

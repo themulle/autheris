@@ -688,7 +688,7 @@ public class GovernanceSecurityTests : IDisposable
             await _mutation.ApproveConsentRequestAsync(req.Id, null, _repository, _repository, _repository, accessor);
         });
 
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Funktionstrennung verletzt"));
+        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Separation of duties violated"));
     }
 
     [Fact]
@@ -722,7 +722,7 @@ public class GovernanceSecurityTests : IDisposable
             await _mutation.ApproveConsentRequestAsync(req.Id, null, _repository, _repository, _repository, accessor);
         });
 
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Mandantenübergreifender Zugriff verboten"));
+        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Cross-tenant access forbidden"));
     }
 
     [Fact]
@@ -768,7 +768,7 @@ public class GovernanceSecurityTests : IDisposable
             await _mutation.RejectConsentRequestAsync(req.Id, "Valid rejection reason", null, _repository, _repository, accessor);
         });
 
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Mandantenübergreifender Zugriff verboten"));
+        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Cross-tenant access forbidden"));
     }
 
     [Fact]
@@ -800,7 +800,7 @@ public class GovernanceSecurityTests : IDisposable
             await _mutation.RevokeConsentAsync(consent.Id, "Valid revocation reason", _repository, accessor);
         });
 
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Mandantenübergreifender Zugriff verboten"));
+        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Cross-tenant access forbidden"));
     }
 
     [Fact]
@@ -825,7 +825,7 @@ public class GovernanceSecurityTests : IDisposable
                 httpContextAccessor: accessor);
         });
 
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("DSGVO-Auskunftsberichte für fremde Identitäten erfordern PrivacyAdmin- oder GovernanceAdmin-Rechte."));
+        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("GDPR access reports for other identities require PrivacyAdmin or GovernanceAdmin rights."));
     }
 
     [Fact]
@@ -910,7 +910,7 @@ public class GovernanceSecurityTests : IDisposable
             await _mutation.ApproveConsentRequestAsync(req.Id, null, _repository, _repository, _repository, accessor);
         });
 
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Funktionstrennung verletzt"));
+        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Separation of duties violated"));
     }
 
     [Fact]

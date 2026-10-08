@@ -58,7 +58,7 @@ public sealed class MustFixRemediationTests
             RequestedFields: ["id"]);
 
         var ex = await Should.ThrowAsync<GatewayNotImplementedException>(() => executor.ExecuteAsync(context));
-        ex.Message.ShouldContain("Synthetischer Daten-Fallback ist außerhalb der Development-Umgebung deaktiviert");
+        ex.Message.ShouldContain("Synthetic data fallback is disabled outside the Development environment");
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public sealed class MustFixRemediationTests
             RequestedFields: ["id"]);
 
         var ex = await Should.ThrowAsync<GatewayNotImplementedException>(() => executor.ExecuteAsync(context));
-        ex.Message.ShouldContain("Synthetischer Daten-Fallback ist außerhalb der Development-Umgebung deaktiviert");
+        ex.Message.ShouldContain("Synthetic data fallback is disabled outside the Development environment");
     }
 
     [Fact]

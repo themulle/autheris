@@ -60,7 +60,7 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
         {
             if (principal.GetUserSid() == null)
             {
-                throw new GatewayUnauthorizedException("Keine gültige Benutzer-SID im Authentifizierungstoken vorhanden.");
+                throw new GatewayUnauthorizedException("No valid user SID in the authentication token.");
             }
         }
         else if (_options?.IsConsentBypassed != true)

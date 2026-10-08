@@ -122,7 +122,7 @@ public sealed class Query
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentifizierung erforderlich für Katalogabfragen.")
+                .SetMessage("Authentication is required for catalog queries.")
                 .Build());
         }
 
@@ -131,7 +131,7 @@ public sealed class Query
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Keine gültige Benutzer-SID im Authentifizierungstoken vorhanden.")
+                .SetMessage("No valid user SID in the authentication token.")
                 .Build());
         }
 
@@ -224,7 +224,7 @@ public sealed class Query
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentifizierung erforderlich für Lineage- und Auswirkungsanalysen.")
+                .SetMessage("Authentication is required for lineage and impact analyses.")
                 .Build());
         }
 
@@ -249,7 +249,7 @@ public sealed class Query
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentifizierung erforderlich für Konsumentenanalysen.")
+                .SetMessage("Authentication is required for consumer analyses.")
                 .Build());
         }
 
@@ -272,7 +272,7 @@ public sealed class Query
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentifizierung erforderlich für DSGVO-Auskunftsberichte.")
+                .SetMessage("Authentication is required for GDPR access reports.")
                 .Build());
         }
 
@@ -294,7 +294,7 @@ public sealed class Query
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("DSGVO-Auskunftsberichte für fremde Identitäten erfordern PrivacyAdmin- oder GovernanceAdmin-Rechte.")
+                .SetMessage("GDPR access reports for other identities require PrivacyAdmin or GovernanceAdmin rights.")
                 .Build());
         }
 
@@ -371,7 +371,7 @@ public sealed class FinanceQuery
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentifizierung erforderlich für Finanzabfragen.")
+                .SetMessage("Authentication is required for financial queries.")
                 .Build());
         }
 
@@ -399,7 +399,7 @@ public sealed class FinanceQuery
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentifizierung erforderlich für Finanzabfragen.")
+                .SetMessage("Authentication is required for financial queries.")
                 .Build());
         }
 
@@ -436,7 +436,7 @@ public sealed class HrQuery
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("UNAUTHORIZED")
-                .SetMessage("Authentifizierung erforderlich für Personalabfragen.")
+                .SetMessage("Authentication is required for HR queries.")
                 .Build());
         }
 

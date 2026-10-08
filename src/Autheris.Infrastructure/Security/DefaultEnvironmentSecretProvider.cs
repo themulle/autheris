@@ -132,7 +132,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
         // placeholder (reference name as key) would be a publicly known HMAC key for that instance.
         if (isInstanceSpecificItsmRef && secretRef.StartsWith(ItsmWebhookSecretInstancePrefix, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException($"Sicherheitsfehler: Das instanzspezifische Secret ({DescribeReference(secretRef)}) ist nicht konfiguriert.");
+            throw new InvalidOperationException($"Security error: The instance-specific secret ({DescribeReference(secretRef)}) is not configured.");
         }
 
         // In Development, allow using the secret reference itself as dev key
@@ -142,7 +142,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
         }
 
         // Fail-fast in non-development if secret cannot be resolved from Key Vault
-        throw new InvalidOperationException($"Sicherheitsfehler: Das Secret ({DescribeReference(secretRef)}) konnte weder über Azure Key Vault / Konfiguration noch Umgebungsvariablen aufgelöst werden.");
+        throw new InvalidOperationException($"Security error: The secret ({DescribeReference(secretRef)}) could not be resolved via Azure Key Vault / configuration or environment variables.");
     }
 
     /// <summary>
@@ -153,7 +153,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
     private static string DescribeReference(string secretRef)
     {
         var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(secretRef));
-        return $"Referenz mit Länge {secretRef.Length}, SHA-256-Präfix {Convert.ToHexStringLower(hash)[..8]}";
+        return $"Reference with length {secretRef.Length}, SHA-256 prefix {Convert.ToHexStringLower(hash)[..8]}";
     }
 
     private static bool IsInstanceSpecificReference(string secretRef)
@@ -168,7 +168,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
         if (!_environment.IsDevelopment() && IsCryptographicKeyRequiringMinLength(secretRef) && bytes.Length < 32)
         {
             throw new InvalidOperationException(
-                $"Sicherheitsfehler: Das kryptografische Secret ({DescribeReference(secretRef)}) muss außerhalb der Entwicklungsumgebung mindestens 32 Bytes lang sein (aktuelle Länge: {bytes.Length}).");
+                $"Security error: The cryptographic secret ({DescribeReference(secretRef)}) must be at least 32 bytes long outside the development environment (current length: {bytes.Length}).");
         }
     }
 

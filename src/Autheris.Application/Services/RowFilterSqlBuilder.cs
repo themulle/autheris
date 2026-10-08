@@ -233,7 +233,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
         var col = filter.ColumnName;
         if (!SafeIdentifierRegex().IsMatch(col))
         {
-            throw new InvalidOperationException($"Ungültiger Spaltenname im Zeilenfilter: '{col}'. Potenzieller Injection-Angriff.");
+            throw new InvalidOperationException($"Invalid column name in row filter: '{col}'. Potential injection attack.");
         }
 
         var quotedCol = dialect.QuoteIdentifier(col);
@@ -241,7 +241,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
         var op = filter.Operator.ToUpperInvariant();
         if (!AllowedFilterOperators.Contains(op))
         {
-            throw new InvalidOperationException($"Nicht unterstützter Operator '{filter.Operator}' im Zeilenfilter.");
+            throw new InvalidOperationException($"Unsupported operator '{filter.Operator}' in row filter.");
         }
 
         var rawVal = filter.ValueJson;
@@ -253,7 +253,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
                 using var inDoc = JsonDocument.Parse(rawVal);
                 if (inDoc.RootElement.ValueKind != JsonValueKind.Array)
                 {
-                    throw new InvalidOperationException("ValueJson für IN-Operator muss ein gültiges JSON-Array sein.");
+                    throw new InvalidOperationException("ValueJson for the IN operator must be a valid JSON array.");
                 }
 
                 var paramNames = new List<string>();
@@ -269,7 +269,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
             }
             catch (JsonException)
             {
-                throw new InvalidOperationException("ValueJson für IN-Operator muss ein gültiges JSON-Array sein.");
+                throw new InvalidOperationException("ValueJson for the IN operator must be a valid JSON array.");
             }
         }
 
@@ -280,7 +280,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
         }
         catch (JsonException ex)
         {
-            throw new InvalidOperationException($"ValueJson im Zeilenfilter muss valides JSON sein: '{rawVal}'.", ex);
+            throw new InvalidOperationException($"ValueJson in row filter must be valid JSON: '{rawVal}'.", ex);
         }
 
         using (doc)
@@ -291,7 +291,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
                 {
                     "EQ" => $"{quotedCol} IS NULL",
                     "NEQ" => $"{quotedCol} IS NOT NULL",
-                    _ => throw new InvalidOperationException($"Operator '{op}' kann nicht mit NULL verglichen werden.")
+                    _ => throw new InvalidOperationException($"Operator '{op}' cannot be compared with NULL.")
                 };
             }
 
@@ -376,7 +376,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
         var col = filter.ColumnName;
         if (!SafeIdentifierRegex().IsMatch(col))
         {
-            throw new InvalidOperationException($"Ungültiger Spaltenname im Zeilenfilter: '{col}'. Potenzieller Injection-Angriff.");
+            throw new InvalidOperationException($"Invalid column name in row filter: '{col}'. Potential injection attack.");
         }
 
         var quotedCol = dialect.QuoteIdentifier(col);
@@ -384,7 +384,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
         var op = filter.Operator.ToUpperInvariant();
         if (!AllowedFilterOperators.Contains(op))
         {
-            throw new InvalidOperationException($"Nicht unterstützter Operator '{filter.Operator}' im Zeilenfilter.");
+            throw new InvalidOperationException($"Unsupported operator '{filter.Operator}' in row filter.");
         }
 
         var rawVal = filter.ValueJson;
@@ -396,7 +396,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
                 using var inDoc = JsonDocument.Parse(rawVal);
                 if (inDoc.RootElement.ValueKind != JsonValueKind.Array)
                 {
-                    throw new InvalidOperationException("ValueJson für IN-Operator muss ein gültiges JSON-Array sein.");
+                    throw new InvalidOperationException("ValueJson for the IN operator must be a valid JSON array.");
                 }
 
                 var items = inDoc.RootElement.EnumerateArray()
@@ -408,7 +408,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
             }
             catch (JsonException)
             {
-                throw new InvalidOperationException("ValueJson für IN-Operator muss ein gültiges JSON-Array sein.");
+                throw new InvalidOperationException("ValueJson for the IN operator must be a valid JSON array.");
             }
         }
 
@@ -419,7 +419,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
         }
         catch (JsonException ex)
         {
-            throw new InvalidOperationException($"ValueJson im Zeilenfilter muss valides JSON sein: '{rawVal}'.", ex);
+            throw new InvalidOperationException($"ValueJson in row filter must be valid JSON: '{rawVal}'.", ex);
         }
 
         using (doc)
@@ -430,7 +430,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
                 {
                     "EQ" => $"{quotedCol} IS NULL",
                     "NEQ" => $"{quotedCol} IS NOT NULL",
-                    _ => throw new InvalidOperationException($"Operator '{op}' kann nicht mit NULL verglichen werden.")
+                    _ => throw new InvalidOperationException($"Operator '{op}' cannot be compared with NULL.")
                 };
             }
 

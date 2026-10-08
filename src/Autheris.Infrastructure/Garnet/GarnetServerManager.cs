@@ -100,7 +100,7 @@ public sealed class GarnetServerManager : IGarnetServerManager, IHostedService
 
         if (secretBytes == null || secretBytes.Length == 0)
         {
-            throw new InvalidOperationException($"Sicherheitsfehler: Das {description} ('{secretRef}') konnte nicht aufgelöst werden.");
+            throw new InvalidOperationException($"Security error: The {description} ('{secretRef}') could not be resolved.");
         }
 
         return Encoding.UTF8.GetString(secretBytes);
@@ -181,7 +181,7 @@ public sealed class GarnetServerManager : IGarnetServerManager, IHostedService
             if (!IsLoopbackBinding(_options.Host) && !IsDevelopmentEnvironment())
             {
                 throw new InvalidOperationException(
-                    $"Sicherheitsfehler: Der eingebettete Garnet-Server darf außerhalb von Development nur an Loopback gebunden werden (konfiguriert: '{_options.Host}').");
+                    $"Security error: The embedded Garnet server may only be bound to loopback outside Development (configured: '{_options.Host}').");
             }
 
             _logger?.LogInformation("Starting embedded Microsoft Garnet server on {Host}:{Port}...", _options.Host, _options.Port);
@@ -190,7 +190,7 @@ public sealed class GarnetServerManager : IGarnetServerManager, IHostedService
             if (_options.EnableTls && (string.IsNullOrWhiteSpace(_options.TlsCertFile) || !File.Exists(_options.TlsCertFile)))
             {
                 throw new InvalidOperationException(
-                    $"Sicherheitsfehler: Caching.Garnet.EnableTls ist aktiv, aber das Zertifikat '{_options.TlsCertFile}' wurde nicht gefunden.");
+                    $"Security error: Caching.Garnet.EnableTls is enabled, but the certificate '{_options.TlsCertFile}' was not found.");
             }
 
             var args = BuildServerArguments(_options, ClientPassword, _tlsCertPassword);

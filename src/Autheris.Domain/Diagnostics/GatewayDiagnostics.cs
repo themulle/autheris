@@ -17,10 +17,10 @@ public static class GatewayDiagnostics
         Meter.CreateCounter<long>("autheris_forbidden_requests_total", description: "Anzahl abgewiesener Anfragen (403/Forbidden)");
 
     public static readonly Counter<long> QueryTooComplexCounter =
-        Meter.CreateCounter<long>("autheris_query_too_complex_total", description: "Anzahl wegen AST-Komplexität abgewiesener Anfragen");
+        Meter.CreateCounter<long>("autheris_query_too_complex_total", description: "Number of requests rejected due to AST complexity");
 
     public static readonly Counter<long> CrossTenantMismatchCounter =
-        Meter.CreateCounter<long>("autheris_cross_tenant_mismatch_total", description: "Cross-Tenant Webhook oder Zugriffsabweichungen");
+        Meter.CreateCounter<long>("autheris_cross_tenant_mismatch_total", description: "Cross-tenant webhook or access mismatches");
 
     public static readonly Histogram<double> PolicyEvaluationDuration =
         Meter.CreateHistogram<double>("autheris_policy_evaluation_duration_ms", "ms", description: "Dauer der Casbin ABAC Evaluierung");

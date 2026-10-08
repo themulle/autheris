@@ -27,7 +27,7 @@ public static partial class AdvancedRlsFilterGenerator
     {
         if (filter.DependentTable == null)
         {
-            throw new InvalidOperationException("DependentTable darf für SubqueryCorrelated nicht null sein.");
+            throw new InvalidOperationException("DependentTable must not be null for SubqueryCorrelated.");
         }
 
         // The query builders expose the filtered table under the reserved alias RowFilterAliases.Target. A configured
@@ -182,7 +182,7 @@ public static partial class AdvancedRlsFilterGenerator
             }
             catch (JsonException)
             {
-                throw new InvalidOperationException("ValueJson im CrossSourceSetFilter muss valides JSON sein.");
+                throw new InvalidOperationException("ValueJson in CrossSourceSetFilter must be valid JSON.");
             }
         }
 
@@ -256,24 +256,24 @@ public static partial class AdvancedRlsFilterGenerator
                 {
                     if (elem.ValueKind != JsonValueKind.Object)
                     {
-                        throw new InvalidOperationException("Subquery-Prädikat-Array darf nur JSON-Objekte enthalten.");
+                        throw new InvalidOperationException("Subquery predicate array must contain only JSON objects.");
                     }
 
                     if (!elem.TryGetProperty("column", out var colElem) || colElem.ValueKind != JsonValueKind.String)
                     {
-                        throw new InvalidOperationException("Subquery-Prädikat muss ein gültiges 'column'-Property enthalten.");
+                        throw new InvalidOperationException("Subquery predicate must contain a valid 'column' property.");
                     }
                     var col = colElem.GetString()!;
                     ValidateQualifiedIdentifier(col, "SubqueryPredicate.Column");
                     var op = elem.TryGetProperty("op", out var opProp) ? opProp.GetString()?.ToUpperInvariant() ?? "EQ" : "EQ";
                     if (!AllowedSubqueryOperators.Contains(op))
                     {
-                        throw new InvalidOperationException($"Nicht unterstützter Operator '{op}' im Subquery-Prädikat.");
+                        throw new InvalidOperationException($"Unsupported operator '{op}' in subquery predicate.");
                     }
 
                     if (!elem.TryGetProperty("value", out var rawVal))
                     {
-                        throw new InvalidOperationException("Subquery-Prädikat muss ein 'value'-Property enthalten.");
+                        throw new InvalidOperationException("Subquery predicate must contain a 'value' property.");
                     }
                     var quotedCol = QuoteQualifiedColumn(rebase(Qualify(col)), dialect);
 
@@ -301,12 +301,12 @@ public static partial class AdvancedRlsFilterGenerator
             }
             else
             {
-                throw new InvalidOperationException("SubqueryFilterPredicateJson muss ein JSON-Objekt oder JSON-Array sein.");
+                throw new InvalidOperationException("SubqueryFilterPredicateJson must be a JSON object or JSON array.");
             }
         }
         catch (JsonException)
         {
-            throw new InvalidOperationException("SubqueryFilterPredicateJson muss gültiges JSON sein.");
+            throw new InvalidOperationException("SubqueryFilterPredicateJson must be valid JSON.");
         }
 
         return conditions;
@@ -340,7 +340,7 @@ public static partial class AdvancedRlsFilterGenerator
             string.Equals(alias, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase) ||
             !seen.Add(alias))
         {
-            throw new InvalidOperationException($"Alias '{alias}' im korrelierten RLS-Filter kollidiert mit dem Ziel-Alias oder einem anderen Alias.");
+            throw new InvalidOperationException($"Alias '{alias}' in the correlated row filter collides with the target alias or another alias.");
         }
     }
 
@@ -360,7 +360,7 @@ public static partial class AdvancedRlsFilterGenerator
     {
         if (string.IsNullOrWhiteSpace(id) || !SafeSimpleIdentifierRegex().IsMatch(id))
         {
-            throw new InvalidOperationException($"Ungültiger Bezeichner in {context}: '{id}'. SQL-Injection-Schutz greift ein.");
+            throw new InvalidOperationException($"Invalid identifier in {context}: '{id}'. SQL injection protection triggered.");
         }
     }
 
@@ -368,7 +368,7 @@ public static partial class AdvancedRlsFilterGenerator
     {
         if (string.IsNullOrWhiteSpace(id) || !SafeQualifiedIdentifierRegex().IsMatch(id))
         {
-            throw new InvalidOperationException($"Ungültiger qualifizierter Bezeichner in {context}: '{id}'. SQL-Injection-Schutz greift ein.");
+            throw new InvalidOperationException($"Invalid qualified identifier in {context}: '{id}'. SQL injection protection triggered.");
         }
     }
 }
