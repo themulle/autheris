@@ -354,6 +354,12 @@ public static class WebSqlEndpoints
         var configuredMaxRows = gatewayOptions.Value.ParquetEgress.MaxRowsPerFile;
         var maxRows = configuredMaxRows > 0 ? configuredMaxRows : 100000;
 
+        // WebSQL findings 4.2: the WebSQL row limit cuts the result in the rewritten SQL, before the Parquet file limit
+        // applies. Reaching it is reported as truncated, exactly like the JSON path.
+        var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
+        var sqlEngine = httpContext.RequestServices?.GetService<TrinoSqlEngine.ISqlEngine>();
+        long effectiveLimit = DetermineEffectiveLimit(governedRequest.Sql, webSqlOptions, sqlEngine);
+
         var rows = new List<IReadOnlyDictionary<string, object?>>();
         string[] columnNames = Array.Empty<string>();
 
@@ -383,7 +389,8 @@ public static class WebSqlEndpoints
                 ct);
 
             // An empty result (or no result set) is a Parquet file with zero rows and the result columns.
-            await ParquetResponseWriter.WriteAsync(httpContext, parquetService!, "websql", rows, columnNames, ct);
+            bool limitReached = rows.Count >= effectiveLimit;
+            await ParquetResponseWriter.WriteAsync(httpContext, parquetService!, "websql", rows, columnNames, ct, limitReached);
         }
         catch (Exception ex)
         {

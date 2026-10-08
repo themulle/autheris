@@ -834,6 +834,59 @@ public sealed class ParquetOutputNegotiationTests
         sqlService.Executions.ShouldBe(0);
     }
 
+    [Fact]
+    public async Task PARQ_WebSql_ResultCutByWebSqlRowLimit_IsReportedAsTruncated()
+    {
+        // WebSQL findings 4.2: the WebSQL limit (MaxAllowedRows) cuts the result in the rewritten SQL, below the Parquet
+        // file limit. The export must report it like the JSON path does (truncated: true / X-Autheris-Truncated).
+        var options = new GatewayOptions
+        {
+            ParquetEgress = CreateOptions(maxRows: 100).ParquetEgress,
+            WebSql = new WebSqlOptions { Enabled = true, MaxAllowedRows = 5, DefaultMaxRows = 5 }
+        };
+        using var services = BuildServices(options);
+        var context = CreateWebSqlContext(services, ParquetAccept);
+
+        await WebSqlEndpoints.HandleWebSqlRequest(context, new DataTableSqlService(CreateEmployeeTable(5)), Options.Create(options), NullLoggerFactory.Instance);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
+        context.Response.Headers["X-Row-Count"].ToString().ShouldBe("5");
+        context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("true");
+        context.Response.Headers["X-Autheris-Truncated"].ToString().ShouldBe("true");
+    }
+
+    [Fact]
+    public async Task PARQ_WebSql_ResultBelowWebSqlRowLimit_IsNotTruncated()
+    {
+        var options = new GatewayOptions
+        {
+            ParquetEgress = CreateOptions(maxRows: 100).ParquetEgress,
+            WebSql = new WebSqlOptions { Enabled = true, MaxAllowedRows = 5, DefaultMaxRows = 5 }
+        };
+        using var services = BuildServices(options);
+        var context = CreateWebSqlContext(services, ParquetAccept);
+
+        await WebSqlEndpoints.HandleWebSqlRequest(context, new DataTableSqlService(CreateEmployeeTable(4)), Options.Create(options), NullLoggerFactory.Instance);
+
+        context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("false");
+        context.Response.Headers.ContainsKey("X-Autheris-Truncated").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task PARQ_SqlEndpoint_TruncatedResult_IsReportedAsTruncated()
+    {
+        var options = CreateOptions();
+        using var services = BuildServices(options);
+        var context = CreateHttpContext(services, ParquetAccept, path: "/api/v1/queries/active_customers", method: "GET");
+        var rows = Rows(new Dictionary<string, object?> { ["id"] = 1 }, new Dictionary<string, object?> { ["id"] = 2 });
+        var execution = CreateSqlEndpointService(new GovernedSqlResult("SELECT 1", "SELECT 1", ["id"], rows, 2, 3, Truncated: true));
+
+        await SqlEndpointRoutes.HandleGetEndpoint("active_customers", context, execution, Options.Create(options), NullLoggerFactory.Instance);
+
+        context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("true");
+        context.Response.Headers["X-Autheris-Truncated"].ToString().ShouldBe("true");
+    }
+
     private static ISqlEndpointExecutionService CreateSqlEndpointService(GovernedSqlResult result)
     {
         var service = Substitute.For<ISqlEndpointExecutionService>();

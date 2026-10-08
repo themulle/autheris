@@ -127,6 +127,7 @@ Geprüft mit Python (`urllib`, `pyarrow` zum Dekodieren) als `david` (Zeilenfilt
 
 ### 4.2 Fehler: Parquet meldet das WebSQL-Zeilenlimit nicht
 
+- **Status:** Behoben. Der WebSQL-Parquet-Pfad ermittelt das wirksame Limit wie der JSON-Pfad (`DetermineEffectiveLimit`); wird es erreicht, setzt `ParquetResponseWriter` `X-Export-Truncated: true` und `X-Autheris-Truncated: true`. SQL-Endpunkte reichen `GovernedSqlResult.Truncated` durch. Tests: `ParquetOutputNegotiationTests` (`PARQ_WebSql_ResultCutByWebSqlRowLimit_IsReportedAsTruncated`, `PARQ_SqlEndpoint_TruncatedResult_IsReportedAsTruncated`).
 - **Beobachtung:** `SELECT id FROM lwetem_prod.tem.crane_state LIMIT 60000` (993 630 Zeilen in der Tabelle) als Parquet liefert 10 000 Zeilen mit `X-Export-Truncated: false` und ohne `X-Autheris-Truncated`. Als JSON steht in derselben Lage `truncated: true`.
 - **Ursache:** `X-Export-Truncated` kommt aus `ParquetExportService.cs:99` (`rows.Count > effectiveMaxRows` mit `MaxRowsPerFile`, Standard 100 000) und betrifft nur diese Dateigrenze. Das WebSQL-Limit (`MaxAllowedRows`, hier 10 000) greift vorher in der Abfrage; die Information aus `GovernedSqlResult.Truncated` wird für Parquet nicht übernommen.
 - **Folge:** Wer Parquet lädt, hält 10 000 Zeilen für das vollständige Ergebnis. Für Auswertungen ist das ein stiller Datenverlust.

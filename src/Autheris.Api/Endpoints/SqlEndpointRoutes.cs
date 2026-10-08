@@ -434,7 +434,7 @@ public static class SqlEndpointRoutes
         if (parquet.Requested && parquet.Service != null)
         {
             // F-DATA-01: the governed (masked, row-filtered) result rows are written as Apache Parquet
-            await ParquetResponseWriter.WriteAsync(httpContext, parquet.Service, endpointName, result.Rows, result.Columns, ct).ConfigureAwait(false);
+            await ParquetResponseWriter.WriteAsync(httpContext, parquet.Service, endpointName, result.Rows, result.Columns, ct, result.Truncated).ConfigureAwait(false);
             return;
         }
 
