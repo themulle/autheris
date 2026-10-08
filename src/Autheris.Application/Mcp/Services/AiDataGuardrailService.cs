@@ -521,7 +521,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             _logger.LogError(ex, "Failed to record audit event for MCP tool execution '{ToolName}'.", toolName);
             if (!_options.Value.IsMcpAuthBypassed)
             {
-                throw new System.Security.SecurityException($"Zero-Trust: Audit-Protokollierung für MCP-Tool '{toolName}' fehlgeschlagen. Ausführung abgebrochen (Fail-Closed).", ex);
+                throw new System.Security.SecurityException($"Zero-Trust: audit logging for MCP tool '{toolName}' failed. Execution aborted (fail-closed).", ex);
             }
         }
     }
