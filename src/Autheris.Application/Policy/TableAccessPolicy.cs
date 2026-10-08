@@ -311,7 +311,14 @@ public sealed class TableAccessPolicy
             .Where(c => c.TenantId == query.Tenant) // multi-tenancy isolation
             .ToList();
 
-        var decision = _resolutionService.ResolveAccess(query.UserSid, query.GroupSids, query.Roles, table, activeConsents, query.Metadata.Dialect, query.AllUserSids);
+        var allSids = query.AllUserSids != null && query.AllUserSids.Any(s => s != query.UserSid)
+            ? query.AllUserSids
+            : null;
+        var decision = _resolutionService.ResolveAccess(query.UserSid, query.GroupSids, query.Roles, table, activeConsents, query.Metadata.Dialect, allSids);
+        if (decision == null)
+        {
+            return TableAccessDecision.Denied(table, "Access denied: consent resolution returned no decision.");
+        }
 
         if (_cacheService != null)
         {
