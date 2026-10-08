@@ -138,14 +138,24 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         }
 
         var earliestExpiry = consents
-            .Where(c => c.ValidTo > now)
+            .Where(c => c.ValidTo > now && c.ValidFrom <= now)
             .Select(c => c.ValidTo - now)
             .DefaultIfEmpty(ttl)
             .Min();
 
-        if (earliestExpiry < ttl)
+        // POL-8: If there is an upcoming scheduled DENY consent (ValidFrom > now),
+        // the cache TTL of an ALLOW decision must be bounded by ValidFrom - now so that the scheduled DENY takes effect on time!
+        var earliestUpcomingDeny = consents
+            .Where(c => c.Effect == ConsentEffect.Deny && !c.IsRevoked && c.ValidFrom > now)
+            .Select(c => c.ValidFrom - now)
+            .DefaultIfEmpty(ttl)
+            .Min();
+
+        var minWindow = earliestExpiry < earliestUpcomingDeny ? earliestExpiry : earliestUpcomingDeny;
+
+        if (minWindow < ttl)
         {
-            ttl = earliestExpiry > TimeSpan.FromSeconds(1) ? earliestExpiry : TimeSpan.FromSeconds(1);
+            ttl = minWindow > TimeSpan.FromSeconds(1) ? minWindow : TimeSpan.FromSeconds(1);
         }
 
         return ttl;

@@ -57,7 +57,11 @@ public partial class PostgreSqlGovernanceRepository
                 var validFrom = DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture);
                 var validTo = DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture);
 
-                if (atTime < validFrom || atTime >= validTo) continue;
+                if (atTime >= validTo) continue;
+
+                var gEffectStr = reader.GetString(3);
+                var isDeny = Enum.TryParse<ConsentEffect>(gEffectStr, true, out var parsedEffect) && parsedEffect == ConsentEffect.Deny;
+                if (atTime < validFrom && !isDeny) continue;
 
                 var gTypeStr = reader.GetString(4);
                 var granteeType = Enum.Parse<GranteeType>(gTypeStr, true);
