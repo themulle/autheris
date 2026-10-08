@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -69,6 +70,48 @@ public sealed class Mutation
         return userSid.Value;
     }
 
+    /// <summary>
+    /// R-GQL-9: the tenant of a mutation is the one resolved for the request (SecurityPrincipalContext, which honours a
+    /// ClusterAdmin's X-Tenant-ID). The token claim only serves as a cross-check: a different claim tenant is forbidden,
+    /// except for canonical ClusterAdmins. Without a context tenant the claim tenant applies.
+    /// </summary>
+    internal static TenantId ResolveMutationTenantId(IHttpContextAccessor? httpContextAccessor, ClaimsPrincipal? principal, bool isCrossTenantAdmin)
+    {
+        var principalTenant = principal?.GetTenantId() ?? TenantId.LegacySingleTenant;
+        var contextTenant = TenantId.LegacySingleTenant;
+        if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
+        {
+            contextTenant = secCtx.TenantId;
+        }
+        else if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
+        {
+            contextTenant = tid;
+        }
+
+        if (principalTenant != TenantId.LegacySingleTenant &&
+            contextTenant != TenantId.LegacySingleTenant &&
+            principalTenant != contextTenant &&
+            !isCrossTenantAdmin)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("FORBIDDEN")
+                .SetMessage("Mandantenübergreifender Zugriff verboten: Token-Mandant stimmt nicht mit dem Mandanten des Verbindungskontexts überein.")
+                .Build());
+        }
+
+        return contextTenant != TenantId.LegacySingleTenant ? contextTenant : principalTenant;
+    }
+
+    /// <summary>
+    /// GQL-11: an idempotency key only replays the result of the same operation with the same arguments in the same
+    /// tenant; reusing a key for other arguments must not return the cached result of a different request.
+    /// </summary>
+    internal static string IdempotencyFingerprint(params object?[] parts)
+    {
+        var material = string.Join('\u001f', parts.Select(p => Convert.ToString(p, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty));
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(material)))[..32];
+    }
+
     private const int MaxIdempotencyKeyLength = 256;
 
     private static string? ValidateAndNormalizeIdempotencyKey(string? idempotencyKey)
@@ -86,12 +129,13 @@ public sealed class Mutation
         Sid userSid,
         string operation,
         string? idempotencyKey,
+        string argumentsFingerprint,
         IIdempotencyStore? idempotencyStore,
         CancellationToken ct = default)
     {
         var normalizedKey = ValidateAndNormalizeIdempotencyKey(idempotencyKey);
         if (normalizedKey == null || idempotencyStore == null) return null;
-        var compositeKey = $"idempotency:{userSid.Value}:{operation}:{normalizedKey}";
+        var compositeKey = $"idempotency:{userSid.Value}:{operation}:{normalizedKey}:{argumentsFingerprint}";
         return await idempotencyStore.GetAsync<ConsentRequestPayload>(compositeKey, ct).ConfigureAwait(false);
     }
 
@@ -99,13 +143,14 @@ public sealed class Mutation
         Sid userSid,
         string operation,
         string? idempotencyKey,
+        string argumentsFingerprint,
         ConsentRequestPayload payload,
         IIdempotencyStore? idempotencyStore,
         CancellationToken ct = default)
     {
         var normalizedKey = ValidateAndNormalizeIdempotencyKey(idempotencyKey);
         if (normalizedKey == null || idempotencyStore == null) return;
-        var compositeKey = $"idempotency:{userSid.Value}:{operation}:{normalizedKey}";
+        var compositeKey = $"idempotency:{userSid.Value}:{operation}:{normalizedKey}:{argumentsFingerprint}";
         await idempotencyStore.SetIfNotExistsAsync(compositeKey, payload, TimeSpan.FromHours(24), ct).ConfigureAwait(false);
     }
 
@@ -173,7 +218,10 @@ public sealed class Mutation
                 .Build());
         }
 
-        var existing = await TryGetIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, idempotencyStore, ct);
+        var requestFingerprint = IdempotencyFingerprint(
+            ResolveMutationTenantId(httpContextAccessor, principal, Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal)).Value,
+            domain, schema, tableName, justification.Trim(), durationDays);
+        var existing = await TryGetIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, requestFingerprint, idempotencyStore, ct);
         if (existing != null)
         {
             return existing;
@@ -190,26 +238,9 @@ public sealed class Mutation
                 .Build());
         }
 
-        var principalTenant = principal?.GetTenantId() ?? TenantId.LegacySingleTenant;
-        var contextTenant = TenantId.LegacySingleTenant;
-        if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
-        {
-            contextTenant = secCtx.TenantId;
-        }
-        else if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
-        {
-            contextTenant = tid;
-        }
-
-        if (principalTenant != TenantId.LegacySingleTenant && contextTenant != TenantId.LegacySingleTenant && principalTenant != contextTenant)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("Mandantenübergreifender Zugriff verboten: Token-Mandant stimmt nicht mit dem Verbindungskontext überein.")
-                .Build());
-        }
-
-        var tenantId = principalTenant != TenantId.LegacySingleTenant ? principalTenant : contextTenant;
+        // R-GQL-9: same ClusterAdmin exception as approve, reject and revoke.
+        bool isCrossTenantAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin);
 
         bool isItsmEnabled = itsmDispatcher != null && (gatewayOptions?.Value.Itsm.Enabled == true);
 
@@ -238,7 +269,7 @@ public sealed class Mutation
                 Status = "APPROVED",
                 Message = "[INSECURE GETTING STARTED] Consent request auto-approved."
             };
-            await StoreIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, payload, idempotencyStore, ct);
+            await StoreIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, requestFingerprint, payload, idempotencyStore, ct);
             return payload;
         }
 
@@ -298,7 +329,7 @@ public sealed class Mutation
                 ItsmTicketReference = ticketResult.TicketReference
             };
 
-            await StoreIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, payload, idempotencyStore, ct);
+            await StoreIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, requestFingerprint, payload, idempotencyStore, ct);
             return payload;
         }
         else
@@ -310,7 +341,7 @@ public sealed class Mutation
                 Message = "Consent request submitted successfully."
             };
 
-            await StoreIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, payload, idempotencyStore, ct);
+            await StoreIdempotentAsync(userSid, "RequestTableAccess", idempotencyKey, requestFingerprint, payload, idempotencyStore, ct);
             return payload;
         }
     }
@@ -358,7 +389,11 @@ public sealed class Mutation
     {
         var approverSid = GetAuthenticatedUserSid(httpContextAccessor);
 
-        var existing = await TryGetIdempotentAsync(approverSid, "ApproveConsentRequest", idempotencyKey, idempotencyStore, ct);
+        var approvePrincipal = httpContextAccessor?.HttpContext?.User;
+        var approveFingerprint = IdempotencyFingerprint(
+            ResolveMutationTenantId(httpContextAccessor, approvePrincipal, Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(approvePrincipal)).Value,
+            requestId);
+        var existing = await TryGetIdempotentAsync(approverSid, "ApproveConsentRequest", idempotencyKey, approveFingerprint, idempotencyStore, ct);
         if (existing != null)
         {
             return existing;
@@ -380,26 +415,7 @@ public sealed class Mutation
         bool isCrossTenantAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal); // RR-L2-01: single cross-tenant definition
         bool isPrivilegedAdmin = roles.Contains("GovernanceAdmin") || isCrossTenantAdmin;
 
-        var principalTenant = principal?.GetTenantId() ?? TenantId.LegacySingleTenant;
-        var contextTenant = TenantId.LegacySingleTenant;
-        if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
-        {
-            contextTenant = secCtx.TenantId;
-        }
-        else if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
-        {
-            contextTenant = tid;
-        }
-
-        if (principalTenant != TenantId.LegacySingleTenant && contextTenant != TenantId.LegacySingleTenant && principalTenant != contextTenant && !isCrossTenantAdmin)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("Mandantenübergreifender Zugriff verboten: Token-Mandant stimmt nicht mit dem Mandanten des Verbindungskontexts überein.")
-                .Build());
-        }
-
-        var tenantId = principalTenant != TenantId.LegacySingleTenant ? principalTenant : contextTenant;
+        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin);
 
         if (req.TenantId != tenantId && !isCrossTenantAdmin)
         {
@@ -485,7 +501,7 @@ public sealed class Mutation
             Message = message
         };
 
-        await StoreIdempotentAsync(approverSid, "ApproveConsentRequest", idempotencyKey, payload, idempotencyStore, ct);
+        await StoreIdempotentAsync(approverSid, "ApproveConsentRequest", idempotencyKey, approveFingerprint, payload, idempotencyStore, ct);
         return payload;
     }
 
@@ -528,7 +544,11 @@ public sealed class Mutation
                 .Build());
         }
 
-        var existing = await TryGetIdempotentAsync(approverSid, "RejectConsentRequest", idempotencyKey, idempotencyStore, ct);
+        var rejectPrincipal = httpContextAccessor?.HttpContext?.User;
+        var rejectFingerprint = IdempotencyFingerprint(
+            ResolveMutationTenantId(httpContextAccessor, rejectPrincipal, Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(rejectPrincipal)).Value,
+            requestId, reason.Trim());
+        var existing = await TryGetIdempotentAsync(approverSid, "RejectConsentRequest", idempotencyKey, rejectFingerprint, idempotencyStore, ct);
         if (existing != null)
         {
             return existing;
@@ -549,26 +569,7 @@ public sealed class Mutation
         bool isCrossTenantAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal); // RR-L2-01: single cross-tenant definition
         bool isPrivilegedAdmin = roles.Contains("GovernanceAdmin") || isCrossTenantAdmin;
 
-        var principalTenant = principal?.GetTenantId() ?? TenantId.LegacySingleTenant;
-        var contextTenant = TenantId.LegacySingleTenant;
-        if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
-        {
-            contextTenant = secCtx.TenantId;
-        }
-        else if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
-        {
-            contextTenant = tid;
-        }
-
-        if (principalTenant != TenantId.LegacySingleTenant && contextTenant != TenantId.LegacySingleTenant && principalTenant != contextTenant && !isCrossTenantAdmin)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("Mandantenübergreifender Zugriff verboten: Token-Mandant stimmt nicht mit dem Mandanten des Verbindungskontexts überein.")
-                .Build());
-        }
-
-        var tenantId = principalTenant != TenantId.LegacySingleTenant ? principalTenant : contextTenant;
+        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin);
 
         if (req.TenantId != tenantId && !isCrossTenantAdmin)
         {
@@ -598,7 +599,7 @@ public sealed class Mutation
             Message = $"Consent request rejected: {reason.Trim()}"
         };
 
-        await StoreIdempotentAsync(approverSid, "RejectConsentRequest", idempotencyKey, payload, idempotencyStore, ct);
+        await StoreIdempotentAsync(approverSid, "RejectConsentRequest", idempotencyKey, rejectFingerprint, payload, idempotencyStore, ct);
         return payload;
     }
 
@@ -651,26 +652,7 @@ public sealed class Mutation
         bool isCrossTenantAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal); // RR-L2-01: single cross-tenant definition
         bool isPrivilegedAdmin = roles.Contains("GovernanceAdmin") || isCrossTenantAdmin;
 
-        var principalTenant = principal?.GetTenantId() ?? TenantId.LegacySingleTenant;
-        var contextTenant = TenantId.LegacySingleTenant;
-        if (httpContextAccessor?.HttpContext?.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) == true && secObj is SecurityPrincipalContext secCtx)
-        {
-            contextTenant = secCtx.TenantId;
-        }
-        else if (httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
-        {
-            contextTenant = tid;
-        }
-
-        if (principalTenant != TenantId.LegacySingleTenant && contextTenant != TenantId.LegacySingleTenant && principalTenant != contextTenant && !isCrossTenantAdmin)
-        {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("FORBIDDEN")
-                .SetMessage("Mandantenübergreifender Zugriff verboten: Token-Mandant stimmt nicht mit dem Mandanten des Verbindungskontexts überein.")
-                .Build());
-        }
-
-        var tenantId = principalTenant != TenantId.LegacySingleTenant ? principalTenant : contextTenant;
+        var tenantId = ResolveMutationTenantId(httpContextAccessor, principal, isCrossTenantAdmin);
 
         if (consent.TenantId != tenantId && !isCrossTenantAdmin)
         {
