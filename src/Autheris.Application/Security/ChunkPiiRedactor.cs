@@ -78,8 +78,8 @@ public static class ChunkPiiRedactor
         {
             if (metadata != null && decision != null)
             {
-                // Discard keys without catalog entry when catalog columns are defined
-                if (metadata.Columns.Count > 0 && metadata.GetColumn(k) == null)
+                // POL-19: Discard keys without catalog entry (fail-closed if table has no catalog columns or key is unmapped)
+                if (metadata.GetColumn(k) == null)
                 {
                     continue;
                 }
