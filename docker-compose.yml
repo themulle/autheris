@@ -10,7 +10,7 @@
 # ==============================================================================
 services:
   gql-gateway:
-    image: ghcr.io/themulle/gql:getting-started
+    image: ghcr.io/themulle/autheris:getting-started
     container_name: gql-gateway
     ports:
       # Loopback only. Publish on other interfaces only behind a TLS-terminating, authenticating proxy.
