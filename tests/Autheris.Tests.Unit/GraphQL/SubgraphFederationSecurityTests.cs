@@ -122,4 +122,137 @@ public sealed class SubgraphFederationSecurityTests
 
         isValid.ShouldBeFalse();
     }
+
+    private sealed class CapturingHandler : HttpMessageHandler
+    {
+        public HttpRequestMessage? CapturedRequest { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            CapturedRequest = request;
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK));
+        }
+    }
+
+    [Fact]
+    public async Task SubgraphDelegatingHandler_Default_DoesNotForwardBearerToken()
+    {
+        var options = new GatewayOptions
+        {
+            Insecure = new InsecureGettingStartedOptions { danger_allow_insecure_transport = true },
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                Subgraphs = [new SubgraphEndpointOptions { Name = "products", Url = "https://products.internal/graphql", ForwardClientBearerToken = false }]
+            }
+        };
+
+        var propService = new SubgraphContextPropagationService(Options.Create(options), NullLogger<SubgraphContextPropagationService>.Instance);
+        var httpContextAccessor = new Microsoft.AspNetCore.Http.HttpContextAccessor
+        {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext()
+        };
+        httpContextAccessor.HttpContext.Request.Headers["Authorization"] = "Bearer client-secret-token";
+
+        var capturing = new CapturingHandler();
+        var handler = new SubgraphSecurityDelegatingHandler(
+            "products",
+            propService,
+            httpContextAccessor,
+            NullLogger<SubgraphSecurityDelegatingHandler>.Instance,
+            Options.Create(options))
+        {
+            InnerHandler = capturing
+        };
+
+        var client = new HttpClient(handler);
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://products.internal/graphql");
+
+        await client.SendAsync(request);
+
+        capturing.CapturedRequest.ShouldNotBeNull();
+        capturing.CapturedRequest.Headers.Contains("Authorization").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SubgraphDelegatingHandler_McpRequest_NeverForwardsBearerToken()
+    {
+        var options = new GatewayOptions
+        {
+            Insecure = new InsecureGettingStartedOptions { danger_allow_insecure_transport = true },
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                Subgraphs = [new SubgraphEndpointOptions { Name = "products", Url = "https://products.internal/graphql", ForwardClientBearerToken = true }]
+            }
+        };
+
+        var propService = new SubgraphContextPropagationService(Options.Create(options), NullLogger<SubgraphContextPropagationService>.Instance);
+        var httpContextAccessor = new Microsoft.AspNetCore.Http.HttpContextAccessor
+        {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext()
+        };
+        httpContextAccessor.HttpContext.Request.Headers["Authorization"] = "Bearer mcp-secret-token";
+        httpContextAccessor.HttpContext.Items["IsMcpRequest"] = true;
+
+        var capturing = new CapturingHandler();
+        var handler = new SubgraphSecurityDelegatingHandler(
+            "products",
+            propService,
+            httpContextAccessor,
+            NullLogger<SubgraphSecurityDelegatingHandler>.Instance,
+            Options.Create(options))
+        {
+            InnerHandler = capturing
+        };
+
+        var client = new HttpClient(handler);
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://products.internal/graphql");
+
+        await client.SendAsync(request);
+
+        capturing.CapturedRequest.ShouldNotBeNull();
+        capturing.CapturedRequest.Headers.Contains("Authorization").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SubgraphDelegatingHandler_WhenExplicitlyAllowed_ForwardsBearerToken()
+    {
+        var options = new GatewayOptions
+        {
+            Insecure = new InsecureGettingStartedOptions { danger_allow_insecure_transport = true },
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                Subgraphs = [new SubgraphEndpointOptions { Name = "products", Url = "https://products.internal/graphql", ForwardClientBearerToken = true }]
+            }
+        };
+
+        var propService = new SubgraphContextPropagationService(Options.Create(options), NullLogger<SubgraphContextPropagationService>.Instance);
+        var httpContextAccessor = new Microsoft.AspNetCore.Http.HttpContextAccessor
+        {
+            HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext()
+        };
+        httpContextAccessor.HttpContext.Request.Headers["Authorization"] = "Bearer trusted-client-token";
+
+        var capturing = new CapturingHandler();
+        var handler = new SubgraphSecurityDelegatingHandler(
+            "products",
+            propService,
+            httpContextAccessor,
+            NullLogger<SubgraphSecurityDelegatingHandler>.Instance,
+            Options.Create(options))
+        {
+            InnerHandler = capturing
+        };
+
+        var client = new HttpClient(handler);
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://products.internal/graphql");
+
+        await client.SendAsync(request);
+
+        capturing.CapturedRequest.ShouldNotBeNull();
+        capturing.CapturedRequest.Headers.Contains("Authorization").ShouldBeTrue();
+        capturing.CapturedRequest.Headers.GetValues("Authorization").First().ShouldBe("Bearer trusted-client-token");
+    }
 }

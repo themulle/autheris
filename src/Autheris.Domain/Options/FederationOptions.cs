@@ -55,8 +55,9 @@ public sealed class FederationOptions
 
     /// <summary>
     /// Forward the original Authorization Bearer token downstream to subgraphs if present.
+    /// Defaults to false (least privilege / token leakage prevention).
     /// </summary>
-    public bool ForwardAuthorizationBearer { get; init; } = true;
+    public bool ForwardAuthorizationBearer { get; init; } = false;
 
     /// <summary>
     /// List of registered subgraph endpoints.
@@ -72,4 +73,10 @@ public sealed class SubgraphEndpointOptions
     public string Name { get; init; } = string.Empty;
     public string Url { get; init; } = string.Empty;
     public int TimeoutSeconds { get; init; } = 30;
+
+    /// <summary>
+    /// Explicit opt-in to forward the client's raw Authorization Bearer token to this specific subgraph.
+    /// Defaults to false. Never forwarded for MCP agent requests to prevent token exfiltration.
+    /// </summary>
+    public bool ForwardClientBearerToken { get; init; } = false;
 }
