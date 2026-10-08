@@ -15,11 +15,20 @@ using Autheris.Domain.Exceptions;
 /// </summary>
 public static class ODataFilterParser
 {
+    public const int MaxFilterLength = 4096;
+    public const int MaxRecursionDepth = 32;
+
     public static TableFilterClause Parse(string filterExpression, DatabaseDialect defaultDialect = DatabaseDialect.PostgreSql, string paramPrefix = "@p_od_")
     {
         if (string.IsNullOrWhiteSpace(filterExpression))
         {
             throw new ArgumentException("Filter expression cannot be null or empty.", nameof(filterExpression));
+        }
+
+        if (filterExpression.Length > MaxFilterLength)
+        {
+            throw new GatewayInvalidQueryException(
+                $"OData $filter expression exceeds maximum allowed length of {MaxFilterLength} characters (received {filterExpression.Length}).");
         }
 
         var tokens = Tokenize(filterExpression);
@@ -324,12 +333,29 @@ public static class ODataFilterParser
         private readonly List<Token> _tokens;
         private readonly string _rawInput;
         private int _pos;
+        private int _depth;
 
         public FilterAstParser(List<Token> tokens, string rawInput)
         {
             _tokens = tokens;
             _rawInput = rawInput;
             _pos = 0;
+            _depth = 0;
+        }
+
+        private void EnterRecursion()
+        {
+            _depth++;
+            if (_depth > MaxRecursionDepth)
+            {
+                throw new GatewayInvalidQueryException(
+                    $"OData $filter expression exceeds maximum recursion depth of {MaxRecursionDepth}.");
+            }
+        }
+
+        private void ExitRecursion()
+        {
+            _depth--;
         }
 
         private Token Current => _pos < _tokens.Count ? _tokens[_pos] : _tokens[^1];
@@ -370,13 +396,21 @@ public static class ODataFilterParser
         // OrExpression := AndExpression ('or' AndExpression)*
         private AstNode ParseOr()
         {
-            var left = ParseAnd();
-            while (Match(TokenType.Or))
+            EnterRecursion();
+            try
             {
-                var right = ParseAnd();
-                left = new BinaryOpNode(left, "OR", right);
+                var left = ParseAnd();
+                while (Match(TokenType.Or))
+                {
+                    var right = ParseAnd();
+                    left = new BinaryOpNode(left, "OR", right);
+                }
+                return left;
             }
-            return left;
+            finally
+            {
+                ExitRecursion();
+            }
         }
 
         // AndExpression := NotExpression ('and' NotExpression)*
@@ -396,8 +430,16 @@ public static class ODataFilterParser
         {
             if (Match(TokenType.Not))
             {
-                var inner = ParseNot();
-                return new NotOpNode(inner);
+                EnterRecursion();
+                try
+                {
+                    var inner = ParseNot();
+                    return new NotOpNode(inner);
+                }
+                finally
+                {
+                    ExitRecursion();
+                }
             }
             return ParseComparison();
         }
@@ -472,32 +514,40 @@ public static class ODataFilterParser
 
         private AstNode ParseFunctionCall(string functionName)
         {
-            Consume(TokenType.OpenParen);
-            var args = new List<AstNode>();
-
-            if (Current.Type != TokenType.CloseParen)
+            EnterRecursion();
+            try
             {
-                args.Add(ParseOr());
-                while (Match(TokenType.Comma))
+                Consume(TokenType.OpenParen);
+                var args = new List<AstNode>();
+
+                if (Current.Type != TokenType.CloseParen)
                 {
                     args.Add(ParseOr());
+                    while (Match(TokenType.Comma))
+                    {
+                        args.Add(ParseOr());
+                    }
+                }
+
+                Consume(TokenType.CloseParen);
+
+                var fn = functionName.ToLowerInvariant();
+                switch (fn)
+                {
+                    case "contains":
+                    case "startswith":
+                    case "endswith":
+                    case "tolower":
+                    case "toupper":
+                        return new FunctionCallNode(fn, args);
+                    default:
+                        throw new GatewayInvalidQueryException(
+                            $"The function '{functionName}' is not supported in $filter expressions.");
                 }
             }
-
-            Consume(TokenType.CloseParen);
-
-            var fn = functionName.ToLowerInvariant();
-            switch (fn)
+            finally
             {
-                case "contains":
-                case "startswith":
-                case "endswith":
-                case "tolower":
-                case "toupper":
-                    return new FunctionCallNode(fn, args);
-                default:
-                    throw new GatewayInvalidQueryException(
-                        $"The function '{functionName}' is not supported in $filter expressions.");
+                ExitRecursion();
             }
         }
     }
@@ -512,13 +562,27 @@ public static class ODataFilterParser
         public string ParamPrefix { get; }
         public Dictionary<string, object?> Parameters { get; } = new(StringComparer.Ordinal);
         private int _counter;
+        public int Depth { get; set; }
 
         public SqlGenerationContext(DatabaseDialect dialect, string paramPrefix)
         {
             Dialect = dialect;
             ParamPrefix = paramPrefix;
             _counter = 0;
+            Depth = 0;
         }
+
+        public void EnterDepth()
+        {
+            Depth++;
+            if (Depth > MaxRecursionDepth + 5)
+            {
+                throw new GatewayInvalidQueryException(
+                    $"AST recursion depth exceeds maximum limit of {MaxRecursionDepth}.");
+            }
+        }
+
+        public void ExitDepth() => Depth--;
 
         public string AddParameter(object? value)
         {
@@ -531,16 +595,35 @@ public static class ODataFilterParser
     internal abstract class AstNode
     {
         public abstract string ToSql(SqlGenerationContext ctx);
-        public abstract void CollectReferencedColumns(List<string> columns);
+        public abstract void CollectReferencedColumns(List<string> columns, int depth = 0);
     }
 
     internal sealed class GroupingNode(AstNode inner) : AstNode
     {
         public AstNode Inner { get; } = inner;
 
-        public override string ToSql(SqlGenerationContext ctx) => $"({Inner.ToSql(ctx)})";
+        public override string ToSql(SqlGenerationContext ctx)
+        {
+            ctx.EnterDepth();
+            try
+            {
+                return $"({Inner.ToSql(ctx)})";
+            }
+            finally
+            {
+                ctx.ExitDepth();
+            }
+        }
 
-        public override void CollectReferencedColumns(List<string> columns) => Inner.CollectReferencedColumns(columns);
+        public override void CollectReferencedColumns(List<string> columns, int depth = 0)
+        {
+            if (depth > MaxRecursionDepth + 5)
+            {
+                throw new GatewayInvalidQueryException(
+                    $"AST recursion depth exceeds maximum limit of {MaxRecursionDepth}.");
+            }
+            Inner.CollectReferencedColumns(columns, depth + 1);
+        }
     }
 
     internal sealed class ColumnNode(string name) : AstNode
@@ -549,7 +632,7 @@ public static class ODataFilterParser
 
         public override string ToSql(SqlGenerationContext ctx) => ctx.Dialect.QuoteIdentifier(Name);
 
-        public override void CollectReferencedColumns(List<string> columns) => columns.Add(Name);
+        public override void CollectReferencedColumns(List<string> columns, int depth = 0) => columns.Add(Name);
     }
 
     internal sealed class LiteralNode(object? value) : AstNode
@@ -558,23 +641,42 @@ public static class ODataFilterParser
 
         public override string ToSql(SqlGenerationContext ctx) => ctx.AddParameter(Value);
 
-        public override void CollectReferencedColumns(List<string> columns) { }
+        public override void CollectReferencedColumns(List<string> columns, int depth = 0) { }
     }
 
     internal sealed class NullLiteralNode : AstNode
     {
         public override string ToSql(SqlGenerationContext ctx) => "NULL";
 
-        public override void CollectReferencedColumns(List<string> columns) { }
+        public override void CollectReferencedColumns(List<string> columns, int depth = 0) { }
     }
 
     internal sealed class NotOpNode(AstNode inner) : AstNode
     {
         public AstNode Inner { get; } = inner;
 
-        public override string ToSql(SqlGenerationContext ctx) => $"NOT ({Inner.ToSql(ctx)})";
+        public override string ToSql(SqlGenerationContext ctx)
+        {
+            ctx.EnterDepth();
+            try
+            {
+                return $"NOT ({Inner.ToSql(ctx)})";
+            }
+            finally
+            {
+                ctx.ExitDepth();
+            }
+        }
 
-        public override void CollectReferencedColumns(List<string> columns) => Inner.CollectReferencedColumns(columns);
+        public override void CollectReferencedColumns(List<string> columns, int depth = 0)
+        {
+            if (depth > MaxRecursionDepth + 5)
+            {
+                throw new GatewayInvalidQueryException(
+                    $"AST recursion depth exceeds maximum limit of {MaxRecursionDepth}.");
+            }
+            Inner.CollectReferencedColumns(columns, depth + 1);
+        }
     }
 
     internal sealed class BinaryOpNode(AstNode left, string op, AstNode right) : AstNode
@@ -585,51 +687,64 @@ public static class ODataFilterParser
 
         public override string ToSql(SqlGenerationContext ctx)
         {
-            // Handle null comparison
-            if (Op.Equals("eq", StringComparison.OrdinalIgnoreCase))
+            ctx.EnterDepth();
+            try
             {
-                if (Right is NullLiteralNode)
+                // Handle null comparison
+                if (Op.Equals("eq", StringComparison.OrdinalIgnoreCase))
                 {
-                    return $"({Left.ToSql(ctx)} IS NULL)";
+                    if (Right is NullLiteralNode)
+                    {
+                        return $"({Left.ToSql(ctx)} IS NULL)";
+                    }
+                    if (Left is NullLiteralNode)
+                    {
+                        return $"({Right.ToSql(ctx)} IS NULL)";
+                    }
+                    return $"({Left.ToSql(ctx)} = {Right.ToSql(ctx)})";
                 }
-                if (Left is NullLiteralNode)
+
+                if (Op.Equals("ne", StringComparison.OrdinalIgnoreCase))
                 {
-                    return $"({Right.ToSql(ctx)} IS NULL)";
+                    if (Right is NullLiteralNode)
+                    {
+                        return $"({Left.ToSql(ctx)} IS NOT NULL)";
+                    }
+                    if (Left is NullLiteralNode)
+                    {
+                        return $"({Right.ToSql(ctx)} IS NOT NULL)";
+                    }
+                    return $"({Left.ToSql(ctx)} <> {Right.ToSql(ctx)})";
                 }
-                return $"({Left.ToSql(ctx)} = {Right.ToSql(ctx)})";
+
+                var sqlOp = Op.ToLowerInvariant() switch
+                {
+                    "and" => "AND",
+                    "or" => "OR",
+                    "gt" => ">",
+                    "ge" => ">=",
+                    "lt" => "<",
+                    "le" => "<=",
+                    _ => Op.ToUpperInvariant()
+                };
+
+                return $"({Left.ToSql(ctx)} {sqlOp} {Right.ToSql(ctx)})";
             }
-
-            if (Op.Equals("ne", StringComparison.OrdinalIgnoreCase))
+            finally
             {
-                if (Right is NullLiteralNode)
-                {
-                    return $"({Left.ToSql(ctx)} IS NOT NULL)";
-                }
-                if (Left is NullLiteralNode)
-                {
-                    return $"({Right.ToSql(ctx)} IS NOT NULL)";
-                }
-                return $"({Left.ToSql(ctx)} <> {Right.ToSql(ctx)})";
+                ctx.ExitDepth();
             }
-
-            var sqlOp = Op.ToLowerInvariant() switch
-            {
-                "and" => "AND",
-                "or" => "OR",
-                "gt" => ">",
-                "ge" => ">=",
-                "lt" => "<",
-                "le" => "<=",
-                _ => Op.ToUpperInvariant()
-            };
-
-            return $"({Left.ToSql(ctx)} {sqlOp} {Right.ToSql(ctx)})";
         }
 
-        public override void CollectReferencedColumns(List<string> columns)
+        public override void CollectReferencedColumns(List<string> columns, int depth = 0)
         {
-            Left.CollectReferencedColumns(columns);
-            Right.CollectReferencedColumns(columns);
+            if (depth > MaxRecursionDepth + 5)
+            {
+                throw new GatewayInvalidQueryException(
+                    $"AST recursion depth exceeds maximum limit of {MaxRecursionDepth}.");
+            }
+            Left.CollectReferencedColumns(columns, depth + 1);
+            Right.CollectReferencedColumns(columns, depth + 1);
         }
     }
 
@@ -640,39 +755,47 @@ public static class ODataFilterParser
 
         public override string ToSql(SqlGenerationContext ctx)
         {
-            switch (Name)
+            ctx.EnterDepth();
+            try
             {
-                case "contains":
-                    if (Args.Count != 2) throw new GatewayInvalidQueryException("Function 'contains' requires 2 arguments.");
-                    var targetContains = Args[0].ToSql(ctx);
-                    var patternContains = GetLikePattern(Args[1], "%{0}%");
-                    var pContains = ctx.AddParameter(patternContains);
-                    return $"({targetContains} LIKE {pContains})";
+                switch (Name)
+                {
+                    case "contains":
+                        if (Args.Count != 2) throw new GatewayInvalidQueryException("Function 'contains' requires 2 arguments.");
+                        var targetContains = Args[0].ToSql(ctx);
+                        var patternContains = GetLikePattern(Args[1], "%{0}%");
+                        var pContains = ctx.AddParameter(patternContains);
+                        return $"({targetContains} LIKE {pContains})";
 
-                case "startswith":
-                    if (Args.Count != 2) throw new GatewayInvalidQueryException("Function 'startswith' requires 2 arguments.");
-                    var targetStarts = Args[0].ToSql(ctx);
-                    var patternStarts = GetLikePattern(Args[1], "{0}%");
-                    var pStarts = ctx.AddParameter(patternStarts);
-                    return $"({targetStarts} LIKE {pStarts})";
+                    case "startswith":
+                        if (Args.Count != 2) throw new GatewayInvalidQueryException("Function 'startswith' requires 2 arguments.");
+                        var targetStarts = Args[0].ToSql(ctx);
+                        var patternStarts = GetLikePattern(Args[1], "{0}%");
+                        var pStarts = ctx.AddParameter(patternStarts);
+                        return $"({targetStarts} LIKE {pStarts})";
 
-                case "endswith":
-                    if (Args.Count != 2) throw new GatewayInvalidQueryException("Function 'endswith' requires 2 arguments.");
-                    var targetEnds = Args[0].ToSql(ctx);
-                    var patternEnds = GetLikePattern(Args[1], "%{0}");
-                    var pEnds = ctx.AddParameter(patternEnds);
-                    return $"({targetEnds} LIKE {pEnds})";
+                    case "endswith":
+                        if (Args.Count != 2) throw new GatewayInvalidQueryException("Function 'endswith' requires 2 arguments.");
+                        var targetEnds = Args[0].ToSql(ctx);
+                        var patternEnds = GetLikePattern(Args[1], "%{0}");
+                        var pEnds = ctx.AddParameter(patternEnds);
+                        return $"({targetEnds} LIKE {pEnds})";
 
-                case "tolower":
-                    if (Args.Count != 1) throw new GatewayInvalidQueryException("Function 'tolower' requires 1 argument.");
-                    return $"LOWER({Args[0].ToSql(ctx)})";
+                    case "tolower":
+                        if (Args.Count != 1) throw new GatewayInvalidQueryException("Function 'tolower' requires 1 argument.");
+                        return $"LOWER({Args[0].ToSql(ctx)})";
 
-                case "toupper":
-                    if (Args.Count != 1) throw new GatewayInvalidQueryException("Function 'toupper' requires 1 argument.");
-                    return $"UPPER({Args[0].ToSql(ctx)})";
+                    case "toupper":
+                        if (Args.Count != 1) throw new GatewayInvalidQueryException("Function 'toupper' requires 1 argument.");
+                        return $"UPPER({Args[0].ToSql(ctx)})";
 
-                default:
-                    throw new GatewayInvalidQueryException($"Function '{Name}' is not supported.");
+                    default:
+                        throw new GatewayInvalidQueryException($"Function '{Name}' is not supported.");
+                }
+            }
+            finally
+            {
+                ctx.ExitDepth();
             }
         }
 
@@ -685,11 +808,16 @@ public static class ODataFilterParser
             throw new GatewayInvalidQueryException("String functions (contains, startswith, endswith) require a literal string as the pattern argument.");
         }
 
-        public override void CollectReferencedColumns(List<string> columns)
+        public override void CollectReferencedColumns(List<string> columns, int depth = 0)
         {
+            if (depth > MaxRecursionDepth + 5)
+            {
+                throw new GatewayInvalidQueryException(
+                    $"AST recursion depth exceeds maximum limit of {MaxRecursionDepth}.");
+            }
             foreach (var arg in Args)
             {
-                arg.CollectReferencedColumns(columns);
+                arg.CollectReferencedColumns(columns, depth + 1);
             }
         }
     }

@@ -361,26 +361,58 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             referenceSpellings[target.FullName] = target.FullName;
         }
 
-        static void RegisterTableLookup<T>(IDictionary<string, T> dict, TableAccessTarget target, TableIdentifier resolvedId, T value)
+        var tableNameCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var schemaTableCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in metadata.ReferencedTables)
         {
-            dict[target.FullName] = value;
-            dict[target.TableName] = value;
-            if (!string.IsNullOrWhiteSpace(target.Schema))
+            tableNameCounts[t.TableName] = tableNameCounts.GetValueOrDefault(t.TableName) + 1;
+            if (!string.IsNullOrWhiteSpace(t.Schema))
             {
-                dict[$"{target.Schema}.{target.TableName}"] = value;
+                var st = $"{t.Schema}.{t.TableName}";
+                schemaTableCounts[st] = schemaTableCounts.GetValueOrDefault(st) + 1;
             }
-            dict[resolvedId.ToQualifiedName()] = value;
         }
 
-        static void RegisterTableSet(ISet<string> set, TableAccessTarget target, TableIdentifier resolvedId)
+        void RegisterTableLookup<T>(IDictionary<string, T> dict, TableAccessTarget target, TableIdentifier resolvedId, T value)
         {
-            set.Add(target.FullName);
-            set.Add(target.TableName);
+            dict[target.FullName] = value;
+            dict[resolvedId.ToQualifiedName()] = value;
+
+            // SR15-02: Only register unqualified table name if it is unique among all referenced tables in this statement
+            if (tableNameCounts.TryGetValue(target.TableName, out var count) && count == 1)
+            {
+                dict[target.TableName] = value;
+            }
+
             if (!string.IsNullOrWhiteSpace(target.Schema))
             {
-                set.Add($"{target.Schema}.{target.TableName}");
+                var st = $"{target.Schema}.{target.TableName}";
+                if (schemaTableCounts.TryGetValue(st, out var sCount) && sCount == 1)
+                {
+                    dict[st] = value;
+                }
             }
+        }
+
+        void RegisterTableSet(ISet<string> set, TableAccessTarget target, TableIdentifier resolvedId)
+        {
+            set.Add(target.FullName);
             set.Add(resolvedId.ToQualifiedName());
+
+            // SR15-02: Only register unqualified table name if it is unique among all referenced tables in this statement
+            if (tableNameCounts.TryGetValue(target.TableName, out var count) && count == 1)
+            {
+                set.Add(target.TableName);
+            }
+
+            if (!string.IsNullOrWhiteSpace(target.Schema))
+            {
+                var st = $"{target.Schema}.{target.TableName}";
+                if (schemaTableCounts.TryGetValue(st, out var sCount) && sCount == 1)
+                {
+                    set.Add(st);
+                }
+            }
         }
 
         foreach (var target in metadata.ReferencedTables)
@@ -811,12 +843,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             ? ResolveAllowedDataSource(request.DataSourceName, tenantId)
             : null;
 
-        // SEC H-13: Client parameters must not collide with gateway-internal parameters
+        // SEC H-13 / SR15-01: Client parameters must not collide with gateway-internal parameters or RLS placeholders
         if (request.Parameters != null)
         {
             foreach (var paramName in request.Parameters.Keys)
             {
-                if (paramName.TrimStart('@').StartsWith(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase))
+                var trimmed = paramName.TrimStart('@');
+                if (trimmed.StartsWith(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("p_rls_", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("rls_", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new WebSqlPolicyException("A request parameter uses a reserved gateway parameter name.");
                 }
@@ -969,11 +1004,20 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (request.Parameters != null)
             {
+                var internalParamNames = new HashSet<string>(
+                    rewrite.InternalParameters.Keys.Select(k => k.StartsWith('@') ? k : "@" + k),
+                    StringComparer.OrdinalIgnoreCase);
+
                 // "name" and "@name" denote the same parameter; bind it once.
                 var boundNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var (paramName, paramVal) in request.Parameters)
                 {
                     string normalizedName = paramName.StartsWith('@') ? paramName : "@" + paramName;
+                    if (internalParamNames.Contains(normalizedName))
+                    {
+                        throw new WebSqlPolicyException($"Client parameter '{paramName}' collides with an internal security rewrite parameter.");
+                    }
+
                     if (!boundNames.Add(normalizedName))
                     {
                         continue;

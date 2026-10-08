@@ -418,7 +418,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 FormatUnaryExpression(ref builder, u, context);
                 break;
             case LikeExpression lk:
-                GenerateExpression(lk.Operand, ref builder, context);
+                GeneratePredicateOperand(lk.Operand, ref builder, context);
                 builder.Append(lk.IsNotLike ? " NOT LIKE " : " LIKE ");
                 GenerateExpression(lk.Pattern, ref builder, context);
                 if (lk.Escape != null)
@@ -428,7 +428,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 }
                 break;
             case InListExpression inL:
-                GenerateExpression(inL.Operand, ref builder, context);
+                GeneratePredicateOperand(inL.Operand, ref builder, context);
                 builder.Append(inL.IsNotIn ? " NOT IN (" : " IN (");
                 for (int i = 0; i < inL.Items.Count; i++)
                 {
@@ -438,7 +438,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(')');
                 break;
             case InSubqueryExpression inSq:
-                GenerateExpression(inSq.Operand, ref builder, context);
+                GeneratePredicateOperand(inSq.Operand, ref builder, context);
                 builder.Append(inSq.IsNotIn ? " NOT IN (" : " IN (");
                 GenerateSelect(inSq.Subquery, ref builder, context);
                 builder.Append(')');
@@ -454,7 +454,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(')');
                 break;
             case QuantifiedComparisonExpression qc:
-                GenerateExpression(qc.Left, ref builder, context);
+                GeneratePredicateOperand(qc.Left, ref builder, context);
                 builder.Append(' ');
                 builder.Append(GetBinaryOperatorString(qc.Operator));
                 builder.Append(' ');
@@ -464,11 +464,11 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(')');
                 break;
             case BetweenExpression bt:
-                GenerateExpression(bt.Operand, ref builder, context);
+                GeneratePredicateOperand(bt.Operand, ref builder, context);
                 builder.Append(bt.IsNotBetween ? " NOT BETWEEN " : " BETWEEN ");
-                GenerateExpression(bt.Lower, ref builder, context);
+                GeneratePredicateOperand(bt.Lower, ref builder, context);
                 builder.Append(" AND ");
-                GenerateExpression(bt.Upper, ref builder, context);
+                GeneratePredicateOperand(bt.Upper, ref builder, context);
                 break;
             case IsDistinctFromExpression dist:
                 FormatIsDistinctFrom(ref builder, dist, context);
@@ -640,7 +640,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(')');
                 break;
             case UnaryOperator.IsNull:
-                if (u.Operand is BinaryExpression or BetweenExpression or LikeExpression)
+                if (u.Operand is BinaryExpression or BetweenExpression or LikeExpression or InListExpression or InSubqueryExpression or IsDistinctFromExpression)
                 {
                     builder.Append('(');
                     GenerateExpression(u.Operand, ref builder, context);
@@ -653,7 +653,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 }
                 break;
             case UnaryOperator.IsNotNull:
-                if (u.Operand is BinaryExpression or BetweenExpression or LikeExpression)
+                if (u.Operand is BinaryExpression or BetweenExpression or LikeExpression or InListExpression or InSubqueryExpression or IsDistinctFromExpression)
                 {
                     builder.Append('(');
                     GenerateExpression(u.Operand, ref builder, context);
@@ -668,11 +668,25 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
     }
 
+    protected virtual void GeneratePredicateOperand(Expression expr, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        bool needsParens = expr is BinaryExpression
+            or BetweenExpression
+            or LikeExpression
+            or InListExpression
+            or InSubqueryExpression
+            or IsDistinctFromExpression;
+
+        if (needsParens) builder.Append('(');
+        GenerateExpression(expr, ref builder, context);
+        if (needsParens) builder.Append(')');
+    }
+
     protected virtual void FormatIsDistinctFrom(ref ValueStringBuilder builder, IsDistinctFromExpression dist, SqlEmitterContext context)
     {
-        GenerateExpression(dist.Left, ref builder, context);
+        GeneratePredicateOperand(dist.Left, ref builder, context);
         builder.Append(dist.IsNotDistinctFrom ? " IS NOT DISTINCT FROM " : " IS DISTINCT FROM ");
-        GenerateExpression(dist.Right, ref builder, context);
+        GeneratePredicateOperand(dist.Right, ref builder, context);
     }
 
     protected virtual void FormatArrayConstructor(ref ValueStringBuilder builder, ArrayConstructorExpression arr, SqlEmitterContext context)
