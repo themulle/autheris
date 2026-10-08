@@ -24,9 +24,10 @@ public static class EgressIntegrations
     public const string Lakehouse = "Lakehouse";
     public const string AuditWorm = "AuditWorm";
     public const string Cdn = "Cdn";
+    public const string Shadowing = "Shadowing";
 
     /// <summary>Integrations that may be listed in <see cref="OutboundEgressOptions.TrustedIntegrations"/>.</summary>
-    public static IReadOnlyList<string> AllowlistCapable { get; } = [Itsm, Catalog, OpenMetadata, Lineage, AuditWorm, Cdn];
+    public static IReadOnlyList<string> AllowlistCapable { get; } = [Itsm, Catalog, OpenMetadata, Lineage, AuditWorm, Cdn, Shadowing];
 }
 
 /// <summary>
