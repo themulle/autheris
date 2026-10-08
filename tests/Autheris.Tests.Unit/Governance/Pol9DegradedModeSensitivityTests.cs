@@ -11,6 +11,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.DependencyInjection;
 using NSubstitute;
 using Shouldly;
 using StackExchange.Redis;
@@ -57,7 +58,7 @@ public sealed class Pol9DegradedModeSensitivityTests
         var service = new EpochValidationService(
             options,
             multiplexer: multiplexer,
-            tableMetadataRepository: tableRepo);
+            serviceProvider: new ServiceCollection().AddSingleton(tableRepo).BuildServiceProvider());
 
         // Act: check validity for table with RESTRICTED sensitivity
         var isValid = await service.IsEpochValidAsync(tableRestricted, cachedEpoch: 1);
