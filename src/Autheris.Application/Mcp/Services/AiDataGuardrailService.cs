@@ -34,6 +34,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     private readonly ISemanticPromptGuardrail _promptGuardrail;
     private readonly IGoldenQueryService? _goldenQueryService;
     private readonly IHitLStepUpApprovalService? _stepUpApprovalService;
+    private readonly IGraphQlCatalogMap? _graphQlCatalogMap;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
 
@@ -64,7 +65,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IMcpSessionStore? sessionStore = null,
         ISemanticPromptGuardrail? promptGuardrail = null,
         IGoldenQueryService? goldenQueryService = null,
-        IHitLStepUpApprovalService? stepUpApprovalService = null)
+        IHitLStepUpApprovalService? stepUpApprovalService = null,
+        IGraphQlCatalogMap? graphQlCatalogMap = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -77,6 +79,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         _promptGuardrail = promptGuardrail ?? new SemanticPromptGuardrail();
         _goldenQueryService = goldenQueryService;
         _stepUpApprovalService = stepUpApprovalService;
+        _graphQlCatalogMap = graphQlCatalogMap;
     }
 
 
@@ -171,7 +174,9 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         }
 
         // Resolve real TargetTable for ABAC policy and Four-Eyes checks
-        var resolvedTables = ParseTablesFromTool(tool, request.ArgumentsJson);
+        var resolvedTables = string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase)
+            ? await ResolveGraphQlTablesAsync(request.ArgumentsJson, cancellationToken).ConfigureAwait(false)
+            : ParseTablesFromTool(tool, request.ArgumentsJson);
 
         // Security Hardening: For data access tools, target table must be resolvable.
         // If unresolvable, fail-closed to prevent bypassing Casbin ABAC and Four-Eyes gates.
@@ -575,6 +580,27 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
 
         var single = ParseTableIdentifierFromTool(tool, argumentsJson);
         return single == null ? null : [single.Value];
+    }
+
+    /// <summary>
+    /// Tables read by a query_graphql call, from the catalog GraphQL schema. Null (fail-closed) without a single
+    /// <c>query</c> argument or for a document that is not one query on catalog fields; a pure introspection query
+    /// is checked like a catalog listing.
+    /// </summary>
+    private async Task<IReadOnlyList<TableIdentifier>?> ResolveGraphQlTablesAsync(string? argumentsJson, CancellationToken ct)
+    {
+        if (_graphQlCatalogMap == null || !McpDatasetTools.TryGetStringArgument(argumentsJson, "query", out var query) || string.IsNullOrWhiteSpace(query))
+        {
+            return null;
+        }
+
+        var tables = await _graphQlCatalogMap.ResolveDocumentTablesAsync(query, ct).ConfigureAwait(false);
+        return tables switch
+        {
+            null => null,
+            { Count: 0 } => [McpDatasetTools.CatalogTable],
+            _ => tables
+        };
     }
 
     private static bool IsBuiltInTableTool(string name) =>

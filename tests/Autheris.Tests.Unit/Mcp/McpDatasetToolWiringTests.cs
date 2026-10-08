@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Mcp;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
@@ -43,6 +44,7 @@ public sealed class McpDatasetToolWiringTests
     [InlineData("list_datasets")]
     [InlineData("describe_dataset")]
     [InlineData("sample_rows")]
+    [InlineData("query_graphql")]
     public void DatasetTools_AreRegistered_WithoutDemoData(string name)
     {
         var tool = Tool(name);
@@ -50,7 +52,7 @@ public sealed class McpDatasetToolWiringTests
         tool.Description.ShouldNotBeNullOrWhiteSpace();
         using var schema = JsonDocument.Parse(tool.InputJsonSchema);
         schema.RootElement.GetProperty("type").GetString().ShouldBe("object");
-        if (name != "list_datasets")
+        if (name is "describe_dataset" or "sample_rows")
         {
             schema.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ShouldContain("dataset");
         }
@@ -140,6 +142,126 @@ public sealed class McpDatasetToolWiringTests
 
         result.IsSuccess.ShouldBe(expectedSuccess);
         await policy.Received(casbinEnabled ? 1 : 0).EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>());
+    }
+
+    private static (AiDataGuardrailService Guardrail, IPolicyEnforcementService Policy, IMcpQueryExecutor Executor) GraphQlGuardrail(
+        IReadOnlyList<TableIdentifier>? documentTables, bool fourEyes = false)
+    {
+        var map = Substitute.For<IGraphQlCatalogMap>();
+        map.ResolveDocumentTablesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(documentTables));
+        var policy = Substitute.For<IPolicyEnforcementService>();
+        policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+            .Returns(c => ValueTask.FromResult(TableAccessDecision.Allowed(c.Arg<SecurityEvaluationContext>().TargetTable, new Dictionary<string, ColumnAccessLevel>())));
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(c => new TableMetadata { Identifier = c.Arg<TableIdentifier>(), Table = new Table { RequiresFourEyes = fourEyes } });
+        var executor = Substitute.For<IMcpQueryExecutor>();
+        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult("""{"data":{}}"""));
+
+        var guardrail = new AiDataGuardrailService(
+            new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData(false)),
+            Options.Create(new GatewayOptions { Casbin = new CasbinOptions { Enabled = true }, Mcp = new McpOptions { Enabled = true } }),
+            NullLogger<AiDataGuardrailService>.Instance,
+            queryExecutor: executor,
+            policyEnforcementService: policy,
+            tableMetadataRepository: metadataRepo,
+            graphQlCatalogMap: map);
+        return (guardrail, policy, executor);
+    }
+
+    private static ValueTask<McpToolCallResult> CallGraphQl(AiDataGuardrailService guardrail, string args) =>
+        guardrail.ExecuteToolWithGuardrailAsync(
+            new McpToolCallRequest("query_graphql", args),
+            new McpSessionContext("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER"));
+
+    [Fact]
+    public async Task QueryGraphQl_RunsAbacOnEveryTableOfTheDocument()
+    {
+        var customers = new TableIdentifier("crm", "dbo", "customers");
+        var (guardrail, policy, _) = GraphQlGuardrail([Orders, customers]);
+
+        var result = await CallGraphQl(guardrail, """{"query":"{ sales_public_orders { id } }"}""");
+
+        result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
+        await policy.Received(1).EvaluatePolicyAsync(Arg.Is<SecurityEvaluationContext>(c => c.TargetTable == Orders), Arg.Any<CancellationToken>());
+        await policy.Received(1).EvaluatePolicyAsync(Arg.Is<SecurityEvaluationContext>(c => c.TargetTable == customers), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task QueryGraphQl_FourEyesTable_NeedsApproval()
+    {
+        var (guardrail, _, executor) = GraphQlGuardrail([Orders], fourEyes: true);
+
+        var result = await CallGraphQl(guardrail, """{"query":"{ sales_public_orders { id } }"}""");
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage!.ShouldContain("Four-Eyes");
+        await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Theory]
+    [InlineData("""{"query":"{ x }"}""")]
+    [InlineData("""{}""")]
+    [InlineData("""{"query":"{ a }","Query":"{ b }"}""")]
+    public async Task QueryGraphQl_UnresolvableDocument_FailsClosed(string args)
+    {
+        var (guardrail, policy, executor) = GraphQlGuardrail(null);
+
+        var result = await CallGraphQl(guardrail, args);
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage!.ShouldContain("fail-closed");
+        await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task QueryGraphQl_IntrospectionOnly_IsCheckedAsACatalogCall()
+    {
+        var (guardrail, policy, _) = GraphQlGuardrail([]);
+
+        var result = await CallGraphQl(guardrail, """{"query":"{ __schema { types { name } } }"}""");
+
+        result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
+        await policy.Received(1).EvaluatePolicyAsync(Arg.Is<SecurityEvaluationContext>(c => c.TargetTable == McpDatasetTools.CatalogTable), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("""{"query":"mutation { revoke { ok } }"}""", "Only queries")]
+    [InlineData("""{"query":"subscription { changes { id } }"}""", "Only queries")]
+    [InlineData("""{"query":"query A { a } query B { b }"}""", "one operation")]
+    [InlineData("""{"query":"{ broken "}""", "parse")]
+    [InlineData("""{"variables":{}}""", "query")]
+    [InlineData("""{"query":"{ a }","variables":[1]}""", "variables")]
+    public async Task Executor_QueryGraphQl_RejectsAnythingButOneQuery(string args, string expected)
+    {
+        var provider = Substitute.For<IRequestExecutorProvider>();
+        var executor = new GatewayMcpQueryExecutor(provider, Substitute.For<IGatewayExecutionService>(), NullLogger<GatewayMcpQueryExecutor>.Instance,
+            datasetCatalog: Substitute.For<IMcpDatasetCatalog>());
+
+        var json = await executor.ExecuteOperationAsync(Tool("query_graphql"), args, Session());
+
+        json.ShouldContain("INVALID_PARAMS");
+        json.ShouldContain(expected, Case.Insensitive);
+        await provider.DidNotReceiveWithAnyArgs().GetExecutorAsync(default, default);
+    }
+
+    [Fact]
+    public async Task Initialize_TellsAgentsToQueryDataWithGraphQl()
+    {
+        var registry = new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData(false));
+        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance);
+        var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
+        var session = handler.CreateSession("agent", "tenant-a");
+
+        var response = await handler.HandleMessageAsync(session.SessionId, """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""");
+
+        using var doc = JsonDocument.Parse(response);
+        var instructions = doc.RootElement.GetProperty("result").GetProperty("instructions").GetString();
+        instructions.ShouldNotBeNull();
+        instructions.ShouldContain("query_graphql");
+        instructions.ShouldContain("list_datasets");
+        instructions.ShouldContain("describe_dataset");
     }
 
     private static GatewayMcpQueryExecutor Executor(IMcpDatasetCatalog catalog) => new(

@@ -13,6 +13,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -81,7 +83,82 @@ public sealed class McpDatasetCatalogTests
             ],
             "MCP"));
 
-    private McpDatasetCatalog Catalog() => new(_metadata, _consents, _gateway, _golden);
+    private readonly IGraphQlCatalogMap _graphQl = Substitute.For<IGraphQlCatalogMap>();
+
+    private McpDatasetCatalog Catalog(GatewayOptions? options = null) =>
+        new(_metadata, _consents, _gateway, _golden, Options.Create(options ?? new GatewayOptions()), _graphQl);
+
+    private void MapOrdersToGraphQl() =>
+        _graphQl.GetTableAsync(Orders, Arg.Any<CancellationToken>()).Returns(new GraphQlTableMapping(
+            Orders, "sales_public_orders", "sales_public_orders", "sales_public_orders_filter", "sales_public_orders_order_by",
+            [
+                new GraphQlColumnMapping("id", "id", "Int"),
+                new GraphQlColumnMapping("amount", "amount", "Decimal"),
+                new GraphQlColumnMapping("customer_email", "customer_email", "String")
+            ],
+            [new GraphQlRelationMapping("payroll_by_order", Payroll, IsList: false)]));
+
+    [Fact]
+    public async Task ListDatasets_PointsToGraphQlFirst_AndListsTheEnabledProtocols()
+    {
+        MapOrdersToGraphQl();
+        var options = new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true }, DuckDbOlap = new DuckDbOlapOptions { Enabled = false } };
+
+        var result = await Catalog(options).ListDatasetsAsync(User(), null, null);
+
+        result.Datasets.ShouldHaveSingleItem().GraphQlField.ShouldBe("sales_public_orders");
+        result.Guidance!.ShouldContain("query_graphql");
+        var endpoints = result.Endpoints!;
+        endpoints[0].Protocol.ShouldBe("GraphQL");
+        endpoints[0].Url.ShouldBe("/graphql");
+        endpoints[0].Preferred.ShouldBeTrue();
+        endpoints.Count(e => e.Preferred).ShouldBe(1);
+        endpoints.Select(e => e.Protocol).ShouldContain("OData v4");
+        endpoints.Select(e => e.Protocol).ShouldContain("WebSQL");
+        endpoints.Select(e => e.Protocol).ShouldNotContain("DuckDB OLAP");
+    }
+
+    [Fact]
+    public async Task DescribeDataset_ExplainsTheGraphQlQuery_ForVisibleColumnsAndDatasetsOnly()
+    {
+        MapOrdersToGraphQl();
+
+        var result = await Catalog().DescribeDatasetAsync(User(), "sales.public.orders");
+
+        var graphQl = result.GraphQl.ShouldNotBeNull();
+        graphQl.Endpoint.ShouldBe("/graphql");
+        graphQl.QueryField.ShouldBe("sales_public_orders");
+        graphQl.FilterType.ShouldBe("sales_public_orders_filter");
+        graphQl.ExampleQuery.ShouldContain("sales_public_orders(first: 10)");
+        graphQl.ExampleQuery.ShouldContain("id amount");
+        graphQl.ExampleQuery.ShouldNotContain("customer_email");
+        graphQl.Arguments.ShouldContain("where");
+        // The related payroll table is hidden from this caller, so its relation is not offered.
+        graphQl.Relations.ShouldBeEmpty();
+        result.Columns[1].GraphQlField.ShouldBe("amount");
+        result.Columns[1].GraphQlType.ShouldBe("Decimal");
+        result.OtherAccess!.ShouldContain(a => a.Protocol == "OData v4" && a.Url == "/odata/v4/sales/public/orders");
+        result.OtherAccess!.ShouldNotContain(a => a.Preferred);
+    }
+
+    [Fact]
+    public async Task DescribeDataset_Admin_SeesRelationsToOtherDatasets()
+    {
+        MapOrdersToGraphQl();
+
+        var result = await Catalog().DescribeDatasetAsync(User("GovernanceAdmin"), "sales.public.orders");
+
+        result.GraphQl!.Relations.ShouldHaveSingleItem().ShouldBe(new McpGraphQlRelation("payroll_by_order", "hr.public.payroll", false));
+    }
+
+    [Fact]
+    public async Task DescribeDataset_OutsideTheGraphQlSchema_OffersTheOtherPaths()
+    {
+        var result = await Catalog().DescribeDatasetAsync(User(), "sales.public.orders");
+
+        result.GraphQl.ShouldBeNull();
+        result.OtherAccess!.ShouldContain(a => a.Protocol == "OData v4");
+    }
 
     [Fact]
     public async Task ListDatasets_ShowsOnlyTablesWithAConsent()

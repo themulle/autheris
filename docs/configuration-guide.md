@@ -648,7 +648,7 @@ Exponiert autorisierte GraphQL-Persisted-Queries als typisierte Tools für auton
 
 > `warn_allow_unmasked_ai_access` und `danger_bypass_mcp_auth` liegen ausschließlich unter `Insecure` (ADR-012, Phase 4).
 
-Die Dataset-Tools `list_datasets`, `describe_dataset` und `sample_rows` ([F-AI-11](features/f-ai-11-mcp-dataset-tools.md)) sind immer registriert und brauchen keinen Eintrag in `AllowedOperations`. Casbin prüft sie wie alle MCP-Tools: `list_datasets` auf dem Objekt `governance.catalog.datasets`, die anderen auf der angefragten Tabelle.
+Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `sample_rows` ([F-AI-11](features/f-ai-11-mcp-dataset-tools.md)) sind immer registriert und brauchen keinen Eintrag in `AllowedOperations`. Agenten fragen Daten bevorzugt mit `query_graphql` ab. Ist `Casbin:Enabled` gesetzt, prüft Casbin die MCP-Tools zusätzlich: `list_datasets` auf dem Objekt `governance.catalog.datasets`, `describe_dataset` und `sample_rows` auf der angefragten Tabelle, `query_graphql` auf jeder Tabelle der Abfrage. Ohne aktives Casbin entfällt diese Prüfung; Consent, Zeilenfilter und Maskierung gelten in jedem Fall.
 
 ```json
 "Mcp": {
