@@ -1531,15 +1531,20 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     /// </summary>
     private static TableIdentifier ResolveTableIdentifier(TableAccessTarget target, string? dataSourceName)
     {
+        // Only schema-qualified names use the data source's domain; unqualified names keep their "default" resolution.
+        // This must precede TryParse, which maps every two-part name to the "default" domain (WebSQL findings 2.1).
+        if (string.IsNullOrWhiteSpace(target.Catalog) && !string.IsNullOrWhiteSpace(target.Schema) &&
+            !string.IsNullOrWhiteSpace(dataSourceName))
+        {
+            return new TableIdentifier(dataSourceName, target.Schema, target.TableName);
+        }
+
         if (TableIdentifier.TryParse(target.FullName, out var parsed))
         {
             return parsed;
         }
 
-        // Only schema-qualified names use the data source's domain; unqualified names keep their "default" resolution.
-        string domain = !string.IsNullOrWhiteSpace(target.Catalog)
-            ? target.Catalog
-            : !string.IsNullOrWhiteSpace(target.Schema) && !string.IsNullOrWhiteSpace(dataSourceName) ? dataSourceName : "default";
+        string domain = !string.IsNullOrWhiteSpace(target.Catalog) ? target.Catalog : "default";
         string schema = !string.IsNullOrWhiteSpace(target.Schema) ? target.Schema : "public";
         return new TableIdentifier(domain, schema, target.TableName);
     }

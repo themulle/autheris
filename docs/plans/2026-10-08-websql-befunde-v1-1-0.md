@@ -18,6 +18,7 @@ Der PoC läuft mit `Gateway__RowFilters__SubqueryStrategy=InCorrelated`. Aggrega
 
 ### 2.1 Fehler: `schema.tabelle` wird nie in der Domäne der Datenquelle aufgelöst
 
+- **Status:** Behoben. `ResolveTableIdentifier` löst zweiteilige Namen zuerst gegen die Datenquelle auf; ist die Tabelle dort nicht katalogisiert, gilt weiter der Rückfall auf `default`. Tests: `tests/Autheris.Tests.Unit/Sql/WebSqlTwoPartNameDataSourceTests.cs`.
 - **Ort:** `src/Autheris.Application/Sql/Services/GovernedSqlExecutionService.cs:1528-1541` (`ResolveTableIdentifier`), Aufruf in Zeile 358.
 - **Ursache:** Die Methode ruft `TableIdentifier.TryParse(target.FullName, …)` zuerst auf. `TryParse` macht aus zwei Teilen sofort die Domäne `default` (`src/Autheris.Domain/Common/TableIdentifier.cs:65-68`). `fms.air1` wird also zu `default.fms.air1`, bevor der Zweig mit der Datenquelle (Zeilen 1536-1538) erreicht wird. Dieser Zweig ist tot. Der Katalog führt die Tabellen nur unter `lwetem_prod`, der Fallback in Zeile 393-397 geht zusätzlich auf `default` und findet erst recht nichts.
 - **Folge:** WebSQL akzeptiert nur noch Dreier-Namen. Der Kommentar der Methode und das Feld `dataSource` im Body versprechen etwas anderes. Der Fall betrifft jede Datenquelle, deren Domäne nicht `default` heißt, nicht nur den PoC. In 1.0.12 war der Fehler sichtbar (403 für alles), in 1.1.0 nur noch für zweiteilige Namen.
