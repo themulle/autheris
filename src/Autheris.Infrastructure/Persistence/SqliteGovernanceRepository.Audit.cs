@@ -205,14 +205,20 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
     private const string AuditGenesisHash = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
 
-    private Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct) =>
-        RecordAuditEventsBatchInternalAsync([entry], ct);
+    private Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct, SqliteTransaction? existingTx = null) =>
+        RecordAuditEventsBatchInternalAsync([entry], ct, existingTx);
 
-    private async Task RecordAuditEventsBatchInternalAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct)
+    private async Task RecordAuditEventsBatchInternalAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct, SqliteTransaction? existingTx = null)
     {
         if (batch.Count == 0) return;
 
-        using var tx = _connection.BeginTransaction(System.Data.IsolationLevel.Serializable);
+        SqliteTransaction? ownedTx = null;
+        var tx = existingTx;
+        if (tx == null)
+        {
+            ownedTx = _connection.BeginTransaction(System.Data.IsolationLevel.Serializable);
+            tx = ownedTx;
+        }
 
         // SEC H-17: the DB tail is compared with the in-memory reference instead of being adopted blindly.
         var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
@@ -294,7 +300,11 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             lastEntryHash = entry.EntryHash;
         }
 
-        await tx.CommitAsync(ct).ConfigureAwait(false);
+        if (ownedTx != null)
+        {
+            await ownedTx.CommitAsync(ct).ConfigureAwait(false);
+            ownedTx.Dispose();
+        }
 
         _lastAuditHash = lastEntryHash;
         _lastAuditSeq = lastSequence;
