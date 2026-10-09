@@ -121,4 +121,56 @@ public sealed class DbtPolicyAutoSyncTests
         var rejected = await ingestionService.RejectProposalAsync(casbinProposal.Id, "security_officer");
         rejected.Status.ShouldBe(DbtProposalStatus.Rejected);
     }
+
+    [Fact]
+    public async Task IngestManifestStreamAsync_WithRebacStore_SeedsParentStructureTuples_AndRespectsDryRun()
+    {
+        var metaRepo = Substitute.For<ITableMetadataRepository>();
+        var proposalRepo = new InMemoryDbtProposalRepository();
+        var lineageStore = Substitute.For<ILineageGraphStore>();
+        var rebacStore = Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>();
+
+        var tableId = new TableIdentifier("corp_dw", "finance", "finance_orders");
+        var existingTable = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { SchemaName = "finance", TableName = "finance_orders" },
+            PrimaryKeyColumns = ["order_id"],
+            Columns = [new TableColumn { ColumnName = "order_id", DataType = "integer" }]
+        };
+
+        metaRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(existingTable));
+
+        var ingestionService = new DbtMetadataIngestionService(
+            proposalRepo,
+            metaRepo,
+            lineageStore,
+            epochRepository: null,
+            gatewayOptions: null,
+            sqlEndpointLoader: null,
+            relationRepository: null,
+            virtualFilterAdmin: null,
+            rebacStore: rebacStore,
+            logger: NullLogger<DbtMetadataIngestionService>.Instance
+        );
+
+        // Dry-run should NOT seed ReBAC tuples
+        using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(PolicyManifestJson)))
+        {
+            await ingestionService.IngestManifestStreamAsync(stream, dryRun: true);
+            await rebacStore.DidNotReceive().AddTuplesAsync(Arg.Any<IEnumerable<RebacTuple>>(), Arg.Any<CancellationToken>());
+        }
+
+        // Actual run should seed structure tuples
+        using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(PolicyManifestJson)))
+        {
+            await ingestionService.IngestManifestStreamAsync(stream, dryRun: false);
+            await rebacStore.Received(1).AddTuplesAsync(
+                Arg.Is<IEnumerable<RebacTuple>>(tuples =>
+                    tuples.Any(t => t.TenantId == "corp_dw" && t.User == "schema:corp_dw.finance" && t.Relation == "parent" && t.Object == "table:corp_dw.finance.finance_orders") &&
+                    tuples.Any(t => t.TenantId == "corp_dw" && t.User == "domain:corp_dw" && t.Relation == "parent" && t.Object == "schema:corp_dw.finance")),
+                Arg.Any<CancellationToken>());
+        }
+    }
 }

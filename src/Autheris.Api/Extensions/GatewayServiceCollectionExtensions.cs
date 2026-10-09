@@ -705,6 +705,45 @@ public static class GatewayServiceCollectionExtensions
                           .AllowAnyMethod();
                 }
             });
+
+            if (isDev && gatewayOptions.Mcp.EnableDeveloperCors)
+            {
+                options.AddPolicy("McpDeveloperCors", policy =>
+                {
+                    var extraOrigins = gatewayOptions.Mcp.DeveloperCorsOrigins != null
+                        ? new HashSet<string>(gatewayOptions.Mcp.DeveloperCorsOrigins, StringComparer.OrdinalIgnoreCase)
+                        : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                    policy.SetIsOriginAllowed(origin =>
+                    {
+                        if (string.IsNullOrWhiteSpace(origin))
+                        {
+                            return false;
+                        }
+
+                        if (extraOrigins.Contains(origin))
+                        {
+                            return true;
+                        }
+
+                        if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                        {
+                            if (string.Equals(uri.Scheme, "http", StringComparison.OrdinalIgnoreCase) &&
+                                (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                                 string.Equals(uri.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase)) &&
+                                uri.Port > 0)
+                            {
+                                return true;
+                            }
+                        }
+
+                        return false;
+                    })
+                    .WithHeaders("Content-Type", "Authorization", "Mcp-Session-Id", "MCP-Protocol-Version", "Last-Event-ID")
+                    .WithExposedHeaders("Mcp-Session-Id", "WWW-Authenticate")
+                    .WithMethods("GET", "POST", "DELETE", "OPTIONS");
+                });
+            }
         });
 
         // OpenTelemetry Tracing & Metrics with OTLP Exporter
@@ -1478,6 +1517,13 @@ public static class GatewayServiceCollectionExtensions
                 throw new ValidationException(
                     "Security violation (API-16): Outside Development, warn_allow_all_cors_origins may be active only with an explicit " +
                     "opt-in (AllowInsecureWarnFlagsInProduction = true).");
+            }
+
+            // Sicherheits-Invariante 2: Mcp.EnableDeveloperCors is strictly prohibited outside Development and cannot be bypassed
+            if (options.Mcp.EnableDeveloperCors)
+            {
+                throw new ValidationException(
+                    "Security violation: Mcp.EnableDeveloperCors is strictly prohibited outside Development and cannot be bypassed.");
             }
 
             if (!options.IsInsecureTransportAllowed && !options.IsColumnMaskingDisabled &&

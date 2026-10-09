@@ -1132,6 +1132,8 @@ public sealed class McpOptions
     public bool RequirePiiMasking { get; init; } = true;
     public List<string> AllowedOperations { get; init; } = [];
     public bool AllowAnonymousDiscovery { get; init; } = false;
+    public bool EnableDeveloperCors { get; init; } = false;
+    public List<string> DeveloperCorsOrigins { get; init; } = [];
 }
 
 public sealed class LakehouseStorageOptions

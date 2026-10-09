@@ -53,7 +53,7 @@ public static class McpEndpoints
         // Streamable HTTP on the official MCP SDK (GatewayMcpServer); stateless, so there are no session endpoints.
         var endpoint = app.MapMcp(mcpBasePath);
 
-        // SEC M-09: hard body limit for JSON-RPC messages.
+        // SEC M-09: hard body limit for JSON-RPC messages and MCP >= 2025-06-18 batch rejection.
         endpoint.Add(builder =>
         {
             var inner = builder.RequestDelegate!;
@@ -72,9 +72,62 @@ public static class McpEndpoints
                     sizeFeature.MaxRequestBodySize = MaxMcpMessageBytes;
                 }
 
+                // Check for JSON-RPC batch arrays (MCP >= 2025-06-18 specification removal of batching)
+                if (HttpMethods.IsPost(context.Request.Method))
+                {
+                    context.Request.EnableBuffering();
+                    byte[] buffer = new byte[512];
+                    int bytesRead = await context.Request.Body.ReadAsync(buffer.AsMemory(0, buffer.Length), context.RequestAborted).ConfigureAwait(false);
+                    context.Request.Body.Position = 0;
+
+                    int startIndex = 0;
+                    if (bytesRead >= 3 && buffer[0] == 0xEF && buffer[1] == 0xBB && buffer[2] == 0xBF)
+                    {
+                        startIndex = 3;
+                    }
+
+                    int firstChar = -1;
+                    for (int i = startIndex; i < bytesRead; i++)
+                    {
+                        char c = (char)buffer[i];
+                        if (!char.IsWhiteSpace(c))
+                        {
+                            firstChar = c;
+                            break;
+                        }
+                    }
+
+                    if (firstChar == '[')
+                    {
+                        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                        context.Response.ContentType = "application/json";
+                        var batchError = new
+                        {
+                            jsonrpc = "2.0",
+                            id = (object?)null,
+                            error = new
+                            {
+                                code = -32600,
+                                message = "JSON-RPC batching is not supported (MCP \u2265 2025-06-18)"
+                            }
+                        };
+                        await context.Response.WriteAsJsonAsync(batchError, context.RequestAborted).ConfigureAwait(false);
+                        return;
+                    }
+                }
+
                 await inner(context).ConfigureAwait(false);
             };
         });
+
+        var hostEnv = env ?? app.ServiceProvider?.GetService<IHostEnvironment>();
+        bool isDev = hostEnv?.IsDevelopment() ?? false;
+
+        // Developer CORS policy is scoped strictly to the /mcp endpoint
+        if (isDev && gatewayOptions.Mcp.EnableDeveloperCors)
+        {
+            endpoint.RequireCors("McpDeveloperCors");
+        }
 
         // SEC H-02: OpenSchema no longer opens MCP. Only the explicit (production-blocked) MCP auth bypass does.
         if (gatewayOptions.IsMcpAuthBypassed)
@@ -96,51 +149,20 @@ public static class McpEndpoints
 
         if (GatewayMcpOAuth.CanDiscover(gatewayOptions))
         {
-            var hostEnv = env ?? app.ServiceProvider?.GetService<IHostEnvironment>();
-            bool isDev = hostEnv?.IsDevelopment() ?? false;
-
-            var discoveryGroup = app.MapGroup("/.well-known");
-            if (!gatewayOptions.Mcp.AllowAnonymousDiscovery && !isDev)
-            {
-                discoveryGroup.RequireAuthorization();
-            }
-            else
-            {
-                discoveryGroup.AllowAnonymous();
-            }
-
             // RFC 9728: Root Protected Resource Metadata Fallback -> redirects to /mcp
-            discoveryGroup.MapGet("/oauth-protected-resource", (HttpContext context) =>
+            // Always anonymously accessible whenever MCP-OAuth is configured (even outside Development).
+            app.MapGet("/.well-known/oauth-protected-resource", (HttpContext context) =>
             {
+                context.Response.Headers.CacheControl = "public, max-age=3600";
                 var target = $"{context.Request.PathBase}/.well-known/oauth-protected-resource{mcpBasePath}";
                 return Results.Redirect(target, permanent: false);
-            });
-
-            // RFC 8414: Authorization Server Metadata Discovery
-            discoveryGroup.MapGet("/oauth-authorization-server", () =>
-            {
-                var servers = Autheris.Api.Mcp.GatewayMcpOAuth.AuthorizationServers(gatewayOptions);
-                if (servers.Count == 0)
-                {
-                    return Results.NotFound();
-                }
-
-                var issuer = servers[0];
-                var scopes = Autheris.Api.Mcp.GatewayMcpOAuth.GetSupportedScopes(gatewayOptions);
-
-                return Results.Ok(new
-                {
-                    issuer = issuer,
-                    authorization_endpoint = $"{issuer.TrimEnd('/')}/oauth2/v2.0/authorize",
-                    token_endpoint = $"{issuer.TrimEnd('/')}/oauth2/v2.0/token",
-                    scopes_supported = scopes,
-                    response_types_supported = new[] { "code", "token" },
-                    grant_types_supported = new[] { "client_credentials", "authorization_code" },
-                    token_endpoint_auth_methods_supported = new[] { "client_secret_post", "client_secret_basic", "private_key_jwt" },
-                    authorization_servers = servers
-                });
-            });
+            }).AllowAnonymous();
         }
+
+        // Variant A (RFC 8414) & OIDC Discovery: Autheris is a Protected Resource Gateway, not an AS or OIDC Provider.
+        // Explicitly return 404 to anonymous clients so FallbackPolicy does not return 401 Unauthorized.
+        app.MapGet("/.well-known/oauth-authorization-server", () => Results.NotFound()).AllowAnonymous();
+        app.MapGet("/.well-known/openid-configuration", () => Results.NotFound()).AllowAnonymous();
 
         return app;
     }

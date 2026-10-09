@@ -110,7 +110,22 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             .Where(t => t.Table.DataSourceType == DataSourceType.LakehouseIceberg || t.Table.DataSourceType == DataSourceType.LakehouseDelta)
             .ToList();
 
-        return await CatalogVisibility.VisibleTablesAsync(tenantTables, principal, new TenantId(tenantId), _consentRepo, ct).ConfigureAwait(false);
+        var visible = await CatalogVisibility.VisibleTablesAsync(tenantTables, principal, new TenantId(tenantId), _consentRepo, ct).ConfigureAwait(false);
+        if (RebacTableGate.IsEnforcedOnQueryPaths(_options.Value))
+        {
+            var userSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
+            var filtered = new List<TableMetadata>(visible.Count);
+            foreach (var table in visible)
+            {
+                if (await RebacTableGate.IsAllowedAsync(_rebacEvaluator, new TenantId(tenantId), userSid, table.Identifier, ct).ConfigureAwait(false))
+                {
+                    filtered.Add(table);
+                }
+            }
+            return filtered;
+        }
+
+        return visible;
     }
 
     public async ValueTask<IcebergLoadTableResponse> LoadTableAsync(
