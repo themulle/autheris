@@ -1,45 +1,45 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Api", "src\Autheris.Api\Autheris.Api.csproj", "{B2FAE447-007C-45CB-9DE2-23F4BFB42C03}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Api", "src/Autheris.Api/Autheris.Api.csproj", "{B2FAE447-007C-45CB-9DE2-23F4BFB42C03}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Application", "src\Autheris.Application\Autheris.Application.csproj", "{8BEE4999-6527-43AF-86E5-09482C3DF21D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Application", "src/Autheris.Application/Autheris.Application.csproj", "{8BEE4999-6527-43AF-86E5-09482C3DF21D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Domain", "src\Autheris.Domain\Autheris.Domain.csproj", "{853C28D8-307D-4779-8EE1-BF52B909AF42}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Domain", "src/Autheris.Domain/Autheris.Domain.csproj", "{853C28D8-307D-4779-8EE1-BF52B909AF42}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.GraphQL", "src\Autheris.GraphQL\Autheris.GraphQL.csproj", "{8D74AE89-4F95-4B9C-A6E4-254318F144AC}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.GraphQL", "src/Autheris.GraphQL/Autheris.GraphQL.csproj", "{8D74AE89-4F95-4B9C-A6E4-254318F144AC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Infrastructure", "src\Autheris.Infrastructure\Autheris.Infrastructure.csproj", "{C6FD95E6-49CD-4687-9742-DA99B4B9EFD8}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Infrastructure", "src/Autheris.Infrastructure/Autheris.Infrastructure.csproj", "{C6FD95E6-49CD-4687-9742-DA99B4B9EFD8}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Tests.Architecture", "tests\Autheris.Tests.Architecture\Autheris.Tests.Architecture.csproj", "{B9DDFDFF-94E5-4113-A138-BFB35E8BB027}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Tests.Architecture", "tests/Autheris.Tests.Architecture/Autheris.Tests.Architecture.csproj", "{B9DDFDFF-94E5-4113-A138-BFB35E8BB027}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Tests.Integration", "tests\Autheris.Tests.Integration\Autheris.Tests.Integration.csproj", "{CDE2AEB5-2FD5-4B79-B299-8151A5ECBADA}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Tests.Integration", "tests/Autheris.Tests.Integration/Autheris.Tests.Integration.csproj", "{CDE2AEB5-2FD5-4B79-B299-8151A5ECBADA}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Tests.Unit", "tests\Autheris.Tests.Unit\Autheris.Tests.Unit.csproj", "{2F48168C-0D01-4286-BAB3-78A7AAFFE0D2}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Tests.Unit", "tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj", "{2F48168C-0D01-4286-BAB3-78A7AAFFE0D2}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "benchmarks", "benchmarks", "{66320409-64EC-F7C5-3DEF-65E7510DAAD1}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Benchmarks", "benchmarks\Autheris.Benchmarks\Autheris.Benchmarks.csproj", "{04E22E7C-2979-4367-A09D-AF7FC9885413}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Benchmarks", "benchmarks/Autheris.Benchmarks/Autheris.Benchmarks.csproj", "{04E22E7C-2979-4367-A09D-AF7FC9885413}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tools", "tools", "{07C2787E-EAC7-C090-1BA3-A61EC2A24D84}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "casbin-policy-lint", "tools\casbin-policy-lint\casbin-policy-lint.csproj", "{A26D3E03-9A2A-4F8E-86CD-CC5FAC007266}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "casbin-policy-lint", "tools/casbin-policy-lint/casbin-policy-lint.csproj", "{A26D3E03-9A2A-4F8E-86CD-CC5FAC007266}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Extensions", "src\Autheris.Extensions\Autheris.Extensions.csproj", "{36226264-8888-4B69-926A-FCCAC22EEE52}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Extensions", "src/Autheris.Extensions/Autheris.Extensions.csproj", "{36226264-8888-4B69-926A-FCCAC22EEE52}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Extensions.Tests", "tests\Autheris.Extensions.Tests\Autheris.Extensions.Tests.csproj", "{CE880BCB-F79C-4233-AAD1-7288BC4AB267}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Autheris.Extensions.Tests", "tests/Autheris.Extensions.Tests/Autheris.Extensions.Tests.csproj", "{CE880BCB-F79C-4233-AAD1-7288BC4AB267}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "autheris-schema-check", "tools\autheris-schema-check\autheris-schema-check.csproj", "{4A50CD5B-A3D9-4D7C-82DF-FA7C7170B231}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "autheris-schema-check", "tools/autheris-schema-check/autheris-schema-check.csproj", "{4A50CD5B-A3D9-4D7C-82DF-FA7C7170B231}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrinoSqlEngine", "src\TrinoSqlEngine\TrinoSqlEngine.csproj", "{06D325EB-4D9B-407E-A001-87771D224A0D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrinoSqlEngine", "src/TrinoSqlEngine/TrinoSqlEngine.csproj", "{06D325EB-4D9B-407E-A001-87771D224A0D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrinoSqlEngine.Tests", "tests\TrinoSqlEngine.Tests\TrinoSqlEngine.Tests.csproj", "{0CE0816D-1670-4768-97ED-84CC6D622547}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TrinoSqlEngine.Tests", "tests/TrinoSqlEngine.Tests/TrinoSqlEngine.Tests.csproj", "{0CE0816D-1670-4768-97ED-84CC6D622547}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -248,6 +248,8 @@ Global
 		{A26D3E03-9A2A-4F8E-86CD-CC5FAC007266} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 		{CE880BCB-F79C-4233-AAD1-7288BC4AB267} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{4A50CD5B-A3D9-4D7C-82DF-FA7C7170B231} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{36226264-8888-4B69-926A-FCCAC22EEE52} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{06D325EB-4D9B-407E-A001-87771D224A0D} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{0CE0816D-1670-4768-97ED-84CC6D622547} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal
