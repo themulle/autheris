@@ -35,6 +35,29 @@ public sealed class AnsiDialectGenerator : SqlDialectGeneratorBase
 
     protected override void GeneratePagination(PaginationClause pagination, OrderByClause? orderBy, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        if (pagination.WithTies)
+        {
+            if (orderBy == null)
+            {
+                throw new TrinoSqlEngine.Ast.Builder.AstBuildException("FETCH … WITH TIES requires an ORDER BY clause.");
+            }
+
+            if (pagination.Offset != null)
+            {
+                builder.Append("OFFSET ");
+                GenerateExpression(pagination.Offset, ref builder, context);
+                builder.Append(" ROWS ");
+            }
+
+            if (pagination.Limit != null)
+            {
+                builder.Append("FETCH FIRST ");
+                GenerateExpression(pagination.Limit, ref builder, context);
+                builder.Append(" ROWS WITH TIES");
+            }
+            return;
+        }
+
         if (pagination.Limit != null)
         {
             builder.Append("LIMIT ");
@@ -96,6 +119,11 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
 
     protected override void GeneratePagination(PaginationClause pagination, OrderByClause? orderBy, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        if (pagination.WithTies)
+        {
+            throw UnsupportedConstruct("FETCH … WITH TIES", TargetDialect);
+        }
+
         if (pagination.Limit != null)
         {
             builder.Append("LIMIT ");
@@ -151,16 +179,10 @@ public sealed class SnowflakeDialectGenerator : SqlDialectGeneratorBase
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
     {
-        if (identifier.IsQuoted)
-        {
-            builder.Append('"');
-            builder.Append(identifier.Value.Replace("\"", "\"\"", StringComparison.Ordinal));
-            builder.Append('"');
-        }
-        else
-        {
-            builder.Append(identifier.Value.ToUpperInvariant());
-        }
+        builder.Append('"');
+        string val = identifier.IsQuoted ? identifier.Value : identifier.Value.ToUpperInvariant();
+        builder.Append(val.Replace("\"", "\"\"", StringComparison.Ordinal));
+        builder.Append('"');
     }
 
     public override void FormatStringLiteral(ref ValueStringBuilder builder, string value, SqlEmitterContext context)
@@ -177,6 +199,29 @@ public sealed class SnowflakeDialectGenerator : SqlDialectGeneratorBase
 
     protected override void GeneratePagination(PaginationClause pagination, OrderByClause? orderBy, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        if (pagination.WithTies)
+        {
+            if (orderBy == null)
+            {
+                throw new TrinoSqlEngine.Ast.Builder.AstBuildException("FETCH … WITH TIES requires an ORDER BY clause.");
+            }
+
+            if (pagination.Offset != null)
+            {
+                builder.Append("OFFSET ");
+                GenerateExpression(pagination.Offset, ref builder, context);
+                builder.Append(" ROWS ");
+            }
+
+            if (pagination.Limit != null)
+            {
+                builder.Append("FETCH FIRST ");
+                GenerateExpression(pagination.Limit, ref builder, context);
+                builder.Append(" ROWS WITH TIES");
+            }
+            return;
+        }
+
         if (pagination.Limit != null)
         {
             builder.Append("LIMIT ");

@@ -24,7 +24,8 @@ public enum NullOrdering
 
 public sealed record PaginationClause(
     Expression? Offset,
-    Expression? Limit) : SqlNode;
+    Expression? Limit,
+    bool WithTies = false) : SqlNode;
 
 /// <param name="GroupingExpressions">Plain grouping expressions.</param>
 /// <param name="AdvancedElements">Wunsch 4: ROLLUP, CUBE and GROUPING SETS, emitted after the plain expressions (the

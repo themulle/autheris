@@ -61,6 +61,29 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
 
     protected override void GeneratePagination(PaginationClause pagination, OrderByClause? orderBy, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        if (pagination.WithTies)
+        {
+            if (orderBy == null)
+            {
+                throw new TrinoSqlEngine.Ast.Builder.AstBuildException("FETCH … WITH TIES requires an ORDER BY clause.");
+            }
+
+            if (pagination.Offset != null)
+            {
+                builder.Append("OFFSET ");
+                GenerateExpression(pagination.Offset, ref builder, context);
+                builder.Append(" ROWS ");
+            }
+
+            if (pagination.Limit != null)
+            {
+                builder.Append("FETCH FIRST ");
+                GenerateExpression(pagination.Limit, ref builder, context);
+                builder.Append(" ROWS WITH TIES");
+            }
+            return;
+        }
+
         bool hasLimit = pagination.Limit != null;
         if (hasLimit)
         {
