@@ -2,28 +2,28 @@
 
 **Dokument-ID:** `PLAN-ONBOARDING-PAGINATION-JOBS-09`  
 **Stand:** 09.10.2026 · **Zweig:** `feat/ast-target-dialect-generator`  
-**Rolle:** Principal .NET & C# Solution Architect  
+**Rolle:** Principal .NET & C# Solution Architect & Lead Application Security (AppSec) Expert  
 **Referenzen:** [Produktmanager Gap-Analyse](file:///root/autheris/docs/plans/00-gesamtplan-uebersicht.md), [Feature Request R-54 bis R-66](file:///root/autheris/docs/plans/2026-10-09-feature-request-admin-datenquellen-und-mcp.md), [Plan 8 Entwickler-Workstreams](file:///root/autheris/docs/plans/plan-workstreams-entwickler-details.md)  
-**Status:** Genehmigt & Bereit zur Implementierung ⏳  
+**Status:** Security-Reviewed, Erweitert & Bereit zur Implementierung 🛡️⏳  
 
 ---
 
 ## 1. Executive Summary & Zielbild
 
-Auf Basis der Produkt- und Gap-Analyse adressiert dieser Implementierungsplan die vier verbleibenden funktionalen und operativen Lücken der Autheris-Plattform:
+Auf Basis der Produkt- und Gap-Analyse adressiert dieser Implementierungsplan die vier verbleibenden funktionalen und operativen Lücken der Autheris-Plattform unter strikter Beachtung von Zero-Trust-, AppSec- und Datengovernance-Vorgaben:
 
 1. **AP-9.1: Automatischer Verbindungstest für Datenquellen (`POST /api/v1/catalog/datasources/{id}/test` / R-55):**  
-   Pre-Flight Connectivity & Authentication Handshake vor der Aktivierung von Datenquellen (Latenzmessung, TLS-Zertifikatsvalidierung, Header-/Secret-Auflösung ohne Daten-Egress).
+   Pre-Flight Connectivity & Authentication Handshake vor der Aktivierung von Datenquellen (Latenzmessung, TLS-Zertifikatsvalidierung, Header-/Secret-Auflösung ohne Daten-Egress und mit strikter SSRF-Barriere).
 2. **AP-9.2: Multi-Page HTTP Staging Pagination Engine (R-56):**  
-   Erweiterung des `DeclarativeHttpDataSourceExecutor` und des `FederatedStagingService` um native Unterstützung für seitenweises Einlesen (`offset/limit`, `page/size`, `nextLink`, `cursor`), damit Cross-Source-Joins vollständige Datensätze über mehrere Seiten hinweg konsistent in DuckDB aggregieren können.
+   Erweiterung des `DeclarativeHttpDataSourceExecutor` und des `FederatedStagingService` um native Unterstützung für seitenweises Einlesen (`offset/limit`, `page/size`, `nextLink`, `cursor`) mit Same-Origin Host-Pinning und Budget-Limits gegen Memory-Exhaustion.
 3. **AP-9.3: Visuelle Web-Konsole im DevPortal für 2FA & HitL Step-Up (R-60 / R-64 UX):**  
-   Schlüsselfertige grafische Oberfläche in `Autheris.Api` (`/portal/2fa/enroll`, `/portal/approvals`), die das Scannen des `otpauth://`-QR-Codes und die interaktive Freigabe von Step-Up-Tickets mit 6-stelligem Code ermöglicht.
+   Schlüsselfertige, gehärtete Web-Oberfläche in `Autheris.Api` (`/portal/2fa/enroll`, `/portal/approvals`), die das Scannen des `otpauth://`-QR-Codes und die interaktive Freigabe von Step-Up-Tickets mit Anti-CSRF, Nonce-basierter CSP und Anti-Caching ermöglicht.
 4. **AP-9.4: Async Long-Running Query Job Engine (`POST /api/v1/jobs/query`, `GET /status`, `GET /result`):**  
-   Asynchrone Hintergrund-Ausführung massiver föderierter Abfragen über einen entkoppelten Worker mit Status-Polling, Stornierung (`CancellationTokenSource`) und komprimiertem Streaming-Export (Parquet / Arrow / JSONL).
+   Asynchrone Hintergrund-Ausführung massiver föderierter Abfragen über einen entkoppelten Worker mit kryptographischer Tenant-/Principal-Isolation (Zero-IDOR), Pre-Storage-Maskierung und ephemerem, abgesichertem File-Export.
 
 ---
 
-## 2. Architektonische Entscheidungen & Invarianten
+## 2. Architektonische Entscheidungen & Invarianten (inkl. AppSec-ADRs)
 
 | ADR | Thema | Entscheidung | Begründung & Invariante |
 |---|---|---|---|
@@ -31,6 +31,9 @@ Auf Basis der Produkt- und Gap-Analyse adressiert dieser Implementierungsplan di
 | **ADR-09.2** | **HTTP Paginierung** | **Budget-Bounded Crawling:** Paginierungsschleifen werden durch harte Obergrenzen (`MaxPages = 50`, `MaxStagedRowsPerTable`, `MaxStagedBytesPerTable`) und Abbruch-Token (`CancellationToken`) begrenzt. | Schutz vor Endlosschleifen bei defekten `nextLink`-Strukturen und Speichersättigung der DuckDB In-Memory OLAP Engine. |
 | **ADR-09.3** | **Web-UI Integration** | **Lightweight Server-Rendered HTML im DevPortal:** Keine externe SPA-Build-Kette (Node/npm), sondern kompaktes, sicheres ASP.NET Core HTML-Rendering mit inline SVG QR-Codes (`QRCoder`) und Zero-Trust CSP. | Hält das Gateway-Docker-Image schlank (< 150 MB), minimiert die Angriffsfläche und vermeidet Node.js-Supply-Chain-Risiken. |
 | **ADR-09.4** | **Async Job Engine** | **Ephemeral Memory / Distributed State Tracker:** Jobs werden mit TTL (z. B. 24h) im `IDistributedClusterStateProvider` geführt. Abfrageergebnisse werden als gepufferte Parquet/Arrow-Dateien im isolierten Scratch-Verzeichnis abgelegt. | Entlastet den Gateway-Speicher und ermöglicht ausfallsicheres Polling über mehrere Gateway-Replikate hinweg. |
+| **ADR-09.5** | **SSRF-Schutz & Host-Pinning** | **Strict Boundary Enforcement:** Verbindungstests dürfen ausschließlich relative Pfade gegen die registrierte `BaseAddress` testen. Bei `NextLinkUrl`-Paginierung werden externe Hosts, Link-Local- (`169.254.0.0/16`) und Loopback-Adressen (`127.0.0.1`, `::1`) strikt verworfen. | Schutz vor Server-Side Request Forgery (SSRF, CWE-918) gegen Cloud-Metadaten-Dienste (AWS/GCP/Azure) und interne Unternehmensnetzwerke. |
+| **ADR-09.6** | **DevPortal WebSec** | **Defense-in-Depth Browser Policy:** Antiforgery-Token-Validierung für alle POST-Aktionen, `Cache-Control: no-store` für TOTP-Secrets/QR-Codes, `X-Frame-Options: DENY` und strikte Content-Security-Policy (CSP) ohne Inline-Scripts. | Schutz vor Cross-Site Request Forgery (CSRF), Clickjacking und XSS bei sensitiven Authentifizierungs- und Genehmigungsschritten. |
+| **ADR-09.7** | **Zero-IDOR Job Isolation** | **Cryptographic Principal Binding & Pre-Storage Masking:** Jeder Job ist kryptographisch an Tenant-ID und User-ID gebunden. Ergebnisse werden erst *nach* Anwendung von Row-Level Security (RLS) und Dynamic Data Masking (DDM) serialisiert. | Verhindert Insecure Direct Object References (IDOR, OWASP API1) und Datenlecks im Zwischenspeicher. |
 
 ---
 

@@ -211,19 +211,11 @@ public sealed class TotpVerificationService : ITotpVerificationService
             Array.Reverse(counterBytes);
         }
 
-        byte[] hash;
-        if (algorithm == HashAlgorithmName.SHA256)
-        {
-            using var hmac = new HMACSHA256(key);
-            hash = hmac.ComputeHash(counterBytes);
-        }
-        else
-        {
+        byte[] hash = algorithm == HashAlgorithmName.SHA256
+            ? HMACSHA256.HashData(key, counterBytes)
 #pragma warning disable CA5350 // RFC 6238 specifies HMAC-SHA1 as the baseline algorithm for Authenticator apps
-            using var hmac = new HMACSHA1(key);
-            hash = hmac.ComputeHash(counterBytes);
+            : HMACSHA1.HashData(key, counterBytes);
 #pragma warning restore CA5350
-        }
 
         // Dynamic truncation (RFC 4226 Section 5.4)
         int offset = hash[^1] & 0x0F;

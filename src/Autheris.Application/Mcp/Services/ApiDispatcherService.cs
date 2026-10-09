@@ -171,10 +171,29 @@ public sealed class ApiDispatcherService : IApiDispatcherService
             {
                 try
                 {
-                    var doc = JsonDocument.Parse(JsonSerializer.Serialize(body));
-                    if (doc.RootElement.TryGetProperty("sql", out var s) || doc.RootElement.TryGetProperty("query", out s))
+                    if (body is JsonElement jsonElem)
                     {
-                        sql = s.GetString();
+                        if (jsonElem.TryGetProperty("sql", out var s) || jsonElem.TryGetProperty("query", out s))
+                        {
+                            sql = s.GetString();
+                        }
+                    }
+                    else if (body is string rawJson && !string.IsNullOrWhiteSpace(rawJson))
+                    {
+                        using var doc = JsonDocument.Parse(rawJson);
+                        if (doc.RootElement.TryGetProperty("sql", out var s) || doc.RootElement.TryGetProperty("query", out s))
+                        {
+                            sql = s.GetString();
+                        }
+                    }
+                    else
+                    {
+                        var serialized = JsonSerializer.Serialize(body);
+                        using var doc = JsonDocument.Parse(serialized);
+                        if (doc.RootElement.TryGetProperty("sql", out var s) || doc.RootElement.TryGetProperty("query", out s))
+                        {
+                            sql = s.GetString();
+                        }
                     }
                 }
                 catch (JsonException) { }

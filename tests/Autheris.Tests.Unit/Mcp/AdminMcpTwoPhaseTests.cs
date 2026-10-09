@@ -402,4 +402,35 @@ public sealed class AdminMcpTwoPhaseTests
         result.ContentJson.ShouldContain("customer_name");
         result.ContentJson.ShouldContain("PII");
     }
+
+    [Fact]
+    public async Task AdminConfirmAndApplyAccess_WhenAdminSidContainsColons_Succeeds()
+    {
+        // Arrange: adminSid has colons (e.g. user:david.admin or tenant:cluster:admin)
+        const string colonAdminSid = "user:david:governance_admin";
+        var planRequest = new AdminPlanAccessRequest(
+            DatasetId: DatasetId,
+            Grants: [new("user_eve", new Dictionary<string, string> { ["id"] = "clear" })],
+            Reason: "ReBAC colon SID test");
+
+        var planResult = await _service.PlanAccessAsync(planRequest, colonAdminSid);
+        var enrollment = _totpService.GenerateEnrollment(colonAdminSid, "admin@autheris.local");
+        await _totpSecretStore.SetSecretAsync(colonAdminSid, enrollment.SecretBase32);
+
+        var validTotp = _totpService.GenerateTotpCode(enrollment.SecretBase32);
+
+        // Act 1: Confirm with colon adminSid
+        var confirmResult = await _service.ConfirmPlanAsync(planResult.PlanId, validTotp, colonAdminSid);
+        confirmResult.ShouldNotBeNull();
+        confirmResult.ConfirmationToken.ShouldNotBeNullOrWhiteSpace();
+
+        // Act 2: Apply with the confirmation token
+        var applyResult = await _service.ApplyAccessAsync(
+            new AdminApplyAccessRequest(planResult.PlanId, confirmResult.ConfirmationToken),
+            colonAdminSid);
+
+        // Assert
+        applyResult.Success.ShouldBeTrue();
+        applyResult.AppliedTuplesCount.ShouldBeGreaterThan(0);
+    }
 }

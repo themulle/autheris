@@ -442,17 +442,24 @@ public class AccessPlanningService : IAccessPlanningService
     private static bool ValidateConfirmationToken(string token, string expectedPlanId, out DateTimeOffset expiresAt)
     {
         expiresAt = DateTimeOffset.MinValue;
-        var parts = token.Split(':');
-        if (parts.Length != 4) return false;
+        var lastColon = token.LastIndexOf(':');
+        if (lastColon <= 0 || lastColon == token.Length - 1) return false;
 
-        var planId = parts[0];
-        var adminSid = parts[1];
-        if (!long.TryParse(parts[2], out var unix)) return false;
-        var signatureHex = parts[3];
+        var payload = token[..lastColon];
+        var signatureHex = token[(lastColon + 1)..];
 
+        var secondLastColon = payload.LastIndexOf(':');
+        if (secondLastColon <= 0 || secondLastColon == payload.Length - 1) return false;
+
+        var unixStr = payload[(secondLastColon + 1)..];
+        if (!long.TryParse(unixStr, out var unix)) return false;
+
+        var firstColon = payload.IndexOf(':');
+        if (firstColon <= 0) return false;
+
+        var planId = payload[..firstColon];
         if (!string.Equals(planId, expectedPlanId, StringComparison.OrdinalIgnoreCase)) return false;
 
-        var payload = $"{planId}:{adminSid}:{unix}";
         var expectedHash = Convert.ToHexString(HMACSHA256.HashData(HmacKey, Encoding.UTF8.GetBytes(payload)));
 
         if (!CryptographicOperations.FixedTimeEquals(

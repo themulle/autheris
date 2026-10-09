@@ -49,29 +49,14 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         ct.ThrowIfCancellationRequested();
 
         var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
-        var visibleTables = new List<CatalogDatasetSummary>();
-
-        foreach (var table in allTables)
+        if (allTables.Count == 0)
         {
-            ct.ThrowIfCancellationRequested();
+            return [];
+        }
 
-            if (_rebacEvaluator is { IsEnabled: true })
-            {
-                var checkReq = new RebacCheckRequest(
-                    TenantId: context.TenantId.Value,
-                    User: context.SubjectId.Value,
-                    Relation: RebacTableGate.Relation,
-                    Object: RebacTableGate.ObjectId(table.Identifier)
-                );
-
-                var checkResult = await _rebacEvaluator.CheckAsync(checkReq, ct).ConfigureAwait(false);
-                if (!checkResult.Allowed)
-                {
-                    continue;
-                }
-            }
-
-            visibleTables.Add(new CatalogDatasetSummary(
+        if (_rebacEvaluator is not { IsEnabled: true })
+        {
+            return allTables.Select(table => new CatalogDatasetSummary(
                 DatasetId: table.Identifier.ToString(),
                 Domain: table.Identifier.Domain,
                 Schema: table.Identifier.Schema,
@@ -80,10 +65,38 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
                 Sensitivity: table.Table.Sensitivity.ToString(),
                 Description: table.Table.Description,
                 IsActive: table.Table.IsActive
-            ));
+            )).ToList();
         }
 
-        return visibleTables;
+        var checkTasks = allTables.Select(async table =>
+        {
+            var checkReq = new RebacCheckRequest(
+                TenantId: context.TenantId.Value,
+                User: context.SubjectId.Value,
+                Relation: RebacTableGate.Relation,
+                Object: RebacTableGate.ObjectId(table.Identifier)
+            );
+
+            var checkResult = await _rebacEvaluator.CheckAsync(checkReq, ct).ConfigureAwait(false);
+            if (!checkResult.Allowed)
+            {
+                return null;
+            }
+
+            return new CatalogDatasetSummary(
+                DatasetId: table.Identifier.ToString(),
+                Domain: table.Identifier.Domain,
+                Schema: table.Identifier.Schema,
+                Table: table.Identifier.TableName,
+                SourceType: table.Table.DataSourceType.ToString(),
+                Sensitivity: table.Table.Sensitivity.ToString(),
+                Description: table.Table.Description,
+                IsActive: table.Table.IsActive
+            );
+        });
+
+        var results = await Task.WhenAll(checkTasks).ConfigureAwait(false);
+        return results.Where(r => r != null).Select(r => r!).ToList();
     }
 
     public async Task<CatalogDatasetDetail?> GetDatasetDetailAsync(TableIdentifier table, RequestContext context, CancellationToken ct = default)
