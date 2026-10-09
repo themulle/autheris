@@ -40,7 +40,7 @@ Bisherige Zugriffspfade und MCP-Fähigkeiten weisen jedoch funktionale Asymmetri
 | **ADR-02** | **MCP-Tool-Granularität** | **Hybrides Tooling**: Dedizierte, stark typisierte High-Level-Tools für 95% der Standardaufgaben plus ein universelles `invoke_api`-Werkzeug. | High-Level-Tools minimieren Token-Verbrauch und Validierungsfehler bei Routineaufgaben. `invoke_api` garantiert 100%ige Abdeckung sämtlicher Endpunkte basierend auf der publizierten OpenAPI-Spezifikation. |
 | **ADR-03** | **Schreibzugriffe über MCP** | **Two-Phase Confirmation (Human-in-the-Loop)**: Änderungen werden durch das Modell im ersten Schritt vorbereitet (`admin_plan_access` / `admin_plan_datasource`). Die Ausführung verlangt zwingend einen kurzlebigen Bestätigungs-Token (`confirmationToken`) aus der Web-UI. | Verhindert Prompt-Injection-Angriffe, bei denen manipulierte Dateninhalte das Modell dazu bringen könnten, administrative Freigaben ohne menschliche Kontrolle zu erteilen. |
 | **ADR-04** | **MCP-Dokumentation als Ressourcen** | **Native MCP-Ressourcen für API-Spezifikation (`autheris://api/*`)**: OpenAPI 3.1 (`openapi.json`) und Markdown-Endpunkt-Referenzen werden als native MCP-Ressourcen und Prompts bereitgestellt. | Erlaubt Agenten das Zero-Shot-Verständnis aller Schnittstellen ohne Halluzinationen oder manuell gepflegte System-Prompts. |
-| **ADR-05** | **2FA / MFA Step-Up-Verifikation für Freigaben** | **Microsoft Authenticator (RFC 6238 TOTP via Bibliothek)**: Bei kritischen Control-Plane-Aktionen (z.B. `admin_apply_access`, Rechteerweiterungen, HitL-Freigaben) wird die Bestätigung (`confirmationToken` / `ApproveStepUpRequestAsync`) zwingend an einen 6-stelligen TOTP-Code aus **Microsoft Authenticator** gekoppelt (per `Otp.Net` oder native Krypto-Engine, Enrollment via standardisierter `otpauth://`-URI & QR-Code, Replay-Schutz im verteilten State). | Selbst wenn ein Admin-Session-Token kompromittiert oder eine Prompt-Injection erfolgreich wäre, kann keine Freigabe ohne physischen zweiten Faktor aus Microsoft Authenticator finalisiert werden. |
+| **ADR-05** | **2FA / MFA Step-Up-Verifikation für Freigaben** | **Standard TOTP (RFC 6238)** *(MS Authenticator, Google Authenticator, 1Password, Bitwarden)*: Bei kritischen Control-Plane-Aktionen (z.B. `admin_apply_access`, Rechteerweiterungen, HitL-Freigaben) wird die Bestätigung (`confirmationToken` / `ApproveStepUpRequestAsync`) zwingend an einen 6-stelligen TOTP-Code gekoppelt (per `Otp.Net` oder nativer Krypto-Engine, Enrollment via standardisierter `otpauth://`-URI & QR-Code, Replay-Schutz im verteilten State). | Höchste Interoperabilität ohne Cloud-Lock-in: Jeder RFC 6238 konforme Authenticator (Microsoft Authenticator, Google Authenticator, 1Password) funktioniert offline und standardisiert. Kein administrativer Eingriff ohne physischen zweiten Faktor. |
 
 ---
 
@@ -273,17 +273,17 @@ Damit AI-Modelle alle APIs und Features fehlerfrei und ohne Halluzinationen bedi
 - [ ] Implementierung von MCP Prompts (`explore_dataset`, `audit_access_compliance`).
 - [ ] Integration mit `ISemanticMcpCompiler`.
 
-### Phase 5: Admin MCP Tools, Two-Phase-Confirmation & 2FA Step-Up (Microsoft Authenticator) (Tag 6)
+### Phase 5: Admin MCP Tools, Two-Phase-Confirmation & 2FA Step-Up (RFC 6238 TOTP) (Tag 6)
 - [ ] Umsetzung der Anforderungen R-54 bis R-64:
   - `admin_register_datasource` (OpenAPI/Swagger Ingestion mit SecretRef)
   - `admin_set_dataset_state` (Aktivieren/Deaktivieren)
   - `admin_resolve_principal` (Namen $\rightarrow$ SID Auflösung)
   - `admin_plan_access` (Vorschau / Diff ohne Seiteneffekte)
   - `admin_apply_access` mit zwingendem `confirmationToken` (Two-Phase Confirmation / Human-in-the-Loop)
-- [ ] **Microsoft Authenticator 2FA Step-Up Integration:**
+- [ ] **RFC 6238 TOTP 2FA Step-Up Integration (MS Authenticator, Google Authenticator, 1Password):**
   - `TotpVerificationService` (RFC 6238 TOTP via `Otp.Net` oder native Krypto) mit Zeittoleranz (+/- 30s) und Nonce/Replay-Protection im Distributed Cluster State.
-  - Endpunkte für 2FA-Enrollment (`GET /api/v1/governance/2fa/enroll` liefert `otpauth://totp/Autheris:...` und QR-Code zum Scannen mit der **Microsoft Authenticator App**; `POST /api/v1/governance/2fa/verify-enrollment` zur Aktivierung).
-  - Erweiterung von `HitLStepUpApprovalService.ApproveStepUpRequestAsync` und `POST /api/governance/hitl/tickets/{ticketId}/approve` um den 6-stelligen `totpCode` aus Microsoft Authenticator.
+  - Endpunkte für 2FA-Enrollment (`GET /api/v1/governance/2fa/enroll` liefert `otpauth://totp/Autheris:...` und QR-Code zum Scannen mit beliebigen RFC 6238 Apps wie **Microsoft Authenticator, Google Authenticator oder 1Password**; `POST /api/v1/governance/2fa/verify-enrollment` zur Aktivierung).
+  - Erweiterung von `HitLStepUpApprovalService.ApproveStepUpRequestAsync` und `POST /api/governance/hitl/tickets/{ticketId}/approve` um den 6-stelligen `totpCode`.
   - `admin_confirm_access` / `POST /api/governance/plans/{planId}/confirm` verifiziert den 2FA-Code vor Generierung des kurzlebigen `confirmationToken`.
 - [ ] Strikte Rollentrennung: Admin-Tools nur für Administratoren sichtbar und ausführbar.
 
