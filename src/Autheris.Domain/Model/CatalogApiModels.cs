@@ -52,7 +52,7 @@ public sealed record PrincipalResolutionItem(
     IReadOnlyList<string> Groups);
 
 public sealed record DatasourceAuthDto(
-    string Type,
+    string? Type = null,
     string? Scheme = null,
     string? In = null,
     string? Name = null,
@@ -62,7 +62,9 @@ public sealed record DatasourceAuthDto(
     string? ClientId = null,
     string? ClientSecret = null,
     string? Scope = null,
-    string? SecretRef = null);
+    string? SecretRef = null,
+    string? Secret = null,
+    string? HeaderName = null);
 
 public sealed record DatasourceRegistrationRequest(
     string Name,

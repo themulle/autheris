@@ -77,15 +77,6 @@ public sealed record AdminApplyAccessResult(
     int AppliedTuplesCount,
     string? Message = null);
 
-/// <summary>
-/// Authentication parameters for datasource registration.
-/// </summary>
-public sealed record DatasourceAuthDto(
-    string? Type = null,
-    string? Secret = null,
-    string? SecretRef = null,
-    string? Username = null,
-    string? HeaderName = null);
 
 /// <summary>
 /// Request to register a new datasource (OpenAPI/Swagger/SQL/etc.).
@@ -129,15 +120,6 @@ public sealed record AdminSetDatasetStateResult(
     bool Success,
     string? Message = null);
 
-/// <summary>
-/// Resolved principal candidate with fuzzy matching indicator.
-/// </summary>
-public sealed record PrincipalResolutionItem(
-    string Sid,
-    string DisplayName,
-    string PrincipalType,
-    bool ExactMatch,
-    IReadOnlyList<string> Groups);
 
 /// <summary>
 /// Request to resolve a principal by unsharp query.
