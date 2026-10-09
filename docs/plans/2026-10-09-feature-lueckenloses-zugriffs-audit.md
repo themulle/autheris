@@ -21,7 +21,7 @@ Befunde (Grep-basiert, vor Umsetzung per Test zu bestätigen):
 | L-8 | Erfolgreiche Abfragen laufen über einen Puffer im Speicher (Standard 5000) und können bei hartem Absturz verloren gehen | Verlustfenster; im Runbook benannt, aber Standard ist „asynchron“ |
 | L-9 | Es gibt keinen Nachweis, dass neue Endpunkte auditiert werden (rund 119 Endpunkte, wenige Aufrufstellen) | Die Lücken wachsen mit dem Code |
 
-**Ergänzend:** Die Review des Audit-Kerns fand zusätzliche Mängel (Phantom-Ereignisse, verlorene Stapel, schwache Anker, Anbieter-Drift): [Befunde AU-01 … AU-19](2026-10-09-audit-architektur-befunde.md). Sie sind Voraussetzung für die Abdeckungserweiterung.
+**Ergänzend:** Die Mängel des Audit-Kerns (AU-01 bis AU-19: Phantom-Ereignisse, verlorene Stapel, schwache Anker, Anbieter-Drift) wurden bereits vollständig behoben, gehärtet und getestet.
 
 ## 2 Ziel
 
