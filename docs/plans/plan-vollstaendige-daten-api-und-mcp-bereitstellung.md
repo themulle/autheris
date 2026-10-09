@@ -39,6 +39,8 @@ Bisherige Zugriffspfade und MCP-Fähigkeiten weisen jedoch funktionale Asymmetri
 | **ADR-01** | **Self-Governance Modellierung** | **Virtuelle System-Tabellen (`system.*`)**: Administrative Control-Plane-Daten (Quellen, Policies, ReBAC-Tupel, Audit-Logs) werden als interne System-Tabellen im Katalog geführt (`governance.system.*`). | Konsistenz über alle Protokolle: Administrative Entitäten können wie jede Geschäftsdaten-Tabelle über REST (`/api/v1/data/governance/system/*`), WebSQL (`SELECT * FROM governance.system.datasources`) und GraphQL abgefragt und über dieselbe `TableAccessPolicy` geschützt werden. |
 | **ADR-02** | **MCP-Tool-Granularität** | **Hybrides Tooling**: Dedizierte, stark typisierte High-Level-Tools für 95% der Standardaufgaben plus ein universelles `invoke_api`-Werkzeug. | High-Level-Tools minimieren Token-Verbrauch und Validierungsfehler bei Routineaufgaben. `invoke_api` garantiert 100%ige Abdeckung sämtlicher Endpunkte basierend auf der publizierten OpenAPI-Spezifikation. |
 | **ADR-03** | **Schreibzugriffe über MCP** | **Two-Phase Confirmation (Human-in-the-Loop)**: Änderungen werden durch das Modell im ersten Schritt vorbereitet (`admin_plan_access` / `admin_plan_datasource`). Die Ausführung verlangt zwingend einen kurzlebigen Bestätigungs-Token (`confirmationToken`) aus der Web-UI. | Verhindert Prompt-Injection-Angriffe, bei denen manipulierte Dateninhalte das Modell dazu bringen könnten, administrative Freigaben ohne menschliche Kontrolle zu erteilen. |
+| **ADR-04** | **MCP-Dokumentation als Ressourcen** | **Native MCP-Ressourcen für API-Spezifikation (`autheris://api/*`)**: OpenAPI 3.1 (`openapi.json`) und Markdown-Endpunkt-Referenzen werden als native MCP-Ressourcen und Prompts bereitgestellt. | Erlaubt Agenten das Zero-Shot-Verständnis aller Schnittstellen ohne Halluzinationen oder manuell gepflegte System-Prompts. |
+| **ADR-05** | **2FA / MFA Step-Up-Verifikation für Freigaben** | **Bibliotheksgestützte 2FA (TOTP RFC 6238 / WebAuthn)**: Bei kritischen Control-Plane-Aktionen (z.B. `admin_apply_access`, Rechteerweiterungen, HitL-Freigaben) wird die Bestätigung (`confirmationToken` / `ApproveStepUpRequestAsync`) zwingend an einen zweiten Faktor gekoppelt (TOTP via `Otp.Net` / native Krypto mit Replay-Schutz, optional FIDO2). | Selbst wenn ein Admin-Session-Token kompromittiert oder eine Prompt-Injection erfolgreich wäre, kann keine Freigabe ohne physischen zweiten Faktor (Authenticator-App / YubiKey) finalisiert werden. |
 
 ---
 
@@ -228,8 +230,10 @@ Damit AI-Modelle alle APIs und Features fehlerfrei und ohne Halluzinationen bedi
    - Alle Pfade nutzen den bestehenden `TableAccessPolicy`-PDP und `GovernedSqlRewriter`/`FederatedDuckDbExecutionService`.
 2. **Anti-Leakage Secret Protection (Review G5):**
    - Zugangsdaten (API-Keys, Basic Auth, OAuth-Secrets) werden in APIs und MCP-Ressourcen **niemals** im Klartext zurückgegeben. Es wird ausschließlich `isConfigured: true` und der Zeitstempel geliefert.
-3. **Zwei-Phasen-Freigabe für MCP-Mutationen (Human-in-the-Loop, R-62):**
-   - Ein KI-Modell kann administrative Freigaben nur planen (`admin_plan_access`). Die Ausführung (`admin_apply_access`) erfordert zwingend einen signierten, zeitlich begrenzten Bestätigungs-Token aus der Admin-Web-UI oder das bestehende HitL-System.
+3. **Zwei-Phasen-Freigabe & 2FA Step-Up für Mutationen (Human-in-the-Loop, R-62, ADR-05):**
+   - Ein KI-Modell kann administrative Freigaben nur planen (`admin_plan_access`). Die Ausführung (`admin_apply_access` / `ApproveStepUpRequestAsync`) erfordert zwingend:
+     1. Einen signierten, zeitlich begrenzten Bestätigungs-Token (`confirmationToken`) aus der Admin-Web-UI oder dem HitL-System.
+     2. Für sicherheitskritische Aktionen (z.B. Privilege Escalation, Rechteerweiterungen auf unmaskierte PII): **2FA/MFA-Verifikation (TOTP RFC 6238 via `Otp.Net` oder native HMAC-SHA256 mit Replay-Schutz)**.
 4. **Zero-Allocation Streaming & Bounded Quotas:**
    - Resultate über REST und MCP sind auf max. 1.000 Zeilen pro Aufruf begrenzt.
    - JSON-Streaming verhindert Memory-Spikes und GC-Pressure.
@@ -240,8 +244,8 @@ Damit AI-Modelle alle APIs und Features fehlerfrei und ohne Halluzinationen bedi
 
 ### Phase 0: Architektur-Grundlagen & Verträge (Tag 1)
 - [ ] DTOs und Response-Modelle für REST Data API und Catalog API in `Autheris.Domain.Model` anlegen.
-- [ ] Definition der Interfaces `IGovernedDataQueryService`, `ICatalogDiscoveryService` und `IApiDispatcherService` in `Autheris.Application.Interfaces`.
-- [ ] Fehlertests (Red Tests) für unautorisierten Datenzugriff, Paging-Limits und Spaltenmaskierung über REST schreiben.
+- [ ] Definition der Interfaces `IGovernedDataQueryService`, `ICatalogDiscoveryService`, `IApiDispatcherService` und `ITotpVerificationService` in `Autheris.Application.Interfaces`.
+- [ ] Fehlertests (Red Tests) für unautorisierten Datenzugriff, Paging-Limits, Spaltenmaskierung über REST und ungültige 2FA-Tokens schreiben.
 
 ### Phase 1: Governed REST Data API & Virtuelle System-Tabellen (Tag 2)
 - [ ] Implementierung `GovernedDataQueryService`: Übersetzung von REST-Parametern (`select`, `filter`, `orderBy`, `limit`, `offset`) in AST-Queries.
@@ -269,13 +273,17 @@ Damit AI-Modelle alle APIs und Features fehlerfrei und ohne Halluzinationen bedi
 - [ ] Implementierung von MCP Prompts (`explore_dataset`, `audit_access_compliance`).
 - [ ] Integration mit `ISemanticMcpCompiler`.
 
-### Phase 5: Admin MCP Tools & Two-Phase-Confirmation (Tag 6)
+### Phase 5: Admin MCP Tools, Two-Phase-Confirmation & 2FA Step-Up (Tag 6)
 - [ ] Umsetzung der Anforderungen R-54 bis R-64:
   - `admin_register_datasource` (OpenAPI/Swagger Ingestion mit SecretRef)
   - `admin_set_dataset_state` (Aktivieren/Deaktivieren)
   - `admin_resolve_principal` (Namen $\rightarrow$ SID Auflösung)
   - `admin_plan_access` (Vorschau / Diff ohne Seiteneffekte)
   - `admin_apply_access` mit zwingendem `confirmationToken` (Two-Phase Confirmation / Human-in-the-Loop)
+- [ ] **2FA Step-Up Integration:**
+  - `TotpVerificationService` (RFC 6238 TOTP via `Otp.Net` oder native Krypto) mit Zeittoleranz (+/- 30s) und Nonce/Replay-Protection im Distributed Cluster State.
+  - Erweiterung von `HitLStepUpApprovalService.ApproveStepUpRequestAsync` und `POST /api/governance/hitl/tickets/{ticketId}/approve` um optionalen/erforderlichen 6-stelligen `totpCode`.
+  - `admin_confirm_access` / `POST /api/governance/plans/{planId}/confirm` verifiziert den 2FA-Code vor Generierung des kurzlebigen `confirmationToken`.
 - [ ] Strikte Rollentrennung: Admin-Tools nur für Administratoren sichtbar und ausführbar.
 
 ### Phase 6: E2E-Tests, Architektur-Tests & Dokumentation (Tag 7)
