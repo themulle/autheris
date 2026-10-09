@@ -636,7 +636,7 @@ public static class VirtualFilterEndpoints
         updated_at = f.UpdatedAt
     };
 
-    private static object ProfileView(AccessProfile p) => new
+    private static object ProfileView(VirtualFilterAccessProfile p) => new
     {
         id = p.Id,
         tenant = p.TenantId.Value,
@@ -819,7 +819,7 @@ public static class VirtualFilterEndpoints
         [JsonPropertyName("uncovered")] public string? Uncovered { get; set; }
         [JsonPropertyName("bindings")] public List<BindingBody>? Bindings { get; set; }
 
-        public AccessProfile ToModel(string name, TenantId tenant)
+        public VirtualFilterAccessProfile ToModel(string name, TenantId tenant)
         {
             var grantee = Grantee ?? throw new ArgumentException("A profile needs a grantee.");
             var type = grantee.Type.ToLowerInvariant() switch
@@ -831,7 +831,7 @@ public static class VirtualFilterEndpoints
                 _ => throw new ArgumentException($"Unknown grantee type '{grantee.Type}'.")
             };
 
-            return new AccessProfile
+            return new VirtualFilterAccessProfile
             {
                 TenantId = tenant,
                 Name = name,

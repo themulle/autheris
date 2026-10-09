@@ -22,6 +22,9 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> CrossTenantMismatchCounter =
         Meter.CreateCounter<long>("autheris_cross_tenant_mismatch_total", description: "Cross-tenant webhook or access mismatches");
 
+    public static readonly Counter<long> AuditDeadLetterCounter =
+        Meter.CreateCounter<long>("autheris_audit_dead_letter_total", description: "Total number of audit events diverted to dead-letter storage");
+
     public static readonly Histogram<double> PolicyEvaluationDuration =
         Meter.CreateHistogram<double>("autheris_policy_evaluation_duration_ms", "ms", description: "Dauer der Casbin ABAC Evaluierung");
 

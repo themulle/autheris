@@ -259,6 +259,17 @@ public sealed class RlsOptions
     public bool RejectMaskedColumnsInDml { get; set; } = true;
 
     /// <summary>
+    /// R-53 / SEC-SPEC: When true (default), SELECT queries with WHERE, HAVING, or ORDER BY referencing masked columns
+    /// are rejected with SecurityException (Fail-Closed Predicate Guard against filter leakage and sorting attacks).
+    /// </summary>
+    public bool RejectMaskedColumnsInPredicates { get; set; } = true;
+
+    /// <summary>
+    /// Optional provider for column data types, used for typed masking expressions like CAST(NULL AS ...).
+    /// </summary>
+    public Func<string, string, string?>? ColumnDataTypeProvider { get; set; }
+
+    /// <summary>
     /// When true (default), UPDATE/DELETE statements without a WHERE clause, or with a trivially true WHERE clause
     /// (e.g. <c>WHERE 1=1</c>, <c>WHERE true</c>, <c>WHERE id = 5 OR 'a' = 'a'</c>), are rejected with an
     /// <see cref="UnfilteredDmlException"/>. The check runs on the original statement, independent of the WHERE

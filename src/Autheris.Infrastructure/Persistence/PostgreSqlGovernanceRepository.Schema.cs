@@ -191,6 +191,15 @@ public partial class PostgreSqlGovernanceRepository
             -- Review PG-1: second line of defence against forks / duplicate sequence numbers.
             CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON AUDIT_LOG_ENTRIES (seq);
 
+            -- AU-05: Dead-letter queue for failed audit batches
+            CREATE TABLE IF NOT EXISTS AUDIT_DEAD_LETTER (
+                id TEXT PRIMARY KEY,
+                batch_json TEXT NOT NULL,
+                error_message TEXT NOT NULL,
+                failed_at TEXT NOT NULL,
+                tenant_id TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS CONSENT_REQUESTS (
                 id TEXT PRIMARY KEY,
                 table_id TEXT NOT NULL,
@@ -289,7 +298,7 @@ public partial class PostgreSqlGovernanceRepository
                 UNIQUE (tenant_id, name)
             );
 
-            CREATE TABLE IF NOT EXISTS ACCESS_PROFILES (
+            CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_ACCESS_PROFILES (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
                 name TEXT NOT NULL,
@@ -301,6 +310,35 @@ public partial class PostgreSqlGovernanceRepository
                 updated_at TEXT NOT NULL,
                 UNIQUE (tenant_id, name)
             );
+
+            CREATE TABLE IF NOT EXISTS access_profiles (
+                profile_id VARCHAR(128) NOT NULL,
+                tenant_id VARCHAR(64) NOT NULL,
+                name VARCHAR(256) NOT NULL,
+                masking_mode VARCHAR(32) NOT NULL DEFAULT 'Default',
+                target_tables TEXT NOT NULL DEFAULT '[""*.*""]',
+                row_filter_predicate TEXT NULL,
+                justification TEXT NULL,
+                created_by VARCHAR(256) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                valid_to TIMESTAMPTZ NULL,
+                CONSTRAINT pk_access_profiles PRIMARY KEY (tenant_id, profile_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS access_profile_assignments (
+                profile_id VARCHAR(128) NOT NULL,
+                tenant_id VARCHAR(64) NOT NULL,
+                subject VARCHAR(256) NOT NULL,
+                subject_type VARCHAR(32) NOT NULL DEFAULT 'User',
+                assigned_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMPTZ NULL,
+                CONSTRAINT pk_access_profile_assignments PRIMARY KEY (tenant_id, profile_id, subject),
+                CONSTRAINT fk_profile_assignments_profile FOREIGN KEY (tenant_id, profile_id) 
+                    REFERENCES access_profiles (tenant_id, profile_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_access_profile_assignments_subject 
+                ON access_profile_assignments(tenant_id, subject);
 
             CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_GENERATION (
                 id INTEGER PRIMARY KEY CHECK (id = 1),

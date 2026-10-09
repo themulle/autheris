@@ -27,6 +27,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
     private readonly CancellationTokenSource _auditCts = new();
     private readonly Task _auditProcessorTask;
     private string _lastAuditHash = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
+    private static readonly byte[] ProcessEphemeralAuditHmacKey = RandomNumberGenerator.GetBytes(32);
     private long _lastAuditSeq;
     private readonly byte[] _auditHmacKey;
     private readonly byte[] _auditAnchorKey;
@@ -57,8 +58,8 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
         var transportEnv = environment?.EnvironmentName ??
                            Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
                            Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
-        bool isDevTransport = string.IsNullOrEmpty(transportEnv) ||
-                              string.Equals(transportEnv, "Development", StringComparison.OrdinalIgnoreCase);
+        bool isDevTransport = string.Equals(transportEnv, "Development", StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(transportEnv, "Test", StringComparison.OrdinalIgnoreCase);
         if (string.IsNullOrWhiteSpace(connStr))
         {
             // Review PG-7: no default credentials outside Development/Test.
@@ -102,7 +103,6 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
             SingleWriter = false
         };
         _auditChannel = Channel.CreateBounded<AuditLogEntry>(channelOptions);
-        _auditProcessorTask = Task.Run(ProcessAuditChannelAsync);
 
         // SEC-04: Resolve or derive dedicated HMAC-SHA256 key for authentic tamper-evident audit logging
         byte[]? key = null;
@@ -128,8 +128,8 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
         var envName = environment?.EnvironmentName ??
                       Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
                       Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
-        bool isDevOrTest = string.IsNullOrEmpty(envName) ||
-                           string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase);
+        bool isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
         if (key != null)
         {
             Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(key, "The audit HMAC key (AuditHmacKeyVaultRef)", isDevOrTest);
@@ -179,7 +179,8 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
                     "Security critical: No AuditHmacKeyVaultRef or HmacSecretKeyVaultRef configured in non-development environment. Cannot ensure audit log integrity.");
             }
 
-            key = SHA256.HashData(Encoding.UTF8.GetBytes("autheris-dev-ephemeral-audit-hmac-salt-secure-fallback"));
+            // AU-03: Process-ephemeral random key for Dev/Test - static fallback removed
+            key = ProcessEphemeralAuditHmacKey;
         }
 
         _auditHmacKey = key;
@@ -191,6 +192,21 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
             info: "Autheris:AuditAnchor:v1"u8.ToArray());
 
         _isDevOrTest = isDevOrTest;
+
+        // AU-01 & AU-03: Startabbruch (Fail-Closed) außerhalb von Dev/Test ohne persistenten Anker-Pfad oder KMS-Signer.
+        if (!isDevOrTest && auditAnchorStore == null)
+        {
+            if (string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorPath) &&
+                string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorWormDirectory) &&
+                string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorSignerKeyVaultRef) &&
+                auditAnchorSigner == null)
+            {
+                throw new InvalidOperationException(
+                    "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
+                    "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
+                    "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
+            }
+        }
 
         // Review PG-2: anchor store from Audit:ChainAnchorPath (use a shared, separately protected location when running
         // several replicas); in-memory only in Development/Test or when nothing is configured (a warning is logged).
@@ -205,6 +221,9 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
 
         bool shouldSeed = options?.Value?.GovernanceDb?.SeedDemoData ?? isDevOrTest;
         InitializeDatabaseSafely(shouldSeed);
+
+        // AU-12: Background processor starts only after keys and stores are completely initialized
+        _auditProcessorTask = Task.Run(ProcessAuditChannelAsync);
     }
 
     private void InitializeDatabaseSafely(bool shouldSeed)

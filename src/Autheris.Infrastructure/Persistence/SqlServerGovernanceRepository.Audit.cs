@@ -123,6 +123,11 @@ public partial class SqlServerGovernanceRepository
                         try
                         {
                             await RecordAuditEventsBatchInternalAsync(batch, _auditCts.Token).ConfigureAwait(false);
+                            if (_isAuditPipelineFaulted)
+                            {
+                                _isAuditPipelineFaulted = false;
+                                _logger?.LogInformation("AU-05: Audit pipeline recovered successfully. Fault flag cleared.");
+                            }
                             break;
                         }
                         catch (OperationCanceledException)
@@ -139,7 +144,9 @@ public partial class SqlServerGovernanceRepository
                             else
                             {
                                 _isAuditPipelineFaulted = true;
-                                _logger?.LogCritical(ex, "FATAL: Audit batch of {Count} entries failed permanently after 3 attempts. Setting audit pipeline to faulted (fail-closed).", batch.Count);
+                                _logger?.LogCritical(ex, "FATAL: Audit batch of {Count} entries failed permanently after 3 attempts. Setting audit pipeline to faulted (fail-closed). Diverting to dead-letter queue.", batch.Count);
+                                await WriteToDeadLetterAsync(batch, ex.Message, _auditCts.Token).ConfigureAwait(false);
+                                Autheris.Domain.Diagnostics.GatewayDiagnostics.AuditDeadLetterCounter.Add(batch.Count);
                             }
                         }
                         finally
@@ -190,8 +197,95 @@ public partial class SqlServerGovernanceRepository
 
     private const string AuditGenesisHash = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
 
-    private Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct) =>
-        RecordAuditEventsBatchInternalAsync([entry], ct);
+    private async Task WriteToDeadLetterAsync(IReadOnlyList<AuditLogEntry> batch, string errorMessage, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"INSERT INTO dbo.AUDIT_DEAD_LETTER (id, batch_json, error_message, failed_at, tenant_id)
+                                VALUES (@id, @batch, @err, @failed, @tenant)";
+            cmd.Parameters.Add("@id", SqlDbType.NVarChar, 128).Value = Guid.NewGuid().ToString("N");
+            cmd.Parameters.Add("@batch", SqlDbType.NVarChar, -1).Value = JsonSerializer.Serialize(batch);
+            cmd.Parameters.Add("@err", SqlDbType.NVarChar, -1).Value = errorMessage;
+            cmd.Parameters.Add("@failed", SqlDbType.NVarChar, 64).Value = DateTimeOffset.UtcNow.ToString("O");
+            cmd.Parameters.Add("@tenant", SqlDbType.NVarChar, 128).Value = batch.FirstOrDefault()?.TenantId.Value ?? "unknown";
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception dlEx)
+        {
+            _logger?.LogCritical(dlEx, "Failed to write audit batch to AUDIT_DEAD_LETTER table!");
+        }
+    }
+
+    private static string GuardLength(string? value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+        return value.Length <= maxLength ? value : value.Substring(0, maxLength);
+    }
+
+    public Task RecordAuditEventAsync(AuditLogEntry entry, System.Data.Common.DbTransaction existingTx, CancellationToken ct = default)
+    {
+        if (existingTx == null)
+        {
+            return RecordAuditEventAsync(entry, ct);
+        }
+        return RecordAuditEventInternalAsync(entry, ct, existingTx);
+    }
+
+    internal Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct, System.Data.Common.DbTransaction? existingTx = null) =>
+        RecordAuditEventsBatchInternalAsync([entry], ct, existingTx);
+
+    private sealed class AuditTxPendingState
+    {
+        public required long PreTxSeq { get; init; }
+        public required string PreTxHash { get; init; }
+        public required long LastSeq { get; set; }
+        public required string LastHash { get; set; }
+    }
+
+    private readonly Dictionary<System.Data.Common.DbTransaction, AuditTxPendingState> _pendingAuditTxStates = new();
+
+    public void OnTransactionCommitted(System.Data.Common.DbTransaction tx)
+    {
+        if (_pendingAuditTxStates.Remove(tx, out var state))
+        {
+            _lastAuditSeq = state.LastSeq;
+            _lastAuditHash = state.LastHash;
+
+            if (Volatile.Read(ref _auditChainViolation) == null && _auditAnchorStore != null)
+            {
+                try
+                {
+                    _auditAnchorStore.Save(CreateSignedAnchor(state.LastSeq, state.LastHash));
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError(ex, "Failed to persist external audit chain anchor (seq {Sequence}).", state.LastSeq);
+                }
+            }
+        }
+    }
+
+    public void OnTransactionRolledBack(System.Data.Common.DbTransaction tx)
+    {
+        if (_pendingAuditTxStates.Remove(tx, out var state))
+        {
+            _lastAuditSeq = state.PreTxSeq;
+            _lastAuditHash = state.PreTxHash;
+        }
+    }
+
+    public void RollbackPendingAuditTransactions()
+    {
+        if (_pendingAuditTxStates.Count == 0) return;
+        foreach (var state in _pendingAuditTxStates.Values)
+        {
+            _lastAuditSeq = state.PreTxSeq;
+            _lastAuditHash = state.PreTxHash;
+        }
+        _pendingAuditTxStates.Clear();
+    }
 
     /// <summary>Review PG-1: resource name of the transaction-owned sp_getapplock that serialises audit chain writers across replicas.</summary>
     private const string AuditChainLockResource = "autheris:audit-chain";
@@ -209,9 +303,15 @@ public partial class SqlServerGovernanceRepository
 
     private const int AuditWriteMaxAttempts = 5;
 
-    private async Task RecordAuditEventsBatchInternalAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct)
+    private async Task RecordAuditEventsBatchInternalAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct, System.Data.Common.DbTransaction? existingTx = null)
     {
         if (batch.Count == 0) return;
+
+        if (existingTx != null)
+        {
+            await WriteAuditBatchEnrolledAsync(batch, existingTx, ct).ConfigureAwait(false);
+            return;
+        }
 
         // Review PG-1: concurrent writers (other replicas) are serialised by an application lock; serialization failures,
         // deadlocks and unique violations on seq are retried instead of failing the mutation or faulting the pipeline.
@@ -230,6 +330,105 @@ public partial class SqlServerGovernanceRepository
                 await Task.Delay(Random.Shared.Next(10, 40) * attempt, ct).ConfigureAwait(false);
             }
         }
+    }
+
+    private async Task WriteAuditBatchEnrolledAsync(IReadOnlyList<AuditLogEntry> batch, System.Data.Common.DbTransaction existingTx, CancellationToken ct)
+    {
+        var conn = (SqlConnection)existingTx.Connection!;
+        var tx = (SqlTransaction)existingTx;
+
+        var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
+        var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
+
+        if (!_pendingAuditTxStates.TryGetValue(existingTx, out var pendingState))
+        {
+            pendingState = new AuditTxPendingState
+            {
+                PreTxSeq = _lastAuditSeq,
+                PreTxHash = _lastAuditHash,
+                LastSeq = dbTailSeq,
+                LastHash = effectiveDbHash
+            };
+            _pendingAuditTxStates[existingTx] = pendingState;
+        }
+
+        long lastSequence = pendingState.LastSeq;
+        string lastEntryHash = pendingState.LastHash;
+
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"INSERT INTO dbo.AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
+                            VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
+
+        var pId = cmd.Parameters.Add("@id", SqlDbType.NVarChar, 128);
+        var pOcc = cmd.Parameters.Add("@occ", SqlDbType.NVarChar, 64);
+        var pEvent = cmd.Parameters.Add("@event", SqlDbType.NVarChar, -1);
+        var pActor = cmd.Parameters.Add("@actor", SqlDbType.NVarChar, -1);
+        var pTarget = cmd.Parameters.Add("@target", SqlDbType.NVarChar, -1);
+        var pCol = cmd.Parameters.Add("@col", SqlDbType.NVarChar, -1);
+        var pDec = cmd.Parameters.Add("@dec", SqlDbType.NVarChar, -1);
+        var pTrace = cmd.Parameters.Add("@trace", SqlDbType.NVarChar, -1);
+        var pDet = cmd.Parameters.Add("@det", SqlDbType.NVarChar, -1);
+        var pPrev = cmd.Parameters.Add("@prev", SqlDbType.NVarChar, 128);
+        var pHash = cmd.Parameters.Add("@hash", SqlDbType.NVarChar, 128);
+        var pTenantId = cmd.Parameters.Add("@tenantId", SqlDbType.NVarChar, 128);
+        var pSeq = cmd.Parameters.Add("@seq", SqlDbType.BigInt);
+
+        for (int i = 0; i < batch.Count; i++)
+        {
+            var entry = batch[i];
+            long currentSequence = ++lastSequence;
+            var currentPrevHash = lastEntryHash;
+
+            var effectiveTenantId = GuardLength(string.IsNullOrWhiteSpace(entry.TenantId.Value) ? TenantId.LegacySingleTenant.Value : entry.TenantId.Value, 128);
+            var eventType = GuardLength(entry.EventType, 128);
+            var actorSid = GuardLength(entry.ActorSid.Value, 256);
+            var targetTable = GuardLength(entry.TargetTable, 512);
+            var targetColumn = entry.TargetColumn != null ? GuardLength(entry.TargetColumn, 256) : null;
+            var decision = GuardLength(entry.Decision, 64);
+            var traceId = GuardLength(entry.TraceId, 128);
+            var detailsJson = entry.DetailsJson ?? string.Empty;
+
+            var entryHash = ComputeAuditEntryHash(
+                currentSequence,
+                entry.Id.ToString(),
+                currentPrevHash,
+                entry.OccurredAt,
+                eventType,
+                actorSid,
+                targetTable,
+                targetColumn,
+                decision,
+                traceId,
+                detailsJson,
+                effectiveTenantId);
+
+            entry.PrevHash = currentPrevHash;
+            entry.EntryHash = entryHash;
+
+            pId.Value = entry.Id.ToString();
+            pOcc.Value = entry.OccurredAt.ToString("O");
+            pEvent.Value = (object?)eventType ?? DBNull.Value;
+            pActor.Value = (object?)actorSid ?? DBNull.Value;
+            pTarget.Value = (object?)targetTable ?? DBNull.Value;
+            pCol.Value = (object?)targetColumn ?? DBNull.Value;
+            pDec.Value = (object?)decision ?? DBNull.Value;
+            pTrace.Value = (object?)traceId ?? DBNull.Value;
+            pDet.Value = (object?)detailsJson ?? DBNull.Value;
+            pPrev.Value = currentPrevHash;
+            pHash.Value = entryHash;
+            pTenantId.Value = effectiveTenantId;
+            pSeq.Value = currentSequence;
+
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            lastEntryHash = entryHash;
+        }
+
+        pendingState.LastSeq = lastSequence;
+        pendingState.LastHash = lastEntryHash;
+
+        _lastAuditHash = lastEntryHash;
+        Interlocked.Exchange(ref _lastAuditSeq, lastSequence);
     }
 
     private async Task WriteAuditBatchOnceAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct)
@@ -276,17 +475,17 @@ public partial class SqlServerGovernanceRepository
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
+        cmd.CommandText = @"INSERT INTO dbo.AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
                             VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
 
         var pId = cmd.Parameters.Add("@id", SqlDbType.NVarChar, 128);
         var pOcc = cmd.Parameters.Add("@occ", SqlDbType.NVarChar, 64);
-        var pEvent = cmd.Parameters.Add("@event", SqlDbType.NVarChar, 128);
-        var pActor = cmd.Parameters.Add("@actor", SqlDbType.NVarChar, 256);
-        var pTarget = cmd.Parameters.Add("@target", SqlDbType.NVarChar, 512);
-        var pCol = cmd.Parameters.Add("@col", SqlDbType.NVarChar, 256);
-        var pDec = cmd.Parameters.Add("@dec", SqlDbType.NVarChar, 64);
-        var pTrace = cmd.Parameters.Add("@trace", SqlDbType.NVarChar, 128);
+        var pEvent = cmd.Parameters.Add("@event", SqlDbType.NVarChar, -1);
+        var pActor = cmd.Parameters.Add("@actor", SqlDbType.NVarChar, -1);
+        var pTarget = cmd.Parameters.Add("@target", SqlDbType.NVarChar, -1);
+        var pCol = cmd.Parameters.Add("@col", SqlDbType.NVarChar, -1);
+        var pDec = cmd.Parameters.Add("@dec", SqlDbType.NVarChar, -1);
+        var pTrace = cmd.Parameters.Add("@trace", SqlDbType.NVarChar, -1);
         var pDet = cmd.Parameters.Add("@det", SqlDbType.NVarChar, -1);
         var pPrev = cmd.Parameters.Add("@prev", SqlDbType.NVarChar, 128);
         var pHash = cmd.Parameters.Add("@hash", SqlDbType.NVarChar, 128);
@@ -299,20 +498,27 @@ public partial class SqlServerGovernanceRepository
             long currentSequence = ++lastSequence;
             var currentPrevHash = lastEntryHash;
 
-            var effectiveTenantId = string.IsNullOrWhiteSpace(entry.TenantId.Value) ? TenantId.LegacySingleTenant.Value : entry.TenantId.Value;
+            var effectiveTenantId = GuardLength(string.IsNullOrWhiteSpace(entry.TenantId.Value) ? TenantId.LegacySingleTenant.Value : entry.TenantId.Value, 128);
+            var eventType = GuardLength(entry.EventType, 128);
+            var actorSid = GuardLength(entry.ActorSid.Value, 256);
+            var targetTable = GuardLength(entry.TargetTable, 512);
+            var targetColumn = entry.TargetColumn != null ? GuardLength(entry.TargetColumn, 256) : null;
+            var decision = GuardLength(entry.Decision, 64);
+            var traceId = GuardLength(entry.TraceId, 128);
+            var detailsJson = entry.DetailsJson ?? string.Empty;
 
             var entryHash = ComputeAuditEntryHash(
                 currentSequence,
                 entry.Id.ToString(),
                 currentPrevHash,
                 entry.OccurredAt,
-                entry.EventType,
-                entry.ActorSid.Value,
-                entry.TargetTable,
-                entry.TargetColumn,
-                entry.Decision,
-                entry.TraceId,
-                entry.DetailsJson,
+                eventType,
+                actorSid,
+                targetTable,
+                targetColumn,
+                decision,
+                traceId,
+                detailsJson,
                 effectiveTenantId);
 
             entry.PrevHash = currentPrevHash;
@@ -320,13 +526,13 @@ public partial class SqlServerGovernanceRepository
 
             pId.Value = entry.Id.ToString();
             pOcc.Value = entry.OccurredAt.ToString("O");
-            pEvent.Value = (object?)entry.EventType ?? DBNull.Value;
-            pActor.Value = (object?)entry.ActorSid.Value ?? DBNull.Value;
-            pTarget.Value = (object?)entry.TargetTable ?? DBNull.Value;
-            pCol.Value = (object?)entry.TargetColumn ?? DBNull.Value;
-            pDec.Value = (object?)entry.Decision ?? DBNull.Value;
-            pTrace.Value = (object?)entry.TraceId ?? DBNull.Value;
-            pDet.Value = (object?)entry.DetailsJson ?? DBNull.Value;
+            pEvent.Value = (object?)eventType ?? DBNull.Value;
+            pActor.Value = (object?)actorSid ?? DBNull.Value;
+            pTarget.Value = (object?)targetTable ?? DBNull.Value;
+            pCol.Value = (object?)targetColumn ?? DBNull.Value;
+            pDec.Value = (object?)decision ?? DBNull.Value;
+            pTrace.Value = (object?)traceId ?? DBNull.Value;
+            pDet.Value = (object?)detailsJson ?? DBNull.Value;
             pPrev.Value = currentPrevHash;
             pHash.Value = entryHash;
             pTenantId.Value = effectiveTenantId;
@@ -726,15 +932,20 @@ public partial class SqlServerGovernanceRepository
         string? detailsJson,
         string? tenantId)
     {
-        var payload = $"{id}|{prevHash}|{occurredAt:O}|{EscapeField(eventType)}|{EscapeField(actorSid)}|{EscapeField(targetTable)}|{EscapeField(targetColumn)}|{EscapeField(decision)}|{EscapeField(traceId)}|{EscapeField(detailsJson)}|{EscapeField(tenantId)}";
-        if (sequence.HasValue)
-        {
-            payload = $"v2|{sequence.Value}|{payload}";
-        }
-
-        Span<byte> hashBytes = stackalloc byte[32];
-        HMACSHA256.HashData(_auditHmacKey, Encoding.UTF8.GetBytes(payload), hashBytes);
-        return Convert.ToHexString(hashBytes);
+        return Autheris.Domain.Audit.AuditCanonicalizer.ComputeEntryHash(
+            _auditHmacKey,
+            sequence,
+            id,
+            prevHash,
+            occurredAt,
+            eventType,
+            actorSid,
+            targetTable,
+            targetColumn,
+            decision,
+            traceId,
+            detailsJson,
+            tenantId);
     }
 
     private AuditChainAnchor CreateSignedAnchor(long sequence, string entryHash)
@@ -845,11 +1056,7 @@ public partial class SqlServerGovernanceRepository
         _logger?.LogCritical("AUDIT CHAIN INTEGRITY VIOLATION: {Reason}", reason);
     }
 
-    private static string EscapeField(string? v)
-    {
-        if (string.IsNullOrEmpty(v)) return string.Empty;
-        return v.Replace("\\", "\\\\").Replace("|", "\\|").Replace("\n", "\\n").Replace("\r", "\\r");
-    }
+    private static string EscapeField(string? v) => Autheris.Domain.Audit.AuditCanonicalizer.CanonicalizeField(v);
 
     private static bool FixedTimeEqualsString(string? a, string? b) =>
         CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a ?? string.Empty), Encoding.UTF8.GetBytes(b ?? string.Empty));

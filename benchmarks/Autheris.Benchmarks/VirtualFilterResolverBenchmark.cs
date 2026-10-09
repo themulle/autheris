@@ -56,7 +56,7 @@ public sealed class VirtualFilterResolverBenchmark
         }).ToList();
 
         var schemas = new[] { "fms", "tem", "dm", "conf", "md" };
-        var profiles = Enumerable.Range(0, 5).Select(p => new AccessProfile
+        var profiles = Enumerable.Range(0, 5).Select(p => new VirtualFilterAccessProfile
         {
             TenantId = Tenant,
             Name = $"profile_{p}",

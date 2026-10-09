@@ -873,6 +873,9 @@ public sealed class AuditOptions
 
     /// <summary>SEC R2-3: Capacity of the asynchronous query audit channel = upper bound of entries lost on a crash.</summary>
     [Range(1, 100000)] public int QueryAuditChannelCapacity { get; init; } = 5000;
+
+    /// <summary>AU-03: Indicates whether the audit HMAC key was resolved from fallback or default values.</summary>
+    public bool HmacKeyIsFallback { get; set; }
 }
 
 public sealed class OpenMetadataOptions

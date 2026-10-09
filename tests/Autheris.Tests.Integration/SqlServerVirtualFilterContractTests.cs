@@ -71,7 +71,7 @@ public sealed class SqlServerVirtualFilterContractTests : IAsyncLifetime
         ManagedBy = new ManagedBy("governance/access", "c1")
     };
 
-    private static AccessProfile Profile() => new()
+    private static VirtualFilterAccessProfile Profile() => new()
     {
         TenantId = Tenant,
         Name = "david",

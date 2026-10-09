@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -142,6 +143,11 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                         try
                         {
                             await RecordAuditEventsBatchInternalAsync(batch, _auditCts.Token).ConfigureAwait(false);
+                            if (_isAuditPipelineFaulted)
+                            {
+                                _isAuditPipelineFaulted = false;
+                                _logger?.LogInformation("AU-05: Audit pipeline recovered successfully. Fault flag cleared.");
+                            }
                             break;
                         }
                         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -154,7 +160,9 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
                             else
                             {
                                 _isAuditPipelineFaulted = true;
-                                _logger?.LogCritical(ex, "FATAL: Audit batch of {Count} entries failed permanently after 3 attempts. Setting audit pipeline to faulted (fail-closed).", batch.Count);
+                                _logger?.LogCritical(ex, "FATAL: Audit batch of {Count} entries failed permanently after 3 attempts. Setting audit pipeline to faulted (fail-closed). Diverting to dead-letter queue.", batch.Count);
+                                await WriteToDeadLetterAsync(batch, ex.Message, _auditCts.Token).ConfigureAwait(false);
+                                Autheris.Domain.Diagnostics.GatewayDiagnostics.AuditDeadLetterCounter.Add(batch.Count);
                             }
                         }
                         finally
@@ -203,7 +211,36 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         }
     }
 
+    private async Task WriteToDeadLetterAsync(IReadOnlyList<AuditLogEntry> batch, string errorMessage, CancellationToken ct)
+    {
+        try
+        {
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = @"INSERT INTO AUDIT_DEAD_LETTER (id, batch_json, error_message, failed_at, tenant_id)
+                                VALUES (@id, @batch, @err, @failed, @tenant)";
+            cmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString("N"));
+            cmd.Parameters.AddWithValue("@batch", JsonSerializer.Serialize(batch));
+            cmd.Parameters.AddWithValue("@err", errorMessage);
+            cmd.Parameters.AddWithValue("@failed", DateTimeOffset.UtcNow.ToString("O"));
+            cmd.Parameters.AddWithValue("@tenant", batch.FirstOrDefault()?.TenantId.Value ?? "unknown");
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception dlEx)
+        {
+            _logger?.LogCritical(dlEx, "Failed to write audit batch to AUDIT_DEAD_LETTER table!");
+        }
+    }
+
     private const string AuditGenesisHash = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
+
+    public Task RecordAuditEventAsync(AuditLogEntry entry, System.Data.Common.DbTransaction existingTx, CancellationToken ct = default)
+    {
+        if (existingTx == null)
+        {
+            return RecordAuditEventAsync(entry, ct);
+        }
+        return RecordAuditEventInternalAsync(entry, ct, (SqliteTransaction)existingTx);
+    }
 
     internal Task RecordAuditEventInternalAsync(AuditLogEntry entry, CancellationToken ct, SqliteTransaction? existingTx = null) =>
         RecordAuditEventsBatchInternalAsync([entry], ct, existingTx);
@@ -641,7 +678,18 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
                 if (!FixedTimeEqualsString(entryHash, computedHash))
                 {
-                    return false; // Tampered payload!
+                    if (!seq.HasValue)
+                    {
+                        var legacyComputed = AuditCanonicalizer.ComputeEntryHash("AutherisAuditLogHmacTamperEvidenceSecret2026!"u8.ToArray(), null, id, prevHash, parsedOccurredAt, eventType, actorSid, targetTable, targetColumn, decision, traceId, detailsJson, tenantId);
+                        if (!FixedTimeEqualsString(entryHash, legacyComputed))
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        return false; // Tampered payload!
+                    }
                 }
 
                 if (anchor != null && anchor.Sequence == position)
@@ -825,16 +873,20 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         string? detailsJson,
         string? tenantId)
     {
-        var payload = $"{id}|{prevHash}|{occurredAt:O}|{EscapeField(eventType)}|{EscapeField(actorSid)}|{EscapeField(targetTable)}|{EscapeField(targetColumn)}|{EscapeField(decision)}|{EscapeField(traceId)}|{EscapeField(detailsJson)}|{EscapeField(tenantId)}";
-        if (sequence.HasValue)
-        {
-            // SEC H-17: v2 payload binds the gap-free sequence number into the HMAC.
-            payload = $"v2|{sequence.Value}|{payload}";
-        }
-
-        Span<byte> hashBytes = stackalloc byte[32];
-        HMACSHA256.HashData(_auditHmacKey, Encoding.UTF8.GetBytes(payload), hashBytes);
-        return Convert.ToHexString(hashBytes);
+        return Autheris.Domain.Audit.AuditCanonicalizer.ComputeEntryHash(
+            _auditHmacKey,
+            sequence,
+            id,
+            prevHash,
+            occurredAt,
+            eventType,
+            actorSid,
+            targetTable,
+            targetColumn,
+            decision,
+            traceId,
+            detailsJson,
+            tenantId);
     }
 
     private AuditChainAnchor CreateSignedAnchor(long sequence, string entryHash)
@@ -969,9 +1021,5 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
     private static bool FixedTimeEqualsString(string? a, string? b) =>
         CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a ?? string.Empty), Encoding.UTF8.GetBytes(b ?? string.Empty));
 
-    private static string EscapeField(string? s)
-    {
-        if (string.IsNullOrEmpty(s)) return "";
-        return s.Replace("\\", "\\\\").Replace("|", "\\|");
-    }
+    private static string EscapeField(string? s) => Autheris.Domain.Audit.AuditCanonicalizer.CanonicalizeField(s);
 }

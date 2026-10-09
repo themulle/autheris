@@ -293,6 +293,7 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
         }
         else if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.SqlServer))
@@ -308,6 +309,7 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
             services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<IAccessProfileRepository, InMemoryAccessProfileRepository>();
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
         }
         else
@@ -323,6 +325,7 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<IAccessProfileRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
         }
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
@@ -1122,7 +1125,10 @@ public static class GatewayServiceCollectionExtensions
 
     internal static void ValidateGatewayOptions(GatewayOptions options, IHostEnvironment environment, Func<string, string?> getEnvironmentVariable)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(getEnvironmentVariable);
+        bool isDevEnvironment = environment.IsDevelopment();
         ValidateObjectRecursively(options);
 
         // SEC E-01: the egress allowlist is validated in every environment; invalid or too broad entries abort the start.
@@ -1299,6 +1305,7 @@ public static class GatewayServiceCollectionExtensions
             Console.WriteLine("[Autheris] WARNING: VirtualFilters.RequireApproval is false outside Development. Four-eyes principle is recommended for production.");
         }
 
+
         if (options.WebSql.AllowDml && options.WebSql.DmlWriterRoles.Count == 0)
         {
             throw new ValidationException(
@@ -1321,7 +1328,7 @@ public static class GatewayServiceCollectionExtensions
             throw new ValidationException("NF-HA-01 violation: TerminationGracePeriodSeconds must be greater than DrainDelay + ShutdownTimeout + 10s.");
         }
 
-        var devErrors = DevOptionsValidator.Validate(options, environment.IsDevelopment());
+        var devErrors = DevOptionsValidator.Validate(options, isDevEnvironment);
         if (devErrors.Count > 0)
         {
             throw new ValidationException(string.Join("\n", devErrors));
@@ -1595,6 +1602,48 @@ public static class GatewayServiceCollectionExtensions
                 catch
                 {
                     // Ignore parse errors here; SqliteConnection will handle them
+                }
+            }
+
+            // AU-01 & AU-03: Startup Fail-Closed & Umgebungsvalidierung für Audit
+            var envName = getEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? environment.EnvironmentName;
+            bool isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
+
+            bool isSqliteFile = false;
+            if (DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite) &&
+                !string.IsNullOrWhiteSpace(options.GovernanceDb.ConnectionString))
+            {
+                try
+                {
+                    var csb = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(options.GovernanceDb.ConnectionString);
+                    isSqliteFile = !string.IsNullOrWhiteSpace(csb.DataSource) &&
+                                   !csb.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase) &&
+                                   csb.Mode != Microsoft.Data.Sqlite.SqliteOpenMode.Memory;
+                }
+                catch { }
+            }
+
+            if (!isDevOrTest)
+            {
+                if (options.Audit.HmacKeyIsFallback)
+                {
+                    throw new ValidationException(
+                        "CRITICAL SECURITY VIOLATION: Hardcoded or fallback HMAC audit keys are strictly prohibited in production.");
+                }
+
+                if (!isSqliteFile)
+                {
+                    // Produktion: Leerer Wert gilt zwingend als Produktion!
+                    if (string.IsNullOrWhiteSpace(options.Audit.ChainAnchorPath) &&
+                        string.IsNullOrWhiteSpace(options.Audit.ChainAnchorWormDirectory) &&
+                        string.IsNullOrWhiteSpace(options.Audit.ChainAnchorSignerKeyVaultRef))
+                    {
+                        throw new ValidationException(
+                            "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
+                            "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
+                            "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
+                    }
                 }
             }
         }

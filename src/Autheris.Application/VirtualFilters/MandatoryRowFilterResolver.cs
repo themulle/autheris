@@ -203,11 +203,11 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             .ToList();
 
         var filtersByName = snapshot.Filters.Where(f => f.TenantId == query.Tenant).ToDictionary(f => f.Name, StringComparer.Ordinal);
-        var applying = new List<(VirtualFilter Filter, FilterBinding Binding, AccessProfile Profile)>();
+        var applying = new List<(VirtualFilter Filter, FilterBinding Binding, VirtualFilterAccessProfile Profile)>();
         string? currentFilter = null;
         try
         {
-            var explained = new List<(AccessProfile Profile, List<(VirtualFilter? Filter, FilterBinding Binding, string? Reason, IReadOnlyList<string> Missing)> Bindings)>();
+            var explained = new List<(VirtualFilterAccessProfile Profile, List<(VirtualFilter? Filter, FilterBinding Binding, string? Reason, IReadOnlyList<string> Missing)> Bindings)>();
             MandatoryFilterOutcome? uncoveredDeny = null;
             foreach (var profile in profiles)
             {
@@ -345,7 +345,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
     }
 
     /// <summary>Whether the binding applies; otherwise the reason and the missing columns.</summary>
-    private (bool Applies, string? Reason, IReadOnlyList<string> Missing) Check(VirtualFilter filter, FilterBinding binding, AccessProfile profile, MandatoryFilterQuery query)
+    private (bool Applies, string? Reason, IReadOnlyList<string> Missing) Check(VirtualFilter filter, FilterBinding binding, VirtualFilterAccessProfile profile, MandatoryFilterQuery query)
     {
         if (filter.Status != FilterApprovalStatus.Active)
         {

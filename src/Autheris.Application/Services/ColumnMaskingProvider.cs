@@ -90,6 +90,16 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
             case "NULLIFY":
                 return null;
 
+            case "GEO_JITTER":
+                return MaskGeoJitter(rawValue, rule, columnName);
+
+            case "PARTIAL_MASK":
+                return MaskPartial(textValue, rule);
+
+            case "TOKENIZE":
+            case "TOKENIZATION":
+                return MaskTokenize(textValue, rule, columnName);
+
             case "REDACT":
                 // B-06: For numeric and temporal types, REDACT returns null (NULLIFY standard) so it is distinguishable from valid zero/epoch
                 if (rawValue is int or long or short or sbyte or byte or uint or ulong or ushort or decimal or double or float)
@@ -396,5 +406,158 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
             span.Slice(state.unmasked, span.Length - 2 * state.unmasked).Fill('*');
             state.phone.AsSpan(span.Length - state.unmasked).CopyTo(span[^state.unmasked..]);
         });
+    }
+
+    private object? MaskGeoJitter(object? value, MaskingRule rule, string columnName = "")
+    {
+        if (value is null or DBNull) return null;
+
+        double d;
+        if (value is double dbl)
+        {
+            d = dbl;
+        }
+        else if (value is float flt)
+        {
+            d = flt;
+        }
+        else if (value is decimal dec)
+        {
+            d = (double)dec;
+        }
+        else if (!double.TryParse(value.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out d))
+        {
+            return value;
+        }
+
+        // Null-Island Schutz: Fehlender GPS-Fix (0.0, 0.0) bleibt zwingend 0.0
+        if (Math.Abs(d) < 1e-9)
+        {
+            return 0.0;
+        }
+
+        var mode = (rule.Mode ?? "round").Trim().ToLowerInvariant();
+        if (mode == "noise")
+        {
+            var keyToUse = GetOrDeriveKey(rule.HmacKeyId ?? _options.HmacKeyId);
+            var seed = $"{columnName}:{rule.PatternOrFormat ?? ""}:{MaskingInputCanonicalizer.ToCanonicalString(value)}";
+            Span<byte> hashBytes = stackalloc byte[32];
+            HMACSHA256.HashData(keyToUse, Encoding.UTF8.GetBytes(seed), hashBytes);
+
+            uint h0_3 = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(hashBytes[0..4]);
+            uint h4_7 = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(hashBytes[4..8]);
+
+            double theta = ((h0_3 % 36000) / 36000.0) * 2.0 * Math.PI;
+            double radiusMeters = rule.RadiusMeters ?? 500.0;
+            double r = Math.Sqrt((h4_7 % 10000) / 10000.0) * radiusMeters;
+
+            bool isLon = columnName.Contains("lon", StringComparison.OrdinalIgnoreCase);
+            double delta;
+            if (isLon)
+            {
+                delta = (r * Math.Sin(theta)) / 111139.0;
+            }
+            else
+            {
+                delta = (r * Math.Cos(theta)) / 111139.0;
+            }
+
+            d += delta;
+
+            if (isLon)
+            {
+                d = Math.Clamp(d, -180.0, 180.0);
+            }
+            else
+            {
+                d = Math.Clamp(d, -90.0, 90.0);
+            }
+
+            int dec = (rule.Decimals != 2 && rule.Decimals.HasValue) ? Math.Clamp(rule.Decimals.Value, 0, 6) : 6;
+            return Math.Round(d, dec, MidpointRounding.AwayFromZero);
+        }
+        else
+        {
+            var decimals = Math.Clamp(rule.Decimals ?? 2, 0, 6);
+            return Math.Round(d, decimals, MidpointRounding.AwayFromZero);
+        }
+    }
+
+    private static string MaskPartial(string s, MaskingRule rule)
+    {
+        if (string.IsNullOrEmpty(s))
+        {
+            return s;
+        }
+
+        var prefixLen = Math.Max(0, rule.KeepPrefix ?? 1);
+        var suffixLen = Math.Max(0, rule.KeepSuffix ?? 0);
+        var maskChar = rule.MaskChar ?? '*';
+        var fixedLen = rule.FixedLength ?? false;
+
+        var runes = s.EnumerateRunes().ToArray();
+        if (runes.Length <= prefixLen + suffixLen)
+        {
+            return new string(maskChar, 5);
+        }
+
+        var prefix = string.Concat(runes.Take(prefixLen));
+        var suffix = suffixLen > 0 ? string.Concat(runes.TakeLast(suffixLen)) : string.Empty;
+        var maskCount = fixedLen ? 5 : (runes.Length - prefixLen - suffixLen);
+
+        return $"{prefix}{new string(maskChar, maskCount)}{suffix}";
+    }
+
+    private string MaskTokenize(string text, MaskingRule rule, string columnName)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return text;
+        }
+
+        var domain = !string.IsNullOrWhiteSpace(rule.TokenDomain)
+            ? rule.TokenDomain.Trim().ToUpperInvariant()
+            : (!string.IsNullOrWhiteSpace(columnName) ? columnName.Trim().ToUpperInvariant() : "ANON");
+
+        var hmacHex = ComputeHmacSha256(text, rule.HmacKeyId ?? _options.HmacKeyId);
+        var prefix = hmacHex.Length >= 8 ? hmacHex[..8].ToLowerInvariant() : hmacHex.ToLowerInvariant();
+
+        return $"TOK_{domain}_{prefix}";
+    }
+
+    public static object? MaskValue(object? value, MaskingRule rule, string? tenant = null, string? dataType = null)
+    {
+        if (value is null or DBNull) return null;
+
+        var ruleType = rule.RuleType?.ToUpperInvariant() ?? "REDACT";
+        if (ruleType == "REDACT")
+        {
+            if (value is int or long or short or sbyte or byte or uint or ulong or ushort or decimal or double or float)
+                return null;
+            if (value is DateTime or DateTimeOffset or DateOnly or TimeOnly)
+                return null;
+            if (value is bool)
+                return null;
+            if (!string.IsNullOrWhiteSpace(dataType) && IsNumericOrTemporalType(dataType))
+                return null;
+        }
+
+        var effectiveRule = !string.IsNullOrWhiteSpace(tenant) && string.IsNullOrWhiteSpace(rule.HmacKeyId)
+            ? rule with { HmacKeyId = $"default|tenant:{tenant}" }
+            : rule;
+
+        var provider = new ColumnMaskingProvider();
+        return provider.MaskValue("column", value, effectiveRule);
+    }
+
+    private static bool IsNumericOrTemporalType(string? dataType)
+    {
+        if (string.IsNullOrWhiteSpace(dataType)) return false;
+        var dt = dataType.Trim().ToLowerInvariant();
+        if (dt.Contains('(')) dt = dt[..dt.IndexOf('(')].Trim();
+        return dt is "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal"
+            or "money" or "smallmoney" or "real" or "float" or "double precision" or "double"
+            or "bit" or "bool" or "boolean" or "date" or "datetime" or "datetime2" or "smalldatetime"
+            or "timestamp" or "timestamptz" or "time" or "uniqueidentifier" or "uuid";
     }
 }

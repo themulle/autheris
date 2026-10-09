@@ -563,6 +563,39 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             {
                 maskExpr = "NULL";
             }
+            else if (ruleType == "GEO_JITTER")
+            {
+                var targetDialect = dialect switch
+                {
+                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
+                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
+                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
+                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
+                };
+                maskExpr = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
+                    columnName,
+                    "GEO_JITTER",
+                    targetDialect,
+                    decimals: rule.Decimals ?? 2);
+            }
+            else if (ruleType == "PARTIAL_MASK")
+            {
+                var targetDialect = dialect switch
+                {
+                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
+                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
+                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
+                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
+                };
+                maskExpr = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
+                    columnName,
+                    "PARTIAL_MASK",
+                    targetDialect,
+                    keepPrefix: rule.KeepPrefix ?? 1,
+                    keepSuffix: rule.KeepSuffix ?? 0,
+                    maskChar: rule.MaskChar ?? '*',
+                    fixedLength: rule.FixedLength ?? false);
+            }
             else if (IsHmacRule(rule))
             {
                 // SEC H-13: No unkeyed in-DB hash. HMAC columns are pseudonymized in the gateway (IColumnMaskingProvider);

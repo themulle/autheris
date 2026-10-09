@@ -505,7 +505,7 @@ WHERE EXISTS (SELECT 1 FROM client c JOIN crane k ON k.serial_number = c.crane_s
                         Where = [new FilterCondition("crane.is_delivered", FilterConditionOperator.IsNull)]
                     }
                 }, actor);
-            await admin.SaveProfileAsync(new AccessProfile
+            await admin.SaveProfileAsync(new VirtualFilterAccessProfile
             {
                 TenantId = new TenantId(Tenant),
                 Name = "david",

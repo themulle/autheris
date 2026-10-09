@@ -148,7 +148,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
         Tenant,
         new ManagedBy("governance/access", commit),
         items.OfType<VirtualFilter>().ToList(),
-        items.OfType<AccessProfile>().ToList());
+        items.OfType<VirtualFilterAccessProfile>().ToList());
 
     [Fact]
     public async Task SyncPlan_ListsCreates_ThenApplyCreatesInOneGenerationAndAudits()
@@ -301,7 +301,7 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     {
         // Setup 3 profiles with Uncovered = Deny
         var filter = VirtualFilterModelTests.DavidFilter("filter_1");
-        var profiles = Enumerable.Range(1, 3).Select(i => new AccessProfile
+        var profiles = Enumerable.Range(1, 3).Select(i => new VirtualFilterAccessProfile
         {
             TenantId = Tenant,
             Name = $"profile_{i}",

@@ -496,10 +496,11 @@ public partial class SqlServerGovernanceRepository
                     ValidTo = consent.ValidTo
                 })
             };
-            await RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+            await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
 
             await IncrementTableEpochInternalAsync(conn, tx, consent.TableIdentifier, ct).ConfigureAwait(false);
             await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
 
             _metadataCache.TryRemove(consent.TableIdentifier.ToString().ToLowerInvariant(), out _);
             await _epochValidationService.InvalidateEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
@@ -526,6 +527,7 @@ public partial class SqlServerGovernanceRepository
         catch
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
             throw;
         }
     }
@@ -654,11 +656,27 @@ public partial class SqlServerGovernanceRepository
                 await IncrementTableEpochInternalAsync(conn, tx, tableId.Value, ct).ConfigureAwait(false);
             }
 
+            var entry = new AuditLogEntry
+            {
+                Id = Guid.NewGuid(),
+                OccurredAt = DateTimeOffset.UtcNow,
+                EventType = "CONSENT_REVOKED",
+                ActorSid = revokedBySid,
+                TargetTable = tableId.HasValue ? tableId.Value.ToString() : "unknown",
+                Decision = "REVOKE",
+                TraceId = Guid.NewGuid().ToString(),
+                DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, Reason = reason }),
+                TenantId = tenantId
+            };
+            await RecordAuditEventAsync(entry, tx, ct).ConfigureAwait(false);
+
             await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
         }
         catch
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
             throw;
         }
 
@@ -667,20 +685,6 @@ public partial class SqlServerGovernanceRepository
             _metadataCache.TryRemove(tableId.Value.ToString().ToLowerInvariant(), out _);
             await _epochValidationService.InvalidateEpochAsync(tableId.Value, ct).ConfigureAwait(false);
         }
-
-        var entry = new AuditLogEntry
-        {
-            Id = Guid.NewGuid(),
-            OccurredAt = DateTimeOffset.UtcNow,
-            EventType = "CONSENT_REVOKED",
-            ActorSid = revokedBySid,
-            TargetTable = tableId.HasValue ? tableId.Value.ToString() : "unknown",
-            Decision = "REVOKE",
-            TraceId = Guid.NewGuid().ToString(),
-            DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, Reason = reason }),
-            TenantId = tenantId
-        };
-        await RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default)
@@ -734,11 +738,27 @@ public partial class SqlServerGovernanceRepository
                 await IncrementTableEpochInternalAsync(conn, tx, tableId.Value, ct).ConfigureAwait(false);
             }
 
+            var entry = new AuditLogEntry
+            {
+                Id = Guid.NewGuid(),
+                OccurredAt = DateTimeOffset.UtcNow,
+                EventType = "CONSENT_REVOKED",
+                ActorSid = revokedBySid,
+                TargetTable = tableId.HasValue ? tableId.Value.ToString() : "unknown",
+                Decision = "REVOKE",
+                TraceId = Guid.NewGuid().ToString(),
+                DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, ConsentRequestId = consentRequestId, Reason = reason }),
+                TenantId = tenantId
+            };
+            await RecordAuditEventAsync(entry, tx, ct).ConfigureAwait(false);
+
             await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
         }
         catch
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
             throw;
         }
 
@@ -748,19 +768,6 @@ public partial class SqlServerGovernanceRepository
             await _epochValidationService.InvalidateEpochAsync(tableId.Value, ct).ConfigureAwait(false);
         }
 
-        var entry = new AuditLogEntry
-        {
-            Id = Guid.NewGuid(),
-            OccurredAt = DateTimeOffset.UtcNow,
-            EventType = "CONSENT_REVOKED",
-            ActorSid = revokedBySid,
-            TargetTable = tableId.HasValue ? tableId.Value.ToString() : "unknown",
-            Decision = "REVOKE",
-            TraceId = Guid.NewGuid().ToString(),
-            DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, ConsentRequestId = consentRequestId, Reason = reason }),
-            TenantId = tenantId
-        };
-        await RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
         return true;
     }
 
@@ -863,13 +870,15 @@ public partial class SqlServerGovernanceRepository
                 TraceId = Guid.NewGuid().ToString("N"),
                 DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, NewValidTo = newValidTo })
             };
-            await RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+            await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
 
             await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
         }
         catch
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
             throw;
         }
 
@@ -1239,14 +1248,16 @@ public partial class SqlServerGovernanceRepository
 
             req.Status = newStatus;
             var auditEntry = ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null);
-            await RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+            await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
 
             await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
             return req;
         }
         catch
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
             throw;
         }
     }
@@ -1331,14 +1342,16 @@ public partial class SqlServerGovernanceRepository
 
             req.Status = "REJECTED";
             var auditEntry = ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason);
-            await RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+            await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
 
             await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
             return req;
         }
         catch
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
             throw;
         }
     }
@@ -1477,13 +1490,15 @@ public partial class SqlServerGovernanceRepository
                 DetailsJson = JsonSerializer.Serialize(new { RequestId = requestId, Grantee = req.RequestedGranteeRef }),
                 TenantId = req.TenantId
             };
-            await RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+            await RecordAuditEventAsync(auditEntry, tx, ct).ConfigureAwait(false);
 
             await tx.CommitAsync(ct).ConfigureAwait(false);
+            OnTransactionCommitted(tx);
         }
         catch
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
+            OnTransactionRolledBack(tx);
             throw;
         }
 

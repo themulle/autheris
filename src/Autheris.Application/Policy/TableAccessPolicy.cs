@@ -15,6 +15,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Caching.Memory;
 
 /// <summary>Where the ReBAC <c>can_query</c> gate applies (see <see cref="RebacTableGate"/>).</summary>
 public enum RebacEnforcement
@@ -97,6 +98,19 @@ public sealed class TableAccessPolicy
     private readonly GatewayOptions? _options;
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
     private readonly ISchemaContractManager? _contractManager;
+    private readonly IAccessProfileRepository? _accessProfileRepository;
+    private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (IReadOnlyList<AccessProfile> Profiles, DateTimeOffset ExpireAt)> _profileCache = new();
+
+    public static void InvalidateCache(TenantId tenant, string subject)
+    {
+        _profileCache.TryRemove($"access_profile:{tenant.Value}:{subject}", out _);
+    }
+
+    public static void ClearCache()
+    {
+        _profileCache.Clear();
+    }
 
     /// <param name="mandatoryFilters">
     /// Virtual filters; required on purpose: a decision point without it would silently skip them. Use
@@ -111,7 +125,9 @@ public sealed class TableAccessPolicy
         IClientIpResolver? clientIpResolver,
         GatewayOptions? options,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver mandatoryFilters,
-        ISchemaContractManager? contractManager = null)
+        ISchemaContractManager? contractManager = null,
+        IAccessProfileRepository? accessProfileRepository = null,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null)
     {
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -122,6 +138,8 @@ public sealed class TableAccessPolicy
         _clientIpResolver = clientIpResolver;
         _options = options;
         _contractManager = contractManager;
+        _accessProfileRepository = accessProfileRepository;
+        _memoryCache = memoryCache;
     }
 
     public async Task<TableAccessDecision> DecideAsync(TableAccessQuery query, CancellationToken ct)
@@ -198,9 +216,20 @@ public sealed class TableAccessPolicy
         }
 
         var consentBypassed = _options?.IsConsentBypassed == true;
-        var decision = consentBypassed
-            ? TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
-            : await ResolveConsentAsync(query, ct).ConfigureAwait(false);
+        var profile = await ResolveActiveAccessProfileAsync(query, ct).ConfigureAwait(false);
+        TableAccessDecision decision;
+        if (profile != null)
+        {
+            decision = CreateDecisionFromProfile(profile, table, query.Metadata);
+        }
+        else if (consentBypassed)
+        {
+            decision = TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
+        }
+        else
+        {
+            decision = await ResolveConsentAsync(query, ct).ConfigureAwait(false);
+        }
 
         // Virtual filters: restrictive, AND with the consent decision (after the consent cache, which stays free of them;
         // also with the consent bypass, decision 1). They never turn a denial into an allow.
@@ -453,5 +482,113 @@ public sealed class TableAccessPolicy
             PurposeId: purpose,
             Attributes: attributes,
             TargetDialect: query.Metadata.Dialect);
+    }
+
+    private static TableAccessDecision CreateDecisionFromProfile(AccessProfile profile, TableIdentifier table, TableMetadata metadata)
+    {
+        var colAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
+        if (profile.MaskingMode == MaskingPolicyMode.Unmasked)
+        {
+            foreach (var col in metadata.Columns)
+            {
+                colAccess[col.ColumnName] = ColumnAccessLevel.Clear;
+            }
+        }
+        else if (profile.MaskingMode == MaskingPolicyMode.Default)
+        {
+            foreach (var col in metadata.Columns)
+            {
+                if (col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName))
+                {
+                    colAccess[col.ColumnName] = ColumnAccessLevel.Mask;
+                }
+                else
+                {
+                    colAccess[col.ColumnName] = ColumnAccessLevel.Clear;
+                }
+            }
+        }
+        else if (profile.MaskingMode == MaskingPolicyMode.Strict)
+        {
+            foreach (var col in metadata.Columns)
+            {
+                if (col.IsSensitive || metadata.ColumnMaskingRules.ContainsKey(col.ColumnName))
+                {
+                    colAccess[col.ColumnName] = ColumnAccessLevel.Deny;
+                }
+                else
+                {
+                    colAccess[col.ColumnName] = ColumnAccessLevel.Clear;
+                }
+            }
+        }
+
+        return TableAccessDecision.Allowed(table, colAccess, rowFilterSql: profile.RowFilterPredicate, hasUnconstrainedColumnAllow: true);
+    }
+
+    private async Task<AccessProfile?> ResolveActiveAccessProfileAsync(TableAccessQuery query, CancellationToken ct)
+    {
+        if (_accessProfileRepository == null)
+        {
+            return null;
+        }
+
+        var tenant = query.Tenant;
+        var subject = query.UserSid.Value;
+        if (string.IsNullOrWhiteSpace(subject))
+        {
+            return null;
+        }
+
+        IReadOnlyList<AccessProfile>? profiles = null;
+        var cacheKey = $"access_profile:{tenant.Value}:{subject}";
+
+        if (_memoryCache != null)
+        {
+            if (_memoryCache.TryGetValue(cacheKey, out var cachedObj) && cachedObj is IReadOnlyList<AccessProfile> cachedProfiles)
+            {
+                profiles = cachedProfiles;
+            }
+            else
+            {
+                profiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenant, subject, ct).ConfigureAwait(false);
+                using var entry = _memoryCache.CreateEntry(cacheKey);
+                entry.Value = profiles;
+                entry.Size = 1;
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
+            }
+        }
+        else if (_profileCache.TryGetValue(cacheKey, out var entry) && entry.ExpireAt > DateTimeOffset.UtcNow)
+        {
+            profiles = entry.Profiles;
+        }
+        else
+        {
+            profiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenant, subject, ct).ConfigureAwait(false);
+            _profileCache[cacheKey] = (profiles, DateTimeOffset.UtcNow.AddMinutes(5));
+        }
+
+        if ((profiles == null || profiles.Count == 0) && query.AllUserSids != null && query.AllUserSids.Count > 0)
+        {
+            foreach (var altSid in query.AllUserSids)
+            {
+                if (altSid.Value == subject) continue;
+                var altProfiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenant, altSid.Value, ct).ConfigureAwait(false);
+                if (altProfiles.Count > 0)
+                {
+                    profiles = altProfiles;
+                    break;
+                }
+            }
+        }
+
+        if (profiles == null || profiles.Count == 0)
+        {
+            return null;
+        }
+
+        var table = query.Metadata.Identifier;
+        var now = DateTimeOffset.UtcNow;
+        return profiles.FirstOrDefault(p => p.IsActive(now) && p.MatchesTable(table));
     }
 }

@@ -47,10 +47,10 @@ internal static class VirtualFilterStore
             }
         }
 
-        var profiles = new List<AccessProfile>();
+        var profiles = new List<VirtualFilterAccessProfile>();
         await using (var cmd = Command(connection, tx, @"
             SELECT id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at
-            FROM ACCESS_PROFILES ORDER BY tenant_id, name;", []))
+            FROM VIRTUAL_FILTER_ACCESS_PROFILES ORDER BY tenant_id, name;", []))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -107,14 +107,14 @@ internal static class VirtualFilterStore
         foreach (var profile in changes.SaveProfiles)
         {
             await ExecuteAsync(connection, tx, sqlServer ? @"
-                MERGE ACCESS_PROFILES WITH (HOLDLOCK) AS t
+                MERGE VIRTUAL_FILTER_ACCESS_PROFILES WITH (HOLDLOCK) AS t
                 USING (SELECT @tenant AS tenant_id, @name AS name) AS s ON t.tenant_id = s.tenant_id AND t.name = s.name
                 WHEN MATCHED THEN UPDATE SET
                     definition_json = @json, definition_hash = @hash,
                     managed_path = @path, managed_commit = @commit, updated_by = @by, updated_at = @at
                 WHEN NOT MATCHED THEN INSERT (id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
                     VALUES (@id, @tenant, @name, @json, @hash, @path, @commit, @by, @at);" : @"
-                INSERT INTO ACCESS_PROFILES (id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
+                INSERT INTO VIRTUAL_FILTER_ACCESS_PROFILES (id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
                 VALUES (@id, @tenant, @name, @json, @hash, @path, @commit, @by, @at)
                 ON CONFLICT (tenant_id, name) DO UPDATE SET
                     definition_json = excluded.definition_json, definition_hash = excluded.definition_hash,
@@ -135,7 +135,7 @@ internal static class VirtualFilterStore
 
         foreach (var (tenant, name) in changes.DeleteProfiles)
         {
-            await ExecuteAsync(connection, tx, "DELETE FROM ACCESS_PROFILES WHERE tenant_id = @tenant AND name = @name;",
+            await ExecuteAsync(connection, tx, "DELETE FROM VIRTUAL_FILTER_ACCESS_PROFILES WHERE tenant_id = @tenant AND name = @name;",
                 [("@tenant", tenant.Value), ("@name", name)], ct).ConfigureAwait(false);
         }
 
@@ -197,7 +197,7 @@ internal static class VirtualFilterStore
         filter.PendingDeletion,
         filter.DeletionRequestedBy?.Value);
 
-    private static ProfileDto ProfileToDto(AccessProfile profile) => new(
+    private static ProfileDto ProfileToDto(VirtualFilterAccessProfile profile) => new(
         profile.GranteeType,
         profile.GranteeSid?.Value,
         profile.RoleName,
@@ -240,7 +240,7 @@ internal static class VirtualFilterStore
         DeletionRequestedBy = string.IsNullOrWhiteSpace(dto.DeletionRequestedBy) ? (Sid?)null : new Sid(dto.DeletionRequestedBy!)
     };
 
-    private static AccessProfile DtoToProfile(ProfileDto dto, Guid id, TenantId tenantId, string name) => new()
+    private static VirtualFilterAccessProfile DtoToProfile(ProfileDto dto, Guid id, TenantId tenantId, string name) => new()
     {
         Id = id,
         TenantId = tenantId,
@@ -285,7 +285,7 @@ internal static class VirtualFilterStore
         };
     }
 
-    private static AccessProfile ReadProfile(DbDataReader reader)
+    private static VirtualFilterAccessProfile ReadProfile(DbDataReader reader)
     {
         var dto = JsonSerializer.Deserialize<ProfileDto>(reader.GetString(3))
             ?? throw new InvalidOperationException("Access profile definition is empty.");

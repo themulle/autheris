@@ -59,6 +59,7 @@ public partial class SqliteGovernanceRepository
         }
 
         DeduplicateDataOwnersBeforeIndex(_connection);
+        EnsureAccessProfilesTableMigration(_connection);
 
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = @"
@@ -216,6 +217,15 @@ public partial class SqliteGovernanceRepository
             CREATE INDEX IF NOT EXISTS idx_audit_target_table ON AUDIT_LOG_ENTRIES (target_table, occurred_at);
             CREATE INDEX IF NOT EXISTS idx_audit_actor_sid ON AUDIT_LOG_ENTRIES (actor_sid, occurred_at);
 
+            -- AU-05: Dead-letter queue for failed audit batches
+            CREATE TABLE IF NOT EXISTS AUDIT_DEAD_LETTER (
+                id TEXT PRIMARY KEY,
+                batch_json TEXT NOT NULL,
+                error_message TEXT NOT NULL,
+                failed_at TEXT NOT NULL,
+                tenant_id TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS CONSENT_REQUESTS (
                 id TEXT PRIMARY KEY,
                 table_id TEXT NOT NULL,
@@ -302,7 +312,7 @@ public partial class SqliteGovernanceRepository
                 UNIQUE (tenant_id, name)
             );
 
-            CREATE TABLE IF NOT EXISTS ACCESS_PROFILES (
+            CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_ACCESS_PROFILES (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
                 name TEXT NOT NULL,
@@ -314,6 +324,34 @@ public partial class SqliteGovernanceRepository
                 updated_at TEXT NOT NULL,
                 UNIQUE (tenant_id, name)
             );
+
+            CREATE TABLE IF NOT EXISTS ACCESS_PROFILES (
+                profile_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                masking_mode TEXT NOT NULL DEFAULT 'Default',
+                target_tables TEXT NOT NULL DEFAULT '[""*.*""]',
+                row_filter_predicate TEXT,
+                justification TEXT,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                valid_to TEXT,
+                PRIMARY KEY (tenant_id, profile_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS ACCESS_PROFILE_ASSIGNMENTS (
+                profile_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                subject_type TEXT NOT NULL DEFAULT 'User',
+                assigned_at TEXT NOT NULL,
+                expires_at TEXT,
+                PRIMARY KEY (tenant_id, profile_id, subject),
+                FOREIGN KEY (tenant_id, profile_id) REFERENCES ACCESS_PROFILES (tenant_id, profile_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_ACCESS_PROFILE_ASSIGNMENTS_SUBJECT 
+                ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject);
 
             CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_GENERATION (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -1016,6 +1054,35 @@ public partial class SqliteGovernanceRepository
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Error while deduplicating DATA_OWNERS table before unique index creation.");
+        }
+    }
+
+    private static void EnsureAccessProfilesTableMigration(SqliteConnection conn)
+    {
+        try
+        {
+            using var pragma = conn.CreateCommand();
+            pragma.CommandText = "PRAGMA table_info(ACCESS_PROFILES);";
+            using var reader = pragma.ExecuteReader();
+            bool hasProfileId = false;
+            bool hasId = false;
+            while (reader.Read())
+            {
+                var col = reader.GetString(1);
+                if (string.Equals(col, "profile_id", StringComparison.OrdinalIgnoreCase)) hasProfileId = true;
+                if (string.Equals(col, "id", StringComparison.OrdinalIgnoreCase)) hasId = true;
+            }
+            reader.Close();
+            if (hasId && !hasProfileId)
+            {
+                using var migrate = conn.CreateCommand();
+                migrate.CommandText = "ALTER TABLE ACCESS_PROFILES RENAME TO VIRTUAL_FILTER_ACCESS_PROFILES;";
+                migrate.ExecuteNonQuery();
+            }
+        }
+        catch
+        {
+            // Table might not exist yet; ignore
         }
     }
 }

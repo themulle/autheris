@@ -47,6 +47,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
     private readonly Channel<AuditLogEntry> _auditChannel;
     private readonly CancellationTokenSource _auditCts = new();
     private readonly Task _auditProcessorTask;
+    private static readonly byte[] ProcessEphemeralAuditHmacKey = RandomNumberGenerator.GetBytes(32);
     private string _lastAuditHash = "GENESIS_0000000000000000000000000000000000000000000000000000000000000000";
     private long _lastAuditSeq;
     private readonly byte[] _auditHmacKey;
@@ -83,7 +84,6 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
             SingleWriter = false
         };
         _auditChannel = Channel.CreateBounded<AuditLogEntry>(channelOptions);
-        _auditProcessorTask = Task.Run(ProcessAuditChannelAsync);
 
         // SEC-04: Resolve or derive dedicated HMAC-SHA256 key for authentic tamper-evident audit logging (N-6)
         byte[]? key = null;
@@ -109,8 +109,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
         var envName = environment?.EnvironmentName ??
                       Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ??
                       Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
-        bool isDevOrTest = string.IsNullOrEmpty(envName) ||
-                           string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase);
+        bool isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
         if (key != null)
         {
             Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(key, "The audit HMAC key (AuditHmacKeyVaultRef)", isDevOrTest);
@@ -179,17 +179,26 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
             }
         }
 
-        if (key == null)
-        {
-            _auditHmacKey = "AutherisAuditLogHmacTamperEvidenceSecret2026!"u8.ToArray();
-        }
-        else
-        {
-            _auditHmacKey = key;
-        }
+        _auditHmacKey = key ?? ProcessEphemeralAuditHmacKey;
 
         // SEC H-17: dedicated sub-key for signing the external audit chain end anchor.
         _auditAnchorKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, _auditHmacKey, 32, info: "Autheris:AuditChainAnchor:v1"u8.ToArray());
+
+        // AU-01 & AU-03: Startabbruch (Fail-Closed) außerhalb von Dev/Test ohne persistenten Anker-Pfad oder KMS-Signer.
+        if (!isDevOrTest && auditAnchorStore == null && isMemory)
+        {
+            if (string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorPath) &&
+                string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorWormDirectory) &&
+                string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorSignerKeyVaultRef) &&
+                auditAnchorSigner == null)
+            {
+                throw new InvalidOperationException(
+                    "CRITICAL AUDIT MISCONFIGURATION (AU-01/AU-03): In production environments, " +
+                    "a persistent audit anchor store (ChainAnchorPath, ChainAnchorWormDirectory, or KMS Signer) " +
+                    "is mandatory. In-memory anchor stores are strictly prohibited outside Development/Test.");
+            }
+        }
+
         _auditAnchorStore = auditAnchorStore ?? AuditChainAnchorStoreFactory.Create(
             options?.Value?.Audit,
             CreateDefaultAuditAnchorStore(connStr, isMemory, options?.Value?.Audit?.ChainAnchorPath),
@@ -203,6 +212,9 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
         {
             SeedInitialCatalog();
         }
+
+        // AU-12: Background processor starts only after keys and stores are completely initialized
+        _auditProcessorTask = Task.Run(ProcessAuditChannelAsync);
     }
 
 
@@ -226,9 +238,10 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
         {
             _auditProcessorTask.GetAwaiter().GetResult();
         }
-        catch
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
         {
-            // Ignore cancellation or drain exceptions during disposal
+            _logger?.LogError(ex, "Error while draining audit channel during disposal.");
         }
 
         try

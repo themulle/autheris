@@ -261,7 +261,7 @@ public sealed record VirtualFilter
 }
 
 /// <summary>
-/// One filter of an <see cref="AccessProfile"/>: applies the virtual filter to the objects matched by
+/// One filter of an <see cref="VirtualFilterAccessProfile"/>: applies the virtual filter to the objects matched by
 /// <see cref="TargetPattern"/> (or the profile's scope). A binding only restricts: it is combined with AND with the
 /// consent decision and never grants access.
 /// </summary>
@@ -315,7 +315,7 @@ public sealed record FilterBinding
 /// The virtual filters of one grantee (design 3.1): grantee, scope, bindings and what applies to objects in the scope
 /// that no binding covers (<see cref="Uncovered"/>, on the profile because filters of one grantee complement each other).
 /// </summary>
-public sealed record AccessProfile
+public sealed record VirtualFilterAccessProfile
 {
     public Guid Id { get; init; } = Guid.NewGuid();
     public TenantId TenantId { get; init; } = TenantId.LegacySingleTenant;
@@ -341,7 +341,7 @@ public sealed record AccessProfile
     public DateTimeOffset? ApprovedAt { get; init; }
     public bool PendingDeletion { get; init; } = false;
     public Sid? DeletionRequestedBy { get; init; }
-    public AccessProfile? Draft { get; init; }
+    public VirtualFilterAccessProfile? Draft { get; init; }
 
     /// <summary>Hash stored with the row (set by the repository).</summary>
     public string? StoredDefinitionHash { get; init; }

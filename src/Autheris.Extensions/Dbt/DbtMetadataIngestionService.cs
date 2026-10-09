@@ -516,8 +516,24 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
 
     private static readonly HashSet<string> ValidMaskingRuleTypes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "REDACT", "NULLIFY", "HMAC", "HMAC_SHA256", "HASH", "MASK_EMAIL", "MASK_IBAN", "MASK_PHONE", "REGEX"
+        "REDACT", "NULLIFY", "HMAC", "HMAC_SHA256", "HASH", "MASK_EMAIL", "MASK_IBAN", "MASK_PHONE", "REGEX",
+        "GEO_JITTER", "PARTIAL_MASK", "TOKENIZE", "TOKENIZATION"
     };
+
+    private static string NormalizeMaskingRuleType(string raw)
+    {
+        var trimmed = raw.Trim().ToUpperInvariant();
+        return trimmed switch
+        {
+            "GEO_JITTER" or "GEOJITTER" => "GEO_JITTER",
+            "PARTIAL_MASK" or "PARTIAL" or "PARTIALMASK" => "PARTIAL_MASK",
+            "TOKENIZE" or "TOKENIZATION" => "TOKENIZE",
+            "NULLING" or "NULLIFY" => "NULLIFY",
+            "PSEUDONYMIZE" or "PSEUDONYMIZATION" or "HMAC" or "HMAC_SHA256" => "HMAC",
+            "REDACT_COMPLETE" or "REDACT" => "REDACT",
+            _ => trimmed
+        };
+    }
 
     public async Task<DbtGovernanceSyncResult> IngestGovernanceFileAsync(string filePath, bool dryRun = false, bool replace = false, CancellationToken ct = default)
     {
@@ -705,7 +721,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                                 }
                                 else
                                 {
-                                    var upperRule = rawRule.ToUpperInvariant();
+                                    var upperRule = NormalizeMaskingRuleType(rawRule);
                                     if (!ValidMaskingRuleTypes.Contains(upperRule))
                                     {
                                         // B-01: reject unknown rule type
@@ -738,6 +754,94 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
 
                                     updatedMaskingRules[col.ColumnName] = newRule;
                                 }
+                            }
+                            else if (mrProp.ValueKind == JsonValueKind.Object)
+                            {
+                                string? rawRule = null;
+                                if (mrProp.TryGetProperty("rule_type", out var rtProp) ||
+                                    mrProp.TryGetProperty("type", out rtProp) ||
+                                    mrProp.TryGetProperty("RuleType", out rtProp))
+                                {
+                                    rawRule = rtProp.GetString();
+                                }
+
+                                if (string.IsNullOrWhiteSpace(rawRule))
+                                {
+                                    throw new ArgumentException($"Masking rule object on column '{col.ColumnName}' missing rule_type.");
+                                }
+
+                                var upperRule = NormalizeMaskingRuleType(rawRule);
+                                if (!ValidMaskingRuleTypes.Contains(upperRule))
+                                {
+                                    throw new ArgumentException($"Unknown masking rule '{rawRule}' on column '{col.ColumnName}'.");
+                                }
+
+                                var newRule = new MaskingRule
+                                {
+                                    RuleType = upperRule,
+                                    Replacement = upperRule == "REDACT" ? "[REDACTED]" : null
+                                };
+
+                                if (mrProp.TryGetProperty("replacement", out var repProp) || mrProp.TryGetProperty("Replacement", out repProp))
+                                {
+                                    newRule = newRule with { Replacement = repProp.GetString() };
+                                }
+                                if (mrProp.TryGetProperty("mode", out var ruleModeProp) || mrProp.TryGetProperty("Mode", out ruleModeProp))
+                                {
+                                    newRule = newRule with { Mode = ruleModeProp.GetString() };
+                                }
+                                if (mrProp.TryGetProperty("decimals", out var decProp) || mrProp.TryGetProperty("Decimals", out decProp))
+                                {
+                                    if (decProp.TryGetInt32(out var decVal)) newRule = newRule with { Decimals = decVal };
+                                }
+                                if (mrProp.TryGetProperty("radius_meters", out var radProp) || mrProp.TryGetProperty("radiusMeters", out radProp) || mrProp.TryGetProperty("RadiusMeters", out radProp))
+                                {
+                                    if (radProp.TryGetDouble(out var radVal)) newRule = newRule with { RadiusMeters = radVal };
+                                }
+                                if (mrProp.TryGetProperty("keep_prefix", out var kpProp) || mrProp.TryGetProperty("keepPrefix", out kpProp) || mrProp.TryGetProperty("KeepPrefix", out kpProp))
+                                {
+                                    if (kpProp.TryGetInt32(out var kpVal)) newRule = newRule with { KeepPrefix = kpVal };
+                                }
+                                if (mrProp.TryGetProperty("keep_suffix", out var ksProp) || mrProp.TryGetProperty("keepSuffix", out ksProp) || mrProp.TryGetProperty("KeepSuffix", out ksProp))
+                                {
+                                    if (ksProp.TryGetInt32(out var ksVal)) newRule = newRule with { KeepSuffix = ksVal };
+                                }
+                                if (mrProp.TryGetProperty("mask_char", out var mcProp) || mrProp.TryGetProperty("maskChar", out mcProp) || mrProp.TryGetProperty("MaskChar", out mcProp))
+                                {
+                                    var mcStr = mcProp.GetString();
+                                    if (!string.IsNullOrEmpty(mcStr)) newRule = newRule with { MaskChar = mcStr[0] };
+                                }
+                                if (mrProp.TryGetProperty("fixed_length", out var flProp) || mrProp.TryGetProperty("fixedLength", out flProp) || mrProp.TryGetProperty("FixedLength", out flProp))
+                                {
+                                    if (flProp.ValueKind == JsonValueKind.True || flProp.ValueKind == JsonValueKind.False)
+                                    {
+                                        newRule = newRule with { FixedLength = flProp.GetBoolean() };
+                                    }
+                                }
+                                if (mrProp.TryGetProperty("token_domain", out var tdProp) || mrProp.TryGetProperty("tokenDomain", out tdProp) || mrProp.TryGetProperty("TokenDomain", out tdProp))
+                                {
+                                    newRule = newRule with { TokenDomain = tdProp.GetString() };
+                                }
+
+                                if (existingMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var existingRule))
+                                {
+                                    int oldStrength = CatalogGovernanceRatchet.MaskingRuleStrength(existingRule);
+                                    int newStrength = CatalogGovernanceRatchet.MaskingRuleStrength(newRule);
+                                    if (newStrength < oldStrength)
+                                    {
+                                        relaxedMaskingRulesCount++;
+                                    }
+                                    else
+                                    {
+                                        maskingRulesCount++;
+                                    }
+                                }
+                                else
+                                {
+                                    maskingRulesCount++;
+                                }
+
+                                updatedMaskingRules[col.ColumnName] = newRule;
                             }
                         }
                         else if (effectiveReplace)
@@ -996,9 +1100,9 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         };
     }
 
-    private static List<AccessProfile> ParseAccessProfiles(JsonElement element)
+    private static List<VirtualFilterAccessProfile> ParseAccessProfiles(JsonElement element)
     {
-        var result = new List<AccessProfile>();
+        var result = new List<VirtualFilterAccessProfile>();
         if (element.ValueKind == JsonValueKind.Object)
         {
             foreach (var prop in element.EnumerateObject())
@@ -1020,7 +1124,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         return result;
     }
 
-    private static AccessProfile? ParseSingleProfile(string name, JsonElement val)
+    private static VirtualFilterAccessProfile? ParseSingleProfile(string name, JsonElement val)
     {
         var tenantStr = val.TryGetProperty("tenant", out var tProp) ? tProp.GetString() : null;
         var tenant = !string.IsNullOrWhiteSpace(tenantStr) ? new TenantId(tenantStr) : TenantId.LegacySingleTenant;
@@ -1083,7 +1187,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             }
         }
 
-        return new AccessProfile
+        return new VirtualFilterAccessProfile
         {
             TenantId = tenant,
             Name = name,

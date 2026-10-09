@@ -89,55 +89,6 @@ public sealed class TableColumn
     public IReadOnlyDictionary<string, string> Meta { get; init; } = new Dictionary<string, string>();
 }
 
-public sealed class MaskingRule
-{
-    public Guid Id { get; init; } = Guid.NewGuid();
-    public Guid TableColumnId { get; init; }
-    public string RuleType { get; init; } = "REDACT"; // REGEX, HMAC, REDACT, NULLIFY
-    public string? PatternOrFormat { get; init; }
-    public string? Replacement { get; init; }
-    public string? HmacKeyId { get; init; }
-
-    /// <summary>R-POL-12: the one definition of a keyed pseudonymization rule (HMAC, HMAC_SHA256 and the HASH alias).</summary>
-    public bool IsHmac => (RuleType ?? string.Empty).Trim().ToUpperInvariant() is "HMAC" or "HMAC_SHA256" or "HASH";
-
-    /// <summary>
-    /// SEC H-13 / SEC D-3: Creates a tenant-scoped copy of an HMAC masking rule, keyed as {baseKeyId}|tenant:{tenant}.
-    /// Idempotent: a rule that is already scoped to the requested tenant is returned unchanged.
-    /// Rejects rules that are already scoped to a DIFFERENT tenant (prevents cross-tenant correlation).
-    /// </summary>
-    public static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId = null)
-    {
-        ArgumentNullException.ThrowIfNull(rule);
-        ArgumentException.ThrowIfNullOrWhiteSpace(tenant);
-
-        var expectedSuffix = $"|tenant:{tenant}";
-        if (rule.HmacKeyId != null)
-        {
-            if (rule.HmacKeyId.EndsWith(expectedSuffix, StringComparison.Ordinal))
-            {
-                return rule;
-            }
-
-            if (rule.HmacKeyId.Contains("|tenant:", StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"The masking rule is already bound to another tenant ('{rule.HmacKeyId}'). Cross-tenant use for tenant '{tenant}' is not allowed.");
-            }
-        }
-
-        var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
-        return new MaskingRule
-        {
-            Id = rule.Id,
-            TableColumnId = rule.TableColumnId,
-            RuleType = "HMAC_SHA256",
-            PatternOrFormat = rule.PatternOrFormat,
-            Replacement = rule.Replacement,
-            HmacKeyId = $"{baseKeyId}{expectedSuffix}"
-        };
-    }
-}
 
 public sealed record TableMetadata
 {

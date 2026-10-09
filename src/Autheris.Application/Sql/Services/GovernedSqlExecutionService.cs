@@ -97,8 +97,12 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         IConsentCacheService? consentCache = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
-        Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null)
+        Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
+        IAccessProfileRepository? accessProfileRepository = null,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null)
     {
+        _accessProfileRepository = accessProfileRepository;
+        _memoryCache = memoryCache;
         _contractManager = contractManager;
         _mandatoryFilters = mandatoryFilters;
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -916,6 +920,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         // DML statements are audited separately (WEBSQL_DML_*), without SQL text that may carry literal data values.
         if (_auditLogRepository != null && !dmlContext.IsDml)
         {
+            var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
+            var (redactedSecuredSql, _) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(securedSql);
             var userSid = ResolveUserSid(user);
             await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
             {
@@ -927,8 +933,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 TraceId = Guid.NewGuid().ToString("N"),
                 DetailsJson = JsonSerializer.Serialize(new
                 {
-                    originalSql = request.Sql,
-                    securedSql,
+                    originalSql = redactedOriginalSql,
+                    originalSqlHash,
+                    securedSql = redactedSecuredSql,
                     dataSource = dsName,
                     virtual_filters = rewrite.VirtualFilters
                 })
@@ -1469,11 +1476,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
     /// <summary>Architecture 1: the shared table access decision; only called with consent services present.</summary>
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
+    private readonly IAccessProfileRepository? _accessProfileRepository;
+    private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
 
     private TableAccessPolicy AccessPolicy() =>
         new(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value,
             _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
-            _contractManager);
+            _contractManager,
+            _accessProfileRepository,
+            _memoryCache);
 
     /// <summary>
     /// SEC P-05: Dialect of the configured connection for <paramref name="dataSourceName"/>, or null when no connection
@@ -1708,6 +1719,39 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             if (ruleType == "MASK_IBAN")
             {
                 return BuildIbanMaskExpression(columnName, tableMeta.Dialect);
+            }
+            if (ruleType == "GEO_JITTER")
+            {
+                var targetDialect = tableMeta.Dialect switch
+                {
+                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
+                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
+                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
+                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
+                };
+                return TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
+                    columnName,
+                    "GEO_JITTER",
+                    targetDialect,
+                    decimals: rule.Decimals ?? 2);
+            }
+            if (ruleType == "PARTIAL_MASK")
+            {
+                var targetDialect = tableMeta.Dialect switch
+                {
+                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
+                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
+                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
+                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
+                };
+                return TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
+                    columnName,
+                    "PARTIAL_MASK",
+                    targetDialect,
+                    keepPrefix: rule.KeepPrefix ?? 1,
+                    keepSuffix: rule.KeepSuffix ?? 0,
+                    maskChar: rule.MaskChar ?? '*',
+                    fixedLength: rule.FixedLength ?? false);
             }
             var col = tableMeta.Columns?.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
             if (col != null && IsNumericOrTemporalType(col.DataType))
