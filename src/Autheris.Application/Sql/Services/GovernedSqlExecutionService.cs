@@ -99,10 +99,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
-        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null)
-        : this(options, Autheris.Application.Audit.NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, planCache, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache)
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+        IServiceProvider? serviceProvider = null,
+        IFederatedQueryExecutionService? federatedExecutionService = null)
+        : this(options, Autheris.Application.Audit.NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, planCache, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService)
     {
     }
+
+    private readonly IServiceProvider? _serviceProvider;
+    private readonly IFederatedQueryExecutionService? _federatedExecutionService;
 
     public GovernedSqlExecutionService(
         IOptions<GatewayOptions> options,
@@ -126,7 +131,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
-        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null)
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+        IServiceProvider? serviceProvider = null,
+        IFederatedQueryExecutionService? federatedExecutionService = null)
     {
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache;
@@ -150,6 +157,27 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
         _rebacEvaluator = rebacEvaluator;
         _consentCache = consentCache;
+        _serviceProvider = serviceProvider;
+        _federatedExecutionService = federatedExecutionService;
+    }
+
+    private IFederatedQueryExecutionService ResolveFederatedService()
+    {
+        if (_federatedExecutionService != null)
+        {
+            return _federatedExecutionService;
+        }
+
+        if (_serviceProvider != null)
+        {
+            var service = (IFederatedQueryExecutionService?)_serviceProvider.GetService(typeof(IFederatedQueryExecutionService));
+            if (service != null)
+            {
+                return service;
+            }
+        }
+
+        throw new WebSqlPolicyException("Cross-source query execution service is not configured.");
     }
 
     public async Task<string> RewriteSqlAsync(
@@ -158,8 +186,16 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         TenantId tenantId,
         CancellationToken ct = default)
     {
-        var rewrite = await RewriteCoreAsync(rawSql, user, tenantId, dataSourceName: null, dmlContext: null, ct).ConfigureAwait(false);
-        return rewrite.Sql;
+        try
+        {
+            var rewrite = await RewriteCoreAsync(rawSql, user, tenantId, dataSourceName: null, dmlContext: null, ct).ConfigureAwait(false);
+            return rewrite.Sql;
+        }
+        catch (CrossSourceRoutingException)
+        {
+            var federatedService = ResolveFederatedService();
+            return await federatedService.RewriteSqlAsync(rawSql, user, tenantId, ct).ConfigureAwait(false);
+        }
     }
 
     private async Task<GovernedRewrite> RewriteCoreAsync(
@@ -337,6 +373,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
         if (distinctCatalogs.Count > 1)
         {
+            if (_options.Value.WebSql?.CrossSource?.Enabled == true)
+            {
+                throw new CrossSourceRoutingException();
+            }
+
             throw new WebSqlPolicyException("Cross-catalog queries across multiple data sources are not supported in WebSQL.");
         }
 
@@ -500,6 +541,18 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 throw TableDenied(target);
             }
 
+            // Phase 0: Non-SQL tables are not supported in the pushdown path (fail-closed).
+            if (tableMeta.Table.DataSourceType != DataSourceType.Sql)
+            {
+                if (_options.Value.WebSql?.CrossSource?.Enabled == true)
+                {
+                    throw new CrossSourceRoutingException();
+                }
+
+                _logger?.LogWarning("WebSQL pushdown rejected table {Table}: data source type {Type} is not supported in pushdown.", target.FullName, tableMeta.Table.DataSourceType);
+                throw new WebSqlPolicyException($"WebSQL pushdown does not support table '{target.FullName}' with data source type '{tableMeta.Table.DataSourceType}'.");
+            }
+
             // SEC P-05: Only dialects with a dedicated rewrite (PostgreSQL, SQL Server, SQLite) are supported (fail-closed).
             if (!IsWebSqlSupportedDialect(tableMeta.Dialect))
             {
@@ -539,6 +592,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             if (!string.IsNullOrWhiteSpace(tableMeta.Table.SourceName) &&
                 !string.Equals(tableMeta.Table.SourceName, effectiveDataSourceName, StringComparison.OrdinalIgnoreCase))
             {
+                if (_options.Value.WebSql?.CrossSource?.Enabled == true)
+                {
+                    throw new CrossSourceRoutingException();
+                }
+
                 _logger?.LogWarning("WebSQL rejected table {Table}: catalog source does not match the requested data source.", target.FullName);
                 throw TableDenied(target);
             }
@@ -551,6 +609,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             {
                 if (!string.Equals(target.Catalog, effectiveDataSourceName, StringComparison.OrdinalIgnoreCase))
                 {
+                    if (_options.Value.WebSql?.CrossSource?.Enabled == true)
+                    {
+                        throw new CrossSourceRoutingException();
+                    }
+
                     _logger?.LogWarning("WebSQL rejected table {Table}: catalog '{Catalog}' does not match active data source '{DataSource}'.",
                         target.FullName, target.Catalog, effectiveDataSourceName);
                     throw TableDenied(target);
@@ -661,44 +724,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 {
                     columnMasks[col.ColumnName] = GetMaskExpressionForRule(col.ColumnName, tableMeta, tenantId, internalParameters, hmacKeyParameterNames, out isEffectiveHmac);
                 }
-
-                // SEC-JOIN-01 / SQL-6: Zero-Trust Guardrail: Check if any statically redacted column is used as a JOIN predicate for this table
-                if (lvl != ColumnAccessLevel.Clear && !isEffectiveHmac)
-                {
-                    bool isUsedInJoin = false;
-                    if (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Count > 0)
-                    {
-                        isUsedInJoin = metadata.JoinColumnReferences.Any(jc => ReferencesColumn(jc.TableOrAlias, jc.ColumnName, col.ColumnName, target));
-                    }
-
-                    if (isUsedInJoin)
-                    {
-                        string ruleDesc = tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
-                            ? mRule.RuleType ?? "REDACT"
-                            : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
-
-                        throw new WebSqlPolicyException(
-                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
-                    }
-
-                    // SEC-FILTER-01 / Befund 3.6: Zero-Trust Guardrail: Check if any masked or denied column is used in WHERE / HAVING / ORDER BY
-                    bool isUsedInFilter = false;
-                    if (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Count > 0)
-                    {
-                        isUsedInFilter = metadata.FilterColumnReferences.Any(fc => ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, target));
-                    }
-
-                    if (isUsedInFilter)
-                    {
-                        string ruleDesc = tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
-                            ? mRule.RuleType ?? "REDACT"
-                            : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
-
-                        throw new WebSqlPolicyException(
-                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING/ORDER BY). Filtering or sorting on masked or denied columns would run against the redacted value and is forbidden to prevent oracle inference attacks.");
-                    }
-                }
             }
+
+            // SEC-JOIN-01 & SEC-FILTER-01 Guardrails (INV-4)
+            EnforceMaskedColumnGuardrails(target, tableMeta, decision, metadata);
 
             if (columnMasks.Count > 0)
             {
@@ -883,7 +912,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         Func<DbDataReader, CancellationToken, Task> rowWriter,
         CancellationToken ct = default)
     {
-        await ExecuteCoreAsync(request, user, tenantId, rowWriter, ct).ConfigureAwait(false);
+        try
+        {
+            await ExecuteCoreAsync(request, user, tenantId, rowWriter, ct).ConfigureAwait(false);
+        }
+        catch (CrossSourceRoutingException)
+        {
+            var federatedService = ResolveFederatedService();
+            await federatedService.ExecuteGovernedQueryAsync(request, user, tenantId, rowWriter, ct).ConfigureAwait(false);
+        }
     }
 
     private async Task<string> ExecuteCoreAsync(
@@ -1338,50 +1375,58 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var rows = new List<IReadOnlyDictionary<string, object?>>();
-        var columns = new List<string>();
-        IReadOnlyList<SqlResultColumn> columnDescriptions = Array.Empty<SqlResultColumn>();
-        bool isTruncated = false;
-        var sw = Stopwatch.StartNew();
+        try
+        {
+            var rows = new List<IReadOnlyDictionary<string, object?>>();
+            var columns = new List<string>();
+            IReadOnlyList<SqlResultColumn> columnDescriptions = Array.Empty<SqlResultColumn>();
+            bool isTruncated = false;
+            var sw = Stopwatch.StartNew();
 
-        string securedSql = await ExecuteCoreAsync(
-            request,
-            user,
-            tenantId,
-            async (reader, token) =>
-            {
-                // WebSQL findings 2.3: unnamed and duplicate columns get unique names (_colN), so no value is lost.
-                columnDescriptions = SqlResultColumns.Describe(reader);
-                foreach (var column in columnDescriptions)
+            string securedSql = await ExecuteCoreAsync(
+                request,
+                user,
+                tenantId,
+                async (reader, token) =>
                 {
-                    columns.Add(column.Name);
-                }
-
-                while (await reader.ReadAsync(token).ConfigureAwait(false))
-                {
-                    var row = new Dictionary<string, object?>(reader.FieldCount, StringComparer.OrdinalIgnoreCase);
-                    for (int i = 0; i < reader.FieldCount; i++)
+                    // WebSQL findings 2.3: unnamed and duplicate columns get unique names (_colN), so no value is lost.
+                    columnDescriptions = SqlResultColumns.Describe(reader);
+                    foreach (var column in columnDescriptions)
                     {
-                        row[columns[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        columns.Add(column.Name);
                     }
-                    rows.Add(row);
-                }
 
-                isTruncated = reader is RowLimitedDataReader { HasMoreRows: true };
-            },
-            ct).ConfigureAwait(false);
+                    while (await reader.ReadAsync(token).ConfigureAwait(false))
+                    {
+                        var row = new Dictionary<string, object?>(reader.FieldCount, StringComparer.OrdinalIgnoreCase);
+                        for (int i = 0; i < reader.FieldCount; i++)
+                        {
+                            row[columns[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        }
+                        rows.Add(row);
+                    }
 
-        sw.Stop();
+                    isTruncated = reader is RowLimitedDataReader { HasMoreRows: true };
+                },
+                ct).ConfigureAwait(false);
 
-        return new GovernedSqlResult(
-            OriginalSql: request.Sql,
-            RewrittenSql: securedSql,
-            Columns: columns.AsReadOnly(),
-            Rows: rows.AsReadOnly(),
-            RowCount: rows.Count,
-            ElapsedMilliseconds: sw.ElapsedMilliseconds,
-            Truncated: isTruncated,
-            ColumnDescriptions: columnDescriptions);
+            sw.Stop();
+
+            return new GovernedSqlResult(
+                OriginalSql: request.Sql,
+                RewrittenSql: securedSql,
+                Columns: columns.AsReadOnly(),
+                Rows: rows.AsReadOnly(),
+                RowCount: rows.Count,
+                ElapsedMilliseconds: sw.ElapsedMilliseconds,
+                Truncated: isTruncated,
+                ColumnDescriptions: columnDescriptions);
+        }
+        catch (CrossSourceRoutingException)
+        {
+            var federatedService = ResolveFederatedService();
+            return await federatedService.ExecuteQueryBufferedAsync(request, user, tenantId, ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -1502,10 +1547,74 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     }
 
     /// <summary>
+    /// SEC-JOIN-01 & SEC-FILTER-01 Zero-Trust Guardrails (INV-4) shared between direct and federated execution paths.
+    /// </summary>
+    internal static void EnforceMaskedColumnGuardrails(
+        TableAccessTarget target,
+        TableMetadata tableMeta,
+        TableAccessDecision decision,
+        SqlQueryMetadata metadata)
+    {
+        foreach (var col in tableMeta.Columns)
+        {
+            var lvl = decision.GetEffectiveColumnAccess(col.ColumnName, tableMeta);
+            bool isEffectiveHmac = false;
+            if (lvl == ColumnAccessLevel.Mask)
+            {
+                if (tableMeta.ColumnMaskingRules != null &&
+                    tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule))
+                {
+                    if (string.Equals(rule.RuleType, "HMAC", StringComparison.OrdinalIgnoreCase))
+                    {
+                        isEffectiveHmac = true;
+                    }
+                }
+            }
+
+            if (lvl != ColumnAccessLevel.Clear && !isEffectiveHmac)
+            {
+                // SEC-JOIN-01 / SQL-6: Zero-Trust Guardrail: Check if any statically redacted column is used as a JOIN predicate for this table
+                bool isUsedInJoin = false;
+                if (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Count > 0)
+                {
+                    isUsedInJoin = metadata.JoinColumnReferences.Any(jc => ReferencesColumn(jc.TableOrAlias, jc.ColumnName, col.ColumnName, target));
+                }
+
+                if (isUsedInJoin)
+                {
+                    string ruleDesc = tableMeta.ColumnMaskingRules != null && tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
+                        ? mRule.RuleType ?? "REDACT"
+                        : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
+
+                    throw new WebSqlPolicyException(
+                        $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
+                }
+
+                // SEC-FILTER-01 / Befund 3.6: Zero-Trust Guardrail: Check if any masked or denied column is used in WHERE / HAVING / ORDER BY
+                bool isUsedInFilter = false;
+                if (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Count > 0)
+                {
+                    isUsedInFilter = metadata.FilterColumnReferences.Any(fc => ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, target));
+                }
+
+                if (isUsedInFilter)
+                {
+                    string ruleDesc = tableMeta.ColumnMaskingRules != null && tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
+                        ? mRule.RuleType ?? "REDACT"
+                        : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
+
+                    throw new WebSqlPolicyException(
+                        $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING/ORDER BY). Filtering or sorting on masked or denied columns would run against the redacted value and is forbidden to prevent oracle inference attacks.");
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// SQL-6: true when a column reference (<paramref name="tableOrAlias"/>, <paramref name="referencedColumn"/>) names
     /// <paramref name="columnName"/> unqualified or qualified with the alias, table name or full name of <paramref name="target"/>.
     /// </summary>
-    private static bool ReferencesColumn(string? tableOrAlias, string referencedColumn, string columnName, TableAccessTarget target)
+    internal static bool ReferencesColumn(string? tableOrAlias, string referencedColumn, string columnName, TableAccessTarget target)
     {
         if (!string.Equals(referencedColumn, columnName, StringComparison.OrdinalIgnoreCase))
             return false;

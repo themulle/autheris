@@ -1427,8 +1427,26 @@ public sealed class WebSqlOptions
     public string? SqlRewriterEngine { get; init; }
 
     /// <summary>
-    /// Legacy alias for <see cref="AllowDml"/> (reported as WARN with the hint to use WebSql.AllowDml).
+    /// Heterogeneous Cross-Source / Federation Join options (DuckDB in-process engine).
     /// </summary>
+    public CrossSourceOptions CrossSource { get; init; } = new();
+}
+
+public sealed class CrossSourceOptions
+{
+    public bool Enabled { get; init; } = false;
+    public List<string> AllowedTransports { get; init; } = ["WebSql", "Trino"];
+    public int MaxTableCount { get; init; } = 5;
+    public int MaxStagedRowsPerTable { get; init; } = 50000;
+    public int MaxTotalStagedRows { get; init; } = 200000;
+    public long MaxStagedBytesPerTable { get; init; } = 32 * 1024 * 1024;
+    public long MaxTotalStagedBytes { get; init; } = 128 * 1024 * 1024;
+    public string MaxMemory { get; init; } = "256MB";
+    public string MaxTempDirectorySize { get; init; } = "0B";
+    public int TimeoutSeconds { get; init; } = 30;
+    public int MaxParallelSourceReads { get; init; } = 4;
+    public bool AllowNonEquiJoins { get; init; } = false;
+    public List<string> AllowedHttpAuthModes { get; init; } = ["None", "StaticApiKey", "ClientCredentials"];
 }
 
 public sealed class SqlEndpointsOptions

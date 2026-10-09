@@ -23,6 +23,8 @@ public static class AuditEventTypes
     public const string TableQuery = "TABLE_QUERY";
     public const string WebSqlQuery = "WEBSQL_QUERY";
     public const string WebSqlQueryDenied = "WEBSQL_QUERY_DENIED";
+    public const string WebSqlCrossSourceQuery = "WEBSQL_CROSS_SOURCE_QUERY";
+    public const string WebSqlCrossSourceSourceRead = "WEBSQL_CROSS_SOURCE_SOURCE_READ";
     public const string WebSqlDmlExecuted = "WEBSQL_DML_EXECUTED";
     public const string WebSqlDmlRejected = "WEBSQL_DML_REJECTED";
     public const string QueryExecutionError = "QUERY_EXECUTION_ERROR";

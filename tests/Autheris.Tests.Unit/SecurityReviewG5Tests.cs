@@ -92,6 +92,7 @@ public sealed class SecurityReviewG5Tests : IDisposable
             .AddLogging()
             .AddSingleton(Options.Create(new GatewayOptions()))
             .AddSingleton<CdcSubscriptionGovernor>()
+            .AddSingleton(Substitute.For<IAuditLogRepository>())
             .AddSingleton(resolver);
     }
 

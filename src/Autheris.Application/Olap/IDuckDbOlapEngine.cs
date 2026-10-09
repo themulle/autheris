@@ -10,7 +10,9 @@ namespace Autheris.Application.Olap;
 public sealed record OlapTableSource(
     TableIdentifier Table,
     IReadOnlyList<IReadOnlyDictionary<string, object?>> GovernedRows,
-    TableMetadata Metadata);
+    TableMetadata Metadata,
+    string? StagingTableName = null,
+    IReadOnlySet<string>? MaskedColumns = null);
 
 public sealed record OlapQueryRequest(
     string Sql,
@@ -23,9 +25,17 @@ public sealed record OlapQueryResult(
     int TotalRowCount,
     TimeSpan ExecutionDuration);
 
+public sealed record GeneratedOlapQuery(string Sql);
+
 public interface IDuckDbOlapEngine : IDisposable
 {
     Task<OlapQueryResult> ExecuteOlapQueryAsync(
         OlapQueryRequest request,
+        CancellationToken ct = default);
+
+    Task<OlapQueryResult> ExecuteGeneratedAsync(
+        GeneratedOlapQuery query,
+        IReadOnlyList<OlapTableSource> sources,
+        int? limit = null,
         CancellationToken ct = default);
 }

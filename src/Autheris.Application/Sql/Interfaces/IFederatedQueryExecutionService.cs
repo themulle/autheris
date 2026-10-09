@@ -1,31 +1,13 @@
 namespace Autheris.Application.Sql.Interfaces;
 
 using System;
-using System.Collections.Generic;
 using System.Data.Common;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Common;
 
-public sealed record GovernedSqlQueryRequest(
-    string Sql,
-    IReadOnlyDictionary<string, object?>? Parameters = null,
-    string? DataSourceName = null,
-    SqlRowLimit? RowLimit = null,
-    string? Transport = null);
-
-public sealed record GovernedSqlResult(
-    string OriginalSql,
-    string RewrittenSql,
-    IReadOnlyList<string> Columns,
-    IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
-    int RowCount,
-    long ElapsedMilliseconds,
-    bool Truncated = false,
-    [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<SqlResultColumn>? ColumnDescriptions = null);
-
-public interface IGovernedSqlExecutionService
+public interface IFederatedQueryExecutionService
 {
     Task ExecuteGovernedQueryAsync(
         GovernedSqlQueryRequest request,

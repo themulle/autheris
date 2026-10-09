@@ -55,4 +55,5 @@ public sealed class HttpEndpointDescriptor
     // Response Mapping
     public string? JsonRootPath { get; init; } // e.g. "data.items" or null for root
     public string PrimaryKeyField { get; init; } = "id";
+    public bool CompleteResponse { get; init; } = false;
 }

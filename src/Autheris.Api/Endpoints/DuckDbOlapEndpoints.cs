@@ -205,7 +205,13 @@ public static class DuckDbOlapEndpoints
                     return;
                 }
 
-                if (!connectorRegistry.TryGetConnectorForTable(meta.Identifier, out var connector) || connector == null)
+                bool canUseConnector = connectorRegistry.TryGetConnectorForTable(meta.Identifier, out var connector) &&
+                    connector != null &&
+                    (meta.Table.DataSourceType == DataSourceType.Sql ||
+                     (!string.Equals(connector.ConnectorId, "default-sql", StringComparison.OrdinalIgnoreCase) &&
+                      !string.Equals(connector.ConnectorId, "sql", StringComparison.OrdinalIgnoreCase)));
+
+                if (!canUseConnector || connector == null)
                 {
                     logger.LogWarning("No active connector registered for table {Table}", meta.Identifier);
                     httpContext.Response.StatusCode = isDev ? StatusCodes.Status502BadGateway : StatusCodes.Status403Forbidden;

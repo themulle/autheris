@@ -395,6 +395,17 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IDataSourceExecutor, PluginHttpDataSourceExecutor>();
         services.AddSingleton<TrinoSqlEngine.ISqlEngine, TrinoSqlEngine.FastSqlEngine>();
         services.AddSingleton<Autheris.Application.Sql.Interfaces.ISqlSecurityValidator, Autheris.Application.Sql.Services.DefaultSqlSecurityValidator>();
+        services.AddScoped<Autheris.Application.Olap.IFederatedStagingService, Autheris.Application.Olap.FederatedStagingService>();
+        services.AddScoped<Autheris.Application.Sql.Services.ICrossSourceQueryRouter>(sp =>
+        {
+            var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
+            return new Autheris.Application.Sql.Services.CrossSourceQueryRouter(
+                sp.GetRequiredService<ITableMetadataRepository>(),
+                opts.WebSql?.CrossSource ?? new Autheris.Domain.Options.CrossSourceOptions(),
+                opts.WebSql ?? new Autheris.Domain.Options.WebSqlOptions());
+        });
+        services.AddSingleton<Autheris.Application.Sql.Services.ICrossSourcePlanner, Autheris.Application.Sql.Services.CrossSourcePlanner>();
+        services.AddScoped<Autheris.Application.Sql.Interfaces.IFederatedQueryExecutionService, Autheris.Application.Sql.Services.FederatedDuckDbExecutionService>();
         services.AddScoped<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService, Autheris.Application.Sql.Services.GovernedSqlExecutionService>();
         services.AddSingleton<Autheris.Application.Sql.Interfaces.IWebSqlStatementManager, Autheris.Application.Sql.Services.WebSqlStatementManager>();
         services.AddSingleton<Autheris.Application.SqlEndpoints.Interfaces.ISqlEndpointRegistry, Autheris.Application.SqlEndpoints.Services.InMemorySqlEndpointRegistry>();
