@@ -66,9 +66,9 @@ public sealed class ProcedureVirtualFilterTests
         {
             Audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(AuditEntries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return new GovernedProcedureExecutionService(
-                Registry, Invoker, Options.Create(options ?? new GatewayOptions()), Tables,
+                Registry, Invoker, Options.Create(options ?? new GatewayOptions()), Audit, Tables,
                 withConsents ? Consents : null, withConsents ? Resolution : null, masking: null,
-                policyEnforcement: null, audit: Audit, rowScope: RowScope, mandatoryFilters: resolver);
+                policyEnforcement: null, rowScope: RowScope, mandatoryFilters: resolver);
         }
     }
 

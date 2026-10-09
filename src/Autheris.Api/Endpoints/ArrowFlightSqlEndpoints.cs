@@ -5,7 +5,9 @@ using System.IO;
 using System.Security;
 using System.Threading.Tasks;
 using Apache.Arrow.Ipc;
+using Autheris.Api.Extensions;
 using Autheris.Application.Serialization;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -39,7 +41,7 @@ public static class ArrowFlightSqlEndpoints
             {
                 return BadRequestResult();
             }
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/api/v1/flight/sql/tables", async (
             string? schema,
@@ -56,23 +58,28 @@ public static class ArrowFlightSqlEndpoints
             {
                 return ForbidResult(context, ex);
             }
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        app.MapPost("/api/v1/flight/sql/stream", HandleStreamAsync).RequireAuthorization();
+        app.MapPost("/api/v1/flight/sql/stream", HandleStreamAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return app;
     }
 
     internal static async Task<IResult> HandleStreamAsync(FlightSqlTicket ticket, HttpContext context, IArrowFlightSqlServer server)
     {
+        var auditContext = context.Features.Get<AuditContext>();
         try
         {
             context.Response.ContentType = "application/vnd.apache.arrow.stream";
             await using var stream = context.Response.BodyWriter.AsStream();
 
             ArrowStreamWriter? writer = null;
+            long totalRows = 0;
             await foreach (var batch in server.DoGetStreamAsync(ticket, context.User, EndpointSecurity.GetRequestTenant(context), context.RequestAborted))
             {
+                totalRows += batch.Length;
+                auditContext?.RecordMetrics(totalRows, null);
+
                 if (writer == null)
                 {
                     // Same signal as the WebSQL JSON and Parquet paths: the row limit cut the result. A schema without
@@ -89,6 +96,11 @@ public static class ArrowFlightSqlEndpoints
             }
 
             return Results.Empty;
+        }
+        catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+        {
+            auditContext?.Error("CLIENT_ABORTED", AuditEventTypes.QueryExecutionError);
+            throw;
         }
         catch (SecurityException ex)
         {

@@ -160,7 +160,8 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataReader,
             _metadataRepo,
             _options,
-            NullLogger<IcebergRestCatalogFederationService>.Instance);
+            NullLogger<IcebergRestCatalogFederationService>.Instance,
+            Substitute.For<IAuditLogRepository>());
 
         // Act
         // Wunsch 9: a GovernanceAdmin sees the whole catalog of the tenant, but still never another tenant's tables
@@ -183,7 +184,8 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataReader,
             _metadataRepo,
             _options,
-            NullLogger<IcebergRestCatalogFederationService>.Instance);
+            NullLogger<IcebergRestCatalogFederationService>.Instance,
+            Substitute.For<IAuditLogRepository>());
 
         var unauthenticatedPrincipal = new ClaimsPrincipal(new ClaimsIdentity()); // no identity or permissions
 
@@ -241,9 +243,9 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataRepo,
             _options,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
+            auditRepo,
             new ConsentResolutionService(),
-            consentRepo,
-            auditRepository: auditRepo);
+            consentRepo);
 
         var response = await service.LoadTableAsync("tenant-1", "raw", "orders", Analyst());
         response.ShouldNotBeNull();
@@ -283,10 +285,10 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataRepo,
             optionsWithRebac,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
+            auditRepo,
             new ConsentResolutionService(),
             consentRepo,
-            rebacEvaluator: rebac,
-            auditRepository: auditRepo);
+            rebacEvaluator: rebac);
 
         await Should.ThrowAsync<SecurityException>(() =>
             service.LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());

@@ -7,11 +7,13 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Serialization;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
@@ -37,7 +39,8 @@ public static class ArrowExportEndpoints
         endpoints.MapPost("/api/v1/export/arrow", HandleArrowExportAsync)
             .WithName("ExportTableToArrow")
             .WithSummary("Exports governed tabular rows directly into Apache Arrow IPC streaming format")
-            .RequireRebac("viewer", "table", paramName: "table", source: RebacParameterSource.QueryOrJsonBody);
+            .RequireRebac("viewer", "table", paramName: "table", source: RebacParameterSource.QueryOrJsonBody)
+            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return endpoints;
     }

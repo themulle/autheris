@@ -3,8 +3,10 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
@@ -46,7 +48,7 @@ public static class HitLEndpoints
 
             var tickets = hitlService.GetPendingTickets(effectiveTenant);
             return Results.Ok(tickets);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
 
         app.MapPost("/api/governance/hitl/approve", async (
             ApproveTicketRequest request,
@@ -78,7 +80,7 @@ public static class HitLEndpoints
 
             var result = await hitlService.ApproveStepUpRequestAsync(request.ApprovalId, approver, context.RequestAborted);
             return result.IsApproved ? Results.Ok(result) : Results.BadRequest(result);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         app.MapPost("/api/governance/hitl/reject", async (
             RejectTicketRequest request,
@@ -110,7 +112,7 @@ public static class HitLEndpoints
 
             var result = await hitlService.RejectStepUpRequestAsync(request.ApprovalId, approver, request.Reason, context.RequestAborted);
             return Results.Ok(result);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentDenied);
 
         return app;
     }

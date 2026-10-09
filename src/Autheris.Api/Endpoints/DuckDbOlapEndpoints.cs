@@ -16,7 +16,8 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Routing;
+using Autheris.Api.Extensions;
+using Autheris.Domain.Audit;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -38,7 +39,8 @@ public static class DuckDbOlapEndpoints
     {
         app.MapPost("/api/v1/olap/query", HandleOlapQueryAsync)
            .WithName("ExecuteDuckDbOlapQueryV1")
-           .WithTags("Analytics & OLAP");
+           .WithTags("Analytics & OLAP")
+           .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return app;
     }

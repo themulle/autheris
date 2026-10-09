@@ -130,7 +130,6 @@ public sealed class Round4ParserGatewayTests
             policyEnforcement: null,
             consentResolution: consentResolution,
             tableRepository: repository,
-            auditLogRepository: null,
             connectionFactory: connectionFactory,
             clientIpResolver: null,
             environment: null,

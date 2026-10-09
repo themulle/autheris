@@ -5,9 +5,11 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
@@ -75,7 +77,9 @@ public static class RebacEndpoints
 
     public static IEndpointRouteBuilder MapRebacEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/rebac").RequireAuthorization();
+        var group = app.MapGroup("/api/v1/rebac")
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // POST /api/v1/rebac/tuples - Add relationship tuples
         group.MapPost("/tuples", async (
@@ -227,7 +231,7 @@ public static class RebacEndpoints
                 request.HttpContext.RequestAborted).ConfigureAwait(false);
 
             return Results.Ok(tuples);
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // POST /api/v1/rebac/check - Single tuple evaluation
         group.MapPost("/check", async (
@@ -267,7 +271,7 @@ public static class RebacEndpoints
 
             var decision = await evaluator.CheckAsync(check, request.HttpContext.RequestAborted).ConfigureAwait(false);
             return Results.Ok(decision);
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         // POST /api/v1/rebac/batch-check - Batch evaluation (Zero-N+1, capped at 100 checks)
         group.MapPost("/batch-check", async (
@@ -322,7 +326,7 @@ public static class RebacEndpoints
 
             var decision = await evaluator.BatchCheckAsync(batchCheck, request.HttpContext.RequestAborted).ConfigureAwait(false);
             return Results.Ok(decision);
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         return app;
     }

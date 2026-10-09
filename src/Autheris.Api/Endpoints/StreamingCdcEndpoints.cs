@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Streaming.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Security;
 using Autheris.Extensions.Cdc;
 using Microsoft.AspNetCore.Builder;
@@ -90,7 +91,8 @@ public static class StreamingCdcEndpoints
                 return Results.BadRequest(new { error = "Invalid CDC event format" });
             }
         }).RequireAuthorization()
-          .WithRequestBodyLimit(10 * 1024 * 1024); // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithRequestBodyLimit(10 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithAudit(AuditLevel.Full, AuditEventTypes.StreamSubscribe);
 
         // F-EVT-01: CloudEvents Outbound Webhook Subscriptions
         app.MapGet("/api/v1/cdc/subscriptions", async (
@@ -111,7 +113,7 @@ public static class StreamingCdcEndpoints
             // SEC M-5: Never return HMAC secrets in GET responses
             var safeSubs = subs.Select(s => s with { HmacSecret = string.IsNullOrEmpty(s.HmacSecret) ? string.Empty : "[REDACTED]" });
             return Results.Ok(safeSubs);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapPost("/api/v1/cdc/subscriptions", async (
             HttpContext context,
@@ -157,7 +159,7 @@ public static class StreamingCdcEndpoints
 
             var responseSub = securedSub with { HmacSecret = string.IsNullOrEmpty(securedSub.HmacSecret) ? string.Empty : "[REDACTED]" };
             return Results.Created($"/api/v1/cdc/subscriptions/{securedSub.Id}", responseSub);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapDelete("/api/v1/cdc/subscriptions/{id}", async (
             string id,
@@ -176,7 +178,7 @@ public static class StreamingCdcEndpoints
             }
             var removed = await store.RemoveSubscriptionAsync(tenantId, id, context.RequestAborted);
             return removed ? Results.NoContent() : Results.NotFound();
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
     }

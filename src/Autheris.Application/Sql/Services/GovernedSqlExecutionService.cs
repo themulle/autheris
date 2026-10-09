@@ -17,6 +17,7 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -59,7 +60,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly IConsentResolutionService? _consentResolution;
     private readonly ITableMetadataRepository? _tableRepository;
-    private readonly IAuditLogRepository? _auditLogRepository;
+    private readonly IAuditLogRepository _auditLogRepository;
     private readonly ISqlConnectionFactory? _connectionFactory;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IHostEnvironment? _environment;
@@ -82,7 +83,33 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         IPolicyEnforcementService? policyEnforcement = null,
         IConsentResolutionService? consentResolution = null,
         ITableMetadataRepository? tableRepository = null,
-        IAuditLogRepository? auditLogRepository = null,
+        ISqlConnectionFactory? connectionFactory = null,
+        IClientIpResolver? clientIpResolver = null,
+        IHostEnvironment? environment = null,
+        ILogger<GovernedSqlExecutionService>? logger = null,
+        IConsentRepository? consentRepository = null,
+        IKeyVaultSecretProvider? secretProvider = null,
+        ISqlEngine? sqlEngine = null,
+        ICompiledSqlQueryPlanCache? planCache = null,
+        ISqlSecurityValidator? sqlSecurityValidator = null,
+        ITableReadConcurrencyGate? concurrencyGate = null,
+        IDbSessionContextInitializer? sessionInitializer = null,
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
+        IConsentCacheService? consentCache = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
+        IAccessProfileRepository? accessProfileRepository = null,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null)
+        : this(options, Autheris.Application.Audit.NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, planCache, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache)
+    {
+    }
+
+    public GovernedSqlExecutionService(
+        IOptions<GatewayOptions> options,
+        IAuditLogRepository auditLogRepository,
+        IPolicyEnforcementService? policyEnforcement = null,
+        IConsentResolutionService? consentResolution = null,
+        ITableMetadataRepository? tableRepository = null,
         ISqlConnectionFactory? connectionFactory = null,
         IClientIpResolver? clientIpResolver = null,
         IHostEnvironment? environment = null,
@@ -106,10 +133,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         _contractManager = contractManager;
         _mandatoryFilters = mandatoryFilters;
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _policyEnforcement = policyEnforcement;
         _consentResolution = consentResolution;
         _tableRepository = tableRepository;
-        _auditLogRepository = auditLogRepository;
         _connectionFactory = connectionFactory;
         _clientIpResolver = clientIpResolver;
         _environment = environment;
@@ -900,11 +927,37 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         {
             rewrite = await RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true).ConfigureAwait(false);
         }
-        catch (SecurityException policyEx) when (dmlContext.IsDml)
+        catch (SecurityException policyEx)
         {
-            // Rejected DML statements are recorded in the audit chain as well.
             string auditDs = requestedDs ?? _options.Value.WebSql.DefaultDataSourceName;
-            await RecordDmlAuditAsync(tenantId, user, auditDs, dmlContext, "WEBSQL_DML_REJECTED", "DENY", request.Sql, affectedRows: null, reason: policyEx is WebSqlPolicyException ? policyEx.Message : "policy violation", synthetic: false, ct).ConfigureAwait(false);
+            if (dmlContext.IsDml)
+            {
+                // Rejected DML statements are recorded in the audit chain as well.
+                await RecordDmlAuditAsync(tenantId, user, auditDs, dmlContext, "WEBSQL_DML_REJECTED", "DENY", request.Sql, affectedRows: null, reason: policyEx is WebSqlPolicyException ? policyEx.Message : "policy violation", synthetic: false, ct).ConfigureAwait(false);
+            }
+            else if (_auditLogRepository != null)
+            {
+                var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
+                var userSid = ResolveUserSid(user);
+                var detailsJson = new AuditDetailsBuilder()
+                    .WithField("originalSql", redactedOriginalSql)
+                    .WithField("originalSqlHash", originalSqlHash)
+                    .WithField("dataSource", auditDs)
+                    .WithField("reasonCode", policyEx is WebSqlPolicyException ? "POLICY_VIOLATION" : "SECURITY_VIOLATION")
+                    .WithField("error", policyEx.Message)
+                    .Build();
+
+                await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    TenantId = tenantId,
+                    EventType = AuditEventTypes.WebSqlQueryDenied,
+                    ActorSid = userSid,
+                    TargetTable = auditDs,
+                    Decision = "DENY",
+                    TraceId = Guid.NewGuid().ToString("N"),
+                    DetailsJson = detailsJson
+                }, ct).ConfigureAwait(false);
+            }
             throw;
         }
 
@@ -1096,8 +1149,39 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
             return securedSql;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            if (_auditLogRepository != null && !dmlContext.IsDml)
+            {
+                try
+                {
+                    var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
+                    var userSid = ResolveUserSid(user);
+                    var detailsJson = new AuditDetailsBuilder()
+                        .WithField("originalSql", redactedOriginalSql)
+                        .WithField("originalSqlHash", originalSqlHash)
+                        .WithField("dataSource", dsName)
+                        .WithField("reasonCode", (ex is OperationCanceledException && ct.IsCancellationRequested) ? "CLIENT_ABORTED" : ex.GetType().Name)
+                        .WithField("error", ex.Message)
+                        .Build();
+
+                    await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+                    {
+                        TenantId = tenantId,
+                        EventType = AuditEventTypes.QueryExecutionError,
+                        ActorSid = userSid,
+                        TargetTable = dsName,
+                        Decision = "ERROR",
+                        TraceId = Guid.NewGuid().ToString("N"),
+                        DetailsJson = detailsJson
+                    }, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Audit failure in catch block must not mask original execution exception
+                }
+            }
+
             if (tx != null && !txCommitted)
             {
                 try

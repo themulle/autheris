@@ -6,7 +6,9 @@ using System.Linq;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -51,7 +53,7 @@ public static class McpEndpoints
             : gatewayOptions.Mcp.EndpointPath.TrimEnd('/');
 
         // Streamable HTTP on the official MCP SDK (GatewayMcpServer); stateless, so there are no session endpoints.
-        var endpoint = app.MapMcp(mcpBasePath);
+        var endpoint = app.MapMcp(mcpBasePath).WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         // SEC M-09: hard body limit for JSON-RPC messages and MCP >= 2025-06-18 batch rejection.
         endpoint.Add(builder =>
@@ -156,13 +158,19 @@ public static class McpEndpoints
                 context.Response.Headers.CacheControl = "public, max-age=3600";
                 var target = $"{context.Request.PathBase}/.well-known/oauth-protected-resource{mcpBasePath}";
                 return Results.Redirect(target, permanent: false);
-            }).AllowAnonymous();
+            })
+            .AllowAnonymous()
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         }
 
         // Variant A (RFC 8414) & OIDC Discovery: Autheris is a Protected Resource Gateway, not an AS or OIDC Provider.
         // Explicitly return 404 to anonymous clients so FallbackPolicy does not return 401 Unauthorized.
-        app.MapGet("/.well-known/oauth-authorization-server", () => Results.NotFound()).AllowAnonymous();
-        app.MapGet("/.well-known/openid-configuration", () => Results.NotFound()).AllowAnonymous();
+        app.MapGet("/.well-known/oauth-authorization-server", () => Results.NotFound())
+            .AllowAnonymous()
+            .WithAuditExemption("Public 404 RFC 8414 AS Discovery stub");
+        app.MapGet("/.well-known/openid-configuration", () => Results.NotFound())
+            .AllowAnonymous()
+            .WithAuditExemption("Public 404 OIDC Discovery stub");
 
         return app;
     }

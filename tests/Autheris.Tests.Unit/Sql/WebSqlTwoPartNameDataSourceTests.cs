@@ -142,7 +142,7 @@ public sealed class WebSqlTwoPartNameDataSourceTests
             policyEnforcement: null,
             consentResolution: resolution,
             tableRepository: repo,
-            auditLogRepository: audit,
+            auditLogRepository: audit ?? Autheris.Application.Audit.NullAuditLogRepository.Instance,
             connectionFactory: factory,
             clientIpResolver: null,
             environment: null,

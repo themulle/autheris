@@ -173,6 +173,7 @@ public sealed class TableAccessPolicyArch1Tests
 
         var service = new GovernedSqlExecutionService(
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } }),
+            auditLogRepository: Substitute.For<IAuditLogRepository>(),
             consentResolution: ResolvesTo(allowed: false),
             tableRepository: tables,
             environment: env,

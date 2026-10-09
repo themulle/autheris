@@ -35,7 +35,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
     private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IRebacEvaluator? _rebacEvaluator;
-    private readonly IAuditLogRepository? _auditRepository;
+    private readonly IAuditLogRepository _auditRepository;
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
 
@@ -49,20 +49,35 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         IPolicyEnforcementService? policyEnforcementService = null,
         IClientIpResolver? clientIpResolver = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
-        IRebacEvaluator? rebacEvaluator = null,
-        IAuditLogRepository? auditRepository = null)
+        IRebacEvaluator? rebacEvaluator = null)
+        : this(metadataReader, metadataRepo, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, consentService, consentRepo, policyEnforcementService, clientIpResolver, mandatoryFilters, rebacEvaluator)
+    {
+    }
+
+    public IcebergRestCatalogFederationService(
+        IIcebergMetadataReader metadataReader,
+        ITableMetadataRepository metadataRepo,
+        IOptions<GatewayOptions> options,
+        ILogger<IcebergRestCatalogFederationService> logger,
+        IAuditLogRepository auditRepository,
+        IConsentResolutionService? consentService = null,
+        IConsentRepository? consentRepo = null,
+        IPolicyEnforcementService? policyEnforcementService = null,
+        IClientIpResolver? clientIpResolver = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        IRebacEvaluator? rebacEvaluator = null)
     {
         _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _auditRepository = auditRepository ?? throw new ArgumentNullException(nameof(auditRepository));
         _consentService = consentService;
         _consentRepo = consentRepo;
         _policyEnforcementService = policyEnforcementService;
         _clientIpResolver = clientIpResolver;
         _rebacEvaluator = rebacEvaluator;
-        _auditRepository = auditRepository;
     }
 
     public async ValueTask<IReadOnlyList<string>> ListNamespacesAsync(string tenantId, ClaimsPrincipal principal, CancellationToken ct = default)
@@ -146,18 +161,15 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         if (principal.Identity?.IsAuthenticated != true)
         {
             _logger.LogWarning("Unauthenticated attempt to load Iceberg table '{Namespace}.{Table}' for tenant '{Tenant}'.", @namespace, table, tenantId);
-            if (_auditRepository != null)
+            await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
             {
-                await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
-                {
-                    TenantId = new TenantId(tenantId),
-                    EventType = "Iceberg.LoadTable",
-                    ActorSid = actorSid,
-                    TargetTable = $"{tenantId}.{@namespace}.{table}",
-                    Decision = "DENY",
-                    DetailsJson = "{\"reason\":\"Unauthenticated caller\"}"
-                }, ct).ConfigureAwait(false);
-            }
+                TenantId = new TenantId(tenantId),
+                EventType = "Iceberg.LoadTable",
+                ActorSid = actorSid,
+                TargetTable = $"{tenantId}.{@namespace}.{table}",
+                Decision = "DENY",
+                DetailsJson = "{\"reason\":\"Unauthenticated caller\"}"
+            }, ct).ConfigureAwait(false);
             throw new SecurityException($"Unauthorized access to table '{@namespace}.{table}'.");
         }
 
@@ -168,18 +180,15 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         }
         catch (SecurityException ex)
         {
-            if (_auditRepository != null)
+            await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
             {
-                await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
-                {
-                    TenantId = new TenantId(tenantId),
-                    EventType = "Iceberg.LoadTable",
-                    ActorSid = actorSid,
-                    TargetTable = $"{tenantId}.{@namespace}.{table}",
-                    Decision = "DENY",
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = ex.Message })
-                }, ct).ConfigureAwait(false);
-            }
+                TenantId = new TenantId(tenantId),
+                EventType = "Iceberg.LoadTable",
+                ActorSid = actorSid,
+                TargetTable = $"{tenantId}.{@namespace}.{table}",
+                Decision = "DENY",
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = ex.Message })
+            }, ct).ConfigureAwait(false);
             throw;
         }
 
@@ -192,18 +201,15 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         var metadataLocation = $"{location.TrimEnd('/')}/metadata/v2.metadata.json";
 
         // SR-P2-06 / SR15-18: Record ALLOW audit log
-        if (_auditRepository != null)
+        await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
         {
-            await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
-            {
-                TenantId = new TenantId(tenantId),
-                EventType = "Iceberg.LoadTable",
-                ActorSid = actorSid,
-                TargetTable = tableMeta.Identifier.ToString(),
-                Decision = "ALLOW",
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { metadataLocation })
-            }, ct).ConfigureAwait(false);
-        }
+            TenantId = new TenantId(tenantId),
+            EventType = "Iceberg.LoadTable",
+            ActorSid = actorSid,
+            TargetTable = tableMeta.Identifier.ToString(),
+            Decision = "ALLOW",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { metadataLocation })
+        }, ct).ConfigureAwait(false);
 
         return new IcebergLoadTableResponse(
             metadataLocation,
@@ -232,18 +238,15 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
 
         await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, ct).ConfigureAwait(false);
 
-        if (_auditRepository != null)
+        await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
         {
-            await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
-            {
-                TenantId = new TenantId(tenantId),
-                EventType = "Iceberg.VendCredential",
-                ActorSid = principal.GetUserSid() ?? new Sid("anonymous"),
-                TargetTable = $"{tenantId}.{@namespace}.{table}",
-                Decision = "DENY",
-                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = "Direct credential vending not supported." })
-            }, ct).ConfigureAwait(false);
-        }
+            TenantId = new TenantId(tenantId),
+            EventType = "Iceberg.VendCredential",
+            ActorSid = principal.GetUserSid() ?? new Sid("anonymous"),
+            TargetTable = $"{tenantId}.{@namespace}.{table}",
+            Decision = "DENY",
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = "Direct credential vending not supported." })
+        }, ct).ConfigureAwait(false);
 
         // SEC H-3: Return 501 Not Implemented instead of vending forgeable random/unsigned fake keys.
         throw new NotSupportedException("Direct storage STS/SAS credential vending is not supported; access lakehouse datasets via governed SQL endpoints.");

@@ -1,6 +1,7 @@
 namespace Autheris.Api.Endpoints;
 
 using System;
+using Autheris.Api.Extensions;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -29,8 +30,8 @@ public static class DevPortalEndpoints
             return Results.Content(html, "text/html;charset=utf-8");
         }
 
-        app.MapGet("/", HandleDevPortal).AllowAnonymous();
-        app.MapGet("/getting-started", HandleDevPortal).AllowAnonymous();
+        app.MapGet("/", HandleDevPortal).AllowAnonymous().WithAuditExemption("Root gateway landing/discovery page");
+        app.MapGet("/getting-started", HandleDevPortal).AllowAnonymous().WithAuditExemption("Developer getting started guide");
 
         return app;
     }

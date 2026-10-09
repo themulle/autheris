@@ -4,8 +4,10 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.FinOps.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
@@ -63,7 +65,7 @@ public static class FinOpsEndpoints
                 count = records.Count,
                 records
             });
-        });
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // GET /api/v1/finops/budget/{tenantId}
         app.MapGet("/api/v1/finops/budget/{tenantId}", async (
@@ -90,7 +92,7 @@ public static class FinOpsEndpoints
 
             var status = await accountingService.CheckBudgetAsync(tenantId, request.HttpContext.RequestAborted);
             return Results.Ok(status);
-        });
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         return app;
     }

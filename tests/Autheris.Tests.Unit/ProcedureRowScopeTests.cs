@@ -148,8 +148,8 @@ public class ProcedureRowScopeTests
         {
             Audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(AuditEntries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return new GovernedProcedureExecutionService(
-                Registry, Invoker, Options.Create(new GatewayOptions()), Tables, Consents, Resolution, masking: null,
-                policyEnforcement: null, audit: Audit, rowScope: withResolver ? RowScope : null);
+                Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, masking: null,
+                policyEnforcement: null, rowScope: withResolver ? RowScope : null);
         }
     }
 

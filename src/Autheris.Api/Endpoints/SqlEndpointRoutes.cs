@@ -8,10 +8,12 @@ using System.Security;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Api.Serialization;
 using Autheris.Application.Serialization;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.SqlEndpoints.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
@@ -32,14 +34,17 @@ public static class SqlEndpointRoutes
 
         group.MapGet("/", HandleListEndpoints)
              .WithName("ListSqlEndpoints")
-             .RequireAuthorization();
+             .RequireAuthorization()
+             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapPost("/", HandleRegisterEndpoint)
              .WithName("RegisterSqlEndpoint")
-             .RequireAuthorization();
+             .RequireAuthorization()
+             .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         var openApiEndpoint = group.MapGet("/openapi.json", HandleOpenApiSpec)
-             .WithName("GetSqlEndpointsOpenApiSpec");
+             .WithName("GetSqlEndpointsOpenApiSpec")
+             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         if (gatewayOptions?.IsOpenSchemaAllowed != true)
         {
@@ -54,12 +59,14 @@ public static class SqlEndpointRoutes
         group.MapGet("/{name}", HandleGetEndpoint)
              .WithName("ExecuteSqlEndpointGet")
              .WithMetadata(new ParquetOutputSupportedMetadata())
-             .RequireAuthorization();
+             .RequireAuthorization()
+             .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         group.MapPost("/{name}", HandlePostEndpoint)
              .WithName("ExecuteSqlEndpointPost")
              .WithMetadata(new ParquetOutputSupportedMetadata())
-             .RequireAuthorization();
+             .RequireAuthorization()
+             .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return app;
     }

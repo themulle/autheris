@@ -91,6 +91,12 @@ public static class GatewayServiceCollectionExtensions
             .Bind(configuration.GetSection(GatewayOptions.SectionName))
             .ValidateDataAnnotations()
             .Validate(opts =>
+                opts.Audit.Retention.SecurityDays >= 365,
+                "Security violation: Audit:Retention:SecurityDays must be at least 365 days.")
+            .Validate(opts =>
+                opts.Audit.AuditLogRetentionDays >= 365,
+                "Security violation: Audit:AuditLogRetentionDays must be at least 365 days.")
+            .Validate(opts =>
                 Enum.IsDefined(opts.RowFilters.SubqueryStrategy),
                 "Gateway:RowFilters:SubqueryStrategy must be Exists, InCorrelated or In.")
             .Validate(opts =>
@@ -506,6 +512,8 @@ public static class GatewayServiceCollectionExtensions
         services.AddScoped<Autheris.Application.Connectors.CrossDomain.ICrossDomainAccessResolver, Autheris.Application.Connectors.CrossDomain.DefaultCrossDomainAccessResolver>();
 
         services.AddScoped<IClientIpResolver, Autheris.Api.Security.HttpContextClientIpResolver>();
+        services.AddScoped<Autheris.Domain.Audit.AuditContext>();
+        services.AddSingleton<Autheris.Application.Audit.IAuthFailureAggregator, Autheris.Application.Audit.AuthFailureAggregator>();
         // O10: process-wide counter of running table reads per tenant, user and table
         services.AddSingleton<ITableReadConcurrencyGate, TableReadConcurrencyGate>();
         // M-1: database session context initializer for PostgreSQL GUCs and SQL Server SESSION_CONTEXT

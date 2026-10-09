@@ -3,7 +3,9 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Autheris.Api.Extensions;
 using Autheris.Application.Mesh.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -73,7 +75,7 @@ public static class EnvoyExtAuthzEndpoints
 
             var body = decision.HttpResponse.DeniedResponse?.Body ?? "Access Denied by Autheris PDP";
             return Results.Json(new { error = body, status = statusCode }, statusCode: statusCode);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         // GET /api/v1/envoy/export/envoyfilter.yaml: Export Istio EnvoyFilter CRD
         app.MapGet("/api/v1/envoy/export/envoyfilter.yaml", (
@@ -98,7 +100,7 @@ public static class EnvoyExtAuthzEndpoints
             {
                 return Results.BadRequest(new { error = "Invalid export parameters (namespace/host must be DNS names, port numeric)." });
             }
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.MetadataExport);
 
         // GET /api/v1/envoy/export/wasmplugin.yaml: Export Istio WasmPlugin CRD
         app.MapGet("/api/v1/envoy/export/wasmplugin.yaml", (
@@ -123,7 +125,7 @@ public static class EnvoyExtAuthzEndpoints
             {
                 return Results.BadRequest(new { error = "Invalid export parameters (namespace/host must be DNS names, port numeric)." });
             }
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.MetadataExport);
 
         return app;
     }

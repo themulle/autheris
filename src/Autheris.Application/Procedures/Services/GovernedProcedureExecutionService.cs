@@ -41,7 +41,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly IColumnMaskingProvider? _masking;
     private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
-    private readonly IAuditLogRepository? _audit;
+    private readonly IAuditLogRepository _audit;
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly IProcedureRowScopeResolver? _rowScope;
     private readonly ILogger<GovernedProcedureExecutionService>? _logger;
@@ -57,7 +57,26 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IConsentResolutionService? consentResolution = null,
         IColumnMaskingProvider? masking = null,
         IPolicyEnforcementService? policyEnforcement = null,
-        IAuditLogRepository? audit = null,
+        IClientIpResolver? clientIpResolver = null,
+        ILogger<GovernedProcedureExecutionService>? logger = null,
+        IProcedureRowScopeResolver? rowScope = null,
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
+        IConsentCacheService? consentCache = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
+        : this(registry, invoker, options, Autheris.Application.Audit.NullAuditLogRepository.Instance, tableRepository, consentRepository, consentResolution, masking, policyEnforcement, clientIpResolver, logger, rowScope, rebacEvaluator, consentCache, mandatoryFilters)
+    {
+    }
+
+    public GovernedProcedureExecutionService(
+        IProcedureRegistry registry,
+        IProcedureInvoker invoker,
+        IOptions<GatewayOptions> options,
+        IAuditLogRepository audit,
+        ITableMetadataRepository? tableRepository = null,
+        IConsentRepository? consentRepository = null,
+        IConsentResolutionService? consentResolution = null,
+        IColumnMaskingProvider? masking = null,
+        IPolicyEnforcementService? policyEnforcement = null,
         IClientIpResolver? clientIpResolver = null,
         ILogger<GovernedProcedureExecutionService>? logger = null,
         IProcedureRowScopeResolver? rowScope = null,
@@ -69,12 +88,12 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _tableRepository = tableRepository;
         _consentRepository = consentRepository;
         _consentResolution = consentResolution;
         _masking = masking;
         _policyEnforcement = policyEnforcement;
-        _audit = audit;
         _clientIpResolver = clientIpResolver;
         _logger = logger;
         _rowScope = rowScope;
@@ -91,11 +110,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(user);
-
-        if (_audit == null)
-        {
-            throw new SecurityException("Procedure execution rejected: audit repository is required but unavailable (SQL2-16).");
-        }
 
         if (!_registry.TryGet(name, out var registered) || registered == null)
         {
@@ -619,11 +633,6 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         object details,
         CancellationToken ct)
     {
-        if (_audit == null)
-        {
-            throw new SecurityException("Procedure execution rejected: audit repository is required but unavailable (SQL2-16).");
-        }
-
         await _audit.RecordAuditEventAsync(
             new AuditLogEntry
             {

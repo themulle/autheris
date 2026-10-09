@@ -15,6 +15,7 @@ using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.State;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -130,7 +131,8 @@ public static class GovernanceEndpoints
 
             return Results.Ok(result);
         }).RequireAuthorization()
-          .WithRequestBodyLimit(20 * 1024 * 1024); // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithRequestBodyLimit(20 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // P10: Multi-Tenant Policy Simulation Sandbox ("What-If" Replay via Audit Logs)
         app.MapPost("/api/governance/policy-simulation/replay", async (
@@ -161,7 +163,7 @@ public static class GovernanceEndpoints
 
             var result = await simulationService.SimulateAsync(request, effectiveTenant, context.RequestAborted);
             return Results.Ok(result);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditRead);
 
         // P11: Automated Schema Deprecation & Client-Impact Sunsetting (Smart Sunsetting Engine)
         app.MapGet("/api/governance/sunsetting/rules", async (
@@ -176,7 +178,7 @@ public static class GovernanceEndpoints
 
             var rules = await sunsettingService.GetRulesAsync(context.RequestAborted);
             return Results.Ok(rules);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapPost("/api/governance/sunsetting/rules", async (
             FieldSunsettingRule rule,
@@ -191,7 +193,7 @@ public static class GovernanceEndpoints
 
             await sunsettingService.RegisterRuleAsync(rule, context.RequestAborted);
             return Results.Created($"/api/governance/sunsetting/rules/{rule.Id}", rule);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapPost("/api/governance/sunsetting/evaluate", async (
             EvaluateFieldSunsettingRequest request,
@@ -246,7 +248,7 @@ public static class GovernanceEndpoints
 
             context.Response.Headers["Sunset"] = evaluation.HttpSunsetHeader;
             return Results.Ok(evaluation);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         // P12: Federated Differential Privacy & Dynamic Epsilon-Perturbation Engine
         app.MapGet("/api/governance/differential-privacy/budget/{clientId}", async (
@@ -275,7 +277,7 @@ public static class GovernanceEndpoints
 
             var budget = await dpEngine.GetBudgetAsync(targetKey, context.RequestAborted);
             return Results.Ok(budget);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapPost("/api/governance/differential-privacy/budget/{clientId}/reset", async (
             string clientId,
@@ -317,7 +319,7 @@ public static class GovernanceEndpoints
                 await auditRepo.RecordAuditEventAsync(new AuditLogEntry
                 {
                     TenantId = EndpointSecurity.GetRequestTenant(context),
-                    EventType = "DIFFERENTIAL_PRIVACY_BUDGET_RESET",
+                    EventType = AuditEventTypes.AuditConfigChanged,
                     ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
                     TargetTable = clientId,
                     Decision = "ALLOW",
@@ -332,7 +334,7 @@ public static class GovernanceEndpoints
             }
 
             return Results.Ok(new { message = $"Privacy budget reset for client '{clientId}'." });
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapPost("/api/governance/differential-privacy/perturb", async (
             DifferentialPrivacyPerturbationRequest request,
@@ -381,7 +383,8 @@ public static class GovernanceEndpoints
                     totalBudget = ex.TotalBudget
                 }, statusCode: StatusCodes.Status429TooManyRequests);
             }
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+          .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         // F-AI-12-B: EU AI Act Article 10 Compliance Certificate Endpoint
         app.MapGet("/api/governance/eu-ai-act/article-10-certificate", async (
@@ -407,7 +410,8 @@ public static class GovernanceEndpoints
             context.Response.Headers["X-Certificate-Id"] = cert.CertificateId;
             context.Response.Headers["X-Integrity-Seal"] = cert.IntegritySealSha256;
             return Results.Ok(cert);
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+          .WithAudit(AuditLevel.Full, AuditEventTypes.MetadataExport);
 
         // GDPR Article 15 PDF Export for Data Protection Officers (DSB)
         app.MapGet("/api/governance/gdpr/export-pdf", async (
@@ -459,7 +463,8 @@ public static class GovernanceEndpoints
 
             context.Response.Headers["X-Audit-Seal-SHA256"] = exportResult.Sha256AuditSeal;
             return Results.File(exportResult.DocumentBytes, exportResult.ContentType, exportResult.FileName);
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+          .WithAudit(AuditLevel.Full, AuditEventTypes.MetadataExport);
 
         // OpenLineage Lineage Push Trigger
         app.MapPost("/api/lineage/openlineage/sync", async (
@@ -480,15 +485,16 @@ public static class GovernanceEndpoints
                 return Results.Ok(new { message = "OpenLineage sync completed successfully." });
             }
             return Results.StatusCode(StatusCodes.Status502BadGateway);
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
         // =========================================================================
         // Declarative Access Profiles & Subject Cleartext Exceptions (R-52 & R-50)
         // =========================================================================
 
-        app.MapPost("/api/v1/consents/bulk", CreateBulkConsentAsync).RequireAuthorization();
-        app.MapGet("/api/v1/profiles", GetProfilesAsync).RequireAuthorization();
-        app.MapGet("/api/v1/profiles/{id}", GetProfileByIdAsync).RequireAuthorization();
-        app.MapDelete("/api/v1/profiles/{id}", DeleteProfileAsync).RequireAuthorization();
+        app.MapPost("/api/v1/consents/bulk", CreateBulkConsentAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
+        app.MapGet("/api/v1/profiles", GetProfilesAsync).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        app.MapGet("/api/v1/profiles/{id}", GetProfileByIdAsync).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        app.MapDelete("/api/v1/profiles/{id}", DeleteProfileAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
     }
