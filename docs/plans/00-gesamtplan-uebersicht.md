@@ -17,6 +17,7 @@
 | **[Plan 5: PoC Arrow/OLAP & MCP Staging](plan-poc-arrow-olap-rebac-und-mcp-staging.md)** | ReBAC-Fallback für Arrow/OLAP, anonyme OAuth-Discovery & JSON-RPC-Batches | **Befunde 3.1 & 3.2** | Vollständig umgesetzt & verifiziert ✅ |
 | **[Plan 6: Lückenloses Zugriffs-Audit](plan-lueckenloses-zugriffs-audit-by-default.md)** | „Audit by Default“ über alle Endpunkte & Middleware, Denial-Audit | **Lücken L-1 bis L-9 (Phasen 0 bis 7)** | Vollständig umgesetzt & verifiziert ✅ |
 | **[Plan 7: WebSQL API Federation Join](plan-websql-heterogene-api-federation-join.md)** | Heterogene Joins zwischen SQL-Tabellen und Web-APIs via WebSQL & DuckDB Routing | **WebSQL Query Federation & API Joins** | Vollständig umgesetzt & verifiziert ✅ |
+| **[Plan 8: Vollständige Daten-API & MCP-Bereitstellung](plan-vollstaendige-daten-api-und-mcp-bereitstellung.md)** | Governed REST Data API (`/api/v1/data/*`), Discovery & MCP-Ökosystem (Tools, Resources, Prompts) | **R-54 bis R-66, PoC Citizen Dev & MCP** | Neu erstellt – bereit zum Review ⏳ |
 
 ### 1.1 Entscheidungen aus dem Review (09.10.2026)
 
@@ -88,6 +89,8 @@ flowchart TD
 - [Plan 5: PoC Arrow/OLAP & MCP Staging](plan-poc-arrow-olap-rebac-und-mcp-staging.md)
 - [Plan 6: Lückenloses Zugriffs-Audit](plan-lueckenloses-zugriffs-audit-by-default.md)
 - [Plan 7: WebSQL API Federation Join](plan-websql-heterogene-api-federation-join.md)
+- [Plan 8: Vollständige Daten-API & MCP-Bereitstellung](plan-vollstaendige-daten-api-und-mcp-bereitstellung.md)
+- [Feature Request: Admin-Datenquellen & MCP (R-54 bis R-66)](2026-10-09-feature-request-admin-datenquellen-und-mcp.md)
 - [Architektur-Review 2026-10-09](2026-10-09-architecture-review.md)
 - [Security Review Build & Supply Chain 2026-10-09](2026-10-09-security-review-supply-chain-deploy.md)
 - [Feature Lückenloses Zugriffs-Audit](2026-10-09-feature-lueckenloses-zugriffs-audit.md)

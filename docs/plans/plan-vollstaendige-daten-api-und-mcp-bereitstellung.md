@@ -1,0 +1,241 @@
+# Implementierungsplan: Vollständige Daten-Verfügbarkeit per API & Bereitstellung für MCP
+
+**Dokument-ID:** `PLAN-DATA-API-MCP-08`  
+**Referenzen:** [Feature Request: Admin-Datenquellen & MCP (R-54 bis R-66)](2026-10-09-feature-request-admin-datenquellen-und-mcp.md), [Befunde v1.1.5](2026-10-09-poc-befunde-v1-1-5.md), [Gesamtübersicht](00-gesamtplan-uebersicht.md)  
+**Rolle:** C# & .NET Solution Architect  
+**Status:** Entwurf / Bereit zum Review ⏳  
+
+---
+
+## 1. Ausgangslage & Zielbild
+
+### 1.1 Ausgangslage
+Autheris fungiert als zentrales Enterprise Data Governance Gateway für heterogene Datenquellen (SQL Server, PostgreSQL, SQLite, DuckDB OLAP, Iceberg/Delta Lakehouse, HTTP-APIs und Plugins).
+Bisherige Zugriffspfade und MCP-Fähigkeiten weisen jedoch funktionale Asymmetrien auf:
+1. **Lückenhafter REST-Datenzugriff:** Es existieren spezialisierte Protokolle (GraphQL, OData v4, WebSQL/Trino, Arrow Flight SQL), aber **keine leichtgewichtige, universelle REST-Data-API**, über die Client-Applikationen oder Webhooks Datensätze direkt und standardisiert per `GET /api/v1/data/{domain}/{table}` mit Paging und Filterung abfragen können.
+2. **Eingeschränkte MCP-Werkzeuge:** Der MCP-Server bietet derzeit nur 4 Built-In Tools (`list_datasets`, `describe_dataset`, `sample_rows`, `query_graphql`). Ein KI-Modell / Agent (Cursor, Claude Code, Windsurf, Talos) kann bisher:
+   - keine direkten SQL-Abfragen via MCP ausführen (obwohl WebSQL existiert),
+   - keine standardisierten REST-Querys absetzen,
+   - den Datenkatalog nicht durchsuchen (`search_catalog`),
+   - seine eigenen Berechtigungen und Maskierungsgründe nicht transparent prüfen (`get_my_permissions`),
+   - keine MCP-Ressourcen (`autheris://...`) zur nativen Kontextanreicherung abonnieren,
+   - keine Datenquellen administrieren oder Freigaben per MCP steuern (Anforderungen R-54 bis R-66).
+
+### 1.2 Zielbild
+1. **100% Governed REST Data API:** Sämtliche Datensätze aller angebundenen Quellen (SQL, APIs, Lakehouse) sind konsistent über einfache, performante REST-Endpunkte abrufbar – vollständig geschützt durch dieselbe Governance-Pipeline (ReBAC, ABAC, Column-Masking, Mandatory Row Filters, Tenant-Isolation und lückenloses Zugriffs-Audit).
+2. **Vollständiges MCP-Ökosystem:** Das Model Context Protocol (MCP) wird zur vollwertigen Steuerungsschnittstelle ausgebaut:
+   - **Tools:** Erweiterung um `query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources` sowie getrennte Admin-Tools (`admin_*`).
+   - **Resources:** Standardisierte URIs (`autheris://catalog/summary`, `autheris://catalog/datasets/{id}/schema`, `autheris://governance/my-access`) für LLM-Kontexte.
+   - **Prompts:** Vordefinierte Vorlagen für explorative Datenanalyse und Compliance-Audits.
+3. **Strenge Sicherheitsinvarianten:** Single Point of Governance (kein Bypass), Least-Privilege-Trennung zwischen Lese- und Admin-Tools, Bestätigungsnachweis außerhalb des LLM für Schreiboperationen, vollständige Geheimnis-Redaction.
+
+---
+
+## 2. Architektur-Übersicht & Datenfluss
+
+```mermaid
+flowchart TD
+    subgraph Clients["Clients & Agents"]
+        REST["REST Client / App / Webhook"]
+        LLM["AI Agent (Cursor / Claude / Talos)"]
+    end
+
+    subgraph API_Gateway["Autheris API & MCP Gateway"]
+        DataApi["REST Data API<br/>/api/v1/data/{domain}/{table}<br/>(Streaming JSON, Paging, Filters)"]
+        CatalogApi["Catalog & Discovery API<br/>/api/v1/catalog/* & /api/v1/governance/*"]
+        McpServer["GatewayMcpServer (Streamable HTTP)<br/>Tools · Resources · Prompts"]
+    end
+
+    subgraph Governance["Central Governance & Security Pipeline (Single Point of Truth)"]
+        PDP["Unified PDP / TableAccessPolicy<br/>(ReBAC + Consent + ABAC)"]
+        Rewriter["GovernedSqlRewriter / Planner<br/>(Masking, RowFilters, CrossSource Routing)"]
+        Audit["AccessAuditMiddleware & IAuditLogRepository<br/>(Lückenloses Audit, PII Masking)"]
+    end
+
+    subgraph Execution["Execution Engines"]
+        SqlExec["GovernedSqlExecutor<br/>(Postgres, MSSQL, SQLite)"]
+        DuckDbExec["FederatedDuckDbExecutionService<br/>(Cross-Source API & Lakehouse Joins)"]
+        HttpExec["DeclarativeHttpDataSourceExecutor<br/>(SSRF-Protected REST Outbound)"]
+    end
+
+    REST --> DataApi
+    REST --> CatalogApi
+    LLM --> McpServer
+
+    McpServer -->|Tool Call: query_sql| Rewriter
+    McpServer -->|Tool Call: query_dataset| DataApi
+    McpServer -->|Resources / Prompts| CatalogApi
+
+    DataApi --> PDP
+    CatalogApi --> PDP
+    PDP --> Rewriter
+    Rewriter --> Audit
+    Audit --> SqlExec
+    Audit --> DuckDbExec
+    Audit --> HttpExec
+```
+
+---
+
+## 3. Detaillierte Spezifikation der Komponenten
+
+### 3.1 Säule 1: Universelle Governed REST Data API
+
+#### Endpunkte (`src/Autheris.Api/Endpoints/DatasetDataEndpoints.cs`)
+- `GET /api/v1/data/{domain}/{schema}/{table}` bzw. `GET /api/v1/data/{datasetId}`
+  - **Query-Parameter:**
+    - `select`: Kommagetrennte Liste gewünschter Spalten (z. B. `id,amount,status`).
+    - `filter`: Prädikate (z. B. `status eq 'active' and amount gt 100`). Unterstützt sichere AST-Übersetzung analog WebSQL-Prädikate.
+    - `orderBy`: Sortierung (z. B. `createdDate desc`).
+    - `limit`: Zeilenbegrenzung (Default: 50, Max: konfigurierbar via `GatewayOptions.DataApi.MaxPageSize`, Default 1.000).
+    - `offset`: Offset-Paging.
+  - **Sicherheits- & Governance-Garantie:**
+    - Wird intern als deterministischer AST-Select formuliert und durch `GovernedSqlExecutionService` bzw. `IFederatedQueryExecutionService` ausgeführt.
+    - Maskierte Spalten werden serverseitig vor der Ausgabe maskiert (Klartext nur bei explizitem `AccessProfile` / Consent).
+    - Unzulässige Spalten (Status `Deny`) führen zu `400 Bad Request` mit präziser Governance-Meldung.
+    - Verhindert Oracle Inference Attacks: Filterung oder Sortierung auf maskierten Spalten ist strikt verboten.
+  - **Streaming & Memory-Effizienz:**
+    - Serialisierung erfolgt direkt über `System.Text.Json.Utf8JsonWriter` auf `HttpResponse.BodyWriter` (keine Pufferung von 10.000 DTOs im RAM).
+    - Antwort-Envelope:
+      ```json
+      {
+        "dataset": "sales.public.orders",
+        "count": 50,
+        "offset": 0,
+        "limit": 50,
+        "hasMore": true,
+        "columns": [
+          { "name": "id", "type": "int", "masked": false },
+          { "name": "customer_email", "type": "varchar", "masked": true }
+        ],
+        "data": [
+          { "id": 1001, "customer_email": "d***@example.com" }
+        ]
+      }
+      ```
+
+- `GET /api/v1/data/{domain}/{schema}/{table}/{id}`
+  - Gezielter Einzeldatensatz-Abruf über Primärschlüssel.
+
+#### Katalog- & Discovery-Endpunkte (`src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs`)
+- `GET /api/v1/catalog/datasets`
+  - Liefert alle Datensätze, für die der aktuelle Aufrufer mindestens Leserechte (`can_query` / Consent) besitzt.
+  - Enthält Domäne, Schema, Tabelle, Quelltyp (`Sql`, `HttpDeclarative`, `Lakehouse`), Sensitivitäts-Klassifikation und Beschreibung.
+- `GET /api/v1/catalog/datasets/{datasetId}`
+  - Detailliertes Schema eines Datensatzes: Spaltenliste, Datentypen, Primärschlüssel, Relationen und der für den Aufrufer geltende Maskierungsstatus (`clear`, `mask`, `deny`).
+- `GET /api/v1/catalog/datasources`
+  - Liste aller angebundenen Datenquellen samt Status (`healthy`, `degraded`, `inactive`), Typ und letztem Sync-Zeitstempel (ohne Geheimnisse!).
+- `GET /api/v1/catalog/search?q={query}&domain={domain}`
+  - Volltext- und Tag-Suche über Datensätze, Beschreibungen und Spaltennamen.
+
+#### Self-Service Permissions API (`src/Autheris.Api/Endpoints/GovernanceApiEndpoints.cs`)
+- `GET /api/v1/governance/me/access`
+  - Transparenz für den Benutzer/Agenten: Zeigt auf einen Blick alle freigegebenen Datensätze, die geltenden Maskierungsstufen je Spalte und hinterlegte Zeilenfilter.
+
+---
+
+### 3.2 Säule 2: Umfassende Bereitstellung für MCP (Model Context Protocol)
+
+#### 3.2.1 Erweiterte MCP Tools
+
+| Werkzeug | Kategorie | Beschreibung & Schema | Ziel-Komponente |
+|---|---|---|---|
+| `query_sql` | Abfrage | Führt sichere Governed SQL/WebSQL-Abfragen aus (mit RLS, Column-Masking, Limitierung).<br/>`{"query": "SELECT id, status FROM sales.public.orders LIMIT 10"}` | `GovernedSqlExecutionService` |
+| `query_dataset` | Abfrage | Einfache Abfrage ohne SQL/GraphQL-Syntax: `dataset`, `columns`, `filter`, `orderBy`, `limit`, `offset`. | `DatasetDataEndpoints` Logik |
+| `search_catalog` | Discovery | Sucht Datensätze anhand von Stichworten, Tags oder Spaltennamen.<br/>`{"query": "kunden umsatz", "domain": "sales"}` | `ITableMetadataRepository` |
+| `get_my_permissions` | Governance | Prüft, welche Spalten für die aktuelle Identität freigegeben oder maskiert sind.<br/>`{"dataset": "sales.public.orders"}` | `TableAccessPolicy` |
+| `list_datasources` | Discovery | Listet angebundene Datenquellen und Konnektoren auf. | `ITableMetadataRepository` |
+| `get_data_lineage` | Compliance | Zeigt Herkunft und Datenfluss eines Datensatzes. | `ILineageGraphStore` |
+
+#### 3.2.2 Admin MCP Tools (R-60 bis R-63)
+Nur sichtbar und aufrufbar für Aufrufer mit Rolle `GovernanceAdmin` oder `TenantAdmin`:
+
+| Werkzeug | Zweck & Sicherheitsleitplanke |
+|---|---|
+| `admin_register_datasource` | Registriert neue Datenquellen aus OpenAPI/Swagger (R-54) ohne Klartext-Secrets. |
+| `admin_set_dataset_state` | Aktiviert oder sperrt Datensätze (`active`/`inactive`, R-58). |
+| `admin_resolve_principal` | Löst Namen („david“, „philipp“) deterministisch in SIDs/Objekt-IDs auf (R-61). |
+| `admin_plan_access` | Erzeugt einen Freigabe-Plan (Vorher/Nachher-Diff je Spalte, Warnungen) mit `planId` (R-60). **Ändert nichts!** |
+| `admin_apply_access` | Wendet Freigabeplan an. **Zwingend erforderlich:** Bestätigungsnachweis `confirmationToken` (R-62, Human-in-the-Loop). |
+| `admin_revoke_access` | Entzieht Freigaben je Person und Datensatz (R-64). |
+
+#### 3.2.3 MCP Resources (Nativer Kontext für LLMs)
+
+MCP-Clients können Ressourcen direkt abonnieren:
+- `autheris://catalog/summary`: Kompakter Markdown-Katalog aller für den Principal sichtbaren Datenbestände.
+- `autheris://catalog/datasets/{datasetId}/schema`: Vollständiges Schema eines Datensatzes als strukturierte JSON/Markdown-Tabelle.
+- `autheris://catalog/datasources`: Status und Typ aller verfügbaren Datenquellen.
+- `autheris://governance/my-access`: Geltende Richtlinien und Maskierungsstufen der aktuellen Sitzung.
+
+#### 3.2.4 MCP Prompts (Geführte Workflows)
+- `explore_dataset(dataset)`: Führt den Agenten durch Metadaten, Schema, Beispieldaten und Best Practices zur Abfrage.
+- `audit_access_compliance(dataset, principal)`: Ermittelt Berechtigungsunterschiede zwischen Rollen oder Personen für Compliance-Berichte.
+
+---
+
+## 4. Sicherheits- & Performance-Leitplanken
+
+1. **Single Point of Governance (Kein Bypass):**
+   - Weder die neue REST-Data-API noch MCP-Tools sprechen Datenquellen direkt an.
+   - Alle Pfade nutzen den bestehenden `TableAccessPolicy`-PDP und `GovernedSqlRewriter`/`FederatedDuckDbExecutionService`.
+2. **Anti-Leakage Secret Protection (Review G5):**
+   - Zugangsdaten (API-Keys, Basic Auth, OAuth-Secrets) werden in APIs und MCP-Ressourcen **niemals** im Klartext zurückgegeben. Es wird ausschließlich `isConfigured: true` und der Zeitstempel geliefert.
+3. **Zwei-Phasen-Freigabe für MCP-Mutationen (Human-in-the-Loop, R-62):**
+   - Ein KI-Modell kann administrative Freigaben nur planen (`admin_plan_access`). Die Ausführung (`admin_apply_access`) erfordert zwingend einen signierten, zeitlich begrenzten Bestätigungs-Token aus der Admin-Web-UI oder das bestehende HitL-System.
+4. **Zero-Allocation Streaming & Bounded Quotas:**
+   - Resultate über REST und MCP sind auf max. 1.000 Zeilen pro Aufruf begrenzt.
+   - JSON-Streaming verhindert Memory-Spikes und GC-Pressure.
+
+---
+
+## 5. Phasenbasierter Implementierungsplan
+
+### Phase 0: Architektur-Grundlagen & Verträge (Tag 1)
+- [ ] DTOs und Response-Modelle für REST Data API und Catalog API in `Autheris.Domain.Model` anlegen.
+- [ ] Definition der Interfaces `IGovernedDataQueryService` und `ICatalogDiscoveryService` in `Autheris.Application.Interfaces`.
+- [ ] Fehlertests (Red Tests) für unautorisierten Datenzugriff, Paging-Limits und Spaltenmaskierung über REST schreiben.
+
+### Phase 1: Governed REST Data API (Tag 2)
+- [ ] Implementierung `GovernedDataQueryService`: Übersetzung von REST-Parametern (`select`, `filter`, `orderBy`, `limit`, `offset`) in AST-Queries.
+- [ ] Implementierung `DatasetDataEndpoints.cs`: Minimal APIs für `/api/v1/data/{domain}/{schema}/{table}` und `/api/v1/data/{datasetId}`.
+- [ ] Direkte Utf8JsonWriter-Streaming-Ausgabe auf den Response-Stream.
+- [ ] Verifikation: 100% Pre-Staging-Masking und RLS bei REST-Abfragen.
+
+### Phase 2: Catalog & Self-Service Permission APIs (Tag 3)
+- [ ] Implementierung `CatalogApiEndpoints.cs` (`/api/v1/catalog/datasets`, `/api/v1/catalog/datasources`, `/api/v1/catalog/search`).
+- [ ] Implementierung `GovernanceApiEndpoints.cs` (`/api/v1/governance/me/access`).
+- [ ] Integration in OpenAPI/Swagger-Dokumentation (`/swagger` & `/api/docs`).
+
+### Phase 3: MCP Tools Erweiterung für Daten & Katalog (Tag 4)
+- [ ] Erweiterung `McpDatasetTools.cs`: Tool-Definitionen für `query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`.
+- [ ] Dispatching in `GatewayMcpServer.cs` und Anbindung an `GovernedSqlExecutionService`.
+- [ ] Result-Formatter: Kompakte Markdown- und JSON-Ausgabe mit Token-Budget-Überwachung.
+
+### Phase 4: MCP Resources & Prompts (Tag 5)
+- [ ] Implementierung von Resource-Handlern in `GatewayMcpServer.cs` für `autheris://catalog/*` und `autheris://governance/*`.
+- [ ] Implementierung von MCP Prompts (`explore_dataset`, `audit_access_compliance`).
+- [ ] Integration mit `ISemanticMcpCompiler`.
+
+### Phase 5: Admin MCP Tools & Dynamic Data Source Registration (Tag 6)
+- [ ] Umsetzung der Anforderungen R-54 bis R-64:
+  - `admin_register_datasource` (OpenAPI/Swagger Ingestion mit SecretRef)
+  - `admin_set_dataset_state` (Aktivieren/Deaktivieren)
+  - `admin_resolve_principal` (Namen $\rightarrow$ SID Auflösung)
+  - `admin_plan_access` & `admin_apply_access` mit Confirmation-Token
+- [ ] Strikte Rollentrennung: Admin-Tools nur für Administratoren sichtbar.
+
+### Phase 6: E2E-Tests, Architektur-Tests & Dokumentation (Tag 7)
+- [ ] xUnit-Tests in `Autheris.Tests.Unit` für alle neuen Endpunkte und MCP-Tools.
+- [ ] Architektur-Tests in `Autheris.Tests.Architecture` (Clean Architecture, DI Lifetimes, File Length $\le 800$ Zeilen).
+- [ ] Integrationstest mit Claude/MCP-Client gegen Staging.
+- [ ] Aktualisierung von `arc42.md` und `00-gesamtplan-uebersicht.md`.
+
+---
+
+## 6. Abnahmekriterien & Verifikation
+
+1. **REST Data API:** Jede im Katalog registrierte Tabelle kann über `GET /api/v1/data/{domain}/{table}` abgerufen werden. David sieht alle Spalten unmaskiert; Philipp sieht sensible Spalten maskiert; unberechtigte Tabellen liefern 403.
+2. **MCP Daten-Abfrage:** Ein AI-Agent kann über `query_sql` und `query_dataset` Governed Abfragen ausführen. Das Ergebnis enthält korrekte Maskierung und keine internen Secrets.
+3. **MCP Katalog-Discovery:** `search_catalog` und `autheris://catalog/summary` liefern dem Modell den aktuellen Stand des Datenkatalogs.
+4. **Admin-Steuerung per MCP:** Ein Administrator kann über MCP eine Datenquelle vorschlagen, Freigaben planen und mit Bestätigungsnachweis anwenden. Ein normaler Benutzer sieht die Admin-Tools nicht.
+5. **Code-Qualität:** 0 Build-Warnungen, 0 Fehler, alle Dateien $\le 800$ Zeilen, 100% bestehende Tests grün.
