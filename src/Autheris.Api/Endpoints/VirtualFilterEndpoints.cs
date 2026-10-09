@@ -197,7 +197,7 @@ public static class VirtualFilterEndpoints
                 return Forbidden();
             }
 
-            var actor = new VirtualFilterActor(security.UserSid, IsSync: true);
+            var actor = new VirtualFilterActor(security.UserSid, IsSync: true, context.User?.GetUserIdentifiers());
             return Results.Ok(await service.ApplySyncAsync(request, actor, force, context.RequestAborted).ConfigureAwait(false));
         }).ConfigureAwait(false);
     }
@@ -538,7 +538,7 @@ public static class VirtualFilterEndpoints
             return Forbidden();
         }
 
-        var actor = new VirtualFilterActor(security.UserSid, IsSync: false);
+        var actor = new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers());
         return await MapErrorsAsync(() => action(security, actor), context).ConfigureAwait(false);
     }
 

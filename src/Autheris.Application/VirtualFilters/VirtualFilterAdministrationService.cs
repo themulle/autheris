@@ -9,7 +9,52 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 
 /// <summary>Who changes virtual filters; <see cref="IsSync"/> is the file repository sync (the only writer of managed rows).</summary>
-public sealed record VirtualFilterActor(Sid Sid, bool IsSync);
+public sealed record VirtualFilterActor(Sid Sid, bool IsSync, IReadOnlyCollection<string>? Identifiers = null)
+{
+    public string FormatAllIdentifiers()
+    {
+        var list = new List<string>();
+        if (!string.IsNullOrWhiteSpace(Sid.Value))
+        {
+            list.Add(Sid.Value);
+        }
+        if (Identifiers != null)
+        {
+            foreach (var id in Identifiers)
+            {
+                if (!string.IsNullOrWhiteSpace(id) && !list.Contains(id, StringComparer.OrdinalIgnoreCase))
+                {
+                    list.Add(id);
+                }
+            }
+        }
+        return string.Join(";", list);
+    }
+
+    public bool MatchesAny(IEnumerable<string> contributorIdentifiers)
+    {
+        if (contributorIdentifiers == null) return false;
+        var myIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(Sid.Value))
+        {
+            myIds.Add(Sid.Value);
+        }
+        if (Identifiers != null)
+        {
+            foreach (var id in Identifiers)
+            {
+                if (!string.IsNullOrWhiteSpace(id)) myIds.Add(id);
+            }
+        }
+
+        foreach (var c in contributorIdentifiers)
+        {
+            if (myIds.Contains(c)) return true;
+        }
+
+        return false;
+    }
+}
 
 /// <summary>A row managed by the file repository was changed outside the sync (HTTP 409).</summary>
 public sealed class ManagedResourceLockedException(string message) : InvalidOperationException(message);
@@ -200,7 +245,7 @@ public sealed class VirtualFilterAdministrationService
                     CreatedBy = actor.Sid,
                     ApprovedBy = null,
                     ApprovedAt = null,
-                    UpdatedBy = actor.Sid.Value,
+                    UpdatedBy = CombineUpdatedBy(existing.Draft?.UpdatedBy, actor),
                     UpdatedAt = DateTimeOffset.UtcNow,
                     Draft = null,
                     PendingDeletion = false,
@@ -210,7 +255,7 @@ public sealed class VirtualFilterAdministrationService
                 var toStore = existing with
                 {
                     Draft = draft,
-                    UpdatedBy = actor.Sid.Value,
+                    UpdatedBy = CombineUpdatedBy(existing.UpdatedBy, actor),
                     UpdatedAt = DateTimeOffset.UtcNow
                 };
 
@@ -228,7 +273,7 @@ public sealed class VirtualFilterAdministrationService
                 CreatedBy = existing?.CreatedBy ?? actor.Sid,
                 ApprovedBy = null,
                 ApprovedAt = null,
-                UpdatedBy = actor.Sid.Value,
+                UpdatedBy = CombineUpdatedBy(existing?.UpdatedBy, actor),
                 UpdatedAt = DateTimeOffset.UtcNow,
                 Draft = null,
                 PendingDeletion = false,
@@ -281,10 +326,10 @@ public sealed class VirtualFilterAdministrationService
             throw new InvalidOperationException($"The virtual filter '{name}' has no pending changes to approve.");
         }
 
-        Sid? submitter = GetSubmitterSid(existing);
-        if (submitter != null && submitter == actor.Sid)
+        var contributors = GetContributorIdentifiers(existing);
+        if (actor.MatchesAny(contributors))
         {
-            throw new InvalidOperationException("Four-eyes principle violation: Creator cannot approve their own rule.");
+            throw new InvalidOperationException("Four-eyes principle violation: Creator or editor cannot approve their own rule.");
         }
 
         string pendingHash = existing.PendingDeletion
@@ -392,7 +437,7 @@ public sealed class VirtualFilterAdministrationService
                     CreatedBy = actor.Sid,
                     ApprovedBy = null,
                     ApprovedAt = null,
-                    UpdatedBy = actor.Sid.Value,
+                    UpdatedBy = CombineUpdatedBy(existing.Draft?.UpdatedBy, actor),
                     UpdatedAt = DateTimeOffset.UtcNow,
                     Draft = null,
                     PendingDeletion = false,
@@ -402,7 +447,7 @@ public sealed class VirtualFilterAdministrationService
                 var toStore = existing with
                 {
                     Draft = draft,
-                    UpdatedBy = actor.Sid.Value,
+                    UpdatedBy = CombineUpdatedBy(existing.UpdatedBy, actor),
                     UpdatedAt = DateTimeOffset.UtcNow
                 };
 
@@ -420,7 +465,7 @@ public sealed class VirtualFilterAdministrationService
                 CreatedBy = existing?.CreatedBy ?? actor.Sid,
                 ApprovedBy = null,
                 ApprovedAt = null,
-                UpdatedBy = actor.Sid.Value,
+                UpdatedBy = CombineUpdatedBy(existing?.UpdatedBy, actor),
                 UpdatedAt = DateTimeOffset.UtcNow,
                 Draft = null,
                 PendingDeletion = false,
@@ -473,10 +518,10 @@ public sealed class VirtualFilterAdministrationService
             throw new InvalidOperationException($"The access profile '{name}' has no pending changes to approve.");
         }
 
-        Sid? submitter = GetSubmitterSid(existing);
-        if (submitter != null && submitter == actor.Sid)
+        var contributors = GetContributorIdentifiers(existing);
+        if (actor.MatchesAny(contributors))
         {
-            throw new InvalidOperationException("Four-eyes principle violation: Creator cannot approve their own rule.");
+            throw new InvalidOperationException("Four-eyes principle violation: Creator or editor cannot approve their own profile.");
         }
 
         string pendingHash = existing.PendingDeletion
@@ -838,46 +883,64 @@ public sealed class VirtualFilterAdministrationService
         }
     }
 
-    private static Sid? GetSubmitterSid(VirtualFilter filter)
+    private static string CombineUpdatedBy(string? existingUpdatedBy, VirtualFilterActor actor)
     {
-        if (filter.PendingDeletion)
+        var actorIds = actor.FormatAllIdentifiers();
+        if (string.IsNullOrWhiteSpace(existingUpdatedBy))
         {
-            if (filter.DeletionRequestedBy != null) return filter.DeletionRequestedBy;
-            if (!string.IsNullOrWhiteSpace(filter.UpdatedBy)) return new Sid(filter.UpdatedBy);
-            return null;
+            return actorIds;
         }
+
+        var parts = existingUpdatedBy.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Concat(actorIds.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        return string.Join(";", parts);
+    }
+
+    private static HashSet<string> GetContributorIdentifiers(VirtualFilter filter)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddToContributors(set, filter.CreatedBy, filter.UpdatedBy);
+        AddToContributors(set, filter.DeletionRequestedBy, null);
 
         if (filter.Draft != null)
         {
-            if (filter.Draft.CreatedBy != null) return filter.Draft.CreatedBy;
-            if (!string.IsNullOrWhiteSpace(filter.Draft.UpdatedBy)) return new Sid(filter.Draft.UpdatedBy);
-            return null;
+            AddToContributors(set, filter.Draft.CreatedBy, filter.Draft.UpdatedBy);
+            AddToContributors(set, filter.Draft.DeletionRequestedBy, null);
         }
 
-        if (filter.CreatedBy != null) return filter.CreatedBy;
-        if (!string.IsNullOrWhiteSpace(filter.UpdatedBy)) return new Sid(filter.UpdatedBy);
-        return null;
+        return set;
     }
 
-    private static Sid? GetSubmitterSid(AccessProfile profile)
+    private static HashSet<string> GetContributorIdentifiers(AccessProfile profile)
     {
-        if (profile.PendingDeletion)
-        {
-            if (profile.DeletionRequestedBy != null) return profile.DeletionRequestedBy;
-            if (!string.IsNullOrWhiteSpace(profile.UpdatedBy)) return new Sid(profile.UpdatedBy);
-            return null;
-        }
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddToContributors(set, profile.CreatedBy, profile.UpdatedBy);
+        AddToContributors(set, profile.DeletionRequestedBy, null);
 
         if (profile.Draft != null)
         {
-            if (profile.Draft.CreatedBy != null) return profile.Draft.CreatedBy;
-            if (!string.IsNullOrWhiteSpace(profile.Draft.UpdatedBy)) return new Sid(profile.Draft.UpdatedBy);
-            return null;
+            AddToContributors(set, profile.Draft.CreatedBy, profile.Draft.UpdatedBy);
+            AddToContributors(set, profile.Draft.DeletionRequestedBy, null);
         }
 
-        if (profile.CreatedBy != null) return profile.CreatedBy;
-        if (!string.IsNullOrWhiteSpace(profile.UpdatedBy)) return new Sid(profile.UpdatedBy);
-        return null;
+        return set;
+    }
+
+    private static void AddToContributors(HashSet<string> set, Sid? sid, string? updatedBy)
+    {
+        if (sid != null && !string.IsNullOrWhiteSpace(sid.Value.Value))
+        {
+            set.Add(sid.Value.Value);
+        }
+        if (!string.IsNullOrWhiteSpace(updatedBy))
+        {
+            foreach (var part in updatedBy.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                set.Add(part);
+            }
+        }
     }
 
     private Task AuditAsync(TenantId tenantId, VirtualFilterActor actor, string eventType, string target, object details, CancellationToken ct) =>

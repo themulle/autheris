@@ -231,4 +231,80 @@ public sealed class VirtualFilterFourEyesApprovalTests : IDisposable
         await Should.ThrowAsync<InvalidOperationException>(() =>
             _adminService.ApproveFilterAsync(Tenant, "filter_clean", SupervisorActor));
     }
+
+    [Fact]
+    public async Task SG_03_EditorCannotSelfApprove_AfterModifyingPendingFilter()
+    {
+        // 1. Alice (Creator) creates a pending filter
+        var filter = VirtualFilterModelTests.DavidFilter("filter_sg03");
+        var savedAlice = await _adminService.SaveFilterAsync(filter, CreatorActor);
+        savedAlice.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+
+        // 2. Bob (Editor) modifies Alice's pending filter
+        var bobSid = new Sid("S-1-5-21-BOB");
+        var bobActor = new VirtualFilterActor(bobSid, IsSync: false, Identifiers: ["bob@company.com", "bob_admin"]);
+        var bobModifiedFilter = filter with { KeyColumns = ["client.client_id", "crane.crane_serial_number"] };
+        var savedBob = await _adminService.SaveFilterAsync(bobModifiedFilter, bobActor);
+        savedBob.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+
+        // 3. Bob attempts to self-approve his own edits -> MUST throw
+        var exBob = await Should.ThrowAsync<InvalidOperationException>(() =>
+            _adminService.ApproveFilterAsync(Tenant, "filter_sg03", bobActor));
+        exBob.Message.ShouldContain("Four-eyes principle violation");
+
+        // 4. Bob attempts with another identifier (e.g. UPN/email) -> MUST throw
+        var bobAlternateActor = new VirtualFilterActor(new Sid("S-1-5-21-BOB-ALT"), IsSync: false, Identifiers: ["bob_admin"]);
+        var exBobAlt = await Should.ThrowAsync<InvalidOperationException>(() =>
+            _adminService.ApproveFilterAsync(Tenant, "filter_sg03", bobAlternateActor));
+        exBobAlt.Message.ShouldContain("Four-eyes principle violation");
+
+        // 5. Alice attempts to approve Bob's modified filter -> MUST throw
+        var exAlice = await Should.ThrowAsync<InvalidOperationException>(() =>
+            _adminService.ApproveFilterAsync(Tenant, "filter_sg03", CreatorActor));
+        exAlice.Message.ShouldContain("Four-eyes principle violation");
+
+        // 6. Charlie (neutral 3rd supervisor) approves -> SUCCESS!
+        var charlieSid = new Sid("S-1-5-21-CHARLIE");
+        var charlieActor = new VirtualFilterActor(charlieSid, IsSync: false, Identifiers: ["charlie_admin"]);
+        var approved = await _adminService.ApproveFilterAsync(Tenant, "filter_sg03", charlieActor);
+        approved.Status.ShouldBe(FilterApprovalStatus.Active);
+        approved.ApprovedBy.ShouldBe(charlieSid);
+    }
+
+    [Fact]
+    public async Task SG_03_EditorCannotSelfApprove_AfterModifyingPendingProfile()
+    {
+        // 1. Setup filter so profile can bind it
+        var filter = VirtualFilterModelTests.DavidFilter("filter_sg03_p");
+        await _adminService.SaveFilterAsync(filter, new VirtualFilterActor(new Sid("S-1-5-21-SYS"), true));
+
+        // 2. Alice creates pending profile
+        var profile = VirtualFilterModelTests.DavidProfile("profile_sg03", "filter_sg03_p");
+        var savedAlice = await _adminService.SaveProfileAsync(profile, CreatorActor);
+        savedAlice.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+
+        // 3. Bob modifies Alice's pending profile
+        var bobSid = new Sid("S-1-5-21-BOB");
+        var bobActor = new VirtualFilterActor(bobSid, IsSync: false, Identifiers: ["bob@company.com", "bob_admin"]);
+        var bobModifiedProfile = profile with { Uncovered = UncoveredPolicy.Skip };
+        var savedBob = await _adminService.SaveProfileAsync(bobModifiedProfile, bobActor);
+        savedBob.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+
+        // 4. Bob attempts to self-approve his own edits -> MUST throw
+        var exBob = await Should.ThrowAsync<InvalidOperationException>(() =>
+            _adminService.ApproveProfileAsync(Tenant, "profile_sg03", bobActor));
+        exBob.Message.ShouldContain("Four-eyes principle violation");
+
+        // 5. Alice attempts to approve -> MUST throw
+        var exAlice = await Should.ThrowAsync<InvalidOperationException>(() =>
+            _adminService.ApproveProfileAsync(Tenant, "profile_sg03", CreatorActor));
+        exAlice.Message.ShouldContain("Four-eyes principle violation");
+
+        // 6. Charlie (neutral 3rd supervisor) approves -> SUCCESS!
+        var charlieSid = new Sid("S-1-5-21-CHARLIE");
+        var charlieActor = new VirtualFilterActor(charlieSid, IsSync: false, Identifiers: ["charlie_admin"]);
+        var approved = await _adminService.ApproveProfileAsync(Tenant, "profile_sg03", charlieActor);
+        approved.Status.ShouldBe(FilterApprovalStatus.Active);
+        approved.ApprovedBy.ShouldBe(charlieSid);
+    }
 }
