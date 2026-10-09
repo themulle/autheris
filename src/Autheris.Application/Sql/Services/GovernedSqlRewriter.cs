@@ -97,21 +97,14 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         SqlDataSourceResolver? dataSourceResolver = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
-        _policyEnforcement = policyEnforcement;
-        _consentResolution = consentResolution;
-        _tableRepository = tableRepository;
-        _clientIpResolver = clientIpResolver;
-        _logger = logger;
-        _consentRepository = consentRepository;
-        _sqlEngine = sqlEngine ?? FastSqlEngine.Default;
-        _planCache = planCache;
+        _policyEnforcement = policyEnforcement; _consentResolution = consentResolution;
+        _tableRepository = tableRepository; _clientIpResolver = clientIpResolver;
+        _logger = logger; _consentRepository = consentRepository;
+        _sqlEngine = sqlEngine ?? FastSqlEngine.Default; _planCache = planCache;
         _sqlSecurityValidator = sqlSecurityValidator ?? new DefaultSqlSecurityValidator();
-        _rebacEvaluator = rebacEvaluator;
-        _consentCache = consentCache;
-        _mandatoryFilters = mandatoryFilters;
-        _contractManager = contractManager;
-        _accessProfileRepository = accessProfileRepository;
-        _memoryCache = memoryCache;
+        _rebacEvaluator = rebacEvaluator; _consentCache = consentCache;
+        _mandatoryFilters = mandatoryFilters; _contractManager = contractManager;
+        _accessProfileRepository = accessProfileRepository; _memoryCache = memoryCache;
         _maskingProvider = maskingProvider ?? new SqlDataMaskingProvider(_options, secretProvider, logger);
         _dataSourceResolver = dataSourceResolver ?? new SqlDataSourceResolver(_options, logger);
     }
@@ -360,40 +353,16 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         {
             dict[target.FullName] = value;
             dict[resolvedId.ToQualifiedName()] = value;
-
-            if (tableNameCounts.TryGetValue(target.TableName, out var count) && count == 1)
-            {
-                dict[target.TableName] = value;
-            }
-
-            if (!string.IsNullOrWhiteSpace(target.Schema))
-            {
-                var st = $"{target.Schema}.{target.TableName}";
-                if (schemaTableCounts.TryGetValue(st, out var sCount) && sCount == 1)
-                {
-                    dict[st] = value;
-                }
-            }
+            if (tableNameCounts.TryGetValue(target.TableName, out var count) && count == 1) dict[target.TableName] = value;
+            if (!string.IsNullOrWhiteSpace(target.Schema) && schemaTableCounts.TryGetValue($"{target.Schema}.{target.TableName}", out var sc) && sc == 1) dict[$"{target.Schema}.{target.TableName}"] = value;
         }
 
         void RegisterTableSet(ISet<string> set, TableAccessTarget target, TableIdentifier resolvedId)
         {
             set.Add(target.FullName);
             set.Add(resolvedId.ToQualifiedName());
-
-            if (tableNameCounts.TryGetValue(target.TableName, out var count) && count == 1)
-            {
-                set.Add(target.TableName);
-            }
-
-            if (!string.IsNullOrWhiteSpace(target.Schema))
-            {
-                var st = $"{target.Schema}.{target.TableName}";
-                if (schemaTableCounts.TryGetValue(st, out var sCount) && sCount == 1)
-                {
-                    set.Add(st);
-                }
-            }
+            if (tableNameCounts.TryGetValue(target.TableName, out var count) && count == 1) set.Add(target.TableName);
+            if (!string.IsNullOrWhiteSpace(target.Schema) && schemaTableCounts.TryGetValue($"{target.Schema}.{target.TableName}", out var sc) && sc == 1) set.Add($"{target.Schema}.{target.TableName}");
         }
 
         foreach (var target in metadata.ReferencedTables)
