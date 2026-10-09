@@ -50,13 +50,22 @@ public sealed record DbtMetadataProposal(
     string? ReviewedBy = null
 );
 
+public sealed record DbtRelationshipDefinition(
+    string Name,
+    string ParentModelOrTable,
+    string ChildModelOrTable,
+    string ParentColumn,
+    string ChildColumn
+);
+
 public sealed record DbtSyncResult(
     bool Success,
     int ParsedModelsCount,
     int GeneratedProposalsCount,
     int UpdatedLineageNodesCount,
     IReadOnlyList<string> Warnings,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    int ImportedRelationsCount = 0
 );
 
 public sealed record DbtContractBreakingChange(
@@ -73,5 +82,16 @@ public sealed record DbtContractValidationResult(
     int ValidatedModelsCount,
     IReadOnlyList<DbtContractBreakingChange> BreakingChanges,
     IReadOnlyList<string> Warnings
+);
+
+public sealed record DbtGovernanceSyncResult(
+    bool Success,
+    int UpdatedTablesCount,
+    int UpdatedColumnsCount,
+    int MaskingRulesCount,
+    int VirtualFiltersCount,
+    int AccessProfilesCount,
+    IReadOnlyList<string> Warnings,
+    string? ErrorMessage = null
 );
 

@@ -411,8 +411,10 @@ public static class ODataEndpoints
             }
         }
 
-        // F-DATA-01: a Parquet request that cannot be served is rejected before the query is executed
-        bool parquetRequested = ParquetContentNegotiation.IsParquetRequested(context.Request);
+        // F-DATA-01 / Befund 1.2: a Parquet request (via Accept header or $format=parquet) that cannot be served is rejected before the query is executed
+        bool parquetRequested = ParquetContentNegotiation.IsParquetRequested(context.Request) ||
+            string.Equals(context.Request.Query["$format"], "parquet", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(context.Request.Query["$format"], "application/vnd.apache.parquet", StringComparison.OrdinalIgnoreCase);
         IParquetExportService? parquetService = null;
         if (parquetRequested)
         {
@@ -540,9 +542,11 @@ public static class ODataEndpoints
             }
             if (string.Equals(key, "$format", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(values.ToString(), "json", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(values.ToString(), "parquet", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(values.ToString(), "application/vnd.apache.parquet", StringComparison.OrdinalIgnoreCase) &&
                 !values.ToString().StartsWith("application/json", StringComparison.OrdinalIgnoreCase))
             {
-                return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", "The query option '$format' supports 'json' only.");
+                return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", "The query option '$format' supports 'json' and 'parquet' only.");
             }
         }
 

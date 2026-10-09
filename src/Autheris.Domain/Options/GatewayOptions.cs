@@ -587,6 +587,13 @@ public sealed class GovernanceDbOptions
     /// alter or truncate the audit table.
     /// </summary>
     public string? MigrationConnectionString { get; init; }
+
+    /// <summary>
+    /// R-42: SQLite journal mode: WAL (default), DELETE, TRUNCATE, MEMORY, OFF.
+    /// When running inside Docker/Podman with bind mounts from Windows/WSL filesystems where
+    /// shared memory (-shm) is broken, configure DELETE or TRUNCATE to avoid database disk image corruption.
+    /// </summary>
+    public string JournalMode { get; init; } = "WAL";
 }
 
 public sealed class CachingOptions

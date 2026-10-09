@@ -272,149 +272,172 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             tx = ownedTx;
         }
 
-        // SEC H-17: the DB tail is compared with the in-memory reference instead of being adopted blindly.
-        var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
-        var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
-        if (!FixedTimeEqualsString(effectiveDbHash, _lastAuditHash) || dbTailSeq != _lastAuditSeq)
+        try
         {
-            // SEC-CRYPTO-01 / SR15-24: If an uncommitted transaction was rolled back without calling OnTransactionRolledBack,
-            // clean up pending states and revert in-memory pointers to the committed DB tail.
-            if (_pendingAuditTxStates.Count > 0 && dbTailSeq < _lastAuditSeq)
-            {
-                RollbackPendingAuditTransactions();
-            }
-
+            // SEC H-17: the DB tail is compared with the in-memory reference instead of being adopted blindly.
+            var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
+            var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
             if (!FixedTimeEqualsString(effectiveDbHash, _lastAuditHash) || dbTailSeq != _lastAuditSeq)
             {
-                var anchor = TryLoadVerifiedAnchor(out _);
-                var explainedByAnchor = anchor != null
-                                        && dbTailSeq > _lastAuditSeq
-                                        && anchor.Sequence == dbTailSeq
-                                        && FixedTimeEqualsString(anchor.EntryHash, effectiveDbHash);
-                if (!explainedByAnchor)
+                // SEC-CRYPTO-01 / SR15-24: If an uncommitted transaction was rolled back without calling OnTransactionRolledBack,
+                // clean up pending states and revert in-memory pointers to the committed DB tail.
+                if (_pendingAuditTxStates.Count > 0 && dbTailSeq < _lastAuditSeq)
                 {
-                    FlagAuditChainViolation(
-                        $"Audit chain tail in DB (seq {dbTailSeq}) diverges from the in-memory reference (seq {_lastAuditSeq}) without a matching signed anchor - possible truncation or rewrite.");
+                    RollbackPendingAuditTransactions();
                 }
 
-                // Keep the chain linear; verification stays failed while a violation is flagged.
-                _lastAuditHash = effectiveDbHash;
-                _lastAuditSeq = dbTailSeq;
-            }
-        }
-
-        long preTxSeq = _lastAuditSeq;
-        string preTxHash = _lastAuditHash;
-
-        long lastSequence = _lastAuditSeq;
-        string lastEntryHash = _lastAuditHash;
-
-        using var cmd = _connection.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
-                            VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
-
-        var pId = cmd.Parameters.Add("@id", SqliteType.Text);
-        var pOcc = cmd.Parameters.Add("@occ", SqliteType.Text);
-        var pEvent = cmd.Parameters.Add("@event", SqliteType.Text);
-        var pActor = cmd.Parameters.Add("@actor", SqliteType.Text);
-        var pTarget = cmd.Parameters.Add("@target", SqliteType.Text);
-        var pCol = cmd.Parameters.Add("@col", SqliteType.Text);
-        var pDec = cmd.Parameters.Add("@dec", SqliteType.Text);
-        var pTrace = cmd.Parameters.Add("@trace", SqliteType.Text);
-        var pDet = cmd.Parameters.Add("@det", SqliteType.Text);
-        var pPrev = cmd.Parameters.Add("@prev", SqliteType.Text);
-        var pHash = cmd.Parameters.Add("@hash", SqliteType.Text);
-        var pTenantId = cmd.Parameters.Add("@tenantId", SqliteType.Text);
-        var pSeq = cmd.Parameters.Add("@seq", SqliteType.Integer);
-
-        foreach (var entry in batch)
-        {
-            lastSequence++;
-            entry.PrevHash = lastEntryHash;
-            entry.EntryHash = ComputeAuditEntryHash(
-                lastSequence,
-                entry.Id.ToString(),
-                entry.PrevHash,
-                entry.OccurredAt,
-                entry.EventType,
-                entry.ActorSid.Value,
-                entry.TargetTable,
-                entry.TargetColumn,
-                entry.Decision,
-                entry.TraceId,
-                entry.DetailsJson,
-                entry.TenantId.Value);
-
-            pId.Value = entry.Id.ToString();
-            pOcc.Value = entry.OccurredAt.ToString("O");
-            pEvent.Value = entry.EventType;
-            pActor.Value = entry.ActorSid.Value;
-            pTarget.Value = entry.TargetTable;
-            pCol.Value = (object?)entry.TargetColumn ?? DBNull.Value;
-            pDec.Value = entry.Decision;
-            pTrace.Value = entry.TraceId;
-            pDet.Value = entry.DetailsJson;
-            pPrev.Value = entry.PrevHash;
-            pHash.Value = entry.EntryHash;
-            pTenantId.Value = entry.TenantId.Value;
-            pSeq.Value = lastSequence;
-
-            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-
-            lastEntryHash = entry.EntryHash;
-        }
-
-        if (ownedTx != null)
-        {
-            await ownedTx.CommitAsync(ct).ConfigureAwait(false);
-            ownedTx.Dispose();
-
-            _lastAuditHash = lastEntryHash;
-            _lastAuditSeq = lastSequence;
-
-            // SEC H-17 / E-11: advance the external signed anchor only AFTER the commit while the write lock is still
-            // held. Append-only (WORM) anchor stores cannot take an anchor back, so an anchor that is ahead of the
-            // database must never exist; a crash between commit and anchor only leaves the anchor behind the tail,
-            // which is harmless. An anchor is never advanced while a violation is flagged (it would otherwise
-            // "launder" a truncated chain).
-            if (Volatile.Read(ref _auditChainViolation) == null)
-            {
-                try
+                if (!FixedTimeEqualsString(effectiveDbHash, _lastAuditHash) || dbTailSeq != _lastAuditSeq)
                 {
-                    _auditAnchorStore.Save(CreateSignedAnchor(lastSequence, lastEntryHash));
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogError(ex, "Failed to persist the external audit chain anchor (seq {Sequence}).", lastSequence);
+                    var anchor = TryLoadVerifiedAnchor(out _);
+                    var explainedByAnchor = anchor != null
+                                            && dbTailSeq > _lastAuditSeq
+                                            && anchor.Sequence == dbTailSeq
+                                            && FixedTimeEqualsString(anchor.EntryHash, effectiveDbHash);
+                    if (!explainedByAnchor)
+                    {
+                        FlagAuditChainViolation(
+                            $"Audit chain tail in DB (seq {dbTailSeq}) diverges from the in-memory reference (seq {_lastAuditSeq}) without a matching signed anchor - possible truncation or rewrite.");
+                    }
+
+                    // Keep the chain linear; verification stays failed while a violation is flagged.
+                    _lastAuditHash = effectiveDbHash;
+                    _lastAuditSeq = dbTailSeq;
                 }
             }
-        }
-        else
-        {
-            // SEC-CRYPTO-01 / SR15-24: Caller-managed transaction (e.g. Consent approval/creation).
-            // Do NOT advance the external signed anchor until the caller explicitly commits the transaction!
-            // Append-only (WORM) anchor stores cannot take an anchor back, so writing the anchor before commit
-            // causes permanent chain violation if the transaction rolls back.
-            if (!_pendingAuditTxStates.TryGetValue(existingTx!, out var pendingState))
+
+            long preTxSeq = _lastAuditSeq;
+            string preTxHash = _lastAuditHash;
+
+            long lastSequence = _lastAuditSeq;
+            string lastEntryHash = _lastAuditHash;
+
+            using var cmd = _connection.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = @"INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, target_column, decision, trace_id, details_json, prev_hash, entry_hash, tenant_id, seq)
+                                VALUES (@id, @occ, @event, @actor, @target, @col, @dec, @trace, @det, @prev, @hash, @tenantId, @seq)";
+
+            var pId = cmd.Parameters.Add("@id", SqliteType.Text);
+            var pOcc = cmd.Parameters.Add("@occ", SqliteType.Text);
+            var pEvent = cmd.Parameters.Add("@event", SqliteType.Text);
+            var pActor = cmd.Parameters.Add("@actor", SqliteType.Text);
+            var pTarget = cmd.Parameters.Add("@target", SqliteType.Text);
+            var pCol = cmd.Parameters.Add("@col", SqliteType.Text);
+            var pDec = cmd.Parameters.Add("@dec", SqliteType.Text);
+            var pTrace = cmd.Parameters.Add("@trace", SqliteType.Text);
+            var pDet = cmd.Parameters.Add("@det", SqliteType.Text);
+            var pPrev = cmd.Parameters.Add("@prev", SqliteType.Text);
+            var pHash = cmd.Parameters.Add("@hash", SqliteType.Text);
+            var pTenantId = cmd.Parameters.Add("@tenantId", SqliteType.Text);
+            var pSeq = cmd.Parameters.Add("@seq", SqliteType.Integer);
+
+            foreach (var entry in batch)
             {
-                _pendingAuditTxStates[existingTx!] = new AuditTxPendingState
+                lastSequence++;
+                entry.PrevHash = lastEntryHash;
+                entry.EntryHash = ComputeAuditEntryHash(
+                    lastSequence,
+                    entry.Id.ToString(),
+                    entry.PrevHash,
+                    entry.OccurredAt,
+                    entry.EventType,
+                    entry.ActorSid.Value,
+                    entry.TargetTable,
+                    entry.TargetColumn,
+                    entry.Decision,
+                    entry.TraceId,
+                    entry.DetailsJson,
+                    entry.TenantId.Value);
+
+                pId.Value = entry.Id.ToString();
+                pOcc.Value = entry.OccurredAt.ToString("O");
+                pEvent.Value = entry.EventType;
+                pActor.Value = entry.ActorSid.Value;
+                pTarget.Value = entry.TargetTable;
+                pCol.Value = (object?)entry.TargetColumn ?? DBNull.Value;
+                pDec.Value = entry.Decision;
+                pTrace.Value = entry.TraceId;
+                pDet.Value = entry.DetailsJson;
+                pPrev.Value = entry.PrevHash;
+                pHash.Value = entry.EntryHash;
+                pTenantId.Value = entry.TenantId.Value;
+                pSeq.Value = lastSequence;
+
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+                lastEntryHash = entry.EntryHash;
+            }
+
+            if (ownedTx != null)
+            {
+                await ownedTx.CommitAsync(ct).ConfigureAwait(false);
+
+                _lastAuditHash = lastEntryHash;
+                _lastAuditSeq = lastSequence;
+
+                // SEC H-17 / E-11: advance the external signed anchor only AFTER the commit while the write lock is still
+                // held. Append-only (WORM) anchor stores cannot take an anchor back, so an anchor that is ahead of the
+                // database must never exist; a crash between commit and anchor only leaves the anchor behind the tail,
+                // which is harmless. An anchor is never advanced while a violation is flagged (it would otherwise
+                // "launder" a truncated chain).
+                if (Volatile.Read(ref _auditChainViolation) == null)
                 {
-                    PreTxSeq = preTxSeq,
-                    PreTxHash = preTxHash,
-                    LastSeq = lastSequence,
-                    LastHash = lastEntryHash
-                };
+                    try
+                    {
+                        _auditAnchorStore.Save(CreateSignedAnchor(lastSequence, lastEntryHash));
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogError(ex, "Failed to persist the external audit chain anchor (seq {Sequence}).", lastSequence);
+                    }
+                }
             }
             else
             {
-                pendingState.LastSeq = lastSequence;
-                pendingState.LastHash = lastEntryHash;
+                // SEC-CRYPTO-01 / SR15-24: Caller-managed transaction (e.g. Consent approval/creation).
+                // Do NOT advance the external signed anchor until the caller explicitly commits the transaction!
+                // Append-only (WORM) anchor stores cannot take an anchor back, so writing the anchor before commit
+                // causes permanent chain violation if the transaction rolls back.
+                if (!_pendingAuditTxStates.TryGetValue(existingTx!, out var pendingState))
+                {
+                    _pendingAuditTxStates[existingTx!] = new AuditTxPendingState
+                    {
+                        PreTxSeq = preTxSeq,
+                        PreTxHash = preTxHash,
+                        LastSeq = lastSequence,
+                        LastHash = lastEntryHash
+                    };
+                }
+                else
+                {
+                    pendingState.LastSeq = lastSequence;
+                    pendingState.LastHash = lastEntryHash;
+                }
+
+                // Tentatively advance in-memory pointers so consecutive writes within this transaction chain correctly
+                _lastAuditHash = lastEntryHash;
+                _lastAuditSeq = lastSequence;
+            }
+        }
+        catch (Exception ex)
+        {
+            if (ownedTx != null)
+            {
+                try
+                {
+                    await ownedTx.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception rbEx)
+                {
+                    _logger?.LogWarning(rbEx, "Failed to rollback audit transaction on SQLite connection.");
+                }
             }
 
-            // Tentatively advance in-memory pointers so consecutive writes within this transaction chain correctly
-            _lastAuditHash = lastEntryHash;
-            _lastAuditSeq = lastSequence;
+            _logger?.LogError(ex, "Failed to record audit events batch; transaction rolled back (R-43).");
+            throw;
+        }
+        finally
+        {
+            ownedTx?.Dispose();
         }
     }
 

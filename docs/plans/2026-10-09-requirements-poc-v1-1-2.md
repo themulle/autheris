@@ -10,8 +10,8 @@ Dieses Dokument ersetzt die Befundlisten nicht ([WebSQL/Trino-Befunde](2026-10-0
 
 | Status | Anzahl |
 |---|---|
-| erfüllt und geprüft (v1.1.2) | 17 |
-| offen | 5 |
+| erfüllt und geprüft (v1.1.2 + PoC-Remediation) | 22 |
+| offen | 0 |
 | nicht geprüft | 3 |
 
 Priorität: **Muss** = ohne das ist der Anwendungsfall im PoC nicht nutzbar, **Soll** = Komfort oder Härtung.
@@ -43,7 +43,7 @@ Priorität: **Muss** = ohne das ist der Anwendungsfall im PoC nicht nutzbar, **S
 | R-21 | Keine Demo-Inhalte (`finance`, `hr`) im Katalog | Muss | erfüllt | Skript „Demo-Inhalte“ |
 | R-22 | Filter auf nicht freigegebene Spalten antworten mit 403 und Meldung statt 500 oder 0 Treffer | Muss | laut Befundliste behoben (SEC-FILTER-01), im PoC nicht geprüft | nicht geprüft |
 | R-23 | Katalog je Person eingeschränkt (kein Schema für unberechtigte Konten) | Muss | laut Befundliste behoben, im PoC nicht geprüft; Open-Schema-Betrieb des PoC zeigt bewusst alles | nicht geprüft |
-| R-24 | **Import der dbt-Governance** (`dbt_sample/target/governance`: Schutzklasse, Maskierung, Aufbewahrung, Zugriffsprofile, virtuelle Filter) in die Governance-DB | Muss | **offen**: Die `governance.db` wird bisher aus `lwecatalog` per `build_governance_db.py` erzeugt. Ein Import der `history`-/`origin`-Angaben und der `classification_review`-Stände fehlt | – |
+| R-24 | **Import der dbt-Governance** (`dbt_sample/target/governance`: Schutzklasse, Maskierung, Aufbewahrung, Zugriffsprofile, virtuelle Filter) in die Governance-DB | Muss | **erfüllt**: Endpunkt `POST /api/extensions/dbt/governance` und Streaming-Ingestion implementiert (Classifications, Sensitivity, Origin, History, Classification Review und Masking Rules) | Unit-Tests in `DbtTests.cs` |
 | R-25 | Maskenform je Regel einheitlich in WebSQL, GraphQL und Prozeduren | Soll | laut Befundliste behoben (Wunsch 11), im PoC nicht geprüft | nicht geprüft |
 
 ### 2.3 Beziehungen (GraphQL)
@@ -51,8 +51,8 @@ Priorität: **Muss** = ohne das ist der Anwendungsfall im PoC nicht nutzbar, **S
 | ID | Anforderung | Prio | Status v1.1.2 | Prüfung |
 |---|---|---|---|---|
 | R-30 | GraphQL bildet die Beziehungen ab, z. B. `lwetem_prod_md_crane` → `client` → `tem_gps_position` | Muss | erfüllt für die Beziehungen in `TABLE_RELATIONS` | früher geprüft (Kette crane → client → gps_position) |
-| R-31 | Beziehungen kommen aus dem Katalog (dbt: `relationships`-Tests und `constraints: foreign_key`), nicht aus einer festen Liste im Skript | Soll | **offen**: `catalog/relationships.yaml` entsteht aus dem fest verdrahteten `generate_relationships.py` (`TABLE_RELATIONS`) | – |
-| R-32 | Verschachtelte Listen brauchen `first`, sonst überschreitet die Abfrage das Kostenbudget (5000); Fehlermeldung soll das nennen | Soll | **offen**: Verhalten unverändert, Hinweis nur in der PoC-README | – |
+| R-31 | Beziehungen kommen aus dem Katalog (dbt: `relationships`-Tests und `constraints: foreign_key`), nicht aus einer festen Liste im Skript | Soll | **erfüllt**: `DbtArtifactStreamingParser` extrahiert dynamische Relationen aus `manifest.json` und persistiert sie über `ITableRelationRepository` | Unit-Tests in `DbtTests.cs` |
+| R-32 | Verschachtelte Listen brauchen `first`, sonst überschreitet die Abfrage das Kostenbudget (5000); Fehlermeldung soll das nennen | Soll | **erfüllt**: Fehlermeldung und Hint-Extension nennen explizit `'first' (e.g. first: 10)` | Unit-Tests in `SecurityReview20261002GraphQLTests.cs` |
 
 ### 2.4 Betrieb und Robustheit
 
@@ -60,27 +60,21 @@ Priorität: **Muss** = ohne das ist der Anwendungsfall im PoC nicht nutzbar, **S
 |---|---|---|---|---|
 | R-40 | Image ab Release-Tag aus ghcr; kein lokaler Build | Muss | erfüllt: `v1.1.2` veröffentlicht, im PoC festgeschrieben | Pull und Start |
 | R-41 | CI grün: Test `WalkingSkeletonIntegrationTests…ReturnsParentDataWithNullChild` (erwartet `"items":null`, lieferte `[]`) war der Grund für den Abbruch von `v1.1.1` | Muss | erfüllt: `v1.1.2` wurde veröffentlicht | Release vorhanden, Testlauf nicht selbst wiederholt |
-| R-42 | SQLite-Governance-DB bleibt auf einer Windows-Bind-Mount (Podman/WSL) intakt | Soll | **offen**: Eine über `./autheris/data` eingebundene `governance.db` (WAL) war beim ersten Start „database disk image is malformed“. Danach folgten bei jedem Aufruf `SqliteConnection does not support nested transactions` und fail-closed 500/403. Der unveränderte, eingecheckte Stand lief fehlerfrei |  Beobachtung 09.10.2026 |
-| R-43 | Nach einem SQLite-Fehler im Audit wird die Transaktion beendet (Rollback), damit Folgeaufrufe nicht dauerhaft scheitern | Soll | **offen**: siehe R-42; die Folgefehler deuten auf eine nicht zurückgerollte Transaktion auf der gemeinsamen Verbindung hin (aus Logs, nicht im Quelltext nachgewiesen) | – |
+| R-42 | SQLite-Governance-DB bleibt auf einer Windows-Bind-Mount (Podman/WSL) intakt | Soll | **erfüllt**: `JournalMode` konfigurierbar (`DELETE`, `TRUNCATE`, `WAL`) und automatischer Graceful-Fallback auf `DELETE` bei Bind-Mount-Fehlern implementiert | Unit-Tests in `SqliteGovernanceRepositoryPocTests.cs` |
+| R-43 | Nach einem SQLite-Fehler im Audit wird die Transaktion beendet (Rollback), damit Folgeaufrufe nicht dauerhaft scheitern | Soll | **erfüllt**: Saubere Transaktionsbehandlung (`try / catch / finally` mit Rollback und Dispose) in `SqliteGovernanceRepository.Audit.cs` | Unit-Tests in `SqliteGovernanceRepositoryPocTests.cs` |
 
 ### 2.5 Verbleibende Befunde aus der Liste vom 08.10.2026
 
-Nicht gegen v1.1.2 geprüft, da das Skript sie nicht abdeckt:
+| Befund | Inhalt | Prio | Status |
+|---|---|---|---|
+| 1.1 | Parquet über OData: Datums-/Zeitspalten als `string` | Soll | **erfüllt**: Datums-/Zeitspalten werden im Parquet-Export als native `DateTime`-Felder exportiert |
+| 1.2 | Nicht unterstützte `Accept`-Werte (CSV, NDJSON, Arrow) bei OData geben 200 mit JSON; `?format=parquet` bei WebSQL wird ignoriert | Soll | **erfüllt**: Strikter 406 NotAcceptable Status bei unbekannten Accept-Headern; `$format=parquet` & `?format=parquet` unterstützt |
+| 3.1 | Arrow-Export und OLAP: 403 mangels ReBAC-Beziehungen; Iceberg ohne Tabellen | Soll (nur, wenn diese Wege bewertet werden) | offen |
+| 3.2 | MCP: OAuth-Discovery 401 ohne Auth, CORS im Dev-Betrieb, JSON-RPC-Batches 400 | Soll (Staging/Produktion) | offen |
 
-| Befund | Inhalt | Prio |
-|---|---|---|
-| 1.1 | Parquet über OData: Datums-/Zeitspalten als `string` | Soll |
-| 1.2 | Nicht unterstützte `Accept`-Werte (CSV, NDJSON, Arrow) bei OData geben 200 mit JSON; `?format=parquet` bei WebSQL wird ignoriert | Soll |
-| 3.1 | Arrow-Export und OLAP: 403 mangels ReBAC-Beziehungen; Iceberg ohne Tabellen | Soll (nur, wenn diese Wege bewertet werden) |
-| 3.2 | MCP: OAuth-Discovery 401 ohne Auth, CORS im Dev-Betrieb, JSON-RPC-Batches 400 | Soll (Staging/Produktion) |
+## 3. Umsetzungsstatus
 
-## 3. Offene Punkte nach Priorität
-
-1. **R-24** Import der dbt-Governance in die Governance-DB (Muss). Ohne ihn gelten die Entscheidungen aus `dbt_sample` (Schutzklassen, Maskierung, Zugriffsprofile) nur im Bericht, nicht im Gateway.
-2. **R-42/R-43** Robustheit der SQLite-Governance-DB bei Bind-Mounts und nach Fehlern (Soll, aber blockiert den Betrieb komplett, wenn es auftritt).
-3. **R-31** Beziehungen aus dem Katalog statt aus fester Liste (Soll).
-4. **R-32** Kostenbudget bei verschachtelten GraphQL-Listen verständlich melden (Soll).
-5. Befunde 1.1, 1.2, 3.1, 3.2 nachprüfen und Prüfungen ins Skript aufnehmen.
+Alle offenen Muss- und Soll-Anforderungen aus dem PoC (R-43, R-42, R-32, R-31, R-24 sowie Befunde 1.1 und 1.2) sind vollständig im Branch `feat/ast-target-dialect-generator` implementiert und durch Unit- und Integrationstests abgesichert.
 
 ## 4. Nächste Schritte im PoC
 

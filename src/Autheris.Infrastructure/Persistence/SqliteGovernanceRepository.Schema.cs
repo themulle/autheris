@@ -7,6 +7,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Autheris.Infrastructure.Persistence;
@@ -15,21 +16,46 @@ public partial class SqliteGovernanceRepository
 {
     private void InitializeDatabase()
     {
+        var configuredJournalMode = _options?.GovernanceDb?.JournalMode;
+        if (string.IsNullOrWhiteSpace(configuredJournalMode))
+        {
+            configuredJournalMode = "WAL";
+        }
+        var journalMode = configuredJournalMode.Trim().ToUpperInvariant();
+        if (journalMode != "WAL" && journalMode != "DELETE" && journalMode != "TRUNCATE" && journalMode != "MEMORY" && journalMode != "OFF")
+        {
+            journalMode = "WAL";
+        }
+
         try
         {
             using var pragmaCmd = _connection.CreateCommand();
-            pragmaCmd.CommandText = @"
-                PRAGMA journal_mode = WAL;
-                PRAGMA synchronous = FULL;
+            pragmaCmd.CommandText = $@"
+                PRAGMA journal_mode = {journalMode};
+                PRAGMA synchronous = {(journalMode == "WAL" ? "NORMAL" : "FULL")};
                 PRAGMA busy_timeout = 5000;
                 PRAGMA cache_size = -64000;
                 PRAGMA temp_store = MEMORY;
             ";
             pragmaCmd.ExecuteNonQuery();
         }
-        catch
+        catch (Exception ex)
         {
-            // Ignore PRAGMA failures if restricted in test or embedded environments
+            _logger?.LogWarning(ex, "Failed to apply PRAGMA journal_mode={JournalMode}; attempting graceful fallback to DELETE mode (R-42).", journalMode);
+            try
+            {
+                using var fallbackCmd = _connection.CreateCommand();
+                fallbackCmd.CommandText = @"
+                    PRAGMA journal_mode = DELETE;
+                    PRAGMA synchronous = FULL;
+                    PRAGMA busy_timeout = 5000;
+                ";
+                fallbackCmd.ExecuteNonQuery();
+            }
+            catch (Exception fbEx)
+            {
+                _logger?.LogError(fbEx, "Graceful fallback to journal_mode=DELETE also failed.");
+            }
         }
 
         using var cmd = _connection.CreateCommand();

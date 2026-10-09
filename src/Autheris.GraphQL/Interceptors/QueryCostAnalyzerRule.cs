@@ -79,10 +79,11 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
             _onQueryTooComplex?.Invoke();
             context.ReportError(
                 ErrorBuilder.New()
-                    .SetMessage($"The query exceeds the complexity budget of {_maxAllowedCost} (calculated cost: {totalCost}). If using variables for pagination limits, declare a default value (e.g. $first: Int = 20) or specify a lower limit.")
+                    .SetMessage($"The query exceeds the complexity budget of {_maxAllowedCost} (calculated cost: {totalCost}). Nested list fields require 'first' (e.g. first: 10) or lower pagination limits to reduce query cost within budget. If using variables for pagination limits, declare a default value (e.g. $first: Int = 20).")
                     .SetCode("QUERY_TOO_COMPLEX")
                     .SetExtension("calculatedCost", totalCost)
                     .SetExtension("maxAllowedCost", _maxAllowedCost)
+                    .SetExtension("hint", "Add 'first: <n>' to nested list selections to bound query cost within budget.")
                     .Build());
         }
     }

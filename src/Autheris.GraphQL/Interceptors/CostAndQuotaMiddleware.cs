@@ -114,10 +114,11 @@ public sealed class CostAndQuotaMiddleware
         if (calculatedCost > maxAllowedCost)
         {
             var error = ErrorBuilder.New()
-                .SetMessage($"The query cost ({calculatedCost}) exceeds the limit of {maxAllowedCost}.")
+                .SetMessage($"The query cost ({calculatedCost}) exceeds the limit of {maxAllowedCost}. Nested list fields require 'first' (e.g. first: 10) or lower pagination limits to bound query cost within budget.")
                 .SetCode("QUERY_COST_QUOTA_EXCEEDED")
                 .SetExtension("calculatedCost", calculatedCost)
                 .SetExtension("maxAllowedCost", maxAllowedCost)
+                .SetExtension("hint", "Add 'first: <n>' to nested list selections or declare lower pagination limits to reduce query cost within budget.")
                 .Build();
             context.Result = OperationResult.FromError(error);
             HttpResponseGuard.SetStatus(httpContext, StatusCodes.Status400BadRequest);

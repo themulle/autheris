@@ -13,9 +13,18 @@ public static class DbtArtifactStreamingParser
 {
     public static async Task<IReadOnlyList<DbtModelDefinition>> ParseManifestStreamAsync(Stream stream, CancellationToken ct = default)
     {
+        var result = await ParseManifestWithRelationshipsAsync(stream, ct).ConfigureAwait(false);
+        return result.Models;
+    }
+
+    public static async Task<(IReadOnlyList<DbtModelDefinition> Models, IReadOnlyList<DbtRelationshipDefinition> Relationships)> ParseManifestWithRelationshipsAsync(
+        Stream stream,
+        CancellationToken ct = default)
+    {
         ArgumentNullException.ThrowIfNull(stream);
 
         var models = new List<DbtModelDefinition>();
+        var relationships = new List<DbtRelationshipDefinition>();
 
         // Parse JsonDocument asynchronously using streaming options
         var jsonDocOptions = new JsonDocumentOptions
@@ -34,6 +43,61 @@ public static class DbtArtifactStreamingParser
             {
                 ct.ThrowIfCancellationRequested();
                 var node = nodeProperty.Value;
+
+                // R-31: Inspect test nodes for relationship tests
+                if (nodeProperty.Name.StartsWith("test.", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (node.TryGetProperty("test_metadata", out var tmProp) &&
+                        tmProp.TryGetProperty("name", out var tmNameProp) &&
+                        string.Equals(tmNameProp.GetString(), "relationships", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (tmProp.TryGetProperty("kwargs", out var kwProp))
+                        {
+                            var childCol = kwProp.TryGetProperty("column_name", out var ccProp) ? ccProp.GetString() ?? "" : "";
+                            var parentRef = kwProp.TryGetProperty("to", out var toProp) ? toProp.GetString() ?? "" : "";
+                            var parentCol = kwProp.TryGetProperty("field", out var fProp) ? fProp.GetString() ?? "" : "";
+
+                            var cleanParent = ExtractModelName(parentRef);
+                            string childModel = "";
+                            if (node.TryGetProperty("attached_node", out var anProp) && anProp.GetString() is string an && !string.IsNullOrWhiteSpace(an))
+                            {
+                                childModel = ExtractModelName(an);
+                            }
+                            else if (node.TryGetProperty("depends_on", out var depProp) &&
+                                     depProp.TryGetProperty("nodes", out var depNodes) &&
+                                     depNodes.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var dn in depNodes.EnumerateArray())
+                                {
+                                    var dnStr = dn.GetString() ?? "";
+                                    if (dnStr.StartsWith("model.", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        var mName = ExtractModelName(dnStr);
+                                        if (!string.Equals(mName, cleanParent, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            childModel = mName;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(cleanParent) && !string.IsNullOrWhiteSpace(childModel) &&
+                                !string.IsNullOrWhiteSpace(childCol) && !string.IsNullOrWhiteSpace(parentCol))
+                            {
+                                var relName = cleanParent.StartsWith("stg_") ? cleanParent[4..] : cleanParent;
+                                relationships.Add(new DbtRelationshipDefinition(
+                                    relName,
+                                    cleanParent,
+                                    childModel,
+                                    parentCol,
+                                    childCol
+                                ));
+                            }
+                        }
+                    }
+                    continue;
+                }
 
                 // Only inspect model and seed nodes (e.g. "model.my_project.customers")
                 if (!nodeProperty.Name.StartsWith("model.", StringComparison.OrdinalIgnoreCase) &&
@@ -89,6 +153,35 @@ public static class DbtArtifactStreamingParser
                     }
                 }
 
+                // R-31: Model-level constraints (foreign_key)
+                if (node.TryGetProperty("constraints", out var modelConsProp) && modelConsProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var con in modelConsProp.EnumerateArray())
+                    {
+                        if (con.TryGetProperty("type", out var typeProp) &&
+                            string.Equals(typeProp.GetString(), "foreign_key", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var toModel = con.TryGetProperty("to", out var toP) ? ExtractModelName(toP.GetString() ?? "") : "";
+                            string parentCol = "id";
+                            if (con.TryGetProperty("to_columns", out var toCols) && toCols.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var tc in toCols.EnumerateArray()) { parentCol = tc.GetString() ?? "id"; break; }
+                            }
+                            string childCol = "id";
+                            if (con.TryGetProperty("columns", out var fromCols) && fromCols.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var fc in fromCols.EnumerateArray()) { childCol = fc.GetString() ?? "id"; break; }
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(toModel))
+                            {
+                                var relName = toModel.StartsWith("stg_") ? toModel[4..] : toModel;
+                                relationships.Add(new DbtRelationshipDefinition(relName, toModel, name, parentCol, childCol));
+                            }
+                        }
+                    }
+                }
+
                 // Columns
                 var columns = new Dictionary<string, DbtColumnDefinition>(StringComparer.OrdinalIgnoreCase);
                 if (node.TryGetProperty("columns", out var colsProp) && colsProp.ValueKind == JsonValueKind.Object)
@@ -116,6 +209,33 @@ public static class DbtArtifactStreamingParser
                             foreach (var cm in cmProp.EnumerateObject())
                             {
                                 colMeta[cm.Name] = JsonValueText.From(cm.Value);
+                            }
+                        }
+
+                        // R-31: Column-level constraints (foreign_key)
+                        if (colVal.TryGetProperty("constraints", out var colConsProp) && colConsProp.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var con in colConsProp.EnumerateArray())
+                            {
+                                if (con.TryGetProperty("type", out var typeProp) &&
+                                    string.Equals(typeProp.GetString(), "foreign_key", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    var toModel = con.TryGetProperty("to", out var toP) ? ExtractModelName(toP.GetString() ?? "") : "";
+                                    string parentCol = "id";
+                                    if (con.TryGetProperty("field", out var fP) && !string.IsNullOrWhiteSpace(fP.GetString()))
+                                    {
+                                        parentCol = fP.GetString()!;
+                                    }
+                                    else if (con.TryGetProperty("to_columns", out var tcP) && tcP.ValueKind == JsonValueKind.Array)
+                                    {
+                                        foreach (var tc in tcP.EnumerateArray()) { if (!string.IsNullOrWhiteSpace(tc.GetString())) { parentCol = tc.GetString()!; break; } }
+                                    }
+                                    if (!string.IsNullOrWhiteSpace(toModel))
+                                    {
+                                        var relName = toModel.StartsWith("stg_") ? toModel[4..] : toModel;
+                                        relationships.Add(new DbtRelationshipDefinition(relName, toModel, name, parentCol, colName));
+                                    }
+                                }
                             }
                         }
 
@@ -152,6 +272,23 @@ public static class DbtArtifactStreamingParser
             }
         }
 
-        return models;
+        return (models, relationships);
+    }
+
+    private static string ExtractModelName(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        var trimmed = raw.Trim();
+        var refMatch = System.Text.RegularExpressions.Regex.Match(
+            trimmed,
+            @"ref\s*\(\s*['""]([^'""]+)['""]\s*\)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (refMatch.Success)
+        {
+            return refMatch.Groups[1].Value;
+        }
+
+        var parts = trimmed.Split('.');
+        return parts[^1];
     }
 }
