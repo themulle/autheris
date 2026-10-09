@@ -154,11 +154,15 @@ public class TotpVerificationServiceTests
             totpSecretStore: secretStore);
 
         // Ticket 1: requester is alice
-        var ticket1 = (await hitlService.RequestStepUpApprovalAsync(
+        var requestTask1 = hitlService.RequestStepUpApprovalAsync(
             "query_table",
             "tenant-1",
             "user-alice",
-            TableIdentifier.Parse("sales.orders"))).Ticket;
+            TableIdentifier.Parse("sales.orders"));
+
+        var pending1 = hitlService.GetPendingTickets("tenant-1");
+        pending1.Count.ShouldBe(1);
+        var ticket1 = pending1[0];
 
         var approverContext = new HitLApproverContext(approverSid, new[] { approverSid }, "tenant-1");
 
@@ -170,16 +174,22 @@ public class TotpVerificationServiceTests
         var validCode = _totpService.GenerateTotpCode(enrollment.SecretBase32);
         var validResult = await hitlService.ApproveStepUpRequestAsync(ticket1.ApprovalId, approverContext, validCode);
         validResult.IsApproved.ShouldBeTrue();
+        (await requestTask1).IsApproved.ShouldBeTrue();
 
         // Ticket 2: Requester is bob
-        var ticket2 = (await hitlService.RequestStepUpApprovalAsync(
+        var requestTask2 = hitlService.RequestStepUpApprovalAsync(
             "query_table",
             "tenant-1",
             "user-bob",
-            TableIdentifier.Parse("sales.customers"))).Ticket;
+            TableIdentifier.Parse("sales.customers"));
+
+        var pending2 = hitlService.GetPendingTickets("tenant-1");
+        pending2.Count.ShouldBe(1);
+        var ticket2 = pending2[0];
 
         // Attempt 3: Replay same TOTP code on Ticket 2
         var replayResult = await hitlService.ApproveStepUpRequestAsync(ticket2.ApprovalId, approverContext, validCode);
         replayResult.IsApproved.ShouldBeFalse();
+        (await hitlService.GetTicketAsync(ticket2.ApprovalId))!.Status.ShouldBe(HitLApprovalStatus.Pending);
     }
 }
