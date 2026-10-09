@@ -126,3 +126,20 @@ public async ValueTask<bool> TryConsumeBudgetAsync(string clientId, double epsil
 - [ ] ReBAC-Invalidierungsfehler führen zu Fail-Closed statt veralteter Autorisierung.
 - [ ] Differential-Privacy-Budgets bleiben über mehrere Knoten hinweg strikt atomar gebunden.
 - [ ] 10.000 parallele Casbin-Evaluierungen laufen ohne Thread-Lock-Starvation durch.
+
+---
+
+## 6. Security Architecture Review & Ergänzungen (Security Expert)
+
+> [!IMPORTANT]
+> **Sicherheits-Invariante 1: Fail-Closed bei Netzwerk-Partitionierung (Split-Brain Schutz)**  
+> Ist die Verbindung zu Redis / Garnet unterbrochen oder meldet der Cluster-State Timeout, darf `IAccessProfileCache` niemals auf `MaskingPolicyMode.Unmasked` zurückfallen. Bei nicht-autoritativem Cache-Zustand wird der Maskierungsmodus zwingend auf `MaskingPolicyMode.Default` (bzw. `Strict`) forciert. Ein administrativer Klartext-Bypass (`david`) ist im Partitionsfall temporär deaktiviert, um Datenabfluss bei veralteten Berechtigungen auszuschließen.
+
+> [!CAUTION]
+> **Sicherheits-Invariante 2: Schutz vor Event-Bus-Spoofing & Replay**  
+> Verteilte Invalidierungsnachrichten (`AccessProfileInvalidationEvent`, ReBAC Generation Bumps) müssen mit einem internen clusterweiten HMAC (`Cluster:InternalMessageSecret`) und einem Monotonie-Token versehen sein. Knoten akzeptieren Invalidierungsnachrichten nur dann, wenn die Signatur gültig ist und der Zeitstempel innerhalb eines 30-Sekunden-Drift-Fensters liegt (Replay-Schutz).
+
+> [!TIP]
+> **Sicherheits-Invariante 3: Atomares Lua-Scripting für Epsilon-Budgets**  
+> Das Auslesen und Dekrementieren des Differential-Privacy-Budgets darf nicht als Zwei-Schritt-Operation (GET -> DECRBY) erfolgen (Time-of-Check to Time-of-Use / TOCTOU). Die Prüfung `budget >= cost` und das anschließende Dekrementieren muss in einem einzigen atomaren Redis-Lua-Skript gekapselt sein, das bei Budgetüberschreitung sofort `false` liefert und ein Sicherheitsaudit-Event (`DP_BUDGET_EXHAUSTED`) triggert.
+

@@ -108,3 +108,22 @@ In `src/Autheris.Api/Extensions/GatewayApplicationBuilderExtensions.cs`:
 - [ ] JSON-RPC-Batch-Anfragen an `/mcp` liefern ein homogenes JSON-Array mit Antworten zurück.
 - [ ] Arrow Flight und OLAP-Abfragen funktionieren bei Tabellen ohne explizite ReBAC-Tupel über den Schema-Fallback.
 - [ ] Sämtliche neuen Unit- und Integrationstests sind grün.
+
+---
+
+## 6. Security Architecture Review & Ergänzungen (Security Expert)
+
+> [!IMPORTANT]
+> **Sicherheits-Invariante 1: Obergrenze für JSON-RPC-Batches (Schutz vor Batch-Amplification-DoS)**  
+> Das ungeprüfte Verarbeiten von JSON-Arrays öffnet die Tür für Resource-Exhaustion-Angriffe (z. B. ein Batch mit 10.000 `sample_rows`-Aufrufen in einem Request).  
+> **Vorgabe:** In `McpProtocolHandler.cs` wird eine strikte Obergrenze von maximal 25 Requests pro Batch (`MaxBatchSize = 25`) und eine maximale Payload-Größe von 1 MB forciert. Bei Überschreitung antwortet das Gateway sofort mit HTTP 400 (`BATCH_SIZE_EXCEEDED`).
+
+> [!CAUTION]
+> **Sicherheits-Invariante 2: Strikte Trennung von Entwickler-CORS und Produktionsbetrieb**  
+> Die Lockerung von CORS für lokale AI-Agenten (`http://localhost:*`, `https://vscode.dev`) birgt in Produktion erhebliche Risiken für Cross-Site Request Forgery und Session-Hijacking.  
+> **Architektur-Schranke:** `GatewayOptionsValidator` erzwingt beim Start: Ist `ASPNETCORE_ENVIRONMENT != Development`, führt `McpOptions.EnableDeveloperCors == true` zu einem sofortigen Startabbruch (Fail-Closed). In Produktion sind nur explizit gewhitelistete Origins zulässig.
+
+> [!TIP]
+> **Sicherheits-Invariante 3: Fail-Closed Hierarchie-Fallback bei ReBAC**  
+> Der Fallback von Tabellenebene auf Schemaebene darf niemals implizit Berechtigungen erweitern. Ein Fallback ist nur dann zulässig, wenn der Benutzer ein explizites `can_query` auf das Parent-Dataset besitzt UND die Tabelle im Catalog nicht als `Restricted` geflaggt ist. Im Zweifel gilt immer `403 Forbidden`.
+

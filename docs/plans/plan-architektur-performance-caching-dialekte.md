@@ -104,3 +104,22 @@ sequenceDiagram
 - [ ] Keine Vorkommen von `.GetAwaiter().GetResult()` in Sicherheits- und Auth-Guards.
 - [ ] Keine zirkulären Service-Provider-Aufrufe im `EpochValidationService`.
 - [ ] Sämtliche Architektur- und Performance-Tests laufen fehlerfrei durch.
+
+---
+
+## 5. Security Architecture Review & Ergänzungen (Security Expert)
+
+> [!IMPORTANT]
+> **Sicherheits-Invariante 1: Null-Staleness bei hochsensiblen Tabellen (Zero-Tolerance Revocation)**  
+> Das Micro-Caching von Epochen (100–250 ms) bietet massiven Performance-Gewinn, birgt jedoch das Risiko einer kurzen Verzögerung beim sofortigen Berechtigungsentzug.  
+> **Architektur-Vorgabe:** Für Tabellen mit `IsSensitivityHigh = true` (Schutzklasse `3_confidential` oder höher) wird das lokale Micro-Caching zwingend umgangen (`StalenessBudget = TimeSpan.Zero`). Diese Abfragen führen immer einen direkten Pipelined MGET gegen Redis aus. Ein Berechtigungsentzug wirkt hier mit Null-Latenz.
+
+> [!CAUTION]
+> **Sicherheits-Invariante 2: DoS-Schutz für CPU-intensives Password-Hashing**  
+> Durch die Bereinigung synchroner Wrapper in `BasicAuthAttemptGuard` wird Thread-Pool-Starvation verhindert.  
+> Da Argon2id rechen- und speicherintensiv ist, muss zusätzlich ein `SemaphoreSlim(MaxConcurrentPasswordHashes)` (Standard: `ProcessorCount`) vorgeschaltet werden, um zu verhindern, dass eine Flut paralleler Anmeldeversuche den CPU-Kern für die reguläre Gateway-Pipeline blockiert.
+
+> [!TIP]
+> **Sicherheits-Invariante 3: Strikte Bezeichner-Quoting-Parität über alle Dialekte**  
+> Im Dialekt-Mapping (`TargetSqlDialect`) dürfen generierte SQL-Bäume niemals ungeprüfte Bezeichner enthalten. Alle generierten Spalten und Tabellen müssen zwingend dialektkonform gequotet werden (`[table].[column]` in T-SQL, `"table"."column"` in PostgreSQL, SQLite und DuckDB). Bezeichner müssen vor der Generierung im Metadaten-Katalog validiert sein.
+

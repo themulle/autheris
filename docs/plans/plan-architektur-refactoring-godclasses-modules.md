@@ -91,3 +91,27 @@ Einführung einer abstrakten Basisklasse `BaseGovernanceRepository`:
 - [ ] Der DI-Container startet vollkommen nebenwirkungsfrei (kein Netzwerkzugriff oder Serverstart während `ConfigureServices`).
 - [ ] Alle bestehenden 3.800+ Tests kompilieren und laufen 100% grün durch.
 - [ ] Architektur-Tests in `tests/Autheris.Tests.Architecture` bestätigen die saubere Schichtentrennung.
+
+---
+
+## 5. Security Architecture Review & Ergänzungen (Security Expert)
+
+> [!IMPORTANT]
+> **Sicherheits-Invariante 1: Strikte Reihenfolge der Pipeline-Stages (Schutz vor Information Leaks)**  
+> Die Ausführungsreihenfolge der Pipeline-Stages in `ISqlRewritePipeline` ist sicherheitskritisch und darf durch Dependency Injection oder Middleware-Reihenfolgen nicht verändert werden:
+> 1. `Parse & Syntax Validation`: Abfangen von Injection, Parser-DoS (Tiefenlimit, Token-Limits).
+> 2. `Table & Column Consent Gate`: Sofortiger Abbruch (`403 Forbidden`) bei `Deny`-Spalten oder unautorisierten Tabellen.
+> 3. `RLS & Virtual Filter Injection`: Konjunktive Injektion (`(rls_predicate) AND (user_where)`).
+> 4. `Column Masking Stage`: Die Maskierung muss zwingend **nach** der RLS-Injektion und vor der Dialekt-Generierung erfolgen. Filter und Sortierung auf maskierten Spalten bleiben verboten, um Orakel-Angriffe (Side-Channel Leaks) auszuschließen.
+> 5. `Dialect Generation`: Generierung dialektspezifischer SQL-Bäume ohne String-Konkatenation; alle Werte werden strikt parametrisiert (`@p_`).
+
+> [!CAUTION]
+> **Sicherheits-Invariante 2: Verhindern von Plan-Cache Poisoning**  
+> Beim Caching kompilierter SQL-Ausführungspläne in Phase 5 darf der Cache-Key niemals allein aus dem SQL-Text bestehen. Der Key muss zwingend folgende Dimensionen kryptografisch hashen:  
+> `Key = SHA256(RawSql | TenantId | UserRolesHash | EffectiveEpoch | AppliedVirtualFiltersHash | Dialect)`  
+> Fehlt eine dieser Komponenten, könnte ein Angreifer durch eine vorab ausgeführte unmaskierte Abfrage den Cache vergiften, sodass nachfolgende eingeschränkte Benutzer unmaskierte Pläne erhalten.
+
+> [!TIP]
+> **Sicherheits-Invariante 3: Auditierung privilegierter Hosted Services**  
+> Bei der Auslagerung von Startup-Seiteneffekten (Garnet-Start, Schemamigration, Seeding) in `IHostedService`s muss jeder Dienst unter einer festen System-Identität (`System:HostedService:{ServiceName}`) agieren und jede Schema- oder Metadatenmutation atomar im unveränderlichen Audit-Log protokollieren.
+

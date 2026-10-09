@@ -132,3 +132,22 @@ tmpfs:
 - [ ] Veröffentlichte Container-Images sind kryptografisch signiert und mit SLSA-Provenance versehen.
 - [ ] Kein Container im Compose-Setup läuft als `root` oder besitzt unnötige Linux-Capabilities.
 - [ ] Alle Docker-Images in Compose- und Deployment-Dateien sind per SHA-256-Digest fixiert.
+
+---
+
+## 6. Security Architecture Review & Ergänzungen (Security Expert)
+
+> [!IMPORTANT]
+> **Sicherheits-Invariante 1: Doppelter Schutz gegen Test-Auth-Bypass (Compile-Time & Unit-Gate)**  
+> Der `TestAuthHandler` stellt bei Fehlkonfiguration einen vollständigen Authentifizierungs-Bypass dar.  
+> Neben der bedingten Kompilierung (`#if DEBUG`) wird ein verbindlicher Architektur-Test (`SecurityReleaseBinarySanityTests.cs`) implementiert, der das kompilierte Release-Assembly per Reflection scannt und fehlschlägt, falls ein Typ namens `TestAuthHandler` oder der Scheme-Name `"TestAuth"` darin gefunden wird.
+
+> [!CAUTION]
+> **Sicherheits-Invariante 2: Notfall-Schlüsselrotation für Masking-Secrets (Zero-Downtime Key Ring)**  
+> Wird das getrennte `GATEWAY_MASKING_HMAC_KEY` kompromittiert, muss eine Rotation ohne Datenverlust möglich sein.  
+> **Vorgabe:** Der `ColumnMaskingProvider` muss einen Schlüsselring unterstützen (`CurrentKeyId` und `PreviousKeyId`). Bestehende pseudonymisierte Cache-Einträge und Abfragen können so während einer definierten Übergangszeit validiert werden, bevor alte Schlüssel endgültig verworfen werden.
+
+> [!TIP]
+> **Sicherheits-Invariante 3: Sigstore / Cosign Admission Gate**  
+> Das Erzeugen von Signaturen in CI ist nur die halbe Miete. In `deploy/kubernetes/` bzw. `deploy/podman/` wird eine `policy.json` / Kyverno-Policy bereitgestellt, die das Starten von Containern verweigert, wenn deren Signatur nicht von der GitHub Actions OIDC-Identität `https://github.com/themulle/autheris/.github/workflows/docker-publish.yml@refs/heads/main` stammt.
+

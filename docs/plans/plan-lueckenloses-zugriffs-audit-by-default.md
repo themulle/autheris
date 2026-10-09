@@ -92,3 +92,25 @@ flowchart TD
 - [ ] Fehlgeschlagene Authentifizierungsversuche erzeugen einen strukturierten Audit-Eintrag ohne Passwörter/Tokens.
 - [ ] WebSQL-Ablehnungen vor der Ausführung werden als `DENY` mit Grundcode auditiert.
 - [ ] Die zusätzliche Latenz durch das synchrone Audit liegt im p95 unter 5%.
+
+---
+
+## 6. Security Architecture Review & Ergänzungen (Security Expert)
+
+> [!IMPORTANT]
+> **Sicherheits-Invariante 1: Schutz vor Audit-Flooding DoS bei Brute-Force-Angriffen**  
+> Ein Angreifer könnte durch Millionen ungültiger Anmeldeversuche versuchen, die Audit-Pipeline zu saturieren oder den Speicher des `AuthFailureAggregator`s zu erschöpfen.  
+> **Vorgabe:** Der `AuthFailureAggregator` nutzt einen bounded LRU-Ringpuffer (maximal 5.000 Buckets für IP/Reason-Paare). Bei extremer Flut schaltet das Gateway auf eine logarithmische Drosselung um und emittiert sofort ein hochprioritäres Sicherheits-Alarmevent `AUTH_BRUTE_FORCE_DETECTED`, ohne den Server durch OOM zu gefährden.
+
+> [!CAUTION]
+> **Sicherheits-Invariante 2: Strikte Datenminimierung & PII-Scrubbing im Audit-Trail**  
+> Im unveränderlichen WORM- und HMAC-Audit-Log dürfen niemals Klartext-Passwörter, Session-Tokens oder personenbezogene Abfrage-Literale persistiert werden (DSGVO Art. 17 Recht auf Vergessenwerden vs. Revisionssicherheit).  
+> **Architektur-Schranke:** Der `AuditDetailsBuilder` filtert über eine strikte Key-Denylist (`password`, `token`, `secret`, `authorization`, `bearer`, `cookie`, `key`) alle sensiblen Fragmente heraus. SQL-Statements werden vor dem Logging über den AST-Normalisierer anonymisiert (`@p_redacted`), während der kryptografische SHA-256-Hash des Original-Statements zur Integritätsprüfung erhalten bleibt.
+
+> [!TIP]
+> **Sicherheits-Invariante 3: WORM-Archivierung vor Löschung (Zero-Data-Loss Retention)**  
+> Der Retention-Job (`AuditLogRetentionDays`) darf abgelaufene Zeilen erst dann per `DELETE` aus der relationalen Datenbank entfernen, wenn:  
+> 1. Der gesamte Batch in ein manipulationssicheres WORM-/Parquet-Archiv exportiert wurde.  
+> 2. Das erzeugte Archiv-Manifest von `IChainAnchorSigner` asymmetrisch signiert und der Anker im Key Vault bestätigt wurde.  
+> 3. Ein abschließendes Revisions-Event `AUDIT_RETENTION_PURGED` mit Hash-Ketten-Intervall geschrieben wurde.
+
