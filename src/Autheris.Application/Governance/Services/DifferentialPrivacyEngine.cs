@@ -30,7 +30,6 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
     private readonly ILogger<DifferentialPrivacyEngine> _logger;
 
     public DifferentialPrivacyEngine(
-    public DifferentialPrivacyEngine(
         IDistributedClusterStateProvider? clusterState,
         IAuditLogRepository auditLog,
         TimeProvider? timeProvider = null,

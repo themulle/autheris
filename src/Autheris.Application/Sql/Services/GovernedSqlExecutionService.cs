@@ -262,6 +262,64 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
     internal static bool IsWebSqlSupportedDialect(DatabaseDialect dialect) =>
         dialect is DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer or DatabaseDialect.Sqlite;
 
+    internal static bool ReferencesColumn(string? tableOrAlias, string referencedColumn, string columnName, TableAccessTarget target) =>
+        SqlDataSourceResolver.ReferencesColumn(tableOrAlias, referencedColumn, columnName, target);
+
+    internal static void EnforceMaskedColumnGuardrails(
+        TableAccessTarget target,
+        TableMetadata tableMeta,
+        TableAccessDecision decision,
+        SqlQueryMetadata metadata)
+    {
+        foreach (var col in tableMeta.Columns)
+        {
+            var lvl = decision.GetEffectiveColumnAccess(col.ColumnName, tableMeta);
+            bool isEffectiveHmac = false;
+            if (lvl == ColumnAccessLevel.Mask && tableMeta.ColumnMaskingRules != null && tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule))
+            {
+                if (string.Equals(rule.RuleType, "HMAC", StringComparison.OrdinalIgnoreCase))
+                {
+                    isEffectiveHmac = true;
+                }
+            }
+
+            if (lvl != ColumnAccessLevel.Clear && !isEffectiveHmac)
+            {
+                bool isUsedInJoin = false;
+                if (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Count > 0)
+                {
+                    isUsedInJoin = metadata.JoinColumnReferences.Any(jc => ReferencesColumn(jc.TableOrAlias, jc.ColumnName, col.ColumnName, target));
+                }
+
+                if (isUsedInJoin)
+                {
+                    string ruleDesc = tableMeta.ColumnMaskingRules != null && tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
+                        ? mRule.RuleType ?? "REDACT"
+                        : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
+
+                    throw new WebSqlPolicyException(
+                        $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
+                }
+
+                bool isUsedInFilter = false;
+                if (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Count > 0)
+                {
+                    isUsedInFilter = metadata.FilterColumnReferences.Any(fc => ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, target));
+                }
+
+                if (isUsedInFilter)
+                {
+                    string ruleDesc = tableMeta.ColumnMaskingRules != null && tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
+                        ? mRule.RuleType ?? "REDACT"
+                        : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
+
+                    throw new WebSqlPolicyException(
+                        $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING/ORDER BY). Filtering or sorting on masked or denied columns would run against the redacted value and is forbidden to prevent oracle inference attacks.");
+                }
+            }
+        }
+    }
+
     internal static bool MatchesPostgreSqlCatalogName(TableAccessTarget target, TableIdentifier catalogTable)
     {
         var physicalTable = target.TableNameQuoted ? target.TableName : target.TableName.ToLowerInvariant();
