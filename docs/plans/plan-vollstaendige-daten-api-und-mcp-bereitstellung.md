@@ -23,11 +23,22 @@ Bisherige Zugriffspfade und MCP-Fähigkeiten weisen jedoch funktionale Asymmetri
 
 ### 1.2 Zielbild
 1. **100% Governed REST Data API:** Sämtliche Datensätze aller angebundenen Quellen (SQL, APIs, Lakehouse) sind konsistent über einfache, performante REST-Endpunkte abrufbar – vollständig geschützt durch dieselbe Governance-Pipeline (ReBAC, ABAC, Column-Masking, Mandatory Row Filters, Tenant-Isolation und lückenloses Zugriffs-Audit).
-2. **Vollständiges MCP-Ökosystem:** Das Model Context Protocol (MCP) wird zur vollwertigen Steuerungsschnittstelle ausgebaut:
-   - **Tools:** Erweiterung um `query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources` sowie getrennte Admin-Tools (`admin_*`).
-   - **Resources:** Standardisierte URIs (`autheris://catalog/summary`, `autheris://catalog/datasets/{id}/schema`, `autheris://governance/my-access`) für LLM-Kontexte.
-   - **Prompts:** Vordefinierte Vorlagen für explorative Datenanalyse und Compliance-Audits.
-3. **Strenge Sicherheitsinvarianten:** Single Point of Governance (kein Bypass), Least-Privilege-Trennung zwischen Lese- und Admin-Tools, Bestätigungsnachweis außerhalb des LLM für Schreiboperationen, vollständige Geheimnis-Redaction.
+2. **Self-Governed Control Plane (Autheris sichert Autheris selbst ab):** Alle administrativen und funktionalen Features von Autheris (Katalog-Management, Freigabe-Erteilung, ReBAC-Tupel-Pflege, Virtuelle Filter, Secrets-Verwaltung, Datenquellen-Onboarding, Schema Contracts, Audit-Log-Abfragen) stehen über eine standardisierte REST-API zur Verfügung. **Diese APIs werden über dieselben Mechanismen von Autheris selbst geschützt:**
+   - Control-Plane-Ressourcen sind als virtuelle Governed-Entitäten modelliert (`domain:governance`, `schema:system`).
+   - Autorisierung erfolgt über ReBAC (`user:X can_manage domain:sales`, `user:X can_grant table:lakehouse.dbo.orders`) und PDP-Regeln.
+   - Jeder administrative Eingriff wird lückenlos im signierten Audit-Log dokumentiert.
+3. **Vollständige MCP-Verfügbarkeit & -Dokumentation:** Sämtliche APIs und Features sind dem MCP bekannt:
+   - **Tools:** Jedes Feature verfügt über passende MCP-Tools (Datenabfragen, Discovery, Permissions-Check, Administration mit Bestätigung).
+   - **Dokumentation als MCP-Ressource:** Vollständige OpenAPI-Spezifikationen (`autheris://api/openapi.json`) und Markdown-Endpunkt-Referenzen (`autheris://api/docs/endpoints`) werden für AI-Modelle direkt als MCP-Ressourcen publiziert.
+4. **Strenge Sicherheitsinvarianten:** Single Point of Governance (kein Bypass), Least-Privilege-Trennung zwischen Lese- und Admin-Tools, Bestätigungsnachweis außerhalb des LLM für Schreiboperationen, vollständige Geheimnis-Redaction.
+
+### 1.3 Architekturentscheidungen (Review 09.10.2026)
+
+| ADR | Thema | Entscheidung | Begründung & Invariante |
+|---|---|---|---|
+| **ADR-01** | **Self-Governance Modellierung** | **Virtuelle System-Tabellen (`system.*`)**: Administrative Control-Plane-Daten (Quellen, Policies, ReBAC-Tupel, Audit-Logs) werden als interne System-Tabellen im Katalog geführt (`governance.system.*`). | Konsistenz über alle Protokolle: Administrative Entitäten können wie jede Geschäftsdaten-Tabelle über REST (`/api/v1/data/governance/system/*`), WebSQL (`SELECT * FROM governance.system.datasources`) und GraphQL abgefragt und über dieselbe `TableAccessPolicy` geschützt werden. |
+| **ADR-02** | **MCP-Tool-Granularität** | **Hybrides Tooling**: Dedizierte, stark typisierte High-Level-Tools für 95% der Standardaufgaben plus ein universelles `invoke_api`-Werkzeug. | High-Level-Tools minimieren Token-Verbrauch und Validierungsfehler bei Routineaufgaben. `invoke_api` garantiert 100%ige Abdeckung sämtlicher Endpunkte basierend auf der publizierten OpenAPI-Spezifikation. |
+| **ADR-03** | **Schreibzugriffe über MCP** | **Two-Phase Confirmation (Human-in-the-Loop)**: Änderungen werden durch das Modell im ersten Schritt vorbereitet (`admin_plan_access` / `admin_plan_datasource`). Die Ausführung verlangt zwingend einen kurzlebigen Bestätigungs-Token (`confirmationToken`) aus der Web-UI. | Verhindert Prompt-Injection-Angriffe, bei denen manipulierte Dateninhalte das Modell dazu bringen könnten, administrative Freigaben ohne menschliche Kontrolle zu erteilen. |
 
 ---
 
@@ -146,6 +157,8 @@ flowchart TD
 | `get_my_permissions` | Governance | Prüft, welche Spalten für die aktuelle Identität freigegeben oder maskiert sind.<br/>`{"dataset": "sales.public.orders"}` | `TableAccessPolicy` |
 | `list_datasources` | Discovery | Listet angebundene Datenquellen und Konnektoren auf. | `ITableMetadataRepository` |
 | `get_data_lineage` | Compliance | Zeigt Herkunft und Datenfluss eines Datensatzes. | `ILineageGraphStore` |
+| `describe_api` | Discovery | Liefert für einen bestimmten Endpunkt Parameter, Typen und Verwendungsbeispiele.<br/>`{"endpoint": "/api/v1/data/{domain}/{table}"}` | OpenAPI-Metadaten |
+| `invoke_api` | Universal | Universeller Aufruf jedes dokumentierten Autheris-Endpunkts (REST, Control-Plane) unter voller ReBAC/Audit-Kontrolle.<br/>`{"endpoint": "/api/v1/catalog/datasets", "method": "GET", "parameters": {...}}` | `ApiDispatcherService` |
 
 #### 3.2.2 Admin MCP Tools (R-60 bis R-63)
 Nur sichtbar und aufrufbar für Aufrufer mit Rolle `GovernanceAdmin` oder `TenantAdmin`:
@@ -173,6 +186,41 @@ MCP-Clients können Ressourcen direkt abonnieren:
 
 ---
 
+### 3.3 Säule 3: Self-Governing Control Plane (Autheris Governs Autheris)
+
+Jedes administrative Feature von Autheris wird über standardisierte REST-APIs bereitgestellt und **über dieselben Schutzmechanismen von Autheris selbst abgesichert**:
+
+1. **System- & Governance-Ressourcen im Autheris-Katalog:**
+   - Administrative Entitäten werden als interne Schemata abgebildet:
+     - `system.datasources`: Verwaltung angebundener SQL-, API- und Plugin-Quellen.
+     - `system.policies`: Maskierungsregeln, Spalten-Klassifizierungen und Richtlinien.
+     - `system.rebac_tuples`: ReBAC-Beziehungsdefinitionen.
+     - `system.virtual_filters`: Virtuelle Zeilenfilter und Scope-Definitionen.
+     - `system.audit_trail`: Audit-Einträge und WORM-Signaturen.
+2. **Rekursive Absicherung via `TableAccessPolicy` & ReBAC:**
+   - Ein Aufrufer (z.B. Administrator oder Agent) kann `system.policies` oder `system.datasources` nur modifizieren oder lesen, wenn er die entsprechende Berechtigung besitzt:
+     - `user:alice can_manage domain:sales` $\rightarrow$ darf nur Quellen und Freigaben der Domäne `sales` verwalten.
+     - `user:bob viewer domain:finance` $\rightarrow$ darf Metadaten sehen, aber keine Freigaben erteilen (`can_grant` verweigert).
+     - Fehlen die nötigen ReBAC-Tupel, greift Fail-Closed (`403 Forbidden`).
+3. **Mandatory Audit aller Control-Plane-Aktionen:**
+   - Jede Mutation (Anlegen von Datenquellen, Ändern von Maskierungsregeln, Löschen von Filtern) wird mit dem vollständigen Akteur-Kontext, der Korrelations-ID, dem Weg (REST vs. MCP) und einem kryptografisch verketteten Audit-Record erfasst.
+
+---
+
+### 3.4 Säule 4: Native MCP-Dokumentation & Selbstbeschreibung
+
+Damit AI-Modelle alle APIs und Features fehlerfrei und ohne Halluzinationen bedienen können, publiziert Autheris seine vollständige API-Dokumentation über das MCP-Protokoll:
+
+1. **MCP API-Ressourcen:**
+   - `autheris://api/openapi.json`: Die vollständige, validierte OpenAPI 3.1 Spezifikation aller REST-Endpunkte.
+   - `autheris://api/docs/endpoints`: Eine LLM-optimierte Markdown-Übersicht aller Endpunkte mit Parametern, Authentifizierungs-Anforderungen und Beispielen.
+   - `autheris://api/docs/mcp-tools`: Referenz aller verfügbaren MCP-Tools mit JSON-Schemas und Nutzungsbeispielen.
+2. **MCP Tool `describe_api`:**
+   - Erlaubt dem Agenten, zur Laufzeit gezielt die Dokumentation, Parameter und Schemata eines spezifischen Endpunkts abzufragen:
+     `describe_api(endpoint: "/api/v1/data/{domain}/{table}")` $\rightarrow$ Liefert Markdown-Spezifikation, Query-Parameter und Beispiel-Requests.
+
+---
+
 ## 4. Sicherheits- & Performance-Leitplanken
 
 1. **Single Point of Governance (Kein Bypass):**
@@ -192,37 +240,43 @@ MCP-Clients können Ressourcen direkt abonnieren:
 
 ### Phase 0: Architektur-Grundlagen & Verträge (Tag 1)
 - [ ] DTOs und Response-Modelle für REST Data API und Catalog API in `Autheris.Domain.Model` anlegen.
-- [ ] Definition der Interfaces `IGovernedDataQueryService` und `ICatalogDiscoveryService` in `Autheris.Application.Interfaces`.
+- [ ] Definition der Interfaces `IGovernedDataQueryService`, `ICatalogDiscoveryService` und `IApiDispatcherService` in `Autheris.Application.Interfaces`.
 - [ ] Fehlertests (Red Tests) für unautorisierten Datenzugriff, Paging-Limits und Spaltenmaskierung über REST schreiben.
 
-### Phase 1: Governed REST Data API (Tag 2)
+### Phase 1: Governed REST Data API & Virtuelle System-Tabellen (Tag 2)
 - [ ] Implementierung `GovernedDataQueryService`: Übersetzung von REST-Parametern (`select`, `filter`, `orderBy`, `limit`, `offset`) in AST-Queries.
+- [ ] Registrierung der internen System-Tabellen (`governance.system.datasources`, `governance.system.policies`, `governance.system.rebac_tuples`, `governance.system.virtual_filters`, `governance.system.audit_trail`) als Governed System-Entities.
 - [ ] Implementierung `DatasetDataEndpoints.cs`: Minimal APIs für `/api/v1/data/{domain}/{schema}/{table}` und `/api/v1/data/{datasetId}`.
 - [ ] Direkte Utf8JsonWriter-Streaming-Ausgabe auf den Response-Stream.
-- [ ] Verifikation: 100% Pre-Staging-Masking und RLS bei REST-Abfragen.
+- [ ] Verifikation: 100% Pre-Staging-Masking und RLS bei REST-Abfragen sowohl auf Business- als auch System-Tabellen.
 
 ### Phase 2: Catalog & Self-Service Permission APIs (Tag 3)
 - [ ] Implementierung `CatalogApiEndpoints.cs` (`/api/v1/catalog/datasets`, `/api/v1/catalog/datasources`, `/api/v1/catalog/search`).
 - [ ] Implementierung `GovernanceApiEndpoints.cs` (`/api/v1/governance/me/access`).
 - [ ] Integration in OpenAPI/Swagger-Dokumentation (`/swagger` & `/api/docs`).
 
-### Phase 3: MCP Tools Erweiterung für Daten & Katalog (Tag 4)
-- [ ] Erweiterung `McpDatasetTools.cs`: Tool-Definitionen für `query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`.
-- [ ] Dispatching in `GatewayMcpServer.cs` und Anbindung an `GovernedSqlExecutionService`.
+### Phase 3: MCP Tools Erweiterung (Hybrid Tooling) (Tag 4)
+- [ ] Erweiterung `McpDatasetTools.cs`: Tool-Definitionen für:
+  - High-Level: `query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`, `get_data_lineage`.
+  - Universal: `describe_api` und `invoke_api` zur Ausführung beliebiger dokumentierter Endpunkte.
+- [ ] Dispatching in `GatewayMcpServer.cs` und Anbindung an `GovernedSqlExecutionService` sowie `IApiDispatcherService`.
 - [ ] Result-Formatter: Kompakte Markdown- und JSON-Ausgabe mit Token-Budget-Überwachung.
 
 ### Phase 4: MCP Resources & Prompts (Tag 5)
-- [ ] Implementierung von Resource-Handlern in `GatewayMcpServer.cs` für `autheris://catalog/*` und `autheris://governance/*`.
+- [ ] Implementierung von Resource-Handlern in `GatewayMcpServer.cs` für:
+  - Datenkontext: `autheris://catalog/summary`, `autheris://catalog/datasets/{datasetId}/schema`, `autheris://catalog/datasources`, `autheris://governance/my-access`.
+  - API-Dokumentation: `autheris://api/openapi.json`, `autheris://api/docs/endpoints`, `autheris://api/docs/mcp-tools`.
 - [ ] Implementierung von MCP Prompts (`explore_dataset`, `audit_access_compliance`).
 - [ ] Integration mit `ISemanticMcpCompiler`.
 
-### Phase 5: Admin MCP Tools & Dynamic Data Source Registration (Tag 6)
+### Phase 5: Admin MCP Tools & Two-Phase-Confirmation (Tag 6)
 - [ ] Umsetzung der Anforderungen R-54 bis R-64:
   - `admin_register_datasource` (OpenAPI/Swagger Ingestion mit SecretRef)
   - `admin_set_dataset_state` (Aktivieren/Deaktivieren)
   - `admin_resolve_principal` (Namen $\rightarrow$ SID Auflösung)
-  - `admin_plan_access` & `admin_apply_access` mit Confirmation-Token
-- [ ] Strikte Rollentrennung: Admin-Tools nur für Administratoren sichtbar.
+  - `admin_plan_access` (Vorschau / Diff ohne Seiteneffekte)
+  - `admin_apply_access` mit zwingendem `confirmationToken` (Two-Phase Confirmation / Human-in-the-Loop)
+- [ ] Strikte Rollentrennung: Admin-Tools nur für Administratoren sichtbar und ausführbar.
 
 ### Phase 6: E2E-Tests, Architektur-Tests & Dokumentation (Tag 7)
 - [ ] xUnit-Tests in `Autheris.Tests.Unit` für alle neuen Endpunkte und MCP-Tools.
