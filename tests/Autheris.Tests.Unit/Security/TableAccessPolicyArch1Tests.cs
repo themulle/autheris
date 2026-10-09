@@ -48,10 +48,10 @@ public sealed class TableAccessPolicyArch1Tests
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
     }
 
-    private static TableMetadata Meta() => new()
+    private static TableMetadata Meta(bool isActive = true) => new()
     {
         Identifier = Table,
-        Table = new Table { TableName = "orders", SchemaName = "public", SourceType = "PostgreSQL" },
+        Table = new Table { TableName = "orders", SchemaName = "public", SourceType = "PostgreSQL", IsActive = isActive },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "int" },
@@ -275,5 +275,16 @@ public sealed class TableAccessPolicyArch1Tests
         var casbin = TableAccessDecision.Allowed(Table, new Dictionary<string, ColumnAccessLevel>(), "[b] = @p", true, new Dictionary<string, object?> { ["p"] = 2 });
 
         TableAccessPolicy.Restrict(consent, casbin, Meta()).IsAllowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Policy_InactiveTable_IsDeniedDirectly()
+    {
+        var meta = Meta(isActive: false);
+        var query = TableAccessQuery.ForPrincipal(User(), new Sid("S-1-5-21-USER"), new TenantId(Tenant), meta);
+        var decision = await Policy(ResolvesTo(true)).DecideAsync(query, default);
+
+        decision.IsAllowed.ShouldBeFalse();
+        decision.DeniedReasons.ShouldContain(r => r.Contains("not active"));
     }
 }

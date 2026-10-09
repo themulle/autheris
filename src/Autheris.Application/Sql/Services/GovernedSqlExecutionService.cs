@@ -463,9 +463,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 }
             }
 
-            if (tableMeta == null || tableMeta.Columns.Count == 0)
+            if (tableMeta == null || tableMeta.Columns.Count == 0 || !tableMeta.Table.IsActive)
             {
-                _logger?.LogWarning("WebSQL rejected table {Table}: no catalog metadata registered.", target.FullName);
+                _logger?.LogWarning("WebSQL rejected table {Table}: no catalog metadata registered or table is inactive.", target.FullName);
                 throw TableDenied(target);
             }
 

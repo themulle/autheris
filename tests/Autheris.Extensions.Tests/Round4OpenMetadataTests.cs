@@ -198,7 +198,7 @@ public sealed class Round4OpenMetadataTests
         Dictionary<string, string>? teamMap = null,
         Dictionary<string, string>? userMap = null,
         Dictionary<string, string>? serviceDatabaseMap = null,
-        bool activateNewTables = false,
+        bool activateNewTables = true,
         string webhookSecret = "") => new()
     {
         Enabled = true,
@@ -557,7 +557,7 @@ public sealed class Round4OpenMetadataTests
     [Fact]
     public async Task E09_Sync_NewTablesAreInactive_ExistingKeepState_OptInActivates()
     {
-        var inactive = CreateOm(Om(), [Orders()]);
+        var inactive = CreateOm(Om(activateNewTables: false), [Orders()]);
         await inactive.Service.SyncPermissionsAsync();
         inactive.Upserted.ShouldHaveSingleItem().Table.IsActive.ShouldBeFalse();
 
@@ -604,7 +604,7 @@ public sealed class Round4OpenMetadataTests
     {
         const string secret = "r4-om-webhook-secret-2";
         var orders = Orders();
-        var f = CreateOm(Om(serviceFilter: "sales_svc", webhookSecret: secret), []);
+        var f = CreateOm(Om(serviceFilter: "sales_svc", webhookSecret: secret, activateNewTables: false), []);
         f.Client.GetTableByFqnAsync(orders.FullyQualifiedName, Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<OpenMetadataTable?>(orders));
 

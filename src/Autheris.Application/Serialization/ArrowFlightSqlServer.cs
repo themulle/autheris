@@ -124,7 +124,7 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         var webSqlOptions = _options.Value.WebSql ?? new WebSqlOptions();
         var tables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         var tenantTables = tables
-            .Where(t => GovernedSqlExecutionService.IsDataSourceQueryable(webSqlOptions, tenant, t.Identifier.Domain))
+            .Where(t => t.Table.IsActive && GovernedSqlExecutionService.IsDataSourceQueryable(webSqlOptions, tenant, t.Identifier.Domain))
             .ToList();
 
         // Wunsch 9: only tables the caller may discover (same rule as the GraphQL catalog and MCP).

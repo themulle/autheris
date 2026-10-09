@@ -213,7 +213,7 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - `servers.url` gegen die Egress-Allowlist prüfen.
   - Ingestion auditieren.
 
-### SG-12 Inaktive Tabellen bleiben über OData (direkter Pfad), WebSQL und Arrow abfragbar
+### SG-12 [BEHOBEN] Inaktive Tabellen bleiben über OData (direkter Pfad), WebSQL und Arrow abfragbar
 - **Konfidenz:** fehlende Prüfung bestätigt; Ausnutzbarkeit plausibel (Consent nötig)
 - **Fundstellen:** `GatewayExecutionService.cs:478-491` (`ResolveTableAccessAsync`), `PostgreSqlGovernanceRepository.Catalog.cs:26-28`, `SqliteGovernanceRepository.Catalog.cs:90-92`. Iceberg, MCP und das GraphQL-Schema prüfen `IsActive`.
 - **Angriff:**

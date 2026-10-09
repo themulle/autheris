@@ -124,10 +124,10 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         try
         {
             metadata = await _metadataRepository.GetTableMetadataAsync(cdcEvent.Table, ct).ConfigureAwait(false);
-            if (metadata == null)
+            if (metadata == null || !metadata.Table.IsActive)
             {
-                _logger.LogDebug("Streaming event '{EventId}' dropped: table '{Table}' not found in catalog", cdcEvent.EventId, cdcEvent.Table.ToQualifiedName());
-                return StreamSecurityDecision.Denied("Table not found in catalog");
+                _logger.LogDebug("Streaming event '{EventId}' dropped: table '{Table}' not found in catalog or inactive", cdcEvent.EventId, cdcEvent.Table.ToQualifiedName());
+                return StreamSecurityDecision.Denied("Table not found in catalog or inactive");
             }
 
             // 5. Consent decision (same chain as GatewayExecutionService)

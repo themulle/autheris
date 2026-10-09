@@ -129,6 +129,12 @@ public sealed class TableAccessPolicy
         ArgumentNullException.ThrowIfNull(query);
         var table = query.Metadata.Identifier;
 
+        // SG-12: Inactive tables are treated as not found / denied centrally
+        if (!query.Metadata.Table.IsActive)
+        {
+            return TableAccessDecision.Denied(table, $"Table '{table.ToQualifiedName()}' is not active.");
+        }
+
         // SR15-51: Enforce schema contracts at query execution time
         var contract = query.Contract;
         if (contract == null && _contractManager != null && _contractManager.IsEnabled)

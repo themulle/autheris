@@ -321,7 +321,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         }
 
         var meta = await _tableRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
-        if (meta == null || meta.Columns.Count == 0)
+        if (meta == null || meta.Columns.Count == 0 || !meta.Table.IsActive)
         {
             return null;
         }

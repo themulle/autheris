@@ -498,6 +498,7 @@ public sealed class SecurityReview20261002ExtensionsTests
             {
                 Enabled = true,
                 AutoCreateConsents = autoCreateConsents,
+                ActivateNewTables = true,
                 RoleToGatewayRoleMap = new Dictionary<string, string> { ["HrSpecialist"] = "HrSpecialist" }
             }
         });
@@ -1134,6 +1135,67 @@ public sealed class SecurityReview20261002ExtensionsTests
         await service.SyncPermissionsAsync();
 
         // Four-Eyes / Art. 9 tables MUST NOT be granted via AutoCreateConsents
+        created.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task SG12_OpenMetadataSync_AutoCreateConsents_SkipsInactiveTables()
+    {
+        var client = Substitute.For<IOpenMetadataClient>();
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var consentRepo = Substitute.For<IConsentRepository>();
+        var epochRepo = Substitute.For<IPolicyEpochRepository>();
+
+        var tableId = Guid.NewGuid();
+        var policyId = Guid.NewGuid();
+
+        // Non-sensitive table, but inactive (newly imported without ActivateNewTables)
+        client.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataTable>>([
+                new OpenMetadataTable
+                {
+                    Id = tableId,
+                    Name = "inactive_orders",
+                    FullyQualifiedName = "analytics.default.public.inactive_orders",
+                    Columns = [new OpenMetadataColumn { Name = "id", DataType = "INT" }]
+                }
+            ]));
+        client.GetPoliciesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataPolicy>>([
+                new OpenMetadataPolicy
+                {
+                    Id = policyId,
+                    Name = "OrderPolicy",
+                    Enabled = true,
+                    Rules = [new OpenMetadataRule { Name = "ReadOrders", Effect = "allow", Resources = ["table"], Operations = ["ViewAll"] }]
+                }
+            ]));
+        client.GetRolesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<OpenMetadataRole>>([
+                new OpenMetadataRole { Name = "OrderReaderRole", Policies = [new OpenMetadataEntityReference { Id = policyId, Name = "OrderPolicy" }] }
+            ]));
+        client.GetTeamsAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataTeam>>([]));
+        client.GetUsersAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult<IReadOnlyList<OpenMetadataUser>>([]));
+
+        var created = new List<Consent>();
+        consentRepo.CreateConsentAsync(Arg.Any<Consent>(), Arg.Any<CancellationToken>())
+            .Returns(ci => { var c = ci.Arg<Consent>(); created.Add(c); return Task.FromResult(c); });
+
+        var options = Options.Create(new GatewayOptions
+        {
+            OpenMetadata = new OpenMetadataOptions
+            {
+                Enabled = true,
+                AutoCreateConsents = true,
+                ActivateNewTables = false,
+                RoleToGatewayRoleMap = new Dictionary<string, string> { ["OrderReaderRole"] = "OrderReader" }
+            }
+        });
+
+        var service = new OpenMetadataSyncService(client, metadataRepo, consentRepo, epochRepo, options, NullLogger<OpenMetadataSyncService>.Instance);
+        await service.SyncPermissionsAsync();
+
+        // SG-12: Inactive tables MUST NOT be auto-granted consents
         created.ShouldBeEmpty();
     }
 
