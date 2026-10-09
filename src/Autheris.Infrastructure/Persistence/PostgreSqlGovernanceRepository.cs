@@ -173,7 +173,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
 
         if (key == null || key.Length == 0)
         {
-            if (!isDevOrTest && options?.Value?.IsInsecureTransportAllowed != true)
+            if (!isDevOrTest)
             {
                 throw new InvalidOperationException(
                     "Security critical: No AuditHmacKeyVaultRef or HmacSecretKeyVaultRef configured in non-development environment. Cannot ensure audit log integrity.");

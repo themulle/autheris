@@ -170,8 +170,14 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var claim in subscriber.Claims)
             {
+                if (string.Equals(claim.Type, "action", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(claim.Type, "gql.action", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
                 attributes[claim.Type] = claim.Value;
             }
+            attributes["action"] = "read";
 
             var purpose = subscriber.FindFirst("purpose")?.Value ?? subscriber.FindFirst("purpose_id")?.Value;
 

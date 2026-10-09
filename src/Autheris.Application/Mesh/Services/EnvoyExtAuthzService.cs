@@ -97,45 +97,41 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             return EnvoyCheckResponse.Deny(400, "Bad Request: Invalid or traversing path.");
         }
 
-        // 2. Extract Tenant (SEC C-1: Strictly from validated ClaimsPrincipal or trusted static context extensions)
-        string tenantStr = "default";
+        // 2. Extract Tenant (SEC C-1 / SG-17: Strictly using canonical GetTenantId())
+        TenantId tenantId;
         if (caller?.Identity?.IsAuthenticated == true)
         {
-            var tClaim = caller.FindFirst("tenant_id")?.Value
-                      ?? caller.FindFirst("tenant")?.Value
-                      ?? caller.FindFirst("tid")?.Value;
-            if (!string.IsNullOrWhiteSpace(tClaim))
-            {
-                tenantStr = tClaim;
-            }
+            tenantId = caller.GetTenantId();
         }
         else if (contextExtensions.TryGetValue("tenant", out var ctxTenant) && !string.IsNullOrWhiteSpace(ctxTenant))
         {
-            tenantStr = ctxTenant;
+            tenantId = new TenantId(ctxTenant);
         }
+        else
+        {
+            tenantId = new TenantId("default");
+        }
+        var tenantStr = tenantId.Value;
 
-        // 3. Extract Principal (SEC C-1: Strictly from validated ClaimsPrincipal or verified mTLS sourcePrincipal)
-        string? principal = null;
+        // 3. Extract Principal (SEC C-1 / SG-17: Strictly using canonical GetUserSid())
+        Sid userSid;
         if (caller?.Identity?.IsAuthenticated == true)
         {
-            principal = caller.FindFirst(System.Security.Claims.ClaimTypes.PrimarySid)?.Value
-                     ?? caller.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-                     ?? caller.FindFirst("sub")?.Value
-                     ?? caller.Identity?.Name;
+            userSid = caller.GetUserSid() ?? new Sid(caller.Identity?.Name ?? "ANONYMOUS");
         }
         else if (!string.IsNullOrWhiteSpace(sourcePrincipal))
         {
-            principal = sourcePrincipal;
+            userSid = new Sid(sourcePrincipal);
         }
         else if (contextExtensions.TryGetValue("user", out var ctxUser) && !string.IsNullOrWhiteSpace(ctxUser))
         {
-            principal = ctxUser;
+            userSid = new Sid(ctxUser);
         }
-
-        if (string.IsNullOrWhiteSpace(principal))
+        else
         {
-            principal = "anonymous";
+            userSid = new Sid("anonymous");
         }
+        var principal = userSid.Value;
 
         // 4. Extract Groups / Roles (SEC C-1: Strictly from validated ClaimsPrincipal)
         var groupList = new List<Sid>();
@@ -176,12 +172,13 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         }
 
         // 6. Security Evaluation Context
-        var tenantId = new TenantId(tenantStr);
         var targetTable = TableIdentifier.TryParse(resourceName, out var parsedTid)
             ? parsedTid
             : new TableIdentifier("default", "public", resourceName);
+        var upperMethod = method?.ToUpperInvariant() ?? "GET";
+        var action = (upperMethod is "GET" or "HEAD" or "OPTIONS") ? "read" : "write";
         var evalContext = new SecurityEvaluationContext(
-            UserSid: new Sid(principal),
+            UserSid: userSid,
             GroupSids: groupList,
             Tenant: tenantId,
             TargetTable: targetTable,
@@ -191,8 +188,9 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
             PurposeId: null,
             Attributes: new Dictionary<string, object?>
             {
-                ["method"] = method?.ToUpperInvariant() ?? "GET",
-                ["path"] = normalizedPath
+                ["method"] = upperMethod,
+                ["path"] = normalizedPath,
+                ["action"] = action
             });
 
         // 7. Policy Evaluation
@@ -216,7 +214,7 @@ public sealed class EnvoyExtAuthzService : IEnvoyExtAuthzService
         if (_virtualFilters != null)
         {
             var snapshot = await _virtualFilters.GetAsync(ct).ConfigureAwait(false);
-            var callerSid = new Sid(principal);
+            var callerSid = userSid;
             var groups = new HashSet<Sid>(groupList);
             var covering = snapshot.Profiles.FirstOrDefault(p =>
                 p.TenantId == tenantId &&

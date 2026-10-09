@@ -59,7 +59,11 @@ public sealed class SubgraphFederationSecurityTests
             timestampStr: ts,
             nonce: nonce,
             signature: sig,
-            signingKey: Secret);
+            signingKey: Secret,
+            subgraph: "products",
+            roles: "",
+            method: "POST",
+            path: "/graphql");
 
         isValid.ShouldBeTrue();
     }
@@ -98,7 +102,100 @@ public sealed class SubgraphFederationSecurityTests
             timestampStr: ts,
             nonce: nonce,
             signature: sig,
-            signingKey: Secret);
+            signingKey: Secret,
+            subgraph: "products",
+            roles: "",
+            method: "POST",
+            path: "/graphql");
+
+        isValid.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SubgraphSecurityValidator_TamperedRoles_ReturnsFalse()
+    {
+        var options = new GatewayOptions
+        {
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                EnableZeroTrustContextForwarding = true,
+                SignContextHeaders = true,
+                SigningKey = Secret
+            }
+        };
+
+        var service = new SubgraphContextPropagationService(
+            Options.Create(options),
+            NullLogger<SubgraphContextPropagationService>.Instance);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://subgraph.internal/graphql");
+        var user = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FED-USER"),
+            new Claim(ClaimTypes.Role, "Reader")
+        ], "Test"));
+
+        service.ApplySecurityHeaders(request, "products", user, "tenant_alpha");
+
+        var sig = request.Headers.GetValues("X-Autheris-Signature").First();
+        var ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
+        var nonce = request.Headers.GetValues("X-Autheris-Nonce").First();
+
+        // Tamper with roles by escalating to ClusterAdmin
+        var isValid = SubgraphSecurityValidator.ValidateSignature(
+            tenant: "tenant_alpha",
+            userSid: "S-1-5-21-FED-USER",
+            timestampStr: ts,
+            nonce: nonce,
+            signature: sig,
+            signingKey: Secret,
+            subgraph: "products",
+            roles: "ClusterAdmin",
+            method: "POST",
+            path: "/graphql");
+
+        isValid.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SubgraphSecurityValidator_TamperedSubgraph_ReturnsFalse()
+    {
+        var options = new GatewayOptions
+        {
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                EnableZeroTrustContextForwarding = true,
+                SignContextHeaders = true,
+                SigningKey = Secret
+            }
+        };
+
+        var service = new SubgraphContextPropagationService(
+            Options.Create(options),
+            NullLogger<SubgraphContextPropagationService>.Instance);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://subgraph.internal/graphql");
+        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FED-USER")], "Test"));
+
+        service.ApplySecurityHeaders(request, "products", user, "tenant_alpha");
+
+        var sig = request.Headers.GetValues("X-Autheris-Signature").First();
+        var ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
+        var nonce = request.Headers.GetValues("X-Autheris-Nonce").First();
+
+        // Replay to another subgraph (e.g. orders)
+        var isValid = SubgraphSecurityValidator.ValidateSignature(
+            tenant: "tenant_alpha",
+            userSid: "S-1-5-21-FED-USER",
+            timestampStr: ts,
+            nonce: nonce,
+            signature: sig,
+            signingKey: Secret,
+            subgraph: "orders",
+            roles: "",
+            method: "POST",
+            path: "/graphql");
 
         isValid.ShouldBeFalse();
     }
@@ -108,7 +205,7 @@ public sealed class SubgraphFederationSecurityTests
     {
         var oldTimestamp = DateTimeOffset.UtcNow.AddMinutes(-5).ToUnixTimeSeconds().ToString();
         var nonce = Guid.NewGuid().ToString("N");
-        var payload = $"tenant_alpha:user1:{oldTimestamp}:{nonce}";
+        var payload = $"tenant_alpha:user1:{oldTimestamp}:{nonce}:products::POST:/graphql";
 
         using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(Secret));
         var signature = Convert.ToHexStringLower(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload)));
@@ -120,7 +217,11 @@ public sealed class SubgraphFederationSecurityTests
             nonce: nonce,
             signature: signature,
             signingKey: Secret,
-            maxDrift: TimeSpan.FromSeconds(60));
+            maxDrift: TimeSpan.FromSeconds(60),
+            subgraph: "products",
+            roles: "",
+            method: "POST",
+            path: "/graphql");
 
         isValid.ShouldBeFalse();
     }

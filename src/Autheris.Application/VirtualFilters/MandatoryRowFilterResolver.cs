@@ -203,7 +203,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             .ToList();
 
         var filtersByName = snapshot.Filters.Where(f => f.TenantId == query.Tenant).ToDictionary(f => f.Name, StringComparer.Ordinal);
-        var applying = new Dictionary<string, (VirtualFilter Filter, FilterBinding Binding, AccessProfile Profile)>(StringComparer.Ordinal);
+        var applying = new List<(VirtualFilter Filter, FilterBinding Binding, AccessProfile Profile)>();
         string? currentFilter = null;
         try
         {
@@ -233,7 +233,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                     if (applies)
                     {
                         covered = true;
-                        applying.TryAdd(filter.Name + "|" + binding.TargetPattern, (filter, binding, profile));
+                        applying.Add((filter, binding, profile));
                     }
                     else if (missing.Count > 0)
                     {
@@ -266,32 +266,43 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                 }
             }
 
-            var names = applying.Values.Select(a => a.Filter.Name).ToHashSet(StringComparer.Ordinal);
-            // SR15-12: supersedes may only supersede filters within the same profile or with the same managed_by context
-            var supersededBy = applying.Values
-                .SelectMany(a => a.Filter.Supersedes.Where(names.Contains).Select(s => (Superseded: s, By: a)))
-                .Where(x =>
+            // SG-14 / SR15-12: supersedes must be decided strictly per (Profile, Binding) context.
+            // A filter may only supersede another filter in the SAME profile or when sharing identical non-null ManagedBy contexts.
+            var supersededByMap = new Dictionary<(string ProfileName, string FilterName, string? TargetPattern), string>();
+            foreach (var target in applying)
+            {
+                foreach (var candidate in applying)
                 {
-                    var targetEntries = applying.Values.Where(v => v.Filter.Name.Equals(x.Superseded, StringComparison.Ordinal)).ToList();
-                    return targetEntries.Any(target =>
-                        string.Equals(x.By.Profile.Name, target.Profile.Name, StringComparison.Ordinal) ||
-                        (x.By.Filter.ManagedBy != null && target.Filter.ManagedBy != null && x.By.Filter.ManagedBy == target.Filter.ManagedBy) ||
-                        (x.By.Profile.ManagedBy != null && target.Profile.ManagedBy != null && x.By.Profile.ManagedBy == target.Profile.ManagedBy));
-                })
-                .GroupBy(x => x.Superseded, StringComparer.Ordinal)
-                .ToDictionary(g => g.Key, g => g.First().By.Filter.Name, StringComparer.Ordinal);
+                    if (candidate.Filter.Supersedes.Contains(target.Filter.Name, StringComparer.Ordinal))
+                    {
+                        bool sameContext = string.Equals(candidate.Profile.Name, target.Profile.Name, StringComparison.Ordinal) ||
+                                           (candidate.Filter.ManagedBy != null && target.Filter.ManagedBy != null && candidate.Filter.ManagedBy == target.Filter.ManagedBy &&
+                                            candidate.Profile.ManagedBy != null && target.Profile.ManagedBy != null && candidate.Profile.ManagedBy == target.Profile.ManagedBy);
+
+                        if (sameContext)
+                        {
+                            supersededByMap.TryAdd((target.Profile.Name, target.Binding.FilterName, target.Binding.TargetPattern), candidate.Filter.Name);
+                            break;
+                        }
+                    }
+                }
+            }
 
             if (trace != null)
             {
                 foreach (var (profile, bindings) in explained)
                 {
-                    trace.Add(new ProfileExplanation(profile.Name, profile.Scope, InScope: true, profile.Uncovered, bindings.Select(b => new BindingExplanation(
-                        b.Binding.FilterName,
-                        b.Binding.TargetPattern ?? profile.Scope,
-                        Applies: b.Reason == null && !supersededBy.ContainsKey(b.Binding.FilterName),
-                        b.Reason,
-                        b.Missing,
-                        b.Reason == null && supersededBy.TryGetValue(b.Binding.FilterName, out var by) ? by : null)).ToList()));
+                    trace.Add(new ProfileExplanation(profile.Name, profile.Scope, InScope: true, profile.Uncovered, bindings.Select(b =>
+                    {
+                        var isSuperseded = supersededByMap.TryGetValue((profile.Name, b.Binding.FilterName, b.Binding.TargetPattern), out var by);
+                        return new BindingExplanation(
+                            b.Binding.FilterName,
+                            b.Binding.TargetPattern ?? profile.Scope,
+                            Applies: b.Reason == null && !isSuperseded,
+                            b.Reason,
+                            b.Missing,
+                            b.Reason == null && isSuperseded ? by : null);
+                    }).ToList()));
                 }
             }
 
@@ -305,17 +316,23 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                 return MandatoryFilterOutcome.None;
             }
 
-            var effective = applying.Values
-                .Where(a => !supersededBy.ContainsKey(a.Filter.Name))
+            var effective = applying
+                .Where(a => !supersededByMap.ContainsKey((a.Profile.Name, a.Binding.FilterName, a.Binding.TargetPattern)))
                 .OrderBy(a => a.Filter.Name, StringComparer.Ordinal)
                 .ThenBy(a => a.Binding.TargetPattern, StringComparer.Ordinal)
+                .ThenBy(a => a.Profile.Name, StringComparer.Ordinal)
                 .ToList();
 
             var parts = new List<string>(effective.Count);
+            var distinctPredicates = new HashSet<string>(StringComparer.Ordinal);
             foreach (var (filter, binding, _) in effective)
             {
                 currentFilter = filter.Name;
-                parts.Add(_predicates.Build(filter, binding, query.Metadata, query.Metadata.Dialect));
+                var pred = _predicates.Build(filter, binding, query.Metadata, query.Metadata.Dialect);
+                if (distinctPredicates.Add(pred))
+                {
+                    parts.Add(pred);
+                }
             }
 
             var predicate = parts.Count == 1 ? parts[0] : string.Join(" AND ", parts.Select(p => $"({p})"));

@@ -55,6 +55,24 @@ public sealed class ReadOnlyTokenMiddleware
 
     private bool IsPermitted(HttpRequest request)
     {
+        // SG-17: When ext_authz or reverse proxies probe with GET/HEAD/OPTIONS, check original method headers
+        if (request.Headers.TryGetValue("X-Original-Method", out var origMethod) && !string.IsNullOrWhiteSpace(origMethod))
+        {
+            var om = origMethod.ToString().Trim().ToUpperInvariant();
+            if (om is not "GET" and not "HEAD" and not "OPTIONS")
+            {
+                return false;
+            }
+        }
+        if (request.Headers.TryGetValue("X-Forwarded-Method", out var fwdMethod) && !string.IsNullOrWhiteSpace(fwdMethod))
+        {
+            var fm = fwdMethod.ToString().Trim().ToUpperInvariant();
+            if (fm is not "GET" and not "HEAD" and not "OPTIONS")
+            {
+                return false;
+            }
+        }
+
         if (HttpMethods.IsGet(request.Method) ||
             HttpMethods.IsHead(request.Method) ||
             HttpMethods.IsOptions(request.Method))

@@ -61,7 +61,7 @@ public sealed class DbtContractValidator(
 
             var tableId = model.ToTableIdentifier();
             var existingTable = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
-            if (existingTable == null)
+            if (existingTable == null || !existingTable.Table.IsActive)
             {
                 warnings.Add($"Table '{tableId}' not found in active metadata repository. Considered as new model contract.");
                 continue;

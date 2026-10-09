@@ -22,6 +22,7 @@ public sealed record SecurityPrincipalContext
     public bool IsAuthenticated { get; init; } = true;
     public string? BreakGlassJustification { get; init; }
     public System.Net.IPAddress? ClientIp { get; init; }
+    public IEnumerable<System.Security.Claims.Claim>? Claims { get; init; }
 
     /// <summary>Cluster-level administrator authorized to perform cross-tenant operations.</summary>
     public bool IsClusterAdmin => ClusterRoles.Any(r => !r.Contains(':') && string.Equals(r, "ClusterAdmin", StringComparison.Ordinal));
@@ -164,7 +165,8 @@ public sealed record SecurityPrincipalContext
             AuthenticationScheme = authenticationScheme ?? principal.Identity?.AuthenticationType ?? "Token",
             IsAuthenticated = principal.Identity?.IsAuthenticated ?? true,
             BreakGlassJustification = breakGlassJustification,
-            ClientIp = clientIp
+            ClientIp = clientIp,
+            Claims = principal.Claims
         };
     }
 }

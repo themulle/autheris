@@ -24,7 +24,8 @@ public sealed record HitLApprovalTicket(
     string? ApproverSid = null,
     string? RejectionReason = null,
     string? ItsmTicketId = null,
-    string? ItsmTicketUrl = null
+    string? ItsmTicketUrl = null,
+    string? Signature = null
 );
 
 public sealed record HitLApprovalResult(
@@ -37,5 +38,6 @@ public sealed record HitLApprovalBroadcast(
     string ApprovalId,
     string ApproverSid,
     bool IsApproved,
-    string? Reason = null
+    string? Reason = null,
+    string? Signature = null
 );

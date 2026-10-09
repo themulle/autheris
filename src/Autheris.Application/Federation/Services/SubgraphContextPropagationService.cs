@@ -50,9 +50,11 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
         }
 
         // 2. Propagate Caller Subject SID
+        string? userSid = null;
+        string rolesStr = string.Empty;
         if (principal != null)
         {
-            var userSid = principal.GetUserSid()?.Value
+            userSid = principal.GetUserSid()?.Value
                           ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
                           ?? principal.Identity?.Name;
 
@@ -66,6 +68,7 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
             var roles = principal.GetUserRoles();
             if (roles.Count > 0)
             {
+                rolesStr = string.Join(",", roles.OrderBy(r => r, StringComparer.Ordinal));
                 request.Headers.Remove(fedOptions.RolesHeaderName);
                 request.Headers.TryAddWithoutValidation(fedOptions.RolesHeaderName, string.Join(",", roles));
             }
@@ -88,7 +91,7 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
         request.Headers.Remove("X-Correlation-ID");
         request.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
 
-        // 6. Sign Zero-Trust Context Headers with HMAC-SHA256 (1.10)
+        // 6. Sign Zero-Trust Context Headers with HMAC-SHA256 (1.10 / SG-21)
         if (fedOptions.SignContextHeaders)
         {
             var isDevelopment = _environment == null || _environment.IsDevelopment();
@@ -120,9 +123,10 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
 
             var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
             var nonce = Guid.NewGuid().ToString("N");
-            var userSid = principal?.GetUserSid()?.Value ?? string.Empty;
+            var methodStr = request.Method.Method;
+            var pathStr = request.RequestUri?.AbsolutePath ?? string.Empty;
 
-            var payload = $"{effectiveTenant}:{userSid}:{timestamp}:{nonce}";
+            var payload = $"{effectiveTenant}:{userSid ?? string.Empty}:{timestamp}:{nonce}:{subgraphName}:{rolesStr}:{methodStr}:{pathStr}";
             using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(signingKey));
             var signature = Convert.ToHexStringLower(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload)));
 

@@ -589,19 +589,27 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         {
             if (context.Attributes.TryGetValue("gql.action", out var gqlAction) && gqlAction != null)
             {
-                var s = gqlAction.ToString();
-                if (!string.IsNullOrWhiteSpace(s))
+                var s = gqlAction.ToString()?.Trim();
+                if (string.Equals(s, "write", StringComparison.OrdinalIgnoreCase))
                 {
-                    return s;
+                    return "write";
+                }
+                if (string.Equals(s, "read", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "read";
                 }
             }
 
             if (context.Attributes.TryGetValue("action", out var action) && action != null)
             {
-                var s = action.ToString();
-                if (!string.IsNullOrWhiteSpace(s))
+                var s = action.ToString()?.Trim();
+                if (string.Equals(s, "write", StringComparison.OrdinalIgnoreCase))
                 {
-                    return s;
+                    return "write";
+                }
+                if (string.Equals(s, "read", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "read";
                 }
             }
         }

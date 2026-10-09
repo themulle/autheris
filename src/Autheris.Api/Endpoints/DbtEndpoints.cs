@@ -148,9 +148,9 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtContractValidator validator) =>
         {
-            // Review E-7: dbt state is global and carries no table ownership; a plain DataOwner role may not read it.
+            // Review E-7 / SG-13: dbt state is global and carries no table ownership; only global governance administrators or DbtAdmin.
             var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
-                               context.User.IsInRole("Developer");
+                               context.User.IsInRole("DbtAdmin");
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -206,9 +206,9 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtHealthCircuitBreaker circuitBreaker) =>
         {
-            // Review E-7: dbt state is global and carries no table ownership; a plain DataOwner role may not read it.
+            // Review E-7 / SG-13: dbt state is global and carries no table ownership; only global governance administrators or DbtAdmin.
             var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
-                               context.User.IsInRole("Developer");
+                               context.User.IsInRole("DbtAdmin");
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);

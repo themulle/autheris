@@ -135,40 +135,60 @@ public sealed class TableAccessPolicy
             return TableAccessDecision.Denied(table, $"Table '{table.ToQualifiedName()}' is not active.");
         }
 
-        // SR15-51: Enforce schema contracts at query execution time
+        // SR15-51 / SG-16: Enforce schema contracts at query execution time
         var contract = query.Contract;
         if (contract == null && _contractManager != null && _contractManager.IsEnabled)
         {
             var claimContract = query.Claims?.FirstOrDefault(c => string.Equals(c.Type, "contract", StringComparison.OrdinalIgnoreCase))?.Value?.Trim();
-            var contractName = !string.IsNullOrWhiteSpace(claimContract) ? claimContract : _contractManager.DefaultContract;
-            if (!string.IsNullOrWhiteSpace(contractName) && _contractManager.HasContract(contractName))
+            if (!string.IsNullOrWhiteSpace(claimContract))
             {
-                contract = _contractManager.GetContract(contractName);
+                if (!_contractManager.HasContract(claimContract))
+                {
+                    return TableAccessDecision.Denied(table,
+                        $"Schema Contract Denial: Unknown schema contract '{claimContract}' specified in caller token.");
+                }
+                contract = _contractManager.GetContract(claimContract);
+            }
+            else
+            {
+                var defaultContract = _contractManager.DefaultContract;
+                if (!string.IsNullOrWhiteSpace(defaultContract) && _contractManager.HasContract(defaultContract))
+                {
+                    contract = _contractManager.GetContract(defaultContract);
+                }
             }
         }
 
         if (contract != null)
         {
             if (contract.AllowedTables.Count > 0 &&
-                !contract.AllowedTables.Contains(table.TableName) &&
-                !contract.AllowedTables.Contains(table.ToQualifiedName()))
+                !contract.AllowedTables.Contains(table.ToString()) &&
+                !contract.AllowedTables.Contains(table.TableName))
             {
                 return TableAccessDecision.Denied(table,
                     $"Schema Contract Denial: Table '{table.ToQualifiedName()}' is not permitted under contract '{contract.Name}'.");
             }
 
-            if (contract.ExcludedTags.Count > 0 &&
-                contract.ExcludedTags.Contains(query.Metadata.Table.Sensitivity))
+            var allTableTags = (query.Metadata.Table.Tags ?? Array.Empty<string>())
+                .Concat(string.IsNullOrWhiteSpace(query.Metadata.Table.Sensitivity) ? Array.Empty<string>() : [query.Metadata.Table.Sensitivity])
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToList();
+
+            if (contract.ExcludedTags.Count > 0)
             {
-                return TableAccessDecision.Denied(table,
-                    $"Schema Contract Denial: Table '{table.ToQualifiedName()}' with tag '{query.Metadata.Table.Sensitivity}' is excluded under contract '{contract.Name}'.");
+                var matchedExcluded = allTableTags.FirstOrDefault(t => contract.ExcludedTags.Contains(t));
+                if (matchedExcluded != null)
+                {
+                    return TableAccessDecision.Denied(table,
+                        $"Schema Contract Denial: Table '{table.ToQualifiedName()}' with tag '{matchedExcluded}' is excluded under contract '{contract.Name}'.");
+                }
             }
 
             if (contract.IncludedTags.Count > 0 &&
-                !contract.IncludedTags.Contains(query.Metadata.Table.Sensitivity))
+                (allTableTags.Count == 0 || !allTableTags.Any(t => contract.IncludedTags.Contains(t))))
             {
                 return TableAccessDecision.Denied(table,
-                    $"Schema Contract Denial: Table '{table.ToQualifiedName()}' with tag '{query.Metadata.Table.Sensitivity}' is not in included tags under contract '{contract.Name}'.");
+                    $"Schema Contract Denial: Table '{table.ToQualifiedName()}' is not in included tags under contract '{contract.Name}'.");
             }
         }
 
