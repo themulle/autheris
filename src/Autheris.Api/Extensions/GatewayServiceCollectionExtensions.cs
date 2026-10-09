@@ -236,6 +236,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddAutherisSecurity(gatewayOptions, hostEnv);
         services.AddAutherisSqlEngine(gatewayOptions);
         services.AddAutherisExecution(gatewayOptions, hostEnv);
+        services.AddAutherisDataApi();
         services.AddAutherisMcp(gatewayOptions);
         services.AddAutherisCore(gatewayOptions, hostEnv);
 

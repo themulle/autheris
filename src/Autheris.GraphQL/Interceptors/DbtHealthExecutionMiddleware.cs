@@ -12,6 +12,7 @@ using HotChocolate.Execution;
 using HotChocolate.Language;
 using Microsoft.Extensions.DependencyInjection;
 using RequestDelegate = HotChocolate.Execution.RequestDelegate;
+using RequestContext = HotChocolate.Execution.RequestContext;
 
 public sealed class DbtHealthExecutionMiddleware
 {
