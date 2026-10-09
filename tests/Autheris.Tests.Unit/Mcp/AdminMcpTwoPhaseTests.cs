@@ -41,7 +41,7 @@ public sealed class AdminMcpTwoPhaseTests
     public AdminMcpTwoPhaseTests()
     {
         _totpService = new TotpVerificationService();
-        _service = new AccessPlanningService(_tableRepo, _rebacStore, _auditRepo, _totpService, _totpSecretStore);
+        _service = new AccessPlanningService(_auditRepo, _tableRepo, _rebacStore, _totpService, _totpSecretStore);
 
         var tableId = Guid.NewGuid();
         _mockMetadata = new TableMetadata

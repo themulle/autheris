@@ -70,9 +70,9 @@ public class AccessPlanningService : IAccessPlanningService
     ];
 
     public AccessPlanningService(
+        IAuditLogRepository auditLogRepository,
         ITableMetadataRepository? tableMetadataRepository = null,
         IRebacStore? rebacStore = null,
-        IAuditLogRepository? auditLogRepository = null,
         ITotpVerificationService? totpVerificationService = null,
         ITotpSecretStore? totpSecretStore = null,
         IKeyVaultSecretProvider? secretProvider = null,
@@ -82,9 +82,9 @@ public class AccessPlanningService : IAccessPlanningService
         IOptions<GatewayOptions>? options = null,
         ILogger<AccessPlanningService>? logger = null)
     {
+        _auditRepo = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
         _rebacStore = rebacStore ?? new NullRebacStore();
-        _auditRepo = auditLogRepository ?? NullAuditLogRepository.Instance;
         _totpService = totpVerificationService;
         _totpSecretStore = totpSecretStore;
         _secretProvider = secretProvider;
