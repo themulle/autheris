@@ -12,6 +12,8 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Mcp.Tools;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -36,6 +38,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IGoldenQueryService? _goldenQueryService;
     private readonly IHitLStepUpApprovalService? _stepUpApprovalService;
     private readonly IGraphQlCatalogMap? _graphQlCatalogMap;
+    private readonly IAccessPlanningService? _accessPlanningService;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
 
@@ -67,8 +70,9 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IGoldenQueryService? goldenQueryService = null,
         IHitLStepUpApprovalService? stepUpApprovalService = null,
         IGraphQlCatalogMap? graphQlCatalogMap = null,
-        IConsentRepository? consentRepository = null)
-        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository)
+        IConsentRepository? consentRepository = null,
+        IAccessPlanningService? accessPlanningService = null)
+        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository, accessPlanningService)
     {
     }
 
@@ -85,7 +89,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IGoldenQueryService? goldenQueryService = null,
         IHitLStepUpApprovalService? stepUpApprovalService = null,
         IGraphQlCatalogMap? graphQlCatalogMap = null,
-        IConsentRepository? consentRepository = null)
+        IConsentRepository? consentRepository = null,
+        IAccessPlanningService? accessPlanningService = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -100,6 +105,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         _stepUpApprovalService = stepUpApprovalService;
         _graphQlCatalogMap = graphQlCatalogMap;
         _consentRepository = consentRepository;
+        _accessPlanningService = accessPlanningService;
     }
 
 
@@ -191,6 +197,47 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                 }
             });
             _ = _sessionStore.SendEventAsync(sessionContext.SessionId, "message", progressData);
+        }
+
+        // Administrative MCP Tools Execution (Track E, ADR-03, ADR-05, R-60..R-64)
+        if (McpAdminTools.IsAdminTool(tool.Name))
+        {
+            var roles = sessionContext.Roles ?? [];
+            bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
+                           roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
+                           roles.Contains("TenantAdmin", StringComparer.OrdinalIgnoreCase);
+
+            if (!isAdmin && !_options.Value.IsMcpAuthBypassed)
+            {
+                activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+
+                await RecordAuditEventAsync(
+                    tool.Name,
+                    sessionContext,
+                    decision: "DENY",
+                    details: $"Tool execution denied: Admin tool '{tool.Name}' requires GovernanceAdmin or ClusterAdmin role.",
+                    isMasked: false,
+                    truncated: false,
+                    estimatedTokens: 0,
+                    cancellationToken).ConfigureAwait(false);
+
+                return new McpToolCallResult(
+                    IsSuccess: false,
+                    ContentJson: "{}",
+                    ErrorMessage: $"Access denied: Tool '{tool.Name}' requires administrative role (GovernanceAdmin / ClusterAdmin)."
+                );
+            }
+
+            if (_accessPlanningService != null)
+            {
+                return await McpAdminTools.ExecuteAdminToolAsync(
+                    tool.Name,
+                    request.ArgumentsJson ?? "{}",
+                    sessionContext,
+                    _accessPlanningService,
+                    cancellationToken).ConfigureAwait(false);
+            }
         }
 
         // Resolve real TargetTable for ABAC policy and Four-Eyes checks

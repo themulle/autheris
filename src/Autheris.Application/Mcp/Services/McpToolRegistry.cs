@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Application.Mcp.Tools;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -133,6 +134,12 @@ public sealed class McpToolRegistry : IMcpToolRegistry
         foreach (var datasetTool in McpDatasetTools.Definitions())
         {
             RegisterTool(datasetTool);
+        }
+
+        // 7. Built-in admin tools: access planning, apply, datasource registration, etc.
+        foreach (var adminTool in McpAdminTools.Definitions())
+        {
+            RegisterTool(adminTool);
         }
 
         // Register any explicitly declared operations
