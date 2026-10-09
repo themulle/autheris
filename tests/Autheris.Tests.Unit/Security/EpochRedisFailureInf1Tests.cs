@@ -84,9 +84,7 @@ public sealed class EpochRedisFailureInf1Tests
         tableMetaRepo.GetTableMetadataAsync(Table, Arg.Any<System.Threading.CancellationToken>())
             .Returns(Task.FromResult<Autheris.Domain.Model.TableMetadata?>(metadata));
 
-        var sp = Substitute.For<IServiceProvider>();
-        sp.GetService(typeof(Autheris.Application.Interfaces.ITableMetadataRepository))
-            .Returns(tableMetaRepo);
+        var sensitivityLookup = new Autheris.Application.Services.TableMetadataSensitivityLookup(tableMetaRepo);
 
         var options = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions
         {
@@ -99,7 +97,7 @@ public sealed class EpochRedisFailureInf1Tests
             }
         });
 
-        var service = new EpochValidationService(options: options, multiplexer: multiplexer, serviceProvider: sp);
+        var service = new EpochValidationService(options: options, sensitivityLookup: sensitivityLookup, multiplexer: multiplexer);
 
         var isValid = await service.IsEpochValidAsync(Table, 1);
         isValid.ShouldBeFalse();

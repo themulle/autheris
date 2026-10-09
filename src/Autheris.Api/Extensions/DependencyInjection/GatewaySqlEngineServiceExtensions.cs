@@ -52,6 +52,21 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddSingleton<IDataSourceExecutor, PluginHttpDataSourceExecutor>();
         services.AddSingleton<ISqlEngine, FastSqlEngine>();
         services.AddSingleton<ISqlSecurityValidator, DefaultSqlSecurityValidator>();
+        services.AddSingleton<Autheris.Application.Sql.ICompiledSqlQueryPlanCache>(sp =>
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
+            var planCacheOptions = options.WebSql.PlanCache;
+            if (planCacheOptions.MaxEntries <= 0)
+            {
+                return Autheris.Application.Sql.NullCompiledSqlQueryPlanCache.Instance;
+            }
+
+            var ttl = planCacheOptions.TtlSeconds > 0
+                ? TimeSpan.FromSeconds(planCacheOptions.TtlSeconds)
+                : TimeSpan.FromMinutes(10);
+
+            return new Autheris.Application.Sql.CompiledSqlQueryPlanCache(planCacheOptions.MaxEntries, ttl);
+        });
         services.AddScoped<IGovernedSqlExecutionService, GovernedSqlExecutionService>();
         services.AddSingleton<IWebSqlStatementManager, WebSqlStatementManager>();
         services.AddSingleton<ISqlEndpointRegistry, InMemorySqlEndpointRegistry>();

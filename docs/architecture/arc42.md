@@ -33,7 +33,7 @@ The GraphQL Enterprise Gateway acts as a centralized, secure data access layer a
   - **HTTP Basic Authentication**: Direct Basic Auth headers on queries and dedicated verification endpoint (`/api/auth/login`).
   - **Kerberos / SPNEGO Negotiate**: Windows Integrated Authentication extracting Windows Security Identifiers (`Sid`).
   - **Development Simulation**: Header-based SID simulation (`X-Test-User-Sid`), strictly restricted to `Development` mode.
-- **Database Dialects & Real Execution**: Native ADO.NET execution with RLS pushdown across Microsoft SQL Server (T-SQL), PostgreSQL (PL/pgSQL), SQLite, Oracle, and Databricks.
+- **Database Dialects & Real Execution**: Native ADO.NET execution with RLS pushdown across Microsoft SQL Server (T-SQL), PostgreSQL (PL/pgSQL), and SQLite (plus Oracle as an AST target dialect without native driver, and Databricks as a catalog dialect without generator and driver).
 - **Zero External Dependencies in Dev**: Fully functional offline development and CI without requiring running Redis or external DB instances.
 
 ---
@@ -51,7 +51,7 @@ flowchart TD
     Gateway -->|Read/Write Governance Catalog| GovDB[(Governance Database / SQLite / SQL Server)]
     Gateway -->|Parameterized Dynamic SQL with RLS Pushdown| TargetDB1[(Finance DB - SQL Server)]
     Gateway -->|Parameterized Dynamic SQL with RLS Pushdown| TargetDB2[(HR DB - PostgreSQL)]
-    Gateway -->|Parameterized Dynamic SQL with RLS Pushdown| TargetDB3[(Analytics DB - SQLite / Databricks)]
+    Gateway -->|Parameterized Dynamic SQL with RLS Pushdown| TargetDB3[(Analytics DB - SQLite)]
 ```
 
 ### 3.1 Business Context

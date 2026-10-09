@@ -79,13 +79,7 @@ public sealed class SqlDataMaskingProvider
             }
             if (ruleType == "GEO_JITTER")
             {
-                var targetDialect = tableMeta.Dialect switch
-                {
-                    DatabaseDialect.SqlServer => TargetSqlDialect.SqlServer,
-                    DatabaseDialect.Sqlite => TargetSqlDialect.Sqlite,
-                    DatabaseDialect.Oracle => TargetSqlDialect.Oracle,
-                    _ => TargetSqlDialect.PostgreSql
-                };
+                var targetDialect = SqlDialectMapper.ToTargetDialect(tableMeta.Dialect);
                 return AstSecurityVisitor.BuildDialectMaskExpression(
                     columnName,
                     "GEO_JITTER",
@@ -94,13 +88,7 @@ public sealed class SqlDataMaskingProvider
             }
             if (ruleType == "PARTIAL_MASK")
             {
-                var targetDialect = tableMeta.Dialect switch
-                {
-                    DatabaseDialect.SqlServer => TargetSqlDialect.SqlServer,
-                    DatabaseDialect.Sqlite => TargetSqlDialect.Sqlite,
-                    DatabaseDialect.Oracle => TargetSqlDialect.Oracle,
-                    _ => TargetSqlDialect.PostgreSql
-                };
+                var targetDialect = SqlDialectMapper.ToTargetDialect(tableMeta.Dialect);
                 return AstSecurityVisitor.BuildDialectMaskExpression(
                     columnName,
                     "PARTIAL_MASK",

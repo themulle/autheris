@@ -665,13 +665,11 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         const string denyAllFilter = "1 = 0";
 
-        TargetSqlDialect targetSqlDialect = targetDatabaseDialect switch
+        if (!targetDatabaseDialect.HasValue || !SqlDialectMapper.IsExecutable(targetDatabaseDialect.Value))
         {
-            DatabaseDialect.PostgreSql => TargetSqlDialect.PostgreSql,
-            DatabaseDialect.SqlServer => TargetSqlDialect.SqlServer,
-            DatabaseDialect.Sqlite => TargetSqlDialect.Sqlite,
-            _ => throw new WebSqlPolicyException("WebSQL only supports tables of PostgreSQL, SQL Server and SQLite data sources.")
-        };
+            throw new WebSqlPolicyException("WebSQL only supports tables of PostgreSQL, SQL Server and SQLite data sources.");
+        }
+        TargetSqlDialect targetSqlDialect = SqlDialectMapper.ToTargetDialect(targetDatabaseDialect.Value);
 
         IReadOnlySet<string> allowedFunctions = SqlFunctionAllowlists.Build(targetSqlDialect, webSqlOptions.AdditionalAllowedFunctions);
         if (metadata.FunctionCalls is { Count: > 0 })
@@ -744,6 +742,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         ulong policyHash = 0;
         var planCache = _planCache;
         bool canUsePlanCache = planCache != null && targetDatabaseDialect.HasValue;
+        string policyFingerprint = $"tenant:{tenantId};dialect:{targetDatabaseDialect.GetValueOrDefault()};ds:{effectiveDataSourceName};engine:{webSqlOptions.SqlRewriterEngine}";
 
         if (canUsePlanCache && planCache != null)
         {
@@ -757,9 +756,11 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 webSqlOptions.SqlRewriterEngine ?? "LegacyTokenStream",
                 tablesWithConsentRowFilter,
                 tablesWithMaskedColumns,
-                _options.Value.RowFilters.SubqueryStrategy);
+                _options.Value.RowFilters.SubqueryStrategy,
+                tableColumnsMap,
+                allowedFunctions);
 
-            if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
+            if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, policyFingerprint, effectiveDataSourceName, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
             {
                 return new GovernedRewrite(cachedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
             }
@@ -770,7 +771,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             securedSql = _sqlEngine.RewriteRls(rawSql.AsMemory(), rlsOptions, ct);
             if (canUsePlanCache && planCache != null && !string.IsNullOrEmpty(securedSql))
             {
-                planCache.SetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, securedSql);
+                planCache.SetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, policyFingerprint, effectiveDataSourceName, securedSql);
             }
         }
         catch (WebSqlPolicyException)

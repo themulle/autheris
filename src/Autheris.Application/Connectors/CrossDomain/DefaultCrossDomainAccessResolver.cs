@@ -36,13 +36,13 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
         IRebacEvaluator? rebacEvaluator = null,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
     {
-        _options = options?.Value;
+        _options = options?.Value ?? new GatewayOptions();
         _policy = new TableAccessPolicy(
             consentRepository ?? throw new ArgumentNullException(nameof(consentRepository)),
             resolutionService ?? throw new ArgumentNullException(nameof(resolutionService)),
-            consentCache,
-            policyEnforcementService,
-            rebacEvaluator,
+            consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            policyEnforcementService ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver,
             _options,
             mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);

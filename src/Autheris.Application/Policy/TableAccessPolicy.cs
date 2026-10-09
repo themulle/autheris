@@ -91,11 +91,11 @@ public sealed class TableAccessPolicy
 
     private readonly IConsentRepository _consentRepository;
     private readonly IConsentResolutionService _resolutionService;
-    private readonly IConsentCacheService? _cacheService;
-    private readonly IPolicyEnforcementService? _policyEnforcementService;
-    private readonly IRebacEvaluator? _rebacEvaluator;
+    private readonly IConsentCacheService _cacheService;
+    private readonly IPolicyEnforcementService _policyEnforcementService;
+    private readonly IRebacEvaluator _rebacEvaluator;
     private readonly IClientIpResolver? _clientIpResolver;
-    private readonly GatewayOptions? _options;
+    private readonly GatewayOptions _options;
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
     private readonly ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
@@ -109,11 +109,11 @@ public sealed class TableAccessPolicy
     public TableAccessPolicy(
         IConsentRepository consentRepository,
         IConsentResolutionService resolutionService,
-        IConsentCacheService? cacheService,
-        IPolicyEnforcementService? policyEnforcementService,
-        IRebacEvaluator? rebacEvaluator,
+        IConsentCacheService cacheService,
+        IPolicyEnforcementService policyEnforcementService,
+        IRebacEvaluator rebacEvaluator,
         IClientIpResolver? clientIpResolver,
-        GatewayOptions? options,
+        GatewayOptions options,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver mandatoryFilters,
         ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
@@ -123,11 +123,11 @@ public sealed class TableAccessPolicy
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
-        _cacheService = cacheService;
-        _policyEnforcementService = policyEnforcementService;
-        _rebacEvaluator = rebacEvaluator;
+        _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
+        _policyEnforcementService = policyEnforcementService ?? throw new ArgumentNullException(nameof(policyEnforcementService));
+        _rebacEvaluator = rebacEvaluator ?? throw new ArgumentNullException(nameof(rebacEvaluator));
         _clientIpResolver = clientIpResolver;
-        _options = options;
+        _options = options ?? throw new ArgumentNullException(nameof(options));
         _contractManager = contractManager;
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache;

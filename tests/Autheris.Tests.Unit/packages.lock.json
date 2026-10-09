@@ -1601,7 +1601,8 @@
           "Microsoft.Extensions.Options": "[10.0.12, )",
           "Parquet.Net": "[6.1.0, )",
           "System.IO.Hashing": "[10.0.12, )",
-          "YamlDotNet": "[18.1.0, )"
+          "YamlDotNet": "[18.1.0, )",
+          "prometheus-net": "[8.2.1, )"
         }
       },
       "autheris.domain": {

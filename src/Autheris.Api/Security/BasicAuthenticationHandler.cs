@@ -29,6 +29,32 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
     private readonly string _dummyStoredHash;
     private readonly Autheris.Application.Interfaces.IClientIpResolver? _clientIpResolver;
 
+    private static readonly Prometheus.Counter PasswordHashRejectedTotal = Prometheus.Metrics.CreateCounter(
+        "autheris_password_hash_rejected_total", "Number of password hashing requests rejected due to concurrency saturation");
+
+    private static SemaphoreSlim? _hashSemaphore;
+    private static readonly object _semaphoreLock = new();
+    private static int _lastConfiguredMaxConcurrency = -1;
+
+    private static SemaphoreSlim GetOrCreateSemaphore(int maxConcurrency)
+    {
+        if (maxConcurrency <= 0)
+        {
+            maxConcurrency = Math.Max(1, Environment.ProcessorCount);
+        }
+
+        lock (_semaphoreLock)
+        {
+            if (_hashSemaphore == null || _lastConfiguredMaxConcurrency != maxConcurrency)
+            {
+                _hashSemaphore?.Dispose();
+                _hashSemaphore = new SemaphoreSlim(maxConcurrency, maxConcurrency);
+                _lastConfiguredMaxConcurrency = maxConcurrency;
+            }
+            return _hashSemaphore;
+        }
+    }
+
     public BasicAuthenticationHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
@@ -57,6 +83,12 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         _dummyStoredHash = _hasArgon2Users
             ? $"$argon2id$v=19$m={_dummyArgon2MemoryKb},t={_dummyArgon2Iterations},p={_dummyArgon2Parallelism}${Convert.ToBase64String(DummySalt)}${Convert.ToBase64String(DummyTargetHash)}"
             : $"$pbkdf2${_dummyPbkdf2Iterations}${Convert.ToBase64String(DummySalt)}${Convert.ToBase64String(DummyTargetHash)}";
+
+        var maxConcurrency = _gatewayOptions.Authentication.BasicAuth.MaxConcurrentPasswordHashes > 0
+            ? _gatewayOptions.Authentication.BasicAuth.MaxConcurrentPasswordHashes
+            : Math.Max(1, Environment.ProcessorCount);
+        var memoryBudgetKb = maxConcurrency * _dummyArgon2MemoryKb;
+        Logger.LogInformation("BasicAuth: Configured MaxConcurrentPasswordHashes={MaxConcurrency}, Argon2 memory budget={BudgetKb} KB.", maxConcurrency, memoryBudgetKb);
     }
 
     private static void ConfigureDummyCost(
@@ -187,17 +219,39 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-        // SR15-38 / SG-35: Always execute the exact same PasswordHasher.VerifyPassword pipeline with dummyStoredHash
-        // when the user is not found, ensuring uniform parsing, base64 decoding and cryptographic hashing times
-        // to defeat timing-based user enumeration.
-        var storedHashToVerify = configuredUser?.Password ?? _dummyStoredHash;
-        bool passwordVerified = PasswordHasher.VerifyPassword(password, storedHashToVerify, username, _isDevelopment, msg => Logger.LogError("{Message}", msg));
-
         // RR-L2-03: recently verified identical credentials skip the cryptographic computation.
-        bool passwordMatches = configuredUser != null &&
-            ((guard.TryGetCachedSuccess(authHeader, out var cachedUser) &&
-              string.Equals(cachedUser, configuredUser.Username, StringComparison.Ordinal)) ||
-             passwordVerified);
+        bool isCached = configuredUser != null &&
+            guard.TryGetCachedSuccess(authHeader, out var cachedUser) &&
+            string.Equals(cachedUser, configuredUser.Username, StringComparison.Ordinal);
+
+        bool passwordVerified = false;
+        if (!isCached)
+        {
+            var maxConcurrency = _gatewayOptions.Authentication.BasicAuth.MaxConcurrentPasswordHashes;
+            var semaphore = GetOrCreateSemaphore(maxConcurrency);
+
+            if (!await semaphore.WaitAsync(TimeSpan.FromSeconds(2), Context.RequestAborted).ConfigureAwait(false))
+            {
+                PasswordHashRejectedTotal.Inc();
+                Logger.LogWarning("Password hash verification concurrency limit ({Limit}) exceeded; rejecting request.", maxConcurrency);
+                return AuthenticateResult.Fail("Password verification queue full.");
+            }
+
+            try
+            {
+                // SR15-38 / SG-35: Always execute the exact same PasswordHasher.VerifyPassword pipeline with dummyStoredHash
+                // when the user is not found, ensuring uniform parsing, base64 decoding and cryptographic hashing times
+                // to defeat timing-based user enumeration.
+                var storedHashToVerify = configuredUser?.Password ?? _dummyStoredHash;
+                passwordVerified = PasswordHasher.VerifyPassword(password, storedHashToVerify, username, _isDevelopment, msg => Logger.LogError("{Message}", msg));
+            }
+            finally
+            {
+                semaphore.Release();
+            }
+        }
+
+        bool passwordMatches = configuredUser != null && (isCached || passwordVerified);
 
         if (!passwordMatches || configuredUser == null)
         {

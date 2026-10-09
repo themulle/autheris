@@ -149,6 +149,16 @@
           "ZstdSharp.Port": "0.8.8"
         }
       },
+      "prometheus-net": {
+        "type": "Direct",
+        "requested": "[8.2.1, )",
+        "resolved": "8.2.1",
+        "contentHash": "3wVgdEPOCBF752s2xps5T+VH+c9mJK8S8GKEDg49084P6JZMumTZI5Te6aJ9MQpX0sx7om6JOnBpIi7ZBmmiDQ==",
+        "dependencies": {
+          "Microsoft.Extensions.Http": "3.1.0",
+          "Microsoft.Extensions.ObjectPool": "7.0.0"
+        }
+      },
       "System.IO.Hashing": {
         "type": "Direct",
         "requested": "[10.0.12, )",
