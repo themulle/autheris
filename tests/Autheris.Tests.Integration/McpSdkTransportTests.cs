@@ -167,27 +167,19 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
     }
 
     [Fact]
-    public async Task AuthorizationServerMetadata_ReturnsConfiguredServersAnonymously()
-    {
-        var client = _factory.CreateClient();
-
-        var response = await client.GetAsync("/.well-known/oauth-authorization-server");
-
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        doc.RootElement.GetProperty("authorization_servers").EnumerateArray().Select(e => e.GetString()).ShouldContain(Authority);
-    }
-
-    [Fact]
-    public async Task McpDiscovery_OutsideDevWithoutOptIn_RequiresAuthentication()
+    public async Task ProtectedResourceMetadata_AnonymousInProduction_NamesTheAuthorizationServer_AndOnlyAllowlistedFields()
     {
         var tempDb = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"gov-test-{Guid.NewGuid():N}.db");
+        var tempAnchor = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"anchor-{Guid.NewGuid():N}.txt");
+        await System.IO.File.WriteAllTextAsync(tempAnchor, "anchor-token");
         try
         {
             var prodFactory = _factory.WithWebHostBuilder(b =>
             {
                 b.UseEnvironment("Production");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={tempDb}");
+                b.UseSetting("Gateway:GovernanceDb:ChainAnchorPath", tempAnchor);
+                b.UseSetting("Gateway:Audit:ChainAnchorPath", tempAnchor);
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKeyVaultRef", "audit-hmac-key");
                 b.UseSetting("Gateway:GovernanceDb:AuditHmacKey", "0123456789012345678901234567890123456789");
                 b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "false");
@@ -199,8 +191,20 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
             });
 
             var client = prodFactory.CreateClient();
-            var response = await client.GetAsync("/.well-known/oauth-authorization-server");
-            response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+            var response = await client.GetAsync("/.well-known/oauth-protected-resource/mcp");
+            response.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var root = doc.RootElement;
+            root.GetProperty("authorization_servers").EnumerateArray().Select(e => e.GetString()).ShouldContain(Authority);
+            root.GetProperty("resource").GetString()!.ShouldEndWith("/mcp");
+
+            // Allowlist assertion: only public fields permitted
+            var allowedFields = new HashSet<string>(["resource", "authorization_servers", "scopes_supported", "bearer_methods_supported", "resource_name"]);
+            foreach (var prop in root.EnumerateObject())
+            {
+                allowedFields.ShouldContain(prop.Name);
+            }
         }
         finally
         {
@@ -208,7 +212,123 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
             {
                 try { System.IO.File.Delete(tempDb); } catch { }
             }
+            if (System.IO.File.Exists(tempAnchor))
+            {
+                try { System.IO.File.Delete(tempAnchor); } catch { }
+            }
         }
+    }
+
+    [Fact]
+    public async Task AuthorizationServerMetadata_Returns404NotFound_VariantA()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/.well-known/oauth-authorization-server");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task OpenIdConfiguration_Returns404NotFound()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/.well-known/openid-configuration");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task BatchRequest_IsRejectedWith400_AndJsonRpcError32600()
+    {
+        var client = AuthenticatedHttpClient();
+        var payload = """[{"jsonrpc":"2.0","id":1,"method":"tools/list"},{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sample_rows","arguments":{}}}]""";
+        var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Accept.ParseAdd("application/json");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetInt32().ShouldBe(-32600);
+        doc.RootElement.GetProperty("error").GetProperty("message").GetString()!.ShouldContain("JSON-RPC batching is not supported");
+    }
+
+    [Fact]
+    public async Task EmptyBatchRequest_IsRejectedWith400_AndJsonRpcError32600()
+    {
+        var client = AuthenticatedHttpClient();
+        var payload = "[]";
+        var request = new HttpRequestMessage(HttpMethod.Post, "/mcp")
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        request.Headers.Accept.ParseAdd("application/json");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetInt32().ShouldBe(-32600);
+        doc.RootElement.GetProperty("error").GetProperty("message").GetString()!.ShouldContain("JSON-RPC batching is not supported");
+    }
+
+    [Fact]
+    public async Task McpDeveloperCors_InDevelopmentWithFlag_HandlesPreflightOptions()
+    {
+        var corsFactory = _factory.WithWebHostBuilder(b =>
+        {
+            b.UseEnvironment("Development");
+            b.UseSetting("Gateway:Mcp:EnableDeveloperCors", "true");
+            b.UseSetting("Gateway:Mcp:DeveloperCorsOrigins:0", "https://vscode.dev");
+        });
+
+        var client = corsFactory.CreateClient();
+
+        // 1. Valid localhost preflight
+        var request = new HttpRequestMessage(HttpMethod.Options, "/mcp");
+        request.Headers.Add("Origin", "http://localhost:6274");
+        request.Headers.Add("Access-Control-Request-Method", "POST");
+        request.Headers.Add("Access-Control-Request-Headers", "Mcp-Session-Id, MCP-Protocol-Version");
+
+        var response = await client.SendAsync(request);
+        response.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        response.Headers.GetValues("Access-Control-Allow-Origin").ShouldContain("http://localhost:6274");
+        var allowHeaders = string.Join(",", response.Headers.GetValues("Access-Control-Allow-Headers"));
+        allowHeaders.ShouldContain("Mcp-Session-Id");
+        allowHeaders.ShouldContain("MCP-Protocol-Version");
+        response.Headers.Contains("Access-Control-Allow-Credentials").ShouldBeFalse();
+
+        // 2. Extra origin (vscode.dev) preflight
+        var vsCodeRequest = new HttpRequestMessage(HttpMethod.Options, "/mcp");
+        vsCodeRequest.Headers.Add("Origin", "https://vscode.dev");
+        vsCodeRequest.Headers.Add("Access-Control-Request-Method", "POST");
+
+        var vsCodeResponse = await client.SendAsync(vsCodeRequest);
+        vsCodeResponse.StatusCode.ShouldBe(HttpStatusCode.NoContent);
+        vsCodeResponse.Headers.GetValues("Access-Control-Allow-Origin").ShouldContain("https://vscode.dev");
+
+        // 3. Evil origin preflight (localhost.evil.com) -> must not be allowed
+        var evilRequest = new HttpRequestMessage(HttpMethod.Options, "/mcp");
+        evilRequest.Headers.Add("Origin", "http://localhost.evil.com");
+        evilRequest.Headers.Add("Access-Control-Request-Method", "POST");
+
+        var evilResponse = await client.SendAsync(evilRequest);
+        evilResponse.Headers.Contains("Access-Control-Allow-Origin").ShouldBeFalse();
+
+        // 4. Preflight on /api/v1/olap/query -> must not be allowed (policy scoped to /mcp)
+        var olapRequest = new HttpRequestMessage(HttpMethod.Options, "/api/v1/olap/query");
+        olapRequest.Headers.Add("Origin", "http://localhost:6274");
+        olapRequest.Headers.Add("Access-Control-Request-Method", "POST");
+
+        var olapResponse = await client.SendAsync(olapRequest);
+        olapResponse.Headers.Contains("Access-Control-Allow-Origin").ShouldBeFalse();
     }
 
     private sealed class ConnectionItemsStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
@@ -260,19 +380,5 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
             public bool TryGetValue(object key, out object? value) => _dict.TryGetValue(key, out value);
             System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => _dict.GetEnumerator();
         }
-    }
-
-    [Fact]
-    public async Task McpDiscovery_WithEmptyServers_Returns404NotFound()
-    {
-        var noAuthServerFactory = _factory.WithWebHostBuilder(b =>
-        {
-            b.UseSetting("Gateway:Authentication:Adfs:Authority", "");
-            b.UseSetting("Gateway:Mcp:AllowAnonymousDiscovery", "true");
-        });
-
-        var client = noAuthServerFactory.CreateClient();
-        var response = await client.GetAsync("/.well-known/oauth-authorization-server");
-        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 }
