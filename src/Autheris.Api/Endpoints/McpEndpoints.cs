@@ -156,9 +156,11 @@ public static class McpEndpoints
         var securityContext = EndpointSecurity.GetSecurityContext(context);
 
         var principalId = (isAuthenticated
-                ? principal.FindFirst("client_id")?.Value
-                  ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
                   ?? principal.FindFirst("sub")?.Value
+                  ?? principal.FindFirst("oid")?.Value
+                  ?? principal.FindFirst(ClaimTypes.PrimarySid)?.Value
+                  ?? principal.FindFirst("client_id")?.Value
                   ?? principal.FindFirst("appid")?.Value
                   ?? principal.Identity?.Name
                 : null)

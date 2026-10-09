@@ -70,17 +70,28 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         _logger.LogInformation("Executing MCP Tool '{ToolName}' for Principal '{PrincipalId}' on Tenant '{TenantId}'.",
             tool.Name, sessionContext.ServicePrincipalId, sessionContext.TenantId);
 
-        // Build authenticated ClaimsPrincipal from active MCP session preserving actual caller identity
+        // SG-09: Build authenticated ClaimsPrincipal from active MCP session preserving actual caller identity
+        var effectiveUserId = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
+            ? sessionContext.UserSid
+            : sessionContext.ServicePrincipalId;
+
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, sessionContext.ServicePrincipalId),
-            new("sub", sessionContext.ServicePrincipalId),
+            new(ClaimTypes.NameIdentifier, effectiveUserId),
+            new("sub", effectiveUserId),
             new("tenant_id", sessionContext.TenantId)
         };
 
         if (!string.IsNullOrWhiteSpace(sessionContext.UserSid))
         {
             claims.Add(new Claim(ClaimTypes.PrimarySid, sessionContext.UserSid));
+        }
+
+        if (!string.IsNullOrWhiteSpace(sessionContext.ServicePrincipalId) &&
+            !string.Equals(sessionContext.ServicePrincipalId, effectiveUserId, StringComparison.Ordinal))
+        {
+            claims.Add(new Claim("client_id", sessionContext.ServicePrincipalId));
+            claims.Add(new Claim("azp", sessionContext.ServicePrincipalId));
         }
 
         if (sessionContext.Roles != null && sessionContext.Roles.Count > 0)
