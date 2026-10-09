@@ -253,14 +253,20 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         public required string LastHash { get; set; }
     }
 
-    private readonly Dictionary<SqliteTransaction, AuditTxPendingState> _pendingAuditTxStates = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<SqliteTransaction, AuditTxPendingState> _pendingAuditTxStates = new();
 
     internal void OnTransactionCommitted(SqliteTransaction tx)
     {
-        if (_pendingAuditTxStates.Remove(tx, out var state))
+        if (_pendingAuditTxStates.TryRemove(tx, out var state))
         {
-            _lastAuditSeq = state.LastSeq;
-            _lastAuditHash = state.LastHash;
+            lock (_pendingAuditTxStates)
+            {
+                if (state.LastSeq >= _lastAuditSeq)
+                {
+                    _lastAuditSeq = state.LastSeq;
+                    _lastAuditHash = state.LastHash;
+                }
+            }
 
             if (Volatile.Read(ref _auditChainViolation) == null)
             {
@@ -278,23 +284,35 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
 
     internal void OnTransactionRolledBack(SqliteTransaction tx)
     {
-        if (_pendingAuditTxStates.Remove(tx, out var state))
+        if (_pendingAuditTxStates.TryRemove(tx, out var state))
         {
-            _lastAuditSeq = state.PreTxSeq;
-            _lastAuditHash = state.PreTxHash;
+            lock (_pendingAuditTxStates)
+            {
+                if (state.PreTxSeq <= _lastAuditSeq)
+                {
+                    _lastAuditSeq = state.PreTxSeq;
+                    _lastAuditHash = state.PreTxHash;
+                }
+            }
         }
     }
 
     internal void RollbackPendingAuditTransactions()
     {
-        if (_pendingAuditTxStates.Count == 0) return;
+        if (_pendingAuditTxStates.IsEmpty) return;
 
-        foreach (var state in _pendingAuditTxStates.Values)
+        lock (_pendingAuditTxStates)
         {
-            _lastAuditSeq = state.PreTxSeq;
-            _lastAuditHash = state.PreTxHash;
+            foreach (var state in _pendingAuditTxStates.Values)
+            {
+                if (state.PreTxSeq <= _lastAuditSeq)
+                {
+                    _lastAuditSeq = state.PreTxSeq;
+                    _lastAuditHash = state.PreTxHash;
+                }
+            }
+            _pendingAuditTxStates.Clear();
         }
-        _pendingAuditTxStates.Clear();
     }
 
     private async Task RecordAuditEventsBatchInternalAsync(IReadOnlyList<AuditLogEntry> batch, CancellationToken ct, SqliteTransaction? existingTx = null)
@@ -318,7 +336,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
             {
                 // SEC-CRYPTO-01 / SR15-24: If an uncommitted transaction was rolled back without calling OnTransactionRolledBack,
                 // clean up pending states and revert in-memory pointers to the committed DB tail.
-                if (_pendingAuditTxStates.Count > 0 && dbTailSeq < _lastAuditSeq)
+                if (!_pendingAuditTxStates.IsEmpty && dbTailSeq < _lastAuditSeq)
                 {
                     RollbackPendingAuditTransactions();
                 }
@@ -602,7 +620,7 @@ public partial class SqliteGovernanceRepository : IAuditChainExportSource
         await _lock.WaitAsync(ct);
         try
         {
-            if (_pendingAuditTxStates.Count > 0)
+            if (!_pendingAuditTxStates.IsEmpty)
             {
                 var (_, tailSeq) = ReadAuditTail(null);
                 if (tailSeq < _lastAuditSeq)

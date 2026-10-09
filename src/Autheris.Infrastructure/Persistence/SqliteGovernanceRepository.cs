@@ -185,7 +185,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
         _auditAnchorKey = HKDF.DeriveKey(HashAlgorithmName.SHA256, _auditHmacKey, 32, info: "Autheris:AuditChainAnchor:v1"u8.ToArray());
 
         // AU-01 & AU-03: Startabbruch (Fail-Closed) außerhalb von Dev/Test ohne persistenten Anker-Pfad oder KMS-Signer.
-        if (!isDevOrTest && auditAnchorStore == null && isMemory)
+        if (!isDevOrTest && auditAnchorStore == null)
         {
             if (string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorPath) &&
                 string.IsNullOrWhiteSpace(options?.Value?.Audit?.ChainAnchorWormDirectory) &&

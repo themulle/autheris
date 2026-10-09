@@ -244,14 +244,20 @@ public partial class SqlServerGovernanceRepository
         public required string LastHash { get; set; }
     }
 
-    private readonly Dictionary<System.Data.Common.DbTransaction, AuditTxPendingState> _pendingAuditTxStates = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<System.Data.Common.DbTransaction, AuditTxPendingState> _pendingAuditTxStates = new();
 
     public void OnTransactionCommitted(System.Data.Common.DbTransaction tx)
     {
-        if (_pendingAuditTxStates.Remove(tx, out var state))
+        if (_pendingAuditTxStates.TryRemove(tx, out var state))
         {
-            _lastAuditSeq = state.LastSeq;
-            _lastAuditHash = state.LastHash;
+            lock (_pendingAuditTxStates)
+            {
+                if (state.LastSeq >= _lastAuditSeq)
+                {
+                    _lastAuditSeq = state.LastSeq;
+                    _lastAuditHash = state.LastHash;
+                }
+            }
 
             if (Volatile.Read(ref _auditChainViolation) == null && _auditAnchorStore != null)
             {
@@ -269,22 +275,34 @@ public partial class SqlServerGovernanceRepository
 
     public void OnTransactionRolledBack(System.Data.Common.DbTransaction tx)
     {
-        if (_pendingAuditTxStates.Remove(tx, out var state))
+        if (_pendingAuditTxStates.TryRemove(tx, out var state))
         {
-            _lastAuditSeq = state.PreTxSeq;
-            _lastAuditHash = state.PreTxHash;
+            lock (_pendingAuditTxStates)
+            {
+                if (state.PreTxSeq <= _lastAuditSeq)
+                {
+                    _lastAuditSeq = state.PreTxSeq;
+                    _lastAuditHash = state.PreTxHash;
+                }
+            }
         }
     }
 
     public void RollbackPendingAuditTransactions()
     {
-        if (_pendingAuditTxStates.Count == 0) return;
-        foreach (var state in _pendingAuditTxStates.Values)
+        if (_pendingAuditTxStates.IsEmpty) return;
+        lock (_pendingAuditTxStates)
         {
-            _lastAuditSeq = state.PreTxSeq;
-            _lastAuditHash = state.PreTxHash;
+            foreach (var state in _pendingAuditTxStates.Values)
+            {
+                if (state.PreTxSeq <= _lastAuditSeq)
+                {
+                    _lastAuditSeq = state.PreTxSeq;
+                    _lastAuditHash = state.PreTxHash;
+                }
+            }
+            _pendingAuditTxStates.Clear();
         }
-        _pendingAuditTxStates.Clear();
     }
 
     /// <summary>Review PG-1: resource name of the transaction-owned sp_getapplock that serialises audit chain writers across replicas.</summary>
@@ -340,17 +358,13 @@ public partial class SqlServerGovernanceRepository
         var (dbTailHash, dbTailSeq) = ReadAuditTail(tx);
         var effectiveDbHash = dbTailHash ?? AuditGenesisHash;
 
-        if (!_pendingAuditTxStates.TryGetValue(existingTx, out var pendingState))
+        var pendingState = _pendingAuditTxStates.GetOrAdd(existingTx, _ => new AuditTxPendingState
         {
-            pendingState = new AuditTxPendingState
-            {
-                PreTxSeq = _lastAuditSeq,
-                PreTxHash = _lastAuditHash,
-                LastSeq = dbTailSeq,
-                LastHash = effectiveDbHash
-            };
-            _pendingAuditTxStates[existingTx] = pendingState;
-        }
+            PreTxSeq = _lastAuditSeq,
+            PreTxHash = _lastAuditHash,
+            LastSeq = dbTailSeq,
+            LastHash = effectiveDbHash
+        });
 
         long lastSequence = pendingState.LastSeq;
         string lastEntryHash = pendingState.LastHash;

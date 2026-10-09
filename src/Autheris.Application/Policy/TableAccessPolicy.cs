@@ -101,10 +101,13 @@ public sealed class TableAccessPolicy
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (IReadOnlyList<AccessProfile> Profiles, DateTimeOffset ExpireAt)> _profileCache = new();
+    private static Microsoft.Extensions.Caching.Memory.IMemoryCache? s_activeMemoryCache;
 
-    public static void InvalidateCache(TenantId tenant, string subject)
+    public static void InvalidateCache(TenantId tenant, string subject, Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null)
     {
-        _profileCache.TryRemove($"access_profile:{tenant.Value}:{subject}", out _);
+        var cacheKey = $"access_profile:{tenant.Value}:{subject}";
+        _profileCache.TryRemove(cacheKey, out _);
+        (memoryCache ?? s_activeMemoryCache)?.Remove(cacheKey);
     }
 
     public static void ClearCache()
@@ -140,6 +143,10 @@ public sealed class TableAccessPolicy
         _contractManager = contractManager;
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache;
+        if (memoryCache != null)
+        {
+            s_activeMemoryCache = memoryCache;
+        }
     }
 
     public async Task<TableAccessDecision> DecideAsync(TableAccessQuery query, CancellationToken ct)
