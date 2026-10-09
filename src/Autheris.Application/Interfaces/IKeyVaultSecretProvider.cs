@@ -6,4 +6,5 @@ namespace Autheris.Application.Interfaces;
 public interface IKeyVaultSecretProvider
 {
     byte[] GetSecretBytes(string secretRef);
+    void SetSecret(string secretRef, byte[] secretBytes) => throw new System.NotSupportedException();
 }

@@ -22,15 +22,18 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly ILogger<OpenApiIngestionService> _logger;
     private readonly IOptions<GatewayOptions>? _options;
+    private readonly IKeyVaultSecretProvider? _secretProvider;
 
     public OpenApiIngestionService(
         ITableMetadataRepository metadataRepository,
         ILogger<OpenApiIngestionService> logger,
-        IOptions<GatewayOptions>? options = null)
+        IOptions<GatewayOptions>? options = null,
+        IKeyVaultSecretProvider? secretProvider = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options;
+        _secretProvider = secretProvider;
     }
 
     public async Task<OpenApiIngestionResult> IngestOpenApiStreamAsync(
@@ -39,16 +42,38 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
         string? defaultBaseUrl = null,
         CancellationToken ct = default)
     {
+        return await IngestOpenApiStreamAsync(stream, domain, defaultBaseUrl, auth: null, dryRun: false, ct: ct).ConfigureAwait(false);
+    }
+
+    public async Task<OpenApiIngestionResult> IngestOpenApiStreamAsync(
+        Stream stream,
+        string domain,
+        string? defaultBaseUrl,
+        DatasourceAuthDto? auth,
+        bool dryRun = false,
+        CancellationToken ct = default)
+    {
         ArgumentNullException.ThrowIfNull(stream);
         using var reader = new StreamReader(stream);
         var json = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
-        return await IngestOpenApiJsonAsync(json, domain, defaultBaseUrl, ct).ConfigureAwait(false);
+        return await IngestOpenApiJsonAsync(json, domain, defaultBaseUrl, auth, dryRun, ct).ConfigureAwait(false);
     }
 
     public async Task<OpenApiIngestionResult> IngestOpenApiJsonAsync(
         string openApiJson,
         string domain = "external",
         string? defaultBaseUrl = null,
+        CancellationToken ct = default)
+    {
+        return await IngestOpenApiJsonAsync(openApiJson, domain, defaultBaseUrl, auth: null, dryRun: false, ct: ct).ConfigureAwait(false);
+    }
+
+    public async Task<OpenApiIngestionResult> IngestOpenApiJsonAsync(
+        string openApiJson,
+        string domain,
+        string? defaultBaseUrl,
+        DatasourceAuthDto? auth,
+        bool dryRun = false,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(openApiJson);
@@ -62,6 +87,8 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
             title = titleProp.GetString() ?? title;
         }
 
+        var isSwagger2 = root.TryGetProperty("swagger", out var swProp) && swProp.GetString() == "2.0";
+
         var serverUrl = defaultBaseUrl ?? "https://api.external.service";
         if (root.TryGetProperty("servers", out var servers) && servers.ValueKind == JsonValueKind.Array)
         {
@@ -73,6 +100,25 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                 {
                     serverUrl = candidate;
                 }
+            }
+        }
+        else if (isSwagger2 && defaultBaseUrl == null)
+        {
+            // R-56: Swagger 2.0 host + basePath + schemes
+            var host = root.TryGetProperty("host", out var hProp) ? hProp.GetString() : null;
+            var basePath = (root.TryGetProperty("basePath", out var bpProp) ? bpProp.GetString() : null) ?? "";
+            var scheme = "https";
+            if (root.TryGetProperty("schemes", out var schemesProp) && schemesProp.ValueKind == JsonValueKind.Array)
+            {
+                var firstScheme = schemesProp.EnumerateArray().FirstOrDefault();
+                if (firstScheme.ValueKind == JsonValueKind.String)
+                {
+                    scheme = firstScheme.GetString() ?? scheme;
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                serverUrl = $"{scheme}://{host}{basePath.TrimEnd('/')}";
             }
         }
 
@@ -108,9 +154,10 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
 
         var warnings = new List<string>();
         var ingestedTableNames = new List<string>();
+        var skippedTableNames = new List<string>();
         var totalColumns = 0;
 
-        // Path mapping cache
+        // Path mapping cache and skipping write operations (R-56)
         var pathMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (root.TryGetProperty("paths", out var paths) && paths.ValueKind == JsonValueKind.Object)
         {
@@ -123,14 +170,86 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                     var lastSegment = segments[^1];
                     pathMap[lastSegment] = pathStr;
                 }
+
+                // R-56: Non-GET methods are skipped
+                if (p.Value.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var op in p.Value.EnumerateObject())
+                    {
+                        var method = op.Name.ToUpperInvariant();
+                        if (method is "POST" or "PUT" or "DELETE" or "PATCH")
+                        {
+                            skippedTableNames.Add($"{method} {pathStr}");
+                        }
+                    }
+                }
             }
         }
+
+        // R-55: Handle Auth and Secret Storage in IKeyVaultSecretProvider
+        var effectiveAuthMode = HttpAuthMode.None;
+        string? apiKeyHeaderName = null;
+        string? apiKeySecretName = null;
+
+        if (auth != null)
+        {
+            if (string.Equals(auth.Type, "apiKey", StringComparison.OrdinalIgnoreCase))
+            {
+                effectiveAuthMode = HttpAuthMode.StaticApiKey;
+                apiKeyHeaderName = auth.Name ?? "X-API-KEY";
+                apiKeySecretName = auth.SecretRef ?? $"datasource:{domain}:apikey:{Guid.NewGuid():N}";
+
+                if (!dryRun && !string.IsNullOrEmpty(auth.Value) && _secretProvider != null)
+                {
+                    _secretProvider.SetSecret(apiKeySecretName, System.Text.Encoding.UTF8.GetBytes(auth.Value));
+                }
+            }
+            else if (string.Equals(auth.Type, "http", StringComparison.OrdinalIgnoreCase) &&
+                     string.Equals(auth.Scheme, "bearer", StringComparison.OrdinalIgnoreCase))
+            {
+                effectiveAuthMode = HttpAuthMode.ClientCredentials;
+                apiKeyHeaderName = "Authorization";
+                apiKeySecretName = auth.SecretRef ?? $"datasource:{domain}:bearer:{Guid.NewGuid():N}";
+
+                var secretVal = auth.Value ?? auth.ClientSecret;
+                if (!dryRun && !string.IsNullOrEmpty(secretVal) && _secretProvider != null)
+                {
+                    _secretProvider.SetSecret(apiKeySecretName, System.Text.Encoding.UTF8.GetBytes(secretVal));
+                }
+            }
+            else if (string.Equals(auth.Type, "oauth2", StringComparison.OrdinalIgnoreCase))
+            {
+                effectiveAuthMode = HttpAuthMode.ClientCredentials;
+                apiKeySecretName = auth.SecretRef ?? $"datasource:{domain}:oauth2:{Guid.NewGuid():N}";
+
+                var secretVal = auth.ClientSecret ?? auth.Value;
+                if (!dryRun && !string.IsNullOrEmpty(secretVal) && _secretProvider != null)
+                {
+                    _secretProvider.SetSecret(apiKeySecretName, System.Text.Encoding.UTF8.GetBytes(secretVal));
+                }
+            }
+        }
+
+        // Schemas resolution: OpenAPI 3 (components.schemas) or Swagger 2.0 (definitions)
+        JsonElement schemasObj = default;
+        bool schemasFound = false;
 
         if (root.TryGetProperty("components", out var components) &&
             components.TryGetProperty("schemas", out var schemas) &&
             schemas.ValueKind == JsonValueKind.Object)
         {
-            foreach (var schemaProp in schemas.EnumerateObject())
+            schemasObj = schemas;
+            schemasFound = true;
+        }
+        else if (root.TryGetProperty("definitions", out var defs) && defs.ValueKind == JsonValueKind.Object)
+        {
+            schemasObj = defs;
+            schemasFound = true;
+        }
+
+        if (schemasFound)
+        {
+            foreach (var schemaProp in schemasObj.EnumerateObject())
             {
                 ct.ThrowIfCancellationRequested();
 
@@ -163,7 +282,8 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                         {
                             foreach (var xm in xMeta.EnumerateObject())
                             {
-                                metaDict[xm.Name] = JsonValueText.From(xm.Value);                            }
+                                metaDict[xm.Name] = JsonValueText.From(xm.Value);
+                            }
                         }
 
                         columns.Add(new TableColumn
@@ -258,7 +378,9 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                             BaseUrl = serverUrl,
                             PathTemplate = resolvedPath,
                             Method = "GET",
-                            AuthMode = HttpAuthMode.None
+                            AuthMode = effectiveAuthMode,
+                            ApiKeyHeaderName = apiKeyHeaderName,
+                            ApiKeySecretName = apiKeySecretName
                         }
                     },
                     Columns = effectiveColumns,
@@ -278,17 +400,21 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                     }
                 }
 
-                await _metadataRepository.UpsertTableMetadataAsync(tableMetadata, ct).ConfigureAwait(false);
+                if (!dryRun)
+                {
+                    await _metadataRepository.UpsertTableMetadataAsync(tableMetadata, ct).ConfigureAwait(false);
+                }
+
                 ingestedTableNames.Add(tableName);
             }
         }
         else
         {
-            warnings.Add("OpenAPI specification has no 'components.schemas' definitions.");
+            warnings.Add("OpenAPI specification has no 'components.schemas' or 'definitions'.");
         }
 
-        _logger.LogInformation("Ingested {Count} tables and {Cols} columns from OpenAPI spec '{Title}'.",
-            ingestedTableNames.Count, totalColumns, title);
+        _logger.LogInformation("Ingested {Count} tables and {Cols} columns from OpenAPI spec '{Title}' (DryRun={DryRun}).",
+            ingestedTableNames.Count, totalColumns, title, dryRun);
 
         return new OpenApiIngestionResult(
             Success: true,
@@ -296,7 +422,8 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
             IngestedTablesCount: ingestedTableNames.Count,
             IngestedColumnsCount: totalColumns,
             IngestedTableNames: ingestedTableNames,
-            Warnings: warnings
+            Warnings: warnings,
+            SkippedTableNames: skippedTableNames
         );
     }
 }

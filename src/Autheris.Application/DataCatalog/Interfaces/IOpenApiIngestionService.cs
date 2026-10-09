@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Domain.Model;
 
 public sealed record OpenApiIngestionResult(
     bool Success,
@@ -12,7 +13,8 @@ public sealed record OpenApiIngestionResult(
     int IngestedColumnsCount,
     IReadOnlyList<string> IngestedTableNames,
     IReadOnlyList<string> Warnings,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    IReadOnlyList<string>? SkippedTableNames = null
 );
 
 public interface IOpenApiIngestionService
@@ -23,9 +25,25 @@ public interface IOpenApiIngestionService
         string? defaultBaseUrl = null,
         CancellationToken ct = default);
 
+    Task<OpenApiIngestionResult> IngestOpenApiJsonAsync(
+        string openApiJson,
+        string domain,
+        string? defaultBaseUrl,
+        DatasourceAuthDto? auth,
+        bool dryRun = false,
+        CancellationToken ct = default);
+
     Task<OpenApiIngestionResult> IngestOpenApiStreamAsync(
         Stream stream,
         string domain = "external",
         string? defaultBaseUrl = null,
+        CancellationToken ct = default);
+
+    Task<OpenApiIngestionResult> IngestOpenApiStreamAsync(
+        Stream stream,
+        string domain,
+        string? defaultBaseUrl,
+        DatasourceAuthDto? auth,
+        bool dryRun = false,
         CancellationToken ct = default);
 }

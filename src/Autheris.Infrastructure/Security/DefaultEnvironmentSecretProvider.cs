@@ -18,6 +18,7 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
     private readonly Microsoft.Extensions.Logging.ILogger<DefaultEnvironmentSecretProvider>? _logger;
 
     private readonly string _secretsDirectory;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte[]> _inMemorySecrets = new(StringComparer.OrdinalIgnoreCase);
 
     public DefaultEnvironmentSecretProvider(
         IConfiguration configuration,
@@ -31,9 +32,21 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
         _secretsDirectory = string.IsNullOrWhiteSpace(secretsDirectory) ? "/run/secrets" : Path.GetFullPath(secretsDirectory);
     }
 
+    public void SetSecret(string secretRef, byte[] secretBytes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(secretRef);
+        ArgumentNullException.ThrowIfNull(secretBytes);
+        _inMemorySecrets[secretRef] = secretBytes;
+    }
+
     public byte[] GetSecretBytes(string secretRef)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(secretRef);
+
+        if (_inMemorySecrets.TryGetValue(secretRef, out var memorySecret))
+        {
+            return memorySecret;
+        }
 
         // SC-07: Support file: reference type for container secrets mounted under /run/secrets/
         if (secretRef.StartsWith("file:", StringComparison.OrdinalIgnoreCase))

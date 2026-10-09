@@ -77,8 +77,8 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddSingleton<ICrossSourceQueryRouter>(sp => sp.GetRequiredService<CrossSourceQueryRouter>());
         services.AddSingleton<CrossSourcePlanner>();
         services.AddSingleton<ICrossSourcePlanner>(sp => sp.GetRequiredService<CrossSourcePlanner>());
-        services.AddSingleton<Autheris.Application.Olap.IFederatedStagingService, Autheris.Application.Olap.FederatedStagingService>();
-        services.AddSingleton<IFederatedQueryExecutionService, FederatedDuckDbExecutionService>();
+        services.AddScoped<Autheris.Application.Olap.IFederatedStagingService, Autheris.Application.Olap.FederatedStagingService>();
+        services.AddScoped<IFederatedQueryExecutionService, FederatedDuckDbExecutionService>();
 
         // F-SQL-02: governed stored procedure endpoints (SQL Server, read-only in phase 1)
         services.AddSingleton<IProcedureRegistry, InMemoryProcedureRegistry>();
