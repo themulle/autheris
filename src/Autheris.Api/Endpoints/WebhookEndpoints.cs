@@ -8,6 +8,7 @@ using Autheris.Api.Extensions;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.OpenMetadata.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -49,7 +50,7 @@ public static class WebhookEndpoints
             }
 
             return Results.Ok(new { status = "Processed" });
-        }).AllowAnonymous();
+        }).AllowAnonymous().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         async Task<IResult> ProcessItsmWebhookAsync(
             HttpContext context,
@@ -156,19 +157,25 @@ public static class WebhookEndpoints
         app.MapPost("/api/webhooks/itsm/status-change", (
             HttpContext context,
             IItsmWebhookHandler webhookHandler,
-            IOptions<GatewayOptions> opts) => ProcessItsmWebhookAsync(context, webhookHandler, opts, "ITSM")).AllowAnonymous();
+            IOptions<GatewayOptions> opts) => ProcessItsmWebhookAsync(context, webhookHandler, opts, "ITSM"))
+            .AllowAnonymous()
+            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         // Dedicated ServiceNow Webhook Endpoint
         app.MapPost("/api/webhooks/servicenow", (
             HttpContext context,
             IItsmWebhookHandler webhookHandler,
-            IOptions<GatewayOptions> opts) => ProcessItsmWebhookAsync(context, webhookHandler, opts, "ServiceNow")).AllowAnonymous();
+            IOptions<GatewayOptions> opts) => ProcessItsmWebhookAsync(context, webhookHandler, opts, "ServiceNow"))
+            .AllowAnonymous()
+            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         // Dedicated Jira Webhook Endpoint
         app.MapPost("/api/webhooks/jira", (
             HttpContext context,
             IItsmWebhookHandler webhookHandler,
-            IOptions<GatewayOptions> opts) => ProcessItsmWebhookAsync(context, webhookHandler, opts, "Jira")).AllowAnonymous();
+            IOptions<GatewayOptions> opts) => ProcessItsmWebhookAsync(context, webhookHandler, opts, "Jira"))
+            .AllowAnonymous()
+            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         // Real-Time Data Catalog Webhook Endpoint
         app.MapPost("/api/webhooks/catalog", async (
@@ -269,7 +276,8 @@ public static class WebhookEndpoints
 
             return Results.Ok(result);
         }).AllowAnonymous()
-          .WithRequestBodyLimit(10 * 1024 * 1024); // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithRequestBodyLimit(10 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapPost("/api/v1/governance/catalog/webhook/{provider}", async (
             HttpContext context,
@@ -367,7 +375,8 @@ public static class WebhookEndpoints
 
             return Results.Ok(result);
         }).AllowAnonymous()
-          .WithRequestBodyLimit(10 * 1024 * 1024); // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithRequestBodyLimit(10 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
     }

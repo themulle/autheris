@@ -6,7 +6,9 @@ using System.Linq;
 using System.Security.Claims;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -51,7 +53,7 @@ public static class McpEndpoints
             : gatewayOptions.Mcp.EndpointPath.TrimEnd('/');
 
         // Streamable HTTP on the official MCP SDK (GatewayMcpServer); stateless, so there are no session endpoints.
-        var endpoint = app.MapMcp(mcpBasePath);
+        var endpoint = app.MapMcp(mcpBasePath).WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         // SEC M-09: hard body limit for JSON-RPC messages.
         endpoint.Add(builder =>
@@ -99,7 +101,7 @@ public static class McpEndpoints
             var hostEnv = env ?? app.ServiceProvider?.GetService<IHostEnvironment>();
             bool isDev = hostEnv?.IsDevelopment() ?? false;
 
-            var discoveryGroup = app.MapGroup("/.well-known");
+            var discoveryGroup = app.MapGroup("/.well-known").WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
             if (!gatewayOptions.Mcp.AllowAnonymousDiscovery && !isDev)
             {
                 discoveryGroup.RequireAuthorization();

@@ -197,8 +197,7 @@ public class ProcedureEndpointTests
         {
             Audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(AuditEntries.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
             return new GovernedProcedureExecutionService(
-                Registry, Invoker, Options.Create(new GatewayOptions()), Tables, Consents, Resolution, Masking,
-                policyEnforcement: null, audit: Audit);
+                Registry, Invoker, Options.Create(new GatewayOptions()), Audit, Tables, Consents, Resolution, Masking);
         }
     }
 
@@ -304,8 +303,8 @@ public class ProcedureEndpointTests
             .Returns(callInfo => ValueTask.FromResult(TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
 
         var svc = new GovernedProcedureExecutionService(
-            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Tables, f.Consents, f.Resolution, f.Masking,
-            policyEnforcement: policyEnforcement, audit: f.Audit);
+            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Audit, f.Tables, f.Consents, f.Resolution, f.Masking,
+            policyEnforcement: policyEnforcement);
 
         var result = await svc.EvaluateTableAsync("default", "sales.orders", User(), new Sid("S-1-5-21-1001"), Tenant, consentBypassed: false, allowRowFilter: false, CancellationToken.None);
 
@@ -439,23 +438,19 @@ public class ProcedureEndpointTests
         var f = Active();
         f.Audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(Task.FromException(new IOException("audit down")));
         var svc = new GovernedProcedureExecutionService(
-            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Tables, f.Consents, f.Resolution, f.Masking, audit: f.Audit);
+            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Audit, f.Tables, f.Consents, f.Resolution, f.Masking);
 
         await Should.ThrowAsync<IOException>(() =>
             svc.ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
     }
 
     [Fact]
-    public async Task SQL2_16_Execute_WhenAuditRepositoryIsNull_FailsClosed()
+    public void SQL2_16_Execute_WhenAuditRepositoryIsNull_FailsClosed()
     {
         var f = Active();
-        var svc = new GovernedProcedureExecutionService(
-            f.Registry, f.Invoker, Options.Create(new GatewayOptions()), f.Tables, f.Consents, f.Resolution, f.Masking, audit: null);
-
-        var ex = await Should.ThrowAsync<SecurityException>(() =>
-            svc.ExecuteAsync("get_orders", new Dictionary<string, object?> { ["customer_id"] = 7 }, User(), Tenant));
-
-        ex.Message.ShouldContain("audit repository is required but unavailable (SQL2-16)");
+        Should.Throw<ArgumentNullException>(() =>
+            new GovernedProcedureExecutionService(
+                f.Registry, f.Invoker, Options.Create(new GatewayOptions()), audit: null!, f.Tables, f.Consents, f.Resolution, f.Masking));
     }
 
     [Fact]

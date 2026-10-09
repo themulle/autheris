@@ -99,7 +99,6 @@ public sealed class WebSqlMaskingExpressionsTests
             policyEnforcement: null,
             consentResolution: resolution,
             tableRepository: tableRepo,
-            auditLogRepository: null,
             connectionFactory: null,
             clientIpResolver: null,
             environment: null,

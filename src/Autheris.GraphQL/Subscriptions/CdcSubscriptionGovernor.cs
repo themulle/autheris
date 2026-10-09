@@ -66,7 +66,7 @@ public sealed class CdcSubscriptionGovernor
         string topic,
         TableIdentifier? table,
         ITableAccessResolver? accessResolver,
-        IAuditLogRepository? audit,
+        IAuditLogRepository audit,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(principal);
@@ -153,13 +153,8 @@ public sealed class CdcSubscriptionGovernor
         }
     }
 
-    private static Task WriteAuditAsync(IAuditLogRepository? audit, TenantId tenant, Sid sid, string topic, string eventType, string decision, object details, CancellationToken ct)
+    private static Task WriteAuditAsync(IAuditLogRepository audit, TenantId tenant, Sid sid, string topic, string eventType, string decision, object details, CancellationToken ct)
     {
-        if (audit == null)
-        {
-            return Task.CompletedTask;
-        }
-
         return audit.RecordAuditEventAsync(new AuditLogEntry
         {
             TenantId = tenant,
@@ -183,19 +178,19 @@ public sealed class CdcSubscriptionGovernor
         private readonly TenantId _tenant;
         private readonly Sid _sid;
         private readonly string _topic;
-        private readonly IAuditLogRepository? _audit;
+        private readonly IAuditLogRepository _audit;
         private readonly DateTimeOffset _started = DateTimeOffset.UtcNow;
         private long _delivered;
         private int _disposed;
 
-        internal Lease(CdcSubscriptionGovernor owner, string key, TenantId tenant, Sid sid, string topic, IAuditLogRepository? audit)
+        internal Lease(CdcSubscriptionGovernor owner, string key, TenantId tenant, Sid sid, string topic, IAuditLogRepository audit)
         {
             _owner = owner;
             _key = key;
             _tenant = tenant;
             _sid = sid;
             _topic = topic;
-            _audit = audit;
+            _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         }
 
         public void CountDelivered() => Interlocked.Increment(ref _delivered);

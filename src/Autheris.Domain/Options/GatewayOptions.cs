@@ -822,11 +822,34 @@ public sealed class WormAuditOptions
     public bool EnforceObjectLock { get; init; } = true;
 }
 
+public enum AuditCatalogReadMode
+{
+    Summarized,
+    Full
+}
+
+public sealed class AuditRetentionOptions
+{
+    [Range(365, 7300)] public int SecurityDays { get; init; } = 3650;
+    [Range(30, 7300)] public int DataAccessDays { get; init; } = 400;
+    [Range(30, 7300)] public int AggregatedDays { get; init; } = 90;
+    [Range(7, 7300)] public int OperationsDays { get; init; } = 30;
+}
+
 public sealed class AuditOptions
 {
+    /// <summary>
+    /// Obsolete / no-op (L-7): Fail-closed tiering is now intrinsic to the audit pipeline.
+    /// </summary>
+    [Obsolete("TierAEnabled is no longer configurable; security-critical audit is fail-closed by default.")]
     public bool TierAEnabled { get; init; } = true;
+
     [Range(1, 3600)] public int TierBAggregationWindowSeconds { get; init; } = 60;
-    [Range(1, 7300)] public int AuditLogRetentionDays { get; init; } = 3650;
+    [Range(365, 7300)] public int AuditLogRetentionDays { get; init; } = 3650;
+    public AuditCatalogReadMode CatalogReadMode { get; init; } = AuditCatalogReadMode.Summarized;
+    [Range(1, 3600)] public int CatalogSummaryWindowSeconds { get; init; } = 60;
+    public AuditRetentionOptions Retention { get; init; } = new();
+    public bool StoreStatementText { get; init; }
     [Range(1, 168)] public int VerifyHashChainIntervalHours { get; init; } = 24;
 
     /// <summary>Review E-11: verify the audit hash chain periodically at runtime (first run shortly after start).</summary>

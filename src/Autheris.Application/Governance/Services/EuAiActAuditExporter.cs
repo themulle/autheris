@@ -27,16 +27,23 @@ public sealed class EuAiActAuditExporter : IEuAiActAuditExporter
 
     private readonly IDifferentialPrivacyEngine _dpEngine;
     private readonly IAuditChainExportSource? _auditSource;
-    private readonly IAuditLogRepository? _auditRepo;
+    private readonly IAuditLogRepository _auditRepo;
 
     public EuAiActAuditExporter(
         IDifferentialPrivacyEngine dpEngine,
-        IAuditChainExportSource? auditSource = null,
-        IAuditLogRepository? auditRepo = null)
+        IAuditChainExportSource? auditSource = null)
+        : this(dpEngine, Autheris.Application.Audit.NullAuditLogRepository.Instance, auditSource)
+    {
+    }
+
+    public EuAiActAuditExporter(
+        IDifferentialPrivacyEngine dpEngine,
+        IAuditLogRepository auditRepo,
+        IAuditChainExportSource? auditSource = null)
     {
         _dpEngine = dpEngine ?? throw new ArgumentNullException(nameof(dpEngine));
+        _auditRepo = auditRepo ?? throw new ArgumentNullException(nameof(auditRepo));
         _auditSource = auditSource;
-        _auditRepo = auditRepo;
     }
 
     public async Task<EuAiActArticle10Certificate> GenerateCertificateAsync(string tenantId, CancellationToken ct = default)

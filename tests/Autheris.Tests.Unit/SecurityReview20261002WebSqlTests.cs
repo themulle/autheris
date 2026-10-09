@@ -218,7 +218,7 @@ public sealed class SecurityReview20261002WebSqlTests
             policyEnforcement: casbin,
             consentResolution: withConsentServices ? (consentResolution ?? CreateConsentResolution(t => UnconstrainedAllow(t))) : null,
             tableRepository: repository ?? CreateRepository(CreateEmployeesMetadata(), CreateOrdersMetadata()),
-            auditLogRepository: auditLog,
+            auditLogRepository: auditLog ?? Autheris.Application.Audit.NullAuditLogRepository.Instance,
             connectionFactory: null,
             clientIpResolver: null,
             environment: CreateDevEnvironment(),

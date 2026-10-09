@@ -634,7 +634,6 @@ public sealed class IntegrationGapCTests
             policyEnforcement: null,
             consentResolution: consentResolution,
             tableRepository: CreateRepository(),
-            auditLogRepository: null,
             connectionFactory: null,
             clientIpResolver: null,
             environment: devEnv,

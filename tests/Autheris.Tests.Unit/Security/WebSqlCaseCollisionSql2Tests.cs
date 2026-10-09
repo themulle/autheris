@@ -70,7 +70,7 @@ public sealed class WebSqlCaseCollisionSql2Tests
             policyEnforcement: null,
             consentResolution: resolution,
             tableRepository: repo,
-            auditLogRepository: null,
+            auditLogRepository: Substitute.For<IAuditLogRepository>(),
             connectionFactory: null,
             clientIpResolver: null,
             environment: env,

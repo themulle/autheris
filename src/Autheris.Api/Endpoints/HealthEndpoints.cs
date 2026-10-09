@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Options;
+using Autheris.Api.Extensions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -46,7 +47,7 @@ public static class HealthEndpoints
                 status = "Live",
                 timestamp = DateTimeOffset.UtcNow
             });
-        }).AllowAnonymous();
+        }).AllowAnonymous().WithAuditExemption("Operational health probe");
 
         app.MapGet("/health/ready", async (
             ITrafficDrainController controller,
@@ -101,7 +102,7 @@ public static class HealthEndpoints
                 status = "Ready",
                 timestamp = DateTimeOffset.UtcNow
             });
-        }).AllowAnonymous();
+        }).AllowAnonymous().WithAuditExemption("Operational health probe");
 
         return app;
     }

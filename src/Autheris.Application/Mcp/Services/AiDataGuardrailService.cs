@@ -28,7 +28,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     private readonly ILogger<AiDataGuardrailService> _logger;
     private readonly IMcpQueryExecutor? _queryExecutor;
     private readonly IConsentRepository? _consentRepository;
-    private readonly IAuditLogRepository? _auditLogRepository;
+    private readonly IAuditLogRepository _auditLogRepository;
     private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly ITableMetadataRepository? _tableMetadataRepository;
     private readonly IMcpSessionStore? _sessionStore;
@@ -60,7 +60,24 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IOptions<GatewayOptions> options,
         ILogger<AiDataGuardrailService> logger,
         IMcpQueryExecutor? queryExecutor = null,
-        IAuditLogRepository? auditLogRepository = null,
+        IPolicyEnforcementService? policyEnforcementService = null,
+        ITableMetadataRepository? tableMetadataRepository = null,
+        IMcpSessionStore? sessionStore = null,
+        ISemanticPromptGuardrail? promptGuardrail = null,
+        IGoldenQueryService? goldenQueryService = null,
+        IHitLStepUpApprovalService? stepUpApprovalService = null,
+        IGraphQlCatalogMap? graphQlCatalogMap = null,
+        IConsentRepository? consentRepository = null)
+        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository)
+    {
+    }
+
+    public AiDataGuardrailService(
+        IMcpToolRegistry toolRegistry,
+        IOptions<GatewayOptions> options,
+        ILogger<AiDataGuardrailService> logger,
+        IAuditLogRepository auditLogRepository,
+        IMcpQueryExecutor? queryExecutor = null,
         IPolicyEnforcementService? policyEnforcementService = null,
         ITableMetadataRepository? tableMetadataRepository = null,
         IMcpSessionStore? sessionStore = null,
@@ -73,8 +90,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _queryExecutor = queryExecutor;
-        _auditLogRepository = auditLogRepository;
         _policyEnforcementService = policyEnforcementService;
         _tableMetadataRepository = tableMetadataRepository;
         _sessionStore = sessionStore;
@@ -604,8 +621,6 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         int estimatedTokens,
         CancellationToken ct)
     {
-        if (_auditLogRepository == null) return;
-
         try
         {
             var actorSid = !string.IsNullOrWhiteSpace(sessionContext.UserSid)

@@ -217,11 +217,11 @@ public class PureYamlProcedureGovernanceTests
             registry,
             invoker,
             opt,
+            audit,
             tables,
             consents,
             resolution,
-            masking,
-            audit: audit);
+            masking);
 
         var result = await executionService.ExecuteAsync("get_orders", null, User("Reader"), Tenant);
 
