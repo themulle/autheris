@@ -66,7 +66,10 @@ public sealed class AccessProfileTests
         };
     }
 
-    private static TableAccessPolicy CreatePolicy(IAccessProfileRepository profileRepo, IMemoryCache? memoryCache = null)
+    private static TableAccessPolicy CreatePolicy(
+        IAccessProfileRepository profileRepo,
+        IMemoryCache? memoryCache = null,
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
     {
         var consentRepo = Substitute.For<IConsentRepository>();
         var resolutionService = Substitute.For<IConsentResolutionService>();
@@ -89,7 +92,8 @@ public sealed class AccessProfileTests
             mandatoryFilters,
             contractManager: null,
             accessProfileRepository: profileRepo,
-            memoryCache: memoryCache);
+            memoryCache: memoryCache,
+            accessProfileCache: accessProfileCache);
     }
 
     [Fact]
@@ -257,7 +261,6 @@ public sealed class AccessProfileTests
     [Fact]
     public async Task AccessProfileResolution_ExpiredProfile_IsNotApplied()
     {
-        TableAccessPolicy.ClearCache();
         var repo = new InMemoryAccessProfileRepository();
         var expiredProfile = new AccessProfile
         {
@@ -285,7 +288,6 @@ public sealed class AccessProfileTests
     [Fact]
     public async Task AccessProfileResolution_CacheInvalidation_RefreshesProfile()
     {
-        TableAccessPolicy.ClearCache();
         var repo = new InMemoryAccessProfileRepository();
         var subject = "david-cache-test";
         var profile = new AccessProfile
@@ -301,7 +303,10 @@ public sealed class AccessProfileTests
         };
         await repo.UpsertProfileAsync(profile);
 
-        var policy = CreatePolicy(repo);
+        var clusterState = new Autheris.Infrastructure.State.InMemoryClusterStateProvider();
+        var l1 = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+        var cache = new Autheris.Application.Policy.Services.AccessProfileCache(repo, clusterState, l1);
+        var policy = CreatePolicy(repo, memoryCache: l1, accessProfileCache: cache);
         var meta = CreateTelemetryTableMetadata();
         var query = new TableAccessQuery(new Sid(subject), TenantLiebherr, new HashSet<Sid>(), new HashSet<string>(), meta);
 
@@ -327,7 +332,7 @@ public sealed class AccessProfileTests
         decisionCached.CombinedRowFilterSql.ShouldBe("status = 'ORIGINAL'");
 
         // Invalidate cache
-        TableAccessPolicy.InvalidateCache(TenantLiebherr, subject);
+        await cache.InvalidateTenantAsync(TenantLiebherr);
 
         // Now policy returns updated filter
         var decisionUpdated = await policy.DecideAsync(query, CancellationToken.None);
@@ -468,7 +473,12 @@ public sealed class AccessProfileTests
         var services = new ServiceCollection();
         services.AddLogging();
         if (auditRepo != null) services.AddSingleton(auditRepo);
-        if (clusterState != null) services.AddSingleton(clusterState);
+        if (clusterState != null)
+        {
+            clusterState.IncrementAsync(Arg.Any<string>(), Arg.Any<long>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
+                .Returns(ValueTask.FromResult<long?>(1));
+            services.AddSingleton(clusterState);
+        }
         if (metaRepo != null) services.AddSingleton(metaRepo);
         if (memoryCache != null) services.AddSingleton(memoryCache);
 

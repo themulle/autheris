@@ -104,7 +104,7 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
             var db = _multiplexer.GetDatabase();
             var redisKey = (RedisKey)BuildKey(key);
             var value = await db.StringIncrementAsync(redisKey, delta).ConfigureAwait(false);
-            if (value == delta)
+            if (value == delta && ttl > TimeSpan.Zero && ttl < TimeSpan.MaxValue)
             {
                 // Counter was just created: bound its lifetime.
                 await db.KeyExpireAsync(redisKey, ttl).ConfigureAwait(false);

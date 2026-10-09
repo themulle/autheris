@@ -328,6 +328,7 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<IAccessProfileRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
         }
+        services.AddSingleton<Autheris.Application.Policy.Interfaces.IAccessProfileCache, Autheris.Application.Policy.Services.AccessProfileCache>();
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
         services.AddSingleton<IDbtHealthCircuitBreaker, DbtHealthCircuitBreaker>();
         services.AddSingleton<IOpenApiCacheManager, OpenApiCacheManager>();

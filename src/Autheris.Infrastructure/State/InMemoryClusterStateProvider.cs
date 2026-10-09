@@ -42,7 +42,7 @@ public sealed class InMemoryClusterStateProvider : IDistributedClusterStateProvi
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentNullException.ThrowIfNull(value);
 
-        var expiresAt = DateTimeOffset.UtcNow.Add(ttl);
+        var expiresAt = (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue) ? DateTimeOffset.MaxValue : DateTimeOffset.UtcNow.Add(ttl);
         var serialized = JsonSerializer.Serialize(value);
         _store[key] = new Entry(serialized, expiresAt);
 
@@ -60,12 +60,13 @@ public sealed class InMemoryClusterStateProvider : IDistributedClusterStateProvi
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
         long result = 0;
+        var expiresAt = (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue) ? DateTimeOffset.MaxValue : DateTimeOffset.UtcNow.Add(ttl);
         _store.AddOrUpdate(
             key,
             _ =>
             {
                 result = delta;
-                return new Entry(delta.ToString(System.Globalization.CultureInfo.InvariantCulture), DateTimeOffset.UtcNow.Add(ttl));
+                return new Entry(delta.ToString(System.Globalization.CultureInfo.InvariantCulture), expiresAt);
             },
             (_, existing) =>
             {
@@ -74,7 +75,7 @@ public sealed class InMemoryClusterStateProvider : IDistributedClusterStateProvi
                 result = current + delta;
                 return new Entry(
                     result.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    live ? existing.ExpiresAt : DateTimeOffset.UtcNow.Add(ttl));
+                    live ? existing.ExpiresAt : expiresAt);
             });
 
         return ValueTask.FromResult<long?>(result);

@@ -656,15 +656,48 @@ public static class GovernanceEndpoints
             await auditRepo.RecordAuditEventAsync(auditEvent, ct).ConfigureAwait(false);
         }
 
-        // Cluster-weite Cache-Invalidierung
-        var memoryCache = context.RequestServices.GetService<IMemoryCache>();
-        memoryCache?.Remove($"access_profile:{tenantId.Value}:{trimmedSubject}");
-        TableAccessPolicy.InvalidateCache(tenantId, trimmedSubject);
-
-        var clusterState = context.RequestServices.GetService<IDistributedClusterStateProvider>();
-        if (clusterState != null)
+        // Cluster-weite Cache-Invalidierung (AR-01)
+        var accessProfileCache = context.RequestServices.GetService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
+        if (accessProfileCache != null)
         {
-            await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.FromDays(30), ct).ConfigureAwait(false);
+            try
+            {
+                await accessProfileCache.InvalidateTenantAsync(tenantId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                if (auditRepo != null)
+                {
+                    var failAudit = new AuditLogEntry
+                    {
+                        TenantId = tenantId,
+                        EventType = "PROFILE_INVALIDATION_FAILED",
+                        ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
+                        Decision = "DENY",
+                        TraceId = context.TraceIdentifier,
+                        DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            reason = ex.Message,
+                            tenant = tenantId.Value,
+                            subject = trimmedSubject
+                        })
+                    };
+                    await auditRepo.RecordAuditEventAsync(failAudit, ct).ConfigureAwait(false);
+                }
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+        }
+        else
+        {
+            var clusterState = context.RequestServices.GetService<IDistributedClusterStateProvider>();
+            if (clusterState != null)
+            {
+                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, ct).ConfigureAwait(false);
+                if (!bumped.HasValue)
+                {
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                }
+            }
         }
 
         var message = mode == MaskingPolicyMode.Unmasked
@@ -775,17 +808,48 @@ public static class GovernanceEndpoints
             await auditRepo.RecordAuditEventAsync(auditEvent, ct).ConfigureAwait(false);
         }
 
-        var memoryCache = context.RequestServices.GetService<IMemoryCache>();
-        foreach (var subject in profile.AssignedSubjects)
+        // Cluster-weite Cache-Invalidierung (AR-01)
+        var accessProfileCache = context.RequestServices.GetService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
+        if (accessProfileCache != null)
         {
-            memoryCache?.Remove($"access_profile:{tenantId.Value}:{subject}");
-            TableAccessPolicy.InvalidateCache(tenantId, subject);
+            try
+            {
+                await accessProfileCache.InvalidateTenantAsync(tenantId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                if (auditRepo != null)
+                {
+                    var failAudit = new AuditLogEntry
+                    {
+                        TenantId = tenantId,
+                        EventType = "PROFILE_INVALIDATION_FAILED",
+                        ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
+                        Decision = "DENY",
+                        TraceId = context.TraceIdentifier,
+                        DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            reason = ex.Message,
+                            tenant = tenantId.Value,
+                            profileId = id.ToString()
+                        })
+                    };
+                    await auditRepo.RecordAuditEventAsync(failAudit, ct).ConfigureAwait(false);
+                }
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
         }
-
-        var clusterState = context.RequestServices.GetService<IDistributedClusterStateProvider>();
-        if (clusterState != null)
+        else
         {
-            await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.FromDays(30), ct).ConfigureAwait(false);
+            var clusterState = context.RequestServices.GetService<IDistributedClusterStateProvider>();
+            if (clusterState != null)
+            {
+                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, ct).ConfigureAwait(false);
+                if (!bumped.HasValue)
+                {
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                }
+            }
         }
 
         return Results.Ok(new { message = $"Profile '{id}' successfully revoked.", auditEventId = auditEvent.Id });
