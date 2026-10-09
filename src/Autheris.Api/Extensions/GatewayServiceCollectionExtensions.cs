@@ -853,6 +853,7 @@ public static class GatewayServiceCollectionExtensions
                 ValidateIssuerSigningKey = true,
                 ClockSkew = TimeSpan.FromMinutes(2)
             };
+            options.IncludeErrorDetails = false;
 
             if (useEntra)
             {

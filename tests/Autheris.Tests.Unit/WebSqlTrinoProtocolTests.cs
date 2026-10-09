@@ -83,6 +83,7 @@ public sealed class WebSqlTrinoProtocolTests
         context.Request.Path = "/v1/statement";
         context.Request.ContentType = "text/plain";
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("SELECT 1 AS num"));
+        context.Request.Headers["X-Trino-User"] = "TrinoUser";
         context.Request.Headers["X-Trino-Wait-Timeout"] = "2s";
         context.Request.Headers["X-Tenant-Id"] = TestTenant.Value;
         context.Response.Body = new MemoryStream();
@@ -137,6 +138,7 @@ public sealed class WebSqlTrinoProtocolTests
         context.Request.Path = "/v1/statement";
         context.Request.ContentType = "text/plain";
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("SELECT 1 AS num"));
+        context.Request.Headers["X-Trino-User"] = "TrinoUser";
         context.Request.Headers["X-Trino-Wait-Timeout"] = "2s";
         context.Response.Body = new MemoryStream();
         var gatewayOptions = Options.Create(new GatewayOptions
@@ -183,6 +185,7 @@ public sealed class WebSqlTrinoProtocolTests
         context.Request.Path = "/v1/statement";
         context.Request.ContentType = "text/plain";
         context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("SELECT * FROM large_table"));
+        context.Request.Headers["X-Trino-User"] = "TrinoUser";
         context.Request.Headers["X-Trino-Wait-Timeout"] = "10ms";
         context.Request.Headers["X-Tenant-Id"] = TestTenant.Value;
         context.Response.Body = new MemoryStream();
@@ -335,5 +338,31 @@ public sealed class WebSqlTrinoProtocolTests
         msg.ShouldBe("The SQL statement could not be executed. Contact support with the trace id.");
         error.GetProperty("errorType").GetString().ShouldBe("INTERNAL_ERROR");
         error.GetProperty("errorName").GetString().ShouldBe("INTERNAL_ERROR");
+    }
+
+    [Fact]
+    public async Task HandleWebSqlRequest_WhenTrinoUserHeaderMissingOnV1Statement_ReturnsBadRequest()
+    {
+        // Arrange
+        var sqlExecutionService = Substitute.For<IGovernedSqlExecutionService>();
+        var context = new DefaultHttpContext { User = TestUser };
+        context.Request.Path = "/v1/statement";
+        context.Request.ContentType = "text/plain";
+        context.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes("SELECT 1"));
+        context.Response.Body = new MemoryStream();
+        var gatewayOptions = Options.Create(new GatewayOptions());
+
+        // Act
+        await WebSqlEndpoints.HandleWebSqlRequest(
+            context,
+            sqlExecutionService,
+            gatewayOptions,
+            NullLoggerFactory.Instance);
+
+        // Assert
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
+        doc.RootElement.GetProperty("error").GetString()!.ShouldContain("X-Trino-User");
     }
 }

@@ -165,14 +165,12 @@ public static class GatewayApplicationBuilderExtensions
                  (HttpMethods.IsGet(context.Request.Method) && (context.Request.Query.ContainsKey("query") || isWebSocketUpgrade)))
                 && context.Request.Path.StartsWithSegments(endpoint);
 
-            bool isStateChangingRestEndpoint = (HttpMethods.IsPost(context.Request.Method) ||
-                                                HttpMethods.IsPut(context.Request.Method) ||
-                                                HttpMethods.IsDelete(context.Request.Method) ||
-                                                HttpMethods.IsPatch(context.Request.Method))
-                                               && (context.Request.Path.StartsWithSegments("/api") ||
-                                                   context.Request.Path.StartsWithSegments("/odata") ||
-                                                   // SEC M-05: MCP is covered by the CSRF protection as well
-                                                   context.Request.Path.StartsWithSegments(mcpBasePath));
+            bool isStateChangingMethod = HttpMethods.IsPost(context.Request.Method) ||
+                                         HttpMethods.IsPut(context.Request.Method) ||
+                                         HttpMethods.IsDelete(context.Request.Method) ||
+                                         HttpMethods.IsPatch(context.Request.Method);
+
+            bool isStateChangingRestEndpoint = isStateChangingMethod && !isGraphQLEndpoint;
 
             if (isGraphQLEndpoint || isStateChangingRestEndpoint)
             {
@@ -191,7 +189,8 @@ public static class GatewayApplicationBuilderExtensions
                 {
                     bool hasPreflightHeader = context.Request.Headers.ContainsKey("GraphQL-Preflight") ||
                                               context.Request.Headers.ContainsKey("X-Requested-With") ||
-                                              context.Request.Headers.ContainsKey("X-CSRF-Token");
+                                              context.Request.Headers.ContainsKey("X-CSRF-Token") ||
+                                              context.Request.Headers.ContainsKey("X-Trino-User");
 
                     if (!hasPreflightHeader)
                     {

@@ -141,7 +141,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
 
 ## 3. Befunde – Mittel
 
-### SG-07 CSRF auf `POST /v1/statement` (Trino-API nimmt `text/plain` an)
+### SG-07 CSRF auf `POST /v1/statement` (Trino-API nimmt `text/plain` an) [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** Lücke bestätigt; dass Kerberos automatisch mitgesendet wird, ist plausibel.
 - **Fundstellen:**
   - `src/Autheris.Api/Extensions/GatewayApplicationBuilderExtensions.cs:163-175`: CSRF-Prüfung nur für GraphQL, `/api`, `/odata` und MCP.
@@ -155,7 +156,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - CSRF-Logik umkehren: alle nicht sicheren Methoden prüfen, Ausnahmen explizit auflisten.
   - Auf `/v1/statement` den Header `X-Trino-User` verlangen.
 
-### SG-08 Entra: App-only-Tokens ohne Rollen- und Client-Prüfung werden als ReadWrite akzeptiert; ID-Tokens gelten als Access-Tokens
+### SG-08 Entra: App-only-Tokens ohne Rollen- und Client-Prüfung werden als ReadWrite akzeptiert; ID-Tokens gelten als Access-Tokens [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** plausibel (abhängig von „Assignment required“ in Entra)
 - **Fundstellen:** `GatewayOptions.cs` (`EntraIdAuthOptions.AppOnlyTokens = ReadWrite`), `src/Autheris.Api/Security/EntraTokenPolicy.cs:66-80`, `GatewayServiceCollectionExtensions.cs:800-857`
 - **Beschreibung:**
@@ -168,7 +170,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Tokens ohne `scp` und ohne `roles` ablehnen, ebenso ID-Tokens.
   - `IncludeErrorDetails=false` setzen.
 
-### SG-09 MCP: Der synthetische Principal setzt `sub`/`NameIdentifier` auf die OAuth-Client-ID (Confused Deputy)
+### SG-09 MCP: Der synthetische Principal setzt `sub`/`NameIdentifier` auf die OAuth-Client-ID (Confused Deputy) [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** plausibel (nur bei Tokens mit `client_id`-Claim, z. B. ADFS, ForwardAuth oder generischer IdP)
 - **Fundstellen:** `src/Autheris.Api/Endpoints/McpEndpoints.cs:158-165`, `src/Autheris.GraphQL/Mcp/GatewayMcpQueryExecutor.cs:74-78`, `Sid.cs:41-57`, `TableAccessPolicy.cs:341, 350-374`
 - **Beschreibung:**

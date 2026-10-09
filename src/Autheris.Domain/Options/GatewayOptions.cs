@@ -538,13 +538,19 @@ public sealed class EntraIdAuthOptions
     public string RolesClaimType { get; init; } = "roles";
 
     /// <summary>
+    /// Optional allowlist of authorized client application IDs (azp / appid) for app-only tokens.
+    /// If empty, any app-only token with valid assigned application roles from the tenant is allowed.
+    /// </summary>
+    public List<string> AllowedClientIds { get; init; } = [];
+
+    /// <summary>
     /// Delegated scopes (<c>scp</c>) that only permit reading, e.g. an agent scope. A user token whose scopes all appear
     /// here is read-only: writes over HTTP, GraphQL mutations and WebSQL DML are rejected.
     /// </summary>
     public List<string> ReadOnlyScopes { get; init; } = ["Agent.Read"];
 
-    /// <summary>How app-only tokens (client credentials, no signed-in person) are treated.</summary>
-    public AppOnlyTokenAccess AppOnlyTokens { get; init; } = AppOnlyTokenAccess.ReadWrite;
+    /// <summary>How app-only tokens (client credentials, no signed-in person) are treated. Defaults to ReadOnly.</summary>
+    public AppOnlyTokenAccess AppOnlyTokens { get; init; } = AppOnlyTokenAccess.ReadOnly;
 }
 
 public enum AppOnlyTokenAccess
