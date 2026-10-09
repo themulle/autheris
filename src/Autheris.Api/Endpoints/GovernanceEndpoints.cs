@@ -60,11 +60,26 @@ public static class GovernanceEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
-            var domain = context.Request.Query.TryGetValue("domain", out var dVal) && !string.IsNullOrWhiteSpace(dVal)
-                ? dVal.ToString()
-                : "external";
+            var callerTenant = EndpointSecurity.GetRequestTenant(context);
+            var isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(context.User);
+
+            string domain;
+            if (context.Request.Query.TryGetValue("domain", out var dVal) && !string.IsNullOrWhiteSpace(dVal))
+            {
+                var requestedDomain = dVal.ToString().Trim();
+                if (!isClusterAdmin && !string.Equals(requestedDomain, callerTenant.Value, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+                }
+                domain = requestedDomain;
+            }
+            else
+            {
+                domain = isClusterAdmin ? "external" : callerTenant.Value;
+            }
+
             var baseUrl = context.Request.Query.TryGetValue("baseUrl", out var bVal) && !string.IsNullOrWhiteSpace(bVal)
-                ? bVal.ToString()
+                ? bVal.ToString().Trim()
                 : null;
 
             // SEC M-07: Bounded read instead of a bypassable Content-Length check.
@@ -82,6 +97,29 @@ public static class GovernanceEndpoints
             if (!result.Success)
             {
                 return Results.BadRequest(result);
+            }
+
+            var auditRepo = context.RequestServices.GetService<IAuditLogRepository>();
+            if (auditRepo != null)
+            {
+                await auditRepo.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    TenantId = callerTenant,
+                    EventType = "OPENAPI_CATALOG_INGESTED",
+                    ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+                    TargetTable = domain,
+                    Decision = "ALLOW",
+                    TraceId = context.TraceIdentifier,
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        domain,
+                        serviceTitle = result.ServiceTitle,
+                        ingestedTablesCount = result.IngestedTablesCount,
+                        ingestedColumnsCount = result.IngestedColumnsCount,
+                        ingestedTableNames = result.IngestedTableNames,
+                        warnings = result.Warnings
+                    })
+                }, context.RequestAborted).ConfigureAwait(false);
             }
 
             return Results.Ok(result);

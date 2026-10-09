@@ -19,6 +19,7 @@ using Xunit;
 
 namespace Autheris.Tests.Unit;
 
+[Collection("ConsoleTests")]
 public sealed class BasicAuthOptimizationTests
 {
     #region PasswordHasher Tests

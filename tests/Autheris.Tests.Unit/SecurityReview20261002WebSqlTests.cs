@@ -1209,6 +1209,27 @@ public sealed class SecurityReview20261002WebSqlTests
         ex.Message.ShouldNotContain(invalidTenantClaim);
     }
 
+    [Fact]
+    public async Task WebSql_InactiveTable_IsRejectedAsTableDenied()
+    {
+        var repo = Substitute.For<ITableMetadataRepository>();
+        var tableId = new TableIdentifier("default", "public", "inactive_orders");
+        var metadata = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { TableName = "inactive_orders", SchemaName = "public", IsActive = false, SourceType = "PostgreSQL" },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(metadata));
+
+        var service = CreateService(repository: repo);
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() =>
+            service.RewriteSqlAsync("SELECT id FROM inactive_orders", CreateUser(), new TenantId("default"), CancellationToken.None));
+
+        ex.Message.ShouldContain("denied or the table is not registered");
+    }
+
     #endregion
 }
 

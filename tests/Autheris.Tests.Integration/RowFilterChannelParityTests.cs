@@ -110,6 +110,7 @@ public sealed class RowFilterChannelParityTests : IClassFixture<RowFilterChannel
         private static async Task<IReadOnlySet<long>> TrinoAsync(Fixture f)
         {
             var c = f.Client();
+            c.DefaultRequestHeaders.Add("X-Trino-User", "test-user");
             c.DefaultRequestHeaders.Add("X-Trino-Wait-Timeout", "30s");
             var r = await c.PostAsync("/v1/statement", new StringContent("SELECT id FROM default.main.air1", Encoding.UTF8, "text/plain"));
             using var doc = await JsonOrFailAsync(r);

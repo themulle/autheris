@@ -64,9 +64,10 @@ public sealed partial class ODataHandler(
         var allTables = await _metadataRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
         var tenant = principal.GetTenantId();
         var candidateTables = allTables
-            .Where(t => tenant == TenantId.LegacySingleTenant ||
-                        string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||
-                        string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase))
+            .Where(t => t.Table.IsActive &&
+                        (tenant == TenantId.LegacySingleTenant ||
+                         string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase)))
             .ToList();
 
         var authorizedTables = new List<Autheris.Domain.Model.TableMetadata>();

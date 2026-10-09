@@ -123,6 +123,52 @@ public sealed class OpenApiIntegrationTests : IClassFixture<WebApplicationFactor
     }
 
     [Fact]
+    public async Task IngestOpenApi_ForeignTenantDomain_ReturnsForbidden()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-TENANT-PUBLISHER");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "SchemaPublisher");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant-alpha");
+
+        var spec = """
+        {
+          "openapi": "3.1.0",
+          "info": { "title": "Alpha Service", "version": "1.0.0" },
+          "servers": [{ "url": "https://api.external.service" }],
+          "paths": {},
+          "components": { "schemas": {} }
+        }
+        """;
+        var content = new System.Net.Http.StringContent(spec, System.Text.Encoding.UTF8, "application/json");
+        // Tenant-alpha publisher attempting to ingest into foreign domain tenant-bravo must be forbidden
+        var response = await client.PostAsync("/api/governance/catalog/ingest-openapi?domain=tenant-bravo", content);
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task IngestOpenApi_MatchingTenantDomain_Succeeds()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-TENANT-PUBLISHER");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "SchemaPublisher");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant-alpha");
+
+        var spec = """
+        {
+          "openapi": "3.1.0",
+          "info": { "title": "Alpha Service", "version": "1.0.0" },
+          "servers": [{ "url": "https://api.external.service" }],
+          "paths": {},
+          "components": { "schemas": {} }
+        }
+        """;
+        var content = new System.Net.Http.StringContent(spec, System.Text.Encoding.UTF8, "application/json");
+        // Tenant-alpha publisher ingesting into own domain tenant-alpha succeeds
+        var response = await client.PostAsync("/api/governance/catalog/ingest-openapi?domain=tenant-alpha", content);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task OpenApiIndexEndpoint_Returns200WithCatalogAndDomains()
     {
         var client = _factory.CreateClient();

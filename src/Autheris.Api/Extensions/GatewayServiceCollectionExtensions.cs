@@ -853,6 +853,7 @@ public static class GatewayServiceCollectionExtensions
                 ValidateIssuerSigningKey = true,
                 ClockSkew = TimeSpan.FromMinutes(2)
             };
+            options.IncludeErrorDetails = false;
 
             if (useEntra)
             {
@@ -1046,13 +1047,13 @@ public static class GatewayServiceCollectionExtensions
             .UseRequest<Autheris.GraphQL.Interceptors.ReadOnlyOperationMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.DbtHealthExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.SchemaSunsettingExecutionMiddleware>()
-            .UseRequest<Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.CdnCacheTagMiddleware>()
             .UseRequest<Autheris.GraphQL.Federation.SubgraphResultMaskingMiddleware>()
             .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
             .UseOperationCache()
             .UseOperationResolver()
             .UseOperationVariableCoercion()
+            .UseRequest<Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware>()
             .UseOperationExecution()
             .AddApplicationService<IHostEnvironment>()
             .AddApplicationService<ErrorSanitizingFilter>()

@@ -150,7 +150,7 @@ public class InvoiceItemsBatchExecutionTests : IDisposable
             new Dictionary<string, ColumnAccessLevel>(),
             hasUnconstrainedColumnAllow: true);
 
-        await _cacheService.SetCachedDecisionAsync(userSid, childTableId, decision, TimeSpan.FromMinutes(5));
+        await _cacheService.SetCachedDecisionAsync(new TenantId("tenant-test"), userSid, childTableId, decision, TimeSpan.FromMinutes(5));
 
         var claims = new[]
         {

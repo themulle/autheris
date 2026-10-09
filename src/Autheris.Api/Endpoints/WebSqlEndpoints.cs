@@ -127,6 +127,17 @@ public static class WebSqlEndpoints
             return;
         }
 
+        if (httpContext.Request.Path.StartsWithSegments("/v1/statement") &&
+            !httpContext.Request.Headers.ContainsKey("X-Trino-User"))
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = "Trino protocol violation: Missing required 'X-Trino-User' header."
+            }, ct);
+            return;
+        }
+
         string? sql = null;
         Dictionary<string, object?>? parameters = null;
         string? dataSource = null;
@@ -817,6 +828,17 @@ public static class WebSqlEndpoints
         var user = httpContext.User;
         var securityContext = EndpointSecurity.GetSecurityContext(httpContext);
         var tenantId = securityContext?.TenantId ?? EndpointSecurity.GetRequestTenant(httpContext);
+
+        if (httpContext.Request.Path.StartsWithSegments("/v1/statement") &&
+            !httpContext.Request.Headers.ContainsKey("X-Trino-User"))
+        {
+            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = "Trino protocol violation: Missing required 'X-Trino-User' header."
+            }, ct);
+            return;
+        }
 
         try
         {

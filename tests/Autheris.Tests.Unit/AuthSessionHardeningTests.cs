@@ -12,6 +12,7 @@ using Xunit;
 namespace Autheris.Tests.Unit;
 
 /// <summary>Review G2: E-1 (revocation claim mapping), E-2 (Kerberos only), tenant claim, session header, hash CLI.</summary>
+[Collection("ConsoleTests")]
 public sealed class AuthSessionHardeningTests
 {
     private const string OidUri = "http://schemas.microsoft.com/identity/claims/objectidentifier";

@@ -133,6 +133,95 @@ public class ReadOnlyTokenTests
             .ShouldNotBeNull();
     }
 
+    [Fact]
+    public void AppOnlyToken_DefaultSetting_IsReadOnly()
+    {
+        var options = new EntraIdAuthOptions();
+        options.AppOnlyTokens.ShouldBe(AppOnlyTokenAccess.ReadOnly);
+
+        var principal = AppToken();
+        EntraTokenPolicy.Apply(principal, options, Resolver).ShouldBeNull();
+        principal.IsReadOnly().ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Token_WithoutScopesAndWithoutRoles_IsRejected()
+    {
+        var bareToken = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("oid", "55555555-5555-5555-5555-555555555555"), new Claim("preferred_username", "bob@corp.example")],
+            "Bearer"));
+
+        var error = EntraTokenPolicy.Apply(bareToken, new EntraIdAuthOptions(), Resolver);
+        error.ShouldNotBeNull();
+        error.ShouldContain("without scopes ('scp') or roles ('roles')");
+    }
+
+    [Fact]
+    public void IdToken_WithNonceClaim_IsRejected()
+    {
+        var idToken = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("oid", "66666666-6666-6666-6666-666666666666"),
+                new Claim("nonce", "xyz-123-nonce"),
+                new Claim("roles", "Reader")
+            ],
+            "Bearer"));
+
+        var error = EntraTokenPolicy.Apply(idToken, new EntraIdAuthOptions(), Resolver);
+        error.ShouldNotBeNull();
+        error.ShouldContain("ID tokens are not accepted");
+    }
+
+    [Fact]
+    public void AppOnlyToken_WithoutRoles_IsRejected()
+    {
+        var appWithoutRoles = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("oid", "77777777-7777-7777-7777-777777777777"),
+                new Claim("appid", "rogue-daemon"),
+                new Claim("idtyp", "app")
+            ],
+            "Bearer"));
+
+        var error = EntraTokenPolicy.Apply(appWithoutRoles, new EntraIdAuthOptions(), Resolver);
+        error.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void AppOnlyToken_WhenAllowedClientIdsConfigured_EnforcesAllowlist()
+    {
+        var options = new EntraIdAuthOptions
+        {
+            AllowedClientIds = ["allowed-daemon-1", "allowed-daemon-2"]
+        };
+
+        // Allowed client
+        var allowedPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("oid", "88888888-8888-8888-8888-888888888888"),
+                new Claim("appid", "allowed-daemon-1"),
+                new Claim("idtyp", "app"),
+                new Claim("roles", "Reader")
+            ],
+            "Bearer"));
+
+        EntraTokenPolicy.Apply(allowedPrincipal, options, Resolver).ShouldBeNull();
+
+        // Disallowed client
+        var unlistedPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("oid", "99999999-9999-9999-9999-999999999999"),
+                new Claim("appid", "unlisted-daemon"),
+                new Claim("idtyp", "app"),
+                new Claim("roles", "Reader")
+            ],
+            "Bearer"));
+
+        var error = EntraTokenPolicy.Apply(unlistedPrincipal, options, Resolver);
+        error.ShouldNotBeNull();
+        error.ShouldContain("unlisted-daemon");
+    }
+
     // ---------------------------------------------------------------- HTTP
 
     [Theory]

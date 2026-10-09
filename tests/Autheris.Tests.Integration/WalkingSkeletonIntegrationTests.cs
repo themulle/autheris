@@ -558,6 +558,20 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
     }
 
     [Fact]
+    public async Task TrinoStatement_PostWithBrowserIndicatorsAndNoCsrfHeader_ReturnsBadRequest()
+    {
+        // SG-07: POST /v1/statement with browser indicators (Origin, Cookie, Sec-Fetch-Site) must require CSRF preflight header
+        var client = CreateClient(antiCsrf: false);
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-USER-CSRF-TRINO");
+        client.DefaultRequestHeaders.Add("Origin", "https://malicious-site.com");
+
+        var response = await client.PostAsync("/v1/statement", new StringContent("SELECT 1", System.Text.Encoding.UTF8, "text/plain"));
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.ShouldContain("CSRF");
+    }
+
+    [Fact]
     public void ReverseProxy_WhenConfiguredWithKnownNetworks_SetsUpForwardedHeadersCorrectly()
     {
         using var customFactory = _factory.WithWebHostBuilder(builder =>

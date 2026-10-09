@@ -236,4 +236,62 @@ public class QueryDefenseStressTests : IClassFixture<WebApplicationFactory<Progr
         var response = await client.PostAsJsonAsync("/graphql", payload);
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
     }
+
+    [Fact]
+    public async Task QueryCostAnalyzer_VariableDefaultBypassAttempt_WithExcessiveRuntimeVariable_IsBlocked()
+    {
+        var client = CreateClient();
+
+        // SG-10: An attacker declares default $n = 1 (static cost ~10 passes document validation),
+        // but runtime variables provide n = 5000 (exceeds complexity budget 250).
+        var payload = new
+        {
+            query = @"
+                query GetInvoicesWithDefault($n: Int = 1) {
+                    finance {
+                        invoicesWithItems(first: $n) {
+                            id
+                            amount
+                            vendor
+                            email
+                        }
+                    }
+                }",
+            variables = new { n = 5000 }
+        };
+
+        var response = await client.PostAsJsonAsync("/graphql", payload);
+        var content = await response.Content.ReadAsStringAsync();
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+        content.ShouldContain("QUERY_COST_QUOTA_EXCEEDED");
+    }
+
+    [Fact]
+    public async Task QueryCostAnalyzer_VariableDefault_WithinBudgetRuntimeVariable_Succeeds()
+    {
+        var client = CreateClient();
+
+        // Normal query within budget using variables
+        var payload = new
+        {
+            query = @"
+                query GetInvoicesWithinBudget($n: Int = 1) {
+                    finance {
+                        invoicesWithItems(first: $n) {
+                            id
+                            amount
+                            vendor
+                            email
+                        }
+                    }
+                }",
+            variables = new { n = 3 }
+        };
+
+        var response = await client.PostAsJsonAsync("/graphql", payload);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var content = await response.Content.ReadAsStringAsync();
+        content.ShouldNotContain("QUERY_COST_QUOTA_EXCEEDED");
+        content.ShouldNotContain("QUERY_TOO_COMPLEX");
+    }
 }

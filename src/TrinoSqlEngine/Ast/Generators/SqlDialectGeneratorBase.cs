@@ -405,6 +405,11 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             case ColumnReference col:
                 FormatQualifiedName(ref builder, col.Name, context);
                 break;
+            case ParenthesizedExpression paren:
+                builder.Append('(');
+                GenerateExpression(paren.Expression, ref builder, context);
+                builder.Append(')');
+                break;
             case ParameterReference param:
                 FormatParameter(ref builder, param, context);
                 break;
@@ -420,11 +425,11 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             case LikeExpression lk:
                 GeneratePredicateOperand(lk.Operand, ref builder, context);
                 builder.Append(lk.IsNotLike ? " NOT LIKE " : " LIKE ");
-                GenerateExpression(lk.Pattern, ref builder, context);
+                GeneratePredicateOperand(lk.Pattern, ref builder, context);
                 if (lk.Escape != null)
                 {
                     builder.Append(" ESCAPE ");
-                    GenerateExpression(lk.Escape, ref builder, context);
+                    GeneratePredicateOperand(lk.Escape, ref builder, context);
                 }
                 break;
             case InListExpression inL:
@@ -551,7 +556,17 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 FormatArrayConstructor(ref builder, arr, context);
                 break;
             case SubscriptExpression sub:
+                bool targetNeedsParens = sub.Target is BinaryExpression
+                    or UnaryExpression
+                    or BetweenExpression
+                    or LikeExpression
+                    or InListExpression
+                    or InSubqueryExpression
+                    or IsDistinctFromExpression
+                    or CastExpression;
+                if (targetNeedsParens) builder.Append('(');
                 GenerateExpression(sub.Target, ref builder, context);
+                if (targetNeedsParens) builder.Append(')');
                 builder.Append('[');
                 GenerateExpression(sub.Index, ref builder, context);
                 builder.Append(']');
@@ -675,7 +690,8 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             or LikeExpression
             or InListExpression
             or InSubqueryExpression
-            or IsDistinctFromExpression;
+            or IsDistinctFromExpression
+            or UnaryExpression;
 
         if (needsParens) builder.Append('(');
         GenerateExpression(expr, ref builder, context);
@@ -731,9 +747,24 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             return false;
         }
 
-        if (child is BetweenExpression && parentOp is BinaryOperator.And or BinaryOperator.Or)
+        if (child is BetweenExpression)
         {
-            return true;
+            if (parentOp is BinaryOperator.And or BinaryOperator.Or) return true;
+            return GetPrecedence(parentOp) >= 3;
+        }
+
+        if (child is LikeExpression or InListExpression or InSubqueryExpression or IsDistinctFromExpression)
+        {
+            return GetPrecedence(parentOp) >= 3;
+        }
+
+        if (child is UnaryExpression u)
+        {
+            if (u.Operator is UnaryOperator.IsNull or UnaryOperator.IsNotNull)
+                return GetPrecedence(parentOp) >= 3;
+            if (u.Operator is UnaryOperator.Not)
+                return GetPrecedence(parentOp) > 2;
+            return false;
         }
 
         return false;

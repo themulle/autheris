@@ -1014,7 +1014,8 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
         merged.ColumnMaskingRules.ShouldContainKey("pan");
         merged.HttpEndpoint!.BaseUrl.ShouldBe("https://payments.internal.corp");
         merged.HttpEndpoint!.TenantIdHeaderName.ShouldBe("X-Tenant");
-        merged.HasColumn("amount").ShouldBeTrue();
+        // SG-11: Bei bestehenden Tabellen keine neuen Phantomspalten zulassen
+        merged.HasColumn("amount").ShouldBeFalse();
     }
 
     // =========================================================================

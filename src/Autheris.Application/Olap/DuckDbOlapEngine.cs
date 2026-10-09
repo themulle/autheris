@@ -20,6 +20,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
 {
     private readonly DuckDbOlapOptions _options;
     private readonly ILogger<DuckDbOlapEngine>? _logger;
+    private readonly SemaphoreSlim _concurrencySemaphore;
 
     public DuckDbOlapEngine(
         IOptions<GatewayOptions> gatewayOptions,
@@ -28,6 +29,8 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         ArgumentNullException.ThrowIfNull(gatewayOptions);
         _options = gatewayOptions.Value.DuckDbOlap ?? new DuckDbOlapOptions();
         _logger = logger;
+        int maxConcurrent = Math.Clamp(_options.MaxConcurrentQueries > 0 ? _options.MaxConcurrentQueries : 4, 1, 64);
+        _concurrencySemaphore = new SemaphoreSlim(maxConcurrent, maxConcurrent);
     }
 
     public DuckDbOlapEngine(
@@ -37,6 +40,8 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
         _logger = logger;
+        int maxConcurrent = Math.Clamp(_options.MaxConcurrentQueries > 0 ? _options.MaxConcurrentQueries : 4, 1, 64);
+        _concurrencySemaphore = new SemaphoreSlim(maxConcurrent, maxConcurrent);
     }
 
     public async Task<OlapQueryResult> ExecuteOlapQueryAsync(
@@ -47,6 +52,9 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Sql);
 
         var sw = Stopwatch.StartNew();
+
+        // 1. Early validation of SQL before any staging or connection allocation
+        ValidateUserSql(request.Sql, request.Sources);
 
         // SEC-OLAP-02: Enforce MaxStagedRowsPerTable limits before opening DuckDB
         if (request.Sources != null)
@@ -67,68 +75,133 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             cts.CancelAfter(TimeSpan.FromSeconds(_options.QueryTimeoutSeconds));
         }
 
-        // SEC-OLAP-03: Completely transient in-memory database session
-        using var connection = new DuckDBConnection("DataSource=:memory:");
-        await connection.OpenAsync(cts.Token).ConfigureAwait(false);
-
-        // SEC-OLAP-01 & SEC-OLAP-02: Sandbox isolation, disable external filesystem/network access, limit RAM & threads
-        using (var setupCmd = connection.CreateCommand())
+        // SG-02: Concurrency throttle to prevent system-wide memory exhaustion
+        var waitTimeout = TimeSpan.FromSeconds(Math.Min(10, _options.QueryTimeoutSeconds > 0 ? _options.QueryTimeoutSeconds : 10));
+        if (!await _concurrencySemaphore.WaitAsync(waitTimeout, cts.Token).ConfigureAwait(false))
         {
-            var maxMem = SanitizeMemoryString(_options.MaxMemory);
-            int threads = Math.Clamp(_options.MaxThreads, 1, 8);
-            setupCmd.CommandText = $"SET enable_external_access = false; PRAGMA max_memory = '{maxMem}'; PRAGMA threads = {threads}; SET lock_configuration = true;";
-            await setupCmd.ExecuteNonQueryAsync(cts.Token).ConfigureAwait(false);
+            throw new System.Security.SecurityException("OLAP engine is at maximum concurrent query capacity. Please retry later.");
         }
 
-        // Stage all authorized source tables into the transient DuckDB session
-        if (request.Sources != null)
+        // SG-01: Session-isolated temporary directory to prevent cross-session spill leakage
+        var sessionTempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "autheris_olap_" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(sessionTempDir);
+
+        try
         {
-            foreach (var source in request.Sources)
+            // SEC-OLAP-03: Completely transient in-memory database session
+            using var connection = new DuckDBConnection("DataSource=:memory:");
+            await connection.OpenAsync(cts.Token).ConfigureAwait(false);
+
+            // SEC-OLAP-01 & SEC-OLAP-02 & SG-01: Sandbox isolation, session temp dir, disable external filesystem/network access, limit RAM & threads
+            using (var setupCmd = connection.CreateCommand())
             {
-                await StageTableAsync(connection, source, cts.Token).ConfigureAwait(false);
-            }
-        }
+                var maxMem = SanitizeMemoryString(_options.MaxMemory);
+                var maxTempSize = SanitizeMemoryString(_options.MaxTempDirectorySize);
+                int threads = Math.Clamp(_options.MaxThreads, 1, 8);
+                var normalizedTempDir = sessionTempDir.Replace('\\', '/').Replace("'", "''");
 
-        // Execute analytical query
-        ValidateUserSql(request.Sql, request.Sources);
-
-        var columns = new List<string>();
-        var rows = new List<IReadOnlyList<object?>>();
-
-        using (var queryCmd = connection.CreateCommand())
-        {
-            queryCmd.CommandText = request.Sql;
-
-            // SQL2-9: DuckDB.NET checks the token only before it starts; Cancel() calls duckdb_interrupt and stops a
-            // running query when the timeout fires or the caller aborts.
-            using var interrupt = cts.Token.Register(static state => ((System.Data.Common.DbCommand)state!).Cancel(), queryCmd);
-            using var reader = await queryCmd.ExecuteReaderAsync(cts.Token).ConfigureAwait(false);
-
-            int fieldCount = reader.FieldCount;
-            for (int i = 0; i < fieldCount; i++)
-            {
-                columns.Add(reader.GetName(i));
+                setupCmd.CommandText = $"SET temp_directory = '{normalizedTempDir}'; PRAGMA max_temp_directory_size = '{maxTempSize}'; SET enable_external_access = false; PRAGMA max_memory = '{maxMem}'; PRAGMA threads = {threads}; SET lock_configuration = true;";
+                await setupCmd.ExecuteNonQueryAsync(cts.Token).ConfigureAwait(false);
             }
 
-            // Gateway:DuckDbOlap:MaxResultRows (default 50 000) bounds every OLAP result.
-            int maxResultRows = _options.MaxResultRows > 0 ? _options.MaxResultRows : 50000;
-            int rowLimit = request.Limit.HasValue && request.Limit.Value > 0
-                ? Math.Min(request.Limit.Value, maxResultRows)
-                : maxResultRows;
-
-            while (await reader.ReadAsync(cts.Token).ConfigureAwait(false) && rows.Count < rowLimit)
+            // Stage all authorized source tables into the transient DuckDB session
+            if (request.Sources != null)
             {
-                var row = new object?[fieldCount];
+                foreach (var source in request.Sources)
+                {
+                    await StageTableAsync(connection, source, cts.Token).ConfigureAwait(false);
+                }
+            }
+
+            var columns = new List<string>();
+            var rows = new List<IReadOnlyList<object?>>();
+
+            using (var queryCmd = connection.CreateCommand())
+            {
+                queryCmd.CommandText = request.Sql;
+
+                // SQL2-9: DuckDB.NET checks the token only before it starts; Cancel() calls duckdb_interrupt and stops a
+                // running query when the timeout fires or the caller aborts.
+                using var interrupt = cts.Token.Register(static state => ((System.Data.Common.DbCommand)state!).Cancel(), queryCmd);
+                using var reader = await queryCmd.ExecuteReaderAsync(cts.Token).ConfigureAwait(false);
+
+                int fieldCount = reader.FieldCount;
                 for (int i = 0; i < fieldCount; i++)
                 {
-                    row[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                    columns.Add(reader.GetName(i));
                 }
-                rows.Add(row);
+
+                // Gateway:DuckDbOlap:MaxResultRows (default 50 000) bounds every OLAP result.
+                int maxResultRows = _options.MaxResultRows > 0 ? _options.MaxResultRows : 50000;
+                int rowLimit = request.Limit.HasValue && request.Limit.Value > 0
+                    ? Math.Min(request.Limit.Value, maxResultRows)
+                    : maxResultRows;
+
+                long maxResultBytes = _options.MaxResultBytes > 0 ? _options.MaxResultBytes : 32 * 1024 * 1024;
+                long currentResultBytes = 0;
+
+                while (await reader.ReadAsync(cts.Token).ConfigureAwait(false))
+                {
+                    if (rows.Count >= rowLimit)
+                    {
+                        break;
+                    }
+
+                    var row = new object?[fieldCount];
+                    for (int i = 0; i < fieldCount; i++)
+                    {
+                        if (reader.IsDBNull(i))
+                        {
+                            row[i] = null;
+                            currentResultBytes += 4;
+                        }
+                        else
+                        {
+                            var val = reader.GetValue(i);
+                            row[i] = val;
+                            if (val is string str)
+                            {
+                                currentResultBytes += (long)str.Length * sizeof(char);
+                            }
+                            else if (val is byte[] bytes)
+                            {
+                                currentResultBytes += bytes.Length;
+                            }
+                            else
+                            {
+                                currentResultBytes += 16;
+                            }
+                        }
+                    }
+
+                    if (currentResultBytes > maxResultBytes)
+                    {
+                        throw new System.Security.SecurityException(
+                            $"OLAP query result exceeded maximum allowed memory size of {maxResultBytes} bytes.");
+                    }
+
+                    rows.Add(row);
+                }
+            }
+
+            sw.Stop();
+            return new OlapQueryResult(columns, rows, rows.Count, sw.Elapsed);
+        }
+        finally
+        {
+            _concurrencySemaphore.Release();
+            try
+            {
+                if (System.IO.Directory.Exists(sessionTempDir))
+                {
+                    System.IO.Directory.Delete(sessionTempDir, recursive: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to delete temporary OLAP spill directory {Path}", sessionTempDir);
             }
         }
-
-        sw.Stop();
-        return new OlapQueryResult(columns, rows, rows.Count, sw.Elapsed);
     }
 
     private static async Task StageTableAsync(
@@ -256,6 +329,12 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             throw new ArgumentException("SQL query cannot be empty.", nameof(sql));
         }
 
+        // SG-24: Prohibit dollar quoting ($$...$$) and dollar variables to eliminate lexer and quote bypasses
+        if (sql.Contains('$'))
+        {
+            throw new System.Security.SecurityException("Dollar-quoted strings and parameters are prohibited in OLAP queries.");
+        }
+
         var stripped = StripSqlComments(sql);
         var trimmed = stripped.Trim();
 
@@ -299,7 +378,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         {
             "CREATE", "DROP", "ALTER", "INSERT", "UPDATE", "DELETE",
             "ATTACH", "DETACH", "COPY", "EXPORT", "IMPORT", "INSTALL", "LOAD",
-            "PRAGMA", "SET",
+            "PRAGMA", "SET", "CALL", "CHECKPOINT",
             // SQL2-9: recursive CTEs generate unbounded rows
             "RECURSIVE"
         };
@@ -311,19 +390,29 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             {
                 throw new System.Security.SecurityException($"Cannot execute query: configuration is locked and command or keyword '{token}' is prohibited in OLAP queries.");
             }
+
+            // SG-01: Prohibit file and internal system functions
+            if (token.Equals("glob", StringComparison.OrdinalIgnoreCase) ||
+                token.StartsWith("read_", StringComparison.OrdinalIgnoreCase) ||
+                token.StartsWith("sniff_", StringComparison.OrdinalIgnoreCase) ||
+                token.StartsWith("parquet_", StringComparison.OrdinalIgnoreCase) ||
+                token.StartsWith("duckdb_", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new System.Security.SecurityException($"Function or table function '{token}' is prohibited in OLAP queries.");
+            }
         }
 
-        // 4. SQL2-9: unbounded generator table functions are prohibited, also next to staged tables (cross join bomb).
-        var match = DisallowedGeneratorRegex.Match(trimmed);
+        // 4. SQL2-9 & SG-01: unbounded generator and file reading functions are prohibited
+        var match = DisallowedTableFunctionsRegex.Match(trimmed);
         if (match.Success)
         {
-            throw new System.Security.SecurityException($"Table generator function '{match.Groups[1].Value}' is not permitted in OLAP queries.");
+            throw new System.Security.SecurityException($"Table generator or file function '{match.Groups[1].Value}' is not permitted in OLAP queries.");
         }
     }
 
     // Function name followed by optional whitespace and '(' (e.g. "range (1, 1000000000)").
-    private static readonly System.Text.RegularExpressions.Regex DisallowedGeneratorRegex = new(
-        @"\b(range|generate_series|repeat)\s*\(",
+    private static readonly System.Text.RegularExpressions.Regex DisallowedTableFunctionsRegex = new(
+        @"\b(range|generate_series|repeat|read_\w+|glob|sniff_\w+|parquet_\w+|duckdb_\w+)\s*\(",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(250));
 
@@ -448,6 +537,11 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         }
 
         return sb.ToString();
+    }
+
+    public void Dispose()
+    {
+        _concurrencySemaphore.Dispose();
     }
 }
 

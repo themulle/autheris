@@ -77,7 +77,7 @@ public sealed class Pol9DegradedModeSensitivityTests
         var multiplexer = Substitute.For<IConnectionMultiplexer>();
         multiplexer.IsConnected.Returns(true);
 
-        var service = new EpochValidationService(multiplexer: multiplexer);
+        var service = new EpochValidationService(multiplexer: multiplexer, eventBus: Substitute.For<IEventBus>());
 
         var table = new TableIdentifier("finance", "dbo", "invoices");
         await service.InvalidateEpochAsync(table);

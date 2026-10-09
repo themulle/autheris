@@ -157,9 +157,11 @@ public static class McpEndpoints
 
         var principalId = (isAuthenticated
                 ? principal.FindFirst("client_id")?.Value
+                  ?? principal.FindFirst("appid")?.Value
                   ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
                   ?? principal.FindFirst("sub")?.Value
-                  ?? principal.FindFirst("appid")?.Value
+                  ?? principal.FindFirst("oid")?.Value
+                  ?? principal.FindFirst(ClaimTypes.PrimarySid)?.Value
                   ?? principal.Identity?.Name
                 : null)
             ?? (allowOpenMcp ? "anonymous-ai-agent" : "unknown-agent");

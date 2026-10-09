@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.DataCatalog.Services;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -128,5 +129,83 @@ public sealed class OpenApiIngestionServiceTests
         refundTable.ShouldNotBeNull();
         refundTable.PrimaryKeyColumns.ShouldContain("refund_id");
         refundTable.Columns.Count.ShouldBe(2);
+
+        // SG-11: Newly discovered tables must be created with IsActive = false
+        paymentTable.Table.IsActive.ShouldBeFalse();
+        refundTable.Table.IsActive.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task IngestOpenApiJsonAsync_ExistingTable_DoesNotAddPhantomColumns()
+    {
+        var repo = Substitute.For<ITableMetadataRepository>();
+        var tableId = new TableIdentifier("payments", "api", "payment");
+
+        // Existing table with only payment_id and amount
+        var existingMetadata = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table
+            {
+                SchemaName = "api",
+                TableName = "payment",
+                DisplayName = "Existing Payment",
+                IsActive = true,
+                DataSourceType = DataSourceType.HttpDeclarative,
+                HttpEndpoint = new HttpEndpointDescriptor
+                {
+                    BaseUrl = "https://payments.internal.corp",
+                    PathTemplate = "/api/v1/payments",
+                    Method = "GET"
+                }
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "payment_id", DataType = "uuid" },
+                new TableColumn { ColumnName = "amount", DataType = "decimal" }
+            ],
+            PrimaryKeyColumns = ["payment_id"]
+        };
+
+        repo.GetTableMetadataAsync(Arg.Is<TableIdentifier>(id => id.TableName == "payment"), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(existingMetadata));
+
+        TableMetadata? savedMetadata = null;
+        repo.UpsertTableMetadataAsync(Arg.Do<TableMetadata>(t =>
+        {
+            if (t.Identifier.TableName == "payment") savedMetadata = t;
+        }), Arg.Any<CancellationToken>())
+            .Returns(callInfo => Task.FromResult(callInfo.Arg<TableMetadata>()));
+
+        var service = new OpenApiIngestionService(repo, NullLogger<OpenApiIngestionService>.Instance);
+        var result = await service.IngestOpenApiJsonAsync(SampleOpenApiJson, domain: "payments");
+
+        result.Success.ShouldBeTrue();
+        savedMetadata.ShouldNotBeNull();
+        // pan_masked was in OpenAPI spec but NOT in existing table columns -> must NOT be added!
+        savedMetadata.Columns.Any(c => c.ColumnName == "pan_masked").ShouldBeFalse();
+        savedMetadata.Columns.Count.ShouldBe(2);
+        // Existing table's IsActive state must be preserved
+        savedMetadata.Table.IsActive.ShouldBeTrue();
+        // Warning should be recorded about ignored phantom column
+        result.Warnings.Any(w => w.Contains("new column(s) were ignored")).ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("http://169.254.169.254/latest/meta-data")]
+    [InlineData("http://127.0.0.1:8080/api")]
+    [InlineData("http://localhost:5000/api")]
+    [InlineData("ftp://payments.corp.internal")]
+    public async Task IngestOpenApiJsonAsync_ForbiddenServerUrl_FailsIngestion(string badUrl)
+    {
+        var repo = Substitute.For<ITableMetadataRepository>();
+        var service = new OpenApiIngestionService(repo, NullLogger<OpenApiIngestionService>.Instance);
+
+        var specWithBadUrl = SampleOpenApiJson.Replace("https://payments.internal.corp", badUrl);
+        var result = await service.IngestOpenApiJsonAsync(specWithBadUrl, domain: "payments");
+
+        result.Success.ShouldBeFalse();
+        result.Warnings.Any(w => w.Contains("violates outbound egress") || w.Contains("Invalid server URL")).ShouldBeTrue();
+        await repo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
     }
 }

@@ -131,7 +131,8 @@ public sealed class WebSocketReadOnlyMutationSecurityTests
 
         var token = CreateJwt([
             new Claim("sub", "spn-app-guid-1234"),
-            new Claim("idtyp", "app")
+            new Claim("idtyp", "app"),
+            new Claim("roles", "Reader")
         ]);
 
         var (isValid, principal) = await validator.ValidateTokenAsync(token);

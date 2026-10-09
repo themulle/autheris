@@ -89,7 +89,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Bei jedem Speichern eines ausstehenden Elements den Einreicher auf den letzten Bearbeiter setzen, oder die Menge aller Bearbeiter speichern.
   - Approve ablehnen, wenn ein Identifier des Freigebenden (`GetUserIdentifiers()`) unter den Bearbeitern ist.
 
-### SG-04 Freitext-Claims (`name`, `preferred_username`, `upn`) gelten als Grantee-Identität (Consent-Impersonation)
+### SG-04 Freitext-Claims (`name`, `preferred_username`, `upn`) gelten als Grantee-Identität (Consent-Impersonation) [BEHOBEN]
+- **Status:** Behoben
 - **Schwere:** Hoch | **Konfidenz:** plausibel (abhängig vom IdP)
 - **Fundstellen:**
   - `src/Autheris.Domain/Common/Sid.cs:41-57` (`UserIdentifierClaimTypes`), `:97-103` (`GetAllUserSids`)
@@ -103,7 +104,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - `name`, `upn` und `preferred_username` nur für die Selbstfreigabe-Prüfung (`GetUserIdentifiers`) verwenden.
   - Siehe auch SG-09.
 
-### SG-05 AST-Rewriter: Ein `OR` im LIKE-Muster bzw. in ESCAPE hebelt den Row-Filter bei UPDATE/DELETE aus (SR15-05 unvollständig)
+### SG-05 AST-Rewriter: Ein `OR` im LIKE-Muster bzw. in ESCAPE hebelt den Row-Filter bei UPDATE/DELETE aus (SR15-05 unvollständig) [BEHOBEN]
+- **Status:** Behoben
 - **Schwere:** Hoch (bedingt: nur mit `WebSql.SqlRewriterEngine=AstCompiler`, DML aktiv und Writer-Rolle) | **Konfidenz:** bestätigt (PostgreSQL 16 und SQLite)
 - **Fundstellen:**
   - `src/TrinoSqlEngine/Ast/Generators/SqlDialectGeneratorBase.cs:420-428`: `LikeExpression` gibt Pattern und Escape ungeklammert aus.
@@ -120,7 +122,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - `NeedsParentheses` um `Like`, `InList`, `IsDistinctFrom`, `Subscript` und `Unary` erweitern.
   - Regressionstest pro Dialekt.
 
-### SG-06 AST-Rewriter: Maskierte Spalten des DML-Ziels über eine qualifizierte Wildcard lesbar (SR15-10 unvollständig)
+### SG-06 AST-Rewriter: Maskierte Spalten des DML-Ziels über eine qualifizierte Wildcard lesbar (SR15-10 unvollständig) [BEHOBEN]
+- **Status:** Behoben
 - **Schwere:** Hoch (bedingt wie SG-05) | **Konfidenz:** bestätigt (PostgreSQL 16; SQLite nicht verwertbar; SQL Server nicht getestet)
 - **Fundstellen:**
   - `AstSecurityVisitor.cs:620-707` (`EnsureNoMaskedColumnReferences` prüft nur `ColumnReference` und `UsingJoinCondition`), `:709ff` (`PushChildren`).
@@ -138,7 +141,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
 
 ## 3. Befunde – Mittel
 
-### SG-07 CSRF auf `POST /v1/statement` (Trino-API nimmt `text/plain` an)
+### SG-07 CSRF auf `POST /v1/statement` (Trino-API nimmt `text/plain` an) [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** Lücke bestätigt; dass Kerberos automatisch mitgesendet wird, ist plausibel.
 - **Fundstellen:**
   - `src/Autheris.Api/Extensions/GatewayApplicationBuilderExtensions.cs:163-175`: CSRF-Prüfung nur für GraphQL, `/api`, `/odata` und MCP.
@@ -152,7 +156,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - CSRF-Logik umkehren: alle nicht sicheren Methoden prüfen, Ausnahmen explizit auflisten.
   - Auf `/v1/statement` den Header `X-Trino-User` verlangen.
 
-### SG-08 Entra: App-only-Tokens ohne Rollen- und Client-Prüfung werden als ReadWrite akzeptiert; ID-Tokens gelten als Access-Tokens
+### SG-08 Entra: App-only-Tokens ohne Rollen- und Client-Prüfung werden als ReadWrite akzeptiert; ID-Tokens gelten als Access-Tokens [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** plausibel (abhängig von „Assignment required“ in Entra)
 - **Fundstellen:** `GatewayOptions.cs` (`EntraIdAuthOptions.AppOnlyTokens = ReadWrite`), `src/Autheris.Api/Security/EntraTokenPolicy.cs:66-80`, `GatewayServiceCollectionExtensions.cs:800-857`
 - **Beschreibung:**
@@ -165,7 +170,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Tokens ohne `scp` und ohne `roles` ablehnen, ebenso ID-Tokens.
   - `IncludeErrorDetails=false` setzen.
 
-### SG-09 MCP: Der synthetische Principal setzt `sub`/`NameIdentifier` auf die OAuth-Client-ID (Confused Deputy)
+### SG-09 MCP: Der synthetische Principal setzt `sub`/`NameIdentifier` auf die OAuth-Client-ID (Confused Deputy) [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** plausibel (nur bei Tokens mit `client_id`-Claim, z. B. ADFS, ForwardAuth oder generischer IdP)
 - **Fundstellen:** `src/Autheris.Api/Endpoints/McpEndpoints.cs:158-165`, `src/Autheris.GraphQL/Mcp/GatewayMcpQueryExecutor.cs:74-78`, `Sid.cs:41-57`, `TableAccessPolicy.cs:341, 350-374`
 - **Beschreibung:**
@@ -174,7 +180,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Das widerspricht dem Kommentar in `Sid.cs` („App-IDs bewusst ausgeschlossen“).
 - **Fix:** `sub` und `NameIdentifier` aus dem echten Nutzer übernehmen und die Client-ID nur als `client_id`/`azp` führen. Am besten `HttpContext.User` direkt verwenden.
 
-### SG-10 GraphQL: Kostenbudget über Variablen-Defaults umgehbar (SR15-19 unvollständig)
+### SG-10 GraphQL: Kostenbudget über Variablen-Defaults umgehbar (SR15-19 unvollständig) [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt (Pipeline-Reihenfolge)
 - **Fundstellen:**
   - `src/Autheris.GraphQL/Interceptors/QueryCostAnalyzerRule.cs:76`
@@ -187,7 +194,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
 - **Angriff:** `query($n:Int=1){a:t1(first:$n){…} b:t1(first:$n){…} …}` mit `{"n":5000}` liefert etwa 500 000 Zeilen pro Request (DB- und Speicher-DoS). Der MCP-Pfad ist nicht betroffen.
 - **Fix:** Kostenprüfung nach `UseOperationVariableCoercion` einhängen, gegen `min(Tier, MaxAllowedComplexity)`. Dazu ein Integrationstest über den echten Executor.
 
-### SG-11 OpenAPI-Ingestion: Katalog-Einträge in fremden Tenant-Domains, sofort aktiv, mit Angreifer-BaseUrl
+### SG-11 OpenAPI-Ingestion: Katalog-Einträge in fremden Tenant-Domains, sofort aktiv, mit Angreifer-BaseUrl [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt (Cross-Tenant-Write); Folge durch Phantomspalten plausibel
 - **Fundstellen:** `GovernanceEndpoints.cs:53-89`, `src/Autheris.Application/DataCatalog/Services/OpenApiIngestionService.cs:57-66, 183-224`, `GatewayRole.cs` (TenantAdmin impliziert SchemaPublisher)
 - **Beschreibung:**
@@ -205,7 +213,7 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - `servers.url` gegen die Egress-Allowlist prüfen.
   - Ingestion auditieren.
 
-### SG-12 Inaktive Tabellen bleiben über OData (direkter Pfad), WebSQL und Arrow abfragbar
+### SG-12 [BEHOBEN] Inaktive Tabellen bleiben über OData (direkter Pfad), WebSQL und Arrow abfragbar
 - **Konfidenz:** fehlende Prüfung bestätigt; Ausnutzbarkeit plausibel (Consent nötig)
 - **Fundstellen:** `GatewayExecutionService.cs:478-491` (`ResolveTableAccessAsync`), `PostgreSqlGovernanceRepository.Catalog.cs:26-28`, `SqliteGovernanceRepository.Catalog.cs:90-92`. Iceberg, MCP und das GraphQL-Schema prüfen `IsActive`.
 - **Angriff:**

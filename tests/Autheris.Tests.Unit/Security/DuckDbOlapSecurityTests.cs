@@ -475,5 +475,89 @@ public sealed class DuckDbOlapSecurityTests
         var responseText = new StreamReader(httpContext.Response.Body).ReadToEnd();
         responseText.ShouldContain("exceeds maximum allowed staging rows (10)");
     }
+
+    [Theory]
+    [InlineData("SELECT * FROM read_blob('.tmp/*')")]
+    [InlineData("SELECT * FROM glob('*')")]
+    [InlineData("SELECT * FROM sniff_csv('/tmp/foo')")]
+    [InlineData("SELECT * FROM duckdb_settings()")]
+    public async Task SG_01_ProhibitedFunctions_ThrowsSecurityException(string sql)
+    {
+        var engine = new DuckDbOlapEngine(_defaultOptions, NullLogger<DuckDbOlapEngine>.Instance);
+        var request = new OlapQueryRequest(sql, []);
+
+        var ex = await Assert.ThrowsAsync<System.Security.SecurityException>(
+            async () => await engine.ExecuteOlapQueryAsync(request));
+
+        Assert.True(
+            ex.Message.Contains("prohibited", StringComparison.OrdinalIgnoreCase) ||
+            ex.Message.Contains("not permitted", StringComparison.OrdinalIgnoreCase),
+            $"Unexpected error message: {ex.Message}");
+    }
+
+    [Fact]
+    public async Task SG_02_ResultByteBudget_Exceeded_ThrowsSecurityException()
+    {
+        var tightOptions = new DuckDbOlapOptions
+        {
+            Enabled = true,
+            MaxResultBytes = 500 // very tight byte budget
+        };
+        var engine = new DuckDbOlapEngine(tightOptions, NullLogger<DuckDbOlapEngine>.Instance);
+        var request = new OlapQueryRequest("SELECT lpad('A', 2000, 'A') AS big_col", []);
+
+        var ex = await Assert.ThrowsAsync<System.Security.SecurityException>(
+            async () => await engine.ExecuteOlapQueryAsync(request));
+
+        Assert.Contains("maximum allowed memory size", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SG_24_DollarQuoting_Prohibited_ThrowsSecurityException()
+    {
+        var engine = new DuckDbOlapEngine(_defaultOptions, NullLogger<DuckDbOlapEngine>.Instance);
+        var request = new OlapQueryRequest("SELECT $$some_text$$", []);
+
+        var ex = await Assert.ThrowsAsync<System.Security.SecurityException>(
+            async () => await engine.ExecuteOlapQueryAsync(request));
+
+        Assert.Contains("Dollar-quoted", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SG_02_TableCountLimit_Exceeded_ReturnsBadRequest()
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("tid", "tenant-1"), new Claim("sub", "user-1"), new Claim("name", "Alice")],
+            "test"));
+        var stream = new MemoryStream(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+        {
+            sql = "SELECT 1",
+            tableNames = Enumerable.Range(1, 15).Select(i => $"t_{i}").ToList()
+        })));
+        httpContext.Request.Body = stream;
+        httpContext.Response.Body = new MemoryStream();
+
+        var options = Options.Create(new GatewayOptions
+        {
+            DuckDbOlap = new DuckDbOlapOptions { Enabled = true, MaxTableCount = 10 }
+        });
+
+        await DuckDbOlapEndpoints.HandleOlapQueryAsync(
+            httpContext,
+            Substitute.For<IDuckDbOlapEngine>(),
+            Substitute.For<ITableMetadataRepository>(),
+            Substitute.For<IAutherisConnectorRegistry>(),
+            Substitute.For<ICrossDomainAccessResolver>(),
+            Substitute.For<IColumnMaskingProvider>(),
+            options,
+            NullLoggerFactory.Instance);
+
+        httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        httpContext.Response.Body.Seek(0, SeekOrigin.Begin);
+        var responseText = new StreamReader(httpContext.Response.Body).ReadToEnd();
+        responseText.ShouldContain("maximum allowed distinct table count");
+    }
 }
 

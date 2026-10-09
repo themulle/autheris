@@ -38,6 +38,19 @@ public static class ClaimsPrincipalExtensions
         return string.IsNullOrWhiteSpace(sidStr) ? (Sid?)null : new Sid(sidStr);
     }
 
+    private static readonly string[] ImmutableUserSidClaimTypes =
+    [
+        System.Security.Claims.ClaimTypes.PrimarySid,
+        "objectSid",
+        "onprem_sid",
+        "primarysid",
+        "http://schemas.microsoft.com/ws/2008/06/identity/claims/primarysid",
+        "oid",
+        "http://schemas.microsoft.com/identity/claims/objectidentifier",
+        System.Security.Claims.ClaimTypes.NameIdentifier,
+        "sub"
+    ];
+
     private static readonly string[] UserIdentifierClaimTypes =
     [
         System.Security.Claims.ClaimTypes.PrimarySid,
@@ -93,13 +106,34 @@ public static class ClaimsPrincipalExtensions
     }
 
     /// <summary>
-    /// Returns all user-bound identifiers resolved as Sid objects.
-    /// Useful for matching access profiles and consents bound to on-prem SID or cloud OID.
+    /// SG-04: Returns all user-bound immutable subject identifiers resolved as Sid objects.
+    /// Used for matching access profiles and consents bound to on-prem SID, cloud OID, or sub.
+    /// Mutable/free-text claims (name, preferred_username, upn) are strictly excluded from grant/consent matching
+    /// to prevent consent impersonation attacks.
     /// </summary>
     public static HashSet<Sid> GetAllUserSids(this System.Security.Claims.ClaimsPrincipal? principal)
     {
-        if (principal == null) return [];
-        return principal.GetUserIdentifiers().Select(id => new Sid(id)).ToHashSet();
+        var result = new HashSet<Sid>();
+        if (principal == null) return result;
+
+        var primary = principal.GetUserSid();
+        if (primary.HasValue && !string.IsNullOrWhiteSpace(primary.Value.Value))
+        {
+            result.Add(primary.Value);
+        }
+
+        foreach (var claimType in ImmutableUserSidClaimTypes)
+        {
+            foreach (var claim in principal.FindAll(claimType))
+            {
+                if (!string.IsNullOrWhiteSpace(claim.Value))
+                {
+                    result.Add(new Sid(claim.Value.Trim()));
+                }
+            }
+        }
+
+        return result;
     }
 
     public static HashSet<Sid> GetGroupSids(this System.Security.Claims.ClaimsPrincipal? principal)

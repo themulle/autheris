@@ -57,6 +57,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             ArrayConstructorExpression arr => VisitArrayConstructorExpression(arr),
             SubscriptExpression sub => VisitSubscriptExpression(sub),
             ExtractExpression ext => VisitExtractExpression(ext),
+            ParenthesizedExpression paren => VisitParenthesizedExpression(paren),
             TrustedSqlExpression trusted => trusted,
             TypedLiteralExpression typed => typed,
             CurrentDateTimeExpression current => current,
@@ -272,6 +273,13 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     public virtual SqlNode VisitParameterReference(ParameterReference node) => node;
 
     public virtual SqlNode VisitLiteralExpression(LiteralExpression node) => node;
+
+    public virtual SqlNode VisitParenthesizedExpression(ParenthesizedExpression node)
+    {
+        var expr = (Expression)Visit(node.Expression);
+        if (expr == node.Expression) return node;
+        return node with { Expression = expr };
+    }
 
     public virtual SqlNode VisitBinaryExpression(BinaryExpression node)
     {

@@ -322,6 +322,9 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
             Equals(l1.Value?.ToString(), l2.Value?.ToString()))
             return true;
 
+        if (expr is ParenthesizedExpression p)
+            return IsTrue(p.Expression);
+
         return false;
     }
 
@@ -336,6 +339,9 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
             !Equals(l1.Value?.ToString(), l2.Value?.ToString()))
             return true;
 
+        if (expr is ParenthesizedExpression p)
+            return IsFalse(p.Expression);
+
         return false;
     }
 
@@ -346,6 +352,9 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
 
         return (a, b) switch
         {
+            (ParenthesizedExpression p1, ParenthesizedExpression p2) =>
+                StructuralEquals(p1.Expression, p2.Expression),
+
             (ColumnReference c1, ColumnReference c2) =>
                 c1.Name.NormalizedName.Equals(c2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase),
 

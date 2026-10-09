@@ -362,12 +362,12 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
                 continue;
             }
 
-            // EX-01 / E-06: four-eyes, Art. 9, HIGH/RESTRICTED or tables with sensitive columns are never auto-granted.
+            // EX-01 / E-06 / SG-12: four-eyes, Art. 9, HIGH/RESTRICTED, inactive tables or tables with sensitive columns are never auto-granted.
             if (consent.Effect == ConsentEffect.Allow &&
-                (!tableMetadataMap.TryGetValue(consent.TableIdentifier, out var targetTableMeta) || IsExcludedFromAutoGrant(targetTableMeta)))
+                (!tableMetadataMap.TryGetValue(consent.TableIdentifier, out var targetTableMeta) || !targetTableMeta.Table.IsActive || IsExcludedFromAutoGrant(targetTableMeta)))
             {
                 _logger.LogWarning(
-                    "OpenMetadata sync skipped automatic allow consent for sensitive table '{Table}' ({GranteeType} '{Grantee}'): table requires four-eyes approval (Article 9 / HIGH / RESTRICTED / sensitive columns).",
+                    "OpenMetadata sync skipped automatic allow consent for sensitive or inactive table '{Table}' ({GranteeType} '{Grantee}'): table is inactive or requires four-eyes approval (Article 9 / HIGH / RESTRICTED / sensitive columns).",
                     consent.TableIdentifier, consent.GranteeType, key.Grantee);
                 continue;
             }

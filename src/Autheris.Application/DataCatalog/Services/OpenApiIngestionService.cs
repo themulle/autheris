@@ -4,26 +4,33 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 public sealed class OpenApiIngestionService : IOpenApiIngestionService
 {
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly ILogger<OpenApiIngestionService> _logger;
+    private readonly IOptions<GatewayOptions>? _options;
 
     public OpenApiIngestionService(
         ITableMetadataRepository metadataRepository,
-        ILogger<OpenApiIngestionService> logger)
+        ILogger<OpenApiIngestionService> logger,
+        IOptions<GatewayOptions>? options = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _options = options;
     }
 
     public async Task<OpenApiIngestionResult> IngestOpenApiStreamAsync(
@@ -61,8 +68,42 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
             var firstServer = servers.EnumerateArray().FirstOrDefault();
             if (firstServer.ValueKind == JsonValueKind.Object && firstServer.TryGetProperty("url", out var urlProp))
             {
-                serverUrl = urlProp.GetString() ?? serverUrl;
+                var candidate = urlProp.GetString();
+                if (!string.IsNullOrWhiteSpace(candidate))
+                {
+                    serverUrl = candidate;
+                }
             }
+        }
+
+        // SG-11: Validate serverUrl against URI format and outbound egress security policy
+        if (!Uri.TryCreate(serverUrl, UriKind.Absolute, out var parsedServerUri) ||
+            (parsedServerUri.Scheme != Uri.UriSchemeHttp && parsedServerUri.Scheme != Uri.UriSchemeHttps))
+        {
+            return new OpenApiIngestionResult(
+                Success: false,
+                ServiceTitle: title,
+                IngestedTablesCount: 0,
+                IngestedColumnsCount: 0,
+                IngestedTableNames: [],
+                Warnings: [$"Invalid server URL '{serverUrl}'. Must be an absolute HTTP or HTTPS URL."]
+            );
+        }
+
+        try
+        {
+            EgressUrlPolicy.ValidateStatic(parsedServerUri, isDev: false, enforceHttps: false);
+        }
+        catch (SecurityException ex)
+        {
+            return new OpenApiIngestionResult(
+                Success: false,
+                ServiceTitle: title,
+                IngestedTablesCount: 0,
+                IngestedColumnsCount: 0,
+                IngestedTableNames: [],
+                Warnings: [$"Server URL '{serverUrl}' violates outbound egress security policy: {ex.Message}"]
+            );
         }
 
         var warnings = new List<string>();
@@ -181,6 +222,24 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                 var tableName = schemaName.ToLowerInvariant();
                 var tableId = new TableIdentifier(domain, "api", tableName);
 
+                // SEC M-30 / SG-11: New tables are created with IsActive = false so they must be reviewed/activated.
+                var existing = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+                var effectiveColumns = columns;
+                var isActive = false;
+
+                if (existing != null)
+                {
+                    // SG-11: Bei bestehenden Tabellen keine neuen Spalten zulassen (Phantomspalten-Schutz)
+                    var existingColNames = new HashSet<string>(existing.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
+                    effectiveColumns = columns.Where(c => existingColNames.Contains(c.ColumnName)).ToList();
+                    var ignoredColsCount = columns.Count - effectiveColumns.Count;
+                    if (ignoredColsCount > 0)
+                    {
+                        warnings.Add($"Schema '{schemaName}': {ignoredColsCount} new column(s) were ignored because adding columns to existing tables via OpenAPI ingestion is not permitted.");
+                    }
+                    isActive = existing.Table.IsActive;
+                }
+
                 var tableMetadata = new TableMetadata
                 {
                     Identifier = tableId,
@@ -193,6 +252,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                         LongDescription = schemaLongDesc,
                         DocumentationSource = "OpenApi",
                         DataSourceType = DataSourceType.HttpDeclarative,
+                        IsActive = isActive,
                         HttpEndpoint = new HttpEndpointDescriptor
                         {
                             BaseUrl = serverUrl,
@@ -201,14 +261,13 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                             AuthMode = HttpAuthMode.None
                         }
                     },
-                    Columns = columns,
+                    Columns = effectiveColumns,
                     PrimaryKeyColumns = primaryKeys
                 };
 
                 // SEC M-30: an OpenAPI (re-)ingestion must never weaken governance of an existing table
                 // (RequiresFourEyes, Sensitivity, IsActive, column IsSensitive, masking rules) nor re-route it
                 // (DataSourceType / HttpEndpoint of existing tables are preserved).
-                var existing = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
                 if (existing != null)
                 {
                     tableMetadata = CatalogGovernanceRatchet.Merge(tableMetadata, existing);

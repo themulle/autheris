@@ -24,10 +24,49 @@ public static class EntraTokenPolicy
             return null;
         }
 
-        // Delegated Entra tokens always carry scp; only tokens without it can be app-only.
+        // SG-08: Check for scopes (scp) and roles (roles).
         var scopes = TokenAccessScope.GetScopes(principal);
+        var roles = principal.FindAll(options.RolesClaimType ?? "roles")
+            .Concat(principal.FindAll(ClaimTypes.Role))
+            .Select(c => c.Value)
+            .ToList();
+
+        // 1. Tokens without scp and without roles cannot access the API.
+        // Also detects and rejects ID-tokens passed as access tokens (which lack scp/roles).
+        if (scopes.Count == 0 && roles.Count == 0)
+        {
+            return "Token without scopes ('scp') or roles ('roles') is not accepted as an API access token.";
+        }
+
+        // 2. Reject ID tokens explicitly: if token has 'nonce' claim typical of ID tokens.
+        if (principal.HasClaim(c => c.Type == "nonce"))
+        {
+            return "ID tokens are not accepted as access tokens.";
+        }
+
+        // Delegated Entra tokens always carry scp; only tokens without it can be app-only.
         if (scopes.Count == 0 && subjectResolver.ResolveSubject(principal).Type == SubjectType.ServicePrincipal)
         {
+            // App-only tokens must have at least one application role assigned
+            if (roles.Count == 0)
+            {
+                return "App-only tokens require an assigned application role ('roles').";
+            }
+
+            // Client ID allowlist check (if configured)
+            if (options.AllowedClientIds.Count > 0)
+            {
+                var clientId = principal.FindFirst("azp")?.Value
+                    ?? principal.FindFirst("appid")?.Value
+                    ?? principal.FindFirst("client_id")?.Value;
+
+                if (string.IsNullOrWhiteSpace(clientId) ||
+                    !options.AllowedClientIds.Contains(clientId, StringComparer.OrdinalIgnoreCase))
+                {
+                    return $"Client application '{clientId}' is not in the list of allowed app-only clients.";
+                }
+            }
+
             switch (options.AppOnlyTokens)
             {
                 case AppOnlyTokenAccess.Deny:

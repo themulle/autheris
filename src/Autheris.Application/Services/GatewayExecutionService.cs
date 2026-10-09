@@ -477,9 +477,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             // such mismatches with 403 in SecurityContextResolutionMiddleware.
         }
 
-        // Verify table existence in metadata catalog
+        // Verify table existence in metadata catalog (SG-12: inactive tables treated as not found)
         var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct);
-        if (metadata == null)
+        if (metadata == null || !metadata.Table.IsActive)
         {
             throw new TableNotFoundException(table);
         }
@@ -919,7 +919,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         var userSid = userSidNullable.Value;
 
         var metadata = await _metadataRepository.GetTableMetadataAsync(table, ct);
-        if (metadata == null)
+        if (metadata == null || !metadata.Table.IsActive)
         {
             return TableAccessDecision.Denied(table, $"Table '{table}' not found in metadata catalog.");
         }
@@ -956,8 +956,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         if (!decision.IsAllowed)
         {
             LastDispatchedChildQueryCount = 0;
-            return invoiceIds?.Distinct().ToDictionary(id => id, _ => new List<InvoiceItemRecord>())
-                   ?? new Dictionary<string, List<InvoiceItemRecord>>();
+            return new Dictionary<string, List<InvoiceItemRecord>>();
         }
 
         if (invoiceIds == null || invoiceIds.Count == 0)
@@ -967,10 +966,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
 
         var metadata = await _metadataRepository.GetTableMetadataAsync(childTableId, ct);
-        if (metadata == null)
+        if (metadata == null || !metadata.Table.IsActive)
         {
             LastDispatchedChildQueryCount = 0;
-            return invoiceIds.Distinct().ToDictionary(id => id, _ => new List<InvoiceItemRecord>());
+            return new Dictionary<string, List<InvoiceItemRecord>>();
         }
 
         var executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
