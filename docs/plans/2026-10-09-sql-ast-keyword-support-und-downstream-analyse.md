@@ -554,9 +554,9 @@ flowchart LR
 | **Gesamtaufwand** | **2.0 Personentage** | **Sehr gering** | **AST-Compiler & Dialektgeneratoren** |
 
 ### 6.3 Definition of Done (DoD)
-- [ ] Alle Unit-Tests für AP-1 bis AP-4 implementiert und grün.
-- [ ] Gesamte Testsuite in `autheris/tests/TrinoSqlEngine.Tests` (1.400+ Tests) läuft mit 0 Fehlern durch.
-- [ ] Kein silent dropping von SQL-Konstrukten im gesamten AST-Builder.
-- [ ] 0 Compiler-Warnungen (`TreatWarningsAsErrors=true`).
-- [ ] Dokumentation und Gesamtübersicht in `docs/plans/00-gesamtplan-uebersicht.md` aktualisiert.
+- [x] Alle Unit-Tests für AP-1 bis AP-4 implementiert und grün.
+- [x] Gesamte Testsuite in `autheris/tests/TrinoSqlEngine.Tests` (1.421 Tests) läuft mit 0 Fehlern durch.
+- [x] Kein silent dropping von SQL-Konstrukten im gesamten AST-Builder (`TABLESAMPLE`, `PIVOT`, `MATCH_RECOGNIZE`).
+- [x] 0 Compiler-Warnungen (`TreatWarningsAsErrors=true`).
+- [x] Dokumentation und Gesamtübersicht in `docs/plans/00-gesamtplan-uebersicht.md` aktualisiert.
 
