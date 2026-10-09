@@ -20,6 +20,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-API-04** | Upstream Web API & Microservice Ingestion via OpenAPI | [f-api-04-openapi-ingestion.md](f-api-04-openapi-ingestion.md) |
 | **F-API-07** | Canonical System Metadata & Monitoring Schema ($system) | [f-api-07-system-metadata-monitoring.md](f-api-07-system-metadata-monitoring.md) |
 | **F-ARCH-10** | Standardized Connector SPI (Trino Pattern) | [f-arch-10-connector-spi.md](f-arch-10-connector-spi.md) |
+| **F-AUDIT-01** | Hardened Cryptographic Audit & Asymmetric KMS Anchors (AU-01..19) | [f-audit-01-hardened-cryptographic-audit.md](f-audit-01-hardened-cryptographic-audit.md) |
 | **F-AUTH-DX** | Basic Auth with Cookie Session and Developer Helpers (Development / internal test environments) | [f-auth-dx-basic-auth-session.md](f-auth-dx-basic-auth-session.md) |
 | **F-CDC-02** | Native MSSQL Change Tracking Ingestion Provider | [f-cdc-02-mssql-change-tracking.md](f-cdc-02-mssql-change-tracking.md) |
 | **F-CDC-03** | Zero-Kafka PostgreSQL CDC via Logical Streaming Replication | [f-cdc-03-zero-kafka-postgresql-cdc.md](f-cdc-03-zero-kafka-postgresql-cdc.md) |
@@ -31,12 +32,17 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DBT-2** | dbt Model Contract Enforcement & Breaking-Change CI Gate | [f-dbt-02-contract-enforcement.md](f-dbt-02-contract-enforcement.md) |
 | **F-DBT-3** | Live-Telemetry Exposure Publisher | [f-dbt-03-telemetry-exposures.md](f-dbt-03-telemetry-exposures.md) |
 | **F-DBT-4** | Zero-Touch dbt Cloud & Orchestrator Webhook Integration | [f-dbt-04-orchestrator-webhooks.md](f-dbt-04-orchestrator-webhooks.md) |
+| **F-DBT-05** | Streaming dbt Metadata Ingestion & Automated Model Sync | [f-dbt-05-streaming-metadata-ingestion.md](f-dbt-05-streaming-metadata-ingestion.md) |
 | **F-DBT-6** | Policy & RLS Auto-Sync from dbt Metadata | [f-dbt-06-policy-rls-sync.md](f-dbt-06-policy-rls-sync.md) |
+| **F-DIALECT-01** | Multi-Target SQL AST Compiler & Native Dialect Pushdown | [f-dialect-01-ast-target-dialect-pushdown.md](f-dialect-01-ast-target-dialect-pushdown.md) |
 | **F-DOC-01** | Omnichannel Semantic Documentation Passthrough | [f-doc-01-omnichannel-documentation.md](f-doc-01-omnichannel-documentation.md) |
 | **F-DX-01** | Zero-Config Developer Quickstart & Dev Portal Hub | [f-dx-01-developer-quickstart.md](f-dx-01-developer-quickstart.md) |
 | **F-GOV-06** | Multi-Stage Pushdown Cascades & Cross-Domain Joins (not implemented) | [f-gov-06-cross-domain-joins.md](f-gov-06-cross-domain-joins.md) |
 | **F-GOV-08** | Dynamic Schema Contracts & Tag-Based Projection (@tag) | [f-gov-08-schema-contracts-tag-projection.md](f-gov-08-schema-contracts-tag-projection.md) |
 | **F-GOV-09** | Virtual Filters (Relation-Scoped Cross-Channel Mandatory Row Filtering) | [f-gov-09-virtual-filters.md](f-gov-09-virtual-filters.md) |
+| **F-GOV-11** | Declarative Access Profiles & Person-Based Plaintext Exceptions (R-52) | [f-gov-11-declarative-access-profiles.md](f-gov-11-declarative-access-profiles.md) |
+| **F-GOV-12** | Multi-Engine Governance Database Storage (MSSQL, PostgreSQL, SQLite) | [f-gov-12-multi-engine-governance-storage.md](f-gov-12-multi-engine-governance-storage.md) |
+| **F-MASK-02** | Extended Column Masking Engine (GEO_JITTER, PARTIAL_MASK, TOKENIZATION) | [f-mask-02-extended-masking-engine.md](f-mask-02-extended-masking-engine.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |
 | **F-OPS-01** | AST-Aware Production Traffic Shadowing & Dark Replay | [f-ops-01-traffic-shadowing-dark-replay.md](f-ops-01-traffic-shadowing-dark-replay.md) |
 | **F-PERF-08** | Hierarchical Resource Groups & Workload Queuing | [f-perf-08-hierarchical-resource-groups.md](f-perf-08-hierarchical-resource-groups.md) |
