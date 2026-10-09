@@ -76,6 +76,29 @@ public sealed class RedisEventBus : IEventBus, IDisposable
         }
     }
 
+    public async Task<long> GetCounterAsync(string key, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        try
+        {
+            var db = _multiplexer.GetDatabase();
+            var fullKey = $"{_prefix}{key}";
+            var val = await db.StringGetAsync(fullKey).ConfigureAwait(false);
+            if (val.IsNullOrEmpty)
+            {
+                return 0L;
+            }
+            return (long)val;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to get Redis counter {Key}", key);
+            throw;
+        }
+    }
+
     public IDisposable Subscribe<T>(string channel, Func<T, Task> handler)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

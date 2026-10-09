@@ -100,20 +100,7 @@ public sealed class TableAccessPolicy
     private readonly ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (IReadOnlyList<AccessProfile> Profiles, DateTimeOffset ExpireAt)> _profileCache = new();
-    private static Microsoft.Extensions.Caching.Memory.IMemoryCache? s_activeMemoryCache;
-
-    public static void InvalidateCache(TenantId tenant, string subject, Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null)
-    {
-        var cacheKey = $"access_profile:{tenant.Value}:{subject}";
-        _profileCache.TryRemove(cacheKey, out _);
-        (memoryCache ?? s_activeMemoryCache)?.Remove(cacheKey);
-    }
-
-    public static void ClearCache()
-    {
-        _profileCache.Clear();
-    }
+    private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
 
     /// <param name="mandatoryFilters">
     /// Virtual filters; required on purpose: a decision point without it would silently skip them. Use
@@ -130,7 +117,8 @@ public sealed class TableAccessPolicy
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver mandatoryFilters,
         ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
-        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null)
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
     {
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -143,9 +131,17 @@ public sealed class TableAccessPolicy
         _contractManager = contractManager;
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache;
-        if (memoryCache != null)
+        if (accessProfileCache != null)
         {
-            s_activeMemoryCache = memoryCache;
+            _accessProfileCache = accessProfileCache;
+        }
+        else if (accessProfileRepository != null)
+        {
+            _accessProfileCache = new Autheris.Application.Policy.Services.AccessProfileCache(
+                accessProfileRepository,
+                clusterState: null,
+                memoryCache ?? new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
+                options != null ? Microsoft.Extensions.Options.Options.Create(options) : null);
         }
     }
 
@@ -223,7 +219,16 @@ public sealed class TableAccessPolicy
         }
 
         var consentBypassed = _options?.IsConsentBypassed == true;
-        var profile = await ResolveActiveAccessProfileAsync(query, ct).ConfigureAwait(false);
+        AccessProfile? profile;
+        try
+        {
+            profile = await ResolveActiveAccessProfileAsync(query, ct).ConfigureAwait(false);
+        }
+        catch (Autheris.Application.Policy.Exceptions.AccessProfileSourceUnavailableException ex)
+        {
+            return TableAccessDecision.Denied(table, $"Access profile source unavailable (fail-closed): {ex.Message}");
+        }
+
         TableAccessDecision decision;
         if (profile != null)
         {
@@ -535,7 +540,7 @@ public sealed class TableAccessPolicy
 
     private async Task<AccessProfile?> ResolveActiveAccessProfileAsync(TableAccessQuery query, CancellationToken ct)
     {
-        if (_accessProfileRepository == null)
+        if (_accessProfileCache == null && _accessProfileRepository == null)
         {
             return null;
         }
@@ -548,43 +553,37 @@ public sealed class TableAccessPolicy
         }
 
         IReadOnlyList<AccessProfile>? profiles = null;
-        var cacheKey = $"access_profile:{tenant.Value}:{subject}";
-
-        if (_memoryCache != null)
+        if (_accessProfileCache != null)
         {
-            if (_memoryCache.TryGetValue(cacheKey, out var cachedObj) && cachedObj is IReadOnlyList<AccessProfile> cachedProfiles)
+            profiles = await _accessProfileCache.GetProfilesAsync(tenant, subject, ct).ConfigureAwait(false);
+            if ((profiles == null || profiles.Count == 0) && query.AllUserSids != null && query.AllUserSids.Count > 0)
             {
-                profiles = cachedProfiles;
-            }
-            else
-            {
-                profiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenant, subject, ct).ConfigureAwait(false);
-                using var entry = _memoryCache.CreateEntry(cacheKey);
-                entry.Value = profiles;
-                entry.Size = 1;
-                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5);
+                foreach (var altSid in query.AllUserSids)
+                {
+                    if (altSid.Value == subject) continue;
+                    var altProfiles = await _accessProfileCache.GetProfilesAsync(tenant, altSid.Value, ct).ConfigureAwait(false);
+                    if (altProfiles.Count > 0)
+                    {
+                        profiles = altProfiles;
+                        break;
+                    }
+                }
             }
         }
-        else if (_profileCache.TryGetValue(cacheKey, out var entry) && entry.ExpireAt > DateTimeOffset.UtcNow)
-        {
-            profiles = entry.Profiles;
-        }
-        else
+        else if (_accessProfileRepository != null)
         {
             profiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenant, subject, ct).ConfigureAwait(false);
-            _profileCache[cacheKey] = (profiles, DateTimeOffset.UtcNow.AddMinutes(5));
-        }
-
-        if ((profiles == null || profiles.Count == 0) && query.AllUserSids != null && query.AllUserSids.Count > 0)
-        {
-            foreach (var altSid in query.AllUserSids)
+            if ((profiles == null || profiles.Count == 0) && query.AllUserSids != null && query.AllUserSids.Count > 0)
             {
-                if (altSid.Value == subject) continue;
-                var altProfiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenant, altSid.Value, ct).ConfigureAwait(false);
-                if (altProfiles.Count > 0)
+                foreach (var altSid in query.AllUserSids)
                 {
-                    profiles = altProfiles;
-                    break;
+                    if (altSid.Value == subject) continue;
+                    var altProfiles = await _accessProfileRepository.GetProfilesForSubjectAsync(tenant, altSid.Value, ct).ConfigureAwait(false);
+                    if (altProfiles.Count > 0)
+                    {
+                        profiles = altProfiles;
+                        break;
+                    }
                 }
             }
         }

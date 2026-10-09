@@ -274,7 +274,7 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<IRateLimiterService, InMemoryRateLimiterService>();
             services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
             services.AddSingleton<ITokenRevocationService, InMemoryTokenRevocationService>(); // SEC M-14 (GAP-B)
-            services.AddSingleton<Autheris.Application.State.IDistributedClusterStateProvider, Autheris.Infrastructure.State.InMemoryClusterStateProvider>();
+            services.AddSingleton<Autheris.Application.State.IDistributedClusterStateProvider, Autheris.Application.State.InMemoryClusterStateProvider>();
         }
 
         services.AddSingleton<IEpochValidationService, EpochValidationService>();
@@ -333,6 +333,7 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<IAccessProfileRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
         }
+        services.AddSingleton<Autheris.Application.Policy.Interfaces.IAccessProfileCache, Autheris.Application.Policy.Services.AccessProfileCache>();
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
         services.AddSingleton<IDbtHealthCircuitBreaker, DbtHealthCircuitBreaker>();
         services.AddSingleton<IOpenApiCacheManager, OpenApiCacheManager>();

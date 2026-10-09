@@ -1,17 +1,16 @@
-namespace Autheris.Infrastructure.State;
+namespace Autheris.Application.State;
 
 using System;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.State;
 
 /// <summary>
 /// K-K14: In-Memory reference implementation of IDistributedClusterStateProvider.
 /// Used for single-node deployments, dev environments, and integration tests.
 /// </summary>
-public sealed class InMemoryClusterStateProvider : IDistributedClusterStateProvider
+public class InMemoryClusterStateProvider : IDistributedClusterStateProvider
 {
     private sealed record Entry(string Serialized, DateTimeOffset ExpiresAt);
 
@@ -42,7 +41,7 @@ public sealed class InMemoryClusterStateProvider : IDistributedClusterStateProvi
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentNullException.ThrowIfNull(value);
 
-        var expiresAt = DateTimeOffset.UtcNow.Add(ttl);
+        var expiresAt = (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue) ? DateTimeOffset.MaxValue : DateTimeOffset.UtcNow.Add(ttl);
         var serialized = JsonSerializer.Serialize(value);
         _store[key] = new Entry(serialized, expiresAt);
 
@@ -60,12 +59,13 @@ public sealed class InMemoryClusterStateProvider : IDistributedClusterStateProvi
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
         long result = 0;
+        var expiresAt = (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue) ? DateTimeOffset.MaxValue : DateTimeOffset.UtcNow.Add(ttl);
         _store.AddOrUpdate(
             key,
             _ =>
             {
                 result = delta;
-                return new Entry(delta.ToString(System.Globalization.CultureInfo.InvariantCulture), DateTimeOffset.UtcNow.Add(ttl));
+                return new Entry(delta.ToString(System.Globalization.CultureInfo.InvariantCulture), expiresAt);
             },
             (_, existing) =>
             {
@@ -74,10 +74,48 @@ public sealed class InMemoryClusterStateProvider : IDistributedClusterStateProvi
                 result = current + delta;
                 return new Entry(
                     result.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    live ? existing.ExpiresAt : DateTimeOffset.UtcNow.Add(ttl));
+                    live ? existing.ExpiresAt : expiresAt);
             });
 
         return ValueTask.FromResult<long?>(result);
+    }
+
+    private readonly object _budgetLock = new();
+
+    public ValueTask<(BudgetConsumeOutcome Outcome, long ConsumedAfter)> TryConsumeBudgetAsync(
+        string key, long cost, long limit, TimeSpan ttl, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+
+        lock (_budgetLock)
+        {
+            var now = DateTimeOffset.UtcNow;
+            long current = 0;
+            DateTimeOffset expiresAt = (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue) ? DateTimeOffset.MaxValue : now.Add(ttl);
+
+            if (_store.TryGetValue(key, out var existing))
+            {
+                if (existing.ExpiresAt > now)
+                {
+                    if (long.TryParse(existing.Serialized, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
+                    {
+                        current = parsed;
+                    }
+                    expiresAt = existing.ExpiresAt;
+                }
+            }
+
+            if (current + cost <= limit)
+            {
+                var newTotal = current + cost;
+                _store[key] = new Entry(newTotal.ToString(System.Globalization.CultureInfo.InvariantCulture), expiresAt);
+                return ValueTask.FromResult((BudgetConsumeOutcome.Consumed, newTotal));
+            }
+            else
+            {
+                return ValueTask.FromResult((BudgetConsumeOutcome.Exhausted, current));
+            }
+        }
     }
 
     public async ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default)

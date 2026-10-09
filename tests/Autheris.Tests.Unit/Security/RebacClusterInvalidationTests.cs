@@ -35,7 +35,7 @@ public sealed class RebacClusterInvalidationTests
         (await replicaB.CheckAsync(check)).Allowed.ShouldBeTrue(); // B caches ALLOW
 
         await store.DeleteTupleAsync(tuple);
-        replicaA.InvalidateTenantCache("tenant-a");                 // revocation handled on A
+        await replicaA.InvalidateTenantCacheAsync("tenant-a");                 // revocation handled on A
 
         var deadline = DateTime.UtcNow.AddSeconds(5);
         bool allowedOnB;
