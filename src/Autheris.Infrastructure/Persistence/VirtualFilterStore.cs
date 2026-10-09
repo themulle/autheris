@@ -8,7 +8,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Virtual filters: storage shared by the SQLite and PostgreSQL governance repositories (portable SQL: ON CONFLICT,
+/// Virtual filters: storage shared by the SQLite and PostgreSQL governance repositories (portable SQL: ON CONFLICT, MERGE on SQL Server,
 /// named parameters). Definitions are stored as JSON with their hash; a change set is one transaction and increments
 /// the generation once.
 /// </summary>
@@ -72,10 +72,18 @@ internal static class VirtualFilterStore
             return;
         }
 
+        var sqlServer = connection is Microsoft.Data.SqlClient.SqlConnection;
         await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         foreach (var filter in changes.SaveFilters)
         {
-            await ExecuteAsync(connection, tx, @"
+            await ExecuteAsync(connection, tx, sqlServer ? @"
+                MERGE VIRTUAL_FILTERS WITH (HOLDLOCK) AS t
+                USING (SELECT @tenant AS tenant_id, @name AS name) AS s ON t.tenant_id = s.tenant_id AND t.name = s.name
+                WHEN MATCHED THEN UPDATE SET
+                    source = @source, definition_json = @json, definition_hash = @hash,
+                    managed_path = @path, managed_commit = @commit, updated_by = @by, updated_at = @at
+                WHEN NOT MATCHED THEN INSERT (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
+                    VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at);" : @"
                 INSERT INTO VIRTUAL_FILTERS (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
                 VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at)
                 ON CONFLICT (tenant_id, name) DO UPDATE SET
@@ -98,7 +106,14 @@ internal static class VirtualFilterStore
 
         foreach (var profile in changes.SaveProfiles)
         {
-            await ExecuteAsync(connection, tx, @"
+            await ExecuteAsync(connection, tx, sqlServer ? @"
+                MERGE ACCESS_PROFILES WITH (HOLDLOCK) AS t
+                USING (SELECT @tenant AS tenant_id, @name AS name) AS s ON t.tenant_id = s.tenant_id AND t.name = s.name
+                WHEN MATCHED THEN UPDATE SET
+                    definition_json = @json, definition_hash = @hash,
+                    managed_path = @path, managed_commit = @commit, updated_by = @by, updated_at = @at
+                WHEN NOT MATCHED THEN INSERT (id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
+                    VALUES (@id, @tenant, @name, @json, @hash, @path, @commit, @by, @at);" : @"
                 INSERT INTO ACCESS_PROFILES (id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
                 VALUES (@id, @tenant, @name, @json, @hash, @path, @commit, @by, @at)
                 ON CONFLICT (tenant_id, name) DO UPDATE SET

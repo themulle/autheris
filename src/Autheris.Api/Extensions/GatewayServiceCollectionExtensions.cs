@@ -142,11 +142,11 @@ public static class GatewayServiceCollectionExtensions
                 "NF-SEC-03 violation: Outside Development, HmacSecretKeyVaultRef must be a valid Key Vault secret reference.")
             .Validate(opts =>
                 IsSupportedGovernanceDbProvider(opts.GovernanceDb.Provider),
-                "The GovernanceDb provider currently supports only 'Sqlite' or 'PostgreSql'.")
+                "The GovernanceDb provider currently supports only 'Sqlite', 'PostgreSql' or 'SqlServer'.")
             .Validate(opts =>
                 !(opts.HighAvailability.MultiNodeClusterMode || opts.HighAvailability.Replicas > 1) ||
                 !DataSourceProvider.Is(opts.GovernanceDb.Provider, DatabaseDialect.Sqlite),
-                "Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' for cluster operation.")
+                "Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.")
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.OpenMetadata.Enabled ||
                 (Uri.TryCreate(opts.OpenMetadata.ServerUrl, UriKind.Absolute, out var uri) && string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)) ||
@@ -294,6 +294,21 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+        }
+        else if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.SqlServer))
+        {
+            services.AddSingleton<SqlServerGovernanceRepository>();
+            services.AddSingleton<IGovernanceRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<ITableMetadataRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<IConsentRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<IAuditLogRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<IPolicyEpochRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<IConsentApprovalRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterRepository>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
+            services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqlServerGovernanceRepository>());
         }
         else
         {
@@ -1572,19 +1587,19 @@ public static class GatewayServiceCollectionExtensions
 
         if (!IsSupportedGovernanceDbProvider(options.GovernanceDb.Provider))
         {
-            throw new ValidationException($"GovernanceDb provider '{options.GovernanceDb.Provider}' is not supported. Allowed values are 'Sqlite' or 'PostgreSql'.");
+            throw new ValidationException($"GovernanceDb provider '{options.GovernanceDb.Provider}' is not supported. Allowed values are 'Sqlite', 'PostgreSql' or 'SqlServer'.");
         }
 
         if ((options.HighAvailability.MultiNodeClusterMode || options.HighAvailability.Replicas > 1) &&
             DataSourceProvider.Is(options.GovernanceDb.Provider, DatabaseDialect.Sqlite))
         {
-            throw new ValidationException("Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' for cluster operation.");
+            throw new ValidationException("Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.");
         }
     }
 
-    /// <summary>Architecture 5: the governance store runs on SQLite or PostgreSQL, under any provider alias.</summary>
+    /// <summary>Architecture 5: the governance store runs on SQLite, PostgreSQL or SQL Server, under any provider alias.</summary>
     private static bool IsSupportedGovernanceDbProvider(string? provider) =>
-        DataSourceProvider.Is(provider, DatabaseDialect.Sqlite) || DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql);
+        DataSourceProvider.Is(provider, DatabaseDialect.Sqlite) || DataSourceProvider.Is(provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(provider, DatabaseDialect.SqlServer);
 
     private static bool IsTruthy(string? value)
     {

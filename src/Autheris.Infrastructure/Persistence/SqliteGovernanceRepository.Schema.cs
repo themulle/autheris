@@ -58,6 +58,8 @@ public partial class SqliteGovernanceRepository
             }
         }
 
+        DeduplicateDataOwnersBeforeIndex(_connection);
+
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS TABLES (
@@ -938,6 +940,82 @@ public partial class SqliteGovernanceRepository
         {
             idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_audit_tenant_id ON AUDIT_LOG_ENTRIES (tenant_id, occurred_at);";
             idxCmd.ExecuteNonQuery();
+        }
+    }
+
+    private void DeduplicateDataOwnersBeforeIndex(SqliteConnection connection)
+    {
+        try
+        {
+            using var checkCmd = connection.CreateCommand();
+            checkCmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='DATA_OWNERS';";
+            if (checkCmd.ExecuteScalar() == null) return;
+
+            using var dupCmd = connection.CreateCommand();
+            dupCmd.CommandText = "SELECT ad_sid FROM DATA_OWNERS WHERE ad_sid IS NOT NULL AND ad_sid != '' GROUP BY ad_sid HAVING COUNT(*) > 1;";
+            var duplicateSids = new List<string>();
+            using (var reader = dupCmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    duplicateSids.Add(reader.GetString(0));
+                }
+            }
+
+            if (duplicateSids.Count == 0) return;
+
+            _logger?.LogWarning("Found {Count} duplicate ad_sid values in DATA_OWNERS; merging duplicates before applying unique constraint (B-05).", duplicateSids.Count);
+
+            foreach (var sid in duplicateSids)
+            {
+                using var fetchCmd = connection.CreateCommand();
+                fetchCmd.CommandText = "SELECT id, is_active FROM DATA_OWNERS WHERE ad_sid = @sid ORDER BY is_active DESC, rowid ASC;";
+                fetchCmd.Parameters.AddWithValue("@sid", sid);
+                var rows = new List<(string id, long active)>();
+                using (var reader = fetchCmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        rows.Add((reader.GetString(0), reader.GetInt64(1)));
+                    }
+                }
+
+                if (rows.Count <= 1) continue;
+
+                var primaryId = rows[0].id;
+                for (int i = 1; i < rows.Count; i++)
+                {
+                    var secondaryId = rows[i].id;
+                    _logger?.LogInformation("Merging duplicate DATA_OWNERS id '{SecondaryId}' into primary id '{PrimaryId}' for ad_sid '{Sid}'.", secondaryId, primaryId, sid);
+
+                    using var updateTableOwnersCmd = connection.CreateCommand();
+                    updateTableOwnersCmd.CommandText = @"
+                        UPDATE OR IGNORE TABLE_OWNERS SET data_owner_id = @primaryId WHERE data_owner_id = @secondaryId;
+                        DELETE FROM TABLE_OWNERS WHERE data_owner_id = @secondaryId;
+                    ";
+                    updateTableOwnersCmd.Parameters.AddWithValue("@primaryId", primaryId);
+                    updateTableOwnersCmd.Parameters.AddWithValue("@secondaryId", secondaryId);
+                    updateTableOwnersCmd.ExecuteNonQuery();
+
+                    using var updateDefaultsCmd = connection.CreateCommand();
+                    updateDefaultsCmd.CommandText = @"
+                        UPDATE OR IGNORE DOMAIN_DEFAULTS SET data_owner_id = @primaryId WHERE data_owner_id = @secondaryId;
+                        DELETE FROM DOMAIN_DEFAULTS WHERE data_owner_id = @secondaryId;
+                    ";
+                    updateDefaultsCmd.Parameters.AddWithValue("@primaryId", primaryId);
+                    updateDefaultsCmd.Parameters.AddWithValue("@secondaryId", secondaryId);
+                    try { updateDefaultsCmd.ExecuteNonQuery(); } catch { }
+
+                    using var deleteCmd = connection.CreateCommand();
+                    deleteCmd.CommandText = "DELETE FROM DATA_OWNERS WHERE id = @secondaryId;";
+                    deleteCmd.Parameters.AddWithValue("@secondaryId", secondaryId);
+                    deleteCmd.ExecuteNonQuery();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error while deduplicating DATA_OWNERS table before unique index creation.");
         }
     }
 }

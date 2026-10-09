@@ -91,25 +91,18 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
                 return null;
 
             case "REDACT":
-                if (rawValue is int or long or short or sbyte or byte or uint or ulong or ushort)
+                // B-06: For numeric and temporal types, REDACT returns null (NULLIFY standard) so it is distinguishable from valid zero/epoch
+                if (rawValue is int or long or short or sbyte or byte or uint or ulong or ushort or decimal or double or float)
                 {
-                    return 0;
+                    return null;
                 }
-                if (rawValue is decimal)
+                if (rawValue is DateTime or DateTimeOffset or DateOnly or TimeOnly)
                 {
-                    return 0m;
-                }
-                if (rawValue is double)
-                {
-                    return 0.0;
-                }
-                if (rawValue is float)
-                {
-                    return 0.0f;
+                    return null;
                 }
                 if (rawValue is bool)
                 {
-                    return false;
+                    return null;
                 }
                 return rule.Replacement ?? "REDACTED";
 

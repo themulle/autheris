@@ -558,7 +558,8 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         if (tableMeta.ColumnMaskingRules.TryGetValue(columnName, out var rule))
         {
             var ruleType = rule.RuleType?.ToUpperInvariant() ?? "REDACT";
-            if (ruleType == "NULLIFY")
+            var effectiveDataType = dataType ?? tableMeta.Columns?.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase))?.DataType;
+            if (ruleType == "NULLIFY" || (ruleType == "REDACT" && IsNumericOrTemporalType(effectiveDataType)))
             {
                 maskExpr = "NULL";
             }
@@ -587,6 +588,17 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
     }
 
     private static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;
+
+    private static bool IsNumericOrTemporalType(string? dataType)
+    {
+        if (string.IsNullOrWhiteSpace(dataType)) return false;
+        var dt = dataType.Trim().ToLowerInvariant();
+        if (dt.Contains('(')) dt = dt[..dt.IndexOf('(')].Trim();
+        return dt is "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal"
+            or "money" or "smallmoney" or "real" or "float" or "double precision" or "double"
+            or "bit" or "bool" or "boolean" or "date" or "datetime" or "datetime2" or "smalldatetime"
+            or "timestamp" or "timestamptz" or "time" or "uniqueidentifier" or "uuid";
+    }
 
     /// <summary>
     /// SEC H-13: Derives a tenant-scoped HMAC key id so pseudonyms cannot be correlated across tenants.

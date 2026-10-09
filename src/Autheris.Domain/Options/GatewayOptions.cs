@@ -574,7 +574,7 @@ public sealed class AdfsAuthOptions
 
 public sealed class GovernanceDbOptions
 {
-    public string Provider { get; init; } = "Sqlite"; // "Sqlite" or "PostgreSql" ("Postgres", "PgSql")
+    public string Provider { get; init; } = "Sqlite"; // "Sqlite", "PostgreSql" ("Postgres", "PgSql") or "SqlServer" ("MsSql")
     public string ConnectionString { get; init; } = "Data Source=governance.db;Cache=Shared";
     [Range(1, 60)] public int CommandTimeoutSeconds { get; init; } = 15;
     public bool EnableOutboxProcessor { get; init; } = true;
@@ -582,7 +582,7 @@ public sealed class GovernanceDbOptions
     public string? AuditHmacKeyVaultRef { get; init; }
 
     /// <summary>
-    /// Review PG-7: optional connection string of a separate role that applies the schema (DDL) at startup (PostgreSQL). When set,
+    /// Review PG-7: optional connection string of a separate role that applies the schema (DDL) at startup (PostgreSQL / SQL Server). When set,
     /// the runtime connection string only needs DML rights (INSERT/SELECT on AUDIT_LOG_ENTRIES), so the runtime account cannot
     /// alter or truncate the audit table.
     /// </summary>

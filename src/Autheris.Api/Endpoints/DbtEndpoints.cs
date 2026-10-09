@@ -70,10 +70,13 @@ public static class DbtEndpoints
 
             var dryRun = context.Request.Query.ContainsKey("dryRun") &&
                          bool.TryParse(context.Request.Query["dryRun"], out var dr) && dr;
+            var replace = (context.Request.Query.ContainsKey("replace") &&
+                           bool.TryParse(context.Request.Query["replace"], out var rep) && rep) ||
+                          string.Equals(context.Request.Query["mode"], "replace", StringComparison.OrdinalIgnoreCase);
 
             return await EndpointSecurity.WithBodyLimitAsync(async () =>
             {
-                var result = await dbtService.IngestGovernanceStreamAsync(context.Request.Body, dryRun, context.RequestAborted);
+                var result = await dbtService.IngestGovernanceStreamAsync(context.Request.Body, dryRun, replace, context.RequestAborted);
                 return result.Success ? Results.Ok(result) : Results.BadRequest(result);
             }, governanceTooLarge);
         }).RequireAuthorization()

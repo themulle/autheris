@@ -36,17 +36,25 @@ public sealed class Table
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
 
     /// <summary>Rank of a sensitivity class; unknown classes rank like HIGH (fail-closed). Empty means NORMAL.</summary>
-    public static int SensitivityRank(string? sensitivity) => (sensitivity ?? "NORMAL").Trim().ToUpperInvariant() switch
+    public static int SensitivityRank(string? sensitivity)
     {
-        "" => 1,
-        "LOW" or "PUBLIC" => 0,
-        "NORMAL" or "INTERNAL" => 1,
-        "MEDIUM" => 2,
-        "CONFIDENTIAL" => 3,
-        "HIGH" => 4,
-        "RESTRICTED" or "SECRET" => 5,
-        _ => 4
-    };
+        var s = (sensitivity ?? "NORMAL").Trim().ToUpperInvariant();
+        if (s.Length > 2 && char.IsAsciiDigit(s[0]) && s[1] == '_')
+        {
+            s = s[2..];
+        }
+        return s switch
+        {
+            "" => 1,
+            "LOW" or "PUBLIC" => 0,
+            "NORMAL" or "INTERNAL" => 1,
+            "MEDIUM" => 2,
+            "CONFIDENTIAL" => 3,
+            "HIGH" => 4,
+            "RESTRICTED" or "SECRET" => 5,
+            _ => 4
+        };
+    }
 
     /// <summary>
     /// D-4 (ADR-010): CONFIDENTIAL and above count as highly sensitive (four eyes, shorter consent TTL, degraded mode,

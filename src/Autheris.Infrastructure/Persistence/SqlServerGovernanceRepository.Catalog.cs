@@ -1,11 +1,12 @@
+using System.Data;
 using System.Text.Json;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
-using Npgsql;
+using Microsoft.Data.SqlClient;
 
 namespace Autheris.Infrastructure.Persistence;
 
-public partial class PostgreSqlGovernanceRepository
+public partial class SqlServerGovernanceRepository
 {
     public async Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
     {
@@ -19,7 +20,7 @@ public partial class PostgreSqlGovernanceRepository
         Guid? tableId = null;
         Table? tableEntity = null;
 
-        await using (var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false))
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
         {
             await using (var cmd = conn.CreateCommand())
             {
@@ -138,7 +139,7 @@ public partial class PostgreSqlGovernanceRepository
     {
         var tables = new List<TableIdentifier>();
 
-        await using (var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false))
+        await using (var conn = await OpenConnectionAsync(ct).ConfigureAwait(false))
         {
             await using (var cmd = conn.CreateCommand())
             {
@@ -166,8 +167,8 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
             var tableId = metadata.Table.Id == Guid.Empty ? Guid.NewGuid() : metadata.Table.Id;
@@ -175,9 +176,9 @@ public partial class PostgreSqlGovernanceRepository
             await using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = tx;
-                cmd.CommandText = @"SELECT id, description, long_description, doc_source FROM TABLES
-                                    WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
-                                    FOR UPDATE";
+                // UPDLOCK/ROWLOCK serialise concurrent upserts of the same table (SQL Server equivalent of FOR UPDATE).
+                cmd.CommandText = @"SELECT id, description, long_description, doc_source FROM TABLES WITH (UPDLOCK, ROWLOCK)
+                                    WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
                 cmd.Parameters.AddWithValue("@domain", metadata.Identifier.Domain);
                 cmd.Parameters.AddWithValue("@schema", metadata.Identifier.Schema);
                 cmd.Parameters.AddWithValue("@table", metadata.Identifier.TableName);
@@ -196,23 +197,26 @@ public partial class PostgreSqlGovernanceRepository
             await using (var upsertCmd = conn.CreateCommand())
             {
                 upsertCmd.Transaction = tx;
-                upsertCmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source)
-                                          VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource)
-                                          ON CONFLICT (id) DO UPDATE SET
-                                              source_type = EXCLUDED.source_type,
-                                              source_name = EXCLUDED.source_name,
-                                              schema_name = EXCLUDED.schema_name,
-                                              table_name = EXCLUDED.table_name,
-                                              display_name = EXCLUDED.display_name,
-                                              sensitivity = EXCLUDED.sensitivity,
-                                              requires_four_eyes = EXCLUDED.requires_four_eyes,
-                                              is_active = EXCLUDED.is_active,
-                                              data_source_type = EXCLUDED.data_source_type,
-                                              http_endpoint_json = EXCLUDED.http_endpoint_json,
-                                              plugin_name = EXCLUDED.plugin_name,
-                                              description = COALESCE(EXCLUDED.description, TABLES.description),
-                                              long_description = COALESCE(EXCLUDED.long_description, TABLES.long_description),
-                                              doc_source = COALESCE(EXCLUDED.doc_source, TABLES.doc_source)";
+                upsertCmd.CommandText = @"MERGE TABLES WITH (HOLDLOCK) AS t
+                                          USING (SELECT @id AS id) AS s
+                                          ON t.id = s.id
+                                          WHEN MATCHED THEN UPDATE SET
+                                              source_type = @sourceType,
+                                              source_name = @domain,
+                                              schema_name = @schema,
+                                              table_name = @tableName,
+                                              display_name = @displayName,
+                                              sensitivity = @sensitivity,
+                                              requires_four_eyes = @fourEyes,
+                                              is_active = @active,
+                                              data_source_type = @dst,
+                                              http_endpoint_json = @httpJson,
+                                              plugin_name = @plugin,
+                                              description = COALESCE(@desc, t.description),
+                                              long_description = COALESCE(@longDesc, t.long_description),
+                                              doc_source = COALESCE(@docSource, t.doc_source)
+                                          WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source)
+                                              VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource);";
                 upsertCmd.Parameters.AddWithValue("@id", tableId.ToString());
                 upsertCmd.Parameters.AddWithValue("@sourceType", metadata.Table.SourceType);
                 upsertCmd.Parameters.AddWithValue("@domain", metadata.Identifier.Domain);
@@ -237,7 +241,7 @@ public partial class PostgreSqlGovernanceRepository
                 await using (var findColCmd = conn.CreateCommand())
                 {
                     findColCmd.Transaction = tx;
-                    findColCmd.CommandText = "SELECT id FROM TABLE_COLUMNS WHERE table_id = @tableId AND LOWER(column_name) = LOWER(@columnName) LIMIT 1";
+                    findColCmd.CommandText = "SELECT TOP (1) id FROM TABLE_COLUMNS WHERE table_id = @tableId AND LOWER(column_name) = LOWER(@columnName)";
                     findColCmd.Parameters.AddWithValue("@tableId", tableId.ToString());
                     findColCmd.Parameters.AddWithValue("@columnName", col.ColumnName);
                     var existingColId = await findColCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
@@ -254,15 +258,18 @@ public partial class PostgreSqlGovernanceRepository
                 await using (var insertColCmd = conn.CreateCommand())
                 {
                     insertColCmd.Transaction = tx;
-                    insertColCmd.CommandText = @"INSERT INTO TABLE_COLUMNS (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json)
-                                                VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson)
-                                                ON CONFLICT (id) DO UPDATE SET
-                                                    data_type = EXCLUDED.data_type,
-                                                    is_sensitive = EXCLUDED.is_sensitive,
-                                                    description = COALESCE(EXCLUDED.description, TABLE_COLUMNS.description),
-                                                    long_description = COALESCE(EXCLUDED.long_description, TABLE_COLUMNS.long_description),
-                                                    doc_source = COALESCE(EXCLUDED.doc_source, TABLE_COLUMNS.doc_source),
-                                                    meta_json = COALESCE(EXCLUDED.meta_json, TABLE_COLUMNS.meta_json)";
+                    insertColCmd.CommandText = @"MERGE TABLE_COLUMNS WITH (HOLDLOCK) AS t
+                                                USING (SELECT @id AS id) AS s
+                                                ON t.id = s.id
+                                                WHEN MATCHED THEN UPDATE SET
+                                                    data_type = @dataType,
+                                                    is_sensitive = @isSensitive,
+                                                    description = COALESCE(@description, t.description),
+                                                    long_description = COALESCE(@longDescription, t.long_description),
+                                                    doc_source = COALESCE(@docSource, t.doc_source),
+                                                    meta_json = COALESCE(@metaJson, t.meta_json)
+                                                WHEN NOT MATCHED THEN INSERT (id, table_id, column_name, data_type, is_sensitive, description, long_description, doc_source, meta_json)
+                                                    VALUES (@id, @tableId, @columnName, @dataType, @isSensitive, @description, @longDescription, @docSource, @metaJson);";
                     insertColCmd.Parameters.AddWithValue("@id", colId.ToString());
                     insertColCmd.Parameters.AddWithValue("@tableId", tableId.ToString());
                     insertColCmd.Parameters.AddWithValue("@columnName", col.ColumnName);
@@ -289,8 +296,8 @@ public partial class PostgreSqlGovernanceRepository
                     {
                         insertMaskCmd.Transaction = tx;
                         insertMaskCmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)
-                                                      VALUES (@id, @colId, @ruleType, @pattern, @replacement, @hmacKeyId)
-                                                      ON CONFLICT (id) DO NOTHING";
+                                                      SELECT @id, @colId, @ruleType, @pattern, @replacement, @hmacKeyId
+                                                      WHERE NOT EXISTS (SELECT 1 FROM COLUMN_MASKING_RULES WHERE id = @id);";
                         insertMaskCmd.Parameters.AddWithValue("@id", (maskRule.Id == Guid.Empty ? Guid.NewGuid() : maskRule.Id).ToString());
                         insertMaskCmd.Parameters.AddWithValue("@colId", colId.ToString());
                         insertMaskCmd.Parameters.AddWithValue("@ruleType", maskRule.RuleType);
@@ -319,7 +326,7 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<long> GetTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT epoch FROM POLICY_EPOCHS
                             WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
@@ -333,8 +340,8 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<long> IncrementTableEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = (SqlTransaction)await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
             var newEpoch = await IncrementTableEpochInternalAsync(conn, tx, table, ct).ConfigureAwait(false);
@@ -351,7 +358,7 @@ public partial class PostgreSqlGovernanceRepository
         }
     }
 
-    private async Task<long> IncrementTableEpochInternalAsync(NpgsqlConnection conn, NpgsqlTransaction tx, TableIdentifier table, CancellationToken ct)
+    private async Task<long> IncrementTableEpochInternalAsync(SqlConnection conn, SqlTransaction tx, TableIdentifier table, CancellationToken ct)
     {
         _metadataCache.TryRemove(table.ToString().ToLowerInvariant(), out _);
         await using (var cmd = conn.CreateCommand())
@@ -359,8 +366,8 @@ public partial class PostgreSqlGovernanceRepository
             cmd.Transaction = tx;
             cmd.CommandText = @"UPDATE POLICY_EPOCHS
                                 SET epoch = epoch + 1, updated_at = @now
-                                WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)
-                                RETURNING epoch";
+                                OUTPUT inserted.epoch
+                                WHERE LOWER(domain) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
             cmd.Parameters.AddWithValue("@domain", table.Domain);
             cmd.Parameters.AddWithValue("@schema", table.Schema);
             cmd.Parameters.AddWithValue("@table", table.TableName);
@@ -372,12 +379,16 @@ public partial class PostgreSqlGovernanceRepository
                 return Convert.ToInt64(scalar);
             }
 
+            // No row yet: insert, or bump when a concurrent writer inserted the same natural key (domain, schema, table).
             await using var insertCmd = conn.CreateCommand();
             insertCmd.Transaction = tx;
-            insertCmd.CommandText = @"INSERT INTO POLICY_EPOCHS (table_id, domain, schema_name, table_name, epoch, updated_at)
-                                      VALUES (@id, @domain, @schema, @table, 1, @now)
-                                      ON CONFLICT (table_id) DO UPDATE SET epoch = POLICY_EPOCHS.epoch + 1, updated_at = EXCLUDED.updated_at
-                                      RETURNING epoch";
+            insertCmd.CommandText = @"MERGE POLICY_EPOCHS WITH (HOLDLOCK) AS t
+                                      USING (SELECT @domain AS domain, @schema AS schema_name, @table AS table_name) AS s
+                                      ON t.domain = s.domain AND t.schema_name = s.schema_name AND t.table_name = s.table_name
+                                      WHEN MATCHED THEN UPDATE SET epoch = t.epoch + 1, updated_at = @now
+                                      WHEN NOT MATCHED THEN INSERT (table_id, domain, schema_name, table_name, epoch, updated_at)
+                                          VALUES (@id, @domain, @schema, @table, 1, @now)
+                                      OUTPUT inserted.epoch;";
             insertCmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
             insertCmd.Parameters.AddWithValue("@domain", table.Domain);
             insertCmd.Parameters.AddWithValue("@schema", table.Schema);
@@ -392,7 +403,7 @@ public partial class PostgreSqlGovernanceRepository
     public async Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default)
     {
         var list = new List<TableRelation>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.join_key_parent, r.join_key_child, r.cardinality,
                                    tp.source_name, tp.schema_name, tp.table_name,
@@ -432,14 +443,14 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task CreateRelationAsync(TableRelation relation, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
 
         string? parentTableId = null;
         string? childTableId = null;
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) LIMIT 1";
+            cmd.CommandText = "SELECT TOP (1) id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
             cmd.Parameters.AddWithValue("@domain", relation.ParentTableIdentifier.Domain);
             cmd.Parameters.AddWithValue("@schema", relation.ParentTableIdentifier.Schema);
             cmd.Parameters.AddWithValue("@table", relation.ParentTableIdentifier.TableName);
@@ -448,7 +459,7 @@ public partial class PostgreSqlGovernanceRepository
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) LIMIT 1";
+            cmd.CommandText = "SELECT TOP (1) id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table)";
             cmd.Parameters.AddWithValue("@domain", relation.ChildTableIdentifier.Domain);
             cmd.Parameters.AddWithValue("@schema", relation.ChildTableIdentifier.Schema);
             cmd.Parameters.AddWithValue("@table", relation.ChildTableIdentifier.TableName);
@@ -462,15 +473,18 @@ public partial class PostgreSqlGovernanceRepository
 
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = @"INSERT INTO TABLE_RELATIONS (id, parent_table_id, child_table_id, relation_name, join_key_parent, join_key_child, cardinality)
-                                VALUES (@id, @pId, @cId, @relName, @jkp, @jkc, @card)
-                                ON CONFLICT (id) DO UPDATE SET
-                                    parent_table_id = EXCLUDED.parent_table_id,
-                                    child_table_id = EXCLUDED.child_table_id,
-                                    relation_name = EXCLUDED.relation_name,
-                                    join_key_parent = EXCLUDED.join_key_parent,
-                                    join_key_child = EXCLUDED.join_key_child,
-                                    cardinality = EXCLUDED.cardinality";
+            cmd.CommandText = @"MERGE TABLE_RELATIONS WITH (HOLDLOCK) AS t
+                                USING (SELECT @id AS id) AS s
+                                ON t.id = s.id
+                                WHEN MATCHED THEN UPDATE SET
+                                    parent_table_id = @pId,
+                                    child_table_id = @cId,
+                                    relation_name = @relName,
+                                    join_key_parent = @jkp,
+                                    join_key_child = @jkc,
+                                    cardinality = @card
+                                WHEN NOT MATCHED THEN INSERT (id, parent_table_id, child_table_id, relation_name, join_key_parent, join_key_child, cardinality)
+                                    VALUES (@id, @pId, @cId, @relName, @jkp, @jkc, @card);";
             cmd.Parameters.AddWithValue("@id", relation.Id.ToString());
             cmd.Parameters.AddWithValue("@pId", parentTableId);
             cmd.Parameters.AddWithValue("@cId", childTableId);
@@ -485,7 +499,7 @@ public partial class PostgreSqlGovernanceRepository
     public async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
         var owners = new List<DataOwner>();
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT o.id, o.ad_sid, o.ad_account, o.display_name, o.email, o.is_active
                             FROM DATA_OWNERS o
@@ -523,7 +537,7 @@ public partial class PostgreSqlGovernanceRepository
     private async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(IEnumerable<string> identifiers, CancellationToken ct)
     {
         var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         foreach (var identifier in identifiers.Where(i => !string.IsNullOrWhiteSpace(i)))
         {
             await using var cmd = conn.CreateCommand();
@@ -551,9 +565,15 @@ public partial class PostgreSqlGovernanceRepository
         return await ResolveDataOwnerIdsInternalAsync(identifiers, ct).ConfigureAwait(false);
     }
 
+    private static void AddNullableTextParameter(SqlCommand cmd, string name, string? value)
+    {
+        // Explicit type so "@x IS NOT NULL" checks work with a null value (same intent as NpgsqlDbType.Text in the PG port).
+        cmd.Parameters.Add(name, SqlDbType.NVarChar, 256).Value = (object?)value ?? DBNull.Value;
+    }
+
     private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, string? itsmApproverAccount, CancellationToken ct)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT COUNT(*)
                             FROM TABLES t
@@ -566,7 +586,7 @@ public partial class PostgreSqlGovernanceRepository
         cmd.Parameters.AddWithValue("@schema", table.Schema);
         cmd.Parameters.AddWithValue("@table", table.TableName);
         cmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
-        cmd.Parameters.AddWithValue("@itsmAccount", NpgsqlTypes.NpgsqlDbType.Text, (object?)itsmApproverAccount ?? DBNull.Value);
+        AddNullableTextParameter(cmd, "@itsmAccount", itsmApproverAccount);
 
         var directOwnerCount = Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
         if (directOwnerCount > 0) return true;
@@ -584,7 +604,7 @@ public partial class PostgreSqlGovernanceRepository
         delCmd.Parameters.AddWithValue("@schema", table.Schema);
         delCmd.Parameters.AddWithValue("@table", table.TableName);
         delCmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
-        delCmd.Parameters.AddWithValue("@itsmAccount", NpgsqlTypes.NpgsqlDbType.Text, (object?)itsmApproverAccount ?? DBNull.Value);
+        AddNullableTextParameter(delCmd, "@itsmAccount", itsmApproverAccount);
         delCmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
 
         var delegateCount = Convert.ToInt64(await delCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
@@ -597,7 +617,7 @@ public partial class PostgreSqlGovernanceRepository
                                 WHERE (r.role_name = 'GovernanceAdmin' OR r.role_name = 'ClusterAdmin')
                                   AND (rm.member_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(rm.member_sid) = LOWER(@itsmAccount)))";
         roleCmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
-        roleCmd.Parameters.AddWithValue("@itsmAccount", NpgsqlTypes.NpgsqlDbType.Text, (object?)itsmApproverAccount ?? DBNull.Value);
+        AddNullableTextParameter(roleCmd, "@itsmAccount", itsmApproverAccount);
 
         var roleAdminCount = Convert.ToInt64(await roleCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
         return roleAdminCount > 0;
@@ -606,7 +626,7 @@ public partial class PostgreSqlGovernanceRepository
     public async Task<IReadOnlySet<string>> GetTransitiveRolesAsync(Sid subjectSid, CancellationToken ct = default)
     {
         var roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT r.role_name
                             FROM ROLES r
@@ -625,15 +645,18 @@ public partial class PostgreSqlGovernanceRepository
 
     public async Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default)
     {
-        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = @"INSERT INTO DATA_OWNER_DELEGATIONS (id, data_owner_id, delegate_sid, valid_from, valid_to, reason)
-                            VALUES (@id, @ownerId, @delegateSid, @validFrom, @validTo, @reason)
-                            ON CONFLICT (id) DO UPDATE SET
-                                delegate_sid = EXCLUDED.delegate_sid,
-                                valid_from = EXCLUDED.valid_from,
-                                valid_to = EXCLUDED.valid_to,
-                                reason = EXCLUDED.reason";
+        cmd.CommandText = @"MERGE DATA_OWNER_DELEGATIONS WITH (HOLDLOCK) AS t
+                            USING (SELECT @id AS id) AS s
+                            ON t.id = s.id
+                            WHEN MATCHED THEN UPDATE SET
+                                delegate_sid = @delegateSid,
+                                valid_from = @validFrom,
+                                valid_to = @validTo,
+                                reason = @reason
+                            WHEN NOT MATCHED THEN INSERT (id, data_owner_id, delegate_sid, valid_from, valid_to, reason)
+                                VALUES (@id, @ownerId, @delegateSid, @validFrom, @validTo, @reason);";
         cmd.Parameters.AddWithValue("@id", delegation.Id.ToString());
         cmd.Parameters.AddWithValue("@ownerId", delegation.DataOwnerId.ToString());
         cmd.Parameters.AddWithValue("@delegateSid", delegation.DelegateSid.Value);

@@ -1708,6 +1708,13 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             {
                 return BuildIbanMaskExpression(columnName, tableMeta.Dialect);
             }
+            var col = tableMeta.Columns?.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
+            if (col != null && IsNumericOrTemporalType(col.DataType))
+            {
+                // B-06: Numeric and temporal columns project NULL (NULLIFY) for REDACT
+                return "NULL";
+            }
+
             if (!string.IsNullOrWhiteSpace(rule.Replacement))
             {
                 var prefix = tableMeta.Dialect == DatabaseDialect.SqlServer ? "N" : string.Empty;
@@ -1715,6 +1722,17 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
         }
         return BuildDefaultTypeSafeMask(tableMeta, columnName);
+    }
+
+    private static bool IsNumericOrTemporalType(string? dataType)
+    {
+        if (string.IsNullOrWhiteSpace(dataType)) return false;
+        var dt = dataType.Trim().ToLowerInvariant();
+        if (dt.Contains('(')) dt = dt[..dt.IndexOf('(')].Trim();
+        return dt is "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal"
+            or "money" or "smallmoney" or "real" or "float" or "double precision" or "double"
+            or "bit" or "bool" or "boolean" or "date" or "datetime" or "datetime2" or "smalldatetime"
+            or "timestamp" or "timestamptz" or "time" or "uniqueidentifier" or "uuid";
     }
 
     private static string BuildDefaultTypeSafeMask(TableMetadata tableMeta, string columnName)
@@ -1733,16 +1751,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
         return dt switch
         {
-            "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal" or "money" or "smallmoney" or "real" or "float" or "double precision" or "double" => "0",
-            "bit" or "bool" or "boolean" => tableMeta.Dialect == DatabaseDialect.SqlServer ? "0" : "FALSE",
-            "date" => "'1970-01-01'",
-            "datetime" or "datetime2" or "smalldatetime" or "timestamp" or "timestamptz" => tableMeta.Dialect switch
-            {
-                DatabaseDialect.SqlServer => "'1970-01-01 00:00:00'",
-                DatabaseDialect.PostgreSql => "'1970-01-01 00:00:00'::timestamp",
-                _ => "'1970-01-01 00:00:00'"
-            },
-            "uniqueidentifier" or "uuid" => "'00000000-0000-0000-0000-000000000000'",
+            "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal" or "money" or "smallmoney" or "real" or "float" or "double precision" or "double" => "NULL",
+            "bit" or "bool" or "boolean" => "NULL",
+            "date" => "NULL",
+            "datetime" or "datetime2" or "smalldatetime" or "timestamp" or "timestamptz" => "NULL",
+            "uniqueidentifier" or "uuid" => "NULL",
             _ => "'***'"
         };
     }

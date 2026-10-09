@@ -70,6 +70,19 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
                     dbDesc = dbHealthy ? "PostgreSQL Governance DB connection active." : "PostgreSQL query returned null.";
                 }
             }
+            else if (_governanceRepository is SqlServerGovernanceRepository msRepo)
+            {
+                dbHealthy = await msRepo.PingAsync(ct).ConfigureAwait(false);
+                if (msRepo.IsAuditPipelineFaulted)
+                {
+                    dbHealthy = false;
+                    dbDesc = "SQL Server Governance DB: Audit pipeline is faulted.";
+                }
+                else
+                {
+                    dbDesc = dbHealthy ? "SQL Server Governance DB connection active." : "SQL Server query returned null.";
+                }
+            }
             else if (_governanceRepository != null)
             {
                 // Fallback check: verify catalog is queryable

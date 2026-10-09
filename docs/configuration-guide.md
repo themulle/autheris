@@ -195,6 +195,21 @@ Speicherort für Metadaten, Freigaben, Delegationen, Vier-Augen-Genehmigungen un
 }
 ```
 
+**SQL Server als Governance-DB:** `Provider = "SqlServer"` (Aliase `MsSql`, `SqlServer`) legt das Schema beim Start selbst an (idempotent, serialisiert über `sp_getapplock`) und ist – wie PostgreSQL – für Cluster-/Mehr-Replika-Betrieb zugelassen. Beispiel:
+
+```json
+"GovernanceDb": {
+  "Provider": "SqlServer",
+  "ConnectionString": "Server=sql.corp.local;Database=autheris_governance;User Id=autheris_app;Password=<secret>;Encrypt=Mandatory;TrustServerCertificate=false",
+  "MigrationConnectionString": "Server=sql.corp.local;Database=autheris_governance;User Id=autheris_migrator;Password=<secret>;Encrypt=Mandatory"
+}
+```
+
+- Außerhalb von Development verlangt die TLS-Policy `Encrypt=Mandatory` (oder `Strict`) und `TrustServerCertificate=false`.
+- `MigrationConnectionString` (optional) führt die DDL mit einem separaten Login aus; der Laufzeit-Login braucht dann nur `SELECT`/`INSERT`/`UPDATE`/`DELETE` (auf `AUDIT_LOG_ENTRIES` nur `SELECT`/`INSERT`).
+- Das Audit-Log ist append-only: ein `INSTEAD OF`-Trigger blockiert `UPDATE`/`DELETE`, eine leere Guard-Tabelle mit Fremdschlüssel blockiert `TRUNCATE`. Ein Tabellen-Owner kann beides entfernen – der Laufzeit-Login darf deshalb keine DDL-Rechte haben.
+- Integrationstests: `SqlServer*ContractTests` laufen gegen `AUTHERIS_TEST_MSSQL` (Connection-String eines Servers, auf dem der Login Datenbanken anlegen darf) oder per Testcontainers (Docker).
+
 ---
 
 ### 2.4 `DataSources` (Backend-Fachdatenbanken & RLS-Pushdown)
