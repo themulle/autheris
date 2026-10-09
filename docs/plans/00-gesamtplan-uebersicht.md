@@ -16,6 +16,7 @@
 | **[Plan 4: Supply Chain, CI & Deploy](plan-security-supply-chain-ci-deploy.md)** | Container-Scanning (Trivy), Cosign-Signierung, Attestations & Root-Drop | **SC-01 bis SC-18** | Bereit zur Umsetzung ⏳ |
 | **[Plan 5: PoC Arrow/OLAP & MCP Staging](plan-poc-arrow-olap-rebac-und-mcp-staging.md)** | ReBAC-Fallback für Arrow/OLAP, anonyme OAuth-Discovery & JSON-RPC-Batches | **Befunde 3.1 & 3.2** | Bereit zur Umsetzung ⏳ |
 | **[Plan 6: Lückenloses Zugriffs-Audit](plan-lueckenloses-zugriffs-audit-by-default.md)** | „Audit by Default“ über alle Endpunkte & Middleware, Denial-Audit | **Lücken L-1 bis L-9 (Phasen 0 bis 7)** | Bereit zur Umsetzung ⏳ |
+| **[Plan 7: WebSQL API Federation Join](plan-websql-heterogene-api-federation-join.md)** | Heterogene Joins zwischen SQL-Tabellen und Web-APIs via WebSQL & DuckDB Routing | **WebSQL Query Federation & API Joins** | Bereit zur Umsetzung ⏳ |
 
 ---
 
@@ -67,6 +68,7 @@ flowchart TD
 - [Plan 4: Supply Chain, CI & Deploy](plan-security-supply-chain-ci-deploy.md)
 - [Plan 5: PoC Arrow/OLAP & MCP Staging](plan-poc-arrow-olap-rebac-und-mcp-staging.md)
 - [Plan 6: Lückenloses Zugriffs-Audit](plan-lueckenloses-zugriffs-audit-by-default.md)
+- [Plan 7: WebSQL API Federation Join](plan-websql-heterogene-api-federation-join.md)
 - [Architektur-Review 2026-10-09](2026-10-09-architecture-review.md)
 - [Security Review Build & Supply Chain 2026-10-09](2026-10-09-security-review-supply-chain-deploy.md)
 - [Feature Lückenloses Zugriffs-Audit](2026-10-09-feature-lueckenloses-zugriffs-audit.md)
