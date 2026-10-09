@@ -25,9 +25,17 @@ public sealed record OlapQueryResult(
     int TotalRowCount,
     TimeSpan ExecutionDuration);
 
+public sealed record GeneratedOlapQuery(string Sql);
+
 public interface IDuckDbOlapEngine : IDisposable
 {
     Task<OlapQueryResult> ExecuteOlapQueryAsync(
         OlapQueryRequest request,
+        CancellationToken ct = default);
+
+    Task<OlapQueryResult> ExecuteGeneratedAsync(
+        GeneratedOlapQuery query,
+        IReadOnlyList<OlapTableSource> sources,
+        int? limit = null,
         CancellationToken ct = default);
 }

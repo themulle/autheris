@@ -212,7 +212,7 @@ public static class WebSqlEndpoints
             dataSource = trinoCatalogHeader.ToString().Trim();
         }
 
-        var governedRequest = new GovernedSqlQueryRequest(sql, parameters, dataSource);
+        var governedRequest = new GovernedSqlQueryRequest(sql, parameters, dataSource, Transport: isTrinoRoute ? "Trino" : "WebSql");
 
         if (isTrinoRoute || trinoWaitTimeout != null)
         {
@@ -226,7 +226,8 @@ public static class WebSqlEndpoints
             {
                 var trinoRequest = governedRequest with
                 {
-                    RowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Trino)
+                    RowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Trino),
+                    Transport = "Trino"
                 };
                 var status = await statementManager.SubmitOrWaitAsync(trinoRequest, user, tenantId, timeout, ct);
                 await WriteTrinoStatementResponseAsync(httpContext, status, ct);

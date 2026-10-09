@@ -44,6 +44,16 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         _concurrencySemaphore = new SemaphoreSlim(maxConcurrent, maxConcurrent);
     }
 
+    public Task<OlapQueryResult> ExecuteGeneratedAsync(
+        GeneratedOlapQuery query,
+        IReadOnlyList<OlapTableSource> sources,
+        int? limit = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return ExecuteOlapQueryAsync(new OlapQueryRequest(query.Sql, sources, limit), ct);
+    }
+
     public async Task<OlapQueryResult> ExecuteOlapQueryAsync(
         OlapQueryRequest request,
         CancellationToken ct = default)

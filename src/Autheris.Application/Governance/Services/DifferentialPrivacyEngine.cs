@@ -31,12 +31,20 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
 
     public DifferentialPrivacyEngine(
         IDistributedClusterStateProvider? clusterState = null,
-        IAuditLogRepository? auditLog = null,
+        TimeProvider? timeProvider = null,
+        ILogger<DifferentialPrivacyEngine>? logger = null)
+        : this(clusterState, Autheris.Application.Audit.NullAuditLogRepository.Instance, timeProvider, logger)
+    {
+    }
+
+    public DifferentialPrivacyEngine(
+        IDistributedClusterStateProvider? clusterState,
+        IAuditLogRepository auditLog,
         TimeProvider? timeProvider = null,
         ILogger<DifferentialPrivacyEngine>? logger = null)
     {
         _clusterState = clusterState ?? new InMemoryClusterStateProvider();
-        _auditLog = auditLog;
+        _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<DifferentialPrivacyEngine>.Instance;
     }
