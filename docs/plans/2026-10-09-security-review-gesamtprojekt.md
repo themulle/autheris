@@ -180,7 +180,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Das widerspricht dem Kommentar in `Sid.cs` („App-IDs bewusst ausgeschlossen“).
 - **Fix:** `sub` und `NameIdentifier` aus dem echten Nutzer übernehmen und die Client-ID nur als `client_id`/`azp` führen. Am besten `HttpContext.User` direkt verwenden.
 
-### SG-10 GraphQL: Kostenbudget über Variablen-Defaults umgehbar (SR15-19 unvollständig)
+### SG-10 GraphQL: Kostenbudget über Variablen-Defaults umgehbar (SR15-19 unvollständig) [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt (Pipeline-Reihenfolge)
 - **Fundstellen:**
   - `src/Autheris.GraphQL/Interceptors/QueryCostAnalyzerRule.cs:76`

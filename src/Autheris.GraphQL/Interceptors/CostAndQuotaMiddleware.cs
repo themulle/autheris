@@ -90,16 +90,34 @@ public sealed class CostAndQuotaMiddleware
                 }
             }
         }
-        int calculatedCost = QueryCostAnalyzerRule.CalculateCost(doc, context.Schema, variableValues: runtimeVariables);
 
-        // 3. Check query cost against tier policy max limit
-        if (calculatedCost > clientContext.Policy.MaxCostPerQuery)
+        int maxResponseRows = gatewayOptions?.GraphQL?.MaxResponseRows ?? 1000;
+        int calculatedCost = QueryCostAnalyzerRule.CalculateCost(
+            doc,
+            context.Schema,
+            maxResponseRows: maxResponseRows,
+            variableValues: runtimeVariables);
+
+        int maxAllowedCost = clientContext.Policy.MaxCostPerQuery;
+        if (gatewayOptions is not null)
+        {
+            var effectiveGatewayMaxCost = gatewayOptions.AreQueryLimitsRelaxed
+                ? (gatewayOptions.AllowInsecureWarnFlagsInProduction ? 100000 : 5000)
+                : gatewayOptions.GraphQL.MaxAllowedComplexity;
+            if (effectiveGatewayMaxCost > 0)
+            {
+                maxAllowedCost = Math.Min(maxAllowedCost, effectiveGatewayMaxCost);
+            }
+        }
+
+        // 3. Check query cost against effective max limit (min of Tier and MaxAllowedComplexity)
+        if (calculatedCost > maxAllowedCost)
         {
             var error = ErrorBuilder.New()
-                .SetMessage($"The query cost ({calculatedCost}) exceeds the tier limit of {clientContext.Policy.MaxCostPerQuery}.")
+                .SetMessage($"The query cost ({calculatedCost}) exceeds the limit of {maxAllowedCost}.")
                 .SetCode("QUERY_COST_QUOTA_EXCEEDED")
                 .SetExtension("calculatedCost", calculatedCost)
-                .SetExtension("maxAllowedCost", clientContext.Policy.MaxCostPerQuery)
+                .SetExtension("maxAllowedCost", maxAllowedCost)
                 .Build();
             context.Result = OperationResult.FromError(error);
             HttpResponseGuard.SetStatus(httpContext, StatusCodes.Status400BadRequest);
