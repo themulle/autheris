@@ -27,13 +27,16 @@ public sealed class InMemoryCloudEventSubscriptionStore : ICloudEventSubscriptio
 
         var tenantStore = _subscriptions.GetOrAdd(subscription.TenantId, _ => new ConcurrentDictionary<string, CloudEventWebhookSubscription>(StringComparer.Ordinal));
 
-        // SEC M-5: Unbounded in-memory subscription store DoS defense
-        if (tenantStore.Count >= MaxSubscriptionsPerTenant && !tenantStore.ContainsKey(subscription.Id))
+        lock (tenantStore)
         {
-            throw new InvalidOperationException($"Maximum webhook subscriptions ({MaxSubscriptionsPerTenant}) reached for tenant '{subscription.TenantId}'.");
-        }
+            // SEC M-5: Unbounded in-memory subscription store DoS defense
+            if (tenantStore.Count >= MaxSubscriptionsPerTenant && !tenantStore.ContainsKey(subscription.Id))
+            {
+                throw new InvalidOperationException($"Maximum webhook subscriptions ({MaxSubscriptionsPerTenant}) reached for tenant '{subscription.TenantId}'.");
+            }
 
-        tenantStore[subscription.Id] = subscription;
+            tenantStore[subscription.Id] = subscription;
+        }
 
         return ValueTask.CompletedTask;
     }
