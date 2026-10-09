@@ -2,6 +2,7 @@ namespace Autheris.Api.Extensions.DependencyInjection;
 
 using System;
 using Autheris.Api.Mcp;
+using Autheris.Application.Governance;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Pruning;
 using Autheris.Application.Mcp.Services;
@@ -36,6 +37,9 @@ public static class GatewayMcpServiceExtensions
 
         // Human-in-the-Loop Step-Up Approval (F-AI-05)
         services.AddSingleton<IHitLStepUpApprovalService, HitLStepUpApprovalService>();
+
+        // Governance Access Plans & Control Plane (Track E, ADR-03, ADR-05, R-60..R-64)
+        services.AddAutherisGovernancePlans();
 
         return services;
     }
