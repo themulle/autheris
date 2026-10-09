@@ -103,6 +103,7 @@ public static class IcebergRestCatalogEndpoints
         return ex switch
         {
             SecurityException => Results.Problem(detail: isProduction ? "Access denied." : ex.Message, statusCode: StatusCodes.Status403Forbidden),
+            ArgumentException => Results.Problem(detail: isProduction ? "Access denied." : ex.Message, statusCode: StatusCodes.Status400BadRequest),
             NotSupportedException => Results.Problem(detail: isProduction ? "Not implemented." : ex.Message, statusCode: StatusCodes.Status501NotImplemented),
             _ => Results.Problem(detail: isProduction ? "An unexpected error occurred." : ex.Message, statusCode: StatusCodes.Status500InternalServerError)
         };

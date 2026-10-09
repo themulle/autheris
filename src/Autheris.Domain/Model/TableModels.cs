@@ -45,13 +45,10 @@ public sealed class Table
         }
         return s switch
         {
-            "" => 1,
-            "LOW" or "PUBLIC" => 0,
-            "NORMAL" or "INTERNAL" => 1,
-            "MEDIUM" => 2,
-            "CONFIDENTIAL" => 3,
-            "HIGH" => 4,
-            "RESTRICTED" or "SECRET" => 5,
+            "LOW" or "PUBLIC" => 1,
+            "" or "NORMAL" or "INTERNAL" or "MEDIUM" or "UNKNOWN_CUSTOM" => 2,
+            "CONFIDENTIAL" or "RESTRICTED" => 3,
+            "HIGH" or "SECRET" or "STRICTLY_CONFIDENTIAL" => 4,
             _ => 4
         };
     }

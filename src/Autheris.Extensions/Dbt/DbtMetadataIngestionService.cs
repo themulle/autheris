@@ -708,20 +708,8 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                                     var upperRule = rawRule.ToUpperInvariant();
                                     if (!ValidMaskingRuleTypes.Contains(upperRule))
                                     {
-                                        // B-01: reject unknown rule type with 400
-                                        warnings.Add($"Column '{col.ColumnName}' has unknown masking rule '{rawRule}'.");
-                                        return new DbtGovernanceSyncResult(
-                                            Success: false,
-                                            UpdatedTablesCount: updatedTables,
-                                            UpdatedColumnsCount: updatedColumns,
-                                            MaskingRulesCount: maskingRulesCount,
-                                            VirtualFiltersCount: virtualFiltersCount,
-                                            AccessProfilesCount: accessProfilesCount,
-                                            Warnings: warnings,
-                                            ErrorMessage: $"Unknown masking rule '{rawRule}' on column '{col.ColumnName}'.",
-                                            RemovedMaskingRulesCount: removedMaskingRulesCount,
-                                            RelaxedMaskingRulesCount: relaxedMaskingRulesCount
-                                        );
+                                        // B-01: reject unknown rule type
+                                        throw new ArgumentException($"Unknown masking rule '{rawRule}' on column '{col.ColumnName}'.");
                                     }
 
                                     var newRule = new MaskingRule
@@ -762,6 +750,14 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         }
 
                         updatedColumns++;
+                    }
+                    else if (effectiveReplace)
+                    {
+                        // B-02: replace mode - omitted column loses its rule
+                        if (updatedMaskingRules.Remove(col.ColumnName))
+                        {
+                            removedMaskingRulesCount++;
+                        }
                     }
 
                     updatedCols.Add(new TableColumn

@@ -110,6 +110,15 @@ public static class WebhookEndpoints
                 }
             }
 
+            try
+            {
+                using var jsonDoc = JsonDocument.Parse(payload);
+            }
+            catch (JsonException ex)
+            {
+                return Results.BadRequest(new { error = $"Malformed JSON payload: {ex.Message}" });
+            }
+
             // SEC H-06: The instance header is unsigned. It is only passed on for a consistency check;
             // the handler takes the instance exclusively from the signed payload.
             string? instanceHeader = context.Request.Headers["X-Instance-ID"].FirstOrDefault()
@@ -117,7 +126,24 @@ public static class WebhookEndpoints
                                      ?? context.Request.Headers["X-Jira-Instance"].FirstOrDefault()
                                      ?? context.Request.Query["instance"].FirstOrDefault();
 
-            var success = await webhookHandler.HandleStatusChangeAsync(payload, signature, timestamp, instanceHeader, tsHeader, context.RequestAborted);
+            bool success;
+            try
+            {
+                success = await webhookHandler.HandleStatusChangeAsync(payload, signature, timestamp, instanceHeader, tsHeader, context.RequestAborted);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { error = ex.Message });
+            }
+            catch (JsonException ex)
+            {
+                return Results.BadRequest(new { error = $"Malformed payload: {ex.Message}" });
+            }
+            catch (FormatException ex)
+            {
+                return Results.BadRequest(new { error = $"Invalid signature or data format: {ex.Message}" });
+            }
+
             if (!success)
             {
                 return Results.Unauthorized();

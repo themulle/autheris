@@ -731,6 +731,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         var rlsOptions = new RlsOptions
         {
             AppendTableAlias = true,
+            EnforceCatalogProjection = true,
             EnforcedMaxRows = enforcedMaxRows,
             EnforceReadOnlyQueries = !isDml,
             TargetDialect = targetSqlDialect,

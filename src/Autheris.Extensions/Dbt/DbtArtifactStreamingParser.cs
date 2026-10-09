@@ -348,7 +348,7 @@ public static class DbtArtifactStreamingParser
         return (models, relationships);
     }
 
-    private static string ExtractModelName(string raw)
+    public static string ExtractModelName(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return "";
         var trimmed = raw.Trim();
@@ -364,11 +364,11 @@ public static class DbtArtifactStreamingParser
         // B-04: Support source('source_name', 'table_name')
         var sourceMatch = System.Text.RegularExpressions.Regex.Match(
             trimmed,
-            @"source\s*\(\s*['""][^'""]+['""]\s*,\s*['""]([^'""]+)['""]\s*\)",
+            @"source\s*\(\s*['""]([^'""]+)['""]\s*,\s*['""]([^'""]+)['""]\s*\)",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (sourceMatch.Success)
         {
-            return sourceMatch.Groups[1].Value;
+            return $"{sourceMatch.Groups[1].Value}.{sourceMatch.Groups[2].Value}";
         }
 
         var parts = trimmed.Split('.');

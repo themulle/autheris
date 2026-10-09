@@ -118,7 +118,36 @@ public static class SqlEndpointRoutes
                 TimeoutSeconds: request.TimeoutSeconds ?? 30);
         }
 
+        bool overwrite = string.Equals(context.Request.Query["overwrite"], "true", StringComparison.OrdinalIgnoreCase) ||
+                         request.Overwrite == true;
+
+        if (!overwrite && registry.TryGet(trimmedName, out _))
+        {
+            return Results.Conflict((object)new { error = $"An endpoint named '{trimmedName}' already exists. Use overwrite=true to replace it." });
+        }
+
         registry.Register(definition);
+
+        var auditRepo = context.RequestServices?.GetService<Autheris.Application.Interfaces.IAuditLogRepository>();
+        if (auditRepo != null)
+        {
+            await auditRepo.RecordAuditEventAsync(new Autheris.Domain.Model.AuditLogEntry
+            {
+                TenantId = EndpointSecurity.GetRequestTenant(context),
+                EventType = "SQL_ENDPOINT_REGISTERED",
+                ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+                TargetTable = definition.Name,
+                Decision = "ALLOW",
+                TraceId = context.TraceIdentifier,
+                DetailsJson = JsonSerializer.Serialize(new
+                {
+                    name = definition.Name,
+                    dataSource = definition.DataSource,
+                    httpMethod = definition.HttpMethod,
+                    overwrite
+                })
+            }, context.RequestAborted).ConfigureAwait(false);
+        }
 
         return Results.Created($"/api/v1/queries/{definition.Name}", (object)new
         {
@@ -494,5 +523,6 @@ public sealed record RegisterSqlEndpointRequest(
     string? Summary = null,
     string? DataSource = null,
     string? HttpMethod = null,
-    int? TimeoutSeconds = null);
+    int? TimeoutSeconds = null,
+    bool? Overwrite = null);
 

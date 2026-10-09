@@ -129,6 +129,13 @@ public sealed class RlsOptions
     public Func<string, IReadOnlyList<string>?>? TableColumnsProvider { get; set; }
 
     /// <summary>
+    /// SEC SG-26: When true, every table with a known column list from <see cref="TableColumnsProvider"/> is encapsulated
+    /// in a subquery projecting only the cataloged columns, preventing access to non-cataloged physical columns and
+    /// internal database system columns (ctid, rowid, tableoid, xmin).
+    /// </summary>
+    public bool EnforceCatalogProjection { get; set; } = false;
+
+    /// <summary>
     /// Clamps or injects LIMIT {maxRows} on top-level queries to prevent result set exhaustion attacks (0 = disabled).
     /// </summary>
     public long EnforcedMaxRows { get; set; } = 0;

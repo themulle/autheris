@@ -36,16 +36,11 @@ public static class FinOpsEndpoints
             var from = DateTimeOffset.TryParse(fromStr, out var f) ? f : DateTimeOffset.UtcNow.AddDays(-30);
             var to = DateTimeOffset.TryParse(toStr, out var t) ? t : DateTimeOffset.UtcNow.AddDays(1);
 
-            var callerTenant = user.FindFirst("tenant_id")?.Value
-                               ?? user.FindFirst("tid")?.Value;
-
-            // SEC M-4: Non-canonical cluster admins can only query their own tenant
+            // SEC M-4 / SG-30: Non-canonical cluster admins can only query their own tenant
             var isClusterAdmin = EndpointSecurity.IsCanonicalClusterAdmin(user);
             if (!isClusterAdmin)
             {
-                tenantId = !string.IsNullOrWhiteSpace(callerTenant)
-                    ? callerTenant
-                    : EndpointSecurity.GetRequestTenant(request.HttpContext).Value;
+                tenantId = EndpointSecurity.GetRequestTenant(request.HttpContext).Value;
             }
 
             var records = new List<FocusCostRecord>();

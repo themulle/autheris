@@ -119,6 +119,8 @@ public sealed class VirtualFilterAdministrationService
         _snapshots = snapshots;
     }
 
+    public VirtualFilterOptions Options => _options;
+
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _processedWebhookDeliveries = new(StringComparer.Ordinal);
     private DateTimeOffset? _lastWebhookTriggerAt;
     private string? _lastWebhookDeliveryId;
@@ -396,7 +398,7 @@ public sealed class VirtualFilterAdministrationService
             throw new VirtualFilterConflictException($"The virtual filter '{name}' is superseded by another filter.");
         }
 
-        if (_options.RequireApproval && !actor.IsSync && existing.Status == FilterApprovalStatus.Active)
+        if (_options.RequireApproval && existing.Status == FilterApprovalStatus.Active)
         {
             var pendingDeletion = existing with
             {
@@ -577,7 +579,7 @@ public sealed class VirtualFilterAdministrationService
         var existing = FindProfile(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The access profile '{name}' does not exist.");
         EnsureWritable(existing.ManagedBy, null, actor, $"access profile '{name}'");
 
-        if (_options.RequireApproval && !actor.IsSync && existing.Status == FilterApprovalStatus.Active)
+        if (_options.RequireApproval && existing.Status == FilterApprovalStatus.Active)
         {
             var pendingDeletion = existing with
             {

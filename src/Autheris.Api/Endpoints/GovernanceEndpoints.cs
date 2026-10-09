@@ -284,6 +284,18 @@ public static class GovernanceEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
+            var callerId = context.User.FindFirst("client_id")?.Value
+                         ?? context.User.FindFirst("azp")?.Value
+                         ?? context.User.FindFirst("sub")?.Value
+                         ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                         ?? context.User.Identity?.Name;
+
+            // SEC SG-29: Prevent self-reset of privacy budget
+            if (!string.IsNullOrWhiteSpace(callerId) && string.Equals(callerId, clientId, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             // SEC M-4: Non-canonical cluster admins may only reset clients within their tenant scope
             var targetKey = ResolveTenantBoundClientId(context, clientId, out var isForbidden);
             if (isForbidden)
@@ -292,6 +304,27 @@ public static class GovernanceEndpoints
             }
 
             await dpEngine.ResetBudgetAsync(targetKey, context.RequestAborted);
+
+            var auditRepo = context.RequestServices.GetService<IAuditLogRepository>();
+            if (auditRepo != null)
+            {
+                await auditRepo.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    TenantId = EndpointSecurity.GetRequestTenant(context),
+                    EventType = "DIFFERENTIAL_PRIVACY_BUDGET_RESET",
+                    ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+                    TargetTable = clientId,
+                    Decision = "ALLOW",
+                    TraceId = context.TraceIdentifier,
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        clientId,
+                        targetKey,
+                        resetBy = callerId
+                    })
+                }, context.RequestAborted).ConfigureAwait(false);
+            }
+
             return Results.Ok(new { message = $"Privacy budget reset for client '{clientId}'." });
         }).RequireAuthorization();
 
@@ -308,7 +341,7 @@ public static class GovernanceEndpoints
                                             ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                                             ?? context.User.Identity?.Name;
 
-                var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
+                var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin]);
 
                 if (!isPrivileged || string.IsNullOrWhiteSpace(request.ClientId))
                 {
@@ -387,11 +420,7 @@ public static class GovernanceEndpoints
             var groupSids = principal.GetGroupSids().ToList();
             var roles = principal.GetUserRoles().ToList();
 
-            var tenantId = TenantId.LegacySingleTenant;
-            if (context.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
-            {
-                tenantId = tid;
-            }
+            var tenantId = EndpointSecurity.GetRequestTenant(context);
 
             bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
             bool isClusterAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase);

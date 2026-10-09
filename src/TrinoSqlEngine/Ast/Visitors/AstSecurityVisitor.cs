@@ -129,8 +129,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
         bool shouldApplyRls = _options.PolicyProvider.ShouldApplyPolicy(normalizedName);
         bool hasMasking = HasMaskingForTable(normalizedName);
+        bool enforceCatalog = _options.EnforceCatalogProjection && _options.TableColumnsProvider != null && _options.TableColumnsProvider(normalizedName) is { Count: > 0 };
 
-        if (!shouldApplyRls && !hasMasking)
+        if (!shouldApplyRls && !hasMasking && !enforceCatalog)
         {
             return node;
         }

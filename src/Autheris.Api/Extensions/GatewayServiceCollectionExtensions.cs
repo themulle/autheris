@@ -808,7 +808,9 @@ public static class GatewayServiceCollectionExtensions
         {
             // Review E-1: JwtBearer keeps the default inbound claim mapping (sub -> NameIdentifier, oid -> objectidentifier
             // URI); revocation lookups (GetLookupKeys) accept both spellings.
-            options.RequireHttpsMetadata = (useEntra && entraConfig.RequireHttpsMetadata) ||
+            // SEC SG-37: RequireHttpsMetadata must always be true outside Development.
+            options.RequireHttpsMetadata = !environment.IsDevelopment() ||
+                                           (useEntra && entraConfig.RequireHttpsMetadata) ||
                                            (useAdfs && adfsConfig.RequireHttpsMetadata);
 
             if (useEntra && !string.IsNullOrWhiteSpace(entraConfig.TenantId))
@@ -1292,6 +1294,11 @@ public static class GatewayServiceCollectionExtensions
                 string.Join("\n  - ", warnings));
         }
 
+        if (!environment.IsDevelopment() && !options.VirtualFilters.RequireApproval)
+        {
+            Console.WriteLine("[Autheris] WARNING: VirtualFilters.RequireApproval is false outside Development. Four-eyes principle is recommended for production.");
+        }
+
         if (options.WebSql.AllowDml && options.WebSql.DmlWriterRoles.Count == 0)
         {
             throw new ValidationException(
@@ -1408,6 +1415,13 @@ public static class GatewayServiceCollectionExtensions
             if (options.Authentication.EnableTestAuthHandler)
             {
                 throw new ValidationException("Security violation: EnableTestAuthHandler may be true ONLY in the Development environment.");
+            }
+
+            // SEC SG-37: RequireHttpsMetadata must not be false outside Development.
+            if (options.Authentication.EntraId.RequireHttpsMetadata == false ||
+                options.Authentication.Adfs.RequireHttpsMetadata == false)
+            {
+                throw new ValidationException("Security violation: RequireHttpsMetadata must not be false outside Development.");
             }
 
             if (options.IsAnonymousAccessAllowed)

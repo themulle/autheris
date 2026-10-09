@@ -317,6 +317,16 @@ public static class ODataEndpoints
 
         if (matchingTables.Count != 1)
         {
+            var env = context.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+            if (env != null && !env.IsDevelopment())
+            {
+                return Results.Json(
+                    new { error = new { code = "ACCESS_DENIED", message = "Access to the table is denied or the table does not exist." } },
+                    statusCode: StatusCodes.Status403Forbidden,
+                    contentType: "application/json;odata.metadata=minimal;charset=utf-8"
+                );
+            }
+
             return Results.NotFound(new { error = new { code = "ResourceNotFound", message = $"The entity set '{entitySetName}' was not found." } });
         }
 

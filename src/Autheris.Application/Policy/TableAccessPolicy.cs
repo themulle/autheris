@@ -246,6 +246,22 @@ public sealed class TableAccessPolicy
         ArgumentNullException.ThrowIfNull(user);
         ArgumentNullException.ThrowIfNull(metadata);
 
+        // SEC SG-25: Fail-closed for writes without explicit write policy.
+        // Consent only grants read access. If Casbin is not available or has no policies for this tenant,
+        // write access is denied unless the principal is a canonical cluster admin or holds an authorized DML writer role.
+        var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(user);
+        var hasDmlWriterRole = _options?.WebSql?.DmlWriterRoles != null &&
+                               _options.WebSql.DmlWriterRoles.Count > 0 &&
+                               _options.WebSql.DmlWriterRoles.Any(r => user.IsInRole(r));
+
+        if (!isClusterAdmin && !hasDmlWriterRole)
+        {
+            if (_policyEnforcementService == null || !_policyEnforcementService.HasPolicies(tenant))
+            {
+                return false;
+            }
+        }
+
         var userSid = user.GetUserSid() ?? new Sid(user.Identity?.Name ?? "anonymous");
         var query = TableAccessQuery.ForPrincipal(
             user,

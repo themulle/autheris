@@ -185,7 +185,9 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         var configuredUser = _gatewayOptions.Authentication.BasicAuth.Users
             .FirstOrDefault(u => string.Equals(u.Username, username, StringComparison.OrdinalIgnoreCase));
 
-        // SR15-38: Always execute the exact same PasswordHasher.VerifyPassword pipeline with dummyStoredHash
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        // SR15-38 / SG-35: Always execute the exact same PasswordHasher.VerifyPassword pipeline with dummyStoredHash
         // when the user is not found, ensuring uniform parsing, base64 decoding and cryptographic hashing times
         // to defeat timing-based user enumeration.
         var storedHashToVerify = configuredUser?.Password ?? _dummyStoredHash;
@@ -201,6 +203,16 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         {
             await guard.RecordFailureAsync(attemptKey, null, Context.RequestAborted).ConfigureAwait(false);
             await guard.RecordFailureAsync(ipKey, guard.MaxFailedAttemptsPerIp, Context.RequestAborted).ConfigureAwait(false);
+
+            if (!_isDevelopment)
+            {
+                var remaining = TimeSpan.FromMilliseconds(50) - stopwatch.Elapsed;
+                if (remaining > TimeSpan.Zero)
+                {
+                    await Task.Delay(remaining, Context.RequestAborted).ConfigureAwait(false);
+                }
+            }
+
             return AuthenticateResult.Fail("Invalid username or password.");
         }
 

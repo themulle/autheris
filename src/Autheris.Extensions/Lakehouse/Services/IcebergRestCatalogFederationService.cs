@@ -162,7 +162,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
                     ActorSid = actorSid,
                     TargetTable = $"{tenantId}.{@namespace}.{table}",
                     Decision = "DENY",
-                    DetailsJson = $"{{\"reason\":\"{ex.Message.Replace("\"", "\\\"")}\"}}"
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = ex.Message })
                 }, ct).ConfigureAwait(false);
             }
             throw;
@@ -186,7 +186,7 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
                 ActorSid = actorSid,
                 TargetTable = tableMeta.Identifier.ToString(),
                 Decision = "ALLOW",
-                DetailsJson = $"{{\"metadataLocation\":\"{metadataLocation}\"}}"
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { metadataLocation })
             }, ct).ConfigureAwait(false);
         }
 
@@ -216,6 +216,19 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         }
 
         await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, ct).ConfigureAwait(false);
+
+        if (_auditRepository != null)
+        {
+            await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
+            {
+                TenantId = new TenantId(tenantId),
+                EventType = "Iceberg.VendCredential",
+                ActorSid = principal.GetUserSid() ?? new Sid("anonymous"),
+                TargetTable = $"{tenantId}.{@namespace}.{table}",
+                Decision = "DENY",
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = "Direct credential vending not supported." })
+            }, ct).ConfigureAwait(false);
+        }
 
         // SEC H-3: Return 501 Not Implemented instead of vending forgeable random/unsigned fake keys.
         throw new NotSupportedException("Direct storage STS/SAS credential vending is not supported; access lakehouse datasets via governed SQL endpoints.");
