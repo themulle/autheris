@@ -1662,6 +1662,17 @@ public sealed class VirtualFilterOptions
     /// Default is 60 minutes.
     /// </summary>
     public int MaxRemovalsWindowMinutes { get; init; } = 60;
+
+    /// <summary>
+    /// HMAC-SHA256 secret used to validate GitHub webhook triggers for virtual filter GitOps sync (X-Hub-Signature-256).
+    /// </summary>
+    public string? WebhookSecret { get; init; }
+
+    /// <summary>
+    /// Configured Git reference (e.g. "refs/heads/main" or "refs/tags/v1.0") to accept push events for.
+    /// Default is null (accepts any push when not configured).
+    /// </summary>
+    public string? GitRef { get; init; }
 }
 
 /// <summary>

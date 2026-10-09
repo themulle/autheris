@@ -3,9 +3,12 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Application.Interfaces;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
@@ -48,6 +51,22 @@ public static class VirtualFilterEndpoints
             ConfigSyncStatusAsync(context, service, options));
         group.MapGet("/effective-filters", (HttpContext context, MandatoryRowFilterResolver resolver, Autheris.Application.Interfaces.ITableMetadataRepository catalog) =>
             EffectiveFiltersAsync(context, resolver, catalog));
+
+        // GitOps Webhook Triggers (GitHub push events)
+        app.MapPost("/api/webhooks/config-sync", (
+            HttpContext context,
+            VirtualFilterAdministrationService service,
+            IOptions<GatewayOptions> options) => HandleConfigSyncWebhookAsync(context, service, options))
+            .AllowAnonymous()
+            .WithRequestBodyLimit(2 * 1024 * 1024);
+
+        app.MapPost("/api/v1/governance/virtual-filters/sync/webhook", (
+            HttpContext context,
+            VirtualFilterAdministrationService service,
+            IOptions<GatewayOptions> options) => HandleConfigSyncWebhookAsync(context, service, options))
+            .AllowAnonymous()
+            .WithRequestBodyLimit(2 * 1024 * 1024);
+
         return app;
     }
 
@@ -383,6 +402,8 @@ public static class VirtualFilterEndpoints
             status = syncStatus,
             lastSyncAt = latestSyncAt,
             lastCommit = latestCommit,
+            lastWebhookTriggerAt = service.LastWebhookTriggerAt,
+            lastWebhookDeliveryId = service.LastWebhookDeliveryId,
             filterCount = filters.Count,
             profileCount = profiles.Count,
             managedFilterCount = managedFilters.Count,
@@ -390,6 +411,102 @@ public static class VirtualFilterEndpoints
             maxRemovals = opt.MaxRemovals,
             requireApproval = opt.RequireApproval
         });
+    }
+
+    public static async Task<IResult> HandleConfigSyncWebhookAsync(
+        HttpContext context,
+        VirtualFilterAdministrationService service,
+        IOptions<GatewayOptions>? options = null)
+    {
+        var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
+            context.Request,
+            2 * 1024 * 1024,
+            "Payload size exceeds maximum allowed size (2 MB).",
+            context.RequestAborted).ConfigureAwait(false);
+
+        if (payload == null)
+        {
+            return tooLarge!;
+        }
+
+        var deliveryId = context.Request.Headers["X-GitHub-Delivery"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(deliveryId))
+        {
+            return Results.BadRequest(new { error = "Header X-GitHub-Delivery is required." });
+        }
+
+        var opt = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
+        var secret = !string.IsNullOrWhiteSpace(opt.WebhookSecret)
+            ? opt.WebhookSecret
+            : Environment.GetEnvironmentVariable("AUTHERIS_CONFIG_SYNC_WEBHOOK_SECRET");
+
+        var signatureHeader = context.Request.Headers["X-Hub-Signature-256"].FirstOrDefault() ??
+                              context.Request.Headers["X-Signature-256"].FirstOrDefault();
+
+        // Timing-safe HMAC verification. Notice: Insecure.danger_bypass_webhook_signature does NOT apply here.
+        if (string.IsNullOrWhiteSpace(secret) || !ValidateHubSignature(payload, signatureHeader, secret))
+        {
+            return Results.Unauthorized();
+        }
+
+        // Validate Git Ref if configured
+        if (!string.IsNullOrWhiteSpace(opt.GitRef))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(payload);
+                if (doc.RootElement.TryGetProperty("ref", out var refProp))
+                {
+                    var pushRef = refProp.GetString();
+                    if (!string.Equals(pushRef, opt.GitRef, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return Results.Ok(new { status = "Ignored", reason = $"Push ref '{pushRef}' does not match configured ref '{opt.GitRef}'." });
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // Invalid JSON body -> ignore ref matching
+            }
+        }
+
+        var recorded = service.RecordWebhookTrigger(deliveryId, DateTimeOffset.UtcNow);
+
+        return Results.Json(new
+        {
+            status = "Accepted",
+            delivery = deliveryId,
+            message = recorded ? "Sync triggered" : "Delivery already processed"
+        }, statusCode: StatusCodes.Status202Accepted);
+    }
+
+    private static bool ValidateHubSignature(string payload, string? signatureHeader, string secret)
+    {
+        if (string.IsNullOrWhiteSpace(signatureHeader) || string.IsNullOrWhiteSpace(secret))
+        {
+            return false;
+        }
+
+        var clean = signatureHeader.Trim();
+        if (clean.StartsWith("sha256=", StringComparison.OrdinalIgnoreCase))
+        {
+            clean = clean["sha256=".Length..];
+        }
+
+        byte[] expectedBytes;
+        try
+        {
+            expectedBytes = Convert.FromHexString(clean);
+        }
+        catch
+        {
+            return false;
+        }
+
+        using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        var computed = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
+
+        return CryptographicOperations.FixedTimeEquals(computed, expectedBytes);
     }
 
     private static bool CanRead(SecurityPrincipalContext security) =>

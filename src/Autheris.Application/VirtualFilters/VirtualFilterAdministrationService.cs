@@ -74,6 +74,40 @@ public sealed class VirtualFilterAdministrationService
         _snapshots = snapshots;
     }
 
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _processedWebhookDeliveries = new(StringComparer.Ordinal);
+    private DateTimeOffset? _lastWebhookTriggerAt;
+    private string? _lastWebhookDeliveryId;
+
+    public DateTimeOffset? LastWebhookTriggerAt => _lastWebhookTriggerAt;
+    public string? LastWebhookDeliveryId => _lastWebhookDeliveryId;
+
+    public bool RecordWebhookTrigger(string deliveryId, DateTimeOffset timestamp)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deliveryId);
+
+        // Prune entries older than 1 hour to prevent unbounded memory growth
+        if (_processedWebhookDeliveries.Count > 100)
+        {
+            var cutoff = DateTimeOffset.UtcNow.AddHours(-1);
+            foreach (var kvp in _processedWebhookDeliveries)
+            {
+                if (kvp.Value < cutoff)
+                {
+                    _processedWebhookDeliveries.TryRemove(kvp.Key, out _);
+                }
+            }
+        }
+
+        if (!_processedWebhookDeliveries.TryAdd(deliveryId, timestamp))
+        {
+            return false;
+        }
+
+        _lastWebhookDeliveryId = deliveryId;
+        _lastWebhookTriggerAt = timestamp;
+        return true;
+    }
+
     /// <summary>Writes and makes the change visible to enforcement on this instance at once.</summary>
     private async Task ApplyAsync(VirtualFilterChangeSet changes, CancellationToken ct)
     {
