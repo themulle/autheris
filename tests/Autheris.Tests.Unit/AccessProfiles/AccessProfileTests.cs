@@ -303,7 +303,7 @@ public sealed class AccessProfileTests
         };
         await repo.UpsertProfileAsync(profile);
 
-        var clusterState = new Autheris.Infrastructure.State.InMemoryClusterStateProvider();
+        var clusterState = new Autheris.Application.State.InMemoryClusterStateProvider();
         var l1 = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
         var cache = new Autheris.Application.Policy.Services.AccessProfileCache(repo, clusterState, l1);
         var policy = CreatePolicy(repo, memoryCache: l1, accessProfileCache: cache);

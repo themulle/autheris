@@ -269,7 +269,7 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<IRateLimiterService, InMemoryRateLimiterService>();
             services.AddSingleton<IIdempotencyStore, InMemoryIdempotencyStore>();
             services.AddSingleton<ITokenRevocationService, InMemoryTokenRevocationService>(); // SEC M-14 (GAP-B)
-            services.AddSingleton<Autheris.Application.State.IDistributedClusterStateProvider, Autheris.Infrastructure.State.InMemoryClusterStateProvider>();
+            services.AddSingleton<Autheris.Application.State.IDistributedClusterStateProvider, Autheris.Application.State.InMemoryClusterStateProvider>();
         }
 
         services.AddSingleton<IEpochValidationService, EpochValidationService>();

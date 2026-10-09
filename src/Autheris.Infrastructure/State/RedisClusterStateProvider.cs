@@ -119,6 +119,60 @@ public sealed class RedisClusterStateProvider : IDistributedClusterStateProvider
         }
     }
 
+    private const string TryConsumeBudgetScript = @"
+local current = redis.call('GET', KEYS[1])
+if not current then
+    current = 0
+else
+    current = tonumber(current)
+end
+local cost = tonumber(ARGV[1])
+local limit = tonumber(ARGV[2])
+local ttl_seconds = tonumber(ARGV[3])
+
+if current + cost <= limit then
+    local new_val = redis.call('INCRBY', KEYS[1], cost)
+    if current == 0 and ttl_seconds > 0 then
+        redis.call('EXPIRE', KEYS[1], ttl_seconds)
+    end
+    return {1, new_val}
+else
+    return {0, current}
+end
+";
+
+    public async ValueTask<(BudgetConsumeOutcome Outcome, long ConsumedAfter)> TryConsumeBudgetAsync(
+        string key, long cost, long limit, TimeSpan ttl, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        try
+        {
+            var db = _multiplexer.GetDatabase();
+            var redisKey = (RedisKey)BuildKey(key);
+            var ttlSeconds = (ttl > TimeSpan.Zero && ttl < TimeSpan.MaxValue) ? (long)ttl.TotalSeconds : 0L;
+
+            var res = await db.ScriptEvaluateAsync(
+                TryConsumeBudgetScript,
+                [redisKey],
+                [cost, limit, ttlSeconds]).ConfigureAwait(false);
+
+            var arr = (RedisResult[]?)res;
+            if (arr is { Length: 2 })
+            {
+                var success = (long)arr[0] == 1;
+                var total = (long)arr[1];
+                return (success ? BudgetConsumeOutcome.Consumed : BudgetConsumeOutcome.Exhausted, total);
+            }
+
+            return (BudgetConsumeOutcome.StoreUnavailable, 0);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to execute atomic budget consume script for key {Key} in Redis state store.", key);
+            return (BudgetConsumeOutcome.StoreUnavailable, 0);
+        }
+    }
+
     public async ValueTask PublishEventAsync<T>(string channel, T payload, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(channel);

@@ -74,6 +74,7 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
         if (shared == null)
         {
             _localSpend.AddOrUpdate(tenantId, totalBilled, (_, current) => current + totalBilled);
+            _logger.LogWarning("F-AI-08 Recorded local fallback spend of {Cost} EUR for tenant {Tenant} due to unavailable shared cluster store.", totalBilled, tenantId);
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -151,6 +152,7 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
             : options.DefaultMonthlyBudget;
 
         var currentSpend = _localSpend.TryGetValue(tenantId, out var spend) ? spend : 0m;
+        var clusterStoreFailed = false;
         if (_clusterState != null)
         {
             try
@@ -160,12 +162,13 @@ public sealed class FocusCostAccountingService : IFinOpsAccountingService
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "F-AI-08 shared FinOps counter unreadable for tenant {Tenant}; using local spend only.", tenantId);
+                clusterStoreFailed = true;
+                _logger.LogWarning(ex, "F-AI-08 shared FinOps counter unreadable for tenant {Tenant}; failing closed on budget enforcement.", tenantId);
             }
         }
 
-        var isExceeded = budgetLimit > 0 && currentSpend >= budgetLimit;
-        var isWarning = budgetLimit > 0 && currentSpend >= budgetLimit * (decimal)options.SoftCapRatio;
+        var isExceeded = budgetLimit > 0 && (clusterStoreFailed || currentSpend >= budgetLimit);
+        var isWarning = budgetLimit > 0 && (clusterStoreFailed || currentSpend >= budgetLimit * (decimal)options.SoftCapRatio);
 
         if (isExceeded)
         {
