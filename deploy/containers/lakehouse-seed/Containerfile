@@ -12,6 +12,11 @@ RUN pip install --no-cache-dir boto3==1.43.108
 COPY containers/lakehouse-seed/seed_lakehouse.py .
 COPY containers/lakehouse-seed/sample_iceberg/ ./sample_iceberg/
 
+RUN addgroup -g 10001 appgroup && adduser -u 10001 -G appgroup -s /bin/sh -D appuser && \
+    chown -R appuser:appgroup /app
+
+USER 10001:10001
+
 HEALTHCHECK --interval=2s --timeout=2s --start-period=1s --retries=20 \
     CMD test -f /tmp/.lakehouse_seed_complete || exit 1
 
