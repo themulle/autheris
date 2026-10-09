@@ -48,6 +48,31 @@ public static class RebacEndpoints
         }, http.RequestAborted).ConfigureAwait(false);
     }
 
+    private static async Task AuditInvalidationFailureAsync(
+        IAuditLogRepository auditLog, HttpContext http, TenantId callerTenant, string tenantId, Exception ex)
+    {
+        TenantId tenant;
+        try
+        {
+            tenant = new TenantId(tenantId);
+        }
+        catch (ArgumentException)
+        {
+            tenant = callerTenant;
+        }
+
+        await auditLog.RecordAuditEventAsync(new AuditLogEntry
+        {
+            TenantId = tenant,
+            EventType = "REBAC_INVALIDATION_FAILED",
+            ActorSid = http.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = string.Empty,
+            Decision = "DENY",
+            TraceId = http.TraceIdentifier,
+            DetailsJson = JsonSerializer.Serialize(new { error = ex.Message, tenant = tenantId })
+        }, http.RequestAborted).ConfigureAwait(false);
+    }
+
     public static IEndpointRouteBuilder MapRebacEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/v1/rebac").RequireAuthorization();
@@ -99,7 +124,15 @@ public static class RebacEndpoints
             foreach (var t in tuples)
             {
                 await store.AddTupleAsync(t, request.HttpContext.RequestAborted).ConfigureAwait(false);
-                evaluator.InvalidateTenantCache(t.TenantId);
+                try
+                {
+                    await evaluator.InvalidateTenantCacheAsync(t.TenantId, request.HttpContext.RequestAborted).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    await AuditInvalidationFailureAsync(auditLog, request.HttpContext, secContext.TenantId, t.TenantId, ex).ConfigureAwait(false);
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                }
                 await AuditTupleChangeAsync(auditLog, request.HttpContext, secContext.TenantId, "REBAC_TUPLE_ADDED", "ALLOW", t).ConfigureAwait(false);
             }
 
@@ -141,7 +174,15 @@ public static class RebacEndpoints
             }
 
             var removed = await store.DeleteTupleAsync(tuple, request.HttpContext.RequestAborted).ConfigureAwait(false);
-            evaluator.InvalidateTenantCache(tuple.TenantId);
+            try
+            {
+                await evaluator.InvalidateTenantCacheAsync(tuple.TenantId, request.HttpContext.RequestAborted).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await AuditInvalidationFailureAsync(auditLog, request.HttpContext, secContext.TenantId, tuple.TenantId, ex).ConfigureAwait(false);
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
             await AuditTupleChangeAsync(auditLog, request.HttpContext, secContext.TenantId, "REBAC_TUPLE_REMOVED", removed ? "REVOKED" : "NOOP", tuple).ConfigureAwait(false);
 
             return Results.Ok(new { removed });

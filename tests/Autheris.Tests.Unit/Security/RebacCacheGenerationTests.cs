@@ -68,9 +68,10 @@ public sealed class RebacCacheGenerationTests
             NullLogger<ZanzibarRebacEvaluator>.Instance,
             eventBus: bus);
 
-        evaluator.InvalidateTenantCache("tenant1");
+        await evaluator.InvalidateTenantCacheAsync("tenant1");
 
-        // Should increment broker generation
+        // Should increment broker generations
+        await bus.Received(1).IncrementCounterAsync(ZanzibarRebacEvaluator.GetTenantGenerationKey("tenant1"), Arg.Any<CancellationToken>());
         await bus.Received(1).IncrementCounterAsync(ZanzibarRebacEvaluator.GenerationKey, Arg.Any<CancellationToken>());
 
         // Should publish to invalidation channel

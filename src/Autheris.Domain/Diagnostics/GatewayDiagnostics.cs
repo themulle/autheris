@@ -25,6 +25,9 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> AuditDeadLetterCounter =
         Meter.CreateCounter<long>("autheris_audit_dead_letter_total", description: "Total number of audit events diverted to dead-letter storage");
 
+    public static readonly Counter<long> EventBusDroppedCounter =
+        Meter.CreateCounter<long>("autheris_eventbus_dropped_total", description: "Total number of event bus messages dropped due to channel saturation");
+
     public static readonly Histogram<double> PolicyEvaluationDuration =
         Meter.CreateHistogram<double>("autheris_policy_evaluation_duration_ms", "ms", description: "Dauer der Casbin ABAC Evaluierung");
 
