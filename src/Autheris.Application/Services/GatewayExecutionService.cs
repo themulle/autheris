@@ -79,7 +79,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _chunkedQueryExecutor = chunkedQueryExecutor ?? new ChunkedQueryExecutor(500);
         _options = options?.Value;
         _drainController = drainController;
-        _dataSourceExecutors = dataSourceExecutors;
+        _dataSourceExecutors = dataSourceExecutors ?? new IDataSourceExecutor[] { new SqlDataSourceExecutor(options: options, maskingProvider: maskingProvider) };
         _policyEnforcementService = policyEnforcementService;
         _clientIpResolver = clientIpResolver;
         _connectorRegistry = connectorRegistry;
@@ -956,97 +956,164 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         if (!decision.IsAllowed)
         {
             LastDispatchedChildQueryCount = 0;
+            return invoiceIds?.Distinct().ToDictionary(id => id, _ => new List<InvoiceItemRecord>())
+                   ?? new Dictionary<string, List<InvoiceItemRecord>>();
+        }
+
+        if (invoiceIds == null || invoiceIds.Count == 0)
+        {
+            LastDispatchedChildQueryCount = 0;
             return new Dictionary<string, List<InvoiceItemRecord>>();
         }
 
         var metadata = await _metadataRepository.GetTableMetadataAsync(childTableId, ct);
+        if (metadata == null)
+        {
+            LastDispatchedChildQueryCount = 0;
+            return invoiceIds.Distinct().ToDictionary(id => id, _ => new List<InvoiceItemRecord>());
+        }
 
-        // Sonderfall: Wenn IN-Liste aufgrund vieler IDs zu lang wird (RDBMS Parameter-/Puffer-Limit),
-        // teilen wir die Abfrage in mehrere parametrisierte Teilabfragen auf und aggregieren die Ergebnisse.
-        var (result, dispatchedQueries) = await _chunkedQueryExecutor.ExecuteGroupedWithMetricsAsync(
+        var executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
+        if (executor == null)
+        {
+            LastDispatchedChildQueryCount = 0;
+            return invoiceIds.Distinct().ToDictionary(id => id, _ => new List<InvoiceItemRecord>());
+        }
+
+        var tenantId = principal.GetTenantId();
+        var joinColumn = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "parent_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
+            ?? metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "invoice_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
+            ?? "parent_id";
+
+        var (result, dispatchedQueries) = await _chunkedQueryExecutor.ExecuteGroupedWithMetricsAsync<string, InvoiceItemRecord>(
             invoiceIds,
-            (chunkKeys, _) =>
+            async (chunkKeys, chunkCt) =>
             {
                 var chunkResult = new Dictionary<string, List<InvoiceItemRecord>>(chunkKeys.Count);
-
-                foreach (var invId in chunkKeys)
+                foreach (var k in chunkKeys)
                 {
-                    var items = new List<InvoiceItemRecord>();
-                    // SEC (Low): effective column access (catalog sensitivity included), tenant-scoped HMAC, row filter on RAW values
-                    // (before masking) so a masked value can neither satisfy nor defeat the predicate.
-                    var effectiveMeta = metadata ?? new TableMetadata { Identifier = childTableId };
-                    var tenantValue = principal.GetTenantId().Value;
-                    var hmacDefault = _options?.DataMasking?.HmacKeyId;
-
-                    for (int i = 1; i <= 2; i++)
-                    {
-                        var rawNote = $"Confidential spec for item {i} of invoice {invId}";
-                        var rawProduct = $"Enterprise License Pack {i}";
-                        var rawPrice = 1250.00m * i;
-
-                        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
-                        {
-                            EnsureInMemoryFilterIsEnforceable(decision);
-                            var rawRow = (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                            {
-                                ["id"] = $"{invId}-ITEM-{i}",
-                                ["invoice_id"] = invId,
-                                ["product_name"] = rawProduct,
-                                ["price"] = rawPrice,
-                                ["sensitive_note"] = rawNote
-                            };
-
-                            if (FilterRows(new List<IReadOnlyDictionary<string, object?>> { rawRow }, decision.CombinedRowFilterSql, effectiveMeta).Count == 0)
-                            {
-                                continue;
-                            }
-                        }
-
-                        object? maskedNote = rawNote;
-                        var noteAccess = decision.GetEffectiveColumnAccess("sensitive_note", effectiveMeta);
-
-                        if (noteAccess == ColumnAccessLevel.Deny)
-                        {
-                            maskedNote = null;
-                        }
-                        else if (noteAccess == ColumnAccessLevel.Mask)
-                        {
-                            var rule = metadata != null && metadata.ColumnMaskingRules.TryGetValue("sensitive_note", out var r)
-                                ? r
-                                : new MaskingRule { RuleType = "REDACT" };
-                            rule = ScopeRuleForTenant(rule, tenantValue, hmacDefault);
-                            maskedNote = _maskingProvider.MaskValue("sensitive_note", rawNote, rule);
-                        }
-
-                        var prodAccess = decision.GetEffectiveColumnAccess("product_name", effectiveMeta);
-                        string? prodName = prodAccess switch
-                        {
-                            ColumnAccessLevel.Clear => rawProduct,
-                            ColumnAccessLevel.Mask => "***",
-                            _ => null
-                        };
-
-                        var priceAccess = decision.GetEffectiveColumnAccess("price", effectiveMeta);
-                        decimal price = priceAccess switch
-                        {
-                            ColumnAccessLevel.Clear => rawPrice,
-                            _ => 0m
-                        };
-
-                        items.Add(new InvoiceItemRecord
-                        {
-                            Id = $"{invId}-ITEM-{i}",
-                            InvoiceId = invId,
-                            ProductName = prodName,
-                            Price = price,
-                            SensitiveNote = maskedNote?.ToString()
-                        });
-                    }
-
-                    chunkResult[invId] = items;
+                    chunkResult[k] = new List<InvoiceItemRecord>();
                 }
 
-                return Task.FromResult<IReadOnlyDictionary<string, List<InvoiceItemRecord>>>(chunkResult);
+                if (chunkKeys.Count == 0)
+                {
+                    return chunkResult;
+                }
+
+                var filterParams = new Dictionary<string, object?>(chunkKeys.Count);
+                var paramNames = new List<string>(chunkKeys.Count);
+                for (int i = 0; i < chunkKeys.Count; i++)
+                {
+                    var pName = $"@p_inv_{i}";
+                    paramNames.Add(pName);
+                    filterParams[pName] = chunkKeys[i];
+                }
+
+                var filterClause = new TableFilterClause(
+                    SqlPredicate: $"{joinColumn} IN ({string.Join(", ", paramNames)})",
+                    Parameters: filterParams,
+                    ReferencedColumns: new[] { joinColumn })
+                {
+                    DialectSqlFactory = d => $"{d.QuoteIdentifier(joinColumn)} IN ({string.Join(", ", paramNames)})"
+                };
+
+                var pageItems = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    [TableQueryItems.Filter] = filterClause
+                };
+
+                var requestedColumns = metadata.Columns
+                    .Where(c => decision.GetColumnAccess(c.ColumnName) != ColumnAccessLevel.Deny)
+                    .Select(c => c.ColumnName)
+                    .ToList();
+
+                var execContext = new DataSourceExecutionContext(
+                    SourceName: metadata.Table.SourceName,
+                    Metadata: metadata,
+                    Principal: principal ?? new ClaimsPrincipal(new ClaimsIdentity()),
+                    AccessDecision: decision,
+                    Arguments: new Dictionary<string, object?> { ["limit"] = Math.Max(100, chunkKeys.Count * 10), ["offset"] = 0 },
+                    RequestedFields: requestedColumns,
+                    RequestHeaders: null,
+                    Limit: Math.Max(100, chunkKeys.Count * 10),
+                    Offset: 0,
+                    Tenant: tenantId,
+                    Items: pageItems
+                );
+
+                IReadOnlyList<IReadOnlyDictionary<string, object?>> rawRows;
+                try
+                {
+                    rawRows = await executor.ExecuteAsync(execContext, chunkCt).ConfigureAwait(false);
+                }
+                catch (GatewayNotImplementedException)
+                {
+                    return chunkResult;
+                }
+
+                var rlsPushdownAlreadyOccurred = execContext.Items.TryGetValue("RlsPushdownExecuted", out var p2) && p2 is true;
+                var inDbMaskingAlreadyOccurred = execContext.Items.TryGetValue("InDbColumnMaskingExecuted", out var m2) && m2 is true;
+
+                var maxBytes = _options?.GraphQL?.MaxResponseBytes > 0 ? _options.GraphQL.MaxResponseBytes : 10 * 1024 * 1024;
+                var processedRows = Autheris.Application.Connectors.GovernedConnectorReader.Apply(
+                    rawRows,
+                    metadata,
+                    decision,
+                    tenantId.Value,
+                    rlsPushdownAlreadyOccurred,
+                    inDbMaskingAlreadyOccurred,
+                    new Autheris.Application.Connectors.GovernedRowPolicy(
+                        _maskingProvider,
+                        _options?.DataMasking?.HmacKeyId,
+                        MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
+                        MaxBytes: maxBytes));
+
+                for (int i = 0; i < processedRows.Count; i++)
+                {
+                    var row = processedRows[i];
+                    var raw = i < rawRows.Count ? rawRows[i] : null;
+
+                    var parentKey = row.TryGetValue(joinColumn, out var pkVal) ? pkVal?.ToString() ?? "" : "";
+                    if (string.IsNullOrEmpty(parentKey) && raw != null)
+                    {
+                        parentKey = raw.TryGetValue(joinColumn, out var rPk) ? rPk?.ToString() ?? "" : "";
+                    }
+                    if (string.IsNullOrEmpty(parentKey) && string.Equals(joinColumn, "parent_id", StringComparison.OrdinalIgnoreCase) && raw != null)
+                    {
+                        parentKey = raw.TryGetValue("invoice_id", out var altVal) ? altVal?.ToString() ?? "" : "";
+                    }
+
+                    if (string.IsNullOrEmpty(parentKey) || !chunkResult.TryGetValue(parentKey, out var list))
+                    {
+                        continue;
+                    }
+
+                    var id = row.TryGetValue("id", out var idVal) ? idVal?.ToString() ?? "" : "";
+                    if (string.IsNullOrEmpty(id) && raw != null)
+                    {
+                        id = raw.TryGetValue("id", out var rawId) ? rawId?.ToString() ?? "" : "";
+                    }
+
+                    var prodName = row.TryGetValue("product_name", out var prodVal) ? prodVal?.ToString() : null;
+                    var price = 0m;
+                    if (row.TryGetValue("price", out var priceVal) && priceVal != null)
+                    {
+                        if (priceVal is decimal d) price = d;
+                        else if (decimal.TryParse(priceVal.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var parsedPrice)) price = parsedPrice;
+                    }
+                    var sensitiveNote = row.TryGetValue("sensitive_note", out var noteVal) ? noteVal?.ToString() : null;
+
+                    list.Add(new InvoiceItemRecord
+                    {
+                        Id = id,
+                        InvoiceId = parentKey,
+                        ProductName = prodName,
+                        Price = price,
+                        SensitiveNote = sensitiveNote
+                    });
+                }
+
+                return (IReadOnlyDictionary<string, List<InvoiceItemRecord>>)chunkResult;
             },
             chunkSize: _options?.GraphQL?.MaxInClauseBatchSize,
             ct: ct);

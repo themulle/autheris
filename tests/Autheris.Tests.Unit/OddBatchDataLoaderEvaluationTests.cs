@@ -13,6 +13,7 @@ using Autheris.Infrastructure.Messaging;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -185,6 +186,10 @@ public class OddBatchDataLoaderEvaluationTests
             }
         });
 
+        var devEnv = NSubstitute.Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        devEnv.EnvironmentName.Returns("Development");
+        var sqlExecutor = new SqlDataSourceExecutor(options: options, environment: devEnv);
+
         var executor = new ChunkedQueryExecutor(defaultChunkSize: maxBatchSize);
         var executionService = new GatewayExecutionService(
             repository,
@@ -192,7 +197,8 @@ public class OddBatchDataLoaderEvaluationTests
             cacheService,
             maskingProvider,
             executor,
-            options);
+            options,
+            dataSourceExecutors: new[] { sqlExecutor });
 
         // Grant consent for finance_items
         var childTableId = new TableIdentifier("finance", "dbo", "finance_items");

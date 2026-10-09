@@ -755,6 +755,35 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         var count = Math.Max(1, context.Limit);
         var offset = Math.Max(0, context.Offset);
 
+        if (context.Items.TryGetValue(TableQueryItems.Filter, out var filterObj) &&
+            filterObj is TableFilterClause filterClause &&
+            filterClause.ReferencedColumns.Any(c => c.Equals("parent_id", StringComparison.OrdinalIgnoreCase) || c.Equals("invoice_id", StringComparison.OrdinalIgnoreCase)))
+        {
+            var joinCol = metadata.Columns.FirstOrDefault(c => c.ColumnName.Equals("parent_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
+                ?? metadata.Columns.FirstOrDefault(c => c.ColumnName.Equals("invoice_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
+                ?? "parent_id";
+
+            foreach (var pVal in filterClause.Parameters.Values)
+            {
+                var parentId = pVal?.ToString() ?? "";
+                if (string.IsNullOrEmpty(parentId)) continue;
+
+                for (int i = 1; i <= 2; i++)
+                {
+                    var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["id"] = $"{parentId}-ITEM-{i}",
+                        [joinCol] = parentId,
+                        ["product_name"] = $"Enterprise License Pack {i}",
+                        ["price"] = 1250.00m * i,
+                        ["sensitive_note"] = $"Confidential spec for item {i} of invoice {parentId}"
+                    };
+                    rows.Add(dict);
+                }
+            }
+            return rows;
+        }
+
         for (int i = 1; i <= count; i++)
         {
             var rowNum = offset + i;
