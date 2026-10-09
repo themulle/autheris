@@ -149,10 +149,25 @@ public static class DuckDbOlapEndpoints
 
         if (dto.TableNames != null && dto.TableNames.Count > 0)
         {
-            foreach (var rawTableName in dto.TableNames)
-            {
-                if (string.IsNullOrWhiteSpace(rawTableName)) continue;
+            int maxTableCount = options.MaxTableCount > 0 ? options.MaxTableCount : 10;
+            var distinctTableNames = dto.TableNames
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
+            if (distinctTableNames.Count > maxTableCount)
+            {
+                logger.LogWarning("OLAP request exceeded maximum table count: {Count} > {Max}", distinctTableNames.Count, maxTableCount);
+                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await httpContext.Response.WriteAsJsonAsync(new { error = $"OLAP request exceeds maximum allowed distinct table count of {maxTableCount}." }, ct);
+                return;
+            }
+
+            int totalStagedRows = 0;
+            int maxTotalStagedRows = options.MaxTotalStagedRows > 0 ? options.MaxTotalStagedRows : 500000;
+
+            foreach (var rawTableName in distinctTableNames)
+            {
                 TableMetadata? meta = null;
                 if (TableIdentifier.TryParse(rawTableName, out var parsedId))
                 {
@@ -230,6 +245,15 @@ public static class DuckDbOlapEndpoints
                     return;
                 }
 
+                totalStagedRows += maskedRows.Count;
+                if (totalStagedRows > maxTotalStagedRows)
+                {
+                    logger.LogWarning("OLAP request exceeded total staged rows limit across tables: {Total} > {Max}", totalStagedRows, maxTotalStagedRows);
+                    httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    await httpContext.Response.WriteAsJsonAsync(new { error = $"Total staged rows across all tables ({totalStagedRows}) exceeded maximum allowed limit ({maxTotalStagedRows})." }, ct);
+                    return;
+                }
+
                 if (!await TryAuditAsync("OLAP_TABLE_STAGED", meta.Identifier.ToQualifiedName(), new
                 {
                     tenant = tenantId.Value,
@@ -283,6 +307,18 @@ public static class DuckDbOlapEndpoints
             logger.LogWarning(ex, "Max staged rows limit exceeded in OLAP query.");
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
             await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message }, ct);
+        }
+        catch (SecurityException ex) when (ex.Message.Contains("capacity", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(ex, "OLAP engine concurrency limit reached.");
+            httpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            await httpContext.Response.WriteAsJsonAsync(new { error = "OLAP capacity limit reached. Please retry later." }, ct);
+        }
+        catch (SecurityException ex) when (ex.Message.Contains("memory size", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(ex, "OLAP query result byte budget exceeded.");
+            httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await httpContext.Response.WriteAsJsonAsync(new { error = isDev ? ex.Message : "OLAP query result exceeded maximum allowed memory size." }, ct);
         }
         catch (Exception ex)
         {

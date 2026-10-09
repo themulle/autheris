@@ -1627,6 +1627,22 @@ public sealed class DuckDbOlapOptions
 
     /// <summary>Maximum rows of an OLAP query result; a smaller requested limit is kept.</summary>
     public int MaxResultRows { get; init; } = 50000;
+
+    /// <summary>Maximum byte size of an OLAP query result (default 32MB) to prevent memory exhaustion DoS (SG-02).</summary>
+    public long MaxResultBytes { get; init; } = 32 * 1024 * 1024;
+
+    /// <summary>Maximum distinct tables allowed to be staged in a single OLAP query (default 10) (SG-02).</summary>
+    public int MaxTableCount { get; init; } = 10;
+
+    /// <summary>Maximum total staged rows across all tables in a single OLAP query (default 500,000) (SG-02).</summary>
+    public int MaxTotalStagedRows { get; init; } = 500000;
+
+    /// <summary>Maximum concurrent OLAP query executions across all tenants (default 4) (SG-02).</summary>
+    public int MaxConcurrentQueries { get; init; } = 4;
+
+    /// <summary>Maximum size of the session-isolated temporary spill directory (default 256MB) (SG-01).</summary>
+    public string MaxTempDirectorySize { get; init; } = "256MB";
+
     public int QueryTimeoutSeconds { get; init; } = 60;
     public int MaxThreads { get; init; } = 2;
 }

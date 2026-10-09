@@ -23,7 +23,7 @@ public sealed record OlapQueryResult(
     int TotalRowCount,
     TimeSpan ExecutionDuration);
 
-public interface IDuckDbOlapEngine
+public interface IDuckDbOlapEngine : IDisposable
 {
     Task<OlapQueryResult> ExecuteOlapQueryAsync(
         OlapQueryRequest request,
