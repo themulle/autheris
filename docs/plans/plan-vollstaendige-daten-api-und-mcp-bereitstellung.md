@@ -192,13 +192,19 @@ MCP-Clients können Ressourcen direkt abonnieren:
 
 Jedes administrative Feature von Autheris wird über standardisierte REST-APIs bereitgestellt und **über dieselben Schutzmechanismen von Autheris selbst abgesichert**:
 
-1. **System- & Governance-Ressourcen im Autheris-Katalog:**
-   - Administrative Entitäten werden als interne Schemata abgebildet:
-     - `system.datasources`: Verwaltung angebundener SQL-, API- und Plugin-Quellen.
-     - `system.policies`: Maskierungsregeln, Spalten-Klassifizierungen und Richtlinien.
-     - `system.rebac_tuples`: ReBAC-Beziehungsdefinitionen.
-     - `system.virtual_filters`: Virtuelle Zeilenfilter und Scope-Definitionen.
-     - `system.audit_trail`: Audit-Einträge und WORM-Signaturen.
+1. **System- & Governance-Ressourcen im Autheris-Katalog (`governance.system.*`):**
+   Administrative Entitäten werden als interne System-Tabellen im Metadaten-Katalog geführt:
+   - `governance.system.datasources`:
+     - Spalten: `id` (string, PK), `name` (varchar), `domain` (varchar), `type` (varchar), `base_url` (varchar), `is_configured` (bool), `status` (varchar: active/inactive/degraded), `created_at` (timestamp), `updated_at` (timestamp).
+     - *Invariante:* Keine Spalte für Secrets. Credentials liegen isoliert im `IKeyVaultSecretProvider`.
+   - `governance.system.policies`:
+     - Spalten: `id` (string, PK), `table_id` (varchar), `column_name` (varchar), `sensitivity` (varchar: PUBLIC, CONFIDENTIAL, SECRET), `masking_type` (varchar: clear, mask, hash, nullify), `classification_tags` (varchar/json).
+   - `governance.system.rebac_tuples`:
+     - Spalten: `user` (varchar), `relation` (varchar: can_query, can_manage, can_grant, viewer, admin), `object` (varchar: table:*, domain:*).
+   - `governance.system.virtual_filters`:
+     - Spalten: `id` (string, PK), `table_id` (varchar), `principal` (varchar), `filter_expression` (varchar), `valid_until` (timestamp).
+   - `governance.system.audit_trail`:
+     - Spalten: `id` (string, PK), `timestamp` (timestamp), `actor_sid` (varchar), `channel` (varchar: rest, mcp, websql), `action` (varchar), `target` (varchar), `correlation_id` (varchar), `worm_signature` (varchar).
 2. **Rekursive Absicherung via `TableAccessPolicy` & ReBAC:**
    - Ein Aufrufer (z.B. Administrator oder Agent) kann `system.policies` oder `system.datasources` nur modifizieren oder lesen, wenn er die entsprechende Berechtigung besitzt:
      - `user:alice can_manage domain:sales` $\rightarrow$ darf nur Quellen und Freigaben der Domäne `sales` verwalten.
@@ -218,8 +224,14 @@ Damit AI-Modelle alle APIs und Features fehlerfrei und ohne Halluzinationen bedi
    - `autheris://api/docs/endpoints`: Eine LLM-optimierte Markdown-Übersicht aller Endpunkte mit Parametern, Authentifizierungs-Anforderungen und Beispielen.
    - `autheris://api/docs/mcp-tools`: Referenz aller verfügbaren MCP-Tools mit JSON-Schemas und Nutzungsbeispielen.
 2. **MCP Tool `describe_api`:**
+   - Schema: `{"endpoint": string, "method": string?}`
    - Erlaubt dem Agenten, zur Laufzeit gezielt die Dokumentation, Parameter und Schemata eines spezifischen Endpunkts abzufragen:
      `describe_api(endpoint: "/api/v1/data/{domain}/{table}")` $\rightarrow$ Liefert Markdown-Spezifikation, Query-Parameter und Beispiel-Requests.
+3. **MCP Tool `invoke_api`:**
+   - Schema: `{"endpoint": string, "method": "GET"|"POST"|"PUT"|"DELETE", "parameters": object?, "body": object?}`
+   - Dispatcher leitet universelle Anfragen an die internen Minimal-API-Handler weiter. Vollständige ReBAC- und Audit-Pipeline greift transparent.
+4. **Entwickler-Workstream-Referenz:**
+   - Alle Implementierungsdetails, Klassenverträge, DTOs und Unit-Test-Spezifikationen für Entwickler-Agents sind in [plan-workstreams-entwickler-details.md](plan-workstreams-entwickler-details.md) detailliert ausgearbeitet.
 
 ---
 

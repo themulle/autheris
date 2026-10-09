@@ -11,6 +11,7 @@
 | Plan / Dokument | Thema / Feature | Behandelte Befunde & Anforderungen | Status |
 |---|---|---|---|
 | **[Plan 8: Vollständige Daten-API & MCP-Bereitstellung](plan-vollstaendige-daten-api-und-mcp-bereitstellung.md)** | Governed REST Data API (`/api/v1/data/*`), Discovery & MCP-Ökosystem (Tools, Resources, Prompts) | **R-54 bis R-66, PoC Citizen Dev & MCP** | Neu erstellt – bereit zum Review ⏳ |
+| **[Entwickler-Workstreams & TDD-Spezifikation](plan-workstreams-entwickler-details.md)** | Detaillierte Modellspezifikationen, C#-Interfaces, Testpläne und Aufteilung in 5 parallele Entwickler-Tracks (A bis E) | **Umsetzungs-Blueprint für Entwickler-Agents** | Spezifiziert & bereit zur TDD-Ausführung ⏳ |
 
 ---
 
@@ -37,19 +38,21 @@ flowchart TD
         CORE["Autheris Core Platform<br/>(State · DI-Module · Plan-Cache · CI · Audit · WebSQL Joins)"]
     end
 
-    subgraph Active["Aktiver Plan (Plan 8)"]
-        REST_DATA["Säule 1: Governed REST Data API<br/>(/api/v1/data/{domain}/{table} · Streaming JSON)"]
-        CATALOG_API["Säule 1b: Catalog & Discovery API<br/>(/api/v1/catalog/* · /api/v1/governance/me/access)"]
-        MCP_TOOLS["Säule 2a: Erweiterte MCP Tools<br/>(query_sql · query_dataset · search_catalog · get_my_permissions)"]
-        MCP_RESOURCES["Säule 2b: MCP Resources & Prompts<br/>(autheris://catalog/* · autheris://governance/*)"]
-        MCP_ADMIN["Säule 2c: Admin MCP Tools<br/>(R-54..64: Swagger-Ingestion · Access Plans · Human-in-the-Loop)"]
+    subgraph Active["Aktiver Plan: Plan 8 & Entwickler-Workstreams"]
+        TRACK_A["Track A: Governed REST Data API<br/>(/api/v1/data/* · Streaming JSON · System-Tabellen)"]
+        TRACK_B["Track B: Catalog & Discovery API<br/>(/api/v1/catalog/* · Swagger R-54..58 · Principals R-61)"]
+        TRACK_C["Track C: RFC 6238 TOTP 2FA Engine<br/>(MS/Google Authenticator · 1Password · HitL Step-Up)"]
+        TRACK_D["Track D: Hybrid MCP Tools & Resources<br/>(query_sql · describe_api · invoke_api · autheris://*)"]
+        TRACK_E["Track E: Admin MCP Tools & Two-Phase Freigabe<br/>(admin_plan_access · confirmationToken mit 2FA)"]
     end
 
-    CORE --> REST_DATA
-    CORE --> CATALOG_API
-    REST_DATA --> MCP_TOOLS
-    CATALOG_API --> MCP_RESOURCES
-    CORE --> MCP_ADMIN
+    CORE --> TRACK_A
+    CORE --> TRACK_B
+    CORE --> TRACK_C
+    TRACK_A --> TRACK_D
+    TRACK_B --> TRACK_D
+    TRACK_B --> TRACK_E
+    TRACK_C --> TRACK_E
 ```
 
 ---
@@ -57,4 +60,5 @@ flowchart TD
 ## 4. Quelltexte und Referenzdokumente
 
 - [Plan 8: Vollständige Daten-API & MCP-Bereitstellung](plan-vollstaendige-daten-api-und-mcp-bereitstellung.md)
+- [Entwickler-Workstreams & TDD-Spezifikation (Tracks A bis E)](plan-workstreams-entwickler-details.md)
 - [Feature Request: Admin-Datenquellen & MCP (R-54 bis R-66)](2026-10-09-feature-request-admin-datenquellen-und-mcp.md)
