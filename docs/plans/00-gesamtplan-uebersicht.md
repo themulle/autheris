@@ -8,15 +8,11 @@
 
 ## 1. Aktive Implementierungspläne (Noch OFFEN ⏳)
 
-**Alle geplanten Workstreams und Feature Requests sind vollständig abgeschlossen und verifiziert! (0 OFFEN 🎉)**
+Basierend auf der Produktmanager-Gap-Analyse wurde der architektonische Implementierungsplan **Plan 9** erstellt und zur Umsetzung freigegeben:
 
-| Workstream | Thema / Feature | Behandelte Anforderungen | Status |
+| Plan / Dokument | Thema / Feature | Behandelte Anforderungen & Komponenten | Status |
 |---|---|---|---|
-| **[Track A: Governed REST Data API](plan-workstreams-entwickler-details.md#2-workstream-a-governed-rest-data-api--virtuelle-system-tabellen)** | • Universelle REST Data API (`/api/v1/data/*`)<br>• Virtuelle System-Tabellen (`governance.system.*`)<br>• Utf8JsonWriter-Streaming, Paging & Maskierung | **ADR-01** | **ABGESCHLOSSEN ✅** |
-| **[Track B: Catalog & Discovery API](plan-workstreams-entwickler-details.md#3-workstream-b-catalog--discovery-api--datasource-onboarding-r-5458-r-61)** | • Endpunkte `/api/v1/catalog/*`<br>• Swagger 2.0 & OpenAPI 3.x Ingestion<br>• Zero-Leakage Vaulting (`IKeyVaultSecretProvider`)<br>• ReBAC `can_query` Filterung & Identity-Linking | **R-54..58, R-61** | **ABGESCHLOSSEN ✅** |
-| **[Track C: RFC 6238 TOTP 2FA Engine](plan-workstreams-entwickler-details.md#4-workstream-c-rfc-6238-totp-2fa-engine--step-up-hitl-integration)** | • RFC 6238 TOTP (MS Authenticator, Google Authenticator, 1Password)<br>• Distributed Replay-Schutz (90s TTL)<br>• HitL Step-Up Integration | **ADR-05, R-64** | **ABGESCHLOSSEN ✅** |
-| **[Track D: Hybrid MCP Tools & Resources](plan-workstreams-entwickler-details.md#5-workstream-d-hybrid-mcp-tools-resources--prompts)** | • High-Level MCP Tools (`query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`, `get_data_lineage`)<br>• Universal API Dispatcher (`describe_api`, `invoke_api`)<br>• MCP Resources (`autheris://catalog/*`, `autheris://governance/*`, `autheris://api/*`) & Prompts (`explore_dataset`, `audit_access_compliance`) | **ADR-02, ADR-04, R-63, R-65** | **ABGESCHLOSSEN ✅** |
-| **[Track E: Admin MCP Tools & Two-Phase-Freigabe](plan-workstreams-entwickler-details.md#6-workstream-e-admin-mcp-tools-access-planning--two-phase-confirmation)** | • Administrative MCP Werkzeuge (`admin_plan_access`, `admin_apply_access`, `admin_register_datasource`, `admin_set_dataset_state`, `admin_resolve_principal`)<br>• Access-Planning mit Diff-Vorschau ohne Seiteneffekte<br>• Human-in-the-Loop Two-Phase Confirmation (`confirmationToken`) gebunden an RFC 6238 TOTP 2FA<br>• WORM-Audit-Logging für alle MCP-Mutationen | **ADR-03, ADR-05, R-60, R-62** | **ABGESCHLOSSEN ✅** |
+| **[Plan 9: Restliche Lücken – Onboarding, Paginierung, UI & Jobs](2026-10-09-implementierungsplan-restliche-luecken-onboarding-pagination-ui-jobs.md)** | • **AP-9.1:** Verbindungstest für Datenquellen (`POST /api/v1/catalog/datasources/{id}/test`)<br>• **AP-9.2:** Multi-Page HTTP Staging Pagination Engine (`offset/limit`, `nextLink`, `cursor`)<br>• **AP-9.3:** 2FA & HitL Web Console im DevPortal (`/portal/2fa/enroll`, `/portal/approvals`)<br>• **AP-9.4:** Async Long-Running Query Job Engine (`/api/v1/jobs/query`, `GET /status`, `GET /result`) | **R-55, R-56, R-60, R-64 UX, F-DATA-05**<br>• `DatasourceTestingService.cs`<br>• `DeclarativeHttpDataSourceExecutor.cs`<br>• `DevPortalEndpoints.cs`<br>• `AsyncQueryJobManager.cs` | **OFFEN ⏳**<br>Bereit zur TDD-Umsetzung |
 
 ---
 
