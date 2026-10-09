@@ -3,7 +3,7 @@
 **Dokument-ID:** `PLAN-ONBOARDING-PAGINATION-JOBS-09`  
 **Stand:** 09.10.2026 · **Zweig:** `feat/ast-target-dialect-generator`  
 **Rolle:** Principal .NET & C# Solution Architect & Lead Application Security (AppSec) Expert  
-**Referenzen:** [Produktmanager Gap-Analyse](file:///root/autheris/docs/plans/00-gesamtplan-uebersicht.md), [Feature Request R-54 bis R-66](file:///root/autheris/docs/plans/2026-10-09-feature-request-admin-datenquellen-und-mcp.md), [Plan 8 Entwickler-Workstreams](file:///root/autheris/docs/plans/plan-workstreams-entwickler-details.md)  
+**Referenzen:** [Produktmanager Gap-Analyse & Gesamtübersicht](file:///root/autheris/docs/plans/00-gesamtplan-uebersicht.md) (Historische Pläne 1–8 & Feature Requests vollständig umgesetzt und in Git-Historie archiviert)  
 **Status:** Security-Reviewed, Erweitert & Bereit zur Implementierung 🛡️⏳  
 
 ---

@@ -90,6 +90,5 @@ flowchart TD
 
 ## 4. Quelltexte und Referenzdokumente
 
-- [Plan 8: Vollständige Daten-API & MCP-Bereitstellung](plan-vollstaendige-daten-api-und-mcp-bereitstellung.md)
-- [Entwickler-Workstreams & TDD-Spezifikation (Tracks D & E)](plan-workstreams-entwickler-details.md)
-- [Feature Request: Admin-Datenquellen & MCP (R-54 bis R-66)](2026-10-09-feature-request-admin-datenquellen-und-mcp.md)
+- **Aktiver Implementierungsplan:** [Plan 9: Restliche Lücken – Onboarding, Paginierung, UI & Jobs](2026-10-09-implementierungsplan-restliche-luecken-onboarding-pagination-ui-jobs.md)
+- **Historische Pläne (1–8, SQL-AST Härtung, Feature Requests):** Vollständig implementiert, verifiziert und in der Git-Historie archiviert.
