@@ -14,11 +14,15 @@ using ModelContextProtocol.Authentication;
 /// </summary>
 public static class GatewayMcpOAuth
 {
-    /// <summary>Only with MCP and at least one OAuth issuer enabled and configured; Kerberos, Basic and ForwardAuth have nothing to discover.</summary>
     public static bool IsEnabled(GatewayOptions options) =>
         options.Mcp.Enabled &&
         (options.Authentication.EntraId.Enabled || options.Authentication.Adfs.Enabled) &&
         AuthorizationServers(options).Count > 0;
+
+    /// <summary>Checks whether OAuth discovery routes should be exposed.</summary>
+    public static bool CanDiscover(GatewayOptions options) =>
+        options.Mcp.Enabled &&
+        (options.Authentication.EntraId.Enabled || options.Authentication.Adfs.Enabled);
 
     public static List<string> GetSupportedScopes(GatewayOptions options)
     {

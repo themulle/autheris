@@ -94,7 +94,7 @@ public static class McpEndpoints
             });
         }
 
-        if (GatewayMcpOAuth.IsEnabled(gatewayOptions))
+        if (GatewayMcpOAuth.CanDiscover(gatewayOptions))
         {
             var hostEnv = env ?? app.ServiceProvider?.GetService<IHostEnvironment>();
             bool isDev = hostEnv?.IsDevelopment() ?? false;
