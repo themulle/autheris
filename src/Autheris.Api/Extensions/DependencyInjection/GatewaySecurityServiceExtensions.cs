@@ -100,6 +100,9 @@ public static class GatewaySecurityServiceExtensions
         // F-ARCH-11: Envoy External Authorization & Istio Service Mesh Adapter
         services.AddSingleton<IEnvoyExtAuthzService, EnvoyExtAuthzService>();
 
+        // RFC 6238 TOTP 2FA Engine (ADR-05)
+        services.AddAutheris2Fa();
+
         return services;
     }
 }
