@@ -38,7 +38,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
 
 ## 2. Befunde – Hoch
 
-### SG-01 OLAP: Cross-Session-Datenleck über das gemeinsame DuckDB-Temp-Verzeichnis
+### SG-01 OLAP: Cross-Session-Datenleck über das gemeinsame DuckDB-Temp-Verzeichnis [BEHOBEN]
+- **Status:** Behoben
 - **Schwere:** Hoch | **Konfidenz:** bestätigt (reproduziert mit DuckDB 1.5.6)
 - **Fundstellen:** `src/Autheris.Application/Olap/DuckDbOlapEngine.cs:72-80` (Setup), `:288-305` (Keyword-Denylist)
 - **Beschreibung:**
@@ -54,7 +55,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - `temp_file_encryption=true` setzen und `max_temp_directory_size` begrenzen.
   - Datei-Tabellenfunktionen verbieten (`read_*`, `glob`, `sniff_csv`, `parquet_*`, `duckdb_settings`), am besten über eine Allowlist.
 
-### SG-02 OLAP: Speicher-DoS bis zum Prozessabsturz (Ergebnis-Materialisierung und unbegrenzte `tableNames`)
+### SG-02 OLAP: Speicher-DoS bis zum Prozessabsturz (Ergebnis-Materialisierung und unbegrenzte `tableNames`) [BEHOBEN]
+- **Status:** Behoben
 - **Schwere:** Hoch | **Konfidenz:** bestätigt (gemessen im verkleinerten Maßstab)
 - **Fundstellen:** `DuckDbOlapEngine.cs:113-127`, `src/Autheris.Api/Endpoints/DuckDbOlapEndpoints.cs:25-28, 39, 150-243, 254-279`, `GatewayOptions.cs:1622-1632`
 - **Beschreibung:**
@@ -71,7 +73,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - `TableNames` auf maximal etwa 10 begrenzen und deduplizieren, dazu ein Gesamtbudget für gestagte Zeilen bzw. Bytes.
   - Eigenes Rate-Limit für den Endpoint.
 
-### SG-03 Virtuelle Filter: Vier-Augen-Umgehung durch Bearbeiten und anschließendes Freigeben
+### SG-03 Virtuelle Filter: Vier-Augen-Umgehung durch Bearbeiten und anschließendes Freigeben [BEHOBEN]
+- **Status:** Behoben
 - **Schwere:** Hoch | **Konfidenz:** bestätigt
 - **Fundstellen:**
   - `src/Autheris.Application/VirtualFilters/VirtualFilterAdministrationService.cs:194, 215` (Filter) und `:386, 407` (Profile): `CreatedBy = existing?.CreatedBy ?? actor.Sid`.
@@ -223,7 +226,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - `!IsActive` zentral in `TableAccessPolicy.DecideAsync` bzw. `ResolveTableAccessAsync` und in `GovernedSqlExecutionService` wie „nicht gefunden“ behandeln.
   - Für inaktive Tabellen keine Auto-Consents anlegen.
 
-### SG-13 dbt `validate-contract` und `health`: Rolle `Developer` sieht Schemas aller Tenants
+### SG-13 dbt `validate-contract` und `health`: Rolle `Developer` sieht Schemas aller Tenants [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt
 - **Fundstellen:** `src/Autheris.Api/Endpoints/DbtEndpoints.cs:147-173, 205-228`, `src/Autheris.Extensions/Dbt/DbtContractValidator.cs:55-102`
 - **Beschreibung:**
@@ -233,7 +237,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Die Warnung „not found“ ist zusätzlich ein Existenz-Orakel.
 - **Fix:** Endpoint nur für GovernanceAdmin/DbtAdmin freigeben, oder auf den Tenant des Aufrufers einschränken und nur Spalten mit Zugriff ≠ Deny melden. Unbekannte und verbotene Tabellen identisch beantworten.
 
-### SG-14 `supersedes` entfernt Pflichtfilter anderer Profile (SR15-12 unvollständig)
+### SG-14 `supersedes` entfernt Pflichtfilter anderer Profile (SR15-12 unvollständig) [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt
 - **Fundstellen:** `src/Autheris.Application/VirtualFilters/MandatoryRowFilterResolver.cs:236, 276, 309`
 - **Beschreibung:**
@@ -243,7 +248,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
 - **Angriff:** Ein eigenes, nicht verwaltetes Profil `0-own` bindet den verwalteten Filter X plus den eigenen Filter Y mit `supersedes=[X]`. Damit fällt X auch im verwalteten Profil weg.
 - **Fix:** Supersede pro (Profil, Binding) entscheiden und `All` statt `Any` verwenden. Nicht global nach Namen entfernen und nicht profilübergreifend deduplizieren.
 
-### SG-15 Token-Claims `action`/`gql.action` fließen weiter in Casbin-Attribute (SR15-08 unvollständig)
+### SG-15 Token-Claims `action`/`gql.action` fließen weiter in Casbin-Attribute (SR15-08 unvollständig) [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt im Code; Voraussetzung ist ein solcher Claim im Token
 - **Fundstellen:** `src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs:170-174` (CDC-Streaming und GraphQL-Subscriptions pro Event), `src/Autheris.Extensions/Lakehouse/Services/IcebergRestCatalogFederationService.cs:298-301`, `CasbinEnforcementService.cs:586-610`
 - **Angriff:** Mit `action=x` im Token greift ein `deny … read` nicht mehr, während ein `allow … *` weiter erlaubt.
@@ -251,7 +257,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Ausschließlich `TableAccessPolicy.BuildEvaluationContext` als gemeinsame Kontextquelle verwenden.
   - In `ResolveRequestedAction` nur `read` und `write` als Whitelist zulassen, alles andere auf `read` abbilden oder ablehnen.
 
-### SG-16 Schema-Contracts: `AllowedTables` ignoriert die Domain, Tags werden gegen Sensitivity geprüft (SR15-51)
+### SG-16 Schema-Contracts: `AllowedTables` ignoriert die Domain, Tags werden gegen Sensitivity geprüft (SR15-51) [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt
 - **Fundstellen:** `TableAccessPolicy.cs:147-149`, `CatalogVisibility.cs:102-104`, `TableIdentifier.cs:36`
 - **Beschreibung:**
@@ -264,7 +271,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Tags mit derselben Funktion prüfen wie der SDL-Filter.
   - Unbekannter Contract führt zu Deny.
 
-### SG-17 Envoy ext_authz: HTTP-Methode und Read-only-Status werden ignoriert, abweichende Tenant-Auflösung
+### SG-17 Envoy ext_authz: HTTP-Methode und Read-only-Status werden ignoriert, abweichende Tenant-Auflösung [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt (Methode); plausibel (Tenant, `X-Original-Method`)
 - **Fundstellen:** `src/Autheris.Application/Mesh/Services/EnvoyExtAuthzService.cs:104-106, 178-196`, `EnvoyExtAuthzEndpoints.cs:30-32`, `ReadOnlyTokenMiddleware.cs:105-110`
 - **Beschreibung:**
@@ -276,7 +284,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Bei `IsReadOnly()` nicht sichere Originalmethoden ablehnen.
   - `GetTenantId()` und `GetUserSid()` verwenden.
 
-### SG-18 HitL-Freigaben über Redis Pub/Sub ohne Integritätsschutz fälschbar
+### SG-18 HitL-Freigaben über Redis Pub/Sub ohne Integritätsschutz fälschbar [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt (Code-Pfad); Voraussetzung ist Schreibzugriff auf Redis
 - **Fundstellen:** `src/Autheris.Application/Mcp/Services/HitLStepUpApprovalService.cs:132-148, 478-481`, `src/Autheris.Infrastructure/State/RedisClusterStateProvider.cs:59, 145-150`
 - **Beschreibung:**
@@ -285,7 +294,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Der Consent-L2-Cache ist dagegen HMAC-geschützt, weil Redis dort als nicht vertrauenswürdig gilt.
 - **Fix:** Tickets und Broadcasts per HMAC mit einem HKDF-Subkey signieren, wie im Consent-Cache, oder die Entscheidung vor der Ausführung aus der Governance-DB neu lesen.
 
-### SG-19 PostgreSQL-Governance-Repo: Audit-HMAC-Key fällt bei `danger_allow_insecure_transport` auf eine öffentliche Konstante zurück
+### SG-19 PostgreSQL-Governance-Repo: Audit-HMAC-Key fällt bei `danger_allow_insecure_transport` auf eine öffentliche Konstante zurück [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt
 - **Fundstellen:** `src/Autheris.Infrastructure/Persistence/PostgreSqlGovernanceRepository.cs:174-185`; vgl. `SqliteGovernanceRepository.cs:166-180` (wirft außerhalb von Development).
 - **Beschreibung:**
@@ -294,7 +304,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Der Anchor-Key wird per HKDF aus diesem Wert abgeleitet. Wer DB-Zugriff hat, kann die Kette konsistent neu schreiben.
 - **Fix:** Ausnahme in Zeile 176 entfernen; außerhalb von Development immer werfen.
 
-### SG-20 Traffic-Shadowing leitet PII aus JSON-Werten (GraphQL-`variables`) unredigiert weiter
+### SG-20 Traffic-Shadowing leitet PII aus JSON-Werten (GraphQL-`variables`) unredigiert weiter [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt (Feature per Default aus)
 - **Fundstellen:** `src/Autheris.Application/Diagnostics/Shadowing/PiiShadowingRedactor.cs:43-44, 117-131`, `TrafficShadowingMiddleware.cs:56-81`
 - **Beschreibung:**
@@ -302,7 +313,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Namen, IBANs, Telefonnummern und Zahlen in `variables` gehen im Klartext an die Shadow-Umgebung. Das verstößt gegen DSGVO-Zweckbindung und Datenminimierung.
 - **Fix:** Den Body als JSON parsen und alle Blätter außerhalb von `query`/`operationName` typgerecht ersetzen. Numerische SQL-Literale ebenfalls redigieren.
 
-### SG-21 Federation: Die Signatur des Kontext-Headers deckt Rollen, Subject und Audience nicht ab
+### SG-21 Federation: Die Signatur des Kontext-Headers deckt Rollen, Subject und Audience nicht ab [BEHOBEN]
+- **Status:** Behoben
 - **Schwere:** Niedrig–Mittel | **Konfidenz:** plausibel
 - **Fundstellen:** `src/Autheris.Application/Federation/Services/SubgraphContextPropagationService.cs:56-58, 70, 125`
 - **Beschreibung:**

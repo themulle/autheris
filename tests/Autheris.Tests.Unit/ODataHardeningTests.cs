@@ -403,6 +403,35 @@ public sealed class ODataHardeningTests
 
         ODataEndpoints.RequiresMetadataChallenge(new GatewayOptions(), env, anonymous).ShouldBeTrue();
     }
+
+    [Fact]
+    public async Task Befund_1_2_UnsupportedAcceptHeader_Returns406NotAcceptable()
+    {
+        var handler = Substitute.For<IODataHandler>();
+        var context = new DefaultHttpContext();
+        context.Request.Headers.Accept = "text/csv";
+
+        var result = await ODataEndpoints.HandleEntitySetRequestAsync("sales", "dbo", "invoices", handler, context);
+
+        var statusResult = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        statusResult!.StatusCode.ShouldBe(StatusCodes.Status406NotAcceptable);
+        await handler.DidNotReceiveWithAnyArgs().ExecuteEntitySetQueryAsync(
+            default, default!, default, default, default, default, default, default, default, default, default);
+    }
+
+    [Theory]
+    [InlineData("parquet")]
+    [InlineData("application/vnd.apache.parquet")]
+    public void Befund_1_2_ValidateSystemQueryOptions_AcceptsParquetFormat(string formatValue)
+    {
+        var query = new QueryCollection(new Dictionary<string, Microsoft.Extensions.Primitives.StringValues>
+        {
+            ["$format"] = formatValue
+        });
+
+        var result = ODataEndpoints.ValidateSystemQueryOptions(query);
+        result.ShouldBeNull();
+    }
 }
 
 

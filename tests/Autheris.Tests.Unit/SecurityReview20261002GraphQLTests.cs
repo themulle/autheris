@@ -81,6 +81,24 @@ public sealed class SecurityReview20261002GraphQLTests
     }
 
     [Fact]
+    public async Task R32_CostExceeded_ErrorMessage_MentionsFirstPagination()
+    {
+        var executor = await new ServiceCollection()
+            .AddGraphQLServer()
+            .AddQueryType<Query>()
+            .AddValidationRule<QueryCostAnalyzerRule>((sp, opt) => new QueryCostAnalyzerRule(maxAllowedCost: 50, maxResponseRows: 5000))
+            .BuildRequestExecutorAsync();
+
+        var result = await executor.ExecuteAsync("query { table(domain: \"hr\", name: \"hr_table_1\", first: 500) { jsonRows } }");
+        var opResult = result.ExpectOperationResult();
+
+        opResult.Errors.ShouldNotBeNull();
+        opResult.Errors!.Count.ShouldBeGreaterThan(0);
+        opResult.Errors[0].Message.ShouldContain("'first' (e.g. first: 10)");
+        opResult.Errors[0].Extensions!["hint"]?.ToString()!.ShouldContain("first");
+    }
+
+    [Fact]
     public async Task M13_SixtyTableAliases_ExceedCostBudgetAndRootFieldLimit()
     {
         var schema = await BuildQuerySchemaAsync();

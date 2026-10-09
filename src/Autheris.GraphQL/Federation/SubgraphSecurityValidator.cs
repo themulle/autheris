@@ -17,7 +17,11 @@ public static class SubgraphSecurityValidator
         string? nonce,
         string? signature,
         string signingKey,
-        TimeSpan? maxDrift = null)
+        TimeSpan? maxDrift = null,
+        string? subgraph = null,
+        string? roles = null,
+        string? method = null,
+        string? path = null)
     {
         if (string.IsNullOrWhiteSpace(tenant) ||
             string.IsNullOrWhiteSpace(timestampStr) ||
@@ -41,7 +45,10 @@ public static class SubgraphSecurityValidator
             return false;
         }
 
-        var payload = $"{tenant}:{userSid ?? string.Empty}:{timestampStr}:{nonce}";
+        var payload = (subgraph != null || roles != null || method != null || path != null)
+            ? $"{tenant}:{userSid ?? string.Empty}:{timestampStr}:{nonce}:{subgraph ?? string.Empty}:{roles ?? string.Empty}:{method ?? string.Empty}:{path ?? string.Empty}"
+            : $"{tenant}:{userSid ?? string.Empty}:{timestampStr}:{nonce}";
+
         using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(signingKey));
         var expectedSignature = Convert.ToHexStringLower(hmac.ComputeHash(Encoding.UTF8.GetBytes(payload)));
 

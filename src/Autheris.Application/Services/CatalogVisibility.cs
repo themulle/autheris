@@ -100,20 +100,25 @@ public static class CatalogVisibility
         return tables.Where(t =>
         {
             if (contract.AllowedTables.Count > 0 &&
-                !contract.AllowedTables.Contains(t.Identifier.TableName) &&
-                !contract.AllowedTables.Contains(t.Identifier.ToQualifiedName()))
+                !contract.AllowedTables.Contains(t.Identifier.ToString()) &&
+                !contract.AllowedTables.Contains(t.Identifier.TableName))
             {
                 return false;
             }
 
+            var allTableTags = (t.Table.Tags ?? Array.Empty<string>())
+                .Concat(string.IsNullOrWhiteSpace(t.Table.Sensitivity) ? Array.Empty<string>() : [t.Table.Sensitivity])
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .ToList();
+
             if (contract.ExcludedTags.Count > 0 &&
-                contract.ExcludedTags.Contains(t.Table.Sensitivity))
+                allTableTags.Any(tag => contract.ExcludedTags.Contains(tag)))
             {
                 return false;
             }
 
             if (contract.IncludedTags.Count > 0 &&
-                !contract.IncludedTags.Contains(t.Table.Sensitivity))
+                (allTableTags.Count == 0 || !allTableTags.Any(tag => contract.IncludedTags.Contains(tag))))
             {
                 return false;
             }

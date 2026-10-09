@@ -11,6 +11,8 @@ using Autheris.Domain.Model;
 public interface IDbtMetadataIngestionService
 {
     Task<DbtSyncResult> IngestManifestStreamAsync(Stream manifestStream, bool dryRun = false, CancellationToken ct = default);
+    Task<DbtGovernanceSyncResult> IngestGovernanceStreamAsync(Stream governanceStream, bool dryRun = false, CancellationToken ct = default);
+    Task<DbtGovernanceSyncResult> IngestGovernanceFileAsync(string filePath, bool dryRun = false, CancellationToken ct = default);
     Task<DbtMetadataProposal> ApproveProposalAsync(Guid proposalId, string reviewedBy, CancellationToken ct = default);
     Task<DbtMetadataProposal> RejectProposalAsync(Guid proposalId, string reviewedBy, CancellationToken ct = default);
     Task<IReadOnlyList<DbtMetadataProposal>> GetPendingProposalsAsync(TableIdentifier? table = null, CancellationToken ct = default);

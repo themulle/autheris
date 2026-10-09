@@ -418,5 +418,210 @@ public sealed class DbtTests
         result.IsCompatible.ShouldBeTrue();
         result.BreakingChanges.ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task DbtArtifactStreamingParser_ParseManifestWithRelationshipsAsync_ExtractsConstraintsAndTestRelationships()
+    {
+        const string manifestWithRelationshipsJson = """
+        {
+          "metadata": {
+            "dbt_version": "1.8.0",
+            "project_name": "corp_analytics"
+          },
+          "nodes": {
+            "model.corp_analytics.stg_customers": {
+              "name": "stg_customers",
+              "database": "postgres",
+              "schema": "raw",
+              "columns": {
+                "customer_id": { "name": "customer_id", "data_type": "integer" }
+              }
+            },
+            "model.corp_analytics.fct_orders": {
+              "name": "fct_orders",
+              "database": "postgres",
+              "schema": "analytics",
+              "columns": {
+                "order_id": { "name": "order_id", "data_type": "integer" },
+                "customer_id": {
+                  "name": "customer_id",
+                  "data_type": "integer",
+                  "constraints": [
+                    {
+                      "type": "foreign_key",
+                      "to": "ref('stg_customers')",
+                      "to_columns": ["customer_id"]
+                    }
+                  ]
+                }
+              }
+            },
+            "test.corp_analytics.relationships_fct_orders_customer_id__customer_id__ref_stg_customers_": {
+              "name": "relationships_fct_orders_customer_id__customer_id__ref_stg_customers_",
+              "resource_type": "test",
+              "test_metadata": {
+                "name": "relationships",
+                "kwargs": {
+                  "column_name": "customer_id",
+                  "field": "customer_id",
+                  "to": "ref('stg_customers')"
+                }
+              },
+              "attached_node": "model.corp_analytics.fct_orders"
+            }
+          }
+        }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifestWithRelationshipsJson));
+        var (models, relationships) = await DbtArtifactStreamingParser.ParseManifestWithRelationshipsAsync(stream);
+
+        models.Count.ShouldBe(2);
+        relationships.Count.ShouldBeGreaterThanOrEqualTo(1);
+
+        var rel = relationships.First(r => r.ChildModelOrTable == "fct_orders" && r.ParentModelOrTable == "stg_customers");
+        rel.ParentColumn.ShouldBe("customer_id");
+        rel.ChildColumn.ShouldBe("customer_id");
+    }
+
+    [Fact]
+    public async Task DbtMetadataIngestionService_SyncMetadataAsync_ImportsDynamicRelationships()
+    {
+        var proposalRepo = Substitute.For<IDbtProposalRepository>();
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var graphStore = Substitute.For<ILineageGraphStore>();
+        var relationRepo = Substitute.For<ITableRelationRepository>();
+        var logger = NullLogger<DbtMetadataIngestionService>.Instance;
+
+        var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, relationRepo, logger);
+
+        const string manifestJson = """
+        {
+          "metadata": {
+            "dbt_version": "1.8.0",
+            "project_name": "corp_analytics"
+          },
+          "nodes": {
+            "model.corp_analytics.dim_users": {
+              "name": "dim_users",
+              "database": "postgres",
+              "schema": "analytics",
+              "columns": {
+                "user_id": { "name": "user_id", "data_type": "integer" }
+              }
+            },
+            "model.corp_analytics.fct_orders": {
+              "name": "fct_orders",
+              "database": "postgres",
+              "schema": "analytics",
+              "columns": {
+                "order_id": { "name": "order_id", "data_type": "integer" },
+                "user_id": {
+                  "name": "user_id",
+                  "data_type": "integer",
+                  "constraints": [
+                    {
+                      "type": "foreign_key",
+                      "to": "ref('dim_users')",
+                      "field": "user_id"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifestJson));
+        var result = await service.IngestManifestStreamAsync(stream, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        result.ImportedRelationsCount.ShouldBe(1);
+        await relationRepo.Received(1).CreateRelationAsync(Arg.Is<TableRelation>(r =>
+            r.RelationName == "dim_users" &&
+            r.ParentTableIdentifier.Schema == "analytics" &&
+            r.ParentTableIdentifier.TableName == "dim_users" &&
+            r.ChildTableIdentifier.Schema == "analytics" &&
+            r.ChildTableIdentifier.TableName == "fct_orders"
+        ), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task DbtMetadataIngestionService_IngestGovernanceStreamAsync_ParsesAndUpdatesGovernanceFields()
+    {
+        var proposalRepo = Substitute.For<IDbtProposalRepository>();
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var graphStore = Substitute.For<ILineageGraphStore>();
+        var logger = NullLogger<DbtMetadataIngestionService>.Instance;
+
+        var targetTableId = new TableIdentifier("postgres", "analytics", "customers");
+        var existingMetadata = new TableMetadata
+        {
+            Identifier = targetTableId,
+            Table = new Table
+            {
+                Id = Guid.NewGuid(),
+                SourceName = "postgres",
+                SchemaName = "analytics",
+                TableName = "customers",
+                Sensitivity = "NORMAL"
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "customer_id", DataType = "integer" },
+                new TableColumn { ColumnName = "email_address", DataType = "varchar" }
+            ]
+        };
+
+        metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>())
+            .Returns(existingMetadata);
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([existingMetadata]);
+
+        var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
+
+        const string governanceJson = """
+        {
+          "classifications": [
+            {
+              "database": "postgres",
+              "schema": "analytics",
+              "table": "customers",
+              "sensitivity": "CONFIDENTIAL",
+              "description": "Customer entity table",
+              "origin": "dbt_governance_v1",
+              "classification_review": {
+                "reviewer": "compliance_lead",
+                "status": "APPROVED"
+              },
+              "columns": {
+                "email_address": {
+                  "sensitivity": "HIGH",
+                  "description": "PII Email address",
+                  "masking_rule": "MASK_EMAIL"
+                }
+              }
+            }
+          ]
+        }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(governanceJson));
+        var result = await service.IngestGovernanceStreamAsync(stream, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        result.UpdatedTablesCount.ShouldBe(1);
+        result.UpdatedColumnsCount.ShouldBe(1);
+        result.MaskingRulesCount.ShouldBe(1);
+
+        await metadataRepo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m =>
+            m.Table.Sensitivity == "CONFIDENTIAL" &&
+            m.Table.DocumentationSource == "dbt_governance_v1" &&
+            m.ColumnMaskingRules.ContainsKey("email_address") &&
+            m.Columns.First(c => c.ColumnName == "email_address").IsSensitive
+        ), Arg.Any<CancellationToken>());
+    }
 }
+
 

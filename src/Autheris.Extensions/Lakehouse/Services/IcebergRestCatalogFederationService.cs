@@ -297,8 +297,14 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
             var attributes = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             foreach (var claim in principal.Claims)
             {
+                if (string.Equals(claim.Type, "action", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(claim.Type, "gql.action", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
                 attributes[claim.Type] = claim.Value;
             }
+            attributes["action"] = "read";
 
             var secContext = new SecurityEvaluationContext(
                 UserSid: userSid,

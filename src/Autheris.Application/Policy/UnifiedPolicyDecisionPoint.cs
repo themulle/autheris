@@ -76,7 +76,7 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
             securityContext.GroupSids,
             roles,
             metadata,
-            Claims: null,
+            Claims: securityContext.Claims,
             RequestedColumns: requestedColumns,
             Rebac: RebacEnforcement.WhenEnabled,
             // RV-01: unknown client IP must never satisfy loopback/internal-network allow rules (fail-closed).

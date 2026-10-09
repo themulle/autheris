@@ -49,6 +49,36 @@ public static class DbtEndpoints
         }).RequireAuthorization()
           .WithRequestBodyLimit(100 * 1024 * 1024); // SEC M-01: explicit large-body exception to the global Kestrel limit
 
+        // dbt Governance Ingestion Endpoint (R-24)
+        app.MapPost("/api/extensions/dbt/governance", async (
+            HttpContext context,
+            IDbtMetadataIngestionService dbtService) =>
+        {
+            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
+                               context.User.IsInRole("DbtAdmin");
+            if (!isPrivileged)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            const string governanceTooLarge = "Governance file size exceeds maximum allowed size (100 MB).";
+            var limitError = EndpointSecurity.TryApplyBodyLimit(context.Request, 100 * 1024 * 1024, governanceTooLarge);
+            if (limitError != null)
+            {
+                return limitError;
+            }
+
+            var dryRun = context.Request.Query.ContainsKey("dryRun") &&
+                         bool.TryParse(context.Request.Query["dryRun"], out var dr) && dr;
+
+            return await EndpointSecurity.WithBodyLimitAsync(async () =>
+            {
+                var result = await dbtService.IngestGovernanceStreamAsync(context.Request.Body, dryRun, context.RequestAborted);
+                return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+            }, governanceTooLarge);
+        }).RequireAuthorization()
+          .WithRequestBodyLimit(100 * 1024 * 1024);
+
         app.MapGet("/api/extensions/dbt/exposures", async (
             IDbtExposurePublisher exposurePublisher,
             HttpContext context) =>
@@ -148,9 +178,9 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtContractValidator validator) =>
         {
-            // Review E-7: dbt state is global and carries no table ownership; a plain DataOwner role may not read it.
+            // Review E-7 / SG-13: dbt state is global and carries no table ownership; only global governance administrators or DbtAdmin.
             var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
-                               context.User.IsInRole("Developer");
+                               context.User.IsInRole("DbtAdmin");
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -206,9 +236,9 @@ public static class DbtEndpoints
             HttpContext context,
             IDbtHealthCircuitBreaker circuitBreaker) =>
         {
-            // Review E-7: dbt state is global and carries no table ownership; a plain DataOwner role may not read it.
+            // Review E-7 / SG-13: dbt state is global and carries no table ownership; only global governance administrators or DbtAdmin.
             var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
-                               context.User.IsInRole("Developer");
+                               context.User.IsInRole("DbtAdmin");
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);

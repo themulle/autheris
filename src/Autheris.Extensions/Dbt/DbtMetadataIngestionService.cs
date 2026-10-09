@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Text.Json;
 using Autheris.Application.DataCatalog.Services;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Interfaces;
@@ -21,6 +22,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
     private readonly IPolicyEpochRepository? _epochRepository;
     private readonly Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? _gatewayOptions;
     private readonly Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? _sqlEndpointLoader;
+    private readonly ITableRelationRepository? _relationRepository;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
 
     public DbtMetadataIngestionService(
@@ -28,7 +30,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         ITableMetadataRepository metadataRepository,
         ILineageGraphStore lineageGraphStore,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, logger)
     {
     }
 
@@ -38,7 +40,17 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, null, null, null, logger)
+    {
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        ITableRelationRepository? relationRepository,
+        ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, relationRepository, logger)
     {
     }
 
@@ -50,6 +62,19 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
         Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, null, logger)
+    {
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        IPolicyEpochRepository? epochRepository,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
+        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        ITableRelationRepository? relationRepository,
+        ILogger<DbtMetadataIngestionService> logger)
     {
         _proposalRepository = proposalRepository ?? throw new ArgumentNullException(nameof(proposalRepository));
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -57,6 +82,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         _epochRepository = epochRepository;
         _gatewayOptions = gatewayOptions;
         _sqlEndpointLoader = sqlEndpointLoader;
+        _relationRepository = relationRepository;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -114,10 +140,11 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
 
         var warnings = new List<string>();
         IReadOnlyList<DbtModelDefinition> models;
+        IReadOnlyList<DbtRelationshipDefinition> relationships;
 
         try
         {
-            models = await DbtArtifactStreamingParser.ParseManifestStreamAsync(manifestStream, ct).ConfigureAwait(false);
+            (models, relationships) = await DbtArtifactStreamingParser.ParseManifestWithRelationshipsAsync(manifestStream, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -125,7 +152,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             return new DbtSyncResult(false, 0, 0, 0, [], $"Manifest parse failure: {ex.Message}");
         }
 
-        _logger.LogInformation("Parsed {Count} dbt models from manifest.", models.Count);
+        _logger.LogInformation("Parsed {Count} dbt models and {RelCount} relationships from manifest.", models.Count, relationships.Count);
 
         var generatedProposals = 0;
         var lineageNodesToUpdate = new List<LineageNode>();
@@ -402,22 +429,286 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             }
         }
 
+        // R-31: Persist relationships into the governance repository
+        var importedRelations = 0;
+        if (_relationRepository != null && relationships.Count > 0)
+        {
+            var modelNameToTableId = new Dictionary<string, TableIdentifier>(StringComparer.OrdinalIgnoreCase);
+            foreach (var m in models)
+            {
+                modelNameToTableId[m.Name] = m.ToTableIdentifier();
+                modelNameToTableId[m.UniqueId] = m.ToTableIdentifier();
+            }
+
+            foreach (var rel in relationships)
+            {
+                if (modelNameToTableId.TryGetValue(rel.ParentModelOrTable, out var parentId) &&
+                    modelNameToTableId.TryGetValue(rel.ChildModelOrTable, out var childId))
+                {
+                    var tableRel = new TableRelation
+                    {
+                        Id = Guid.NewGuid(),
+                        ParentTableIdentifier = parentId,
+                        ChildTableIdentifier = childId,
+                        RelationName = rel.Name,
+                        JoinKeysParent = [rel.ParentColumn],
+                        JoinKeysChild = [rel.ChildColumn],
+                        Cardinality = RelationCardinality.OneToMany
+                    };
+
+                    if (!dryRun)
+                    {
+                        try
+                        {
+                            await _relationRepository.CreateRelationAsync(tableRel, ct).ConfigureAwait(false);
+                            importedRelations++;
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to import table relation '{Relation}' between {Parent} and {Child}.",
+                                rel.Name, parentId, childId);
+                        }
+                    }
+                    else
+                    {
+                        importedRelations++;
+                    }
+                }
+            }
+        }
+
         // Apply lineage updates
         if (!dryRun && lineageNodesToUpdate.Count > 0)
         {
             _lineageGraphStore.UpdateGraph(lineageNodesToUpdate);
         }
 
-        _logger.LogInformation("Completed dbt ingestion: {Models} models, {Proposals} proposals, {Lineage} lineage nodes.",
-            models.Count, generatedProposals, lineageNodesToUpdate.Count);
+        _logger.LogInformation("Completed dbt ingestion: {Models} models, {Proposals} proposals, {Lineage} lineage nodes, {Relations} relations.",
+            models.Count, generatedProposals, lineageNodesToUpdate.Count, importedRelations);
 
         return new DbtSyncResult(
             Success: true,
             ParsedModelsCount: models.Count,
             GeneratedProposalsCount: generatedProposals,
             UpdatedLineageNodesCount: lineageNodesToUpdate.Count,
+            Warnings: warnings,
+            ErrorMessage: null,
+            ImportedRelationsCount: importedRelations
+        );
+    }
+
+    public async Task<DbtGovernanceSyncResult> IngestGovernanceFileAsync(string filePath, bool dryRun = false, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
+        ValidateSafeFilePath(filePath);
+        var fullPath = Path.GetFullPath(filePath);
+        ValidateSafeFilePath(fullPath);
+
+        if (!File.Exists(fullPath))
+        {
+            return new DbtGovernanceSyncResult(false, 0, 0, 0, 0, 0, [], $"Dbt governance file not found at: {fullPath}");
+        }
+
+        await using var stream = File.OpenRead(fullPath);
+        return await IngestGovernanceStreamAsync(stream, dryRun, ct).ConfigureAwait(false);
+    }
+
+    public async Task<DbtGovernanceSyncResult> IngestGovernanceStreamAsync(Stream governanceStream, bool dryRun = false, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(governanceStream);
+
+        var warnings = new List<string>();
+        int updatedTables = 0;
+        int updatedColumns = 0;
+        int maskingRulesCount = 0;
+        int virtualFiltersCount = 0;
+        int accessProfilesCount = 0;
+
+        using var doc = await JsonDocument.ParseAsync(
+            governanceStream,
+            new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip },
+            ct).ConfigureAwait(false);
+        var root = doc.RootElement;
+
+        // Process classifications / models
+        JsonElement modelsArray = default;
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            modelsArray = root;
+        }
+        else if (root.ValueKind == JsonValueKind.Object)
+        {
+            if (root.TryGetProperty("classifications", out var cProp) && cProp.ValueKind == JsonValueKind.Array)
+            {
+                modelsArray = cProp;
+            }
+            else if (root.TryGetProperty("models", out var mProp) && mProp.ValueKind == JsonValueKind.Array)
+            {
+                modelsArray = mProp;
+            }
+        }
+
+        if (modelsArray.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in modelsArray.EnumerateArray())
+            {
+                ct.ThrowIfCancellationRequested();
+                var tableNameStr = item.TryGetProperty("table", out var tProp) ? tProp.GetString() ?? "" :
+                                  (item.TryGetProperty("name", out var nProp) ? nProp.GetString() ?? "" : "");
+                if (string.IsNullOrWhiteSpace(tableNameStr)) continue;
+
+                var itemSchema = item.TryGetProperty("schema", out var sProp2) ? sProp2.GetString() : null;
+                var itemDatabase = item.TryGetProperty("database", out var dbProp2) ? dbProp2.GetString() : null;
+
+                var tableId = ParseTableIdentifier(tableNameStr, itemSchema, itemDatabase);
+                var existingMeta = await _metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+                if (existingMeta == null)
+                {
+                    var allTables = await _metadataRepository.GetAllTablesAsync(ct).ConfigureAwait(false);
+                    existingMeta = allTables.FirstOrDefault(m =>
+                        string.Equals(m.Identifier.Schema, tableId.Schema, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(m.Identifier.TableName, tableId.TableName, StringComparison.OrdinalIgnoreCase));
+                    if (existingMeta != null)
+                    {
+                        tableId = existingMeta.Identifier;
+                    }
+                }
+                if (existingMeta == null)
+                {
+                    warnings.Add($"Table '{tableId}' not found in catalog; skipped governance update.");
+                    continue;
+                }
+
+                var sensitivity = item.TryGetProperty("sensitivity", out var sProp) ? sProp.GetString() ?? existingMeta.Table.Sensitivity : existingMeta.Table.Sensitivity;
+                var origin = item.TryGetProperty("origin", out var oProp) ? oProp.GetString() : "dbt_sample";
+                var description = item.TryGetProperty("description", out var dProp) ? dProp.GetString() : existingMeta.Table.Description;
+                var historyJson = item.TryGetProperty("history", out var hProp) ? hProp.GetRawText() : null;
+                var reviewJson = item.TryGetProperty("classification_review", out var crProp) ? crProp.GetRawText() : null;
+
+                var updatedTable = new Table
+                {
+                    Id = existingMeta.Table.Id,
+                    SourceType = existingMeta.Table.SourceType,
+                    SourceName = existingMeta.Table.SourceName,
+                    SchemaName = existingMeta.Table.SchemaName,
+                    TableName = existingMeta.Table.TableName,
+                    DisplayName = existingMeta.Table.DisplayName,
+                    Description = description,
+                    LongDescription = reviewJson ?? existingMeta.Table.LongDescription,
+                    DocumentationSource = origin ?? existingMeta.Table.DocumentationSource,
+                    Sensitivity = sensitivity,
+                    RequiresFourEyes = existingMeta.Table.RequiresFourEyes,
+                    IsActive = existingMeta.Table.IsActive,
+                    DataSourceType = existingMeta.Table.DataSourceType,
+                    HttpEndpoint = existingMeta.Table.HttpEndpoint,
+                    PluginName = existingMeta.Table.PluginName
+                };
+
+                var updatedCols = new List<TableColumn>();
+                var updatedMaskingRules = new Dictionary<string, MaskingRule>(existingMeta.ColumnMaskingRules, StringComparer.OrdinalIgnoreCase);
+
+                JsonElement colsElement = default;
+                if (item.TryGetProperty("columns", out var ce)) colsElement = ce;
+
+                foreach (var col in existingMeta.Columns)
+                {
+                    var colSensitivity = col.IsSensitive;
+                    var colDesc = col.Description;
+                    var colMeta = new Dictionary<string, string>(col.Meta ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
+
+                    if (colsElement.ValueKind == JsonValueKind.Object && colsElement.TryGetProperty(col.ColumnName, out var colObj))
+                    {
+                        if (colObj.TryGetProperty("sensitivity", out var csProp))
+                        {
+                            var cs = csProp.GetString();
+                            colSensitivity = !string.Equals(cs, "PUBLIC", StringComparison.OrdinalIgnoreCase);
+                            if (!string.IsNullOrWhiteSpace(cs)) colMeta["sensitivity"] = cs;
+                        }
+                        if (colObj.TryGetProperty("description", out var cdProp) && cdProp.GetString() is string cd && !string.IsNullOrWhiteSpace(cd))
+                        {
+                            colDesc = cd;
+                        }
+                        if (colObj.TryGetProperty("origin", out var coProp) && coProp.GetString() is string co)
+                        {
+                            colMeta["origin"] = co;
+                        }
+                        if (colObj.TryGetProperty("history", out var chProp))
+                        {
+                            colMeta["history"] = chProp.GetRawText();
+                        }
+                        if (colObj.TryGetProperty("classification_review", out var ccrProp))
+                        {
+                            colMeta["classification_review"] = ccrProp.GetRawText();
+                        }
+                        if (colObj.TryGetProperty("masking_rule", out var mrProp) && mrProp.GetString() is string mr && !string.IsNullOrWhiteSpace(mr))
+                        {
+                            var newRule = new MaskingRule
+                            {
+                                RuleType = mr,
+                                Replacement = mr == "REDACT" ? "[REDACTED]" : null
+                            };
+                            updatedMaskingRules[col.ColumnName] = newRule;
+                            maskingRulesCount++;
+                        }
+                        updatedColumns++;
+                    }
+
+                    updatedCols.Add(new TableColumn
+                    {
+                        Id = col.Id,
+                        TableId = col.TableId,
+                        ColumnName = col.ColumnName,
+                        DataType = col.DataType,
+                        IsSensitive = colSensitivity,
+                        Description = colDesc,
+                        LongDescription = col.LongDescription,
+                        Meta = colMeta
+                    });
+                }
+
+                var updatedMetadata = new TableMetadata
+                {
+                    Table = updatedTable,
+                    Identifier = existingMeta.Identifier,
+                    Columns = updatedCols,
+                    ColumnMaskingRules = updatedMaskingRules,
+                    PrimaryKeyColumns = existingMeta.PrimaryKeyColumns
+                };
+
+                if (!dryRun)
+                {
+                    await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
+                }
+                updatedTables++;
+            }
+        }
+
+        return new DbtGovernanceSyncResult(
+            Success: true,
+            UpdatedTablesCount: updatedTables,
+            UpdatedColumnsCount: updatedColumns,
+            MaskingRulesCount: maskingRulesCount,
+            VirtualFiltersCount: virtualFiltersCount,
+            AccessProfilesCount: accessProfilesCount,
             Warnings: warnings
         );
+    }
+
+    private static TableIdentifier ParseTableIdentifier(string raw, string? explicitSchema = null, string? explicitDatabase = null)
+    {
+        var parts = raw.Split('.');
+        if (parts.Length == 1)
+        {
+            var db = !string.IsNullOrWhiteSpace(explicitDatabase) ? explicitDatabase : "default";
+            var sc = !string.IsNullOrWhiteSpace(explicitSchema) ? explicitSchema : "public";
+            return new TableIdentifier(db, sc, parts[0]);
+        }
+        if (parts.Length == 2)
+        {
+            var db = !string.IsNullOrWhiteSpace(explicitDatabase) ? explicitDatabase : "default";
+            return new TableIdentifier(db, parts[0], parts[1]);
+        }
+        return new TableIdentifier(parts[0], parts[1], parts[2]);
     }
 
     public async Task<DbtMetadataProposal> ApproveProposalAsync(Guid proposalId, string reviewedBy, CancellationToken ct = default)

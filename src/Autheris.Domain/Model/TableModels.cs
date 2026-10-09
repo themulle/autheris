@@ -33,6 +33,7 @@ public sealed class Table
     public string? Location { get; init; }
     public HttpEndpointDescriptor? HttpEndpoint { get; init; }
     public string? PluginName { get; init; }
+    public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
 
     /// <summary>Rank of a sensitivity class; unknown classes rank like HIGH (fail-closed). Empty means NORMAL.</summary>
     public static int SensitivityRank(string? sensitivity) => (sensitivity ?? "NORMAL").Trim().ToUpperInvariant() switch

@@ -22,6 +22,58 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly ILogger<HitLStepUpApprovalService> _logger;
     private readonly Autheris.Application.State.IDistributedClusterStateProvider? _clusterState;
+    private readonly byte[] _hmacKey;
+    private static readonly byte[] ProcessFallbackHmacKey = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+
+    private static byte[] ResolveHitLHmacKey(GatewayOptions? options)
+    {
+        var rawKey = options?.DataMasking?.HmacSecretKeyVaultRef;
+        if (!string.IsNullOrWhiteSpace(rawKey) && rawKey != "DEV_INSECURE_TEST_KEY_ONLY")
+        {
+            var keyBytes = System.Text.Encoding.UTF8.GetBytes(rawKey);
+            return System.Security.Cryptography.HKDF.DeriveKey(
+                System.Security.Cryptography.HashAlgorithmName.SHA256,
+                keyBytes,
+                32,
+                info: "Autheris:HitLStepUp:v1"u8.ToArray());
+        }
+
+        return ProcessFallbackHmacKey;
+    }
+
+    internal static string ComputeTicketSignature(byte[] key, HitLApprovalTicket ticket)
+    {
+        var payload = $"{ticket.ApprovalId}:{ticket.ToolName}:{ticket.TenantId}:{ticket.RequesterSid}:{ticket.TargetTable}:{ticket.Status}:{ticket.ApproverSid}:{ticket.CreatedAt.ToUnixTimeSeconds()}:{ticket.ExpiresAt.ToUnixTimeSeconds()}";
+        using var hmac = new System.Security.Cryptography.HMACSHA256(key);
+        var hash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload));
+        return Convert.ToHexString(hash);
+    }
+
+    internal static string ComputeBroadcastSignature(byte[] key, HitLApprovalBroadcast broadcast)
+    {
+        var payload = $"{broadcast.ApprovalId}:{broadcast.ApproverSid}:{broadcast.IsApproved}:{broadcast.Reason}";
+        using var hmac = new System.Security.Cryptography.HMACSHA256(key);
+        var hash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload));
+        return Convert.ToHexString(hash);
+    }
+
+    internal static bool VerifyTicketSignature(byte[] key, HitLApprovalTicket ticket)
+    {
+        if (string.IsNullOrWhiteSpace(ticket.Signature)) return false;
+        var expected = ComputeTicketSignature(key, ticket);
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(expected),
+            System.Text.Encoding.UTF8.GetBytes(ticket.Signature));
+    }
+
+    internal static bool VerifyBroadcastSignature(byte[] key, HitLApprovalBroadcast broadcast)
+    {
+        if (string.IsNullOrWhiteSpace(broadcast.Signature)) return false;
+        var expected = ComputeBroadcastSignature(key, broadcast);
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(expected),
+            System.Text.Encoding.UTF8.GetBytes(broadcast.Signature));
+    }
 
     private sealed class TicketEntry
     {
@@ -46,6 +98,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _scopeFactory = scopeFactory;
         _clusterState = clusterState;
+        _hmacKey = ResolveHitLHmacKey(options.Value);
     }
 
     public async Task<HitLApprovalResult> RequestStepUpApprovalAsync(
@@ -120,6 +173,7 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
             ItsmTicketId: itsmTicketId,
             ItsmTicketUrl: itsmTicketUrl
         );
+        ticket = ticket with { Signature = ComputeTicketSignature(_hmacKey, ticket) };
 
         var entry = new TicketEntry(ticket);
         _tickets[approvalId] = entry;
@@ -132,6 +186,13 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                 await _clusterState.SetAsync($"hitl:ticket:{approvalId}", ticket, TimeSpan.FromSeconds(timeoutSeconds + 900), ct).ConfigureAwait(false);
                 clusterSubscription = _clusterState.SubscribeAsync<HitLApprovalBroadcast>($"hitl:events:{approvalId}", broadcast =>
                 {
+                    if (!VerifyBroadcastSignature(_hmacKey, broadcast))
+                    {
+                        var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                        _logger.LogWarning("Dropping unverified or tampered HitL broadcast for ticket '{ApprovalId}'.", safeApprovalIdForLog);
+                        return ValueTask.CompletedTask;
+                    }
+
                     lock (entry.Lock)
                     {
                         if (entry.Ticket.Status == HitLApprovalStatus.Pending)
@@ -452,8 +513,10 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
 
         try
         {
-            await _clusterState.SetAsync($"hitl:ticket:{approvalId}", ticket, CompletedTicketRetention, ct).ConfigureAwait(false);
-            await _clusterState.PublishEventAsync($"hitl:events:{approvalId}", broadcast, ct).ConfigureAwait(false);
+            var signedTicket = ticket with { Signature = ComputeTicketSignature(_hmacKey, ticket) };
+            var signedBroadcast = broadcast with { Signature = ComputeBroadcastSignature(_hmacKey, broadcast) };
+            await _clusterState.SetAsync($"hitl:ticket:{approvalId}", signedTicket, CompletedTicketRetention, ct).ConfigureAwait(false);
+            await _clusterState.PublishEventAsync($"hitl:events:{approvalId}", signedBroadcast, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -478,7 +541,15 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
                     var remoteTicket = await _clusterState.GetAsync<HitLApprovalTicket>($"hitl:ticket:{approvalId}", ct).ConfigureAwait(false);
                     if (remoteTicket != null)
                     {
-                        entry = _tickets.GetOrAdd(approvalId, _ => new TicketEntry(remoteTicket));
+                        if (!VerifyTicketSignature(_hmacKey, remoteTicket))
+                        {
+                            var safeFetchApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                            _logger.LogWarning("Dropping unverified or tampered remote HitL ticket '{ApprovalId}' from cluster state.", safeFetchApprovalId);
+                        }
+                        else
+                        {
+                            entry = _tickets.GetOrAdd(approvalId, _ => new TicketEntry(remoteTicket));
+                        }
                     }
                 }
                 catch (Exception ex)
