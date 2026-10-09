@@ -334,7 +334,6 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
             case DatabaseDialect.Sqlite:
             case DatabaseDialect.PostgreSql:
-            case DatabaseDialect.Databricks:
             default:
                 if (requestedOrder != null)
                 {
@@ -678,7 +677,6 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             {
                 DatabaseDialect.PostgreSql => $"encode({quotedCol}, 'base64') AS {quotedCol}",
                 DatabaseDialect.Sqlite => $"hex({quotedCol}) AS {quotedCol}",
-                DatabaseDialect.Databricks => $"base64({quotedCol}) AS {quotedCol}",
                 DatabaseDialect.Oracle => $"RAWTOHEX({quotedCol}) AS {quotedCol}",
                 _ => quotedCol
             };
@@ -692,7 +690,6 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 DatabaseDialect.PostgreSql => $"to_char({quotedCol}, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS {quotedCol}",
                 DatabaseDialect.SqlServer => $"CONVERT(VARCHAR(33), {quotedCol}, 126) AS {quotedCol}",
                 DatabaseDialect.Sqlite => $"strftime('%Y-%m-%dT%H:%M:%fZ', {quotedCol}) AS {quotedCol}",
-                DatabaseDialect.Databricks => $"date_format({quotedCol}, 'yyyy-MM-dd''T''HH:mm:ss.SSS''Z''') AS {quotedCol}",
                 DatabaseDialect.Oracle => $"TO_CHAR({quotedCol}, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF6\"Z\"') AS {quotedCol}",
                 _ => quotedCol
             };
@@ -707,7 +704,6 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 DatabaseDialect.SqlServer => $"CONVERT(VARCHAR(10), {quotedCol}, 23) AS {quotedCol}",
                 DatabaseDialect.Oracle => $"TO_CHAR({quotedCol}, 'YYYY-MM-DD') AS {quotedCol}",
                 DatabaseDialect.Sqlite => $"strftime('%Y-%m-%d', {quotedCol}) AS {quotedCol}",
-                DatabaseDialect.Databricks => $"date_format({quotedCol}, 'yyyy-MM-dd') AS {quotedCol}",
                 _ => quotedCol
             };
         }

@@ -230,6 +230,14 @@ public static class GatewayServiceCollectionExtensions
     {
         var hostEnv = environment ?? (services.FirstOrDefault(d => d.ServiceType == typeof(IHostEnvironment))?.ImplementationInstance as IHostEnvironment);
         var isDev = hostEnv?.IsDevelopment() ?? false;
+
+        if (!isDev && DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.Sqlite))
+        {
+            var loggerFactory = services.FirstOrDefault(d => d.ServiceType == typeof(ILoggerFactory))?.ImplementationInstance as ILoggerFactory;
+            var startupLogger = loggerFactory?.CreateLogger("Autheris.Startup");
+            startupLogger?.LogWarning("AR-08: SQLite governance provider is not recommended for production environments. Consider PostgreSQL or SQL Server.");
+        }
+
         services.AddMemoryCache(options =>
         {
             options.SizeLimit = (long)gatewayOptions.Caching.L1MemoryCache.SizeLimitMb * 1024 * 1024;
@@ -283,6 +291,9 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<Autheris.Application.State.IDistributedClusterStateProvider, Autheris.Application.State.InMemoryClusterStateProvider>();
         }
 
+        services.AddSingleton<ITableSensitivityLookup>(sp => new TableMetadataSensitivityLookup(
+            () => sp.GetService<ITableMetadataRepository>(),
+            sp.GetService<ILogger<TableMetadataSensitivityLookup>>()));
         services.AddSingleton<IEpochValidationService, EpochValidationService>();
         services.AddSingleton<Autheris.Application.VirtualFilters.VirtualFilterAdministrationService>();
         services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider, Autheris.Application.VirtualFilters.VirtualFilterSnapshotProvider>();
@@ -568,8 +579,22 @@ public static class GatewayServiceCollectionExtensions
         // Canonical System Metadata & Monitoring (F-API-07)
         services.AddSingleton<IGatewaySystemMetricsService, GatewaySystemMetricsService>();
 
-        // Plan Cache (F-PERF-09 / graphql-bench)
-        services.AddSingleton<ICompiledSqlQueryPlanCache, CompiledSqlQueryPlanCache>();
+        // Plan Cache (F-PERF-09 / graphql-bench / AR-10 / AR-19)
+        services.AddSingleton<ICompiledSqlQueryPlanCache>(sp =>
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
+            var planCacheOptions = options.WebSql.PlanCache;
+            if (planCacheOptions.MaxEntries <= 0)
+            {
+                return NullCompiledSqlQueryPlanCache.Instance;
+            }
+
+            var ttl = planCacheOptions.TtlSeconds > 0
+                ? TimeSpan.FromSeconds(planCacheOptions.TtlSeconds)
+                : TimeSpan.FromMinutes(10);
+
+            return new CompiledSqlQueryPlanCache(planCacheOptions.MaxEntries, ttl);
+        });
 
         // Human-in-the-Loop Step-Up Approval (F-AI-05)
         services.AddSingleton<IHitLStepUpApprovalService, HitLStepUpApprovalService>();

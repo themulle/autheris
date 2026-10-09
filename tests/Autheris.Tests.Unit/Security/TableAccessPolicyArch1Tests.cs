@@ -194,7 +194,13 @@ public sealed class TableAccessPolicyArch1Tests
         IRebacEvaluator? rebac = null,
         GatewayOptions? options = null,
         IConsentCacheService? cache = null) =>
-        new(NoConsents(), resolution, cache, casbin, rebac, clientIpResolver: null, options, Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
+        new(NoConsents(), resolution,
+            cache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            casbin ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            rebac ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
+            clientIpResolver: null,
+            options ?? new GatewayOptions(),
+            Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
 
     private static TableAccessQuery Query(RebacEnforcement rebac = RebacEnforcement.QueryPaths, params Claim[] claims) =>
         TableAccessQuery.ForPrincipal(User(claims), new Sid("S-1-5-21-USER"), new TenantId(Tenant), Meta(), rebac: rebac);

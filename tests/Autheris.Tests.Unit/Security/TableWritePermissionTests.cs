@@ -120,9 +120,9 @@ public sealed class TableWritePermissionTests
         var tableAccessPolicy = new TableAccessPolicy(
             consentRepo,
             new ConsentResolutionService(),
-            cacheService: null,
+            cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             policyEnforcementService: casbin,
-            rebacEvaluator: null,
+            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance);
@@ -178,9 +178,9 @@ public sealed class TableWritePermissionTests
         var tableAccessPolicy = new TableAccessPolicy(
             consentRepo,
             new ConsentResolutionService(),
-            cacheService: null,
+            cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             policyEnforcementService: casbin,
-            rebacEvaluator: null,
+            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance);

@@ -26,6 +26,16 @@ public interface ICompiledSqlQueryPlanCache
         ulong policyHash,
         out string? sql);
 
+    bool TryGetCompiledSql(
+        string rawSql,
+        ulong queryHash,
+        DatabaseDialect dialect,
+        TenantId tenantId,
+        ulong policyHash,
+        string? policyFingerprint,
+        string? dataSource,
+        out string? sql);
+
     void SetCompiledSql(
         ulong queryHash,
         DatabaseDialect dialect,
@@ -40,6 +50,17 @@ public interface ICompiledSqlQueryPlanCache
         DatabaseDialect dialect,
         TenantId tenantId,
         ulong policyHash,
+        string sql,
+        TimeSpan? ttl = null);
+
+    void SetCompiledSql(
+        string rawSql,
+        ulong queryHash,
+        DatabaseDialect dialect,
+        TenantId tenantId,
+        ulong policyHash,
+        string? policyFingerprint,
+        string? dataSource,
         string sql,
         TimeSpan? ttl = null);
 
@@ -58,7 +79,9 @@ public interface ICompiledSqlQueryPlanCache
         string? rewriterEngine = null,
         IReadOnlySet<string>? tablesWithConsentRowFilter = null,
         IReadOnlySet<string>? tablesWithMaskedColumns = null,
-        RowFilterSubqueryStrategy subqueryStrategy = RowFilterSubqueryStrategy.Exists);
+        RowFilterSubqueryStrategy subqueryStrategy = RowFilterSubqueryStrategy.Exists,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? catalogColumnsMap = null,
+        IReadOnlySet<string>? allowedFunctions = null);
 
     void Clear();
 }

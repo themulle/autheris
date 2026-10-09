@@ -82,7 +82,16 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
             // RV-01: unknown client IP must never satisfy loopback/internal-network allow rules (fail-closed).
             ClientIp: securityContext.ClientIp ?? IPAddress.None);
 
-        var decision = await new TableAccessPolicy(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, clientIpResolver: null, _options.Value, _mandatoryFilters, _contractManager)
+        var decision = await new TableAccessPolicy(
+            _consentRepository,
+            _resolutionService,
+            _cacheService,
+            _policyEnforcementService ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
+            clientIpResolver: null,
+            _options.Value,
+            _mandatoryFilters,
+            _contractManager)
             .DecideAsync(query, ct).ConfigureAwait(false);
         if (!decision.IsAllowed)
         {

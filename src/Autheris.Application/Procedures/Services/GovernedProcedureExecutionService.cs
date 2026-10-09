@@ -352,7 +352,15 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             ? await WithVirtualFiltersAsync(
                 TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true),
                 user, userSid, tenantId, meta, ct).ConfigureAwait(false)
-            : await new Autheris.Application.Policy.TableAccessPolicy(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value, _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance)
+            : await new Autheris.Application.Policy.TableAccessPolicy(
+                _consentRepository!,
+                _consentResolution!,
+                _consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+                _policyEnforcement ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+                _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
+                _clientIpResolver,
+                _options.Value,
+                _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance)
                 .DecideAsync(
                     new Autheris.Application.Policy.TableAccessQuery(
                         userSid,

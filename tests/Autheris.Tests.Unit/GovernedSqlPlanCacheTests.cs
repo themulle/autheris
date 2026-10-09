@@ -159,7 +159,7 @@ public sealed class GovernedSqlPlanCacheTests
             consentRepository: consentRepository,
             secretProvider: null,
             sqlEngine: sqlEngine,
-            planCache: planCache);
+            planCache: planCache ?? NullCompiledSqlQueryPlanCache.Instance);
     }
 
     [Fact]

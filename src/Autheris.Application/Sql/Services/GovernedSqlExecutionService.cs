@@ -54,7 +54,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     };
 
     private readonly ISqlEngine _sqlEngine;
-    private readonly ICompiledSqlQueryPlanCache? _planCache;
+    private readonly ICompiledSqlQueryPlanCache _planCache;
     private readonly ISqlSecurityValidator _sqlSecurityValidator;
     private readonly IOptions<GatewayOptions> _options;
     private readonly IPolicyEnforcementService? _policyEnforcement;
@@ -90,7 +90,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         IConsentRepository? consentRepository = null,
         IKeyVaultSecretProvider? secretProvider = null,
         ISqlEngine? sqlEngine = null,
-        ICompiledSqlQueryPlanCache? planCache = null,
+        ICompiledSqlQueryPlanCache planCache = null!,
         ISqlSecurityValidator? sqlSecurityValidator = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
@@ -117,7 +117,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         IConsentRepository? consentRepository = null,
         IKeyVaultSecretProvider? secretProvider = null,
         ISqlEngine? sqlEngine = null,
-        ICompiledSqlQueryPlanCache? planCache = null,
+        ICompiledSqlQueryPlanCache planCache = null!,
         ISqlSecurityValidator? sqlSecurityValidator = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
@@ -721,13 +721,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         const string denyAllFilter = "1 = 0";
 
         // SEC P-05: no fallback to ANSI for unknown dialects (fail-closed).
-        TargetSqlDialect targetSqlDialect = targetDatabaseDialect switch
+        if (!targetDatabaseDialect.HasValue || !SqlDialectMapper.IsExecutable(targetDatabaseDialect.Value))
         {
-            DatabaseDialect.PostgreSql => TargetSqlDialect.PostgreSql,
-            DatabaseDialect.SqlServer => TargetSqlDialect.SqlServer,
-            DatabaseDialect.Sqlite => TargetSqlDialect.Sqlite,
-            _ => throw new WebSqlPolicyException("WebSQL only supports tables of PostgreSQL, SQL Server and SQLite data sources.")
-        };
+            throw new WebSqlPolicyException("WebSQL only supports tables of PostgreSQL, SQL Server and SQLite data sources.");
+        }
+        TargetSqlDialect targetSqlDialect = SqlDialectMapper.ToTargetDialect(targetDatabaseDialect.Value);
 
         // SQ-06 / SEC P-02: Function allowlist of the target dialect plus WebSql.AdditionalAllowedFunctions.
         // Denylisted functions are never allowed (SqlFunctionAllowlists.Build and SqlFunctionPolicy enforce this).
@@ -810,6 +808,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         ulong policyHash = 0;
         var planCache = _planCache;
         bool canUsePlanCache = planCache != null && targetDatabaseDialect.HasValue;
+        string policyFingerprint = $"tenant:{tenantId};dialect:{targetDatabaseDialect.GetValueOrDefault()};ds:{effectiveDataSourceName};engine:{webSqlOptions.SqlRewriterEngine}";
 
         if (canUsePlanCache && planCache != null)
         {
@@ -823,9 +822,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 webSqlOptions.SqlRewriterEngine ?? "LegacyTokenStream",
                 tablesWithConsentRowFilter,
                 tablesWithMaskedColumns,
-                _options.Value.RowFilters.SubqueryStrategy);
+                _options.Value.RowFilters.SubqueryStrategy,
+                tableColumnsMap,
+                allowedFunctions);
 
-            if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
+            if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, policyFingerprint, effectiveDataSourceName, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
             {
                 return new GovernedRewrite(cachedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
             }
@@ -836,7 +837,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             securedSql = _sqlEngine.RewriteRls(rawSql.AsMemory(), rlsOptions, ct);
             if (canUsePlanCache && planCache != null && !string.IsNullOrEmpty(securedSql))
             {
-                planCache.SetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, securedSql);
+                planCache.SetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, policyFingerprint, effectiveDataSourceName, securedSql);
             }
         }
         catch (WebSqlPolicyException)
@@ -1564,7 +1565,12 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
 
     private TableAccessPolicy AccessPolicy() =>
-        new(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value,
+        new(_consentRepository!, _consentResolution!,
+            _consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            _policyEnforcement ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
+            _clientIpResolver,
+            _options.Value,
             _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             _contractManager,
             _accessProfileRepository,
@@ -1806,13 +1812,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
             if (ruleType == "GEO_JITTER")
             {
-                var targetDialect = tableMeta.Dialect switch
-                {
-                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
-                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
-                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
-                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
-                };
+                var targetDialect = SqlDialectMapper.ToTargetDialect(tableMeta.Dialect);
                 return TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
                     columnName,
                     "GEO_JITTER",
@@ -1821,13 +1821,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
             if (ruleType == "PARTIAL_MASK")
             {
-                var targetDialect = tableMeta.Dialect switch
-                {
-                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
-                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
-                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
-                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
-                };
+                var targetDialect = SqlDialectMapper.ToTargetDialect(tableMeta.Dialect);
                 return TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
                     columnName,
                     "PARTIAL_MASK",

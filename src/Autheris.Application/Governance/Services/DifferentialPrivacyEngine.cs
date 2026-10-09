@@ -25,18 +25,33 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
     private static readonly TimeSpan BudgetTtl = TimeSpan.FromHours(48);
 
     private readonly IDistributedClusterStateProvider _clusterState;
-    private readonly IAuditLogRepository? _auditLog;
+    private readonly IAuditLogRepository _auditLog;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<DifferentialPrivacyEngine> _logger;
 
     public DifferentialPrivacyEngine(
         IDistributedClusterStateProvider? clusterState = null,
-        IAuditLogRepository? auditLog = null,
+        TimeProvider? timeProvider = null,
+        ILogger<DifferentialPrivacyEngine>? logger = null)
+        : this(Autheris.Application.Audit.NullAuditLogRepository.Instance, clusterState, timeProvider, logger)
+    {
+    }
+
+    public DifferentialPrivacyEngine(
+        IDistributedClusterStateProvider clusterState,
+        IAuditLogRepository auditLog)
+        : this(auditLog, clusterState)
+    {
+    }
+
+    public DifferentialPrivacyEngine(
+        IAuditLogRepository auditLog,
+        IDistributedClusterStateProvider? clusterState = null,
         TimeProvider? timeProvider = null,
         ILogger<DifferentialPrivacyEngine>? logger = null)
     {
         _clusterState = clusterState ?? new InMemoryClusterStateProvider();
-        _auditLog = auditLog;
+        _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<DifferentialPrivacyEngine>.Instance;
     }

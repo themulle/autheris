@@ -475,6 +475,9 @@ public sealed class BasicAuthOptions
     /// <summary>RR-L2-03: Lifetime of a verified-credential cache entry in seconds (0 disables the cache).</summary>
     public int SuccessCacheSeconds { get; init; } = 30;
 
+    /// <summary>DoS-Schutz: Maximale gleichzeitige Passwort-Hash-Berechnungen (Argon2id/PBKDF2).</summary>
+    public int MaxConcurrentPasswordHashes { get; init; } = Environment.ProcessorCount;
+
     /// <summary>
     /// F-AUTH-DX: Optional cookie session issued after a successful Basic login (developer experience).
     /// Only permitted in the environments listed in <see cref="BasicAuthSessionOptions.AllowedEnvironments"/>,
@@ -717,6 +720,8 @@ public sealed class EpochValidationOptions
     public bool FailClosedOnSensitiveTables { get; init; } = true;
     [Range(1, 300)] public int DegradedMaxStalenessSeconds { get; init; } = 30;
     public bool PipelinedMGetEnabled { get; init; } = true;
+    [Range(0, 250)] public int LocalStalenessBudgetMilliseconds { get; init; } = 0;
+    public int MaxLocalEpochEntries { get; init; } = 50_000;
 }
 
 public sealed class RateLimitingOptions
@@ -1427,8 +1432,19 @@ public sealed class WebSqlOptions
     public string? SqlRewriterEngine { get; init; }
 
     /// <summary>
+    /// Configuration for bounded compiled SQL query plan cache (AR-10 / AR-19).
+    /// </summary>
+    public WebSqlPlanCacheOptions PlanCache { get; init; } = new();
+
+    /// <summary>
     /// Legacy alias for <see cref="AllowDml"/> (reported as WARN with the hint to use WebSql.AllowDml).
     /// </summary>
+}
+
+public sealed class WebSqlPlanCacheOptions
+{
+    public int MaxEntries { get; init; } = 10_000;
+    public int TtlSeconds { get; init; } = 600;
 }
 
 public sealed class SqlEndpointsOptions

@@ -314,9 +314,9 @@ public sealed class DynamicSchemaContractTests
         var policy = new Autheris.Application.Policy.TableAccessPolicy(
             consentRepo,
             new Autheris.Application.Services.ConsentResolutionService(),
-            cacheService: null,
-            policyEnforcementService: null,
-            rebacEvaluator: null,
+            cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            policyEnforcementService: Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
@@ -351,9 +351,9 @@ public sealed class DynamicSchemaContractTests
         var policy = new Autheris.Application.Policy.TableAccessPolicy(
             consentRepo,
             new Autheris.Application.Services.ConsentResolutionService(),
-            cacheService: null,
-            policyEnforcementService: null,
-            rebacEvaluator: null,
+            cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            policyEnforcementService: Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
@@ -401,9 +401,9 @@ public sealed class DynamicSchemaContractTests
         var policy = new Autheris.Application.Policy.TableAccessPolicy(
             consentRepo,
             new Autheris.Application.Services.ConsentResolutionService(),
-            cacheService: null,
-            policyEnforcementService: null,
-            rebacEvaluator: null,
+            cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            policyEnforcementService: Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,

@@ -570,7 +570,12 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
 
     private TableAccessPolicy AccessPolicy() =>
-        new(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, _clientIpResolver, _options,
+        new(_consentRepository, _resolutionService,
+            _cacheService,
+            _policyEnforcementService ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
+            _clientIpResolver,
+            _options ?? new GatewayOptions(),
             _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             _contractManager,
             _accessProfileRepository,
