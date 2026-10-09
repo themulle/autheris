@@ -1,0 +1,10 @@
+# Code Owners for Autheris
+# Security-sensitive components require reviews from security leads
+
+src/Autheris.Api/Security/**       @themulle
+.github/**                         @themulle
+deploy/**                          @themulle
+Dockerfile*                        @themulle
+Directory.Build.props              @themulle
+NuGet.config                       @themulle
+**/packages.lock.json              @themulle

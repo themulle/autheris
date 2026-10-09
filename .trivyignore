@@ -1,0 +1,7 @@
+# .trivyignore
+# Autheris Supply-Chain & Container Security Ignore List
+# Each entry MUST have an issue/CVE identifier, justification, and expiration date.
+# Reviewed: 2026-10-09
+
+# Example format:
+# CVE-2026-XXXXX # Exp: 2026-12-31, Justification: False positive in base image, no code execution path
