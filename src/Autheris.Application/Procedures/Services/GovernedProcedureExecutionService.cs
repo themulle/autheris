@@ -319,7 +319,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     /// unless <paramref name="allowRowFilter"/> is set: the result table's filter is then enforced by a database key
     /// match after the call (<see cref="ApplyRowScopeAsync"/>).
     /// </summary>
-    internal async Task<(TableAccessDecision Decision, TableMetadata Meta)?> EvaluateTableAsync(
+    internal Task<(TableAccessDecision Decision, TableMetadata Meta)?> EvaluateTableAsync(
         string catalogDomain,
         string tableKey,
         ClaimsPrincipal user,
@@ -329,7 +329,24 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         bool allowRowFilter,
         CancellationToken ct)
     {
-        if (_tableRepository == null || !TableIdentifier.TryParse(catalogDomain + "." + tableKey, out var tableId))
+        if (!TableIdentifier.TryParse(catalogDomain + "." + tableKey, out var tableId))
+        {
+            return Task.FromResult<(TableAccessDecision Decision, TableMetadata Meta)?>(null);
+        }
+
+        return EvaluateTableAsync(tableId, user, userSid, tenantId, consentBypassed, allowRowFilter, ct);
+    }
+
+    internal async Task<(TableAccessDecision Decision, TableMetadata Meta)?> EvaluateTableAsync(
+        TableIdentifier tableId,
+        ClaimsPrincipal user,
+        Sid userSid,
+        TenantId tenantId,
+        bool consentBypassed,
+        bool allowRowFilter,
+        CancellationToken ct)
+    {
+        if (_tableRepository == null)
         {
             return null;
         }

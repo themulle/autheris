@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Events.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
@@ -61,6 +62,11 @@ public sealed class InMemoryCloudEventSubscriptionStore : ICloudEventSubscriptio
         CdcOperation operation,
         CancellationToken ct = default)
     {
+        if (TableIdentifier.TryParse(tableName, out var tid))
+        {
+            return GetSubscriptionsAsync(tenantId, tid, operation, ct);
+        }
+
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
 
         if (!_subscriptions.TryGetValue(tenantId, out var tenantStore))
@@ -75,6 +81,37 @@ public sealed class InMemoryCloudEventSubscriptionStore : ICloudEventSubscriptio
             .ToList();
 
         return ValueTask.FromResult<IReadOnlyList<CloudEventWebhookSubscription>>(matched);
+    }
+
+    public ValueTask<IReadOnlyList<CloudEventWebhookSubscription>> GetSubscriptionsAsync(
+        string tenantId,
+        TableIdentifier table,
+        CdcOperation operation,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+
+        if (!_subscriptions.TryGetValue(tenantId, out var tenantStore))
+        {
+            return ValueTask.FromResult<IReadOnlyList<CloudEventWebhookSubscription>>(Array.Empty<CloudEventWebhookSubscription>());
+        }
+
+        var matched = tenantStore.Values
+            .Where(s => s.IsEnabled)
+            .Where(s => MatchesTableFilter(s.FilterTable, table))
+            .Where(s => s.FilterOperations.Count == 0 || s.FilterOperations.Contains(operation))
+            .ToList();
+
+        return ValueTask.FromResult<IReadOnlyList<CloudEventWebhookSubscription>>(matched);
+    }
+
+    private static bool MatchesTableFilter(string filterTable, TableIdentifier table)
+    {
+        if (filterTable == "*") return true;
+        if (string.Equals(filterTable, table.TableName, StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(filterTable, table.ToQualifiedName(), StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(filterTable, table.ToString(), StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 
     public ValueTask<IReadOnlyList<CloudEventWebhookSubscription>> ListSubscriptionsAsync(string tenantId, CancellationToken ct = default)
