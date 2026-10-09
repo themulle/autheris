@@ -81,6 +81,9 @@ public static class SqlFunctionAllowlists
     /// <summary>Oracle allowlist (ANSI + Oracle date/string/null-handling functions).</summary>
     public static IReadOnlySet<string> Oracle { get; } = Create(CommonFunctions, OracleFunctions);
 
+    /// <summary>DuckDB allowlist (ANSI + safe analytical/date/string functions).</summary>
+    public static IReadOnlySet<string> DuckDb { get; } = Create(CommonFunctions, PostgreSqlFunctions);
+
     /// <summary>Returns the curated default allowlist for <paramref name="dialect"/>.</summary>
     public static IReadOnlySet<string> GetDefault(TargetSqlDialect dialect) => dialect switch
     {
@@ -88,6 +91,7 @@ public static class SqlFunctionAllowlists
         TargetSqlDialect.SqlServer => SqlServer,
         TargetSqlDialect.Sqlite => Sqlite,
         TargetSqlDialect.Oracle => Oracle,
+        TargetSqlDialect.DuckDb => DuckDb,
         _ => Ansi
     };
 

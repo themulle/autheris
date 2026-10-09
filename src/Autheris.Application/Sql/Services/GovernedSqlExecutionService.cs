@@ -668,44 +668,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 {
                     columnMasks[col.ColumnName] = GetMaskExpressionForRule(col.ColumnName, tableMeta, tenantId, internalParameters, hmacKeyParameterNames, out isEffectiveHmac);
                 }
-
-                // SEC-JOIN-01 / SQL-6: Zero-Trust Guardrail: Check if any statically redacted column is used as a JOIN predicate for this table
-                if (lvl != ColumnAccessLevel.Clear && !isEffectiveHmac)
-                {
-                    bool isUsedInJoin = false;
-                    if (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Count > 0)
-                    {
-                        isUsedInJoin = metadata.JoinColumnReferences.Any(jc => ReferencesColumn(jc.TableOrAlias, jc.ColumnName, col.ColumnName, target));
-                    }
-
-                    if (isUsedInJoin)
-                    {
-                        string ruleDesc = tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
-                            ? mRule.RuleType ?? "REDACT"
-                            : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
-
-                        throw new WebSqlPolicyException(
-                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
-                    }
-
-                    // SEC-FILTER-01 / Befund 3.6: Zero-Trust Guardrail: Check if any masked or denied column is used in WHERE / HAVING / ORDER BY
-                    bool isUsedInFilter = false;
-                    if (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Count > 0)
-                    {
-                        isUsedInFilter = metadata.FilterColumnReferences.Any(fc => ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, target));
-                    }
-
-                    if (isUsedInFilter)
-                    {
-                        string ruleDesc = tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
-                            ? mRule.RuleType ?? "REDACT"
-                            : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
-
-                        throw new WebSqlPolicyException(
-                            $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING/ORDER BY). Filtering or sorting on masked or denied columns would run against the redacted value and is forbidden to prevent oracle inference attacks.");
-                    }
-                }
             }
+
+            // SEC-JOIN-01 & SEC-FILTER-01 Guardrails (INV-4)
+            EnforceMaskedColumnGuardrails(target, tableMeta, decision, metadata);
 
             if (columnMasks.Count > 0)
             {
@@ -1509,10 +1475,74 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     }
 
     /// <summary>
+    /// SEC-JOIN-01 & SEC-FILTER-01 Zero-Trust Guardrails (INV-4) shared between direct and federated execution paths.
+    /// </summary>
+    internal static void EnforceMaskedColumnGuardrails(
+        TableAccessTarget target,
+        TableMetadata tableMeta,
+        TableAccessDecision decision,
+        SqlQueryMetadata metadata)
+    {
+        foreach (var col in tableMeta.Columns)
+        {
+            var lvl = decision.GetEffectiveColumnAccess(col.ColumnName, tableMeta);
+            bool isEffectiveHmac = false;
+            if (lvl == ColumnAccessLevel.Mask)
+            {
+                if (tableMeta.ColumnMaskingRules != null &&
+                    tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule))
+                {
+                    if (string.Equals(rule.RuleType, "HMAC", StringComparison.OrdinalIgnoreCase))
+                    {
+                        isEffectiveHmac = true;
+                    }
+                }
+            }
+
+            if (lvl != ColumnAccessLevel.Clear && !isEffectiveHmac)
+            {
+                // SEC-JOIN-01 / SQL-6: Zero-Trust Guardrail: Check if any statically redacted column is used as a JOIN predicate for this table
+                bool isUsedInJoin = false;
+                if (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Count > 0)
+                {
+                    isUsedInJoin = metadata.JoinColumnReferences.Any(jc => ReferencesColumn(jc.TableOrAlias, jc.ColumnName, col.ColumnName, target));
+                }
+
+                if (isUsedInJoin)
+                {
+                    string ruleDesc = tableMeta.ColumnMaskingRules != null && tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
+                        ? mRule.RuleType ?? "REDACT"
+                        : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
+
+                    throw new WebSqlPolicyException(
+                        $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
+                }
+
+                // SEC-FILTER-01 / Befund 3.6: Zero-Trust Guardrail: Check if any masked or denied column is used in WHERE / HAVING / ORDER BY
+                bool isUsedInFilter = false;
+                if (metadata.FilterColumnReferences != null && metadata.FilterColumnReferences.Count > 0)
+                {
+                    isUsedInFilter = metadata.FilterColumnReferences.Any(fc => ReferencesColumn(fc.TableOrAlias, fc.ColumnName, col.ColumnName, target));
+                }
+
+                if (isUsedInFilter)
+                {
+                    string ruleDesc = tableMeta.ColumnMaskingRules != null && tableMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var mRule)
+                        ? mRule.RuleType ?? "REDACT"
+                        : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
+
+                    throw new WebSqlPolicyException(
+                        $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING/ORDER BY). Filtering or sorting on masked or denied columns would run against the redacted value and is forbidden to prevent oracle inference attacks.");
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// SQL-6: true when a column reference (<paramref name="tableOrAlias"/>, <paramref name="referencedColumn"/>) names
     /// <paramref name="columnName"/> unqualified or qualified with the alias, table name or full name of <paramref name="target"/>.
     /// </summary>
-    private static bool ReferencesColumn(string? tableOrAlias, string referencedColumn, string columnName, TableAccessTarget target)
+    internal static bool ReferencesColumn(string? tableOrAlias, string referencedColumn, string columnName, TableAccessTarget target)
     {
         if (!string.Equals(referencedColumn, columnName, StringComparison.OrdinalIgnoreCase))
             return false;
