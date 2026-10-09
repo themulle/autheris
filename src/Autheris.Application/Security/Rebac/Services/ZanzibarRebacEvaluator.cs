@@ -161,14 +161,22 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var maxDepth = _gatewayOptions.Value.Rebac.MaxTraversalDepth;
 
-        var allowed = await TraverseAndEvaluateAsync(tenant, request.User, request.Relation, request.Object, depth: 0, maxDepth, visited, ct).ConfigureAwait(false);
+        try
+        {
+            var allowed = await TraverseAndEvaluateAsync(tenant, request.User, request.Relation, request.Object, depth: 0, maxDepth, visited, ct).ConfigureAwait(false);
 
-        // 3. Store in cache
-        var ttl = _gatewayOptions.Value.Rebac.CacheTtlSeconds;
-        var expiry = DateTimeOffset.UtcNow.AddSeconds(ttl);
-        StoreInCache(tenant, cacheKey, allowed, expiry);
+            // 3. Store in cache
+            var ttl = _gatewayOptions.Value.Rebac.CacheTtlSeconds;
+            var expiry = DateTimeOffset.UtcNow.AddSeconds(ttl);
+            StoreInCache(tenant, cacheKey, allowed, expiry);
 
-        return allowed ? RebacCheckResult.Permitted : RebacCheckResult.Denied;
+            return allowed ? RebacCheckResult.Permitted : RebacCheckResult.Denied;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "F-SEC-04 ReBAC evaluation failed closed due to store exception for {User}#{Rel}@{Obj} in tenant {Tenant}", request.User, request.Relation, request.Object, tenant);
+            return RebacCheckResult.Denied;
+        }
     }
 
     /// <summary>Review E-3: bounded decision cache (arbitrary user/object combinations must not grow memory unbounded).</summary>
