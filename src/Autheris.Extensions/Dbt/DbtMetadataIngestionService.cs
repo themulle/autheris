@@ -64,6 +64,17 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         ITableMetadataRepository metadataRepository,
         ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
+        ITableRelationRepository? relationRepository,
+        ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, null, null, relationRepository, null, null, logger)
+    {
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        IPolicyEpochRepository? epochRepository,
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
         Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ILogger<DbtMetadataIngestionService> logger)

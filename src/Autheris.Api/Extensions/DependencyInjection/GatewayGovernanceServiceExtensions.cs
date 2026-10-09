@@ -103,6 +103,7 @@ public static class GatewayGovernanceServiceExtensions
         // Outbound SSRF protection (HIGH-03 / SEC-02) & OpenAPI ingestion (P1).
         services.AddHttpClient<IAuditWormExportService, AuditWormExportService>().AddSecureOutboundHandlers(EgressIntegrations.AuditWorm);
         services.AddSingleton<IOpenApiIngestionService, OpenApiIngestionService>();
+        services.AddAutherisCatalog();
 
         // Strategic Enterprise Moats (P10, P11, P12)
         services.AddSingleton<IPolicySimulationService, PolicySimulationService>();

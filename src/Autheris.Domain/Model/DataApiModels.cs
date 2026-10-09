@@ -26,14 +26,3 @@ public sealed record DatasetQueryEnvelope(
     bool HasMore,
     IReadOnlyList<DatasetColumnInfo> Columns,
     IReadOnlyList<IReadOnlyDictionary<string, object?>> Data);
-
-public sealed record RequestContext(
-    ClaimsPrincipal User,
-    TenantId TenantId,
-    string? ClientIp = null)
-{
-    public RequestContext() : this(new ClaimsPrincipal(new ClaimsIdentity()), TenantId.LegacySingleTenant) { }
-
-    public static RequestContext FromUser(ClaimsPrincipal user, TenantId? tenantId = null, string? clientIp = null) =>
-        new(user, tenantId ?? TenantId.LegacySingleTenant, clientIp);
-}
