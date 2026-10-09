@@ -196,7 +196,7 @@ public static class GovernedConnectorReader
         return dict;
     }
 
-    private static long EstimateBytes(List<IReadOnlyDictionary<string, object?>> rows)
+    public static long EstimateBytes(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows)
     {
         long estimatedBytes = 0;
         foreach (var row in rows)

@@ -10,7 +10,9 @@ namespace Autheris.Application.Olap;
 public sealed record OlapTableSource(
     TableIdentifier Table,
     IReadOnlyList<IReadOnlyDictionary<string, object?>> GovernedRows,
-    TableMetadata Metadata);
+    TableMetadata Metadata,
+    string? StagingTableName = null,
+    IReadOnlySet<string>? MaskedColumns = null);
 
 public sealed record OlapQueryRequest(
     string Sql,
