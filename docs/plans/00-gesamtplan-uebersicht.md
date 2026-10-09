@@ -12,6 +12,7 @@
 |---|---|---|---|
 | **[Plan 8: Vollständige Daten-API & MCP-Bereitstellung](plan-vollstaendige-daten-api-und-mcp-bereitstellung.md)** | Governed REST Data API (`/api/v1/data/*`), Discovery & MCP-Ökosystem (Tools, Resources, Prompts) | **R-54 bis R-66, PoC Citizen Dev & MCP** | Neu erstellt – bereit zum Review ⏳ |
 | **[Entwickler-Workstreams & TDD-Spezifikation](plan-workstreams-entwickler-details.md)** | Detaillierte Modellspezifikationen, C#-Interfaces, Testpläne und Aufteilung in 5 parallele Entwickler-Tracks (A bis E) | **Umsetzungs-Blueprint für Entwickler-Agents** | Spezifiziert & bereit zur TDD-Ausführung ⏳ |
+| **[SQL-AST Keyword- & Downstream-Analyse](2026-10-09-sql-ast-keyword-support-und-downstream-analyse.md)** | Prüfung aller SQL-Keywords im AST, Fail-Loud-Verhalten und Ziel-Dialekt-Generierung | **Befunde F-01 bis F-04, WebSQL AST-Compiler** | Dokumentiert & bereit zur Behebung ⏳ |
 
 ---
 
@@ -62,3 +63,4 @@ flowchart TD
 - [Plan 8: Vollständige Daten-API & MCP-Bereitstellung](plan-vollstaendige-daten-api-und-mcp-bereitstellung.md)
 - [Entwickler-Workstreams & TDD-Spezifikation (Tracks A bis E)](plan-workstreams-entwickler-details.md)
 - [Feature Request: Admin-Datenquellen & MCP (R-54 bis R-66)](2026-10-09-feature-request-admin-datenquellen-und-mcp.md)
+- [SQL-AST Keyword- & Downstream-Analyse](2026-10-09-sql-ast-keyword-support-und-downstream-analyse.md)
