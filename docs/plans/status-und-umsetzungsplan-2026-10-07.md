@@ -16,18 +16,5 @@ Regeln: Ein Thema pro Commit. TDD: Jeder Sicherheitstest muss ohne Fix rot sein.
 | DEP-5-Rest | Altes ghcr-Paket (`…/gql`) manuell löschen; das Image heißt jetzt `ghcr.io/themulle/autheris`. |
 | CI | PR nach `main` öffnen, damit die CI läuft (läuft nur auf `main`/PRs). |
 
-## 2. Tests nachziehen (Phase 2) - VOLLSTÄNDIG ERLEDIGT
 
-Alle Phase-2-Tests wurden implementiert und verifiziert (Stand 2026-10-08):
-
-| Befund | Test | Status |
-|---|---|---|
-| D-1 / R-SQL-3 | Integrationstest WebSQL-SELECT gegen PostgreSQL (Testcontainers): Reader vor Commit geschlossen, `set_config(…, true)` in derselben Transaktion. | ✅ Erledigt (`PostgreSqlWebSqlTransactionTests.cs`) |
-| POL-15 | PG-Aktivierung für Gruppe und Service-Principal setzt `grantee_sid`. | ✅ Erledigt (`PostgreSqlVirtualFilterContractTests.cs`) |
-| R-SQL-6 | Prozeduraufruf setzt die Sitzungsvariablen über den Initializer. | ✅ Erledigt (`ProcedureSessionContextInitializerTests.cs`) |
-| GraphQL E2E | Ende-zu-Ende mit SQLite über `WebApplicationFactory`; gleiche Zeilen wie OData und WebSQL; Abnahme `fms/air1` unter 2 s. | ✅ Erledigt (`RowFilterChannelParityTests.cs`) |
-
-## 3. Niedrige Befunde (Gesamt-Review)
-
-Alle niedrigen Befunde aus dem Gesamt-Review sind vollständig behoben und verifiziert.
 

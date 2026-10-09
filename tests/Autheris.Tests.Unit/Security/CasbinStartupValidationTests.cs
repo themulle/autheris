@@ -55,7 +55,7 @@ public sealed class CasbinStartupValidationTests
         var tempPolicy = Path.GetTempFileName();
         try
         {
-            File.WriteAllText(tempPolicy, "p, admin, domain1, data1, read, allow, (true)\n");
+            File.WriteAllText(tempPolicy, "p, admin, domain1, data1, read, (true), allow\n");
 
             var options = new GatewayOptions
             {

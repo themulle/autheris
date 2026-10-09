@@ -22,8 +22,8 @@ Jede Phase ist ein Commit und beginnt mit fehlschlagenden Tests.
 | 6 `effective-filters`, Audit | umgesetzt |
 | 7 SQL-Definition, Datumsfunktionen | umgesetzt (7a, 7b, 7c) |
 | 8 Prozeduren | umgesetzt; Lücke beim Bypass ohne Einwilligungsdienste geschlossen |
-| 9 Leistung | Resolver gemessen ([Messungen](2026-10-08-virtuelle-filter-messungen.md)); SQL Server im PoC offen |
-| – | **Offen:** Neuladen aus GitHub (Entwurf 4.2), `RequireApproval`, Talos-Bereitstellung (Schritt 4) |
+| – | **Offen:** Talos-Bereitstellung (Schritt 4); Neuladen per Webhook (GitHub) |
+| – | **Erledigt:** `RequireApproval` (Vier-Augen-Prinzip) und `config-sync/status` Endpunkt |
 
 **Anpassung an den erweiterten Entwurf (faa3be5):**
 - **Profile:** Berechtigter, Bereich (`scope`) und `uncovered` stehen am Profil (`AccessProfile`). Die Bindungen eines Profils tragen nur Filter, Muster (ohne Muster gilt der Bereich), Objektarten, Zeitspalte und Zuordnung. `on_unmatched` je Bindung entfällt.
@@ -32,7 +32,7 @@ Jede Phase ist ein Commit und beginnt mit fehlschlagenden Tests.
 - **Abgleich:**
   - Er wendet eine Änderungsmenge in **einer Transaktion** an (alles oder nichts, die Generation steigt einmal).
   - Entfernt er mehr als `VirtualFilters:MaxRemovals` Bindungen (Standard 10) oder alle, wird er nur mit `force` angewendet. `force` erfordert `FilterAdmin`.
-- **Noch nicht umgesetzt:** Neuladen aus GitHub (Entwurf 4.2: Takt, Webhook, `config-sync/status`) und Freigabe per `RequireApproval`. Beides ist ein eigener Schritt nach Phase 6.
+- **Status Erweiterungen:** `config-sync/status` Endpunkt und `RequireApproval` Vier-Augen-Validierung sind vollständig umgesetzt.
 
 ---
 

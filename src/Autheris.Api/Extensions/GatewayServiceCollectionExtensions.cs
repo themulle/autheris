@@ -405,13 +405,15 @@ public static class GatewayServiceCollectionExtensions
                         throw new FileNotFoundException($"Gateway:Casbin is enabled, but model file '{fullModelPath}' was not found. Failing closed.");
                     }
                 }
-                if (!string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
+                if (string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
                 {
-                    var fullPolicyPath = System.IO.Path.GetFullPath(options.Casbin.PolicyPath);
-                    if (!System.IO.File.Exists(fullPolicyPath))
-                    {
-                        throw new FileNotFoundException($"Gateway:Casbin is enabled, but policy file '{fullPolicyPath}' was not found. Failing closed.");
-                    }
+                    throw new InvalidOperationException("Gateway:Casbin is enabled, but PolicyPath is not configured. Failing closed.");
+                }
+
+                var fullPolicyPath = System.IO.Path.GetFullPath(options.Casbin.PolicyPath);
+                if (!System.IO.File.Exists(fullPolicyPath))
+                {
+                    throw new FileNotFoundException($"Gateway:Casbin is enabled, but policy file '{fullPolicyPath}' was not found. Failing closed.");
                 }
             }
 
