@@ -1,7 +1,7 @@
 # P10: Enterprise Governance Mutations & 4-Eyes SoD
 
 **Status:** [Done] (100% GA – Core Foundation)  
-**Components:** [`MutationTypes.cs`](file:///root/lis-git/autheris/src/Autheris.GraphQL/Types/MutationTypes.cs), [`RedisIdempotencyStore.cs`](file:///root/lis-git/autheris/src/Autheris.Infrastructure/Caching/RedisIdempotencyStore.cs), [`ConsentRecertificationWorkflowService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Workflows/ConsentRecertificationWorkflowService.cs)
+**Components:** [`MutationTypes.cs`](file:///root/autheris/src/Autheris.GraphQL/Types/MutationTypes.cs), [`RedisIdempotencyStore.cs`](file:///root/autheris/src/Autheris.Infrastructure/Caching/RedisIdempotencyStore.cs), [`ConsentRecertificationWorkflowService.cs`](file:///root/autheris/src/Autheris.Application/Workflows/ConsentRecertificationWorkflowService.cs)
 
 ---
 

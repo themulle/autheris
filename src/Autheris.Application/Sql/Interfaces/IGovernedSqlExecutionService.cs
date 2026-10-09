@@ -11,7 +11,8 @@ using Autheris.Domain.Common;
 public sealed record GovernedSqlQueryRequest(
     string Sql,
     IReadOnlyDictionary<string, object?>? Parameters = null,
-    string? DataSourceName = null);
+    string? DataSourceName = null,
+    SqlRowLimit? RowLimit = null);
 
 public sealed record GovernedSqlResult(
     string OriginalSql,
@@ -20,7 +21,8 @@ public sealed record GovernedSqlResult(
     IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
     int RowCount,
     long ElapsedMilliseconds,
-    bool Truncated = false);
+    bool Truncated = false,
+    [property: System.Text.Json.Serialization.JsonIgnore] IReadOnlyList<SqlResultColumn>? ColumnDescriptions = null);
 
 public interface IGovernedSqlExecutionService
 {

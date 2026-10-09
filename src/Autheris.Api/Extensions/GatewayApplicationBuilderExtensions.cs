@@ -442,6 +442,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapTokenRevocationEndpoints(); // SEC M-14 (GAP-B)
         app.MapFinOpsEndpoints();
         app.MapRebacEndpoints();
+        app.MapVirtualFilterEndpoints();
         app.MapArrowExportEndpoints();
         app.MapArrowFlightSqlEndpoints();
         app.MapDuckDbOlapEndpoints();

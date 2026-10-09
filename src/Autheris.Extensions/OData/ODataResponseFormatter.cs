@@ -37,7 +37,8 @@ public static class ODataResponseFormatter
         string serviceRootUrl,
         TableIdentifier table,
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
-        int? totalCount = null)
+        long? totalCount = null,
+        string? nextLink = null)
     {
         var cleanRoot = serviceRootUrl.TrimEnd('/');
         var entitySetName = $"{table.Domain}_{table.Schema}_{table.TableName}";
@@ -54,6 +55,12 @@ public static class ODataResponseFormatter
         }
 
         result["value"] = rows;
+
+        if (!string.IsNullOrWhiteSpace(nextLink))
+        {
+            result["@odata.nextLink"] = nextLink;
+        }
+
         return result;
     }
 

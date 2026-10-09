@@ -49,4 +49,64 @@ public sealed class SwaggerChallengeApi15Tests
 
         await auth.Received(1).ChallengeAsync(context, null, Arg.Any<AuthenticationProperties?>());
     }
+
+    [Fact]
+    public void CheckSwaggerAuth_AnonymousOutsideDevelopment_ReturnsChallenge()
+    {
+        var anonymous = new DefaultHttpContext();
+        var result = ODataEndpoints.CheckSwaggerAuth(new GatewayOptions(), Env(Environments.Production), anonymous);
+
+        result.ShouldNotBeNull();
+        result.GetType().Name.ShouldContain("Challenge");
+    }
+
+    [Fact]
+    public void CheckSwaggerAuth_AuthenticatedNonAdminOutsideDevelopment_ReturnsForbid()
+    {
+        var nonAdmin = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "DataAnalyst")], "Negotiate"))
+        };
+        var result = ODataEndpoints.CheckSwaggerAuth(new GatewayOptions(), Env(Environments.Production), nonAdmin);
+
+        result.ShouldNotBeNull();
+        result.GetType().Name.ShouldContain("Forbid");
+    }
+
+    [Fact]
+    public void CheckSwaggerAuth_AuthenticatedAdminOutsideDevelopment_Allows()
+    {
+        var admin = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "ClusterAdmin")], "Negotiate"))
+        };
+        var result = ODataEndpoints.CheckSwaggerAuth(new GatewayOptions(), Env(Environments.Production), admin);
+
+        result.ShouldBeNull();
+    }
+
+    [Fact]
+    public void CheckSwaggerAuth_DevelopmentOrOpenSchema_Allows()
+    {
+        var anonymous = new DefaultHttpContext();
+        var openSchemaOptions = new GatewayOptions { OpenSchema = true };
+
+        ODataEndpoints.CheckSwaggerAuth(new GatewayOptions(), Env(Environments.Development), anonymous).ShouldBeNull();
+        ODataEndpoints.CheckSwaggerAuth(openSchemaOptions, Env(Environments.Production), anonymous).ShouldBeNull();
+    }
+
+    [Fact]
+    public void RequiresMetadataChallenge_Tests()
+    {
+        var anonymous = new DefaultHttpContext();
+        var authenticated = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "u")], "Negotiate"))
+        };
+
+        ODataEndpoints.RequiresMetadataChallenge(new GatewayOptions(), Env(Environments.Production), anonymous).ShouldBeTrue();
+        ODataEndpoints.RequiresMetadataChallenge(new GatewayOptions(), Env(Environments.Production), authenticated).ShouldBeFalse();
+        ODataEndpoints.RequiresMetadataChallenge(new GatewayOptions(), Env(Environments.Development), anonymous).ShouldBeFalse();
+    }
 }
+

@@ -108,7 +108,7 @@ public class LakehouseIntegrationTests : IClassFixture<WebApplicationFactory<Pro
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.UseSetting("Gateway:Lakehouse:Enabled", "true");
             builder.UseSetting("Gateway:Lakehouse:Storage:Provider", "Local");
             builder.UseSetting("Gateway:Lakehouse:Storage:LocalBasePath", _testLakehouseDir);

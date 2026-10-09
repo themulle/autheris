@@ -1,7 +1,7 @@
 # F-DBT-3: Live-Telemetry Exposure Publisher
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`IDbtExposurePublisher.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Dbt/Interfaces/IDbtExposurePublisher.cs), [`DbtExposurePublisher.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Dbt/Services/DbtExposurePublisher.cs)
+**Components:** [`IDbtExposurePublisher.cs`](file:///root/autheris/src/Autheris.Application/Dbt/Interfaces/IDbtExposurePublisher.cs), [`DbtExposurePublisher.cs`](file:///root/autheris/src/Autheris.Application/Dbt/Services/DbtExposurePublisher.cs)
 
 ---
 

@@ -127,15 +127,109 @@ public sealed record WhenClause(
     Expression Condition,
     Expression Result) : SqlNode;
 
+/// <param name="IsStar">Wunsch 4: the call takes <c>*</c> as its only argument (<c>COUNT(*)</c>); <see cref="Arguments"/> is empty.</param>
+/// <param name="Filter">Wunsch 4: aggregate <c>FILTER (WHERE …)</c>.</param>
+/// <param name="OrderWithin">Wunsch 4: <c>ORDER BY</c> inside the argument list of an aggregate (<c>array_agg(x ORDER BY y)</c>).</param>
 public sealed record FunctionCallExpression(
     SqlQualifiedName Name,
     IReadOnlyList<Expression> Arguments,
     bool Distinct = false,
-    WindowSpecification? Window = null) : Expression;
+    WindowSpecification? Window = null,
+    bool IsStar = false,
+    Expression? Filter = null,
+    OrderByClause? OrderWithin = null) : Expression;
 
 public sealed record WindowSpecification(
     IReadOnlyList<Expression>? PartitionBy,
-    OrderByClause? OrderBy) : SqlNode;
+    OrderByClause? OrderBy,
+    WindowFrame? Frame = null) : SqlNode;
+
+/// <summary>Wunsch 4: <c>ROWS|RANGE [BETWEEN] start [AND end]</c>; offsets are non-negative integer literals only.</summary>
+public sealed record WindowFrame(WindowFrameType Type, FrameBound Start, FrameBound? End) : SqlNode;
+
+public sealed record FrameBound(FrameBoundKind Kind, long Offset = 0) : SqlNode;
+
+public enum WindowFrameType
+{
+    Rows,
+    Range
+}
+
+public enum FrameBoundKind
+{
+    UnboundedPreceding,
+    Preceding,
+    CurrentRow,
+    Following,
+    UnboundedFollowing
+}
+
+/// <summary>Wunsch 4: <c>current_date</c>, <c>current_time</c>, <c>current_timestamp</c>, <c>localtime</c>, <c>localtimestamp</c>.</summary>
+public sealed record CurrentDateTimeExpression(CurrentDateTimeKind Kind) : Expression;
+
+public enum CurrentDateTimeKind
+{
+    CurrentDate,
+    CurrentTime,
+    CurrentTimestamp,
+    LocalTime,
+    LocalTimestamp
+}
+
+/// <summary>Wunsch 4: <c>substring(x FROM start [FOR length])</c>.</summary>
+public sealed record SubstringExpression(Expression Source, Expression Start, Expression? Length) : Expression;
+
+/// <summary>Wunsch 4: <c>trim([BOTH|LEADING|TRAILING] [chars] FROM x)</c> and <c>trim(x[, chars])</c>.</summary>
+public sealed record TrimExpression(TrimSpecification Specification, Expression Source, Expression? Characters) : Expression;
+
+public enum TrimSpecification
+{
+    Both,
+    Leading,
+    Trailing
+}
+
+/// <summary>Wunsch 4: <c>position(needle IN haystack)</c>, 1-based, 0 when not found.</summary>
+public sealed record PositionExpression(Expression Needle, Expression Haystack) : Expression;
+
+/// <summary>Wunsch 4: <c>GROUPING(col, …)</c>; with several columns a bitmask (SQL Server: GROUPING_ID).</summary>
+public sealed record GroupingOperationExpression(IReadOnlyList<ColumnReference> Columns) : Expression;
+
+/// <summary>Wunsch 4: <c>DATE '…'</c>, <c>TIME '…'</c>, <c>TIMESTAMP '…'</c>; the value is validated by the builder.</summary>
+public sealed record TypedLiteralExpression(TypedLiteralKind Kind, string Value) : Expression;
+
+public enum TypedLiteralKind
+{
+    Date,
+    Time,
+    Timestamp
+}
+
+/// <summary>
+/// Virtual filters (phase 7b): Trino <c>date_add(unit, Amount, Source)</c> (also <c>Source ± INTERVAL</c>) and
+/// <c>date_trunc(unit, Source)</c>; only built with <c>TranslateTrinoDateFunctions</c>. <c>Amount</c> is 0 for Trunc.
+/// </summary>
+public sealed record DateFunctionExpression(DateFunctionKind Kind, DateUnit Unit, long Amount, Expression Source) : Expression;
+
+public enum DateFunctionKind
+{
+    Add,
+    Trunc
+}
+
+public enum DateUnit
+{
+    Second,
+    Minute,
+    Hour,
+    Day,
+    Week,
+    Month,
+    Year
+}
+
+/// <summary>Wunsch 4: <c>INTERVAL '<Value>' <Field></c> with a single unsigned field.</summary>
+public sealed record IntervalLiteralExpression(string Value, string Field) : Expression;
 
 public sealed record CastExpression(
     Expression Operand,

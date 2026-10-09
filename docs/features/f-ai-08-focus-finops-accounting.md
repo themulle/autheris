@@ -1,7 +1,7 @@
 # F-AI-08: FOCUS FinOps Accounting for Token & Compute
 
 **Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`IFocusCostAccountingService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/FinOps/Interfaces/IFocusCostAccountingService.cs), [`FocusCostAccountingService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/FinOps/Services/FocusCostAccountingService.cs)
+**Components:** [`IFocusCostAccountingService.cs`](file:///root/autheris/src/Autheris.Application/FinOps/Interfaces/IFocusCostAccountingService.cs), [`FocusCostAccountingService.cs`](file:///root/autheris/src/Autheris.Application/FinOps/Services/FocusCostAccountingService.cs)
 
 ---
 

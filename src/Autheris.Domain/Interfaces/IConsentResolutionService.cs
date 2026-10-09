@@ -11,6 +11,7 @@ public interface IConsentResolutionService
         IReadOnlySet<string> userRoles,
         TableIdentifier table,
         IReadOnlyList<Consent> activeConsents,
-        Autheris.Domain.Common.DatabaseDialect dialect = Autheris.Domain.Common.DatabaseDialect.SqlServer
+        Autheris.Domain.Common.DatabaseDialect dialect = Autheris.Domain.Common.DatabaseDialect.SqlServer,
+        IReadOnlySet<Sid>? allUserSids = null
     );
 }

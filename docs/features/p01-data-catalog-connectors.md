@@ -1,7 +1,7 @@
 # P1: Enterprise Data Catalog Connectors (Purview, Collibra, OpenMetadata)
 
 **Status:** [Done] (100% GA – Core Foundation)  
-**Components:** [`PurviewDataCatalogClient.cs`](file:///root/lis-git/autheris/src/Autheris.Extensions/DataCatalog/PurviewDataCatalogClient.cs), [`CollibraDataCatalogClient.cs`](file:///root/lis-git/autheris/src/Autheris.Extensions/DataCatalog/CollibraDataCatalogClient.cs), [`OpenMetadataDataCatalogClient.cs`](file:///root/lis-git/autheris/src/Autheris.Extensions/DataCatalog/OpenMetadataDataCatalogClient.cs), [`DataCatalogSyncService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/DataCatalog/Services/DataCatalogSyncService.cs)
+**Components:** [`PurviewDataCatalogClient.cs`](file:///root/autheris/src/Autheris.Extensions/DataCatalog/PurviewDataCatalogClient.cs), [`CollibraDataCatalogClient.cs`](file:///root/autheris/src/Autheris.Extensions/DataCatalog/CollibraDataCatalogClient.cs), [`OpenMetadataDataCatalogClient.cs`](file:///root/autheris/src/Autheris.Extensions/DataCatalog/OpenMetadataDataCatalogClient.cs), [`DataCatalogSyncService.cs`](file:///root/autheris/src/Autheris.Application/DataCatalog/Services/DataCatalogSyncService.cs)
 
 ---
 

@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/azure-sql-edge:latest
+FROM mcr.microsoft.com/azure-sql-edge:1.0.7
 
 USER root
 COPY containers/sqlserver/entrypoint.sh /usr/local/bin/entrypoint.sh

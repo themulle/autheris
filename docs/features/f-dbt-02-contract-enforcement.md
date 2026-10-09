@@ -1,7 +1,7 @@
 # F-DBT-2: dbt Model Contract Enforcement & Breaking-Change CI Gate
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`IDbtContractValidator.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Dbt/Interfaces/IDbtContractValidator.cs), [`DbtContractValidator.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Dbt/Services/DbtContractValidator.cs)
+**Components:** [`IDbtContractValidator.cs`](file:///root/autheris/src/Autheris.Application/Dbt/Interfaces/IDbtContractValidator.cs), [`DbtContractValidator.cs`](file:///root/autheris/src/Autheris.Application/Dbt/Services/DbtContractValidator.cs)
 
 ---
 

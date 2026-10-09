@@ -1,7 +1,7 @@
 # F-DATA-01: Hierarchical Parquet Egress & Nested Query Serialization
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`ParquetGraphQLResponseMiddleware.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Middleware/ParquetGraphQLResponseMiddleware.cs), [`ParquetOutputNegotiationMiddleware.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Middleware/ParquetOutputNegotiationMiddleware.cs)
+**Components:** [`ParquetGraphQLResponseMiddleware.cs`](file:///root/autheris/src/Autheris.Api/Middleware/ParquetGraphQLResponseMiddleware.cs), [`ParquetOutputNegotiationMiddleware.cs`](file:///root/autheris/src/Autheris.Api/Middleware/ParquetOutputNegotiationMiddleware.cs)
 
 ---
 

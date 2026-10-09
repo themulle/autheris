@@ -66,6 +66,12 @@ public sealed class GatewayThrottledException : Exception
     {
         RetryAfterSeconds = Math.Max(1, retryAfterSeconds);
     }
+
+    public GatewayThrottledException(string message, int retryAfterSeconds = 5)
+        : base(message)
+    {
+        RetryAfterSeconds = Math.Max(1, retryAfterSeconds);
+    }
 }
 
 /// <summary>

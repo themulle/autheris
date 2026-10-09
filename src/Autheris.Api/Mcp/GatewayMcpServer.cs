@@ -177,7 +177,9 @@ public static class GatewayMcpServer
             caller.UserSid,
             caller.Roles,
             caller.GroupSids,
-            caller.ClientIp);
+            caller.ClientIp,
+            caller.IsReadOnly,
+            caller.AdditionalClaims);
     }
 
     /// <summary>Low (JSON injection): only well-formed object schemas are passed on; anything else becomes an empty object schema.</summary>

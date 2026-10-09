@@ -229,12 +229,21 @@ public sealed class FederationTests
         httpContext.Request.Headers["Authorization"] = "Bearer test-jwt-token-123";
         httpContextAccessor.HttpContext.Returns(httpContext);
 
+        var fedOptions = Options.Create(new GatewayOptions
+        {
+            Federation = new FederationOptions
+            {
+                ForwardAuthorizationBearer = true
+            }
+        });
+
         var innerHandler = new TestHttpMessageHandler();
         var handler = new SubgraphSecurityDelegatingHandler(
             "InventorySubgraph",
             propagationService,
             httpContextAccessor,
-            NullLogger<SubgraphSecurityDelegatingHandler>.Instance)
+            NullLogger<SubgraphSecurityDelegatingHandler>.Instance,
+            fedOptions)
         {
             InnerHandler = innerHandler
         };

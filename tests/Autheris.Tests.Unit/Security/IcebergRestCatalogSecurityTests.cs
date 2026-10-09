@@ -223,4 +223,78 @@ public sealed class IcebergRestCatalogSecurityTests
             await catalogService.LoadTableAsync("tenant-1", "raw", "orders", Analyst());
         });
     }
+
+    [Fact]
+    public async Task LoadTable_WhenAllowed_AuditsAllow()
+    {
+        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var meta = Orders("id", "name");
+        _metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(meta));
+        var consentRepo = Substitute.For<IConsentRepository>();
+        consentRepo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([AllowFor("analyst@corp.com")]));
+
+        var service = new IcebergRestCatalogFederationService(
+            _metadataReader,
+            _metadataRepo,
+            _options,
+            NullLogger<IcebergRestCatalogFederationService>.Instance,
+            new ConsentResolutionService(),
+            consentRepo,
+            auditRepository: auditRepo);
+
+        var response = await service.LoadTableAsync("tenant-1", "raw", "orders", Analyst());
+        response.ShouldNotBeNull();
+
+        await auditRepo.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e =>
+                e.EventType == "Iceberg.LoadTable" &&
+                e.Decision == "ALLOW" &&
+                e.TargetTable == "tenant-1.raw.orders" &&
+                e.TenantId.Value == "tenant-1"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task LoadTable_WhenRebacEnforced_AndRebacDenies_ThrowsSecurityExceptionAndAuditsDeny()
+    {
+        var optionsWithRebac = Options.Create(new GatewayOptions
+        {
+            Rebac = new RebacOptions { Enabled = true, EnforceOnQueryPaths = true }
+        });
+
+        var rebac = Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator>();
+        rebac.IsEnabled.Returns(true);
+        rebac.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<RebacCheckResult>(new RebacCheckResult(false)));
+
+        var auditRepo = Substitute.For<IAuditLogRepository>();
+        var meta = Orders("id", "name");
+        _metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(meta));
+        var consentRepo = Substitute.For<IConsentRepository>();
+        consentRepo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([AllowFor("analyst@corp.com")]));
+
+        var service = new IcebergRestCatalogFederationService(
+            _metadataReader,
+            _metadataRepo,
+            optionsWithRebac,
+            NullLogger<IcebergRestCatalogFederationService>.Instance,
+            new ConsentResolutionService(),
+            consentRepo,
+            rebacEvaluator: rebac,
+            auditRepository: auditRepo);
+
+        await Should.ThrowAsync<SecurityException>(() =>
+            service.LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
+
+        await auditRepo.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e =>
+                e.EventType == "Iceberg.LoadTable" &&
+                e.Decision == "DENY" &&
+                e.TargetTable.Contains("orders")),
+            Arg.Any<CancellationToken>());
+    }
 }

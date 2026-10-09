@@ -147,6 +147,15 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
                         return ConnectionStatus.Reject("Cross-subject identity mismatch");
                     }
 
+                    // SR15-03: Inherit read-only access mode from upgrade request or token
+                    if (isHttpAuthenticated && httpUser.IsReadOnly() && !validatedPrincipal.IsReadOnly())
+                    {
+                        if (validatedPrincipal.Identity is ClaimsIdentity id)
+                        {
+                            TokenAccessScope.MarkReadOnly(id);
+                        }
+                    }
+
                     httpContext.User = validatedPrincipal;
                     httpContext.Items["TenantId"] = tokenTenant;
                     httpContext.Items[SecurityPrincipalContext.ItemKey] = SecurityPrincipalContext.FromPrincipal(
@@ -161,10 +170,12 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
                 if (session is HotChocolate.IHasContextData sessionHasContext)
                 {
                     sessionHasContext.ContextData["TenantId"] = tokenTenant;
+                    sessionHasContext.ContextData[nameof(ClaimsPrincipal)] = validatedPrincipal;
                 }
                 if (session.Connection is HotChocolate.IHasContextData connHasContext)
                 {
                     connHasContext.ContextData["TenantId"] = tokenTenant;
+                    connHasContext.ContextData[nameof(ClaimsPrincipal)] = validatedPrincipal;
                 }
 
                 return ConnectionStatus.Accept();
@@ -203,6 +214,16 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
 
                 ScheduleSessionExpiry(httpContext, expiry);
                 ScheduleRevocationChecks(httpContext, httpUser, revocationService);
+
+                if (session is HotChocolate.IHasContextData sessionHasContextFallback)
+                {
+                    sessionHasContextFallback.ContextData[nameof(ClaimsPrincipal)] = httpUser;
+                }
+                if (session.Connection is HotChocolate.IHasContextData connHasContextFallback)
+                {
+                    connHasContextFallback.ContextData[nameof(ClaimsPrincipal)] = httpUser;
+                }
+
                 return ConnectionStatus.Accept();
             }
 

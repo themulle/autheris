@@ -33,6 +33,15 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         _cteScopeStack.Push(new HashSet<string>(StringComparer.Ordinal));
     }
 
+    /// <summary>
+    /// A policy filter as an expression: verbatim and parenthesized when it is gateway-rendered target-dialect SQL
+    /// (<see cref="RlsOptions.PolicyFiltersAreTargetDialectSql"/>), otherwise parsed as Trino SQL.
+    /// </summary>
+    private Expression PolicyFilterExpression(string filterSql) =>
+        _options.PolicyFiltersAreTargetDialectSql
+            ? new TrustedSqlExpression($"({filterSql})")
+            : ParseFilterExpression(filterSql);
+
     private Expression ParseFilterExpression(string filterSql)
     {
         var tokenOptions = SqlTokenSecurityOptions.FromRlsOptions(_options);
@@ -187,7 +196,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         var innerSource = new NamedTableSource(node.Name, innerTableAlias);
 
         Expression? whereClause = !string.IsNullOrWhiteSpace(policyFilter)
-            ? ParseFilterExpression(policyFilter)
+            ? PolicyFilterExpression(policyFilter)
             : null;
 
         var subqueryBody = new QuerySpecification(
@@ -257,7 +266,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             throw new SecurityException("Correlated row filters are not supported for UPDATE/DELETE statements.");
         }
 
-        var rlsFilter = ParseFilterExpression(policyFilter);
+        var rlsFilter = PolicyFilterExpression(policyFilter);
         var combinedWhere = visitedWhere != null
             ? new BinaryExpression(visitedWhere, BinaryOperator.And, rlsFilter)
             : rlsFilter;
@@ -334,7 +343,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             throw new SecurityException("Correlated row filters are not supported for UPDATE/DELETE statements.");
         }
 
-        var rlsFilter = ParseFilterExpression(policyFilter);
+        var rlsFilter = PolicyFilterExpression(policyFilter);
         var combinedWhere = visitedWhere != null
             ? new BinaryExpression(visitedWhere, BinaryOperator.And, rlsFilter)
             : rlsFilter;
@@ -463,10 +472,80 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             throw new UnfilteredDmlException($"{operation} without a WHERE clause is not permitted.");
         }
 
+        // Plan 1: DML statement WHERE clause must reference at least one table column; literal-only predicates are forbidden
+        if (!ContainsColumnReference(where))
+        {
+            throw new UnfilteredDmlException($"{operation} statement WHERE clause must reference at least one table column; literal-only predicates are forbidden.");
+        }
+
         if (IsTriviallyTrue(where))
         {
             throw new UnfilteredDmlException($"{operation} with a trivially true WHERE clause is not permitted.");
         }
+    }
+
+    private static bool ContainsColumnReference(Expression? expr)
+    {
+        if (expr == null) return false;
+
+        return expr switch
+        {
+            ColumnReference => true,
+            BinaryExpression b => ContainsColumnReference(b.Left) || ContainsColumnReference(b.Right),
+            UnaryExpression u => ContainsColumnReference(u.Operand),
+            LikeExpression l => ContainsColumnReference(l.Operand) || ContainsColumnReference(l.Pattern) || (l.Escape != null && ContainsColumnReference(l.Escape)),
+            InListExpression inList => ContainsColumnReference(inList.Operand) || inList.Items.Any(ContainsColumnReference),
+            InSubqueryExpression inSq => ContainsColumnReference(inSq.Operand) || ContainsColumnReferenceInQuery(inSq.Subquery),
+            ExistsExpression ex => ContainsColumnReferenceInQuery(ex.Subquery),
+            ScalarSubqueryExpression sc => ContainsColumnReferenceInQuery(sc.Subquery),
+            BetweenExpression between => ContainsColumnReference(between.Operand) || ContainsColumnReference(between.Lower) || ContainsColumnReference(between.Upper),
+            CaseExpression caseExpr => (caseExpr.Operand != null && ContainsColumnReference(caseExpr.Operand)) ||
+                                       caseExpr.WhenClauses.Any(w => ContainsColumnReference(w.Condition) || ContainsColumnReference(w.Result)) ||
+                                       (caseExpr.ElseResult != null && ContainsColumnReference(caseExpr.ElseResult)),
+            FunctionCallExpression func => func.Arguments.Any(ContainsColumnReference),
+            SubstringExpression sub => ContainsColumnReference(sub.Source) || ContainsColumnReference(sub.Start) || (sub.Length != null && ContainsColumnReference(sub.Length)),
+            TrimExpression trim => ContainsColumnReference(trim.Source) || (trim.Characters != null && ContainsColumnReference(trim.Characters)),
+            PositionExpression pos => ContainsColumnReference(pos.Needle) || ContainsColumnReference(pos.Haystack),
+            CastExpression cast => ContainsColumnReference(cast.Operand),
+            DateFunctionExpression dateFunc => ContainsColumnReference(dateFunc.Source),
+            ExtractExpression extract => ContainsColumnReference(extract.Source),
+            IsDistinctFromExpression distinct => ContainsColumnReference(distinct.Left) || ContainsColumnReference(distinct.Right),
+            QuantifiedComparisonExpression quant => ContainsColumnReference(quant.Left) || ContainsColumnReferenceInQuery(quant.Subquery),
+            _ => false
+        };
+    }
+
+    private static bool ContainsColumnReferenceInQuery(SelectStatement subquery)
+    {
+        var stack = new Stack<SqlNode>();
+        stack.Push(subquery);
+
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            if (node is ColumnReference or WildcardSelectItem or UsingJoinCondition)
+            {
+                return true;
+            }
+            PushChildren(node, stack);
+        }
+
+        return false;
+    }
+
+    private static bool TryCompareNumericLiterals(LiteralExpression left, LiteralExpression right, out int comparison)
+    {
+        comparison = 0;
+        if (left.Value == null || right.Value == null) return false;
+
+        if (double.TryParse(left.Value.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d1) &&
+            double.TryParse(right.Value.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d2))
+        {
+            comparison = d1.CompareTo(d2);
+            return true;
+        }
+
+        return false;
     }
 
     private static bool IsTriviallyTrue(Expression? expr)
@@ -481,20 +560,82 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 return IsTriviallyTrue(b.Left) || IsTriviallyTrue(b.Right);
             case BinaryExpression b when b.Operator == BinaryOperator.And:
                 return IsTriviallyTrue(b.Left) && IsTriviallyTrue(b.Right);
-            case BinaryExpression b when b.Operator is BinaryOperator.Equal or BinaryOperator.LessThanOrEqual or BinaryOperator.GreaterThanOrEqual:
-                if (b.Left is LiteralExpression l1 && b.Right is LiteralExpression l2)
+            case BinaryExpression b when b.Operator == BinaryOperator.Equal:
+                if (b.Left is LiteralExpression el1 && b.Right is LiteralExpression el2)
                 {
-                    return Equals(l1.Value?.ToString(), l2.Value?.ToString());
+                    if (TryCompareNumericLiterals(el1, el2, out int cmpEq))
+                        return cmpEq == 0;
+                    return Equals(el1.Value?.ToString(), el2.Value?.ToString());
                 }
-                if (b.Left is ColumnReference c1 && b.Right is ColumnReference c2)
+                if (b.Left is ColumnReference ec1 && b.Right is ColumnReference ec2)
                 {
-                    return c1.Name.NormalizedName.Equals(c2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase);
+                    return ec1.Name.NormalizedName.Equals(ec2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase);
                 }
                 return false;
             case BinaryExpression b when b.Operator == BinaryOperator.NotEqual:
                 if (b.Left is LiteralExpression nl1 && b.Right is LiteralExpression nl2)
                 {
+                    if (TryCompareNumericLiterals(nl1, nl2, out int cmpNeq))
+                        return cmpNeq != 0;
                     return !Equals(nl1.Value?.ToString(), nl2.Value?.ToString());
+                }
+                return false;
+            case BinaryExpression b when b.Operator == BinaryOperator.LessThan:
+                if (b.Left is LiteralExpression ltl && b.Right is LiteralExpression ltr &&
+                    TryCompareNumericLiterals(ltl, ltr, out int cmpLt))
+                {
+                    return cmpLt < 0;
+                }
+                return false;
+            case BinaryExpression b when b.Operator == BinaryOperator.LessThanOrEqual:
+                if (b.Left is LiteralExpression le1 && b.Right is LiteralExpression le2)
+                {
+                    if (TryCompareNumericLiterals(le1, le2, out int cmpLe))
+                        return cmpLe <= 0;
+                    return Equals(le1.Value?.ToString(), le2.Value?.ToString());
+                }
+                if (b.Left is ColumnReference leCol1 && b.Right is ColumnReference leCol2)
+                {
+                    return leCol1.Name.NormalizedName.Equals(leCol2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase);
+                }
+                return false;
+            case BinaryExpression b when b.Operator == BinaryOperator.GreaterThan:
+                if (b.Left is LiteralExpression gtl && b.Right is LiteralExpression gtr &&
+                    TryCompareNumericLiterals(gtl, gtr, out int cmpGt))
+                {
+                    return cmpGt > 0;
+                }
+                return false;
+            case BinaryExpression b when b.Operator == BinaryOperator.GreaterThanOrEqual:
+                if (b.Left is LiteralExpression ge1 && b.Right is LiteralExpression ge2)
+                {
+                    if (TryCompareNumericLiterals(ge1, ge2, out int cmpGe))
+                        return cmpGe >= 0;
+                    return Equals(ge1.Value?.ToString(), ge2.Value?.ToString());
+                }
+                if (b.Left is ColumnReference geCol1 && b.Right is ColumnReference geCol2)
+                {
+                    return geCol1.Name.NormalizedName.Equals(geCol2.Name.NormalizedName, StringComparison.OrdinalIgnoreCase);
+                }
+                return false;
+            case BetweenExpression between:
+                if (between.Operand is ColumnReference opCol &&
+                    between.Lower is ColumnReference lowCol &&
+                    between.Upper is ColumnReference upCol)
+                {
+                    if (opCol.Name.NormalizedName.Equals(lowCol.Name.NormalizedName, StringComparison.OrdinalIgnoreCase) &&
+                        opCol.Name.NormalizedName.Equals(upCol.Name.NormalizedName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            case InListExpression inList:
+                if (inList.Operand is ColumnReference inCol &&
+                    inList.Items.Any(item => item is ColumnReference itemCol &&
+                                            itemCol.Name.NormalizedName.Equals(inCol.Name.NormalizedName, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
                 }
                 return false;
             case UnaryExpression u when u.Operator == UnaryOperator.Not:
@@ -521,7 +662,27 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             if (node is ColumnReference colRef)
             {
                 string colName = colRef.Name.SimpleName;
-                if (_options.ColumnMaskingProvider.HasMask(normalizedTableName, colName))
+                bool isMasked = _options.ColumnMaskingProvider.HasMask(normalizedTableName, colName);
+
+                if (!isMasked && colRef.Name.Parts.Count > 1)
+                {
+                    string qualifier = colRef.Name.Parts[^2].Value;
+                    isMasked = _options.ColumnMaskingProvider.HasMask(qualifier, colName);
+                }
+
+                if (!isMasked && _options.TablesWithMaskedColumns != null)
+                {
+                    foreach (var tbl in _options.TablesWithMaskedColumns)
+                    {
+                        if (_options.ColumnMaskingProvider.HasMask(tbl, colName))
+                        {
+                            isMasked = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (isMasked)
                 {
                     throw new SecurityException($"Masked column '{colName}' of table '{normalizedTableName}' must not be referenced in {clause}.");
                 }
@@ -532,6 +693,29 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                     HasMaskingForTable(normalizedTableName))
                 {
                     throw new SecurityException($"Whole-row reference to '{colName}' in {clause} is forbidden because table '{normalizedTableName}' contains masked columns.");
+                }
+            }
+            else if (node is UsingJoinCondition usingCond)
+            {
+                foreach (var col in usingCond.Columns)
+                {
+                    string colName = col.Value;
+                    bool isMasked = _options.ColumnMaskingProvider.HasMask(normalizedTableName, colName);
+                    if (!isMasked && _options.TablesWithMaskedColumns != null)
+                    {
+                        foreach (var tbl in _options.TablesWithMaskedColumns)
+                        {
+                            if (_options.ColumnMaskingProvider.HasMask(tbl, colName))
+                            {
+                                isMasked = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (isMasked)
+                    {
+                        throw new SecurityException($"Masked column '{colName}' of table '{normalizedTableName}' must not be referenced in {clause}.");
+                    }
                 }
             }
 
@@ -555,6 +739,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 stack.Push(cast.Operand);
                 break;
             case LikeExpression lk:
+                if (lk.Escape != null) stack.Push(lk.Escape);
                 stack.Push(lk.Pattern);
                 stack.Push(lk.Operand);
                 break;
@@ -587,6 +772,10 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 break;
             case FunctionCallExpression fn:
                 foreach (var arg in fn.Arguments) stack.Push(arg);
+                if (fn.Filter != null) stack.Push(fn.Filter);
+                if (fn.OrderWithin != null) stack.Push(fn.OrderWithin);
+                if (fn.Window?.PartitionBy != null) foreach (var p in fn.Window.PartitionBy) stack.Push(p);
+                if (fn.Window?.OrderBy != null) stack.Push(fn.Window.OrderBy);
                 break;
             case CaseExpression cs:
                 if (cs.ElseResult != null) stack.Push(cs.ElseResult);
@@ -606,14 +795,74 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             case ExtractExpression ext:
                 stack.Push(ext.Source);
                 break;
+            case SubstringExpression sub:
+                stack.Push(sub.Source);
+                stack.Push(sub.Start);
+                if (sub.Length != null) stack.Push(sub.Length);
+                break;
+            case TrimExpression trim:
+                stack.Push(trim.Source);
+                if (trim.Characters != null) stack.Push(trim.Characters);
+                break;
+            case DateFunctionExpression date:
+                stack.Push(date.Source);
+                break;
+            case PositionExpression pos:
+                stack.Push(pos.Needle);
+                stack.Push(pos.Haystack);
+                break;
             case SelectStatement s:
+                if (s.With != null) { foreach (var cte in s.With.Ctes) stack.Push(cte.Query); }
                 stack.Push(s.Body);
                 if (s.OrderBy != null) stack.Push(s.OrderBy);
+                if (s.Pagination != null)
+                {
+                    if (s.Pagination.Offset != null) stack.Push(s.Pagination.Offset);
+                    if (s.Pagination.Limit != null) stack.Push(s.Pagination.Limit);
+                }
                 break;
             case QuerySpecification qs:
                 foreach (var p in qs.Projections) stack.Push(p);
+                if (qs.From != null) stack.Push(qs.From);
                 if (qs.Where != null) stack.Push(qs.Where);
+                if (qs.GroupBy != null) stack.Push(qs.GroupBy);
                 if (qs.Having != null) stack.Push(qs.Having);
+                break;
+            case SetOperationQuery so:
+                stack.Push(so.Left);
+                stack.Push(so.Right);
+                break;
+            case ValuesQueryBody vq:
+                foreach (var r in vq.Rows) stack.Push(r);
+                break;
+            case JoinedTableSource jt:
+                stack.Push(jt.Left);
+                stack.Push(jt.Right);
+                if (jt.Condition != null) stack.Push(jt.Condition);
+                break;
+            case SubqueryTableSource st:
+                stack.Push(st.Subquery);
+                break;
+            case LateralTableSource lt:
+                stack.Push(lt.Subquery);
+                break;
+            case OnJoinCondition on:
+                stack.Push(on.Predicate);
+                break;
+            case UsingJoinCondition:
+                break;
+            case GroupByClause gb:
+                foreach (var g in gb.GroupingExpressions) stack.Push(g);
+                if (gb.AdvancedElements != null)
+                {
+                    foreach (var adv in gb.AdvancedElements)
+                    {
+                        foreach (var set in adv.Sets)
+                        {
+                            foreach (var g in set) stack.Push(g);
+                        }
+                    }
+                }
                 break;
             case ColumnSelectItem csi:
                 stack.Push(csi.Expression);
@@ -656,15 +905,5 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         }
 
         return false;
-    }
-
-    private static bool IsQuotedIdentifier(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return false;
-        text = text.Trim();
-        return text.Length >= 2 &&
-               ((text[0] == '"' && text[^1] == '"') ||
-                (text[0] == '`' && text[^1] == '`') ||
-                (text[0] == '[' && text[^1] == ']'));
     }
 }

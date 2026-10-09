@@ -1,7 +1,7 @@
 # F-PERF-08: Hierarchical Resource Groups & Workload Queuing
 
 **Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`ResourceGroupMiddleware.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Middleware/ResourceGroupMiddleware.cs), [`IResourceGroupQueueManager.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Performance/IResourceGroupQueueManager.cs)
+**Components:** [`ResourceGroupMiddleware.cs`](file:///root/autheris/src/Autheris.Api/Middleware/ResourceGroupMiddleware.cs), [`IResourceGroupQueueManager.cs`](file:///root/autheris/src/Autheris.Application/Performance/IResourceGroupQueueManager.cs)
 
 ---
 

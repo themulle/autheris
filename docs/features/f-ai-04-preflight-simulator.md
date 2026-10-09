@@ -1,7 +1,7 @@
 # F-AI-04: Pre-Flight Query Simulator & Safety Limits
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`IPreFlightQuerySimulator.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Interfaces/IPreFlightQuerySimulator.cs), [`McpPreflightSimulator.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Services/McpPreflightSimulator.cs)
+**Components:** [`IPreFlightQuerySimulator.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Interfaces/IPreFlightQuerySimulator.cs), [`McpPreflightSimulator.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/McpPreflightSimulator.cs)
 
 ---
 

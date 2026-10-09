@@ -65,13 +65,19 @@ public static class ParquetResponseWriter
         return true;
     }
 
+    /// <param name="resultTruncated">
+    /// WebSQL findings 4.2: the rows were already cut before the export (row limit of the channel, e.g. WebSQL
+    /// MaxAllowedRows). Reported like a cut at the Parquet file limit (X-Export-Truncated) and with X-Autheris-Truncated,
+    /// as the JSON path does.
+    /// </param>
     public static async Task WriteAsync(
         HttpContext ctx,
         IParquetExportService svc,
         string tableHint,
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
         IReadOnlyList<string>? columns,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool resultTruncated = false)
     {
         ArgumentNullException.ThrowIfNull(ctx);
         ArgumentNullException.ThrowIfNull(svc);
@@ -106,7 +112,12 @@ public static class ParquetResponseWriter
         response.ContentLength = result.Data.Length;
         response.Headers.ContentDisposition = contentDisposition.ToString();
         response.Headers["X-Row-Count"] = result.RowCount.ToString(CultureInfo.InvariantCulture);
-        response.Headers["X-Export-Truncated"] = result.IsTruncated ? "true" : "false";
+        bool truncated = result.IsTruncated || resultTruncated;
+        response.Headers["X-Export-Truncated"] = truncated ? "true" : "false";
+        if (truncated)
+        {
+            response.Headers["X-Autheris-Truncated"] = "true";
+        }
         response.Headers.Vary = "Accept";
         response.Headers.CacheControl = "no-store";
 

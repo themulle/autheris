@@ -726,16 +726,21 @@ public sealed class ParquetOutputNegotiationTests
     {
         public int Executions { get; private set; }
 
+        public GovernedSqlQueryRequest? LastRequest { get; private set; }
+
         public async Task ExecuteGovernedQueryAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, Func<DbDataReader, CancellationToken, Task> rowWriter, CancellationToken ct = default)
         {
             Executions++;
+            LastRequest = request;
             if (toThrow != null)
             {
                 throw toThrow;
             }
 
+            // Like the governed service: the row limit is delivered, one probe row beyond it marks the cut.
             using var reader = table.CreateDataReader();
-            await rowWriter(reader, ct);
+            long limit = request.RowLimit?.Effective(null) ?? 0;
+            await rowWriter(limit > 0 ? new RowLimitedDataReader(reader, limit) : reader, ct);
         }
 
         public Task<GovernedSqlResult> ExecuteQueryBufferedAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
@@ -834,6 +839,97 @@ public sealed class ParquetOutputNegotiationTests
         sqlService.Executions.ShouldBe(0);
     }
 
+    [Fact]
+    public async Task PARQ_WebSql_ResultCutByWebSqlRowLimit_IsReportedAsTruncated()
+    {
+        // WebSQL findings 4.2: the WebSQL limit (MaxAllowedRows) cuts the result in the rewritten SQL, below the Parquet
+        // file limit. The export must report it like the JSON path does (truncated: true / X-Autheris-Truncated).
+        var options = new GatewayOptions
+        {
+            ParquetEgress = CreateOptions(maxRows: 100).ParquetEgress,
+            WebSql = new WebSqlOptions { Enabled = true, MaxAllowedRows = 5, DefaultMaxRows = 5 }
+        };
+        using var services = BuildServices(options);
+        var context = CreateWebSqlContext(services, ParquetAccept);
+
+        await WebSqlEndpoints.HandleWebSqlRequest(context, new DataTableSqlService(CreateEmployeeTable(6)), Options.Create(options), NullLoggerFactory.Instance);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
+        context.Response.Headers["X-Row-Count"].ToString().ShouldBe("5");
+        context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("true");
+        context.Response.Headers["X-Autheris-Truncated"].ToString().ShouldBe("true");
+    }
+
+    [Fact]
+    public async Task PARQ_WebSql_UsesParquetRowLimits()
+    {
+        // Gateway:RowLimits:Parquet raises the WebSQL limit for Parquet exports; reaching 5 rows is then not a cut.
+        var options = new GatewayOptions
+        {
+            ParquetEgress = CreateOptions(maxRows: 100).ParquetEgress,
+            WebSql = new WebSqlOptions { Enabled = true, MaxAllowedRows = 5, DefaultMaxRows = 5 },
+            RowLimits = new TransportRowLimitsOptions { Parquet = new ChannelRowLimitOptions { DefaultMaxRows = 50, MaxAllowedRows = 50 } }
+        };
+        using var services = BuildServices(options);
+        var context = CreateWebSqlContext(services, ParquetAccept);
+        var sqlService = new DataTableSqlService(CreateEmployeeTable(5));
+
+        await WebSqlEndpoints.HandleWebSqlRequest(context, sqlService, Options.Create(options), NullLoggerFactory.Instance);
+
+        sqlService.LastRequest!.RowLimit.ShouldBe(new SqlRowLimit(50, 50));
+        context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("false");
+    }
+
+    [Fact]
+    public async Task PARQ_WebSql_ResultExactlyAtWebSqlRowLimit_IsNotTruncated()
+    {
+        // WebSQL findings 2.4: exactly the limit, no further row -> nothing was cut.
+        var options = new GatewayOptions
+        {
+            ParquetEgress = CreateOptions(maxRows: 100).ParquetEgress,
+            WebSql = new WebSqlOptions { Enabled = true, MaxAllowedRows = 5, DefaultMaxRows = 5 }
+        };
+        using var services = BuildServices(options);
+        var context = CreateWebSqlContext(services, ParquetAccept);
+
+        await WebSqlEndpoints.HandleWebSqlRequest(context, new DataTableSqlService(CreateEmployeeTable(5)), Options.Create(options), NullLoggerFactory.Instance);
+
+        context.Response.Headers["X-Row-Count"].ToString().ShouldBe("5");
+        context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("false");
+    }
+
+    [Fact]
+    public async Task PARQ_WebSql_ResultBelowWebSqlRowLimit_IsNotTruncated()
+    {
+        var options = new GatewayOptions
+        {
+            ParquetEgress = CreateOptions(maxRows: 100).ParquetEgress,
+            WebSql = new WebSqlOptions { Enabled = true, MaxAllowedRows = 5, DefaultMaxRows = 5 }
+        };
+        using var services = BuildServices(options);
+        var context = CreateWebSqlContext(services, ParquetAccept);
+
+        await WebSqlEndpoints.HandleWebSqlRequest(context, new DataTableSqlService(CreateEmployeeTable(4)), Options.Create(options), NullLoggerFactory.Instance);
+
+        context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("false");
+        context.Response.Headers.ContainsKey("X-Autheris-Truncated").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task PARQ_SqlEndpoint_TruncatedResult_IsReportedAsTruncated()
+    {
+        var options = CreateOptions();
+        using var services = BuildServices(options);
+        var context = CreateHttpContext(services, ParquetAccept, path: "/api/v1/queries/active_customers", method: "GET");
+        var rows = Rows(new Dictionary<string, object?> { ["id"] = 1 }, new Dictionary<string, object?> { ["id"] = 2 });
+        var execution = CreateSqlEndpointService(new GovernedSqlResult("SELECT 1", "SELECT 1", ["id"], rows, 2, 3, Truncated: true));
+
+        await SqlEndpointRoutes.HandleGetEndpoint("active_customers", context, execution, Options.Create(options), NullLoggerFactory.Instance);
+
+        context.Response.Headers["X-Export-Truncated"].ToString().ShouldBe("true");
+        context.Response.Headers["X-Autheris-Truncated"].ToString().ShouldBe("true");
+    }
+
     private static ISqlEndpointExecutionService CreateSqlEndpointService(GovernedSqlResult result)
     {
         var service = Substitute.For<ISqlEndpointExecutionService>();
@@ -899,8 +995,24 @@ public sealed class ParquetOutputNegotiationTests
                 Arg.Any<string?>(),
                 Arg.Any<bool>(),
                 Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string?>(),
                 Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(result));
+
+        handler.ExecuteEntitySetQueryAsync(
+                Arg.Any<ClaimsPrincipal?>(),
+                Arg.Any<string>(),
+                Arg.Any<TableIdentifier>(),
+                Arg.Any<int?>(),
+                Arg.Any<int?>(),
+                Arg.Any<string?>(),
+                Arg.Any<bool>(),
+                Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+                Arg.Any<string?>(),
+                Arg.Any<string?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(result));
+
         return handler;
     }
 

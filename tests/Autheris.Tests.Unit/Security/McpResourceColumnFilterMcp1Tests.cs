@@ -109,4 +109,66 @@ public sealed class McpResourceColumnFilterMcp1Tests
         resources.ShouldAllBe(r => !r.Uri.Contains("employees"));
         resources.ShouldContain(r => r.Uri.Contains("payroll"));
     }
+
+    [Fact]
+    public async Task TableWithDenyMaskingRule_OmitsDeniedColumnFromGlossaryAndDocs()
+    {
+        var tableWithDeny = Table(Hr) with
+        {
+            ColumnMaskingRules = new Dictionary<string, MaskingRule>
+            {
+                ["salary_band"] = new MaskingRule { RuleType = "DENY" }
+            }
+        };
+
+        var repo = Substitute.For<ITableMetadataRepository>();
+        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { tableWithDeny }));
+
+        var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance);
+        var resources = await compiler.GetSemanticResourcesAsync("corp");
+
+        var glossary = resources.FirstOrDefault(r => r.Uri.StartsWith("glossary://", StringComparison.Ordinal));
+        glossary.ShouldNotBeNull();
+        glossary.Text.ShouldContain("`name`");
+        glossary.Text.ShouldNotContain("salary_band");
+
+        // Column docs for salary_band should not be generated
+        resources.ShouldNotContain(r => r.Uri.Contains("salary_band"));
+    }
+
+    [Fact]
+    public async Task UserWithUnconstrainedAllowAndSpecificDenyColumnRule_OmitsDeniedColumnFromGlossaryAndDocs()
+    {
+        // SR15-52: Even if an unconstrained Allow exists, a user-specific consent with a Deny column rule
+        // must exclude the denied column from generated glossary and docs resources.
+        var compiler = CreateCompiler(
+            new Consent { TableIdentifier = Hr, Effect = ConsentEffect.Allow, TenantId = new TenantId(Tenant) },
+            new Consent
+            {
+                TableIdentifier = Hr,
+                Effect = ConsentEffect.Allow,
+                TenantId = new TenantId(Tenant),
+                ColumnRules = [new ConsentColumnRule { ColumnName = "salary_band", AccessLevel = ColumnAccessLevel.Deny }]
+            });
+
+        var resources = await compiler.GetSemanticResourcesAsync(principal: User());
+
+        resources.ShouldNotBeEmpty();
+        resources.ShouldAllBe(r => !r.Text.Contains("salary_band") && !r.Uri.Contains("salary_band"));
+    }
+
+    [Fact]
+    public async Task NullConsentRepo_WithoutBypass_FailsClosed()
+    {
+        // Fail-closed: when consent repository is null and auth is not bypassed, no tables/resources should be returned
+        var repo = Substitute.For<ITableMetadataRepository>();
+        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new List<TableMetadata> { Table(Hr) }));
+
+        var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, null, null);
+        var resources = await compiler.GetSemanticResourcesAsync(principal: User());
+
+        resources.ShouldBeEmpty();
+    }
 }

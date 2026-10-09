@@ -1,7 +1,7 @@
 # F-CDC-02: Native MSSQL Change Tracking Ingestion Provider
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`IMssqlChangeTrackingPoller.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Streaming/Interfaces/IMssqlChangeTrackingPoller.cs), [`MssqlChangeTrackingPoller.cs`](file:///root/lis-git/autheris/src/Autheris.Extensions/Cdc/MssqlChangeTrackingPoller.cs), [`StreamRlsPolicyEnforcer.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs)
+**Components:** [`IMssqlChangeTrackingPoller.cs`](file:///root/autheris/src/Autheris.Application/Streaming/Interfaces/IMssqlChangeTrackingPoller.cs), [`MssqlChangeTrackingPoller.cs`](file:///root/autheris/src/Autheris.Extensions/Cdc/MssqlChangeTrackingPoller.cs), [`StreamRlsPolicyEnforcer.cs`](file:///root/autheris/src/Autheris.Application/Streaming/Services/StreamRlsPolicyEnforcer.cs)
 
 ---
 

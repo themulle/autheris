@@ -13,6 +13,9 @@ public static class ODataCsdlGenerator
         var escapedNamespace = System.Security.SecurityElement.Escape(serviceNamespace) ?? serviceNamespace;
         sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
         sb.AppendLine("<edmx:Edmx Version=\"4.0\" xmlns:edmx=\"http://docs.oasis-open.org/odata/ns/edmx\">");
+        sb.AppendLine("  <edmx:Reference Uri=\"https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Core.V1.xml\">");
+        sb.AppendLine("    <edmx:Include Namespace=\"Org.OData.Core.V1\" Alias=\"Core\" />");
+        sb.AppendLine("  </edmx:Reference>");
         sb.AppendLine("  <edmx:DataServices>");
         sb.AppendLine($"    <Schema Namespace=\"{escapedNamespace}\" xmlns=\"http://docs.oasis-open.org/odata/ns/edm\">");
 
@@ -23,8 +26,8 @@ public static class ODataCsdlGenerator
             var entityName = System.Security.SecurityElement.Escape(rawEntityName) ?? rawEntityName;
             sb.AppendLine($"      <EntityType Name=\"{entityName}\">");
 
-            // Keys
-            var keys = table.PrimaryKeyColumns.Count > 0 ? table.PrimaryKeyColumns : ["id"];
+            // Keys (Befund 4a.4: ensure keys always reference existing properties with Nullable="false")
+            var keys = ResolveEntityKeys(table);
             sb.AppendLine("        <Key>");
             foreach (var key in keys)
             {
@@ -51,8 +54,8 @@ public static class ODataCsdlGenerator
                 foreach (var col in table.Columns)
                 {
                     var edmType = MapToEdmType(col.DataType);
-                    var nullable = !keys.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase);
-                    var nullStr = nullable ? "" : " Nullable=\"false\"";
+                    var isKey = keys.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase);
+                    var nullStr = isKey ? " Nullable=\"false\"" : "";
                     var escapedColName = System.Security.SecurityElement.Escape(col.ColumnName) ?? col.ColumnName;
 
                     var hasDesc = !string.IsNullOrWhiteSpace(col.Description);
@@ -135,4 +138,47 @@ public static class ODataCsdlGenerator
             _ => "Edm.String"
         };
     }
+
+    /// <summary>
+    /// Befund 4a.4: Resolves entity keys referencing strictly existing properties of the entity type.
+    /// Priority:
+    /// 1. Declared primary keys from catalog matching an existing column.
+    /// 2. Existing column named 'id' (case-insensitive).
+    /// 3. All table columns as a composite key (read-only query gateway).
+    /// 4. Fallback to 'id' if the table has zero columns.
+    /// </summary>
+    public static IReadOnlyList<string> ResolveEntityKeys(TableMetadata table)
+    {
+        var validKeys = new List<string>();
+        if (table.PrimaryKeyColumns.Count > 0)
+        {
+            foreach (var pk in table.PrimaryKeyColumns)
+            {
+                var match = table.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, pk, StringComparison.OrdinalIgnoreCase));
+                if (match != null && !validKeys.Contains(match.ColumnName, StringComparer.OrdinalIgnoreCase))
+                {
+                    validKeys.Add(match.ColumnName);
+                }
+            }
+        }
+
+        if (validKeys.Count > 0)
+        {
+            return validKeys;
+        }
+
+        var idCol = table.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "id", StringComparison.OrdinalIgnoreCase));
+        if (idCol != null)
+        {
+            return [idCol.ColumnName];
+        }
+
+        if (table.Columns.Count > 0)
+        {
+            return table.Columns.Select(c => c.ColumnName).ToList();
+        }
+
+        return ["id"];
+    }
 }
+

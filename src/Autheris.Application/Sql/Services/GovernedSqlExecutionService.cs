@@ -70,6 +70,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly IDbSessionContextInitializer _sessionInitializer;
+    private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
 
     private const int ThrottledRetryAfterSeconds = 2;
 
@@ -94,8 +95,12 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
-        IConsentCacheService? consentCache = null)
+        IConsentCacheService? consentCache = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null)
     {
+        _contractManager = contractManager;
+        _mandatoryFilters = mandatoryFilters;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement;
         _consentResolution = consentResolution;
@@ -132,7 +137,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         TenantId tenantId,
         string? dataSourceName,
         DmlAuditContext? dmlContext,
-        CancellationToken ct)
+        CancellationToken ct,
+        SqlRowLimit? rowLimit = null,
+        bool probeExtraRow = false)
     {
         if (string.IsNullOrWhiteSpace(rawSql))
         {
@@ -283,7 +290,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         var clientIp = ResolveClientIp(user);
 
         // SEC M-20: Make the requested action visible to ABAC sub-rules (applied after claims so it cannot be spoofed).
-        var actionAttribute = new Dictionary<string, object?> { ["gql.action"] = isDml ? "write" : "read" };
+        var actionAttribute = new Dictionary<string, object?>
+        {
+            ["gql.action"] = isDml ? "write" : "read",
+            ["action"] = isDml ? "write" : "read"
+        };
 
         // SQ-09 / Trino Compatibility: In Trino queries, 3-part names (catalog.schema.table) are canonical.
         // Catalog auto-inference and cross-catalog validation:
@@ -329,6 +340,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         var internalParameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         var hmacKeyParameterNames = new Dictionary<string, string>(StringComparer.Ordinal);
         var accessedTables = new List<TableIdentifier>();
+        var virtualFilters = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var accessedTableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // SEC P-05: The SQL dialect comes from the data source configuration (the provider the connection factory will
@@ -350,6 +362,60 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
 
             referenceSpellings[target.FullName] = target.FullName;
+        }
+
+        var tableNameCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var schemaTableCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in metadata.ReferencedTables)
+        {
+            tableNameCounts[t.TableName] = tableNameCounts.GetValueOrDefault(t.TableName) + 1;
+            if (!string.IsNullOrWhiteSpace(t.Schema))
+            {
+                var st = $"{t.Schema}.{t.TableName}";
+                schemaTableCounts[st] = schemaTableCounts.GetValueOrDefault(st) + 1;
+            }
+        }
+
+        void RegisterTableLookup<T>(IDictionary<string, T> dict, TableAccessTarget target, TableIdentifier resolvedId, T value)
+        {
+            dict[target.FullName] = value;
+            dict[resolvedId.ToQualifiedName()] = value;
+
+            // SR15-02: Only register unqualified table name if it is unique among all referenced tables in this statement
+            if (tableNameCounts.TryGetValue(target.TableName, out var count) && count == 1)
+            {
+                dict[target.TableName] = value;
+            }
+
+            if (!string.IsNullOrWhiteSpace(target.Schema))
+            {
+                var st = $"{target.Schema}.{target.TableName}";
+                if (schemaTableCounts.TryGetValue(st, out var sCount) && sCount == 1)
+                {
+                    dict[st] = value;
+                }
+            }
+        }
+
+        void RegisterTableSet(ISet<string> set, TableAccessTarget target, TableIdentifier resolvedId)
+        {
+            set.Add(target.FullName);
+            set.Add(resolvedId.ToQualifiedName());
+
+            // SR15-02: Only register unqualified table name if it is unique among all referenced tables in this statement
+            if (tableNameCounts.TryGetValue(target.TableName, out var count) && count == 1)
+            {
+                set.Add(target.TableName);
+            }
+
+            if (!string.IsNullOrWhiteSpace(target.Schema))
+            {
+                var st = $"{target.Schema}.{target.TableName}";
+                if (schemaTableCounts.TryGetValue(st, out var sCount) && sCount == 1)
+                {
+                    set.Add(st);
+                }
+            }
         }
 
         foreach (var target in metadata.ReferencedTables)
@@ -424,6 +490,20 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 throw TableDenied(target);
             }
 
+            // SR15-43 / SEC C-03: Restrict domain 'default' fallback and enforce source matching.
+            // If table was resolved from fallback domain 'default', it must explicitly specify a matching SourceName.
+            if (string.Equals(resolvedId.Domain, "default", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(tableId.Domain, "default", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(tableMeta.Table.SourceName) ||
+                    !string.Equals(tableMeta.Table.SourceName, effectiveDataSourceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger?.LogWarning("WebSQL rejected table {Table}: uncatalogued under data source '{DataSource}' and fallback 'default' does not match source.",
+                        target.FullName, effectiveDataSourceName);
+                    throw TableDenied(target);
+                }
+            }
+
             // SEC C-03 / SQ-09: A catalog table bound to a specific data source must only be queried through that source.
             if (!string.IsNullOrWhiteSpace(tableMeta.Table.SourceName) &&
                 !string.Equals(tableMeta.Table.SourceName, effectiveDataSourceName, StringComparison.OrdinalIgnoreCase))
@@ -455,11 +535,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             }
 
             var colList = tableMeta.Columns.Select(c => c.ColumnName).ToList();
-            tableColumnsMap[target.FullName] = colList;
-            if (string.Equals(target.FullName, target.TableName, StringComparison.OrdinalIgnoreCase))
-            {
-                tableColumnsMap[target.TableName] = colList;
-            }
+            RegisterTableLookup(tableColumnsMap, target, resolvedId, colList);
 
             if (accessedTableSet.Add(resolvedId.ToQualifiedName()))
             {
@@ -486,6 +562,16 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 throw TableDenied(target);
             }
 
+            if (isDml)
+            {
+                var canWrite = await AccessPolicy().CanWriteTableAsync(user, tenantId, tableMeta, ct: ct).ConfigureAwait(false);
+                if (!canWrite)
+                {
+                    _logger?.LogWarning("WebSQL DML write access to table {Table} denied.", target.FullName);
+                    throw TableDenied(target);
+                }
+            }
+
             // Row-level security: tenant isolation (defense in depth) AND consent/ABAC row filters
             var rlsParts = new List<string>(2);
             // Review E-5: any usual spelling of the tenant column is honoured; unusual names are not written into SQL.
@@ -501,40 +587,32 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 }
 
                 primaryTenantColumn ??= tenantColumn;
-                tableTenantColumns[target.FullName] = tenantColumn;
-                if (string.Equals(target.FullName, target.TableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    tableTenantColumns[target.TableName] = tenantColumn;
-                }
+                RegisterTableLookup(tableTenantColumns, target, resolvedId, tenantColumn);
 
                 rlsParts.Add($"{tenantColumn} = '{tenantId.Value.Replace("'", "''")}'");
             }
 
+            if (decision.AppliedVirtualFilters is { Count: > 0 } applied)
+            {
+                RegisterTableLookup(virtualFilters, target, resolvedId, applied);
+            }
+
             if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
             {
-                _sqlSecurityValidator.ValidatePredicateSql(decision.CombinedRowFilterSql, "CombinedRowFilterSql");
+                _sqlSecurityValidator.ValidateRowFilter(decision);
                 rlsParts.Add($"({decision.CombinedRowFilterSql})");
                 AddInternalRowFilterParameters(decision.RowFilterParameters, internalParameters);
-                tablesWithConsentRowFilter.Add(target.FullName);
-                tablesWithConsentRowFilter.Add(target.TableName);
+                RegisterTableSet(tablesWithConsentRowFilter, target, resolvedId);
             }
 
             if (rlsParts.Count > 0)
             {
                 var rlsFilter = string.Join(" AND ", rlsParts);
-                tableRlsFilters[target.FullName] = rlsFilter;
-                if (string.Equals(target.FullName, target.TableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    tableRlsFilters[target.TableName] = rlsFilter;
-                }
+                RegisterTableLookup(tableRlsFilters, target, resolvedId, rlsFilter);
             }
             else
             {
-                tablesWithoutRls.Add(target.FullName);
-                if (string.Equals(target.FullName, target.TableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    tablesWithoutRls.Add(target.TableName);
-                }
+                RegisterTableSet(tablesWithoutRls, target, resolvedId);
             }
 
             // Column projection / masking (SEC C-03/H-10: shared effective access function, catalog-sensitive -> Mask unless explicit Clear)
@@ -560,10 +638,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                     if (metadata.JoinColumnReferences != null && metadata.JoinColumnReferences.Count > 0)
                     {
                         isUsedInJoin = metadata.JoinColumnReferences.Any(jc => ReferencesColumn(jc.TableOrAlias, jc.ColumnName, col.ColumnName, target));
-                    }
-                    else if (metadata.JoinConditionColumns != null && metadata.JoinConditionColumns.Contains(col.ColumnName))
-                    {
-                        isUsedInJoin = true;
                     }
 
                     if (isUsedInJoin)
@@ -597,33 +671,20 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (columnMasks.Count > 0)
             {
-                tableMaskingExpressions[target.FullName] = columnMasks;
-                if (string.Equals(target.FullName, target.TableName, StringComparison.OrdinalIgnoreCase))
-                {
-                    tableMaskingExpressions[target.TableName] = columnMasks;
-                }
-                tablesWithMaskedColumns.Add(target.FullName);
-                tablesWithMaskedColumns.Add(target.TableName);
+                RegisterTableLookup(tableMaskingExpressions, target, resolvedId, columnMasks);
+                RegisterTableSet(tablesWithMaskedColumns, target, resolvedId);
             }
         }
 
         // 6. Construct RlsOptions
-        long maxRows;
-        if (metadata.HasExplicitLimit && metadata.ExplicitLimitValue is > 0)
-        {
-            var requestedLimit = metadata.ExplicitLimitValue.Value;
-            maxRows = webSqlOptions.MaxAllowedRows > 0
-                ? Math.Min(requestedLimit, webSqlOptions.MaxAllowedRows)
-                : requestedLimit;
-        }
-        else
-        {
-            maxRows = webSqlOptions.DefaultMaxRows > 0 ? webSqlOptions.DefaultMaxRows : 1000;
-            if (webSqlOptions.MaxAllowedRows > 0 && maxRows > webSqlOptions.MaxAllowedRows)
-            {
-                maxRows = webSqlOptions.MaxAllowedRows;
-            }
-        }
+        // The transport (Trino, Parquet, SQL endpoints, Arrow, Flight SQL) may carry its own configured row limit.
+        long maxRows = (rowLimit ?? SqlRowLimit.For(webSqlOptions))
+            .Effective(metadata.HasExplicitLimit ? metadata.ExplicitLimitValue : null);
+
+        // WebSQL findings 2.4: executions read one probe row beyond the limit; RowLimitedDataReader drops it and reports
+        // whether rows were cut. A client's own LIMIT up to the maximum stays below the probe and is never "truncated".
+        long deliveredRowLimit = probeExtraRow && !isDml && maxRows > 0 ? maxRows : 0;
+        long enforcedMaxRows = deliveredRowLimit > 0 ? maxRows + 1 : maxRows;
 
         // SEC C-03: Any table name the rewriter encounters that was not resolved above is filtered to the empty set (fail-closed).
         const string denyAllFilter = "1 = 0";
@@ -670,7 +731,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         var rlsOptions = new RlsOptions
         {
             AppendTableAlias = true,
-            EnforcedMaxRows = maxRows,
+            EnforcedMaxRows = enforcedMaxRows,
             EnforceReadOnlyQueries = !isDml,
             TargetDialect = targetSqlDialect,
             // SQ-01 & SQ-02: Strict parser / lexer checks for governed execution
@@ -705,6 +766,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             PolicyProvider = policyProvider,
             TableColumnsProvider = tbl => tableColumnsMap.TryGetValue(tbl, out var cols) ? cols : null,
             ColumnMaskingProvider = maskingProvider,
+            // Wunsch 4: tenant and consent filters are rendered by the gateway in the target dialect and validated by
+            // ValidatePredicateSql above; the AST compiler splices them in like the legacy rewriter (no client input).
+            PolicyFiltersAreTargetDialectSql = true,
             RewriterEngine = _options.Value.WebSql.SqlRewriterEngine
         };
 
@@ -722,7 +786,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 tableRlsFilters,
                 tableMaskingExpressions,
                 tablesWithoutRls,
-                maxRows,
+                enforcedMaxRows,
                 isDml,
                 webSqlOptions.SqlRewriterEngine ?? "LegacyTokenStream",
                 tablesWithConsentRowFilter,
@@ -731,7 +795,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
             {
-                return new GovernedRewrite(cachedSql, internalParameters, accessedTables, effectiveDataSourceName);
+                return new GovernedRewrite(cachedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
             }
         }
 
@@ -753,6 +817,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 "UPDATE/DELETE statements in WebSQL require a restricting WHERE clause (statements without WHERE or with a trivially true condition such as 'WHERE 1=1' are rejected).",
                 unfilteredEx);
         }
+        catch (TrinoSqlEngine.Ast.Builder.AstBuildException astEx)
+        {
+            // Wunsch 4: a construct the AST compiler cannot translate is a client error (400), not a server error.
+            throw new ArgumentException($"The SQL statement could not be compiled: {astEx.Message}", nameof(rawSql), astEx);
+        }
         catch (SecurityException secEx)
         {
             _logger?.LogWarning(secEx, "WebSQL statement rejected by RLS rewriter.");
@@ -772,7 +841,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             _logger?.LogDebug("GovernedSqlExecutionService: Generated secured SQL: {SecuredSql}", securedSql);
         }
 
-        return new GovernedRewrite(securedSql, internalParameters, accessedTables, effectiveDataSourceName);
+        return new GovernedRewrite(securedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
     }
 
     public async Task ExecuteGovernedQueryAsync(
@@ -801,12 +870,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             ? ResolveAllowedDataSource(request.DataSourceName, tenantId)
             : null;
 
-        // SEC H-13: Client parameters must not collide with gateway-internal parameters
+        // SEC H-13 / SR15-01: Client parameters must not collide with gateway-internal parameters or RLS placeholders
         if (request.Parameters != null)
         {
             foreach (var paramName in request.Parameters.Keys)
             {
-                if (paramName.TrimStart('@').StartsWith(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase))
+                var trimmed = paramName.TrimStart('@');
+                if (trimmed.StartsWith(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("p_rls_", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.StartsWith("rls_", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new WebSqlPolicyException("A request parameter uses a reserved gateway parameter name.");
                 }
@@ -821,7 +893,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         GovernedRewrite rewrite;
         try
         {
-            rewrite = await RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct).ConfigureAwait(false);
+            rewrite = await RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true).ConfigureAwait(false);
         }
         catch (SecurityException policyEx) when (dmlContext.IsDml)
         {
@@ -856,7 +928,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 {
                     originalSql = request.Sql,
                     securedSql,
-                    dataSource = dsName
+                    dataSource = dsName,
+                    virtual_filters = rewrite.VirtualFilters
                 })
             }, ct).ConfigureAwait(false);
         }
@@ -958,11 +1031,20 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             if (request.Parameters != null)
             {
+                var internalParamNames = new HashSet<string>(
+                    rewrite.InternalParameters.Keys.Select(k => k.StartsWith('@') ? k : "@" + k),
+                    StringComparer.OrdinalIgnoreCase);
+
                 // "name" and "@name" denote the same parameter; bind it once.
                 var boundNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var (paramName, paramVal) in request.Parameters)
                 {
                     string normalizedName = paramName.StartsWith('@') ? paramName : "@" + paramName;
+                    if (internalParamNames.Contains(normalizedName))
+                    {
+                        throw new WebSqlPolicyException($"Client parameter '{paramName}' collides with an internal security rewrite parameter.");
+                    }
+
                     if (!boundNames.Add(normalizedName))
                     {
                         continue;
@@ -989,7 +1071,14 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
             await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
             {
-                await rowWriter(reader, ct).ConfigureAwait(false);
+                if (rewrite.DeliveredRowLimit > 0)
+                {
+                    await rowWriter(new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit), ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    await rowWriter(reader, ct).ConfigureAwait(false);
+                }
             }
 
             if (tx != null)
@@ -1159,6 +1248,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
         var rows = new List<IReadOnlyDictionary<string, object?>>();
         var columns = new List<string>();
+        IReadOnlyList<SqlResultColumn> columnDescriptions = Array.Empty<SqlResultColumn>();
+        bool isTruncated = false;
         var sw = Stopwatch.StartNew();
 
         string securedSql = await ExecuteCoreAsync(
@@ -1167,9 +1258,11 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             tenantId,
             async (reader, token) =>
             {
-                for (int i = 0; i < reader.FieldCount; i++)
+                // WebSQL findings 2.3: unnamed and duplicate columns get unique names (_colN), so no value is lost.
+                columnDescriptions = SqlResultColumns.Describe(reader);
+                foreach (var column in columnDescriptions)
                 {
-                    columns.Add(reader.GetName(i));
+                    columns.Add(column.Name);
                 }
 
                 while (await reader.ReadAsync(token).ConfigureAwait(false))
@@ -1177,21 +1270,16 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                     var row = new Dictionary<string, object?>(reader.FieldCount, StringComparer.OrdinalIgnoreCase);
                     for (int i = 0; i < reader.FieldCount; i++)
                     {
-                        row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        row[columns[i]] = reader.IsDBNull(i) ? null : reader.GetValue(i);
                     }
                     rows.Add(row);
                 }
+
+                isTruncated = reader is RowLimitedDataReader { HasMoreRows: true };
             },
             ct).ConfigureAwait(false);
 
         sw.Stop();
-
-        bool isTruncated = false;
-        var limitMatch = System.Text.RegularExpressions.Regex.Match(securedSql, @"\bLIMIT\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-        if (limitMatch.Success && long.TryParse(limitMatch.Groups[1].ValueSpan, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var limitVal) && limitVal > 0)
-        {
-            isTruncated = rows.Count >= limitVal;
-        }
 
         return new GovernedSqlResult(
             OriginalSql: request.Sql,
@@ -1200,7 +1288,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             Rows: rows.AsReadOnly(),
             RowCount: rows.Count,
             ElapsedMilliseconds: sw.ElapsedMilliseconds,
-            Truncated: isTruncated);
+            Truncated: isTruncated,
+            ColumnDescriptions: columnDescriptions);
     }
 
     /// <summary>
@@ -1263,11 +1352,25 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
     private string ResolveGloballyAllowedDataSource(string? requested)
     {
-        var webSqlOptions = _options.Value.WebSql;
+        if (TryResolveGloballyAllowedDataSource(_options.Value.WebSql, requested, out var resolved))
+        {
+            return resolved;
+        }
+
+        throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
+    }
+
+    /// <summary>
+    /// SEC C-03: the default data source, a source listed in WebSql.AllowedDataSources or a mapped source
+    /// (WebSql.DataSourceMappings); <paramref name="resolved"/> is its configured spelling.
+    /// </summary>
+    private static bool TryResolveGloballyAllowedDataSource(WebSqlOptions webSqlOptions, string? requested, out string resolved)
+    {
         string defaultName = webSqlOptions.DefaultDataSourceName;
         if (string.IsNullOrWhiteSpace(requested) || string.Equals(requested, defaultName, StringComparison.OrdinalIgnoreCase))
         {
-            return defaultName;
+            resolved = defaultName;
+            return true;
         }
 
         var allowed = webSqlOptions.AllowedDataSources;
@@ -1277,17 +1380,33 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             {
                 if (string.Equals(candidate, requested, StringComparison.OrdinalIgnoreCase))
                 {
-                    return candidate;
+                    resolved = candidate;
+                    return true;
                 }
             }
         }
 
         if (webSqlOptions.DataSourceMappings != null && webSqlOptions.DataSourceMappings.ContainsKey(requested))
         {
-            return requested;
+            resolved = requested;
+            return true;
         }
 
-        throw new WebSqlPolicyException("The requested data source is not enabled for WebSQL.");
+        resolved = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// True when WebSQL is enabled and <paramref name="dataSourceName"/> may be queried by <paramref name="tenantId"/>
+    /// (globally allowed and within the tenant's allowlist), the same rule a statement on that source has to pass.
+    /// </summary>
+    internal static bool IsDataSourceQueryable(WebSqlOptions webSqlOptions, TenantId tenantId, string dataSourceName)
+    {
+        ArgumentNullException.ThrowIfNull(webSqlOptions);
+        return webSqlOptions.Enabled &&
+               !string.IsNullOrWhiteSpace(dataSourceName) &&
+               TryResolveGloballyAllowedDataSource(webSqlOptions, dataSourceName, out var resolved) &&
+               IsDataSourceAllowedForTenant(webSqlOptions, tenantId, resolved);
     }
 
     /// <summary>
@@ -1348,8 +1467,12 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     }
 
     /// <summary>Architecture 1: the shared table access decision; only called with consent services present.</summary>
+    private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
+
     private TableAccessPolicy AccessPolicy() =>
-        new(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value);
+        new(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value,
+            _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+            _contractManager);
 
     /// <summary>
     /// SEC P-05: Dialect of the configured connection for <paramref name="dataSourceName"/>, or null when no connection
@@ -1527,15 +1650,20 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     /// </summary>
     private static TableIdentifier ResolveTableIdentifier(TableAccessTarget target, string? dataSourceName)
     {
+        // Only schema-qualified names use the data source's domain; unqualified names keep their "default" resolution.
+        // This must precede TryParse, which maps every two-part name to the "default" domain (WebSQL findings 2.1).
+        if (string.IsNullOrWhiteSpace(target.Catalog) && !string.IsNullOrWhiteSpace(target.Schema) &&
+            !string.IsNullOrWhiteSpace(dataSourceName))
+        {
+            return new TableIdentifier(dataSourceName, target.Schema, target.TableName);
+        }
+
         if (TableIdentifier.TryParse(target.FullName, out var parsed))
         {
             return parsed;
         }
 
-        // Only schema-qualified names use the data source's domain; unqualified names keep their "default" resolution.
-        string domain = !string.IsNullOrWhiteSpace(target.Catalog)
-            ? target.Catalog
-            : !string.IsNullOrWhiteSpace(target.Schema) && !string.IsNullOrWhiteSpace(dataSourceName) ? dataSourceName : "default";
+        string domain = !string.IsNullOrWhiteSpace(target.Catalog) ? target.Catalog : "default";
         string schema = !string.IsNullOrWhiteSpace(target.Schema) ? target.Schema : "public";
         return new TableIdentifier(domain, schema, target.TableName);
     }
@@ -1570,7 +1698,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 }
 
                 // SEC H-13: No resolvable HMAC secret -> redact (fail-closed), never fall back to an unkeyed hash
-                return "'***'";
+                return BuildDefaultTypeSafeMask(tableMeta, columnName);
             }
             if (ruleType == "MASK_EMAIL")
             {
@@ -1586,7 +1714,37 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 return $"{prefix}'{tableMeta.Dialect.EscapeSqlLiteral(rule.Replacement)}'";
             }
         }
-        return "'***'";
+        return BuildDefaultTypeSafeMask(tableMeta, columnName);
+    }
+
+    private static string BuildDefaultTypeSafeMask(TableMetadata tableMeta, string columnName)
+    {
+        var col = tableMeta.Columns?.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
+        if (col == null || string.IsNullOrWhiteSpace(col.DataType))
+        {
+            return "'***'";
+        }
+
+        var dt = col.DataType.Trim().ToLowerInvariant();
+        if (dt.Contains('('))
+        {
+            dt = dt[..dt.IndexOf('(')].Trim();
+        }
+
+        return dt switch
+        {
+            "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal" or "money" or "smallmoney" or "real" or "float" or "double precision" or "double" => "0",
+            "bit" or "bool" or "boolean" => tableMeta.Dialect == DatabaseDialect.SqlServer ? "0" : "FALSE",
+            "date" => "'1970-01-01'",
+            "datetime" or "datetime2" or "smalldatetime" or "timestamp" or "timestamptz" => tableMeta.Dialect switch
+            {
+                DatabaseDialect.SqlServer => "'1970-01-01 00:00:00'",
+                DatabaseDialect.PostgreSql => "'1970-01-01 00:00:00'::timestamp",
+                _ => "'1970-01-01 00:00:00'"
+            },
+            "uniqueidentifier" or "uuid" => "'00000000-0000-0000-0000-000000000000'",
+            _ => "'***'"
+        };
     }
 
     private static string BuildEmailMaskExpression(string columnName, DatabaseDialect dialect)
@@ -1721,7 +1879,15 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         return _masterHmacKey;
     }
 
-    private sealed record GovernedRewrite(string Sql, IReadOnlyDictionary<string, object?> InternalParameters, IReadOnlyList<TableIdentifier> AccessedTables, string DataSourceName);
+    /// <param name="DeliveredRowLimit">Rows handed to the caller; the statement reads one more as probe (0 = no probe).</param>
+    /// <param name="VirtualFilters">Virtual filters applied per referenced table (audit).</param>
+    private sealed record GovernedRewrite(
+        string Sql,
+        IReadOnlyDictionary<string, object?> InternalParameters,
+        IReadOnlyList<TableIdentifier> AccessedTables,
+        string DataSourceName,
+        long DeliveredRowLimit = 0,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? VirtualFilters = null);
 
     /// <summary>
     /// Collects the DML classification during governance so that executed AND rejected DML can be audited.

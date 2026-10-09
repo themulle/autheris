@@ -13,7 +13,31 @@ using TrinoSqlEngine.Ast.Nodes;
 public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.PostgreSql;
+    protected override bool SupportsAggregateFilter => true;
+    protected override bool SupportsOrderedAggregates => true;
+    protected override bool SupportsGroupByDistinct => true;
+
+    /// <summary>Wunsch 4: PostgreSQL has no double, tinyint or varbinary.</summary>
+    protected override string FormatTypeName(TrinoType type) => type.Name switch
+    {
+        "double" => "double precision",
+        "tinyint" => "smallint",
+        "varbinary" => "bytea",
+        _ => type.Normalized
+    };
     public override int MaxParameterBudget => 65535;
+
+    /// <summary>Virtual filters (phase 7b): <c>(x + (n) * INTERVAL '1 unit')</c>.</summary>
+    protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
+    {
+        builder.Append('(');
+        GenerateExpression(source, ref builder, context);
+        builder.Append(" + (");
+        builder.Append(amount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.Append(") * INTERVAL '1 ");
+        builder.Append(DateUnitName(unit));
+        builder.Append("')");
+    }
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
     {

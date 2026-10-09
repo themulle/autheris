@@ -1,7 +1,7 @@
 # F-AI-02: Semantic MCP Compiler & Schema Grounding
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`ISemanticMcpCompiler.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Interfaces/ISemanticMcpCompiler.cs), [`SemanticMcpCompiler.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Services/SemanticMcpCompiler.cs), [`AiDataGuardrailService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Services/AiDataGuardrailService.cs)
+**Components:** [`ISemanticMcpCompiler.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Interfaces/ISemanticMcpCompiler.cs), [`SemanticMcpCompiler.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/SemanticMcpCompiler.cs), [`AiDataGuardrailService.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/AiDataGuardrailService.cs)
 
 ---
 

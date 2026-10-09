@@ -13,6 +13,9 @@ public interface ISqlSecurityValidator
     /// </summary>
     void ValidatePredicateSql(string? predicate, string fieldName, bool allowSubqueries = true);
 
+    /// <summary>Validates the combined row filter of a decision with the length limit that applies to it.</summary>
+    void ValidateRowFilter(TableAccessDecision decision) => Autheris.Application.Sql.SqlSecurityValidator.ValidateRowFilter(decision);
+
     /// <summary>
     /// Validates an ORDER BY SQL fragment to ensure only valid column expressions and sort directions are present.
     /// </summary>

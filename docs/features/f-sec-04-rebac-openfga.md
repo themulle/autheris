@@ -1,7 +1,7 @@
 # F-SEC-04: Relationship-Based Access Control (ReBAC via OpenFGA / Zanzibar)
 
 **Status:** [Done] (100% GA – Next-Gen)  
-**Components:** [`RebacEndpoints.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Endpoints/RebacEndpoints.cs), [`IRebacAuthorizationService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Security/IRebacAuthorizationService.cs), [`OpenFgaRebacClient.cs`](file:///root/lis-git/autheris/src/Autheris.Infrastructure/Security/OpenFgaRebacClient.cs)
+**Components:** [`RebacEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/RebacEndpoints.cs), [`IRebacAuthorizationService.cs`](file:///root/autheris/src/Autheris.Application/Security/IRebacAuthorizationService.cs), [`OpenFgaRebacClient.cs`](file:///root/autheris/src/Autheris.Infrastructure/Security/OpenFgaRebacClient.cs)
 
 ---
 

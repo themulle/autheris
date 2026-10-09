@@ -1,7 +1,7 @@
 # F-DBT-6: Policy & RLS Auto-Sync from dbt Metadata
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`DbtPolicySyncService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Dbt/Services/DbtPolicySyncService.cs), [`CasbinRlsPushdownEngine.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Security/CasbinRlsPushdownEngine.cs)
+**Components:** [`DbtPolicySyncService.cs`](file:///root/autheris/src/Autheris.Application/Dbt/Services/DbtPolicySyncService.cs), [`CasbinRlsPushdownEngine.cs`](file:///root/autheris/src/Autheris.Application/Security/CasbinRlsPushdownEngine.cs)
 
 ---
 

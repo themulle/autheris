@@ -19,7 +19,12 @@ public enum GatewayRole
     DataOwner = 10,
     DataSteward = 11,
     SchemaPublisher = 12,
-    Consumer = 20
+    Consumer = 20,
+
+    // Virtual filters (decision 2): maintenance and the file repository sync are separate; neither is implied by
+    // GovernanceAdmin or TenantAdmin, only by ClusterAdmin.
+    FilterAdmin = 30,
+    FilterSync = 31
 }
 
 public static class GatewayRoleExtensions
@@ -35,6 +40,8 @@ public static class GatewayRoleExtensions
         ["DataSteward"] = GatewayRole.DataSteward,
         ["SchemaPublisher"] = GatewayRole.SchemaPublisher,
         ["Consumer"] = GatewayRole.Consumer,
+        ["FilterAdmin"] = GatewayRole.FilterAdmin,
+        ["FilterSync"] = GatewayRole.FilterSync,
         ["Analyst"] = GatewayRole.Consumer
     };
 

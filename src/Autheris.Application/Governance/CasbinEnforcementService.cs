@@ -23,6 +23,15 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
+public sealed record CasbinRuleInput(
+    string Sub,
+    string Obj,
+    string Act,
+    string SubRule = "true",
+    string Eft = "allow",
+    string? RlsFilter = null,
+    ConsentRowFilter? CorrelatedRowFilter = null);
+
 public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDisposable
 {
     internal sealed record GroupingRule(string User, string Role);
@@ -128,7 +137,7 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
         ConsentRowFilter? CorrelatedRowFilter = null
     );
 
-    internal const string DefaultModelText = @"
+    public const string DefaultModelText = @"
 [request_definition]
 r = sub, tenant, obj, act, ctx
 
@@ -232,7 +241,11 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         return enforcer;
     }
 
-    private PolicySnapshot BuildSnapshot(PolicySources src, long epoch)
+    private PolicySnapshot BuildSnapshot(
+        PolicySources src,
+        long epoch,
+        PolicySnapshot? previousSnapshot = null,
+        string? changedTenant = null)
     {
         var wildcardRules = new List<CasbinRuleMetadata>();
         if (src.GlobalRules.TryGetValue("*", out var gw))
@@ -253,15 +266,39 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         var enforcersDict = new Dictionary<string, Enforcer>(StringComparer.OrdinalIgnoreCase);
         var rulesDict = new Dictionary<string, ImmutableArray<CasbinRuleMetadata>>(StringComparer.OrdinalIgnoreCase);
 
-        var wildcardEnforcer = CreateEnforcer(
-            Enumerable.Empty<CasbinRuleMetadata>(),
-            wildcardRules,
-            wildcardGrouping);
-
-        rulesDict["*"] = wildcardRules.ToImmutableArray();
+        // F-8 optimization: reuse wildcard enforcer when only a single non-wildcard tenant changed
+        bool isSingleTenantChange = !string.IsNullOrEmpty(changedTenant) && changedTenant != "*";
+        Enforcer wildcardEnforcer;
+        if (isSingleTenantChange && previousSnapshot != null)
+        {
+            wildcardEnforcer = previousSnapshot.WildcardEnforcer;
+            rulesDict["*"] = previousSnapshot.Rules.TryGetValue("*", out var existingW)
+                ? existingW
+                : wildcardRules.ToImmutableArray();
+        }
+        else
+        {
+            wildcardEnforcer = CreateEnforcer(
+                Enumerable.Empty<CasbinRuleMetadata>(),
+                wildcardRules,
+                wildcardGrouping);
+            rulesDict["*"] = wildcardRules.ToImmutableArray();
+        }
 
         foreach (var tenant in src.AllTenants)
         {
+            // F-8 optimization: if only a specific tenant changed, reuse other tenants' enforcers
+            if (isSingleTenantChange &&
+                previousSnapshot != null &&
+                !tenant.Equals(changedTenant, StringComparison.OrdinalIgnoreCase) &&
+                previousSnapshot.Enforcers.TryGetValue(tenant, out var existingTenantEnforcer) &&
+                previousSnapshot.Rules.TryGetValue(tenant, out var existingTenantRules))
+            {
+                enforcersDict[tenant] = existingTenantEnforcer;
+                rulesDict[tenant] = existingTenantRules;
+                continue;
+            }
+
             var tenantRules = new List<CasbinRuleMetadata>();
             if (src.GlobalRules.TryGetValue(tenant, out var gr))
             {
@@ -300,7 +337,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
     private void Publish(
         Func<PolicySources, PolicySources> change,
-        Action<PolicySources, PolicySources>? validate = null)
+        Action<PolicySources, PolicySources>? validate = null,
+        string? changedTenant = null)
     {
         List<string> tenantsToNotify;
         lock (_syncLock)
@@ -308,17 +346,24 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             var nextSources = change(_sources);
             validate?.Invoke(_sources, nextSources);
             var current = Volatile.Read(ref _currentSnapshot);
-            var nextSnapshot = BuildSnapshot(nextSources, current.Epoch + 1);
+            var nextSnapshot = BuildSnapshot(nextSources, current.Epoch + 1, current, changedTenant);
             _sources = nextSources;
             Interlocked.Exchange(ref _currentSnapshot, nextSnapshot);
             _decisionCache.Clear();
 
-            tenantsToNotify = current.Enforcers.Keys
-                .Union(current.Rules.Keys, StringComparer.OrdinalIgnoreCase)
-                .Union(nextSnapshot.Enforcers.Keys, StringComparer.OrdinalIgnoreCase)
-                .Union(nextSnapshot.Rules.Keys, StringComparer.OrdinalIgnoreCase)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            if (!string.IsNullOrEmpty(changedTenant) && changedTenant != "*")
+            {
+                tenantsToNotify = [changedTenant];
+            }
+            else
+            {
+                tenantsToNotify = current.Enforcers.Keys
+                    .Union(current.Rules.Keys, StringComparer.OrdinalIgnoreCase)
+                    .Union(nextSnapshot.Enforcers.Keys, StringComparer.OrdinalIgnoreCase)
+                    .Union(nextSnapshot.Rules.Keys, StringComparer.OrdinalIgnoreCase)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
         }
 
         foreach (var tName in tenantsToNotify)
@@ -426,7 +471,46 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             var nextList = currentList.Add(ruleMeta);
             var nextDict = src.ProgrammaticRules.SetItem(tenant.Value, nextList);
             return src with { ProgrammaticRules = nextDict };
-        });
+        }, changedTenant: tenant.Value);
+    }
+
+    public void AddPolicies(
+        TenantId tenant,
+        IEnumerable<CasbinRuleInput> rules)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+        var ruleList = rules as IReadOnlyList<CasbinRuleInput> ?? rules.ToList();
+        if (ruleList.Count == 0) return;
+
+        if (tenant.Value == "*" && !_modelSupportsWildcardTenant)
+        {
+            throw new InvalidOperationException("The Casbin model does not support wildcard tenants (probe W1). `*` rules are not allowed.");
+        }
+
+        var metaList = new List<CasbinRuleMetadata>(ruleList.Count);
+        foreach (var rule in ruleList)
+        {
+            ValidateSubRuleTokens(rule.SubRule, rule.RlsFilter);
+            metaList.Add(new CasbinRuleMetadata(
+                rule.Sub,
+                tenant.Value,
+                rule.Obj,
+                rule.Act,
+                rule.SubRule,
+                rule.Eft,
+                rule.RlsFilter,
+                rule.CorrelatedRowFilter));
+        }
+
+        Publish(src =>
+        {
+            var currentList = src.ProgrammaticRules.TryGetValue(tenant.Value, out var list)
+                ? list
+                : ImmutableArray<CasbinRuleMetadata>.Empty;
+            var nextList = currentList.AddRange(metaList);
+            var nextDict = src.ProgrammaticRules.SetItem(tenant.Value, nextList);
+            return src with { ProgrammaticRules = nextDict };
+        }, changedTenant: tenant.Value);
     }
 
     public void AddRlsPolicy(
@@ -452,7 +536,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             var nextList = currentList.Add(grouping);
             var nextDict = src.ProgrammaticGrouping.SetItem(tenant.Value, nextList);
             return src with { ProgrammaticGrouping = nextDict };
-        });
+        }, changedTenant: tenant.Value);
     }
 
     public void AddWildcardPolicy(
@@ -481,7 +565,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             var nextList = currentList.Add(ruleMeta);
             var nextDict = src.ProgrammaticRules.SetItem(WildcardTenant, nextList);
             return src with { ProgrammaticRules = nextDict };
-        });
+        }, changedTenant: WildcardTenant);
     }
 
     public void AddWildcardRoleForUser(string user, string role)
@@ -496,10 +580,34 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             var nextList = currentList.Add(grouping);
             var nextDict = src.ProgrammaticGrouping.SetItem(WildcardTenant, nextList);
             return src with { ProgrammaticGrouping = nextDict };
-        });
+        }, changedTenant: WildcardTenant);
     }
 
-    private const string RequestedAction = "read";
+    public static string ResolveRequestedAction(SecurityEvaluationContext context)
+    {
+        if (context.Attributes != null)
+        {
+            if (context.Attributes.TryGetValue("gql.action", out var gqlAction) && gqlAction != null)
+            {
+                var s = gqlAction.ToString();
+                if (!string.IsNullOrWhiteSpace(s))
+                {
+                    return s;
+                }
+            }
+
+            if (context.Attributes.TryGetValue("action", out var action) && action != null)
+            {
+                var s = action.ToString();
+                if (!string.IsNullOrWhiteSpace(s))
+                {
+                    return s;
+                }
+            }
+        }
+
+        return "read";
+    }
 
     public ValueTask<TableAccessDecision> EvaluatePolicyAsync(
         SecurityEvaluationContext context,
@@ -508,6 +616,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         ArgumentNullException.ThrowIfNull(context);
 
         var snapshot = Volatile.Read(ref _currentSnapshot);
+        var requestedAction = ResolveRequestedAction(context);
 
         var tableStr = context.TargetTable.ToString();
         var groupsStr = context.GroupSids != null && context.GroupSids.Count > 0
@@ -519,7 +628,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         var colsStr = context.RequestedColumns != null && context.RequestedColumns.Count > 0
             ? string.Join(",", context.RequestedColumns.OrderBy(c => c, StringComparer.OrdinalIgnoreCase))
             : string.Empty;
-        var cacheKey = $"{snapshot.Epoch}:{context.Tenant.Value}:{context.UserSid.Value}:{tableStr}:{context.PurposeId}:{context.Department}:{context.Region}:{context.ClearanceLevel}:{context.ClientIp}:G[{groupsStr}]:A[{attrsStr}]:C[{colsStr}]";
+        var cacheKey = $"{snapshot.Epoch}:{context.Tenant.Value}:{context.UserSid.Value}:{tableStr}:{requestedAction}:{context.PurposeId}:{context.Department}:{context.Region}:{context.ClearanceLevel}:{context.ClientIp}:G[{groupsStr}]:A[{attrsStr}]:C[{colsStr}]";
 
         if (_decisionCache.TryGetValue(cacheKey, out var cachedEntry))
         {
@@ -573,10 +682,11 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 bool denied = false;
                 foreach (var rule in tenantRulesSnapshot)
                 {
-                    // Deny rules are matched conservatively (any action, wildcard tenant or current tenant).
+                    // Deny rules are matched conservatively (matching action or wildcard, wildcard tenant or current tenant).
                     if (!string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase) ||
                         (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
-                        !MatchObjectPattern(rule.Obj, tableStr))
+                        !MatchObjectPattern(rule.Obj, tableStr) ||
+                        !IsActionMatch(rule.Act, requestedAction, isDeny: true))
                     {
                         continue;
                     }
@@ -589,7 +699,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                         }
 
                         // Fail-closed: a deny rule whose condition cannot be evaluated is treated as matching.
-                        if (EvaluateSubRule(rule.SubRule, context, subject, tableStr, RequestedAction) != false)
+                        if (EvaluateSubRule(rule.SubRule, context, subject, tableStr, requestedAction) != false)
                         {
                             denied = true;
                             break;
@@ -608,7 +718,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                     // rules determined here is both the authorization basis and the source of the RLS filters.
                     foreach (var rule in tenantRulesSnapshot)
                     {
-                        if (IsAllowRuleMatch(rule, context, subjects, tableStr, enforcer))
+                        if (IsAllowRuleMatch(rule, context, subjects, tableStr, requestedAction, enforcer))
                         {
                             matchedAllowRules.Add(rule);
                         }
@@ -622,7 +732,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                     foreach (var subject in subjects)
                     {
                         // r = sub, tenant, obj, act, ctx
-                        if (enforcer.Enforce(subject, context.Tenant.Value, tableStr, RequestedAction, context))
+                        if (enforcer.Enforce(subject, context.Tenant.Value, tableStr, requestedAction, context))
                         {
                             casbinAllowed = true;
                             break;
@@ -708,9 +818,10 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         return false;
     }
 
-    private static bool IsActionMatch(string ruleAct) =>
+    private static bool IsActionMatch(string ruleAct, string requestedAction, bool isDeny = false) =>
         string.Equals(ruleAct, "*", StringComparison.Ordinal) ||
-        string.Equals(ruleAct, RequestedAction, StringComparison.OrdinalIgnoreCase);
+        string.Equals(ruleAct, requestedAction, StringComparison.OrdinalIgnoreCase) ||
+        (isDeny && string.Equals(ruleAct, "read", StringComparison.OrdinalIgnoreCase) && string.Equals(requestedAction, "write", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsSubjectMatch(string ruleSub, string subject, Enforcer enforcer) =>
         string.Equals(ruleSub, "*", StringComparison.OrdinalIgnoreCase) ||
@@ -722,6 +833,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         SecurityEvaluationContext context,
         IReadOnlyList<string> subjects,
         string tableStr,
+        string requestedAction,
         Enforcer enforcer)
     {
         if (!string.Equals(rule.Eft, "allow", StringComparison.OrdinalIgnoreCase))
@@ -736,7 +848,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             return false;
         }
 
-        if (!MatchObjectPattern(rule.Obj, tableStr) || !IsActionMatch(rule.Act))
+        if (!MatchObjectPattern(rule.Obj, tableStr) || !IsActionMatch(rule.Act, requestedAction))
         {
             return false;
         }
@@ -745,7 +857,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         {
             // Sub_rule is evaluated with r.sub = the matched subject (user or group), as in the Casbin request.
             if (IsSubjectMatch(rule.Sub, subject, enforcer) &&
-                EvaluateSubRule(rule.SubRule, context, subject, tableStr, RequestedAction) == true)
+                EvaluateSubRule(rule.SubRule, context, subject, tableStr, requestedAction) == true)
             {
                 return true;
             }
@@ -1351,7 +1463,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                         "Casbin policy reload rejected: the new policy set is empty while the tenant has active policies. " +
                         "The last-known-good policy set remains active.");
                 }
-            });
+            },
+            changedTenant: tenant.Value);
     }
 
     public void LoadPolicyFromFile(TenantId tenant, string filePath, bool watchFile = false)
@@ -1581,7 +1694,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             {
                 ProgrammaticRules = src.ProgrammaticRules.Remove(tenant.Value),
                 ProgrammaticGrouping = src.ProgrammaticGrouping.Remove(tenant.Value)
-            });
+            }, changedTenant: tenant.Value);
         }
 
         return Task.CompletedTask;

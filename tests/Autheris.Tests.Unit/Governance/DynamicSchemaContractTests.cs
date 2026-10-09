@@ -6,10 +6,13 @@ using System.IO;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
 using Autheris.Application.Governance.Contracts;
+using Autheris.Domain.Common;
+using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -235,5 +238,196 @@ public sealed class DynamicSchemaContractTests
         {
             context.Items[SchemaContractMiddleware.ContractItemKey].ShouldBe(expectedContract);
         }
+    }
+
+    [Fact]
+    public void CatalogVisibility_FilterByContract_AllowedTables_FiltersTablesAccurately()
+    {
+        var t1 = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "public", "orders"),
+            Table = new Table { TableName = "orders", SchemaName = "public" }
+        };
+        var t2 = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "public", "invoices"),
+            Table = new Table { TableName = "invoices", SchemaName = "public" }
+        };
+
+        var contract = new SchemaContractDefinition("partner", allowedTables: ["orders"]);
+
+        var filtered = Autheris.Application.Services.CatalogVisibility.FilterByContract(new[] { t1, t2 }, contract);
+
+        filtered.Count.ShouldBe(1);
+        filtered[0].Identifier.TableName.ShouldBe("orders");
+    }
+
+    [Fact]
+    public void CatalogVisibility_FilterByContract_ExcludedTags_ExcludesSensitiveTables()
+    {
+        var t1 = new TableMetadata
+        {
+            Identifier = new TableIdentifier("hr", "public", "public_info"),
+            Table = new Table { TableName = "public_info", Sensitivity = "PUBLIC" }
+        };
+        var t2 = new TableMetadata
+        {
+            Identifier = new TableIdentifier("hr", "public", "salaries"),
+            Table = new Table { TableName = "salaries", Sensitivity = "HIGH" }
+        };
+
+        var contract = new SchemaContractDefinition("external", excludedTags: ["HIGH"]);
+
+        var filtered = Autheris.Application.Services.CatalogVisibility.FilterByContract(new[] { t1, t2 }, contract);
+
+        filtered.Count.ShouldBe(1);
+        filtered[0].Identifier.TableName.ShouldBe("public_info");
+    }
+
+    [Fact]
+    public async Task TableAccessPolicy_WithAllowedTablesContract_DeniesUnallowedTableExecution()
+    {
+        var allowedTable = new TableIdentifier("sales", "public", "orders");
+        var deniedTable = new TableIdentifier("sales", "public", "invoices");
+
+        var contract = new SchemaContractDefinition("partner", allowedTables: ["orders"]);
+
+        var consentRepo = NSubstitute.Substitute.For<Autheris.Application.Interfaces.IConsentRepository>();
+        var allowConsent = new Consent
+        {
+            TableIdentifier = deniedTable,
+            TenantId = new TenantId("tenant-1"),
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("user-1"),
+            Effect = ConsentEffect.Allow,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+        };
+        consentRepo.GetActiveConsentsForSubjectsAsync(
+            NSubstitute.Arg.Any<IEnumerable<Sid>>(),
+            NSubstitute.Arg.Any<TableIdentifier>(),
+            NSubstitute.Arg.Any<DateTimeOffset>(),
+            NSubstitute.Arg.Any<TenantId?>(),
+            NSubstitute.Arg.Any<System.Threading.CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>(new[] { allowConsent }));
+
+        var policy = new Autheris.Application.Policy.TableAccessPolicy(
+            consentRepo,
+            new Autheris.Application.Services.ConsentResolutionService(),
+            cacheService: null,
+            policyEnforcementService: null,
+            rebacEvaluator: null,
+            clientIpResolver: null,
+            options: new GatewayOptions(),
+            mandatoryFilters: Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
+
+        var tableMeta = new TableMetadata
+        {
+            Identifier = deniedTable,
+            Table = new Table { TableName = "invoices", SchemaName = "public" }
+        };
+
+        var query = new Autheris.Application.Policy.TableAccessQuery(
+            new Sid("user-1"),
+            new TenantId("tenant-1"),
+            new HashSet<Sid>(),
+            new HashSet<string>(),
+            tableMeta,
+            Contract: contract);
+
+        var decision = await policy.DecideAsync(query, default);
+
+        decision.IsAllowed.ShouldBeFalse();
+        decision.DeniedReasons.ShouldContain(r => r.Contains("Schema Contract Denial"));
+    }
+
+    [Fact]
+    public async Task TableAccessPolicy_WithExcludedTagsContract_DeniesSensitiveTableExecution()
+    {
+        var sensitiveTable = new TableIdentifier("hr", "public", "salaries");
+        var contract = new SchemaContractDefinition("external", excludedTags: ["HIGH"]);
+
+        var consentRepo = NSubstitute.Substitute.For<Autheris.Application.Interfaces.IConsentRepository>();
+        var policy = new Autheris.Application.Policy.TableAccessPolicy(
+            consentRepo,
+            new Autheris.Application.Services.ConsentResolutionService(),
+            cacheService: null,
+            policyEnforcementService: null,
+            rebacEvaluator: null,
+            clientIpResolver: null,
+            options: new GatewayOptions(),
+            mandatoryFilters: Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
+
+        var tableMeta = new TableMetadata
+        {
+            Identifier = sensitiveTable,
+            Table = new Table { TableName = "salaries", SchemaName = "public", Sensitivity = "HIGH" }
+        };
+
+        var query = new Autheris.Application.Policy.TableAccessQuery(
+            new Sid("user-1"),
+            new TenantId("tenant-1"),
+            new HashSet<Sid>(),
+            new HashSet<string>(),
+            tableMeta,
+            Contract: contract);
+
+        var decision = await policy.DecideAsync(query, default);
+
+        decision.IsAllowed.ShouldBeFalse();
+        decision.DeniedReasons.ShouldContain(r => r.Contains("Schema Contract Denial") && r.Contains("HIGH"));
+    }
+
+    [Fact]
+    public async Task TableAccessPolicy_WithContractManager_ResolvesClaimContractAndEnforcesAtRuntime()
+    {
+        var deniedTable = new TableIdentifier("sales", "public", "invoices");
+        var options = new GatewayOptions
+        {
+            SchemaContracts = new SchemaContractsOptions
+            {
+                Enabled = true,
+                DefaultContract = "default",
+                Contracts = new Dictionary<string, SchemaContractDefinitionOptions>
+                {
+                    ["partner"] = new() { AllowedTables = ["orders"] }
+                }
+            }
+        };
+
+        var manager = new SchemaContractManager(Options.Create(options), NullLogger<SchemaContractManager>.Instance);
+
+        var consentRepo = NSubstitute.Substitute.For<Autheris.Application.Interfaces.IConsentRepository>();
+        var policy = new Autheris.Application.Policy.TableAccessPolicy(
+            consentRepo,
+            new Autheris.Application.Services.ConsentResolutionService(),
+            cacheService: null,
+            policyEnforcementService: null,
+            rebacEvaluator: null,
+            clientIpResolver: null,
+            options: new GatewayOptions(),
+            mandatoryFilters: Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+            contractManager: manager);
+
+        var tableMeta = new TableMetadata
+        {
+            Identifier = deniedTable,
+            Table = new Table { TableName = "invoices", SchemaName = "public" }
+        };
+
+        var claims = new[] { new System.Security.Claims.Claim("contract", "partner") };
+
+        var query = new Autheris.Application.Policy.TableAccessQuery(
+            new Sid("user-1"),
+            new TenantId("tenant-1"),
+            new HashSet<Sid>(),
+            new HashSet<string>(),
+            tableMeta,
+            Claims: claims);
+
+        var decision = await policy.DecideAsync(query, default);
+
+        decision.IsAllowed.ShouldBeFalse();
+        decision.DeniedReasons.ShouldContain(r => r.Contains("Schema Contract Denial") && r.Contains("partner"));
     }
 }

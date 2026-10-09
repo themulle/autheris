@@ -20,18 +20,21 @@ public sealed class JwtSocketTokenValidator : ISocketTokenValidator
     private readonly IOptions<GatewayOptions> _gatewayOptions;
     private readonly IHostEnvironment _environment;
     private readonly ILogger<JwtSocketTokenValidator> _logger;
+    private readonly IIdentitySubjectResolver? _subjectResolver;
     private readonly JsonWebTokenHandler _tokenHandler = new();
 
     public JwtSocketTokenValidator(
         IOptionsMonitor<JwtBearerOptions> jwtOptionsMonitor,
         IOptions<GatewayOptions> gatewayOptions,
         IHostEnvironment environment,
-        ILogger<JwtSocketTokenValidator> logger)
+        ILogger<JwtSocketTokenValidator> logger,
+        IIdentitySubjectResolver? subjectResolver = null)
     {
         _jwtOptionsMonitor = jwtOptionsMonitor ?? throw new ArgumentNullException(nameof(jwtOptionsMonitor));
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _subjectResolver = subjectResolver;
     }
 
     public async Task<(bool IsValid, ClaimsPrincipal? Principal)> ValidateTokenAsync(string token, CancellationToken cancellationToken = default)
@@ -86,7 +89,21 @@ public sealed class JwtSocketTokenValidator : ISocketTokenValidator
                         return (false, null);
                     }
 
-                    return (true, new ClaimsPrincipal(identity));
+                    var rawPrincipal = new ClaimsPrincipal(identity);
+                    var normalizedPrincipal = ClaimsNormalizer.Normalize(rawPrincipal);
+
+                    var entraConfig = _gatewayOptions.Value.Authentication.EntraId;
+                    if (entraConfig != null && entraConfig.Enabled && _subjectResolver != null)
+                    {
+                        var failure = EntraTokenPolicy.Apply(normalizedPrincipal, entraConfig, _subjectResolver);
+                        if (failure != null)
+                        {
+                            _logger.LogWarning("WebSocket connection rejected: Entra token policy validation failed: {Reason}", failure);
+                            return (false, null);
+                        }
+                    }
+
+                    return (true, normalizedPrincipal);
                 }
 
                 _logger.LogWarning("WebSocket token rejected: No cryptographic IssuerSigningKey configured.");

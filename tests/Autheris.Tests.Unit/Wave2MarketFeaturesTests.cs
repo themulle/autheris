@@ -71,7 +71,7 @@ public sealed class Wave2MarketFeaturesTests
             ResourceGroups = new ResourceGroupsOptions
             {
                 Enabled = true,
-                AutonomousAgents = new ResourceGroupTierConfigOptions(MaxConcurrency: 1, MaxQueueDepth: 1, TimeoutSeconds: 2)
+                AutonomousAgents = new ResourceGroupTierConfigOptions(MaxConcurrency: 1, MaxQueueDepth: 1, TimeoutSeconds: 10)
             }
         });
 

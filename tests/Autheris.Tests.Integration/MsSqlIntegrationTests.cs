@@ -8,7 +8,7 @@ namespace Autheris.Tests.Integration;
 
 public sealed class MsSqlContainerFixture : IAsyncLifetime
 {
-    public MsSqlContainer Container { get; } = new MsSqlBuilder("mcr.microsoft.com/azure-sql-edge:latest")
+    public MsSqlContainer Container { get; } = new MsSqlBuilder("mcr.microsoft.com/azure-sql-edge:1.0.7")
         .WithPassword("Strong_P@ssw0rd_2026!")
         .Build();
 

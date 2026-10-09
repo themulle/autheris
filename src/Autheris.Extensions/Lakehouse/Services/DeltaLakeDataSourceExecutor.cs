@@ -183,6 +183,7 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
         var candidateRows = rawRows.Cast<IReadOnlyDictionary<string, object?>>().ToList();
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {
+            Autheris.Application.Services.GatewayExecutionService.EnsureInMemoryFilterIsEnforceable(context.AccessDecision);
             candidateRows = Autheris.Application.Services.GatewayExecutionService.FilterRows(
                 candidateRows,
                 context.AccessDecision.CombinedRowFilterSql,

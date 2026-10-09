@@ -36,6 +36,7 @@ public sealed class GatewayOptions
     [Required] public OutboundEgressOptions Egress { get; init; } = new();
     [Required] public HitLStepUpOptions HitLStepUp { get; init; } = new();
     [Required] public WebSqlOptions WebSql { get; init; } = new();
+    [Required] public TransportRowLimitsOptions RowLimits { get; init; } = new();
     [Required] public SqlEndpointsOptions SqlEndpoints { get; init; } = new();
     [Required] public InsecureGettingStartedOptions Insecure { get; init; } = new();
     [Required] public DevOptions Dev { get; init; } = new();
@@ -49,6 +50,7 @@ public sealed class GatewayOptions
     [Required] public ArrowExportOptions Arrow { get; init; } = new();
     [Required] public DuckDbOlapOptions DuckDbOlap { get; init; } = new();
     [Required] public RowFilterOptions RowFilters { get; init; } = new();
+    [Required] public VirtualFilterOptions VirtualFilters { get; init; } = new();
     [Required] public LoggingOptions Logging { get; init; } = new();
 
     /// <summary>
@@ -105,6 +107,7 @@ public sealed class GatewayOptions
     public bool IsMcpAuthBypassed => Insecure.danger_bypass_mcp_auth;
     public bool IsMcpUnmaskedAllowed => Insecure.warn_allow_unmasked_ai_access;
     public bool IsLakehouseAuthBypassed => Insecure.danger_bypass_lakehouse_auth;
+    public bool IsRebacBypassed => Insecure.danger_bypass_rebac;
     public bool AreUnsignedS3RequestsAllowed => Insecure.warn_allow_unsigned_s3_requests;
     public bool IsWebSqlDmlAllowed => WebSql.AllowDml || Insecure.warn_allow_websql_dml;
 
@@ -202,6 +205,7 @@ public sealed class GatewayOptions
         if (AreUntrustedCertificatesAllowed) list.Add("DANGER:danger_allow_untrusted_certificates");
         if (IsMcpAuthBypassed) list.Add("DANGER:danger_bypass_mcp_auth");
         if (IsLakehouseAuthBypassed) list.Add("DANGER:danger_bypass_lakehouse_auth");
+        if (IsRebacBypassed) list.Add("DANGER:danger_bypass_rebac");
         if (IsWebSqlGovernanceBypassed) list.Add("DANGER:danger_bypass_websql_governance");
         if (IsOpenSchemaExplicitlyEnabled) list.Add("DANGER:open_schema (OpenSchema / Catalog.OpenSchema)");
         if (IsMcpUnmaskedAllowed) list.Add("DANGER:warn_allow_unmasked_ai_access");
@@ -288,6 +292,11 @@ public sealed class InsecureGettingStartedOptions
     /// [DANGER] Umgeht Authentifizierung und Rollenprüfungen für Apache Iceberg / Lakehouse Tabellenabfragen.
     /// </summary>
     public bool danger_bypass_lakehouse_auth { get; init; } = false;
+
+    /// <summary>
+    /// [DANGER] Umgeht ReBAC (Relationship-Based Access Control) Autorisierungsprüfungen für Schnelleinstieg / PoC.
+    /// </summary>
+    public bool danger_bypass_rebac { get; init; } = false;
 
 
     // --- WARN: Mittlerer / Operativer Security-Impact (Lockert Limits und Schutzschilder) ---
@@ -1106,7 +1115,7 @@ public sealed class McpOptions
     [Range(1, 10000)] public int MaxResultRows { get; init; } = 100;
     public bool RequirePiiMasking { get; init; } = true;
     public List<string> AllowedOperations { get; init; } = [];
-
+    public bool AllowAnonymousDiscovery { get; init; } = false;
 }
 
 public sealed class LakehouseStorageOptions
@@ -1285,6 +1294,38 @@ public sealed class HitLStepUpOptions
     public ItsmSystemType PreferredItsmSystem { get; init; } = ItsmSystemType.ServiceNow;
 }
 
+/// <summary>
+/// Row limits per SQL transport. Every channel runs the governed WebSQL pipeline; an unset value falls back to
+/// WebSql.DefaultMaxRows / WebSql.MaxAllowedRows (the limits of POST /api/v1/sql).
+/// </summary>
+public sealed class TransportRowLimitsOptions
+{
+    /// <summary>Trino client protocol (POST /v1/statement).</summary>
+    public ChannelRowLimitOptions Trino { get; init; } = new();
+
+    /// <summary>WebSQL with Accept: application/vnd.apache.parquet (ParquetEgress.MaxRowsPerFile still caps the file).</summary>
+    public ChannelRowLimitOptions Parquet { get; init; } = new();
+
+    /// <summary>Declared SQL endpoints (/api/v1/queries/...).</summary>
+    public ChannelRowLimitOptions SqlEndpoints { get; init; } = new();
+
+    /// <summary>Arrow IPC export (POST /api/v1/export/arrow; Arrow.MaxExportRows still caps the export).</summary>
+    public ChannelRowLimitOptions ArrowExport { get; init; } = new();
+
+    /// <summary>Arrow Flight SQL (/api/v1/flight/sql/*).</summary>
+    public ChannelRowLimitOptions FlightSql { get; init; } = new();
+}
+
+/// <summary>Row limits of one transport; null keeps the WebSql value.</summary>
+public sealed class ChannelRowLimitOptions
+{
+    /// <summary>Rows returned when the statement has no LIMIT.</summary>
+    public long? DefaultMaxRows { get; init; }
+
+    /// <summary>Upper bound for an explicit LIMIT (0 = no bound).</summary>
+    public long? MaxAllowedRows { get; init; }
+}
+
 public sealed class WebSqlOptions
 {
     // SEC C-01/C-03: WebSQL is opt-in (secure default).
@@ -1295,6 +1336,9 @@ public sealed class WebSqlOptions
     public int MaxQueryLength { get; init; } = 64_000;
     public int ExecutionTimeoutSeconds { get; init; } = 30;
     public string DefaultDataSourceName { get; init; } = "default";
+    public int MaxConcurrentSessionsPerUser { get; init; } = 10;
+    public int MaxTotalStatementSessions { get; init; } = 1000;
+    public int StatementRetentionMinutes { get; init; } = 5;
 
     /// <summary>
     /// SEC C-03: Additional data sources (keys of DataSources.Connections) a WebSQL request may target.
@@ -1469,6 +1513,7 @@ public sealed class SchemaContractDefinitionOptions
     public List<string> IncludedTags { get; init; } = [];
     public List<string> ExcludedTags { get; init; } = [];
     public bool ExcludeInaccessible { get; init; } = true;
+    public List<string> AllowedTables { get; init; } = [];
 }
 
 /// <summary>
@@ -1537,8 +1582,21 @@ public sealed class RebacOptions
     /// The unified PDP (MCP-RAG, DuckDB OLAP) checks ReBAC whenever <see cref="Enabled"/> is true.
     /// </summary>
     public bool EnforceOnQueryPaths { get; init; } = false;
+
+    /// <summary>
+    /// SR15-23: When true, users with the <c>viewer</c> relation automatically inherit <c>can_query</c>.
+    /// Defaults to true for backwards compatibility with POL-6 / OLAP / Arrow egress, but can be set to false
+    /// to require explicit <c>can_query</c>, <c>editor</c>, or <c>owner</c> relations, preventing existing <c>viewer</c>
+    /// tuples from automatically granting full analytical and raw egress capabilities.
+    /// </summary>
+    public bool InheritCanQueryFromViewer { get; init; } = true;
     public string? OpenFgaApiUrl { get; init; }
     public string? OpenFgaStoreId { get; init; }
+
+    /// <summary>
+    /// Initial relationship tuples seeded into the ReBAC store on startup (for Development, PoC, or testing).
+    /// </summary>
+    public List<RebacTuple> SeedTuples { get; init; } = [];
 }
 
 /// <summary>
@@ -1566,8 +1624,55 @@ public sealed class DuckDbOlapOptions
     public bool Enabled { get; init; } = true;
     public string MaxMemory { get; init; } = "1GB";
     public int MaxStagedRowsPerTable { get; init; } = 250000;
+
+    /// <summary>Maximum rows of an OLAP query result; a smaller requested limit is kept.</summary>
+    public int MaxResultRows { get; init; } = 50000;
     public int QueryTimeoutSeconds { get; init; } = 60;
     public int MaxThreads { get; init; } = 2;
+}
+
+/// <summary>Virtual filters (docs/plans/2026-10-08-virtuelle-filter.md).</summary>
+public sealed class VirtualFilterOptions
+{
+    /// <summary>
+    /// A sync that removes more bindings than this (or all of them) is not applied without <c>force</c>: removing a
+    /// binding widens what its grantee sees. 0 disables the check.
+    /// </summary>
+    public int MaxRemovals { get; init; } = 10;
+
+    /// <summary>
+    /// How often (seconds) an instance compares the virtual filter generation with the governance database; changes made
+    /// on another instance take effect within this time. 0 compares on every access.
+    /// </summary>
+    public int GenerationCheckSeconds { get; init; } = 5;
+
+    /// <summary>
+    /// When enabled, manual changes to virtual filters and access profiles require four-eyes approval by a distinct approver.
+    /// </summary>
+    public bool RequireApproval { get; init; } = false;
+
+    /// <summary>
+    /// SR15-11: Optional allowlist of table names or qualified identifiers allowed in virtual filter subqueries.
+    /// When non-empty, any table referenced in a virtual filter subquery must be present in this list.
+    /// </summary>
+    public IReadOnlyList<string>? AllowedReferenceTables { get; init; } = null;
+
+    /// <summary>
+    /// SR15-15: Sliding time window in minutes across which removals and relaxations accumulate toward MaxRemovals.
+    /// Default is 60 minutes.
+    /// </summary>
+    public int MaxRemovalsWindowMinutes { get; init; } = 60;
+
+    /// <summary>
+    /// HMAC-SHA256 secret used to validate GitHub webhook triggers for virtual filter GitOps sync (X-Hub-Signature-256).
+    /// </summary>
+    public string? WebhookSecret { get; init; }
+
+    /// <summary>
+    /// Configured Git reference (e.g. "refs/heads/main" or "refs/tags/v1.0") to accept push events for.
+    /// Default is null (accepts any push when not configured).
+    /// </summary>
+    public string? GitRef { get; init; }
 }
 
 /// <summary>

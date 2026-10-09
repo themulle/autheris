@@ -383,5 +383,58 @@ public sealed class GovernedTreeQueryServiceTests : IDisposable
         await fixture.Resolver.Received(2).ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Authors, Arg.Any<IReadOnlyList<string>?>(),
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task SameOperationId_DifferentPrincipals_DoNotShareTableAccessMemo_ResolvesIndependently()
+    {
+        var fixture = Create();
+        var tree = new TreeQueryNode(Authors, ["id"]);
+        var sameOpId = "shared-op-id";
+
+        var userA = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim("objectSid", "S-1-5-21-USER-A"),
+            new Claim("tenant_id", "tenant-1")
+        }, "TestAuth"));
+
+        var userB = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim("objectSid", "S-1-5-21-USER-B"),
+            new Claim("tenant_id", "tenant-1")
+        }, "TestAuth"));
+
+        await fixture.Service.ExecuteAsync(userA, tree, null, sameOpId);
+        await fixture.Service.ExecuteAsync(userB, tree, null, sameOpId);
+
+        // SQL2-13: Both users must have their table access resolved independently, never sharing a cached decision
+        await fixture.Resolver.Received(2).ResolveTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Authors, Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task SameOperationId_DifferentTenants_AuditsSeparatelyPerTenantAndUser()
+    {
+        var fixture = Create();
+        var tree = new TreeQueryNode(Authors, ["id"]);
+        var sameOpId = "shared-op-id-tenants";
+
+        var tenant1User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim("objectSid", "S-1-5-21-TENANT1-USER"),
+            new Claim("tenant_id", "tenant-alpha")
+        }, "TestAuth"));
+
+        var tenant2User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+        {
+            new Claim("objectSid", "S-1-5-21-TENANT2-USER"),
+            new Claim("tenant_id", "tenant-beta")
+        }, "TestAuth"));
+
+        await fixture.Service.ExecuteAsync(tenant1User, tree, null, sameOpId);
+        await fixture.Service.ExecuteAsync(tenant2User, tree, null, sameOpId);
+
+        // SQL2-13: Auditing must record both tenants separately, never suppressing the second tenant
+        await fixture.Audit.Received(2).RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+    }
 }
 

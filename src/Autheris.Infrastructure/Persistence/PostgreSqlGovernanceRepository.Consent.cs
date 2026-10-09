@@ -57,7 +57,11 @@ public partial class PostgreSqlGovernanceRepository
                 var validFrom = DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture);
                 var validTo = DateTimeOffset.Parse(reader.GetString(9), System.Globalization.CultureInfo.InvariantCulture);
 
-                if (atTime < validFrom || atTime >= validTo) continue;
+                if (atTime >= validTo) continue;
+
+                var gEffectStr = reader.GetString(3);
+                var isDeny = Enum.TryParse<ConsentEffect>(gEffectStr, true, out var parsedEffect) && parsedEffect == ConsentEffect.Deny;
+                if (atTime < validFrom && !isDeny) continue;
 
                 var gTypeStr = reader.GetString(4);
                 var granteeType = Enum.Parse<GranteeType>(gTypeStr, true);
@@ -458,14 +462,7 @@ public partial class PostgreSqlGovernanceRepository
                 await filterCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            await IncrementTableEpochInternalAsync(conn, tx, consent.TableIdentifier, ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
-
-            _metadataCache.TryRemove(consent.TableIdentifier.ToString().ToLowerInvariant(), out _);
-            await _epochValidationService.InvalidateEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
-
-            // Review E-10: parity with SQLite - a directly created consent is recorded with the creator as actor.
-            await TryRecordAuditAfterCommitAsync(new AuditLogEntry
+            var auditEntry = new AuditLogEntry
             {
                 TenantId = consent.TenantId,
                 EventType = "CONSENT_GRANTED",
@@ -481,7 +478,14 @@ public partial class PostgreSqlGovernanceRepository
                     ValidFrom = consent.ValidFrom,
                     ValidTo = consent.ValidTo
                 })
-            }, ct).ConfigureAwait(false);
+            };
+            await RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+
+            await IncrementTableEpochInternalAsync(conn, tx, consent.TableIdentifier, ct).ConfigureAwait(false);
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+
+            _metadataCache.TryRemove(consent.TableIdentifier.ToString().ToLowerInvariant(), out _);
+            await _epochValidationService.InvalidateEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
 
             return new Consent
             {
@@ -834,6 +838,19 @@ public partial class PostgreSqlGovernanceRepository
                 await IncrementTableEpochInternalAsync(conn, tx, tableId.Value, ct).ConfigureAwait(false);
             }
 
+            // Review E-10: a longer validity is a policy change and belongs in the hash chain.
+            var auditEntry = new AuditLogEntry
+            {
+                TenantId = extendTenant,
+                EventType = "CONSENT_EXPIRY_EXTENDED",
+                ActorSid = new Sid("SYSTEM"),
+                TargetTable = tableId?.ToString() ?? "unknown",
+                Decision = "EXTENDED",
+                TraceId = Guid.NewGuid().ToString("N"),
+                DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, NewValidTo = newValidTo })
+            };
+            await RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+
             await tx.CommitAsync(ct).ConfigureAwait(false);
         }
         catch
@@ -847,18 +864,6 @@ public partial class PostgreSqlGovernanceRepository
             _metadataCache.TryRemove(tableId.Value.ToString().ToLowerInvariant(), out _);
             await _epochValidationService.InvalidateEpochAsync(tableId.Value, ct).ConfigureAwait(false);
         }
-
-        // Review E-10: a longer validity is a policy change and belongs in the hash chain.
-        await TryRecordAuditAfterCommitAsync(new AuditLogEntry
-        {
-            TenantId = extendTenant,
-            EventType = "CONSENT_EXPIRY_EXTENDED",
-            ActorSid = new Sid("SYSTEM"),
-            TargetTable = tableId?.ToString() ?? "unknown",
-            Decision = "EXTENDED",
-            TraceId = Guid.NewGuid().ToString("N"),
-            DetailsJson = JsonSerializer.Serialize(new { ConsentId = consentId, NewValidTo = newValidTo })
-        }, ct).ConfigureAwait(false);
     }
 
     public async Task<ConsentRequest> CreateConsentRequestAsync(ConsentRequest request, CancellationToken ct = default)
@@ -1218,30 +1223,17 @@ public partial class PostgreSqlGovernanceRepository
                 await updateReq.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            await tx.CommitAsync(ct).ConfigureAwait(false);
-
             req.Status = newStatus;
-            await TryRecordAuditAfterCommitAsync(
-                ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null), ct).ConfigureAwait(false);
+            var auditEntry = ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, itsmApproverAccount, null);
+            await RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
             return req;
         }
         catch
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
             throw;
-        }
-    }
-
-    /// <summary>The business transaction is already committed; a failing audit enqueue must not turn it into an error.</summary>
-    private async Task TryRecordAuditAfterCommitAsync(AuditLogEntry entry, CancellationToken ct)
-    {
-        try
-        {
-            await RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger?.LogError(ex, "Audit event {EventType} could not be recorded after the transaction was committed.", entry.EventType);
         }
     }
 
@@ -1323,10 +1315,11 @@ public partial class PostgreSqlGovernanceRepository
                 await updateReq.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            await tx.CommitAsync(ct).ConfigureAwait(false);
             req.Status = "REJECTED";
-            await TryRecordAuditAfterCommitAsync(
-                ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason), ct).ConfigureAwait(false);
+            var auditEntry = ConsentApprovalPolicy.BuildStepAudit(req, approverSid, "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", null, reason);
+            await RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+
+            await tx.CommitAsync(ct).ConfigureAwait(false);
             return req;
         }
         catch
@@ -1457,6 +1450,21 @@ public partial class PostgreSqlGovernanceRepository
             }
 
             await IncrementTableEpochInternalAsync(conn, tx, req.TableIdentifier, ct).ConfigureAwait(false);
+
+            var auditEntry = new AuditLogEntry
+            {
+                Id = Guid.NewGuid(),
+                OccurredAt = DateTimeOffset.UtcNow,
+                EventType = "CONSENT_GRANTED",
+                ActorSid = approvedBy ?? req.RequesterSid,
+                TargetTable = req.TableIdentifier.ToString(),
+                Decision = "ALLOW",
+                TraceId = Guid.NewGuid().ToString(),
+                DetailsJson = JsonSerializer.Serialize(new { RequestId = requestId, Grantee = req.RequestedGranteeRef }),
+                TenantId = req.TenantId
+            };
+            await RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+
             await tx.CommitAsync(ct).ConfigureAwait(false);
         }
         catch
@@ -1467,20 +1475,6 @@ public partial class PostgreSqlGovernanceRepository
 
         _metadataCache.TryRemove(req.TableIdentifier.ToString().ToLowerInvariant(), out _);
         await _epochValidationService.InvalidateEpochAsync(req.TableIdentifier, ct).ConfigureAwait(false);
-
-        var auditEntry = new AuditLogEntry
-        {
-            Id = Guid.NewGuid(),
-            OccurredAt = DateTimeOffset.UtcNow,
-            EventType = "CONSENT_GRANTED",
-            ActorSid = approvedBy ?? req.RequesterSid,
-            TargetTable = req.TableIdentifier.ToString(),
-            Decision = "ALLOW",
-            TraceId = Guid.NewGuid().ToString(),
-            DetailsJson = JsonSerializer.Serialize(new { RequestId = requestId, Grantee = req.RequestedGranteeRef }),
-            TenantId = req.TenantId
-        };
-        await RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
     }
 
     public async Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default)

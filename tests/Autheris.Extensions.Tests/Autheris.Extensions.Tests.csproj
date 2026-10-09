@@ -24,4 +24,10 @@
     <ProjectReference Include="..\..\src\Autheris.Extensions\Autheris.Extensions.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Schemas\*.xsd">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

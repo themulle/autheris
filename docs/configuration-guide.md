@@ -675,6 +675,7 @@ Die Dataset-Tools `list_datasets`, `describe_dataset`, `query_graphql` und `samp
 | `DuckDbOlap:MaxMemory` | `string` | z. B. `"512MB"`, `"2GB"` | `"1GB"` | Maximale RAM-Quota pro DuckDB-Session (`PRAGMA max_memory`). |
 | `DuckDbOlap:MaxThreads` | `int` | `1 .. 32` | `2` | Maximale Thread-Anzahl für parallele SIMD-Ausführung. |
 | `DuckDbOlap:MaxStagedRowsPerTable` | `int` | `1000 .. 5000000` | `250000` | Obergrenze gestagter Zeilen pro temporärer Quelltabelle. |
+| `DuckDbOlap:MaxResultRows` | `int` | `1 ..` | `50000` | Obergrenze der Zeilen eines OLAP-Ergebnisses; ein kleineres `limit` der Anfrage bleibt erhalten. |
 | `DuckDbOlap:QueryTimeoutSeconds` | `int` | `1 .. 300` | `30` | Timeout für analytische In-Memory DuckDB-Abfragen. |
 | `ArrowExport:Enabled` | `bool` | `true \| false` | `false` | Aktiviert den binären Zero-Copy Apache Arrow Export (`F-DATA-04`). |
 | `ArrowExport:BatchSize` | `int` | `100 .. 100000` | `10000` | Zeilenanzahl pro gestreamtem Arrow-RecordBatch. |
@@ -761,7 +762,8 @@ Autheris bietet eine integrierte, abgesicherte WebSQL-Schnittstelle, die 100% ko
 | `WebSql:DefaultDataSourceName` | `string` | `"default"` | Standard-Datenquelle, wenn kein Catalog/DataSource explizit angegeben ist. |
 | `WebSql:AllowedDataSources` | `string[]` | `[]` | Liste global freigegebener Datenquellen für WebSQL-Abfragen. |
 | `WebSql:TenantDataSourceAllowlist` | `Dictionary<string, string[]>` | `{}` | Mandantenspezifische Einschränkung erlaubter Datenquellen. |
-| `WebSql:MaxResultRows` | `int` | `5000` | Maximale Zeilenanzahl bei synchronen Abfragen. |
+| `WebSql:DefaultMaxRows` | `long` | `1000` | Zeilen einer Abfrage ohne `LIMIT` (`POST /api/v1/sql`). |
+| `WebSql:MaxAllowedRows` | `long` | `10000` | Obergrenze für ein explizites `LIMIT` (`0` = keine Obergrenze). |
 | `WebSql:ExecutionTimeoutSeconds` | `int` | `30` | Maximaler Timeout für die Abfrageausführung im Backend. |
 | `WebSql:AllowDml` | `bool` | `false` | Erlaubt schreibende Operationen (`INSERT`, `UPDATE`, `DELETE`). |
 | `WebSql:DmlWriterRoles` | `string[]` | `[]` | Rollen, die DML ausführen dürfen (Pflicht, wenn `AllowDml = true`). |
@@ -773,12 +775,34 @@ Autheris bietet eine integrierte, abgesicherte WebSQL-Schnittstelle, die 100% ko
   "Enabled": true,
   "DefaultDataSourceName": "default",
   "AllowedDataSources": ["sales", "finance", "analytics"],
-  "MaxResultRows": 5000,
+  "DefaultMaxRows": 1000,
+  "MaxAllowedRows": 10000,
   "ExecutionTimeoutSeconds": 30,
   "AllowDml": false,
   "DmlWriterRoles": ["DatabaseOperator"],
   "MaxAffectedRows": 1000,
   "RejectUnfilteredDml": true
+}
+```
+
+#### Zeilenlimits je Transport (`RowLimits`)
+
+Alle SQL-Transporte laufen durch dieselbe WebSQL-Pipeline. Ohne eigene Werte gelten `WebSql:DefaultMaxRows` und `WebSql:MaxAllowedRows`; je Transport lässt sich jeder der beiden Werte einzeln überschreiben:
+
+| Schlüssel | Transport | Zusätzliche Obergrenze |
+|---|---|---|
+| `RowLimits:Trino:DefaultMaxRows` / `:MaxAllowedRows` | Trino-Protokoll (`POST /v1/statement`) | – |
+| `RowLimits:Parquet:...` | WebSQL mit `Accept: application/vnd.apache.parquet` | `ParquetEgress:MaxRowsPerFile` |
+| `RowLimits:SqlEndpoints:...` | Deklarierte SQL-Endpunkte (`/api/v1/queries/...`) | – |
+| `RowLimits:ArrowExport:...` | Arrow-Export (`POST /api/v1/export/arrow`) | `Arrow:MaxExportRows` |
+| `RowLimits:FlightSql:...` | Arrow Flight SQL (`/api/v1/flight/sql/*`) | `Arrow:MaxExportRows` |
+
+Ergebnisse, die das Limit erreichen, werden als gekürzt gemeldet (`truncated`, `X-Autheris-Truncated`, bei Parquet zusätzlich `X-Export-Truncated`).
+
+```json
+"RowLimits": {
+  "Parquet": { "MaxAllowedRows": 1000000 },
+  "Trino": { "DefaultMaxRows": 10000, "MaxAllowedRows": 100000 }
 }
 ```
 
@@ -803,6 +827,30 @@ Autheris unterstützt das native Trino REST Client Protokoll, womit Standard-Tri
   - `X-Trino-Schema`: Standard-Schema.
   - `X-Trino-Wait-Timeout`: Wartefenster für synchrone Fertigstellung (z. B. `5s`, `500ms`, `1m`).
   - `X-Trino-User` & `X-Trino-Source`: Identitäts- und Auditierungskontext.
+
+### 2.20 `VirtualFilters` (Virtuelle Filter & Access Profiles)
+
+Steuert die Verwaltung und Cluster-Synchronisation relationsbasierter Zeilenfilter ([`F-GOV-09`](features/f-gov-09-virtual-filters.md)).
+
+| Eigenschaft | Typ | Standard | Beschreibung |
+| :--- | :--- | :--- | :--- |
+| `VirtualFilters:MaxRemovals` | `int` | `10` | Maximale Anzahl an Bindungen, die ein GitOps-Sync ohne `?force=true` entfernen darf. Das Entfernen erweitert die Sichtrechte des Berechtigten; `0` deaktiviert die Schranke. |
+| `VirtualFilters:GenerationCheckSeconds` | `int` | `5` | Intervall in Sekunden, in dem eine Gateway-Instanz die Generation mit der Datenbank abgleicht. `0` prüft bei jedem Zugriff. |
+| `RowFilter:SubqueryStrategy` | `enum` | `Exists` | SQL-Strategie für RLS-Unterabfragen: `Exists` (`EXISTS (SELECT 1 ...)`), `InCorrelated` oder `In`. |
+| `Logging:LogGeneratedSql` | `bool` | `false` | Diagnoseschalter zur Protokollierung generierter Ziel-SQL-Abfragen inklusive RLS- und Virtual-Filter-Prädikate. |
+
+```json
+"VirtualFilters": {
+  "MaxRemovals": 10,
+  "GenerationCheckSeconds": 5
+},
+"RowFilter": {
+  "SubqueryStrategy": "Exists"
+},
+"Logging": {
+  "LogGeneratedSql": false
+}
+```
 
 ---
 

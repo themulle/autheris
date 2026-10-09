@@ -102,14 +102,14 @@ Reihenfolge nach Schwere; die Nummern bleiben, weil Abschnitt 4 auf sie verweist
 |---|---|---|---|---|---|
 | 9 | Schema je Person (Katalog für unberechtigte Konten einschränken) | Befund 3.4 | **Mittel**: Katalog lesbar für jedes Konto | **behoben**: Introspection/SDL im Betrieb aus (nur mit Opt-In); GraphQL `catalog`, OData `$metadata`, MCP filtern je Person; die letzten ungefilterten Listen (Iceberg-REST `namespaces`/`tables`, Flight SQL `tables`) nutzen jetzt dieselbe Sichtbarkeit (`CatalogVisibility.VisibleTablesAsync`), Iceberg antwortet für unbekannte Tabellen wie für verweigerte (403). Ein eigenes GraphQL-Schema je Person gibt es nicht; mit gesperrter Introspection und gleicher Antwort für unbekannt/verweigert ist es nicht nötig | mittel |
 | 8 | Filter auf nicht freigegebene Spalten in WebSQL mit 403 und Meldung beantworten statt 500 oder 0 Treffern | Befund 3.6 | **Mittel**: kein Leck, aber stille Falschergebnisse | behoben: WebSqlPolicyException (HTTP 403) bei WHERE/HAVING-Filtern und ORDER BY auf maskierten oder verbotenen Spalten (SEC-FILTER-01), auch in Unterabfragen; HMAC-Spalten ausgenommen | mittel |
-| 4 | AST-Rewriter: siehe die Punkte unter der Tabelle | Abschnitt 1 | **Mittel**: nicht Standard, aber Ziel des laufenden Branches; fehlende Gruppierungen ändern Ergebnisse still | offen; `EXTRACT` und `CAST` teilweise | groß |
+| 4 | AST-Rewriter: siehe die Punkte unter der Tabelle | Abschnitt 1 | **Mittel**: nicht Standard, aber Ziel des laufenden Branches; fehlende Gruppierungen ändern Ergebnisse still | **behoben** (66a219f…bafab16, Plan [Wunsch 4](2026-10-08-umsetzungsplan-wunsch-4-ast-rewriter.md)): alle Punkte unten; nicht abbildbare Konstrukte werden mit 400 abgelehnt statt still verändert | groß |
 | 6 | GraphQL-Kostenlimit konfigurierbar oder je Rolle; API-Keys registrierbar machen | Abschnitt 1 | **Niedrig**: begrenzt Agenten auf kleine Seiten | behoben: konfigurierbare TierLimits, RoleTierMappings und ApiKeys in ClientTierOptions / ClientTierResolver | mittel |
 | 11 | Eine Maskenform je Regel, gleich in allen Wegen | Befund 3.7 | **Niedrig** | behoben: dialektspezifische SQL-Maskierungsausdrücke für MASK_EMAIL und MASK_IBAN in GovernedSqlExecutionService | mittel |
 
-**Wunsch 4 im Einzelnen:**
-- **`COUNT(*)`:** wird zu einem leeren Aufruf (`SqlAstBuilder.cs:813` wird nie erreicht). Tests schreiben die falsche Ausgabe fest (`ComplexTrinoBenchmarkQueriesTests.cs:51`, `:63`).
-- **Funktionsnamen:** werden gequotet (`SqlDialectGeneratorBase.cs:496`), also `[COUNT]` bzw. `"coalesce"`. Daran scheitert auch `COALESCE`.
-- **Parameter:** `@param` wird positional ausgegeben, findet aber die gebundenen Namen nicht wieder (`RestoreClientParameters`).
-- **`EXTRACT`:** geht nur als ANSI; für SQL Server und SQLite fehlt die Übersetzung.
-- **Gruppierungen:** `ROLLUP`, `CUBE` und `GROUPING SETS` fallen still weg (`SqlAstBuilder.cs:351-366`).
-- **Ohne Fix und ohne Test:** SQL Server mit Zeilenfilter, `CAST … GROUP BY` und deklarierte Abfragen.
+**Wunsch 4 im Einzelnen** (alle behoben, Commits in Klammern):
+- **`COUNT(*)`** (12bd022): wird zu einem leeren Aufruf (`SqlAstBuilder.cs:813` wird nie erreicht). Tests schreiben die falsche Ausgabe fest (`ComplexTrinoBenchmarkQueriesTests.cs:51`, `:63`).
+- **Funktionsnamen** (12bd022): werden gequotet (`SqlDialectGeneratorBase.cs:496`), also `[COUNT]` bzw. `"coalesce"`. Daran scheitert auch `COALESCE`.
+- **Parameter** (0195090, gilt auch für deklarierte Abfragen): `@param` wird positional ausgegeben, findet aber die gebundenen Namen nicht wieder (`RestoreClientParameters`).
+- **`EXTRACT`** (b6a6786; dabei auch `DOW` in PostgreSQL korrigiert, das Sonntag = 0 zählte): geht nur als ANSI; für SQL Server und SQLite fehlt die Übersetzung.
+- **Gruppierungen** (1b5c8b5; SQLite lehnt sie mit 400 ab): `ROLLUP`, `CUBE` und `GROUPING SETS` fallen still weg (`SqlAstBuilder.cs:351-366`).
+- **SQL Server mit Zeilenfilter** (48d29d5), **`CAST … GROUP BY`** (12bd022), **deklarierte Abfragen** (0195090); vorher: SQL Server mit Zeilenfilter, `CAST … GROUP BY` und deklarierte Abfragen.

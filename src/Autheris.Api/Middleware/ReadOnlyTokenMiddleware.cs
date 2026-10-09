@@ -53,9 +53,28 @@ public sealed class ReadOnlyTokenMiddleware
         }), context.RequestAborted).ConfigureAwait(false);
     }
 
-    private bool IsPermitted(HttpRequest request) =>
-        HttpMethods.IsGet(request.Method) ||
-        HttpMethods.IsHead(request.Method) ||
-        HttpMethods.IsOptions(request.Method) ||
-        (HttpMethods.IsPost(request.Method) && _queryPaths.Any(p => request.Path.StartsWithSegments(p, StringComparison.OrdinalIgnoreCase)));
+    private bool IsPermitted(HttpRequest request)
+    {
+        if (HttpMethods.IsGet(request.Method) ||
+            HttpMethods.IsHead(request.Method) ||
+            HttpMethods.IsOptions(request.Method))
+        {
+            return true;
+        }
+
+        if (!HttpMethods.IsPost(request.Method))
+        {
+            return false;
+        }
+
+        // SR15-20: Root /api/v1/queries registration is forbidden for read-only tokens;
+        // only query executions on sub-paths like /api/v1/queries/{name} are allowed.
+        if (request.Path.Equals("/api/v1/queries", StringComparison.OrdinalIgnoreCase) ||
+            request.Path.Equals("/api/v1/queries/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return _queryPaths.Any(p => request.Path.StartsWithSegments(p, StringComparison.OrdinalIgnoreCase));
+    }
 }

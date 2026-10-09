@@ -145,6 +145,25 @@ public class DataCatalogSyncTests
     }
 
     [Fact]
+    public async Task EXT_2_SyncCatalogAsync_KeepsThePersistedSourceName()
+    {
+        var tableId = new TableIdentifier("sales", "dbo", "invoices");
+        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<CatalogTableAsset>>([new CatalogTableAsset { Identifier = tableId }]));
+        _tableRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(new TableMetadata
+            {
+                Identifier = tableId,
+                Table = new Table { SourceName = "sales_readonly_conn", SchemaName = "dbo", TableName = "invoices", IsActive = true }
+            }));
+
+        await _sut.SyncCatalogAsync();
+
+        await _tableRepo.Received(1).UpsertTableMetadataAsync(
+            Arg.Is<TableMetadata>(m => m.Table.SourceName == "sales_readonly_conn"), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task SyncCatalogAsync_DryRunMode_DoesNotPersistToRepository()
     {
         var tableId = new TableIdentifier("sales", "dbo", "customers");

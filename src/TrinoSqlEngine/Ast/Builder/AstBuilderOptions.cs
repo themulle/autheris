@@ -19,6 +19,9 @@ public sealed record AstBuilderOptions
     public bool AllowInlineFunctionDefinitions { get; init; } = false;
     public bool RejectTimeTravelQueries { get; init; } = true;
 
+    /// <summary>See <see cref="RlsOptions.TranslateTrinoDateFunctions"/>.</summary>
+    public bool TranslateTrinoDateFunctions { get; init; }
+
     public static AstBuilderOptions FromRlsOptions(RlsOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -31,7 +34,8 @@ public sealed record AstBuilderOptions
             AllowedTableFunctions = options.AllowedTableFunctions,
             AllowedSessionProperties = options.AllowedSessionProperties,
             AllowInlineFunctionDefinitions = options.AllowInlineFunctionDefinitions,
-            RejectTimeTravelQueries = options.RejectTimeTravelQueries
+            RejectTimeTravelQueries = options.RejectTimeTravelQueries,
+            TranslateTrinoDateFunctions = options.TranslateTrinoDateFunctions
         };
     }
 }

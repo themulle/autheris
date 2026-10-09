@@ -29,7 +29,7 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
             builder.UseSetting("Gateway:WebSql:AllowDml", "false");
             builder.UseSetting("Gateway:WebSql:DefaultMaxRows", "200");
@@ -414,5 +414,23 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
 
         ex.Message.ShouldContain("Security Policy Violation: Column 'ssn'");
         ex.Message.ShouldContain("protected by static redaction");
+    }
+
+    [Fact]
+    public async Task WebSql_UnsupportedAcceptHeader_Returns406NotAcceptable()
+    {
+        var client = _factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/sql")
+        {
+            Content = new StringContent("""{"sql":"SELECT 1"}""", System.Text.Encoding.UTF8, "application/json")
+        };
+        request.Headers.Accept.Clear();
+        request.Headers.Accept.ParseAdd("text/csv");
+        request.Headers.Add("X-Test-User-Sid", "S-1-5-21-1");
+        request.Headers.Add("X-Test-Roles", "ClusterAdmin");
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.NotAcceptable);
     }
 }

@@ -8,6 +8,8 @@ using Autheris.Application.Federation.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Application.Security;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -15,13 +17,16 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
 {
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<SubgraphContextPropagationService> _logger;
+    private readonly IHostEnvironment? _environment;
 
     public SubgraphContextPropagationService(
         IOptions<GatewayOptions> options,
-        ILogger<SubgraphContextPropagationService> logger)
+        ILogger<SubgraphContextPropagationService> logger,
+        IHostEnvironment? environment = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _environment = environment;
     }
 
     public void ApplySecurityHeaders(
@@ -82,6 +87,53 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
         var correlationId = Activity.Current?.Id ?? Guid.NewGuid().ToString("N");
         request.Headers.Remove("X-Correlation-ID");
         request.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
+
+        // 6. Sign Zero-Trust Context Headers with HMAC-SHA256 (1.10)
+        if (fedOptions.SignContextHeaders)
+        {
+            var isDevelopment = _environment == null || _environment.IsDevelopment();
+            string? signingKey = fedOptions.SigningKey;
+
+            if (string.IsNullOrWhiteSpace(signingKey) || (!isDevelopment && string.Equals(signingKey, "autheris-federation-default-secret", StringComparison.OrdinalIgnoreCase)))
+            {
+                if (isDevelopment)
+                {
+                    signingKey = !string.IsNullOrWhiteSpace(fedOptions.SigningKey)
+                        ? fedOptions.SigningKey
+                        : (_options.Value.DataMasking?.HmacSecretKeyVaultRef ?? "autheris-federation-default-secret");
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        "Security error: Federation Zero-Trust context header signing is enabled (Gateway:Federation:SignContextHeaders = true), " +
+                        "but no secure SigningKey is configured. Using the default secret is prohibited outside the Development environment.");
+                }
+            }
+
+            if (!isDevelopment)
+            {
+                SecretKeyRequirements.EnsureMinimumLength(
+                    System.Text.Encoding.UTF8.GetBytes(signingKey),
+                    "The Federation context header signing key (Federation:SigningKey)",
+                    isDevelopment: false);
+            }
+
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+            var nonce = Guid.NewGuid().ToString("N");
+            var userSid = principal?.GetUserSid()?.Value ?? string.Empty;
+
+            var payload = $"{effectiveTenant}:{userSid}:{timestamp}:{nonce}";
+            using var hmac = new System.Security.Cryptography.HMACSHA256(System.Text.Encoding.UTF8.GetBytes(signingKey));
+            var signature = Convert.ToHexStringLower(hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(payload)));
+
+            request.Headers.Remove("X-Autheris-Signature");
+            request.Headers.Remove("X-Autheris-Timestamp");
+            request.Headers.Remove("X-Autheris-Nonce");
+
+            request.Headers.TryAddWithoutValidation("X-Autheris-Signature", signature);
+            request.Headers.TryAddWithoutValidation("X-Autheris-Timestamp", timestamp);
+            request.Headers.TryAddWithoutValidation("X-Autheris-Nonce", nonce);
+        }
 
         _logger.LogDebug("Propagated Zero-Trust context to subgraph '{Subgraph}' (Tenant: {Tenant}, Correlation: {Correlation})",
             subgraphName, effectiveTenant, correlationId);

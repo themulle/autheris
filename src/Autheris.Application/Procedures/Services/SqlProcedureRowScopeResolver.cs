@@ -100,7 +100,7 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
         string? filterSql = decision.CombinedRowFilterSql;
         if (!string.IsNullOrWhiteSpace(filterSql))
         {
-            Autheris.Application.Sql.SqlSecurityValidator.ValidatePredicateSql(filterSql, "CombinedRowFilterSql");
+            Autheris.Application.Sql.SqlSecurityValidator.ValidateRowFilter(decision);
         }
 
         int filterParameterCount = decision.RowFilterParameters?.Count ?? 0;

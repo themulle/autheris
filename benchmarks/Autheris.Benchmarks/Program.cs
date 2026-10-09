@@ -14,6 +14,12 @@ public static class BenchmarkRunnerApp
         Console.WriteLine("================================================================================");
         Console.WriteLine();
 
+        if (args.Length > 0 && args[0].Equals("vf", StringComparison.OrdinalIgnoreCase))
+        {
+            await VirtualFilterResolverBenchmark.RunAsync();
+            return;
+        }
+
         if (args.Length > 0 && args[0].Equals("sla", StringComparison.OrdinalIgnoreCase))
         {
             await SlaValidationBenchmark.RunAllSlaChecksAsync();

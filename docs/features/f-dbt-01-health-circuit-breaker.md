@@ -1,7 +1,7 @@
 # F-DBT-1: dbt Data Health Circuit Breaker
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`IDbtHealthCircuitBreaker.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Dbt/Interfaces/IDbtHealthCircuitBreaker.cs), [`DbtHealthCircuitBreaker.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Dbt/Services/DbtHealthCircuitBreaker.cs)
+**Components:** [`IDbtHealthCircuitBreaker.cs`](file:///root/autheris/src/Autheris.Application/Dbt/Interfaces/IDbtHealthCircuitBreaker.cs), [`DbtHealthCircuitBreaker.cs`](file:///root/autheris/src/Autheris.Application/Dbt/Services/DbtHealthCircuitBreaker.cs)
 
 ---
 

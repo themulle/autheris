@@ -9,9 +9,12 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
 using Autheris.Api.Serialization;
+using Autheris.Application.Common;
+using Autheris.Application.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.Serialization;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Extensions.OData;
 using Microsoft.AspNetCore.Builder;
@@ -26,11 +29,37 @@ public static class ODataEndpoints
     internal static bool RequiresSwaggerChallenge(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context) =>
         !gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true;
 
+    /// <summary>API-15: Evaluates Swagger UI authorization: challenge if unauthenticated outside Dev, forbid if authenticated non-admin.</summary>
+    internal static IResult? CheckSwaggerAuth(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context)
+    {
+        if (gatewayOptions.IsOpenSchemaAllowed || env.IsDevelopment())
+        {
+            return null;
+        }
+        if (context.User?.Identity?.IsAuthenticated != true)
+        {
+            return Results.Challenge();
+        }
+        if (!IsOpenApiAdmin(context.User))
+        {
+            return Results.Forbid();
+        }
+        return null;
+    }
+
+    /// <summary>API-15: Metadata and service document outside Development require an authenticated caller (challenge).</summary>
+    internal static bool RequiresMetadataChallenge(GatewayOptions gatewayOptions, IWebHostEnvironment env, HttpContext context) =>
+        !gatewayOptions.IsOpenSchemaAllowed && !env.IsDevelopment() && context.User?.Identity?.IsAuthenticated != true;
+
     public static IEndpointRouteBuilder MapODataEndpoints(this IEndpointRouteBuilder app, GatewayOptions gatewayOptions)
     {
         // OData v4 / Power BI & Excel Direct Adapter Endpoints
-        async Task<IResult> HandleServiceDocumentAsync(IODataHandler odataHandler, HttpContext context)
+        async Task<IResult> HandleServiceDocumentAsync(IODataHandler odataHandler, HttpContext context, IWebHostEnvironment env)
         {
+            if (RequiresMetadataChallenge(gatewayOptions, env, context))
+            {
+                return Results.Challenge();
+            }
             context.Response.Headers["OData-Version"] = "4.0";
             var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
             var doc = await odataHandler.GetServiceDocumentAsync(serviceRoot, context.User, context.RequestAborted);
@@ -41,8 +70,13 @@ public static class ODataEndpoints
 
         app.MapGet("/odata/v4/$metadata", async (
             IODataHandler odataHandler,
-            HttpContext context) =>
+            HttpContext context,
+            IWebHostEnvironment env) =>
         {
+            if (RequiresMetadataChallenge(gatewayOptions, env, context))
+            {
+                return Results.Challenge();
+            }
             context.Response.Headers["OData-Version"] = "4.0";
             var xml = await odataHandler.GetMetadataCsdlAsync(context.User, context.RequestAborted);
             return Results.Content(xml, "application/xml;charset=utf-8");
@@ -214,11 +248,10 @@ public static class ODataEndpoints
         // Die UI-Assets werden aus dem Assembly ausgeliefert (kein CDN, offline-faehig).
         IResult ServeSwaggerUi(HttpContext context, IWebHostEnvironment env)
         {
-            if (RequiresSwaggerChallenge(gatewayOptions, env, context))
+            var authCheck = CheckSwaggerAuth(gatewayOptions, env, context);
+            if (authCheck != null)
             {
-                // API-15: a bare 401 carries no WWW-Authenticate header, so browsers never start Kerberos/Negotiate.
-                // A challenge lets the default scheme answer with the proper header.
-                return Results.Challenge();
+                return authCheck;
             }
             var nonce = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(16));
             context.Response.Headers.ContentSecurityPolicy = $"default-src 'self'; script-src 'self' 'nonce-{nonce}'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self';";
@@ -250,7 +283,50 @@ public static class ODataEndpoints
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .RequireAuthorization();
 
+        app.MapGet("/odata/v4/{domain}/{schema}/{tableName}/$count", HandleCountRequestAsync)
+           .RequireAuthorization();
+
+        app.MapGet("/odata/v4/{entitySetName}", HandleFlatEntitySetRequestAsync)
+           .WithMetadata(new ParquetOutputSupportedMetadata())
+           .RequireAuthorization();
+
         return app;
+    }
+
+    /// <summary>
+    /// Befund 4a.2 & SR15-31: Support single-segment entity set name path (/odata/v4/lwetem_prod_md_crane) as an alias
+    /// matching the OData 4.0 CSDL EntitySet name, strictly isolated to the caller's tenant catalog.
+    /// </summary>
+    internal static async Task<IResult> HandleFlatEntitySetRequestAsync(
+        string entitySetName,
+        IODataHandler odataHandler,
+        ITableMetadataRepository metadataRepo,
+        HttpContext context)
+    {
+        var tables = await metadataRepo.GetAllTablesAsync(context.RequestAborted).ConfigureAwait(false);
+        var tenant = context.User.GetTenantId();
+        var candidateTables = tables
+            .Where(t => tenant == TenantId.LegacySingleTenant ||
+                        string.Equals(t.Identifier.Domain, tenant.Value, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(t.Identifier.Domain, "default", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var matchingTables = candidateTables
+            .Where(t => string.Equals(ODataCsdlGenerator.GetEntityName(t), entitySetName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (matchingTables.Count != 1)
+        {
+            return Results.NotFound(new { error = new { code = "ResourceNotFound", message = $"The entity set '{entitySetName}' was not found." } });
+        }
+
+        var table = matchingTables[0];
+        return await HandleEntitySetRequestAsync(
+            table.Identifier.Domain,
+            table.Identifier.Schema,
+            table.Identifier.TableName,
+            odataHandler,
+            context).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -294,7 +370,7 @@ public static class ODataEndpoints
         int? skip = null;
         if (context.Request.Query.TryGetValue("$skip", out var skipVal))
         {
-            if (!int.TryParse(skipVal, out var s) || s < 0)
+            if (!long.TryParse(skipVal, out var s) || s < 0)
             {
                 return Results.Json(
                     new { error = new { code = "InvalidQueryOption", message = "The query parameter '$skip' must be a non-negative integer." } },
@@ -302,16 +378,36 @@ public static class ODataEndpoints
                     contentType: "application/json;odata.metadata=minimal;charset=utf-8"
                 );
             }
-            skip = s;
+            if (s > ODataHandler.MaxSkip)
+            {
+                return Results.Json(
+                    new { error = new { code = "InvalidQueryOption", message = $"The query parameter '$skip' must not exceed {ODataHandler.MaxSkip}." } },
+                    statusCode: StatusCodes.Status400BadRequest,
+                    contentType: "application/json;odata.metadata=minimal;charset=utf-8"
+                );
+            }
+            skip = (int)s;
         }
 
         string? select = context.Request.Query["$select"].FirstOrDefault();
+        string? orderBy = context.Request.Query.TryGetValue("$orderby", out var orderByVal) ? orderByVal.ToString() : null;
+        string? filter = context.Request.Query.TryGetValue("$filter", out var filterVal) ? filterVal.ToString() : null;
         bool includeCount = false;
         if (context.Request.Query.TryGetValue("$count", out var countVal))
         {
             if (!bool.TryParse(countVal, out includeCount))
             {
                 return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", "The query parameter '$count' must be 'true' or 'false'.");
+            }
+        }
+
+        // Befund 1.2: Strict Content Negotiation. If Accept header requests non-OData formats (CSV, NDJSON, etc.), reject with 406.
+        if (context.Request.Headers.Accept.Count > 0)
+        {
+            var acceptEval = ParquetContentNegotiation.Evaluate(context.Request);
+            if (!acceptEval.ParquetPreferred && !acceptEval.HasJsonAlternative)
+            {
+                return Results.StatusCode(StatusCodes.Status406NotAcceptable);
             }
         }
 
@@ -338,6 +434,8 @@ public static class ODataEndpoints
             select: select,
             includeCount: includeCount,
             headers: headers,
+            orderBy: orderBy,
+            filter: filter,
             ct: context.RequestAborted
         );
 
@@ -356,13 +454,62 @@ public static class ODataEndpoints
         return Results.Json(result.Payload, statusCode: result.StatusCode, contentType: "application/json;odata.metadata=minimal;charset=utf-8");
     }
 
+    /// <summary>
+    /// 4a.3: <c>/$count</c> answers the number of rows the caller may read (same row filter as the entity set) as plain
+    /// text, as OData 4.0 specifies for the count segment.
+    /// </summary>
+    internal static async Task<IResult> HandleCountRequestAsync(
+        string domain,
+        string schema,
+        string tableName,
+        IODataHandler odataHandler,
+        HttpContext context)
+    {
+        context.Response.Headers["OData-Version"] = "4.0";
+        foreach (var (key, _) in context.Request.Query)
+        {
+            if (key.StartsWith('$'))
+            {
+                return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", "The '/$count' segment takes no query options.");
+            }
+        }
+
+        var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
+        var headers = context.Request.Headers.ToDictionary(h => h.Key, h => h.Value.Select(v => v ?? string.Empty).ToArray());
+        var result = await odataHandler.ExecuteEntitySetQueryAsync(
+            principal: context.User,
+            serviceRootUrl: serviceRoot,
+            table: new TableIdentifier(domain, schema, tableName),
+            top: 1,
+            skip: null,
+            select: null,
+            includeCount: true,
+            headers: headers,
+            ct: context.RequestAborted).ConfigureAwait(false);
+
+        if (result.RetryAfterSeconds is int retryAfter)
+        {
+            context.Response.Headers.RetryAfter = retryAfter.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (result.StatusCode != StatusCodes.Status200OK ||
+            result.Payload is not IReadOnlyDictionary<string, object?> payload ||
+            !payload.TryGetValue("@odata.count", out var count) || count == null)
+        {
+            var status = result.StatusCode == StatusCodes.Status200OK ? StatusCodes.Status501NotImplemented : result.StatusCode;
+            return Results.Json(result.Payload, statusCode: status, contentType: "application/json;odata.metadata=minimal;charset=utf-8");
+        }
+
+        return Results.Text(Convert.ToString(count, CultureInfo.InvariantCulture), "text/plain; charset=utf-8");
+    }
+
     /// <summary>System query options the entity set endpoint implements.</summary>
     private static readonly FrozenSet<string> SupportedSystemQueryOptions =
-        new[] { "$top", "$skip", "$select", "$count", "$format" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        new[] { "$top", "$skip", "$select", "$count", "$orderby", "$filter", "$format" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>OData v4 system query options that exist but are not implemented yet (answered with 501, never ignored).</summary>
     private static readonly FrozenSet<string> NotImplementedSystemQueryOptions =
-        new[] { "$filter", "$orderby", "$expand", "$search", "$apply", "$compute", "$skiptoken", "$deltatoken", "$levels", "$index", "$schemaversion", "$id" }
+        new[] { "$expand", "$search", "$apply", "$compute", "$skiptoken", "$deltatoken", "$levels", "$index", "$schemaversion", "$id" }
             .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>

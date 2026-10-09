@@ -173,4 +173,88 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         var polled = await _manager.GetStatusOrWaitAsync(status.StatementId, TestUser, TestTenant, TimeSpan.FromMilliseconds(10));
         polled.State.ShouldBe("CANCELED");
     }
+
+    [Fact]
+    public async Task SubmitOrWaitAsync_WhenExecutionFaultsWithDatabaseError_SanitizesErrorMessage()
+    {
+        // Arrange
+        var request = new GovernedSqlQueryRequest("SELECT secret_iban FROM default.dbo.users");
+        var tcs = new TaskCompletionSource<GovernedSqlResult>();
+        tcs.SetException(new InvalidOperationException("Conversion failed when converting the varchar value 'SECRET_IBAN_99999' to data type int"));
+
+        _sqlExecutionService.ExecuteQueryBufferedAsync(request, TestUser, TestTenant, Arg.Any<CancellationToken>())
+            .Returns(tcs.Task);
+
+        // Act
+        var status = await _manager.SubmitOrWaitAsync(request, TestUser, TestTenant, TimeSpan.FromSeconds(2));
+
+        // Assert
+        status.ShouldNotBeNull();
+        status.State.ShouldBe("FAILED");
+        status.ErrorMessage.ShouldNotBeNull();
+        status.ErrorMessage.ShouldNotContain("SECRET_IBAN");
+        status.ErrorMessage.ShouldBe("The SQL statement could not be executed. Contact support with the trace id.");
+    }
+
+    [Fact]
+    public async Task SubmitOrWaitAsync_ExceedingMaxConcurrentSessionsPerUser_ThrowsGatewayThrottledException()
+    {
+        using var smallManager = new WebSqlStatementManager(
+            _scopeFactory,
+            NullLogger<WebSqlStatementManager>.Instance,
+            options: null,
+            retentionPeriod: TimeSpan.FromMinutes(1),
+            maxSessionsPerUser: 2,
+            maxTotalSessions: 10);
+
+        var tcs1 = new TaskCompletionSource<GovernedSqlResult>();
+        var tcs2 = new TaskCompletionSource<GovernedSqlResult>();
+        var tcs3 = new TaskCompletionSource<GovernedSqlResult>();
+
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), TestUser, TestTenant, Arg.Any<CancellationToken>())
+            .Returns(tcs1.Task, tcs2.Task, tcs3.Task);
+
+        var s1 = await smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 1"), TestUser, TestTenant, TimeSpan.FromMilliseconds(5));
+        var s2 = await smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 2"), TestUser, TestTenant, TimeSpan.FromMilliseconds(5));
+
+        s1.State.ShouldBe("RUNNING");
+        s2.State.ShouldBe("RUNNING");
+
+        var ex = await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayThrottledException>(() =>
+            smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 3"), TestUser, TestTenant, TimeSpan.FromMilliseconds(5)));
+
+        ex.Message.ShouldContain("limit of 2 concurrent active statements");
+        ex.RetryAfterSeconds.ShouldBe(5);
+    }
+
+    [Fact]
+    public async Task SubmitOrWaitAsync_EvictsOldestCompletedSession_WhenUserCapacityExceeded()
+    {
+        using var smallManager = new WebSqlStatementManager(
+            _scopeFactory,
+            NullLogger<WebSqlStatementManager>.Instance,
+            options: null,
+            retentionPeriod: TimeSpan.FromMinutes(5),
+            maxSessionsPerUser: 2,
+            maxTotalSessions: 10);
+
+        var fastResult = new GovernedSqlResult("SELECT 1", "SELECT 1", ["id"], [new Dictionary<string, object?> { ["id"] = 1 }], 1, 5);
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), TestUser, TestTenant, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(fastResult));
+
+        var s1 = await smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 1"), TestUser, TestTenant, TimeSpan.FromSeconds(1));
+        var s2 = await smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 2"), TestUser, TestTenant, TimeSpan.FromSeconds(1));
+
+        s1.State.ShouldBe("FINISHED");
+        s2.State.ShouldBe("FINISHED");
+
+        var s3 = await smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 3"), TestUser, TestTenant, TimeSpan.FromSeconds(1));
+        s3.State.ShouldBe("FINISHED");
+
+        await Should.ThrowAsync<KeyNotFoundException>(() =>
+            smallManager.GetStatusOrWaitAsync(s1.StatementId, TestUser, TestTenant, TimeSpan.FromSeconds(1)));
+
+        var p2 = await smallManager.GetStatusOrWaitAsync(s2.StatementId, TestUser, TestTenant, TimeSpan.FromSeconds(1));
+        p2.State.ShouldBe("FINISHED");
+    }
 }

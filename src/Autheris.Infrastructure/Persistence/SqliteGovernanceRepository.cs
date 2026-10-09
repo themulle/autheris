@@ -21,6 +21,8 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
     internal SqliteConnection Connection => _connection;
     private readonly IEpochValidationService _epochValidationService;
     private readonly SemaphoreSlim _lock = new(1, 1);
+    internal Task LockAsync(CancellationToken ct = default) => _lock.WaitAsync(ct);
+    internal void ReleaseLock() => _lock.Release();
     private readonly ConcurrentDictionary<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
     private volatile bool _isAuditPipelineFaulted = false;
@@ -92,13 +94,13 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
             {
                 key = secretProvider.GetSecretBytes(auditSecretRef);
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 var env = environment?.EnvironmentName ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
                 bool isDev = string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase);
                 if (!isDev)
                 {
-                    throw new InvalidOperationException($"Security critical: Failed to load AuditHmacKeyVaultRef '{auditSecretRef}' from Key Vault in non-development environment.", ex);
+                    throw new InvalidOperationException("Security critical: Failed to load AuditHmacKeyVaultRef from Key Vault in non-development environment.");
                 }
             }
         }

@@ -94,6 +94,15 @@ public static class GatewayServiceCollectionExtensions
                 Enum.IsDefined(opts.RowFilters.SubqueryStrategy),
                 "Gateway:RowFilters:SubqueryStrategy must be Exists, InCorrelated or In.")
             .Validate(opts =>
+                !opts.Casbin.Enabled || string.IsNullOrWhiteSpace(opts.Casbin.ModelPath) || System.IO.File.Exists(System.IO.Path.GetFullPath(opts.Casbin.ModelPath)),
+                "Gateway:Casbin is enabled, but the configured ModelPath file was not found.")
+            .Validate(opts =>
+                !opts.Casbin.Enabled || !string.IsNullOrWhiteSpace(opts.Casbin.PolicyPath),
+                "Gateway:Casbin is enabled, but PolicyPath is not configured. Failing closed.")
+            .Validate(opts =>
+                !opts.Casbin.Enabled || string.IsNullOrWhiteSpace(opts.Casbin.PolicyPath) || System.IO.File.Exists(System.IO.Path.GetFullPath(opts.Casbin.PolicyPath)),
+                "Gateway:Casbin is enabled, but the configured PolicyPath file was not found.")
+            .Validate(opts =>
                 opts.HighAvailability.ShutdownTimeoutSeconds >= opts.HighAvailability.QueryTimeoutSeconds + 10,
                 "NF-HA-01 violation: ShutdownTimeoutSeconds must be at least 10s greater than QueryTimeoutSeconds.")
             .Validate(opts =>
@@ -152,6 +161,10 @@ public static class GatewayServiceCollectionExtensions
                 !Directory.Exists(System.IO.Path.GetFullPath(opts.Plugins.Directory)) ||
                 opts.Plugins.RequireIntegrityManifest,
                 "Security violation: Outside Development, a configured plugin directory requires Plugins.RequireIntegrityManifest = true.")
+            .Validate(opts =>
+                environment.IsDevelopment() || opts.Rebac.SeedTuples.Count == 0 ||
+                !opts.Rebac.SeedTuples.Any(t => t.User.Contains("david", StringComparison.OrdinalIgnoreCase) || t.Object.Contains("prod", StringComparison.OrdinalIgnoreCase)),
+                "Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.")
             .ValidateOnStart();
 
         var gatewayOptions = configuration.GetSection(GatewayOptions.SectionName).Get<GatewayOptions>() ?? new GatewayOptions();
@@ -260,6 +273,11 @@ public static class GatewayServiceCollectionExtensions
         }
 
         services.AddSingleton<IEpochValidationService, EpochValidationService>();
+        services.AddSingleton<Autheris.Application.VirtualFilters.VirtualFilterAdministrationService>();
+        services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider, Autheris.Application.VirtualFilters.VirtualFilterSnapshotProvider>();
+        services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterPredicateBuilder, Autheris.Application.VirtualFilters.StructuredFilterSqlBuilder>();
+        services.AddSingleton<Autheris.Application.VirtualFilters.MandatoryRowFilterResolver>();
+        services.AddSingleton<Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<Autheris.Application.VirtualFilters.MandatoryRowFilterResolver>());
         services.AddSingleton<IConsentCacheService, ConsentCacheService>();
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
@@ -274,6 +292,7 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
+            services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterRepository>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<PostgreSqlGovernanceRepository>());
         }
         else
@@ -288,6 +307,7 @@ public static class GatewayServiceCollectionExtensions
             services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IItsmOutboxRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+            services.AddSingleton<Autheris.Application.VirtualFilters.IVirtualFilterRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
         }
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
@@ -375,7 +395,32 @@ public static class GatewayServiceCollectionExtensions
             {
                 logger?.LogWarning("Casbin ABAC engine is DISABLED (Gateway:Casbin:Enabled = false). Access control via Casbin policies is inactive.");
             }
-            var service = new CasbinEnforcementService(options.Casbin.ModelPath, rlsGen, logger);
+            else
+            {
+                if (!string.IsNullOrWhiteSpace(options.Casbin.ModelPath))
+                {
+                    var fullModelPath = System.IO.Path.GetFullPath(options.Casbin.ModelPath);
+                    if (!System.IO.File.Exists(fullModelPath))
+                    {
+                        throw new FileNotFoundException($"Gateway:Casbin is enabled, but model file '{fullModelPath}' was not found. Failing closed.");
+                    }
+                }
+                if (string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
+                {
+                    throw new InvalidOperationException("Gateway:Casbin is enabled, but PolicyPath is not configured. Failing closed.");
+                }
+
+                var fullPolicyPath = System.IO.Path.GetFullPath(options.Casbin.PolicyPath);
+                if (!System.IO.File.Exists(fullPolicyPath))
+                {
+                    throw new FileNotFoundException($"Gateway:Casbin is enabled, but policy file '{fullPolicyPath}' was not found. Failing closed.");
+                }
+            }
+
+            var service = new CasbinEnforcementService(
+                string.IsNullOrWhiteSpace(options.Casbin.ModelPath) ? null : options.Casbin.ModelPath,
+                rlsGen,
+                logger);
             if (options.Casbin.Enabled && !string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
                 service.LoadPolicyFromFile(options.Casbin.PolicyPath, options.Casbin.WatchPolicyFile);
@@ -456,7 +501,8 @@ public static class GatewayServiceCollectionExtensions
             sp.GetService<IClientIpResolver>(),
             sp.GetService<Autheris.Application.Connectors.IAutherisConnectorRegistry>(),
             sp.GetService<ITableReadConcurrencyGate>(),
-            sp.GetService<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator>()));
+            sp.GetService<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator>(),
+            sp.GetRequiredService<Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver>()));
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();
@@ -566,13 +612,45 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>(sp =>
         {
             var multiplexer = sp.GetService<StackExchange.Redis.IConnectionMultiplexer>();
-            return multiplexer != null
+            var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>();
+            var env = sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+            Autheris.Application.Security.Rebac.Interfaces.IRebacStore store = multiplexer != null
                 ? new Autheris.Infrastructure.Rebac.RedisRebacStore(
                     multiplexer,
-                    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>(),
+                    opts,
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Infrastructure.Rebac.RedisRebacStore>>())
                 : new Autheris.Application.Security.Rebac.Services.InMemoryRebacStore(
                     sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Security.Rebac.Services.InMemoryRebacStore>>());
+
+            var tuplesToSeed = new List<Autheris.Domain.Model.RebacTuple>(opts.Value.Rebac.SeedTuples);
+            if (tuplesToSeed.Count == 0 && env?.IsDevelopment() == true)
+            {
+                tuplesToSeed.AddRange([
+                    new("default", "user:david", "viewer", "table:lakehouse.dbo.orders"),
+                    new("default", "S-1-5-21-LWE-DAVID", "viewer", "table:lakehouse.dbo.orders"),
+                    new("default", "user:david", "viewer", "table:sales.public.orders"),
+                    new("default", "S-1-5-21-LWE-DAVID", "viewer", "table:sales.public.orders"),
+                    new("default", "user:david", "viewer", "table:sales.crm.contacts"),
+                    new("tenant_lwe", "user:david", "viewer", "table:lakehouse.dbo.orders"),
+                    new("tenant_lwe", "S-1-5-21-LWE-DAVID", "viewer", "table:lakehouse.dbo.orders")
+                ]);
+            }
+
+            if (tuplesToSeed.Count > 0)
+            {
+                try
+                {
+                    store.AddTuplesAsync(tuplesToSeed).AsTask().GetAwaiter().GetResult();
+                }
+                catch (Exception ex)
+                {
+                    sp.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()
+                        ?.CreateLogger("RebacSeeder")
+                        .LogWarning(ex, "Failed to preload ReBAC seed tuples.");
+                }
+            }
+
+            return store;
         });
         services.AddSingleton<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator, Autheris.Application.Security.Rebac.Services.ZanzibarRebacEvaluator>();
         services.AddScoped<Autheris.Application.Security.Rebac.Interfaces.IRebacBatchDataLoader, Autheris.Application.Security.Rebac.Services.RebacBatchDataLoader>();
@@ -1061,7 +1139,15 @@ public static class GatewayServiceCollectionExtensions
         }
         else if (options.Casbin.Enabled)
         {
-            throw new ValidationException("Casbin is enabled (Gateway:Casbin:Enabled = true), but Casbin:ModelPath is not configured.");
+            // SR15-50: Embedded default model is verified and allowed when ModelPath is not configured
+            try
+            {
+                CasbinModelContract.Verify(CasbinEnforcementService.DefaultModelText);
+            }
+            catch (CasbinModelValidationException ex)
+            {
+                throw new ValidationException($"Embedded default Casbin model does not satisfy the gateway contract: {string.Join("; ", ex.Violations)}", ex);
+            }
         }
 
         // POL-1 / R-POL-5: If Casbin is enabled, PolicyPath must exist, not be empty, and contain valid 'p' rules
@@ -1148,6 +1234,23 @@ public static class GatewayServiceCollectionExtensions
                     "Security violation: GraphQL.PersistedQueriesOnly=true requires an existing GraphQL.TrustedDocumentsDirectory " +
                     "containing the approved operations (*.graphql / *.gql). Without a document store, the switch would have no effect.");
             }
+        }
+
+        // SR-P2-02 / SEC-GQL-02: Federation context header signing key must be configured outside Development
+        if (!environment.IsDevelopment() && options.Federation.Enabled && options.Federation.SignContextHeaders)
+        {
+            if (string.IsNullOrWhiteSpace(options.Federation.SigningKey) ||
+                string.Equals(options.Federation.SigningKey, "autheris-federation-default-secret", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ValidationException(
+                    "Security violation: Federation context header signing is enabled (Federation:SignContextHeaders = true), " +
+                    "but Federation:SigningKey is not configured or uses the insecure default secret. A secure key of at least 32 bytes is required outside Development.");
+            }
+
+            Autheris.Application.Security.SecretKeyRequirements.EnsureMinimumLength(
+                System.Text.Encoding.UTF8.GetBytes(options.Federation.SigningKey),
+                "Gateway:Federation:SigningKey",
+                isDevelopment: false);
         }
 
         // Security switch semantics: DANGER = blocked outside Development (see below), WARN = permitted everywhere
@@ -1294,6 +1397,14 @@ public static class GatewayServiceCollectionExtensions
             if (options.IsAnonymousAccessAllowed)
             {
                 throw new ValidationException("Security violation: danger_allow_anonymous_access may be true ONLY in the Development environment.");
+            }
+
+            if (options.Rebac.SeedTuples.Count > 0)
+            {
+                if (options.Rebac.SeedTuples.Any(t => t.User.Contains("david", StringComparison.OrdinalIgnoreCase) || t.Object.Contains("prod", StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw new ValidationException("Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.");
+                }
             }
 
             // Only DANGER entries are blocked outside Development; WARN entries are permitted (reported above).

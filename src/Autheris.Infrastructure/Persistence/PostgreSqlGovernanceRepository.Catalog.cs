@@ -566,7 +566,7 @@ public partial class PostgreSqlGovernanceRepository
         cmd.Parameters.AddWithValue("@schema", table.Schema);
         cmd.Parameters.AddWithValue("@table", table.TableName);
         cmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
-        cmd.Parameters.AddWithValue("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("@itsmAccount", NpgsqlTypes.NpgsqlDbType.Text, (object?)itsmApproverAccount ?? DBNull.Value);
 
         var directOwnerCount = Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
         if (directOwnerCount > 0) return true;
@@ -584,7 +584,7 @@ public partial class PostgreSqlGovernanceRepository
         delCmd.Parameters.AddWithValue("@schema", table.Schema);
         delCmd.Parameters.AddWithValue("@table", table.TableName);
         delCmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
-        delCmd.Parameters.AddWithValue("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value);
+        delCmd.Parameters.AddWithValue("@itsmAccount", NpgsqlTypes.NpgsqlDbType.Text, (object?)itsmApproverAccount ?? DBNull.Value);
         delCmd.Parameters.AddWithValue("@now", DateTimeOffset.UtcNow.ToString("O"));
 
         var delegateCount = Convert.ToInt64(await delCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
@@ -597,7 +597,7 @@ public partial class PostgreSqlGovernanceRepository
                                 WHERE (r.role_name = 'GovernanceAdmin' OR r.role_name = 'ClusterAdmin')
                                   AND (rm.member_sid = @apprSid OR (@itsmAccount IS NOT NULL AND LOWER(rm.member_sid) = LOWER(@itsmAccount)))";
         roleCmd.Parameters.AddWithValue("@apprSid", approverSid.Value);
-        roleCmd.Parameters.AddWithValue("@itsmAccount", (object?)itsmApproverAccount ?? DBNull.Value);
+        roleCmd.Parameters.AddWithValue("@itsmAccount", NpgsqlTypes.NpgsqlDbType.Text, (object?)itsmApproverAccount ?? DBNull.Value);
 
         var roleAdminCount = Convert.ToInt64(await roleCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
         return roleAdminCount > 0;

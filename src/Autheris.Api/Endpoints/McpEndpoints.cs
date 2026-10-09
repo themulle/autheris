@@ -10,10 +10,13 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Autheris.Api.Mcp;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 public static class McpEndpoints
 {
@@ -29,9 +32,14 @@ public static class McpEndpoints
         string TenantId,
         IReadOnlyList<string> Roles,
         IReadOnlyList<string> GroupSids,
-        string? ClientIp = null);
+        string? ClientIp = null,
+        bool IsReadOnly = false,
+        IReadOnlyDictionary<string, string>? AdditionalClaims = null);
 
-    public static IEndpointRouteBuilder MapMcpEndpoints(this IEndpointRouteBuilder app, GatewayOptions gatewayOptions)
+    public static IEndpointRouteBuilder MapMcpEndpoints(
+        this IEndpointRouteBuilder app,
+        GatewayOptions gatewayOptions,
+        IHostEnvironment? env = null)
     {
         if (!gatewayOptions.Mcp.Enabled)
         {
@@ -86,6 +94,54 @@ public static class McpEndpoints
             });
         }
 
+        if (GatewayMcpOAuth.CanDiscover(gatewayOptions))
+        {
+            var hostEnv = env ?? app.ServiceProvider?.GetService<IHostEnvironment>();
+            bool isDev = hostEnv?.IsDevelopment() ?? false;
+
+            var discoveryGroup = app.MapGroup("/.well-known");
+            if (!gatewayOptions.Mcp.AllowAnonymousDiscovery && !isDev)
+            {
+                discoveryGroup.RequireAuthorization();
+            }
+            else
+            {
+                discoveryGroup.AllowAnonymous();
+            }
+
+            // RFC 9728: Root Protected Resource Metadata Fallback -> redirects to /mcp
+            discoveryGroup.MapGet("/oauth-protected-resource", (HttpContext context) =>
+            {
+                var target = $"{context.Request.PathBase}/.well-known/oauth-protected-resource{mcpBasePath}";
+                return Results.Redirect(target, permanent: false);
+            });
+
+            // RFC 8414: Authorization Server Metadata Discovery
+            discoveryGroup.MapGet("/oauth-authorization-server", () =>
+            {
+                var servers = Autheris.Api.Mcp.GatewayMcpOAuth.AuthorizationServers(gatewayOptions);
+                if (servers.Count == 0)
+                {
+                    return Results.NotFound();
+                }
+
+                var issuer = servers[0];
+                var scopes = Autheris.Api.Mcp.GatewayMcpOAuth.GetSupportedScopes(gatewayOptions);
+
+                return Results.Ok(new
+                {
+                    issuer = issuer,
+                    authorization_endpoint = $"{issuer.TrimEnd('/')}/oauth2/v2.0/authorize",
+                    token_endpoint = $"{issuer.TrimEnd('/')}/oauth2/v2.0/token",
+                    scopes_supported = scopes,
+                    response_types_supported = new[] { "code", "token" },
+                    grant_types_supported = new[] { "client_credentials", "authorization_code" },
+                    token_endpoint_auth_methods_supported = new[] { "client_secret_post", "client_secret_basic", "private_key_jwt" },
+                    authorization_servers = servers
+                });
+            });
+        }
+
         return app;
     }
 
@@ -120,6 +176,20 @@ public static class McpEndpoints
                         ?? (context.RequestServices?.GetService<Autheris.Application.Interfaces.IClientIpResolver>()?.ResolveClientIp()
                             ?? context.Connection.RemoteIpAddress)?.ToString();
 
-        return new McpCaller(principalId, userSid, tenantId, roles, groupSids, clientIp);
+        var isReadOnly = principal.IsReadOnly();
+        var additionalClaims = isAuthenticated
+            ? principal.Claims
+                .Where(c => c.Type != ClaimTypes.NameIdentifier &&
+                            c.Type != "sub" &&
+                            c.Type != "tenant_id" &&
+                            c.Type != ClaimTypes.PrimarySid &&
+                            c.Type != ClaimTypes.Role &&
+                            c.Type != ClaimTypes.GroupSid &&
+                            c.Type != Autheris.Domain.Security.TokenAccessScope.ClaimType)
+                .GroupBy(c => c.Type, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.Ordinal)
+            : null;
+
+        return new McpCaller(principalId, userSid, tenantId, roles, groupSids, clientIp, isReadOnly, additionalClaims);
     }
 }

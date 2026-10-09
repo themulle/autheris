@@ -52,6 +52,42 @@ public sealed class AstSecurityVisitorDmlTests
         Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 1 = 1", options));
         Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 'a' = 'a'", options));
         Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE true", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 1 < 2", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE 10 > 5", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 5 <= 5", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE 5 >= 2", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 1 != 2", options));
+    }
+
+    [Fact]
+    public void Dml_WhereWithoutColumnReference_ThrowsUnfilteredDmlException()
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            RejectUnfilteredDml = true
+        };
+
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE 'a' != 'b'", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE 100 + 200 = 300", options));
+    }
+
+    [Fact]
+    public void Dml_LegitimateColumnFilter_Passes()
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            RejectUnfilteredDml = true
+        };
+
+        var deleteResult = SecureAndGenerate("DELETE FROM orders WHERE id = 1", options);
+        Assert.Contains("DELETE FROM", deleteResult, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orders", deleteResult, StringComparison.OrdinalIgnoreCase);
+
+        var updateResult = SecureAndGenerate("UPDATE orders SET x = 1 WHERE amount > 100", options);
+        Assert.Contains("UPDATE", updateResult, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("orders", updateResult, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -186,4 +222,55 @@ public sealed class AstSecurityVisitorDmlTests
         // Subquery referencing masked column in UPDATE SET is rejected
         Assert.Throws<SecurityException>(() => SecureAndGenerate("UPDATE notes SET content = (SELECT salary FROM employees WHERE id = 1) WHERE id = 1", options));
     }
+
+    [Fact]
+    public void Dml_TautologyWhere_ColumnComparison_ThrowsUnfilteredDmlException()
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            RejectUnfilteredDml = true
+        };
+
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE id <= id", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("UPDATE orders SET x = 1 WHERE id >= id", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE id BETWEEN id AND id", options));
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE id IN (id)", options));
+    }
+
+    [Fact]
+    public void Dml_ExistsWithoutColumnReference_ThrowsUnfilteredDmlException()
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            RejectUnfilteredDml = true
+        };
+
+        // Subquery without any column reference does not satisfy column reference requirement
+        Assert.Throws<UnfilteredDmlException>(() => SecureAndGenerate("DELETE FROM orders WHERE EXISTS (SELECT 1)", options));
+    }
+
+    [Fact]
+    public void Dml_MaskedColumnInJoinOnOrGroupByOrEscape_ThrowsSecurityException()
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            RejectMaskedColumnsInDml = true,
+            ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
+                (t, c) => c.Equals("salary", StringComparison.OrdinalIgnoreCase),
+                (t, c) => "NULL")
+        };
+
+        // JOIN ON referencing masked column in WHERE subquery
+        Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM orders WHERE id IN (SELECT o.id FROM orders o JOIN employees e ON o.user_id = e.salary)", options));
+
+        // GROUP BY referencing masked column in WHERE subquery
+        Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM orders WHERE id IN (SELECT count(*) FROM employees GROUP BY salary)", options));
+
+        // LIKE ESCAPE referencing masked column in WHERE
+        Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM employees WHERE name LIKE 'test%' ESCAPE salary", options));
+    }
 }
+

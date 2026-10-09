@@ -59,9 +59,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         // SEC-AC-02: Zero-Trust: Validate RLS filter early before any connection or query execution
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {
-            Autheris.Application.Sql.SqlSecurityValidator.ValidatePredicateSql(
-                context.AccessDecision.CombinedRowFilterSql,
-                "CombinedRowFilterSql");
+            Autheris.Application.Sql.SqlSecurityValidator.ValidateRowFilter(context.AccessDecision);
         }
 
         // SEC-01: Side-channel inference protection: verify column filters target only Clear columns
@@ -218,9 +216,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {
-            Autheris.Application.Sql.SqlSecurityValidator.ValidatePredicateSql(
-                context.AccessDecision.CombinedRowFilterSql,
-                "CombinedRowFilterSql");
+            Autheris.Application.Sql.SqlSecurityValidator.ValidateRowFilter(context.AccessDecision);
             whereParts.Add($"({context.AccessDecision.CombinedRowFilterSql})");
 
             if (context.AccessDecision.RowFilterParameters != null)
@@ -263,16 +259,44 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             }
         }
 
+        // Befund 2.1: $filter pushdown with Zero-Trust enforcement and parameterization
+        if (context.Items.TryGetValue(TableQueryItems.Filter, out var filterObj) && filterObj is TableFilterClause filterClause)
+        {
+            foreach (var colName in filterClause.ReferencedColumns)
+            {
+                var matchingCol = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, colName, StringComparison.OrdinalIgnoreCase));
+                if (matchingCol != null)
+                {
+                    var access = context.AccessDecision.GetEffectiveColumnAccess(matchingCol.ColumnName, metadata);
+                    if (access != ColumnAccessLevel.Clear)
+                    {
+                        throw new SecurityException($"Zero-Trust violation: Filtering on column '{matchingCol.ColumnName}' in table '{metadata.Identifier}' is not permitted (access level: {access}).");
+                    }
+                }
+            }
+
+            var filterPredicate = filterClause.GetSqlPredicate(dialect);
+            whereParts.Add($"({filterPredicate})");
+
+            foreach (var (pName, pVal) in filterClause.Parameters)
+            {
+                var p = command.CreateParameter();
+                p.ParameterName = pName;
+                p.Value = pVal ?? DBNull.Value;
+                command.Parameters.Add(p);
+            }
+        }
+
         var sqlBuilder = new StringBuilder();
         // The reserved alias lets correlated row filters (EXISTS ... = autheris_target.fk) bind to this table.
         var aliasKeyword = dialect == DatabaseDialect.Oracle ? " " : " AS ";
-        sqlBuilder.Append($"SELECT {selectClause} FROM {fromTable}{aliasKeyword}{dialect.QuoteIdentifier(TrinoSqlEngine.RowFilterAliases.Target)}");
+        var fromClause = $" FROM {fromTable}{aliasKeyword}{dialect.QuoteIdentifier(TrinoSqlEngine.RowFilterAliases.Target)}";
+        var whereClause = whereParts.Count > 0 ? " WHERE " + string.Join(" AND ", whereParts) : string.Empty;
+        sqlBuilder.Append($"SELECT {selectClause}{fromClause}{whereClause}");
 
-        if (whereParts.Count > 0)
-        {
-            sqlBuilder.Append(" WHERE ");
-            sqlBuilder.Append(string.Join(" AND ", whereParts));
-        }
+        // 4a.3: ORDER BY of the request (validated against the catalog and the access decision by the gateway; checked
+        // here again because the column name ends up in the statement text).
+        string? requestedOrder = BuildOrderByClause(context, metadata, dialect);
 
         // 3. Pagination Pushdown (Dialect-specific)
         var limit = Math.Max(1, context.Limit);
@@ -296,11 +320,15 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 // Otherwise fall back to (SELECT 1) to avoid an expensive full-table sort on an arbitrary first column.
                 var pkCol = metadata.PrimaryKeyColumns.FirstOrDefault(pk => metadata.HasColumn(pk));
                 var orderCol = pkCol ?? metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "id", StringComparison.OrdinalIgnoreCase))?.ColumnName;
-                var orderClause = orderCol != null ? dialect.QuoteIdentifier(orderCol) : "(SELECT 1)";
+                var orderClause = requestedOrder ?? (orderCol != null ? dialect.QuoteIdentifier(orderCol) : "(SELECT 1)");
                 sqlBuilder.Append($" ORDER BY {orderClause} OFFSET @gql_offset ROWS FETCH NEXT @gql_limit ROWS ONLY");
                 break;
 
             case DatabaseDialect.Oracle:
+                if (requestedOrder != null)
+                {
+                    sqlBuilder.Append($" ORDER BY {requestedOrder}");
+                }
                 sqlBuilder.Append(" OFFSET @gql_offset ROWS FETCH NEXT @gql_limit ROWS ONLY");
                 break;
 
@@ -308,6 +336,10 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             case DatabaseDialect.PostgreSql:
             case DatabaseDialect.Databricks:
             default:
+                if (requestedOrder != null)
+                {
+                    sqlBuilder.Append($" ORDER BY {requestedOrder}");
+                }
                 sqlBuilder.Append(" LIMIT @gql_limit OFFSET @gql_offset");
                 break;
         }
@@ -352,6 +384,30 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 results = await ReadRowsAsync(reader, gatewayHmacColumns, context.Limit, ct).ConfigureAwait(false);
             }
 
+            // 4a.3: total row count under exactly the same FROM/WHERE (tenant, row filter, arguments), same transaction.
+            if (context.Items.TryGetValue(TableQueryItems.CountTotal, out var countRequested) && countRequested is true)
+            {
+                await using var countCommand = connection.CreateCommand();
+                countCommand.CommandTimeout = command.CommandTimeout;
+                countCommand.Transaction = tx;
+                countCommand.CommandText = $"SELECT COUNT(*){fromClause}{whereClause}";
+                foreach (DbParameter parameter in command.Parameters)
+                {
+                    if (parameter.ParameterName is "@gql_limit" or "@gql_offset")
+                    {
+                        continue;
+                    }
+
+                    var copy = countCommand.CreateParameter();
+                    copy.ParameterName = parameter.ParameterName;
+                    copy.Value = parameter.Value;
+                    countCommand.Parameters.Add(copy);
+                }
+
+                var scalar = await countCommand.ExecuteScalarAsync(ct).ConfigureAwait(false);
+                context.Items[TableQueryItems.TotalCount] = Convert.ToInt64(scalar, System.Globalization.CultureInfo.InvariantCulture);
+            }
+
             if (tx != null)
             {
                 await tx.CommitAsync(ct).ConfigureAwait(false);
@@ -381,6 +437,31 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 await tx.DisposeAsync().ConfigureAwait(false);
             }
         }
+    }
+
+    /// <summary>
+    /// 4a.3: ORDER BY clause of the request, or null. Only catalog columns with clear-text access are accepted.
+    /// </summary>
+    private static string? BuildOrderByClause(DataSourceExecutionContext context, TableMetadata metadata, DatabaseDialect dialect)
+    {
+        if (!context.Items.TryGetValue(TableQueryItems.OrderBy, out var orderObj) || orderObj is not IReadOnlyList<TableOrderBy> orderBy || orderBy.Count == 0)
+        {
+            return null;
+        }
+
+        var parts = new List<string>(orderBy.Count);
+        foreach (var item in orderBy)
+        {
+            var column = metadata.GetColumn(item.Column);
+            if (column == null || context.AccessDecision.GetEffectiveColumnAccess(column.ColumnName, metadata) != ColumnAccessLevel.Clear)
+            {
+                throw new SecurityException($"Zero-Trust violation: Ordering by column '{item.Column}' in table '{metadata.Identifier}' is not permitted.");
+            }
+
+            parts.Add(dialect.QuoteIdentifier(column.ColumnName) + (item.Descending ? " DESC" : " ASC"));
+        }
+
+        return string.Join(", ", parts);
     }
 
     /// <summary>
@@ -673,6 +754,35 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         var metadata = context.Metadata;
         var count = Math.Max(1, context.Limit);
         var offset = Math.Max(0, context.Offset);
+
+        if (context.Items.TryGetValue(TableQueryItems.Filter, out var filterObj) &&
+            filterObj is TableFilterClause filterClause &&
+            filterClause.ReferencedColumns.Any(c => c.Equals("parent_id", StringComparison.OrdinalIgnoreCase) || c.Equals("invoice_id", StringComparison.OrdinalIgnoreCase)))
+        {
+            var joinCol = metadata.Columns.FirstOrDefault(c => c.ColumnName.Equals("parent_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
+                ?? metadata.Columns.FirstOrDefault(c => c.ColumnName.Equals("invoice_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
+                ?? "parent_id";
+
+            foreach (var pVal in filterClause.Parameters.Values)
+            {
+                var parentId = pVal?.ToString() ?? "";
+                if (string.IsNullOrEmpty(parentId)) continue;
+
+                for (int i = 1; i <= 2; i++)
+                {
+                    var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["id"] = $"{parentId}-ITEM-{i}",
+                        [joinCol] = parentId,
+                        ["product_name"] = $"Enterprise License Pack {i}",
+                        ["price"] = 1250.00m * i,
+                        ["sensitive_note"] = $"Confidential spec for item {i} of invoice {parentId}"
+                    };
+                    rows.Add(dict);
+                }
+            }
+            return rows;
+        }
 
         for (int i = 1; i <= count; i++)
         {

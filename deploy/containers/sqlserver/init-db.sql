@@ -56,3 +56,23 @@ BEGIN
     OPTION (MAXRECURSION 5000);
 END
 GO
+
+-- Least-privilege application user for Autheris (DEP-15)
+USE master;
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.server_principals WHERE name = 'crm_user')
+BEGIN
+    CREATE LOGIN crm_user WITH PASSWORD = '$(MSSQL_CRM_PASSWORD)';
+END
+GO
+
+USE crmdb;
+GO
+
+IF NOT EXISTS (SELECT * FROM sys.database_principals WHERE name = 'crm_user')
+BEGIN
+    CREATE USER crm_user FOR LOGIN crm_user;
+    ALTER ROLE db_datareader ADD MEMBER crm_user;
+END
+GO

@@ -9,6 +9,7 @@ using Autheris.Api.Endpoints;
 using Autheris.Application.SqlEndpoints.Interfaces;
 using Autheris.Application.SqlEndpoints.Services;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -67,6 +68,26 @@ public sealed class SqlEndpointDynamicRegistrationTests
     {
         var registry = new InMemorySqlEndpointRegistry();
         var context = CreateContext(isAdmin: false);
+
+        var request = new RegisterSqlEndpointRequest(
+            Name: "active_users",
+            Sql: "SELECT 1");
+
+        var result = await SqlEndpointRoutes.HandleRegisterEndpoint(request, registry, context);
+
+        result.ShouldBeOfType<ForbidHttpResult>();
+        registry.TryGet("active_users", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task HandleRegisterEndpoint_WhenAdmin_ButReadOnly_ReturnsForbidden()
+    {
+        var registry = new InMemorySqlEndpointRegistry();
+        var context = CreateContext(isAdmin: true);
+        if (context.User.Identity is ClaimsIdentity identity)
+        {
+            TokenAccessScope.MarkReadOnly(identity);
+        }
 
         var request = new RegisterSqlEndpointRequest(
             Name: "active_users",

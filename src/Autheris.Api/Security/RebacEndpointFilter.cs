@@ -1,6 +1,8 @@
 namespace Autheris.Api.Security;
 
 using System;
+using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Security.Rebac.Interfaces;
@@ -18,7 +20,13 @@ public enum RebacParameterSource
 {
     Route,
     Query,
-    Header
+    Header,
+
+    /// <summary>
+    /// The query string first, otherwise a top-level string property of the JSON request body (WebSQL findings 4.3).
+    /// The body is buffered and rewound, so the handler can read it again.
+    /// </summary>
+    QueryOrJsonBody
 }
 
 /// <summary>
@@ -49,8 +57,9 @@ public sealed class RebacEndpointFilter : IEndpointFilter
         ArgumentNullException.ThrowIfNull(next);
 
         var httpContext = context.HttpContext;
-        var options = httpContext.RequestServices.GetService<IOptions<GatewayOptions>>()?.Value?.Rebac;
-        if (options is not null && !options.Enabled)
+        var gatewayOptions = httpContext.RequestServices.GetService<IOptions<GatewayOptions>>()?.Value;
+        var options = gatewayOptions?.Rebac;
+        if ((options is not null && !options.Enabled) || gatewayOptions?.IsRebacBypassed == true)
         {
             return await next(context).ConfigureAwait(false);
         }
@@ -81,6 +90,26 @@ public sealed class RebacEndpointFilter : IEndpointFilter
         else if (_source == RebacParameterSource.Header && httpContext.Request.Headers.TryGetValue(_paramName, out var headerVal))
         {
             objectId = headerVal.ToString();
+        }
+        else if (_source == RebacParameterSource.QueryOrJsonBody)
+        {
+            if (httpContext.Request.Query.TryGetValue(_paramName, out var queryOrBodyVal) && !string.IsNullOrWhiteSpace(queryOrBodyVal))
+            {
+                objectId = queryOrBodyVal.ToString();
+            }
+            else
+            {
+                var bodyResult = await ReadJsonBodyPropertyAsync(httpContext.Request, _paramName, httpContext.RequestAborted).ConfigureAwait(false);
+                if (bodyResult.HasDuplicateProperties)
+                {
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status400BadRequest,
+                        title: "Bad Request",
+                        detail: "Duplicate properties in JSON request body are not permitted.");
+                }
+
+                objectId = bodyResult.Value;
+            }
         }
 
         if (string.IsNullOrWhiteSpace(objectId))
@@ -122,7 +151,59 @@ public sealed class RebacEndpointFilter : IEndpointFilter
                 detail: "Access denied by ReBAC policy.");
         }
 
+        httpContext.Items[$"RebacValidated:{_paramName}"] = objectId;
+
         return await next(context).ConfigureAwait(false);
+    }
+
+    private readonly record struct JsonBodyReadResult(string? Value, bool HasDuplicateProperties);
+
+    /// <summary>
+    /// Top-level string property <paramref name="name"/> (case-insensitive) of a JSON body; returns result indicating
+    /// matched value and whether duplicate properties were detected. The body is rewound for the handler.
+    /// </summary>
+    private static async Task<JsonBodyReadResult> ReadJsonBodyPropertyAsync(HttpRequest request, string name, CancellationToken ct)
+    {
+        if (request.ContentType == null || !request.ContentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+        {
+            return default;
+        }
+
+        request.EnableBuffering();
+        try
+        {
+            using var document = await JsonDocument.ParseAsync(request.Body, cancellationToken: ct).ConfigureAwait(false);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return default;
+            }
+
+            string? matchedValue = null;
+            var seenProperties = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (!seenProperties.Add(property.Name))
+                {
+                    return new JsonBodyReadResult(null, HasDuplicateProperties: true);
+                }
+
+                if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind == JsonValueKind.String)
+                {
+                    matchedValue = property.Value.GetString();
+                }
+            }
+
+            return new JsonBodyReadResult(matchedValue, HasDuplicateProperties: false);
+        }
+        catch (JsonException)
+        {
+            return default;
+        }
+        finally
+        {
+            request.Body.Position = 0;
+        }
     }
 }
 

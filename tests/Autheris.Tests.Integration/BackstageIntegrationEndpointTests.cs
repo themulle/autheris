@@ -20,7 +20,7 @@ public class BackstageIntegrationEndpointTests : IClassFixture<WebApplicationFac
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
-            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", "Data Source=:memory:;Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.UseSetting("Gateway:Backstage:Enabled", "true");
             builder.UseSetting("Gateway:Backstage:DefaultOwner", "group:platform-governance");
             builder.UseSetting("Gateway:Backstage:DefaultSystem", "core-data-plane");

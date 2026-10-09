@@ -45,8 +45,24 @@ public sealed class ODataEndpointsTests
             Arg.Any<string?>(),
             Arg.Any<bool>(),
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
             Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(result));
+
+        handler.ExecuteEntitySetQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(),
+            Arg.Any<string>(),
+            Arg.Any<TableIdentifier>(),
+            Arg.Any<int?>(),
+            Arg.Any<int?>(),
+            Arg.Any<string?>(),
+            Arg.Any<bool>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(result));
+
         return handler;
     }
 
@@ -84,7 +100,7 @@ public sealed class ODataEndpointsTests
         await handler.DidNotReceive().ExecuteEntitySetQueryAsync(
             Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(),
             Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<bool>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Theory]
@@ -105,7 +121,7 @@ public sealed class ODataEndpointsTests
         await handler.DidNotReceive().ExecuteEntitySetQueryAsync(
             Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(),
             Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<bool>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -118,13 +134,15 @@ public sealed class ODataEndpointsTests
 
         await handler.Received().ExecuteEntitySetQueryAsync(
             Arg.Any<ClaimsPrincipal?>(),
-            serviceRootUrl: "http://localhost:8080/odata/v4",
+            serviceRootUrl: Arg.Is("http://localhost:8080/odata/v4"),
             table: Arg.Is<TableIdentifier>(t => t.Domain == "sales" && t.Schema == "dbo" && t.TableName == "invoices"),
-            top: 25,
-            skip: 50,
-            select: null,
-            includeCount: false,
+            top: Arg.Is<int?>(25),
+            skip: Arg.Is<int?>(50),
+            select: Arg.Is<string?>(x => x == null),
+            includeCount: Arg.Is(false),
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            orderBy: Arg.Is<string?>(x => x == null),
+            filter: Arg.Is<string?>(x => x == null),
             Arg.Any<CancellationToken>()
         );
     }
@@ -141,11 +159,13 @@ public sealed class ODataEndpointsTests
             Arg.Any<ClaimsPrincipal?>(),
             Arg.Any<string>(),
             Arg.Any<TableIdentifier>(),
-            top: null,
-            skip: null,
-            select: "id,customer,amount",
-            includeCount: false,
+            top: Arg.Is<int?>(x => x == null),
+            skip: Arg.Is<int?>(x => x == null),
+            select: Arg.Is("id,customer,amount"),
+            includeCount: Arg.Is(false),
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            orderBy: Arg.Is<string?>(x => x == null),
+            filter: Arg.Is<string?>(x => x == null),
             Arg.Any<CancellationToken>()
         );
     }
@@ -171,6 +191,8 @@ public sealed class ODataEndpointsTests
             Arg.Any<string?>(),
             includeCount: expectedCount,
             Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
+            Arg.Any<string?>(),
             Arg.Any<CancellationToken>()
         );
     }
@@ -191,17 +213,15 @@ public sealed class ODataEndpointsTests
         handler.DidNotReceive().ExecuteEntitySetQueryAsync(
             Arg.Any<ClaimsPrincipal?>(), Arg.Any<string>(), Arg.Any<TableIdentifier>(),
             Arg.Any<int?>(), Arg.Any<int?>(), Arg.Any<string?>(), Arg.Any<bool>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>());
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
 
     [Theory]
-    [InlineData("?$filter=amount gt 1000")]
-    [InlineData("?$orderby=ts")]
     [InlineData("?$expand=client")]
     [InlineData("?$search=crane")]
     [InlineData("?$apply=aggregate(ts with max as m)")]
     [InlineData("?$compute=a add b as c")]
     [InlineData("?$skiptoken=abc")]
-    [InlineData("?$FILTER=amount gt 1")]
+    [InlineData("?$deltatoken=abc")]
     public async Task HandleEntitySetRequestAsync_UnsupportedSystemQueryOption_Returns501(string queryString)
     {
         var handler = CreateMockHandler(new ODataQueryResult(true, 200, new object()));
@@ -248,6 +268,7 @@ public sealed class ODataEndpointsTests
     [Theory]
     [InlineData(StatusCodes.Status429TooManyRequests, "TooManyRequests", 2)]
     [InlineData(StatusCodes.Status503ServiceUnavailable, "ServiceUnavailable", 5)]
+    [InlineData(StatusCodes.Status504GatewayTimeout, "ExecutionTimeout", 5)]
     public async Task HandleEntitySetRequestAsync_RetryAfter_IsSetFromHandlerResult(int statusCode, string errorCode, int retryAfter)
     {
         var context = CreateHttpContext();
@@ -278,6 +299,8 @@ public sealed class ODataEndpointsTests
             Arg.Any<string?>(),
             Arg.Any<bool>(),
             headers: Arg.Is<IReadOnlyDictionary<string, string[]>?>(h => h != null && h.ContainsKey("X-Custom-Tenant") && h["X-Custom-Tenant"].Contains("tenant_123")),
+            Arg.Any<string?>(),
+            Arg.Any<string?>(),
             Arg.Any<CancellationToken>()
         );
     }
@@ -382,4 +405,140 @@ public sealed class ODataEndpointsTests
         ODataEndpoints.IsOpenApiAdmin(anonymous).ShouldBeFalse();
         ODataEndpoints.IsOpenApiAdmin(null).ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task HandleFlatEntitySetRequestAsync_ResolvesEntitySetName_AndExecutesQuery()
+    {
+        var context = CreateHttpContext(path: "/odata/v4/sales_dbo_invoices");
+        var table = new Autheris.Domain.Model.TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "dbo", "invoices"),
+            Table = new Autheris.Domain.Model.Table { SchemaName = "dbo", TableName = "invoices" }
+        };
+
+        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table]));
+
+        var rows = new List<IReadOnlyDictionary<string, object?>> { new Dictionary<string, object?> { ["id"] = 1 } };
+        var payload = ODataResponseFormatter.FormatEntitySetResponse("http://localhost:8080/odata/v4", table.Identifier, rows);
+        var handler = CreateMockHandler(new ODataQueryResult(true, StatusCodes.Status200OK, payload));
+
+        var result = await ODataEndpoints.HandleFlatEntitySetRequestAsync(
+            "sales_dbo_invoices",
+            handler,
+            metadataRepo,
+            context
+        );
+
+        result.ShouldBeOfType<JsonHttpResult<object>>();
+        await handler.Received(1).ExecuteEntitySetQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(),
+            "http://localhost:8080/odata/v4",
+            Arg.Is<TableIdentifier>(t => t.Domain == "sales" && t.Schema == "dbo" && t.TableName == "invoices"),
+            Arg.Any<int?>(),
+            Arg.Any<int?>(),
+            Arg.Any<string?>(),
+            Arg.Any<bool>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>()
+        );
+    }
+
+    [Fact]
+    public async Task HandleFlatEntitySetRequestAsync_WhenNotFound_Returns404()
+    {
+        var context = CreateHttpContext(path: "/odata/v4/unknown_table");
+        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([]));
+
+        var handler = CreateMockHandler(new ODataQueryResult(true, StatusCodes.Status200OK, new { }));
+
+        var result = await ODataEndpoints.HandleFlatEntitySetRequestAsync(
+            "unknown_table",
+            handler,
+            metadataRepo,
+            context
+        );
+
+        var notFound = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        notFound.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+    }
+
+    [Fact]
+    public async Task HandleFlatEntitySetRequestAsync_WhenEntitySetBelongsToDifferentTenant_Returns404NotFound()
+    {
+        // SR15-31: User is in tenant "sales", but entity set belongs to tenant "finance"
+        var context = CreateHttpContext(path: "/odata/v4/finance_dbo_invoices");
+        var table = new Autheris.Domain.Model.TableMetadata
+        {
+            Identifier = new TableIdentifier("finance", "dbo", "invoices"),
+            Table = new Autheris.Domain.Model.Table { SchemaName = "dbo", TableName = "invoices" }
+        };
+
+        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table]));
+
+        var handler = CreateMockHandler(new ODataQueryResult(true, StatusCodes.Status200OK, new { }));
+
+        var result = await ODataEndpoints.HandleFlatEntitySetRequestAsync(
+            "finance_dbo_invoices",
+            handler,
+            metadataRepo,
+            context
+        );
+
+        var notFound = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        notFound.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+        await handler.DidNotReceive().ExecuteEntitySetQueryAsync(
+            Arg.Any<ClaimsPrincipal?>(),
+            Arg.Any<string>(),
+            Arg.Any<TableIdentifier>(),
+            Arg.Any<int?>(),
+            Arg.Any<int?>(),
+            Arg.Any<string?>(),
+            Arg.Any<bool>(),
+            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<string?>(),
+            Arg.Any<string?>(),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task HandleFlatEntitySetRequestAsync_WhenEntityNameIsAmbiguousWithinTenant_Returns404NotFound()
+    {
+        // SR15-31: Ambiguous match within tenant returns 404
+        var context = CreateHttpContext(path: "/odata/v4/sales_invoices");
+        var table1 = new Autheris.Domain.Model.TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "dbo", "invoices"),
+            Table = new Autheris.Domain.Model.Table { SchemaName = "dbo", TableName = "invoices" }
+        };
+        var table2 = new Autheris.Domain.Model.TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "archive", "invoices"),
+            Table = new Autheris.Domain.Model.Table { SchemaName = "archive", TableName = "invoices" }
+        };
+
+        var metadataRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Autheris.Domain.Model.TableMetadata>>([table1, table2]));
+
+        var handler = CreateMockHandler(new ODataQueryResult(true, StatusCodes.Status200OK, new { }));
+
+        var result = await ODataEndpoints.HandleFlatEntitySetRequestAsync(
+            "sales_invoices",
+            handler,
+            metadataRepo,
+            context
+        );
+
+        var notFound = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
+        notFound.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+    }
 }
+

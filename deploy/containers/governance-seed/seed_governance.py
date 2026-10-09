@@ -801,11 +801,87 @@ def seed_governance_data(conn):
         VALUES (?, ?, NULL, 'Deny', 'User', 'S-1-5-21-FORWARD-USER_BLOCKED', NULL, NULL, ?, ?, 0)
     """, (cid_lake_blk, lake_tid, now_iso, far_future_iso))
 
+    # User David: Demo / PoC consent guarded by ENABLE_DEMO_GOVERNANCE_SEED=true
+    enable_demo_gov = os.environ.get("ENABLE_DEMO_GOVERNANCE_SEED", "false").lower() == "true"
+    env_name = os.environ.get("ASPNETCORE_ENVIRONMENT", os.environ.get("ENVIRONMENT", "Production")).lower()
+    is_prod = env_name in ["production", "prod"]
+
+    if enable_demo_gov:
+        if is_prod:
+            print("[governance-seed] WARNING: ENABLE_DEMO_GOVERNANCE_SEED is ignored in Production environment.")
+        else:
+            print("[governance-seed] Seeding demo consent for user David (ENABLE_DEMO_GOVERNANCE_SEED=true)...")
+            cid_lake_david = str(uuid.uuid5(uuid.UUID(lake_tid), "consent-lake-david-user"))
+            cur.execute("""
+                INSERT OR REPLACE INTO CONSENTS
+                (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, role_id, role_name, valid_from, valid_to, is_revoked)
+                VALUES (?, ?, NULL, 'Allow', 'User', 'S-1-5-21-LWE-DAVID', NULL, NULL, ?, ?, 0)
+            """, (cid_lake_david, lake_tid, now_iso, far_future_iso))
+            for cname in ["customerEmail", "orderId", "tenantId", "amount", "orderDate"]:
+                cur.execute("""
+                    INSERT OR REPLACE INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
+                    VALUES (?, ?, ?, ?, 2)
+                """, (str(uuid.uuid4()), cid_lake_david, col_id_map[(lake_tid, cname)], cname))
+    else:
+        print("[governance-seed] Demo consent for user David skipped (set ENABLE_DEMO_GOVERNANCE_SEED=true in Development to enable).")
+
     conn.commit()
+
+def send_redis_cmd(sock, *args):
+    cmd = f"*{len(args)}\r\n"
+    for arg in args:
+        b = str(arg).encode('utf-8')
+        cmd += f"${len(b)}\r\n{str(arg)}\r\n"
+    sock.sendall(cmd.encode('utf-8'))
+    return sock.recv(4096)
+
+def seed_rebac_redis():
+    enable_demo_rebac = os.environ.get("ENABLE_DEMO_REBAC_SEED", "false").lower() == "true"
+    env_name = os.environ.get("ASPNETCORE_ENVIRONMENT", os.environ.get("ENVIRONMENT", "Production")).lower()
+    is_prod = env_name in ["production", "prod"]
+
+    if not enable_demo_rebac:
+        print("[governance-seed] Demo ReBAC Redis seeding is disabled by default (set ENABLE_DEMO_REBAC_SEED=true to enable).")
+        return
+
+    if is_prod:
+        print("[governance-seed] WARNING: Demo ReBAC Redis seeding is disabled in Production environment.")
+        return
+
+    redis_host = os.environ.get("REDIS_HOST", "redis")
+    redis_port = int(os.environ.get("REDIS_PORT", "6379"))
+    redis_pass = os.environ.get("REDIS_PASSWORD", "")
+
+    try:
+        import socket
+        s = socket.create_connection((redis_host, redis_port), timeout=3)
+        if redis_pass:
+            send_redis_cmd(s, "AUTH", redis_pass)
+
+        tuples = [
+            ("default", "user:david", "viewer", "table:lakehouse.dbo.orders"),
+            ("default", "S-1-5-21-LWE-DAVID", "viewer", "table:lakehouse.dbo.orders"),
+            ("default", "user:david", "viewer", "table:sales.public.orders"),
+            ("default", "S-1-5-21-LWE-DAVID", "viewer", "table:sales.public.orders"),
+            ("tenant_lwe", "user:david", "viewer", "table:lakehouse.dbo.orders"),
+            ("tenant_lwe", "S-1-5-21-LWE-DAVID", "viewer", "table:lakehouse.dbo.orders")
+        ]
+
+        for tenant, user, rel, obj in tuples:
+            key = f"autheris:rebac:{tenant}:tuples"
+            field = f"{user}#{rel}@{obj}"
+            val = json.dumps({"TenantId": tenant, "User": user, "Relation": rel, "Object": obj})
+            send_redis_cmd(s, "HSET", key, field, val)
+
+        s.close()
+        print(f"[governance-seed] Successfully seeded ReBAC tuples into Redis at {redis_host}:{redis_port}")
+    except Exception as e:
+        print(f"[governance-seed] Optional Redis ReBAC seeding skipped: {e}")
 
 if __name__ == "__main__":
     db_file = get_db_path()
     init_governance_db(db_file)
+    seed_rebac_redis()
     try:
         os.chmod(db_file, 0o660)
         hr_file = os.environ.get("HR_DB_PATH", "/data/hr.db")

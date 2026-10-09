@@ -28,5 +28,19 @@ public interface IODataHandler
         string? select,
         bool includeCount,
         IReadOnlyDictionary<string, string[]>? headers,
+        string? orderBy = null,
+        CancellationToken ct = default);
+
+    Task<ODataQueryResult> ExecuteEntitySetQueryAsync(
+        ClaimsPrincipal? principal,
+        string serviceRootUrl,
+        TableIdentifier table,
+        int? top,
+        int? skip,
+        string? select,
+        bool includeCount,
+        IReadOnlyDictionary<string, string[]>? headers,
+        string? orderBy,
+        string? filter,
         CancellationToken ct = default);
 }

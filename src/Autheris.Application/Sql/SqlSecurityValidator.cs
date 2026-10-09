@@ -36,21 +36,44 @@ public static partial class SqlSecurityValidator
     /// Validates a SQL predicate or filter expression to ensure it is free from SQL injection,
     /// statement terminators, comment breakouts, and unbalanced syntax using grammar-level AST parsing.
     /// </summary>
+    /// <summary>Maximum length of a row filter predicate.</summary>
+    public const int MaxPredicateLength = 2000;
+
+    /// <summary>
+    /// Maximum length when the row filter contains gateway-generated virtual filter predicates (decision 9): several
+    /// bindings on one object easily exceed <see cref="MaxPredicateLength"/>.
+    /// </summary>
+    public const int MaxPredicateLengthWithVirtualFilters = 8000;
+
     public static void ValidatePredicateSql(string? predicate, string fieldName)
         => ValidatePredicateSql(predicate, fieldName, allowSubqueries: true);
+
+    /// <summary>The length limit that applies to the row filter of <paramref name="decision"/>.</summary>
+    public static int MaxLengthFor(TableAccessDecision? decision) =>
+        decision?.MandatoryRowPredicateSql != null ? MaxPredicateLengthWithVirtualFilters : MaxPredicateLength;
+
+    /// <summary>Validates the combined row filter of <paramref name="decision"/> with the length limit that applies to it.</summary>
+    public static void ValidateRowFilter(TableAccessDecision decision, string fieldName = "CombinedRowFilterSql")
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        ValidatePredicateSql(decision.CombinedRowFilterSql, fieldName, allowSubqueries: true, MaxLengthFor(decision));
+    }
 
     /// <summary>
     /// RR-L5-03: Same as <see cref="ValidatePredicateSql(string?, string)"/>; with <paramref name="allowSubqueries"/> = false
     /// any nested query (EXISTS / IN (SELECT ...) / scalar subquery) is rejected, so a filter can never probe other tables.
     /// </summary>
     public static void ValidatePredicateSql(string? predicate, string fieldName, bool allowSubqueries)
+        => ValidatePredicateSql(predicate, fieldName, allowSubqueries, MaxPredicateLength);
+
+    public static void ValidatePredicateSql(string? predicate, string fieldName, bool allowSubqueries, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(predicate))
         {
             return;
         }
 
-        var cacheKey = (allowSubqueries ? "S:" : "N:") + predicate;
+        var cacheKey = (allowSubqueries ? "S:" : "N:") + maxLength.ToString(System.Globalization.CultureInfo.InvariantCulture) + ":" + predicate;
 
         // Fast-path: Return immediately if already verified safe in hot-cache
         if (ValidatedPredicatesCache.ContainsKey(cacheKey))
@@ -58,9 +81,9 @@ public static partial class SqlSecurityValidator
             return;
         }
 
-        if (predicate.Length > 2000)
+        if (predicate.Length > maxLength)
         {
-            throw new ArgumentException($"SQL predicate in '{fieldName}' exceeds maximum allowed length of 2000 characters.", fieldName);
+            throw new ArgumentException($"SQL predicate in '{fieldName}' exceeds maximum allowed length of {maxLength} characters.", fieldName);
         }
 
         if (predicate.Contains('\0'))

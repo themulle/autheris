@@ -76,6 +76,7 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
         // (such as "region <> 'US'") evaluate against raw, unmasked values instead of "REDACTED" / "0".
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {
+            Autheris.Application.Services.GatewayExecutionService.EnsureInMemoryFilterIsEnforceable(context.AccessDecision);
             rawRows = Autheris.Application.Services.GatewayExecutionService.FilterRows(
                 rawRows,
                 context.AccessDecision.CombinedRowFilterSql,

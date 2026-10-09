@@ -145,6 +145,8 @@ public class ReadOnlyTokenTests
     [InlineData("POST", "/mcp", true)]
     [InlineData("POST", "/api/v1/sql", true)]
     [InlineData("POST", "/api/v1/queries/open_invoices", true)]
+    [InlineData("POST", "/api/v1/queries", false)]
+    [InlineData("POST", "/api/v1/queries/", false)]
     [InlineData("GET", "/api/governance/sunsetting/rules", true)]
     public async Task ReadOnlyToken_HttpRequest_IsLimitedToQueryEndpoints(string method, string path, bool expectedPassed)
     {
