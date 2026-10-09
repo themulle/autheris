@@ -442,6 +442,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapSchemaRegistryEndpoints();
         app.MapBackstageEndpoints(gatewayOptions);
         app.MapHitLEndpoints();
+        app.MapGovernanceApiEndpoints();
         app.MapTokenRevocationEndpoints(); // SEC M-14 (GAP-B)
         app.MapFinOpsEndpoints();
         app.MapRebacEndpoints();
