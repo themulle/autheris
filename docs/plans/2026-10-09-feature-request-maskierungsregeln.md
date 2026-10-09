@@ -8,7 +8,7 @@ Die Governance der Liebherr-Daten kennt neun standardisierte Maskierungsregeln. 
 | Regel im Vokabular | Bedeutung | In Autheris | Wirkung im PoC heute | Spalten im PoC |
 |---|---|---|---|---|
 | `none` | Klartext | (keine Regel) | – | 1 432 |
-| `nulling` | durch NULL ersetzen | `NULLIFY` ✔ | NULL | in `ud.customer_geo_*` u. a. |
+| `nulling` | durch NULL ersetzen | `NULLIFY` ✔ | NULL | 0 |
 | `pseudonymize` | Hash mit geheimem Schlüssel | `HMAC` / `HMAC_SHA256` ✔ | Hash | 9 |
 | `email_mask` | `j***n@domain.com` | `MASK_EMAIL` ✔ | maskiert | 1 |
 | `phone_mask` | `+49 171 ******89` | `MASK_PHONE` ✔ | maskiert | 0 |
