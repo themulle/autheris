@@ -50,21 +50,31 @@ public sealed class CasbinStartupValidationTests
     }
 
     [Fact]
-    public void Casbin_Enabled_With_Missing_ModelPath_Throws_InvalidOperationException()
+    public void Casbin_Enabled_With_Missing_ModelPath_Uses_Embedded_Default_Model()
     {
-        var options = new GatewayOptions
+        var tempPolicy = Path.GetTempFileName();
+        try
         {
-            Casbin = new CasbinOptions
-            {
-                Enabled = true,
-                ModelPath = null,
-                PolicyPath = "dummy.csv"
-            }
-        };
+            File.WriteAllText(tempPolicy, "p, admin, domain1, data1, read, allow, (true)\n");
 
-        var provider = BuildProvider(options);
-        var ex = Should.Throw<InvalidOperationException>(() => provider.GetRequiredService<IPolicyEnforcementService>());
-        ex.Message.ShouldContain("ModelPath is not configured");
+            var options = new GatewayOptions
+            {
+                Casbin = new CasbinOptions
+                {
+                    Enabled = true,
+                    ModelPath = null,
+                    PolicyPath = tempPolicy
+                }
+            };
+
+            var provider = BuildProvider(options);
+            var service = provider.GetRequiredService<IPolicyEnforcementService>();
+            service.ShouldNotBeNull();
+        }
+        finally
+        {
+            if (File.Exists(tempPolicy)) File.Delete(tempPolicy);
+        }
     }
 
     [Fact]
@@ -91,7 +101,7 @@ public sealed class CasbinStartupValidationTests
         var tempModel = Path.GetTempFileName();
         try
         {
-            File.WriteAllText(tempModel, "[request_definition]\nr = sub, dom, obj, act\n[policy_definition]\np = sub, dom, obj, act\n[policy_effect]\ne = some(where (p.eft == allow))\n[matchers]\nm = r.sub == p.sub");
+            File.WriteAllText(tempModel, Autheris.Application.Governance.CasbinEnforcementService.DefaultModelText);
 
             var options = new GatewayOptions
             {
@@ -119,7 +129,7 @@ public sealed class CasbinStartupValidationTests
         var tempModel = Path.GetTempFileName();
         try
         {
-            File.WriteAllText(tempModel, "[request_definition]\nr = sub, dom, obj, act\n[policy_definition]\np = sub, dom, obj, act\n[policy_effect]\ne = some(where (p.eft == allow))\n[matchers]\nm = r.sub == p.sub");
+            File.WriteAllText(tempModel, Autheris.Application.Governance.CasbinEnforcementService.DefaultModelText);
 
             var options = new GatewayOptions
             {

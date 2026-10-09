@@ -7,6 +7,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
@@ -41,7 +42,8 @@ public sealed record TableAccessQuery(
     IPAddress? ClientIp = null,
     IReadOnlyDictionary<string, object?>? ExtraAttributes = null,
     FilterObjectKinds ObjectKind = FilterObjectKinds.Relation,
-    IReadOnlySet<Sid>? AllUserSids = null)
+    IReadOnlySet<Sid>? AllUserSids = null,
+    SchemaContractDefinition? Contract = null)
 {
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,
@@ -50,7 +52,8 @@ public sealed record TableAccessQuery(
         TableMetadata metadata,
         IReadOnlyList<string>? requestedColumns = null,
         RebacEnforcement rebac = RebacEnforcement.QueryPaths,
-        IReadOnlyDictionary<string, object?>? extraAttributes = null)
+        IReadOnlyDictionary<string, object?>? extraAttributes = null,
+        SchemaContractDefinition? contract = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
         return new TableAccessQuery(
@@ -64,7 +67,8 @@ public sealed record TableAccessQuery(
             rebac,
             ClientIp: null,
             extraAttributes,
-            AllUserSids: principal.GetAllUserSids());
+            AllUserSids: principal.GetAllUserSids(),
+            Contract: contract);
     }
 }
 
@@ -92,6 +96,7 @@ public sealed class TableAccessPolicy
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly GatewayOptions? _options;
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
+    private readonly ISchemaContractManager? _contractManager;
 
     /// <param name="mandatoryFilters">
     /// Virtual filters; required on purpose: a decision point without it would silently skip them. Use
@@ -105,7 +110,8 @@ public sealed class TableAccessPolicy
         IRebacEvaluator? rebacEvaluator,
         IClientIpResolver? clientIpResolver,
         GatewayOptions? options,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver mandatoryFilters)
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver mandatoryFilters,
+        ISchemaContractManager? contractManager = null)
     {
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -115,12 +121,50 @@ public sealed class TableAccessPolicy
         _rebacEvaluator = rebacEvaluator;
         _clientIpResolver = clientIpResolver;
         _options = options;
+        _contractManager = contractManager;
     }
 
     public async Task<TableAccessDecision> DecideAsync(TableAccessQuery query, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(query);
         var table = query.Metadata.Identifier;
+
+        // SR15-51: Enforce schema contracts at query execution time
+        var contract = query.Contract;
+        if (contract == null && _contractManager != null && _contractManager.IsEnabled)
+        {
+            var claimContract = query.Claims?.FirstOrDefault(c => string.Equals(c.Type, "contract", StringComparison.OrdinalIgnoreCase))?.Value?.Trim();
+            var contractName = !string.IsNullOrWhiteSpace(claimContract) ? claimContract : _contractManager.DefaultContract;
+            if (!string.IsNullOrWhiteSpace(contractName) && _contractManager.HasContract(contractName))
+            {
+                contract = _contractManager.GetContract(contractName);
+            }
+        }
+
+        if (contract != null)
+        {
+            if (contract.AllowedTables.Count > 0 &&
+                !contract.AllowedTables.Contains(table.TableName) &&
+                !contract.AllowedTables.Contains(table.ToQualifiedName()))
+            {
+                return TableAccessDecision.Denied(table,
+                    $"Schema Contract Denial: Table '{table.ToQualifiedName()}' is not permitted under contract '{contract.Name}'.");
+            }
+
+            if (contract.ExcludedTags.Count > 0 &&
+                contract.ExcludedTags.Contains(query.Metadata.Table.Sensitivity))
+            {
+                return TableAccessDecision.Denied(table,
+                    $"Schema Contract Denial: Table '{table.ToQualifiedName()}' with tag '{query.Metadata.Table.Sensitivity}' is excluded under contract '{contract.Name}'.");
+            }
+
+            if (contract.IncludedTags.Count > 0 &&
+                !contract.IncludedTags.Contains(query.Metadata.Table.Sensitivity))
+            {
+                return TableAccessDecision.Denied(table,
+                    $"Schema Contract Denial: Table '{table.ToQualifiedName()}' with tag '{query.Metadata.Table.Sensitivity}' is not in included tags under contract '{contract.Name}'.");
+            }
+        }
 
         if (await IsRebacDeniedAsync(query, ct).ConfigureAwait(false))
         {
@@ -170,6 +214,7 @@ public sealed class TableAccessPolicy
         ClaimsPrincipal user,
         TenantId tenant,
         TableMetadata metadata,
+        SchemaContractDefinition? contract = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
@@ -185,7 +230,8 @@ public sealed class TableAccessPolicy
             {
                 ["gql.action"] = "write",
                 ["action"] = "write"
-            });
+            },
+            contract: contract);
 
         var decision = await DecideAsync(query, ct).ConfigureAwait(false);
         return decision.IsAllowed;
@@ -198,12 +244,13 @@ public sealed class TableAccessPolicy
         ClaimsPrincipal user,
         TenantId tenant,
         TableIdentifier table,
+        SchemaContractDefinition? contract = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
 
         var metadata = new TableMetadata { Identifier = table };
-        return CanWriteTableAsync(user, tenant, metadata, ct);
+        return CanWriteTableAsync(user, tenant, metadata, contract, ct);
     }
 
     /// <summary>

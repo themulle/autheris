@@ -154,4 +154,62 @@ public sealed class TableWritePermissionTests
         var canWriteAfterGrant = await tableAccessPolicy.CanWriteTableAsync(user, TenantA, tableMeta);
         canWriteAfterGrant.ShouldBeTrue();
     }
+
+    [Fact]
+    public async Task TableAccessPolicy_CanWriteTableAsync_WithContract_EnforcesAllowedTables()
+    {
+        using var casbin = new CasbinEnforcementService();
+        casbin.AddPolicy(TenantA, AliceSid.Value, OrdersTable.ToString(), "write", "true", "allow");
+
+        var consentRepo = Substitute.For<IConsentRepository>();
+        var allowConsent = new Consent
+        {
+            TableIdentifier = OrdersTable,
+            TenantId = TenantA,
+            GranteeType = GranteeType.User,
+            GranteeSid = AliceSid,
+            Effect = ConsentEffect.Allow,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+        };
+        consentRepo.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(ci => Task.FromResult<IReadOnlyList<Consent>>(new[] { allowConsent }));
+
+        var tableAccessPolicy = new TableAccessPolicy(
+            consentRepo,
+            new ConsentResolutionService(),
+            cacheService: null,
+            policyEnforcementService: casbin,
+            rebacEvaluator: null,
+            clientIpResolver: null,
+            options: new GatewayOptions(),
+            mandatoryFilters: NullMandatoryRowFilterResolver.Instance);
+
+        var identity = new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.PrimarySid, AliceSid.Value),
+            new Claim("sub", AliceSid.Value)
+        }, "TestAuth");
+        var user = new ClaimsPrincipal(identity);
+
+        var tableMeta = new TableMetadata
+        {
+            Identifier = OrdersTable,
+            Table = new Table { TableName = "orders", SchemaName = "dbo" },
+            Columns = new[]
+            {
+                new TableColumn { ColumnName = "id", DataType = "int" }
+            }
+        };
+
+        // When contract allows only "customers"
+        var contractExcluding = new Autheris.Application.Governance.Contracts.SchemaContractDefinition("partner", allowedTables: ["customers"]);
+        var canWriteDisallowed = await tableAccessPolicy.CanWriteTableAsync(user, TenantA, tableMeta, contractExcluding, default);
+        canWriteDisallowed.ShouldBeFalse();
+
+        // When contract allows "orders"
+        var contractAllowing = new Autheris.Application.Governance.Contracts.SchemaContractDefinition("partner", allowedTables: ["orders"]);
+        var canWriteAllowed = await tableAccessPolicy.CanWriteTableAsync(user, TenantA, tableMeta, contractAllowing, default);
+        canWriteAllowed.ShouldBeTrue();
+    }
 }

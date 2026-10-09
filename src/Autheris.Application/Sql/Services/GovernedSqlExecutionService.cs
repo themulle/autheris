@@ -70,6 +70,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly ITableReadConcurrencyGate? _concurrencyGate;
     private readonly IDbSessionContextInitializer _sessionInitializer;
+    private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
 
     private const int ThrottledRetryAfterSeconds = 2;
 
@@ -95,8 +96,10 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
         IDbSessionContextInitializer? sessionInitializer = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         IConsentCacheService? consentCache = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null)
     {
+        _contractManager = contractManager;
         _mandatoryFilters = mandatoryFilters;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _policyEnforcement = policyEnforcement;
@@ -557,6 +560,16 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
             {
                 _logger?.LogWarning("WebSQL access to table {Table} denied: {Reasons}", target.FullName, string.Join("; ", decision.DeniedReasons));
                 throw TableDenied(target);
+            }
+
+            if (isDml)
+            {
+                var canWrite = await AccessPolicy().CanWriteTableAsync(user, tenantId, tableMeta, ct: ct).ConfigureAwait(false);
+                if (!canWrite)
+                {
+                    _logger?.LogWarning("WebSQL DML write access to table {Table} denied.", target.FullName);
+                    throw TableDenied(target);
+                }
             }
 
             // Row-level security: tenant isolation (defense in depth) AND consent/ABAC row filters
@@ -1458,7 +1471,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
 
     private TableAccessPolicy AccessPolicy() =>
         new(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value,
-            _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
+            _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+            _contractManager);
 
     /// <summary>
     /// SEC P-05: Dialect of the configured connection for <paramref name="dataSourceName"/>, or null when no connection

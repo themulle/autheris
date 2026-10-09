@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -40,10 +41,10 @@ public sealed class WebSqlTwoPartNameDataSourceTests
             ],
             "Test"));
 
-    private static TableMetadata CreateTable(TableIdentifier id) => new()
+    private static TableMetadata CreateTable(TableIdentifier id, string? sourceName = null) => new()
     {
         Identifier = id,
-        Table = new Table { TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql" },
+        Table = new Table { TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = sourceName ?? string.Empty },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "int" },
@@ -58,23 +59,38 @@ public sealed class WebSqlTwoPartNameDataSourceTests
         return (service, repo);
     }
 
+    private static (GovernedSqlExecutionService Service, ITableMetadataRepository Repository) CreateService(params TableMetadata[] catalogued)
+    {
+        var (service, repo, _) = CreateServiceWithCommand(catalogued);
+        return (service, repo);
+    }
+
     internal static (GovernedSqlExecutionService Service, ITableMetadataRepository Repository, DbCommand Command) CreateServiceWithCommand(params TableIdentifier[] catalogued) =>
+        CreateServiceWithCommand(null, null, catalogued.Select(id => CreateTable(id)).ToArray());
+
+    internal static (GovernedSqlExecutionService Service, ITableMetadataRepository Repository, DbCommand Command) CreateServiceWithCommand(params TableMetadata[] catalogued) =>
         CreateServiceWithCommand(null, null, catalogued);
 
     internal static (GovernedSqlExecutionService Service, ITableMetadataRepository Repository, DbCommand Command) CreateServiceWithCommand(
         IAuditLogRepository? audit,
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters,
-        params TableIdentifier[] catalogued)
+        params TableIdentifier[] catalogued) =>
+        CreateServiceWithCommand(audit, mandatoryFilters, catalogued.Select(id => CreateTable(id)).ToArray());
+
+    internal static (GovernedSqlExecutionService Service, ITableMetadataRepository Repository, DbCommand Command) CreateServiceWithCommand(
+        IAuditLogRepository? audit,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters,
+        params TableMetadata[] catalogued)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
                 var requested = ci.ArgAt<TableIdentifier>(0);
-                foreach (var id in catalogued)
+                foreach (var meta in catalogued)
                 {
-                    if (id.Equals(requested))
-                        return Task.FromResult<TableMetadata?>(CreateTable(id));
+                    if (meta.Identifier.Equals(requested))
+                        return Task.FromResult<TableMetadata?>(meta);
                 }
 
                 return Task.FromResult<TableMetadata?>(null);
@@ -177,7 +193,7 @@ public sealed class WebSqlTwoPartNameDataSourceTests
     public async Task TwoPartName_WithDataSource_FallsBackToDefaultDomain()
     {
         var defaultId = new TableIdentifier("default", "md", "crane");
-        var (service, repo) = CreateService(defaultId);
+        var (service, repo) = CreateService(CreateTable(defaultId, sourceName: DataSource));
 
         var result = await service.ExecuteQueryBufferedAsync(
             new GovernedSqlQueryRequest("SELECT id, name FROM md.crane", null, DataSource), CreateUser(), new TenantId(Tenant));
@@ -185,5 +201,17 @@ public sealed class WebSqlTwoPartNameDataSourceTests
         result.ShouldNotBeNull();
         await repo.Received().GetTableMetadataAsync(CraneId, Arg.Any<CancellationToken>());
         await repo.Received().GetTableMetadataAsync(defaultId, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TwoPartName_WithDataSource_FallsBackToDefaultDomain_WithoutMatchingSourceName_IsDenied()
+    {
+        var defaultId = new TableIdentifier("default", "md", "crane");
+        var (service, _) = CreateService(CreateTable(defaultId, sourceName: null));
+
+        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => service.ExecuteQueryBufferedAsync(
+            new GovernedSqlQueryRequest("SELECT id, name FROM md.crane", null, DataSource), CreateUser(), new TenantId(Tenant)));
+
+        ex.Message.ShouldContain("is denied or the table is not registered");
     }
 }

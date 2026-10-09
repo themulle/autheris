@@ -65,8 +65,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         Autheris.Application.Connectors.IAutherisConnectorRegistry? connectorRegistry = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null)
     {
+        _contractManager = contractManager;
         _mandatoryFilters = mandatoryFilters;
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
@@ -559,10 +561,12 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     }
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
+    private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
 
     private TableAccessPolicy AccessPolicy() =>
         new(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, _clientIpResolver, _options,
-            _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
+            _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+            _contractManager);
 
     /// <summary>
     /// Virtual filters: an in-memory row filter cannot evaluate their subqueries (it would return nothing and look like
