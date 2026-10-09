@@ -3,6 +3,7 @@ namespace Autheris.Domain.Model;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Autheris.Domain.Common;
 
 /// <summary>F-SQL-02: Execution mode of a governed stored procedure.</summary>
 public enum ProcedureMode
@@ -121,6 +122,12 @@ public sealed record ProcedureDefinition(
     /// </summary>
     public IReadOnlyList<string> ReferencedTables { get; init; } = [];
 
+    public TableIdentifier? ResultTableIdentifier =>
+        ResultTable == null ? null : (TableIdentifier.TryParse(CatalogDomain + "." + ResultTable, out var id) ? id : (TableIdentifier.TryParse(ResultTable, out var direct) ? direct : null));
+
+    public IReadOnlyList<TableIdentifier> ReferencedTableIdentifiers =>
+        ReferencedTables.Select(t => TableIdentifier.TryParse(CatalogDomain + "." + t, out var id) ? id : (TableIdentifier.TryParse(t, out var direct) ? direct : new TableIdentifier(CatalogDomain, "dbo", t))).ToList();
+
     /// <summary>
     /// Optional SHA-256 hash of the procedure DDL/header for schema drift prevention.
     /// </summary>
@@ -167,7 +174,13 @@ public sealed record ProcedureValidationResult(
 /// SEC D-2: source of a result column as reported by <c>sys.dm_exec_describe_first_result_set_for_object(@id, 1)</c> (browse mode).
 /// Table/Column are null for computed or ambiguous columns.
 /// </summary>
-public sealed record ResultColumnSource(string? Schema, string? Table, string? Column);
+public sealed record ResultColumnSource(string? Schema, string? Table, string? Column)
+{
+    public TableIdentifier? ToTableIdentifier(string defaultDomain = "default") =>
+        !string.IsNullOrWhiteSpace(Table)
+            ? new TableIdentifier(defaultDomain, Schema ?? "dbo", Table)
+            : null;
+}
 
 /// <summary>A procedure together with its runtime validation state.</summary>
 public sealed record RegisteredProcedure(

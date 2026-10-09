@@ -143,6 +143,24 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         return visible;
     }
 
+    public ValueTask<IcebergLoadTableResponse> LoadTableAsync(
+        string tenantId,
+        TableIdentifier table,
+        ClaimsPrincipal principal,
+        CancellationToken ct = default)
+    {
+        return LoadTableAsync(tenantId, table.Schema, table.TableName, principal, ct);
+    }
+
+    public ValueTask<VendedStorageCredential> VendCredentialAsync(
+        string tenantId,
+        TableIdentifier table,
+        ClaimsPrincipal principal,
+        CancellationToken ct = default)
+    {
+        return VendCredentialAsync(tenantId, table.Schema, table.TableName, principal, ct);
+    }
+
     public async ValueTask<IcebergLoadTableResponse> LoadTableAsync(
         string tenantId,
         string @namespace,

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
@@ -14,5 +15,7 @@ public interface IIcebergRestCatalogFederationService
     ValueTask<IReadOnlyList<string>> ListNamespacesAsync(string tenantId, ClaimsPrincipal principal, CancellationToken ct = default);
     ValueTask<IReadOnlyList<string>> ListTablesAsync(string tenantId, string @namespace, ClaimsPrincipal principal, CancellationToken ct = default);
     ValueTask<IcebergLoadTableResponse> LoadTableAsync(string tenantId, string @namespace, string table, ClaimsPrincipal principal, CancellationToken ct = default);
+    ValueTask<IcebergLoadTableResponse> LoadTableAsync(string tenantId, TableIdentifier table, ClaimsPrincipal principal, CancellationToken ct = default);
     ValueTask<VendedStorageCredential> VendCredentialAsync(string tenantId, string @namespace, string table, ClaimsPrincipal principal, CancellationToken ct = default);
+    ValueTask<VendedStorageCredential> VendCredentialAsync(string tenantId, TableIdentifier table, ClaimsPrincipal principal, CancellationToken ct = default);
 }
