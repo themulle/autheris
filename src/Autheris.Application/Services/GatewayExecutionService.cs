@@ -956,8 +956,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         if (!decision.IsAllowed)
         {
             LastDispatchedChildQueryCount = 0;
-            return invoiceIds?.Distinct().ToDictionary(id => id, _ => new List<InvoiceItemRecord>())
-                   ?? new Dictionary<string, List<InvoiceItemRecord>>();
+            return new Dictionary<string, List<InvoiceItemRecord>>();
         }
 
         if (invoiceIds == null || invoiceIds.Count == 0)

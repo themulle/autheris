@@ -243,10 +243,12 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         _rootLimitHandled = true;
         string normalizedName = node.TargetTable.Name.NormalizedName;
 
+        string? targetAlias = node.TargetTable.Alias?.Value;
+
         // SEC H-15 / SQ-03: Ensure no masked column or whole-row references in WHERE
         if (node.Where != null)
         {
-            EnsureNoMaskedColumnReferences(normalizedName, node.Where, "DELETE WHERE");
+            EnsureNoMaskedColumnReferences(normalizedName, targetAlias, node.Where, "DELETE WHERE");
         }
 
         // DML guardrail: Reject unfiltered or tautological WHERE
@@ -267,9 +269,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         }
 
         var rlsFilter = PolicyFilterExpression(policyFilter);
-        var combinedWhere = visitedWhere != null
-            ? new BinaryExpression(visitedWhere, BinaryOperator.And, rlsFilter)
-            : rlsFilter;
+        Expression combinedWhere = visitedWhere != null
+            ? (Expression)new BinaryExpression(new ParenthesizedExpression(visitedWhere), BinaryOperator.And, new ParenthesizedExpression(rlsFilter))
+            : new ParenthesizedExpression(rlsFilter);
 
         return node with { Where = combinedWhere };
     }
@@ -280,6 +282,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         // WHERE (or the source of INSERT ... SELECT) must not be truncated, that would change which rows are written.
         _rootLimitHandled = true;
         string normalizedName = node.TargetTable.Name.NormalizedName;
+        string? targetAlias = node.TargetTable.Alias?.Value;
 
         var visitedAssignments = new List<UpdateAssignment>(node.Assignments.Count);
         // SEC H-15 / SQ-03: Ensure no masked column or whole-row references in SET or WHERE
@@ -290,7 +293,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             {
                 throw new SecurityException($"Masked column '{colName}' of table '{normalizedName}' must not be referenced in UPDATE SET.");
             }
-            EnsureNoMaskedColumnReferences(normalizedName, assignment.Value, "UPDATE SET");
+            EnsureNoMaskedColumnReferences(normalizedName, targetAlias, assignment.Value, "UPDATE SET");
 
             var visitedValue = (Expression)Visit(assignment.Value);
             visitedAssignments.Add(assignment with { Value = visitedValue });
@@ -298,7 +301,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
         if (node.Where != null)
         {
-            EnsureNoMaskedColumnReferences(normalizedName, node.Where, "UPDATE WHERE");
+            EnsureNoMaskedColumnReferences(normalizedName, targetAlias, node.Where, "UPDATE WHERE");
         }
 
         // DML guardrail: Reject unfiltered or tautological WHERE
@@ -344,9 +347,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         }
 
         var rlsFilter = PolicyFilterExpression(policyFilter);
-        var combinedWhere = visitedWhere != null
-            ? new BinaryExpression(visitedWhere, BinaryOperator.And, rlsFilter)
-            : rlsFilter;
+        Expression combinedWhere = visitedWhere != null
+            ? (Expression)new BinaryExpression(new ParenthesizedExpression(visitedWhere), BinaryOperator.And, new ParenthesizedExpression(rlsFilter))
+            : new ParenthesizedExpression(rlsFilter);
 
         return node with { Assignments = visitedAssignments.AsReadOnly(), Where = combinedWhere };
     }
@@ -554,6 +557,8 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
         switch (expr)
         {
+            case ParenthesizedExpression p:
+                return IsTriviallyTrue(p.Expression);
             case LiteralExpression lit when lit.Type == LiteralType.Boolean:
                 return true.Equals(lit.Value);
             case BinaryExpression b when b.Operator == BinaryOperator.Or:
@@ -647,7 +652,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
-    private void EnsureNoMaskedColumnReferences(string normalizedTableName, Expression scope, string clause)
+    private void EnsureNoMaskedColumnReferences(string normalizedTableName, string? targetAlias, Expression scope, string clause)
     {
         if (!_options.RejectMaskedColumnsInDml || _options.ColumnMaskingProvider == null)
             return;
@@ -689,7 +694,8 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
 
                 if (_options.RejectWholeRowReferencesInDml &&
                     (colName.Equals(normalizedTableName, StringComparison.OrdinalIgnoreCase) ||
-                     colName.Equals(simpleTableName, StringComparison.OrdinalIgnoreCase)) &&
+                     colName.Equals(simpleTableName, StringComparison.OrdinalIgnoreCase) ||
+                     (!string.IsNullOrEmpty(targetAlias) && colName.Equals(targetAlias, StringComparison.OrdinalIgnoreCase))) &&
                     HasMaskingForTable(normalizedTableName))
                 {
                     throw new SecurityException($"Whole-row reference to '{colName}' in {clause} is forbidden because table '{normalizedTableName}' contains masked columns.");
@@ -718,6 +724,27 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                     }
                 }
             }
+            else if (node is WildcardSelectItem wildcard)
+            {
+                bool hasTableMasking = HasMaskingForTable(normalizedTableName);
+                if (wildcard.Qualifier != null)
+                {
+                    string qualSimple = wildcard.Qualifier.SimpleName;
+                    string qualNorm = wildcard.Qualifier.NormalizedName;
+                    bool matchesTarget = qualSimple.Equals(simpleTableName, StringComparison.OrdinalIgnoreCase) ||
+                                         qualNorm.Equals(normalizedTableName, StringComparison.OrdinalIgnoreCase) ||
+                                         (!string.IsNullOrEmpty(targetAlias) &&
+                                          (qualSimple.Equals(targetAlias, StringComparison.OrdinalIgnoreCase) ||
+                                           qualNorm.Equals(targetAlias, StringComparison.OrdinalIgnoreCase)));
+
+                    if ((matchesTarget && hasTableMasking) ||
+                        HasMaskingForTable(qualNorm) ||
+                        HasMaskingForTable(qualSimple))
+                    {
+                        throw new SecurityException($"Whole-row reference to '{wildcard.Qualifier}.*' in {clause} is forbidden because table '{normalizedTableName}' contains masked columns.");
+                    }
+                }
+            }
 
             // Push children
             PushChildren(node, stack);
@@ -728,6 +755,9 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
     {
         switch (node)
         {
+            case ParenthesizedExpression p:
+                stack.Push(p.Expression);
+                break;
             case BinaryExpression b:
                 stack.Push(b.Right);
                 stack.Push(b.Left);

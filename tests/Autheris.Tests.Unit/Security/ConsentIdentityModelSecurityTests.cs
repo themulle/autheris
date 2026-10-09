@@ -52,7 +52,7 @@ public sealed class ConsentIdentityModelSecurityTests
     }
 
     [Fact]
-    public void SG_09_McpEndpoints_ResolveCaller_PrioritizesRealUserSubjectOverClientId()
+    public void SG_09_McpSyntheticPrincipal_PreservesUserSubject_AndSeparatesClientId()
     {
         // Arrange
         var realUserSid = "S-1-5-21-USER-REAL";
@@ -74,12 +74,33 @@ public sealed class ConsentIdentityModelSecurityTests
             User = new ClaimsPrincipal(identity)
         };
 
-        // Act
+        // 1. Act: Resolve caller at endpoint level
         var caller = Autheris.Api.Endpoints.McpEndpoints.ResolveCaller(context, allowOpenMcp: false);
 
-        // Assert SG-09:
-        caller.PrincipalId.ShouldBe(realUserSub);
+        // Caller distinguishes service principal (client_id) from end-user (UserSid)
+        caller.PrincipalId.ShouldBe(agentClientId);
         caller.UserSid.ShouldBe(realUserSid);
-        caller.PrincipalId.ShouldNotBe(agentClientId);
+
+        // 2. Act: Build synthetic principal for query execution
+        var now = DateTimeOffset.UtcNow;
+        var sessionContext = new Autheris.Domain.Model.McpSessionContext(
+            "sess-1",
+            caller.PrincipalId,
+            caller.TenantId,
+            now,
+            now,
+            caller.UserSid,
+            caller.Roles,
+            caller.GroupSids);
+
+        var queryPrincipal = Autheris.GraphQL.Mcp.GatewayMcpQueryExecutor.BuildPrincipal(sessionContext);
+
+        // Assert SG-09:
+        // sub and NameIdentifier MUST reflect the real user (UserSid), NEVER the client_id
+        queryPrincipal.FindFirst(ClaimTypes.NameIdentifier)?.Value.ShouldBe(realUserSid);
+        queryPrincipal.FindFirst("sub")?.Value.ShouldBe(realUserSid);
+        // client_id and azp preserve the agent client ID
+        queryPrincipal.FindFirst("client_id")?.Value.ShouldBe(agentClientId);
+        queryPrincipal.FindFirst("azp")?.Value.ShouldBe(agentClientId);
     }
 }

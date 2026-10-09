@@ -200,7 +200,7 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
                     if (rel.IsList)
                     {
                         var field = d.Field(rel.FieldName)
-                            .Type(new NonNullTypeNode(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(rel.TargetTypeName)))))
+                            .Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(rel.TargetTypeName))))
                             .Argument("where", a => a.Type(new NamedTypeNode($"{rel.TargetTypeName}_filter")))
                             .Argument("orderBy", a => a.Type(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode($"{rel.TargetTypeName}_order_by")))))
                             .Argument("first", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
@@ -440,26 +440,26 @@ public sealed class CatalogGraphQlTypeModule : ITypeModule, IDisposable
         var parent = ctx.Parent<JsonElement>();
         if (parent.ValueKind != JsonValueKind.Object)
         {
-            return rel.IsList ? Array.Empty<JsonElement>() : null;
+            return null;
         }
 
         var key = ctx.ResponseName;
         if (!parent.TryGetProperty(key, out var prop) &&
             !parent.TryGetProperty(rel.FieldName, out prop))
         {
-            return rel.IsList ? Array.Empty<JsonElement>() : null;
+            return null;
         }
 
         if (prop.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
         {
-            return rel.IsList ? Array.Empty<JsonElement>() : null;
+            return null;
         }
 
         if (rel.IsList)
         {
             if (prop.ValueKind != JsonValueKind.Array)
             {
-                return Array.Empty<JsonElement>();
+                return null;
             }
 
             var list = new List<JsonElement>(prop.GetArrayLength());

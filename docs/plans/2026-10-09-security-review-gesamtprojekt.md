@@ -89,7 +89,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - Bei jedem Speichern eines ausstehenden Elements den Einreicher auf den letzten Bearbeiter setzen, oder die Menge aller Bearbeiter speichern.
   - Approve ablehnen, wenn ein Identifier des Freigebenden (`GetUserIdentifiers()`) unter den Bearbeitern ist.
 
-### SG-04 Freitext-Claims (`name`, `preferred_username`, `upn`) gelten als Grantee-Identität (Consent-Impersonation)
+### SG-04 Freitext-Claims (`name`, `preferred_username`, `upn`) gelten als Grantee-Identität (Consent-Impersonation) [BEHOBEN]
+- **Status:** Behoben
 - **Schwere:** Hoch | **Konfidenz:** plausibel (abhängig vom IdP)
 - **Fundstellen:**
   - `src/Autheris.Domain/Common/Sid.cs:41-57` (`UserIdentifierClaimTypes`), `:97-103` (`GetAllUserSids`)
@@ -103,7 +104,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - `name`, `upn` und `preferred_username` nur für die Selbstfreigabe-Prüfung (`GetUserIdentifiers`) verwenden.
   - Siehe auch SG-09.
 
-### SG-05 AST-Rewriter: Ein `OR` im LIKE-Muster bzw. in ESCAPE hebelt den Row-Filter bei UPDATE/DELETE aus (SR15-05 unvollständig)
+### SG-05 AST-Rewriter: Ein `OR` im LIKE-Muster bzw. in ESCAPE hebelt den Row-Filter bei UPDATE/DELETE aus (SR15-05 unvollständig) [BEHOBEN]
+- **Status:** Behoben
 - **Schwere:** Hoch (bedingt: nur mit `WebSql.SqlRewriterEngine=AstCompiler`, DML aktiv und Writer-Rolle) | **Konfidenz:** bestätigt (PostgreSQL 16 und SQLite)
 - **Fundstellen:**
   - `src/TrinoSqlEngine/Ast/Generators/SqlDialectGeneratorBase.cs:420-428`: `LikeExpression` gibt Pattern und Escape ungeklammert aus.
@@ -120,7 +122,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
   - `NeedsParentheses` um `Like`, `InList`, `IsDistinctFrom`, `Subscript` und `Unary` erweitern.
   - Regressionstest pro Dialekt.
 
-### SG-06 AST-Rewriter: Maskierte Spalten des DML-Ziels über eine qualifizierte Wildcard lesbar (SR15-10 unvollständig)
+### SG-06 AST-Rewriter: Maskierte Spalten des DML-Ziels über eine qualifizierte Wildcard lesbar (SR15-10 unvollständig) [BEHOBEN]
+- **Status:** Behoben
 - **Schwere:** Hoch (bedingt wie SG-05) | **Konfidenz:** bestätigt (PostgreSQL 16; SQLite nicht verwertbar; SQL Server nicht getestet)
 - **Fundstellen:**
   - `AstSecurityVisitor.cs:620-707` (`EnsureNoMaskedColumnReferences` prüft nur `ColumnReference` und `UsingJoinCondition`), `:709ff` (`PushChildren`).

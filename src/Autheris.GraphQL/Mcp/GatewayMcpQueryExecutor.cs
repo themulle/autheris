@@ -70,60 +70,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         _logger.LogInformation("Executing MCP Tool '{ToolName}' for Principal '{PrincipalId}' on Tenant '{TenantId}'.",
             tool.Name, sessionContext.ServicePrincipalId, sessionContext.TenantId);
 
-        // SG-09: Build authenticated ClaimsPrincipal from active MCP session preserving actual caller identity
-        var effectiveUserId = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
-            ? sessionContext.UserSid
-            : sessionContext.ServicePrincipalId;
-
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, effectiveUserId),
-            new("sub", effectiveUserId),
-            new("tenant_id", sessionContext.TenantId)
-        };
-
-        if (!string.IsNullOrWhiteSpace(sessionContext.UserSid))
-        {
-            claims.Add(new Claim(ClaimTypes.PrimarySid, sessionContext.UserSid));
-        }
-
-        if (!string.IsNullOrWhiteSpace(sessionContext.ServicePrincipalId) &&
-            !string.Equals(sessionContext.ServicePrincipalId, effectiveUserId, StringComparison.Ordinal))
-        {
-            claims.Add(new Claim("client_id", sessionContext.ServicePrincipalId));
-            claims.Add(new Claim("azp", sessionContext.ServicePrincipalId));
-        }
-
-        if (sessionContext.Roles != null && sessionContext.Roles.Count > 0)
-        {
-            foreach (var role in sessionContext.Roles)
-            {
-                claims.Add(new Claim(ClaimTypes.Role, role));
-            }
-        }
-
-        if (sessionContext.GroupSids != null)
-        {
-            foreach (var groupSid in sessionContext.GroupSids)
-            {
-                claims.Add(new Claim(ClaimTypes.GroupSid, groupSid));
-            }
-        }
-
-        if (sessionContext.AdditionalClaims != null)
-        {
-            foreach (var (k, v) in sessionContext.AdditionalClaims)
-            {
-                claims.Add(new Claim(k, v));
-            }
-        }
-
-        var identity = new ClaimsIdentity(claims, "McpAuth");
-        if (sessionContext.IsReadOnly)
-        {
-            Autheris.Domain.Security.TokenAccessScope.MarkReadOnly(identity);
-        }
-        var principal = new ClaimsPrincipal(identity);
+        var principal = BuildPrincipal(sessionContext);
 
         // Parse input arguments if provided
         var variables = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
@@ -651,6 +598,67 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         var writer = new System.Buffers.ArrayBufferWriter<byte>();
         HotChocolate.Transport.Formatters.JsonResultFormatter.Default.Format(op, writer);
         return System.Text.Encoding.UTF8.GetString(writer.WrittenSpan);
+    }
+
+    /// <summary>
+    /// SG-09: Build authenticated ClaimsPrincipal from active MCP session preserving actual caller identity.
+    /// Sets sub and NameIdentifier to the user identity (UserSid) while maintaining service principal in client_id and azp.
+    /// </summary>
+    internal static ClaimsPrincipal BuildPrincipal(McpSessionContext sessionContext)
+    {
+        var effectiveUserId = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
+            ? sessionContext.UserSid
+            : sessionContext.ServicePrincipalId;
+
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, effectiveUserId),
+            new("sub", effectiveUserId),
+            new("tenant_id", sessionContext.TenantId)
+        };
+
+        if (!string.IsNullOrWhiteSpace(sessionContext.UserSid))
+        {
+            claims.Add(new Claim(ClaimTypes.PrimarySid, sessionContext.UserSid));
+        }
+
+        if (!string.IsNullOrWhiteSpace(sessionContext.ServicePrincipalId) &&
+            !string.Equals(sessionContext.ServicePrincipalId, effectiveUserId, StringComparison.Ordinal))
+        {
+            claims.Add(new Claim("client_id", sessionContext.ServicePrincipalId));
+            claims.Add(new Claim("azp", sessionContext.ServicePrincipalId));
+        }
+
+        if (sessionContext.Roles != null && sessionContext.Roles.Count > 0)
+        {
+            foreach (var role in sessionContext.Roles)
+            {
+                claims.Add(new Claim(ClaimTypes.Role, role));
+            }
+        }
+
+        if (sessionContext.GroupSids != null)
+        {
+            foreach (var groupSid in sessionContext.GroupSids)
+            {
+                claims.Add(new Claim(ClaimTypes.GroupSid, groupSid));
+            }
+        }
+
+        if (sessionContext.AdditionalClaims != null)
+        {
+            foreach (var (k, v) in sessionContext.AdditionalClaims)
+            {
+                claims.Add(new Claim(k, v));
+            }
+        }
+
+        var identity = new ClaimsIdentity(claims, "McpAuth");
+        if (sessionContext.IsReadOnly)
+        {
+            Autheris.Domain.Security.TokenAccessScope.MarkReadOnly(identity);
+        }
+        return new ClaimsPrincipal(identity);
     }
 }
 

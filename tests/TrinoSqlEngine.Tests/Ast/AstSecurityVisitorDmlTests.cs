@@ -272,5 +272,71 @@ public sealed class AstSecurityVisitorDmlTests
         // LIKE ESCAPE referencing masked column in WHERE
         Assert.Throws<SecurityException>(() => SecureAndGenerate("DELETE FROM employees WHERE name LIKE 'test%' ESCAPE salary", options));
     }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    [InlineData(TargetSqlDialect.Sqlite)]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    public void Sg05_LikePatternOrEscape_Parenthesized_And_DmlFilterEnforcesExplicitGrouping(TargetSqlDialect dialect)
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            TargetDialect = dialect,
+            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'")
+        };
+
+        // 1. DELETE with OR in LIKE pattern
+        string deleteSql = "DELETE FROM orders WHERE col LIKE ('pattern' OR 'foo')";
+        string deleteResult = SecureAndGenerate(deleteSql, options);
+
+        // Pattern operand must be parenthesized to avoid precedence leak
+        Assert.Contains("LIKE (", deleteResult, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("'pattern' OR ", deleteResult, StringComparison.OrdinalIgnoreCase);
+        // Entire user where is parenthesized and combined with parenthesized RLS filter: (userWhere) AND (rls)
+        Assert.Contains("WHERE (", deleteResult, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(") AND (", deleteResult, StringComparison.OrdinalIgnoreCase);
+
+        // 2. UPDATE with OR in ESCAPE
+        string updateSql = "UPDATE orders SET status = 'done' WHERE col LIKE 'test' ESCAPE ('/' OR '\\')";
+        string updateResult = SecureAndGenerate(updateSql, options);
+
+        Assert.Contains("ESCAPE (", updateResult, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(") AND (", updateResult, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Sg06_TargetWildcardInSubquery_ThrowsSecurityException_WhenTargetHasMaskedColumns()
+    {
+        var options = new RlsOptions
+        {
+            EnforceReadOnlyQueries = false,
+            RejectMaskedColumnsInDml = true,
+            TablesWithMaskedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "employees", "public.employees" },
+            ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
+                (t, c) => c.Equals("salary", StringComparison.OrdinalIgnoreCase),
+                (t, c) => "NULL")
+        };
+
+        // 1. UPDATE SET with correlated target table wildcard: employees.*
+        string sql1 = "UPDATE employees SET notes = (SELECT sub.val FROM (SELECT employees.*) sub) WHERE id = 1";
+        var ex1 = Assert.Throws<SecurityException>(() => SecureAndGenerate(sql1, options));
+        Assert.Contains("Whole-row reference", ex1.Message, StringComparison.OrdinalIgnoreCase);
+
+        // 2. UPDATE WHERE with correlated target table wildcard: employees.*
+        string sql2 = "UPDATE employees SET notes = 'x' WHERE (SELECT count(*) FROM (SELECT employees.*) sub) > 0";
+        var ex2 = Assert.Throws<SecurityException>(() => SecureAndGenerate(sql2, options));
+        Assert.Contains("Whole-row reference", ex2.Message, StringComparison.OrdinalIgnoreCase);
+
+        // 3. DELETE WHERE with correlated target table wildcard: employees.*
+        string sql3 = "DELETE FROM employees WHERE (SELECT count(*) FROM (SELECT employees.*) sub) > 0";
+        var ex3 = Assert.Throws<SecurityException>(() => SecureAndGenerate(sql3, options));
+        Assert.Contains("Whole-row reference", ex3.Message, StringComparison.OrdinalIgnoreCase);
+
+        // 4. Fully qualified target table wildcard: public.employees.*
+        string sql4 = "DELETE FROM public.employees WHERE (SELECT count(*) FROM (SELECT public.employees.*) sub) > 0";
+        var ex4 = Assert.Throws<SecurityException>(() => SecureAndGenerate(sql4, options));
+        Assert.Contains("Whole-row reference", ex4.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }
 

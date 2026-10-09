@@ -34,6 +34,8 @@ public enum LiteralType
     Binary
 }
 
+public sealed record ParenthesizedExpression(Expression Expression) : Expression;
+
 public sealed record BinaryExpression(
     Expression Left,
     BinaryOperator Operator,
