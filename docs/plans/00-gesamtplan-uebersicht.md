@@ -8,12 +8,15 @@
 
 ## 1. Aktive Implementierungspläne (Noch OFFEN ⏳)
 
-Aus dem aktuellen Planungsstand sind nur noch **zwei Workstreams** (Tracks D und E aus Plan 8) offen:
+**Alle geplanten Workstreams und Feature Requests sind vollständig abgeschlossen und verifiziert! (0 OFFEN 🎉)**
 
 | Workstream | Thema / Feature | Behandelte Anforderungen | Status |
 |---|---|---|---|
-| **[Track D: Hybrid MCP Tools & Resources](plan-workstreams-entwickler-details.md#5-workstream-d-hybrid-mcp-tools-resources--prompts)** | • High-Level MCP Tools (`query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`, `get_data_lineage`)<br>• Universal API Dispatcher (`describe_api`, `invoke_api`)<br>• MCP Resources (`autheris://catalog/*`, `autheris://api/*`) & Prompts (`explore_dataset`, `audit_access_compliance`) | **R-63, R-65** | **OFFEN ⏳**<br>Bereit zur TDD-Umsetzung |
-| **[Track E: Admin MCP Tools & Two-Phase-Freigabe](plan-workstreams-entwickler-details.md#6-workstream-e-admin-mcp-tools-access-planning--two-phase-confirmation)** | • Administrative MCP Werkzeuge (`admin_plan_access`, `admin_apply_access`)<br>• Access-Planning mit Diff-Vorschau ohne Seiteneffekte<br>• Human-in-the-Loop Two-Phase Confirmation (`confirmationToken`) gebunden an 2FA TOTP<br>• WORM-Audit-Logging für alle MCP-Mutationen | **R-60, R-62** | **OFFEN ⏳**<br>Bereit zur TDD-Umsetzung |
+| **[Track A: Governed REST Data API](plan-workstreams-entwickler-details.md#2-workstream-a-governed-rest-data-api--virtuelle-system-tabellen)** | • Universelle REST Data API (`/api/v1/data/*`)<br>• Virtuelle System-Tabellen (`governance.system.*`)<br>• Utf8JsonWriter-Streaming, Paging & Maskierung | **ADR-01** | **ABGESCHLOSSEN ✅** |
+| **[Track B: Catalog & Discovery API](plan-workstreams-entwickler-details.md#3-workstream-b-catalog--discovery-api--datasource-onboarding-r-5458-r-61)** | • Endpunkte `/api/v1/catalog/*`<br>• Swagger 2.0 & OpenAPI 3.x Ingestion<br>• Zero-Leakage Vaulting (`IKeyVaultSecretProvider`)<br>• ReBAC `can_query` Filterung & Identity-Linking | **R-54..58, R-61** | **ABGESCHLOSSEN ✅** |
+| **[Track C: RFC 6238 TOTP 2FA Engine](plan-workstreams-entwickler-details.md#4-workstream-c-rfc-6238-totp-2fa-engine--step-up-hitl-integration)** | • RFC 6238 TOTP (MS Authenticator, Google Authenticator, 1Password)<br>• Distributed Replay-Schutz (90s TTL)<br>• HitL Step-Up Integration | **ADR-05, R-64** | **ABGESCHLOSSEN ✅** |
+| **[Track D: Hybrid MCP Tools & Resources](plan-workstreams-entwickler-details.md#5-workstream-d-hybrid-mcp-tools-resources--prompts)** | • High-Level MCP Tools (`query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`, `get_data_lineage`)<br>• Universal API Dispatcher (`describe_api`, `invoke_api`)<br>• MCP Resources (`autheris://catalog/*`, `autheris://governance/*`, `autheris://api/*`) & Prompts (`explore_dataset`, `audit_access_compliance`) | **ADR-02, ADR-04, R-63, R-65** | **ABGESCHLOSSEN ✅** |
+| **[Track E: Admin MCP Tools & Two-Phase-Freigabe](plan-workstreams-entwickler-details.md#6-workstream-e-admin-mcp-tools-access-planning--two-phase-confirmation)** | • Administrative MCP Werkzeuge (`admin_plan_access`, `admin_apply_access`, `admin_register_datasource`, `admin_set_dataset_state`, `admin_resolve_principal`)<br>• Access-Planning mit Diff-Vorschau ohne Seiteneffekte<br>• Human-in-the-Loop Two-Phase Confirmation (`confirmationToken`) gebunden an RFC 6238 TOTP 2FA<br>• WORM-Audit-Logging für alle MCP-Mutationen | **ADR-03, ADR-05, R-60, R-62** | **ABGESCHLOSSEN ✅** |
 
 ---
 
@@ -21,50 +24,70 @@ Aus dem aktuellen Planungsstand sind nur noch **zwei Workstreams** (Tracks D und
 
 Alle nachfolgenden Arbeitspakete wurden vollständig implementiert, durch automatisierte Tests verifiziert und aus dem aktiven Backlog bereinigt:
 
+- **Plan 8 – Vollständige Daten-API & MCP-Bereitstellung (Tracks A bis E):** ✅
+  - **Track A (Governed REST Data API):** `/api/v1/data/{domain}/{table}` mit Streaming, Paging, Maskierung und System-Tabellen (`governance.system.*`).
+  - **Track B (Catalog & Discovery API & Swagger Ingestion):** `/api/v1/catalog/*`, Swagger 2.0 / OpenAPI Ingestion, Zero-Leakage Secrets, ReBAC Filterung.
+  - **Track C (RFC 6238 TOTP 2FA Engine):** Enrollment, Replay-Schutz, Validierung für Microsoft Authenticator, Google Authenticator, 1Password.
+  - **Track D (Hybrid MCP Tools & Resources):** High-Level Tools (`query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`, `get_data_lineage`, `describe_api`, `invoke_api`), native MCP Resources (`autheris://*`) und Prompts (`explore_dataset`, `audit_access_compliance`).
+  - **Track E (Admin MCP Tools & Two-Phase Freigabe):** `admin_plan_access`, `admin_apply_access`, `admin_register_datasource`, `admin_set_dataset_state`, `admin_resolve_principal` mit TOTP 2FA Step-Up und WORM-Audit.
 - **SQL-AST Keyword-Support & Fail-Loud Härtung (AP-1 bis AP-5):** ✅
   - Härtung gegen Silent Dropping bei `TABLESAMPLE`, `PIVOT`, `MATCH_RECOGNIZE` (`SqlAstBuilder.VisitSampledRelation`).
   - Modellierung und Codegenerierung von `FETCH ... ROWS WITH TIES` über alle Dialekte (SQL Server, Postgres, Oracle, Snowflake, DuckDB, SQLite).
   - Lexer-Regex-Erweiterung für alphanumerische Keywords (`UTF8`, `UTF16`, `UTF32`) in `SqlKeywords.cs`.
   - Case-Insensitive Snowflake Identifier Quoting (`"USER"`, `"ORDERS"`) gegen Keyword-Kollisionen.
   - Verifiziert durch **1.421 Tests mit 0 Fehlern** in `TrinoSqlEngine.Tests`.
-- **Plan 8 – Track A (Governed REST Data API):** ✅
-  - Universelle REST Data API (`/api/v1/data/*`) mit Utf8JsonWriter-Streaming, Paging (`limit`, `offset`) und Filterung.
-  - Virtuelle System-Tabellen (`governance.system.datasources`, `policies`, `rebac_tuples`, `virtual_filters`, `audit_trail`).
-- **Plan 8 – Track B (Catalog & Discovery API & Datasource Onboarding):** ✅
-  - Endpunkte `/api/v1/catalog/datasets`, `/datasources`, `/search` und `/api/governance/principals`.
-  - OpenAPI/Swagger-Ingestion mit Zero-Leakage Vaulting via `IKeyVaultSecretProvider`.
-  - ReBAC `can_query` Filterung und Identity-Linking mit Namensauflösung (R-54 bis R-58, R-61).
-- **Plan 8 – Track C (RFC 6238 TOTP 2FA Engine & HitL Step-Up):** ✅
-  - Standard-TOTP-Engine (kompatibel mit Microsoft Authenticator, Google Authenticator, 1Password, Bitwarden).
-  - Enrollment-Endpunkte (`/api/v1/governance/2fa/enroll`, `/verify-enrollment`) mit `otpauth://`-URI und QR-Code.
-  - Distributed Replay-Schutz im Cluster-State (90s TTL) und Step-Up-Anbindung in `HitLStepUpApprovalService` (R-64).
 - **Pläne 1 bis 7 (Autheris Core Platform):** ✅
   - Distributed State & Invalidation (Plan 1), Modularisierung (Plan 2), Plan-Cache & Dialekte (Plan 3), CI-Härtung (Plan 4), PoC Arrow/OLAP & ReBAC (Plan 5), Lückenloses Zugriffs-Audit (Plan 6), WebSQL heterogene Cross-Source Joins (Plan 7).
 
 ---
 
-## 3. Ausführungsgraph des verbleibenden Backlogs
+## 3. Architektur-Zustand des Gesamtsystems
 
 ```mermaid
 flowchart TD
-    subgraph Baseline["Verifizierte Basis (Pläne 1–7, SQL-AST & Tracks A, B, C ✅)"]
-        CORE["Autheris Core Platform & Dialekte<br/>(1.421 Tests grün)"]
-        DATA_API["Track A: Governed REST Data API<br/>(/api/v1/data/* · System-Tabellen)"]
-        CATALOG["Track B: Catalog & Discovery API<br/>(/api/v1/catalog/* · Swagger Ingestion)"]
-        TOTP["Track C: RFC 6238 TOTP 2FA Engine<br/>(Authenticator / 1Password · HitL Step-Up)"]
+    subgraph Clients["Clients & Konsumenten"]
+        AI_AGENT["KI-Agenten & MCP-Clients<br/>(Claude Desktop / Cursor / IDE)"]
+        REST_CLIENT["REST / OpenAPI Clients<br/>(Citizen Dev / Talos / Web-UI)"]
+        SQL_CLIENT["WebSQL / BI-Tools<br/>(Trino JDBC / DuckDB OLAP)"]
     end
 
-    subgraph Active["Verbleibendes offenes Backlog ⏳"]
-        TRACK_D["Track D: Hybrid MCP Tools & Resources<br/>(query_sql · describe_api · invoke_api · autheris://*)"]
-        TRACK_E["Track E: Admin MCP Tools & Two-Phase Freigabe<br/>(admin_plan_access · confirmationToken mit 2FA)"]
+    subgraph MCP_Layer["Model Context Protocol (MCP)"]
+        MCP_SERVER["GatewayMcpServer (Official SDK)<br/>Streamable HTTP / Stateless"]
+        MCP_TOOLS["Hybrid Tools: query_sql, query_dataset, describe_api, invoke_api<br/>Admin Tools: admin_plan_access, admin_apply_access"]
+        MCP_RES["Native Resources: autheris://*<br/>Prompts: explore_dataset, audit_access_compliance"]
     end
 
-    CORE --> TRACK_D
-    DATA_API --> TRACK_D
-    CATALOG --> TRACK_D
-    CATALOG --> TRACK_E
-    TOTP --> TRACK_E
-    TRACK_D -.-> TRACK_E
+    subgraph Governance_Layer["Autheris Security & Governance Core"]
+        PDP["Policy Decision Point (PDP)<br/>ReBAC (Zanzibar) + ABAC + Consent Rules"]
+        MASKING["Dynamic Masking & Row-Level Security"]
+        TOTP_2FA["RFC 6238 TOTP 2FA Engine<br/>(MS Authenticator / 1Password / Google Auth)"]
+        HITL["Two-Phase Confirmation (HitL)<br/>Plan-Diff -> TOTP Step-Up -> confirmationToken -> Apply"]
+        WORM["WORM Tamper-Proof Audit Log<br/>(Zero Secret Leakage)"]
+    end
+
+    subgraph Execution_Layer["Federated Query & Execution Engine"]
+        SQL_EXEC["GovernedSqlExecutionService<br/>(Fast AST Rewriter & Multi-Dialect Generator)"]
+        DATA_API["GovernedDataQueryService<br/>(Streaming Data API / System Tables)"]
+        CATALOG["CatalogDiscoveryService & Ingestion<br/>(Swagger 2.0 / OpenAPI 3.x / Zero-Leakage Vault)"]
+    end
+
+    AI_AGENT --> MCP_SERVER
+    REST_CLIENT --> DATA_API
+    REST_CLIENT --> CATALOG
+    SQL_CLIENT --> SQL_EXEC
+
+    MCP_SERVER --> MCP_TOOLS
+    MCP_SERVER --> MCP_RES
+    MCP_TOOLS --> PDP
+    DATA_API --> PDP
+    SQL_EXEC --> PDP
+
+    PDP --> MASKING
+    MCP_TOOLS --> HITL
+    HITL --> TOTP_2FA
+    HITL --> WORM
+    MASKING --> SQL_EXEC
+    MASKING --> DATA_API
 ```
 
 ---
