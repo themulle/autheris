@@ -92,7 +92,8 @@ public sealed class SecurityReviewG5Tests : IDisposable
             .AddLogging()
             .AddSingleton(Options.Create(new GatewayOptions()))
             .AddSingleton<CdcSubscriptionGovernor>()
-            .AddSingleton(resolver);
+            .AddSingleton(resolver)
+            .AddSingleton(Substitute.For<IAuditLogRepository>());
     }
 
     private static ClaimsPrincipal TokenPrincipal(DateTimeOffset exp) => new(new ClaimsIdentity(

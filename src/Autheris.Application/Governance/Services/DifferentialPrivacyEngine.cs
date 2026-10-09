@@ -30,15 +30,34 @@ public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
     private readonly ILogger<DifferentialPrivacyEngine> _logger;
 
     public DifferentialPrivacyEngine(
-        IDistributedClusterStateProvider? clusterState = null,
-        IAuditLogRepository? auditLog = null,
+        IDistributedClusterStateProvider clusterState,
+        IAuditLogRepository auditLog,
         TimeProvider? timeProvider = null,
         ILogger<DifferentialPrivacyEngine>? logger = null)
     {
-        _clusterState = clusterState ?? new InMemoryClusterStateProvider();
+        ArgumentNullException.ThrowIfNull(clusterState);
+        ArgumentNullException.ThrowIfNull(auditLog);
+        _clusterState = clusterState;
         _auditLog = auditLog;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _logger = logger ?? NullLogger<DifferentialPrivacyEngine>.Instance;
+    }
+
+    public DifferentialPrivacyEngine(
+        IAuditLogRepository auditLog,
+        IDistributedClusterStateProvider? clusterState = null,
+        TimeProvider? timeProvider = null,
+        ILogger<DifferentialPrivacyEngine>? logger = null)
+        : this(clusterState ?? new InMemoryClusterStateProvider(), auditLog, timeProvider, logger)
+    {
+    }
+
+    public DifferentialPrivacyEngine(
+        IDistributedClusterStateProvider? clusterState = null,
+        TimeProvider? timeProvider = null,
+        ILogger<DifferentialPrivacyEngine>? logger = null)
+        : this(clusterState ?? new InMemoryClusterStateProvider(), Autheris.Application.Audit.NullAuditLogRepository.Instance, timeProvider, logger)
+    {
     }
 
     public async ValueTask<PrivacyBudget> GetBudgetAsync(string clientId, CancellationToken cancellationToken = default)
