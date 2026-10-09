@@ -2,32 +2,44 @@
 
 **Stand:** 09.10.2026 · **Zweig:** `feat/ast-target-dialect-generator`  
 **Rolle:** C# & .NET Solution Architect  
-**Ziel:** Strukturierte Übersicht und Ausführungsgraph des aktiven Backlogs in `docs/plans/`. Abgeschlossene Pläne (1–7) wurden nach erfolgreicher Implementierung und Verifikation bereinigt.
+**Ziel:** Strukturierte Übersicht und Ausführungsgraph des aktiven Backlogs in `docs/plans/`. Abgeschlossene Pläne (1–7, SQL-AST Härtung sowie Tracks A, B, C) wurden nach erfolgreicher Implementierung und Verifikation bereinigt.
 
 ---
 
-## 1. Aktive Implementierungspläne
+## 1. Aktive Implementierungspläne (Noch OFFEN ⏳)
 
-| Plan / Dokument | Thema / Feature | Behandelte Befunde & Anforderungen | Status |
+Aus dem aktuellen Planungsstand sind nur noch **zwei Workstreams** (Tracks D und E aus Plan 8) offen:
+
+| Workstream | Thema / Feature | Behandelte Anforderungen | Status |
 |---|---|---|---|
-| **[Plan 8: Vollständige Daten-API & MCP-Bereitstellung](plan-vollstaendige-daten-api-und-mcp-bereitstellung.md)** | Governed REST Data API (`/api/v1/data/*`), Discovery & MCP-Ökosystem (Tools, Resources, Prompts) | **R-54 bis R-66, PoC Citizen Dev & MCP** | Neu erstellt – bereit zum Review ⏳ |
-| **[Entwickler-Workstreams & TDD-Spezifikation](plan-workstreams-entwickler-details.md)** | Detaillierte Modellspezifikationen, C#-Interfaces, Testpläne und Aufteilung in 5 parallele Entwickler-Tracks (A bis E) | **Umsetzungs-Blueprint für Entwickler-Agents** | Spezifiziert & bereit zur TDD-Ausführung ⏳ |
-| **[SQL-AST Keyword- & Downstream-Analyse](2026-10-09-sql-ast-keyword-support-und-downstream-analyse.md)** | Prüfung aller SQL-Keywords im AST, Fail-Loud-Verhalten und Ziel-Dialekt-Generierung | **Befunde F-01 bis F-04, WebSQL AST-Compiler** | Dokumentiert & bereit zur Behebung ⏳ |
+| **[Track D: Hybrid MCP Tools & Resources](plan-workstreams-entwickler-details.md#5-workstream-d-hybrid-mcp-tools-resources--prompts)** | • High-Level MCP Tools (`query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`, `get_data_lineage`)<br>• Universal API Dispatcher (`describe_api`, `invoke_api`)<br>• MCP Resources (`autheris://catalog/*`, `autheris://api/*`) & Prompts (`explore_dataset`, `audit_access_compliance`) | **R-63, R-65** | **OFFEN ⏳**<br>Bereit zur TDD-Umsetzung |
+| **[Track E: Admin MCP Tools & Two-Phase-Freigabe](plan-workstreams-entwickler-details.md#6-workstream-e-admin-mcp-tools-access-planning--two-phase-confirmation)** | • Administrative MCP Werkzeuge (`admin_plan_access`, `admin_apply_access`)<br>• Access-Planning mit Diff-Vorschau ohne Seiteneffekte<br>• Human-in-the-Loop Two-Phase Confirmation (`confirmationToken`) gebunden an 2FA TOTP<br>• WORM-Audit-Logging für alle MCP-Mutationen | **R-60, R-62** | **OFFEN ⏳**<br>Bereit zur TDD-Umsetzung |
 
 ---
 
 ## 2. Historie: Erfolgreich umgesetzte & verifizierte Pläne ✅
 
-Alle vorherigen Pläne wurden vollständig umgesetzt, bereinigt und durch **3.761 Unit-Tests**, **13 Architektur-Tests** und **1.628 Engine-/Extensions-Tests** mit **0 Fehlern und 0 Warnungen** verifiziert:
+Alle nachfolgenden Arbeitspakete wurden vollständig implementiert, durch automatisierte Tests verifiziert und aus dem aktiven Backlog bereinigt:
 
-- **Plan 1 (Distributed State & Invalidation):** AR-01 bis AR-04, AR-12. Epoch-Keyed Caching, generation pull-validation, atomare Redis Lua-Scripts für DP-Budget & FinOps, lock-freier Casbin-Matcher.
-- **Plan 2 (God-Classes Refactoring & Modularisierung):** AR-05, AR-06, AR-07, AR-11, AR-18. DI-Modularisierung (`AddAutheris*`), `GovernedSqlRewriter`/`Executor` ($\le 800$ Zeilen), typsichere `TableIdentifier`.
-- **Plan 3 (Performance, Caching & Dialekte):** AR-08 bis AR-10, AR-13 bis AR-15, AR-19. Bounded LRU Plan-Cache, Policy-Fingerprinting, `SqlDialectMapper`, SQLite-Produktionswarnung.
-- **Plan 4 (Supply Chain & CI-Härtung):** SC-01 bis SC-18. Trivy-Scanning, Cosign Keyless-Signing, Syft-SBOM, Non-Root-User `10001:10001`, Seccomp, Read-Only RootFS.
-- **Plan 5 (PoC Arrow/OLAP & MCP Staging):** Befunde 3.1 & 3.2. ReBAC-Hierarchie (`schema:`, `domain:`), Fail-Closed Evaluator, RFC-9728 Discovery, Dev-CORS, Batch-Rejection.
-- **Plan 6 (Lückenloses Zugriffs-Audit):** Lücken L-1 bis L-9. `AccessAuditMiddleware`, 100% Endpoint-Audit, `AuditDetailsBuilder` PII-Maskierung, `AuthFailureAggregator`.
-- **Plan 7 (WebSQL Heterogene API Federation & Joins):** `CrossSourceQueryRouter`, `CrossSourcePlanner`, `FederatedDuckDbExecutionService`, Pre-Staging Masking vor DuckDB-Ingest.
-- **Frühere Kernfunktionen:** dbt-Governance (B-01..06, R-50..51), erweiterte Maskierung (R-53, R-25), Klartext je Person (R-52), KMS-Audit (AU-01..19), Security Review Phasen 1–3 (SG-01..39).
+- **SQL-AST Keyword-Support & Fail-Loud Härtung (AP-1 bis AP-5):** ✅
+  - Härtung gegen Silent Dropping bei `TABLESAMPLE`, `PIVOT`, `MATCH_RECOGNIZE` (`SqlAstBuilder.VisitSampledRelation`).
+  - Modellierung und Codegenerierung von `FETCH ... ROWS WITH TIES` über alle Dialekte (SQL Server, Postgres, Oracle, Snowflake, DuckDB, SQLite).
+  - Lexer-Regex-Erweiterung für alphanumerische Keywords (`UTF8`, `UTF16`, `UTF32`) in `SqlKeywords.cs`.
+  - Case-Insensitive Snowflake Identifier Quoting (`"USER"`, `"ORDERS"`) gegen Keyword-Kollisionen.
+  - Verifiziert durch **1.421 Tests mit 0 Fehlern** in `TrinoSqlEngine.Tests`.
+- **Plan 8 – Track A (Governed REST Data API):** ✅
+  - Universelle REST Data API (`/api/v1/data/*`) mit Utf8JsonWriter-Streaming, Paging (`limit`, `offset`) und Filterung.
+  - Virtuelle System-Tabellen (`governance.system.datasources`, `policies`, `rebac_tuples`, `virtual_filters`, `audit_trail`).
+- **Plan 8 – Track B (Catalog & Discovery API & Datasource Onboarding):** ✅
+  - Endpunkte `/api/v1/catalog/datasets`, `/datasources`, `/search` und `/api/governance/principals`.
+  - OpenAPI/Swagger-Ingestion mit Zero-Leakage Vaulting via `IKeyVaultSecretProvider`.
+  - ReBAC `can_query` Filterung und Identity-Linking mit Namensauflösung (R-54 bis R-58, R-61).
+- **Plan 8 – Track C (RFC 6238 TOTP 2FA Engine & HitL Step-Up):** ✅
+  - Standard-TOTP-Engine (kompatibel mit Microsoft Authenticator, Google Authenticator, 1Password, Bitwarden).
+  - Enrollment-Endpunkte (`/api/v1/governance/2fa/enroll`, `/verify-enrollment`) mit `otpauth://`-URI und QR-Code.
+  - Distributed Replay-Schutz im Cluster-State (90s TTL) und Step-Up-Anbindung in `HitLStepUpApprovalService` (R-64).
+- **Pläne 1 bis 7 (Autheris Core Platform):** ✅
+  - Distributed State & Invalidation (Plan 1), Modularisierung (Plan 2), Plan-Cache & Dialekte (Plan 3), CI-Härtung (Plan 4), PoC Arrow/OLAP & ReBAC (Plan 5), Lückenloses Zugriffs-Audit (Plan 6), WebSQL heterogene Cross-Source Joins (Plan 7).
 
 ---
 
@@ -35,25 +47,24 @@ Alle vorherigen Pläne wurden vollständig umgesetzt, bereinigt und durch **3.76
 
 ```mermaid
 flowchart TD
-    subgraph Baseline["Verifizierte Basis (Pläne 1 bis 7 ✅)"]
-        CORE["Autheris Core Platform<br/>(State · DI-Module · Plan-Cache · CI · Audit · WebSQL Joins)"]
+    subgraph Baseline["Verifizierte Basis (Pläne 1–7, SQL-AST & Tracks A, B, C ✅)"]
+        CORE["Autheris Core Platform & Dialekte<br/>(1.421 Tests grün)"]
+        DATA_API["Track A: Governed REST Data API<br/>(/api/v1/data/* · System-Tabellen)"]
+        CATALOG["Track B: Catalog & Discovery API<br/>(/api/v1/catalog/* · Swagger Ingestion)"]
+        TOTP["Track C: RFC 6238 TOTP 2FA Engine<br/>(Authenticator / 1Password · HitL Step-Up)"]
     end
 
-    subgraph Active["Aktiver Plan: Plan 8 & Entwickler-Workstreams"]
-        TRACK_A["Track A: Governed REST Data API<br/>(/api/v1/data/* · Streaming JSON · System-Tabellen)"]
-        TRACK_B["Track B: Catalog & Discovery API<br/>(/api/v1/catalog/* · Swagger R-54..58 · Principals R-61)"]
-        TRACK_C["Track C: RFC 6238 TOTP 2FA Engine<br/>(MS/Google Authenticator · 1Password · HitL Step-Up)"]
+    subgraph Active["Verbleibendes offenes Backlog ⏳"]
         TRACK_D["Track D: Hybrid MCP Tools & Resources<br/>(query_sql · describe_api · invoke_api · autheris://*)"]
         TRACK_E["Track E: Admin MCP Tools & Two-Phase Freigabe<br/>(admin_plan_access · confirmationToken mit 2FA)"]
     end
 
-    CORE --> TRACK_A
-    CORE --> TRACK_B
-    CORE --> TRACK_C
-    TRACK_A --> TRACK_D
-    TRACK_B --> TRACK_D
-    TRACK_B --> TRACK_E
-    TRACK_C --> TRACK_E
+    CORE --> TRACK_D
+    DATA_API --> TRACK_D
+    CATALOG --> TRACK_D
+    CATALOG --> TRACK_E
+    TOTP --> TRACK_E
+    TRACK_D -.-> TRACK_E
 ```
 
 ---
@@ -61,6 +72,5 @@ flowchart TD
 ## 4. Quelltexte und Referenzdokumente
 
 - [Plan 8: Vollständige Daten-API & MCP-Bereitstellung](plan-vollstaendige-daten-api-und-mcp-bereitstellung.md)
-- [Entwickler-Workstreams & TDD-Spezifikation (Tracks A bis E)](plan-workstreams-entwickler-details.md)
+- [Entwickler-Workstreams & TDD-Spezifikation (Tracks D & E)](plan-workstreams-entwickler-details.md)
 - [Feature Request: Admin-Datenquellen & MCP (R-54 bis R-66)](2026-10-09-feature-request-admin-datenquellen-und-mcp.md)
-- [SQL-AST Keyword- & Downstream-Analyse](2026-10-09-sql-ast-keyword-support-und-downstream-analyse.md)
