@@ -74,7 +74,9 @@ public static class GatewaySqlEngineServiceExtensions
 
         // WebSQL Federation & Cross-Source Joins (Plan 7)
         services.AddSingleton<CrossSourceQueryRouter>();
+        services.AddSingleton<ICrossSourceQueryRouter>(sp => sp.GetRequiredService<CrossSourceQueryRouter>());
         services.AddSingleton<CrossSourcePlanner>();
+        services.AddSingleton<ICrossSourcePlanner>(sp => sp.GetRequiredService<CrossSourcePlanner>());
         services.AddSingleton<Autheris.Application.Olap.IFederatedStagingService, Autheris.Application.Olap.FederatedStagingService>();
         services.AddSingleton<IFederatedQueryExecutionService, FederatedDuckDbExecutionService>();
 

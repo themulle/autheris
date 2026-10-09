@@ -47,6 +47,16 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
 
     public CrossSourceQueryRouter(
         ITableMetadataRepository tableRepository,
+        Microsoft.Extensions.Options.IOptions<GatewayOptions> options)
+        : this(
+            tableRepository,
+            (options ?? throw new ArgumentNullException(nameof(options))).Value.WebSql.CrossSource,
+            options.Value.WebSql)
+    {
+    }
+
+    public CrossSourceQueryRouter(
+        ITableMetadataRepository tableRepository,
         CrossSourceOptions crossSourceOptions,
         WebSqlOptions webSqlOptions)
     {
