@@ -500,6 +500,13 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService
                 throw TableDenied(target);
             }
 
+            // Phase 0: Non-SQL tables are not supported in the pushdown path (fail-closed).
+            if (tableMeta.Table.DataSourceType != DataSourceType.Sql)
+            {
+                _logger?.LogWarning("WebSQL pushdown rejected table {Table}: data source type {Type} is not supported in pushdown.", target.FullName, tableMeta.Table.DataSourceType);
+                throw new WebSqlPolicyException($"WebSQL pushdown does not support table '{target.FullName}' with data source type '{tableMeta.Table.DataSourceType}'.");
+            }
+
             // SEC P-05: Only dialects with a dedicated rewrite (PostgreSQL, SQL Server, SQLite) are supported (fail-closed).
             if (!IsWebSqlSupportedDialect(tableMeta.Dialect))
             {
