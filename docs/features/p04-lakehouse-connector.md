@@ -1,7 +1,7 @@
 # P4: Modern Lakehouse Connector (Apache Iceberg v2)
 
 **Status:** [Done] (100% GA – Core Foundation)  
-**Components:** [`IcebergMetadataReader.cs`](file:///root/lis-git/autheris/src/Autheris.Extensions/Lakehouse/Services/IcebergMetadataReader.cs), [`IcebergPartitionPruner.cs`](file:///root/lis-git/autheris/src/Autheris.Extensions/Lakehouse/Services/IcebergPartitionPruner.cs), [`LakehouseDataSourceExecutor.cs`](file:///root/lis-git/autheris/src/Autheris.Extensions/Lakehouse/Services/LakehouseDataSourceExecutor.cs)
+**Components:** [`IcebergMetadataReader.cs`](file:///root/autheris/src/Autheris.Extensions/Lakehouse/Services/IcebergMetadataReader.cs), [`IcebergPartitionPruner.cs`](file:///root/autheris/src/Autheris.Extensions/Lakehouse/Services/IcebergPartitionPruner.cs), [`LakehouseDataSourceExecutor.cs`](file:///root/autheris/src/Autheris.Extensions/Lakehouse/Services/LakehouseDataSourceExecutor.cs)
 
 ---
 

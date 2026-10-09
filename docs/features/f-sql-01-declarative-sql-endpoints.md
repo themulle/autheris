@@ -1,7 +1,7 @@
 # F-SQL-01: Declarative SQL-to-API Engine & Auto-OpenAPI
 
 **Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`SqlEndpointLoader.cs`](file:///root/lis-git/autheris/src/Autheris.Application/SqlEndpoints/Services/SqlEndpointLoader.cs), [`InMemorySqlEndpointRegistry.cs`](file:///root/lis-git/autheris/src/Autheris.Application/SqlEndpoints/Services/InMemorySqlEndpointRegistry.cs), [`SqlEndpointRoutes.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Endpoints/SqlEndpointRoutes.cs)
+**Components:** [`SqlEndpointLoader.cs`](file:///root/autheris/src/Autheris.Application/SqlEndpoints/Services/SqlEndpointLoader.cs), [`InMemorySqlEndpointRegistry.cs`](file:///root/autheris/src/Autheris.Application/SqlEndpoints/Services/InMemorySqlEndpointRegistry.cs), [`SqlEndpointRoutes.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/SqlEndpointRoutes.cs)
 
 ---
 

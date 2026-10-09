@@ -49,8 +49,8 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
 {
     private sealed class OperationMemo : IDisposable
     {
-        public System.Collections.Concurrent.ConcurrentDictionary<TableIdentifier, ResolvedTableAccess> AccessByTable { get; } = new();
-        public System.Collections.Concurrent.ConcurrentDictionary<(TableIdentifier Table, bool Allowed), byte> Audited { get; } = new();
+        public System.Collections.Concurrent.ConcurrentDictionary<(TableIdentifier Table, string Tenant, string UserSid), ResolvedTableAccess> AccessByTable { get; } = new();
+        public System.Collections.Concurrent.ConcurrentDictionary<(TableIdentifier Table, string Tenant, string UserSid, bool Allowed), byte> Audited { get; } = new();
         public SemaphoreSlim Lock { get; } = new(1, 1);
         public DateTime CreatedAtUtc { get; } = DateTime.UtcNow;
 
@@ -78,7 +78,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
     private readonly ILogger<GovernedTreeQueryService>? _logger;
     private readonly IDbSessionContextInitializer _sessionInitializer;
 
-    // G3, G4, G7, D7 & R-GQL-3: memo and audit are scoped per operationId to isolate operations and prevent unbounded memory growth in long-lived WebSocket sessions.
+    // G3, G4, G7, D7 & R-GQL-3: memo and audit are scoped per operationId, tenant, and user to isolate operations and prevent cross-tenant/cross-principal leak.
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, OperationMemo> _memos = new();
 
     private const int ThrottledRetryAfterSeconds = 2;
@@ -110,9 +110,17 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             return;
         }
 
-        if (_memos.TryRemove(operationId, out var memo))
+        var prefix = operationId + "|";
+        foreach (var key in _memos.Keys)
         {
-            memo.Dispose();
+            if (string.Equals(key, operationId, StringComparison.Ordinal) ||
+                key.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                if (_memos.TryRemove(key, out var memo))
+                {
+                    memo.Dispose();
+                }
+            }
         }
     }
 
@@ -163,7 +171,15 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
 
         EvictStaleMemosIfNecessary();
 
-        var memo = _memos.GetOrAdd(operationId, _ => new OperationMemo());
+        var tenant = principal.GetTenantId().Value;
+        var userSid = principal.GetUserSid()?.Value;
+        if (string.IsNullOrWhiteSpace(userSid))
+        {
+            userSid = "anonymous";
+        }
+
+        var memoKey = $"{operationId}|{tenant}|{userSid}";
+        var memo = _memos.GetOrAdd(memoKey, _ => new OperationMemo());
 
         var maxRows = _options.GraphQL?.MaxResponseRows > 0 ? _options.GraphQL.MaxResponseRows : 1000;
         if (root.Limit > maxRows)
@@ -258,7 +274,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         }
 
         var node = JsonNode.Parse(json) ?? new JsonArray();
-        var tenant = rootAccess.Tenant.Value;
+        tenant = rootAccess.Tenant.Value;
         foreach (var hmac in compiled.HmacColumns)
         {
             var rule = MaskingRule.CreateTenantScopedHmacRule(hmac.Rule, tenant, _options.DataMasking?.HmacKeyId);
@@ -296,7 +312,15 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         CancellationToken ct)
     {
-        if (memo.AccessByTable.TryGetValue(table, out var cached))
+        var tenant = principal.GetTenantId().Value;
+        var userSid = principal.GetUserSid()?.Value;
+        if (string.IsNullOrWhiteSpace(userSid))
+        {
+            userSid = "anonymous";
+        }
+        var key = (table, tenant, userSid);
+
+        if (memo.AccessByTable.TryGetValue(key, out var cached))
         {
             return cached;
         }
@@ -304,12 +328,12 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
         await memo.Lock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (memo.AccessByTable.TryGetValue(table, out cached))
+            if (memo.AccessByTable.TryGetValue(key, out cached))
             {
                 return cached;
             }
             var access = await _accessResolver.ResolveTableAccessAsync(principal, table, columns, requestHeaders, ct).ConfigureAwait(false);
-            memo.AccessByTable[table] = access;
+            memo.AccessByTable[key] = access;
             return access;
         }
         finally
@@ -320,7 +344,11 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
 
     private async Task AuditOnceAsync(OperationMemo memo, ResolvedTableAccess access, TableIdentifier table, CancellationToken ct)
     {
-        if (!memo.Audited.TryAdd((table, access.Decision.IsAllowed), 1))
+        var tenant = access.Tenant.Value;
+        var userSid = string.IsNullOrWhiteSpace(access.UserSid.Value) ? "anonymous" : access.UserSid.Value;
+        var auditKey = (table, tenant, userSid, access.Decision.IsAllowed);
+
+        if (!memo.Audited.TryAdd(auditKey, 1))
         {
             return;
         }
@@ -333,7 +361,7 @@ public sealed class GovernedTreeQueryService : IGovernedTreeQueryService, IDispo
             TargetTable = table.ToString(),
             Decision = access.Decision.IsAllowed ? "ALLOW" : "DENY",
             TraceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId(),
-            DetailsJson = JsonSerializer.Serialize(new { is_allowed = access.Decision.IsAllowed, reasons = access.Decision.DeniedReasons, path = "graphql_tree" })
+            DetailsJson = JsonSerializer.Serialize(new { is_allowed = access.Decision.IsAllowed, reasons = access.Decision.DeniedReasons, path = "graphql_tree", virtual_filters = access.Decision.AppliedVirtualFilters })
         }, ct).ConfigureAwait(false);
     }
 

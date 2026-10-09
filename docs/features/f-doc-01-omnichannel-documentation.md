@@ -1,7 +1,7 @@
 # F-DOC-01: Omnichannel Semantic Documentation Passthrough
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`IOmnichannelDocService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Documentation/IOmnichannelDocService.cs), [`OmnichannelDocumentationService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Documentation/OmnichannelDocumentationService.cs)
+**Components:** [`IOmnichannelDocService.cs`](file:///root/autheris/src/Autheris.Application/Documentation/IOmnichannelDocService.cs), [`OmnichannelDocumentationService.cs`](file:///root/autheris/src/Autheris.Application/Documentation/OmnichannelDocumentationService.cs)
 
 ---
 

@@ -38,10 +38,23 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
     public bool IsCacheable => true;
     public ushort Priority => 10;
 
-    public static int CalculateCost(DocumentNode document, ISchemaDefinition schema, int defaultListMultiplier = 10, int maxResponseRows = 1000)
+    public static int CalculateCost(
+        DocumentNode document,
+        ISchemaDefinition schema,
+        int defaultListMultiplier = 10,
+        int maxResponseRows = 1000,
+        IReadOnlyDictionary<string, object?>? variableValues = null)
     {
         var rule = new QueryCostAnalyzerRule(int.MaxValue, defaultListMultiplier, maxResponseRows);
-        return rule.ComputeCost(document, schema);
+        return rule.ComputeCost(document, schema, variableValues);
+    }
+
+    public static int CalculateCost(
+        DocumentNode document,
+        ISchemaDefinition schema,
+        IReadOnlyDictionary<string, object?>? variableValues)
+    {
+        return CalculateCost(document, schema, 10, 1000, variableValues);
     }
 
     public void Validate(DocumentValidatorContext context, DocumentNode document)
@@ -66,7 +79,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
             _onQueryTooComplex?.Invoke();
             context.ReportError(
                 ErrorBuilder.New()
-                    .SetMessage($"The query exceeds the complexity budget of {_maxAllowedCost} (calculated cost: {totalCost}).")
+                    .SetMessage($"The query exceeds the complexity budget of {_maxAllowedCost} (calculated cost: {totalCost}). If using variables for pagination limits, declare a default value (e.g. $first: Int = 20) or specify a lower limit.")
                     .SetCode("QUERY_TOO_COMPLEX")
                     .SetExtension("calculatedCost", totalCost)
                     .SetExtension("maxAllowedCost", _maxAllowedCost)
@@ -145,7 +158,10 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
 
     private static int SafeAdd(int a, int b) => (int)Math.Min((long)int.MaxValue, (long)a + b);
 
-    public int ComputeCost(DocumentNode document, ISchemaDefinition schema)
+    public int ComputeCost(
+        DocumentNode document,
+        ISchemaDefinition schema,
+        IReadOnlyDictionary<string, object?>? variableValues = null)
     {
         var fragments = document.Definitions
             .OfType<FragmentDefinitionNode>()
@@ -178,7 +194,9 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     maskingCostCache,
                     schema,
                     ref spreadCounter,
-                    maxSpreadExpansions));
+                    maxSpreadExpansions,
+                    operation.VariableDefinitions,
+                    variableValues));
             }
         }
 
@@ -194,7 +212,9 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         Dictionary<string, int> maskingCostCache,
         ISchemaDefinition schema,
         ref int spreadCounter,
-        int maxSpreadExpansions)
+        int maxSpreadExpansions,
+        IReadOnlyList<VariableDefinitionNode>? variableDefinitions = null,
+        IReadOnlyDictionary<string, object?>? variableValues = null)
     {
         if (selectionSet == null || selectionSet.Selections.Count == 0)
         {
@@ -255,7 +275,25 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                                 break;
                             }
 
-                            limitIsVariable = true;
+                            if (arg.Value is VariableNode varNode)
+                            {
+                                limitIsVariable = true;
+                                if (variableValues != null && variableValues.TryGetValue(varNode.Name.Value, out var val) && TryExtractPositiveInt(val, out var runtimeLimit))
+                                {
+                                    requestedLimit = runtimeLimit;
+                                    break;
+                                }
+
+                                if (variableDefinitions != null)
+                                {
+                                    var varDef = variableDefinitions.FirstOrDefault(v => string.Equals(v.Variable.Name.Value, varNode.Name.Value, StringComparison.Ordinal));
+                                    if (varDef?.DefaultValue is IntValueNode defInt && int.TryParse(defInt.Value, out var defParsed) && defParsed > 0)
+                                    {
+                                        requestedLimit = defParsed;
+                                        break;
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -285,7 +323,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     {
                         // SEC M-9: Multiply nested list selection costs by effectiveRows using saturating arithmetic
                         var maskingCost = CalculateMaskingCost(field.SelectionSet, fragments, activeFragments, maskingCostCache);
-                        var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions);
+                        var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions, variableValues);
                         var totalChild = SafeAdd(maskingCost, childCost);
                         if (isList)
                         {
@@ -307,7 +345,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     cost = SafeAdd(cost, isList ? assumedRows : 1);
                     if (field.SelectionSet != null)
                     {
-                        var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions);
+                        var childCost = CalculateSelectionSetCost(field.SelectionSet, nextType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions, variableValues);
                         if (isList)
                         {
                             var nestedCost = (int)Math.Min((long)int.MaxValue, (long)childCost * assumedRows);
@@ -328,7 +366,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                     inlineType = foundType;
                 }
 
-                cost = SafeAdd(cost, CalculateSelectionSetCost(inlineFrag.SelectionSet, inlineType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions));
+                cost = SafeAdd(cost, CalculateSelectionSetCost(inlineFrag.SelectionSet, inlineType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions, variableValues));
             }
             else if (selection is FragmentSpreadNode fragmentSpread)
             {
@@ -350,7 +388,7 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
                         fragType = foundType;
                     }
 
-                    int fragCost = CalculateSelectionSetCost(fragDef.SelectionSet, fragType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions);
+                    int fragCost = CalculateSelectionSetCost(fragDef.SelectionSet, fragType, fragments, activeFragments, fragmentCostCache, maskingCostCache, schema, ref spreadCounter, maxSpreadExpansions, variableDefinitions, variableValues);
                     activeFragments.Remove(fragDef.Name.Value);
                     fragmentCostCache[fragDef.Name.Value] = fragCost;
                     cost = SafeAdd(cost, fragCost);
@@ -359,6 +397,36 @@ public sealed class QueryCostAnalyzerRule : IDocumentValidatorRule
         }
 
         return cost;
+    }
+
+    private static bool TryExtractPositiveInt(object? val, out int result)
+    {
+        result = 0;
+        if (val == null) return false;
+        if (val is int i) { result = i; return i > 0; }
+        if (val is long l && l <= int.MaxValue && l > 0) { result = (int)l; return true; }
+        if (val is short s && s > 0) { result = s; return true; }
+        if (val is byte b && b > 0) { result = b; return true; }
+        if (val is IntValueNode ivn && int.TryParse(ivn.Value, out var ivnParsed) && ivnParsed > 0) { result = ivnParsed; return true; }
+        if (val is System.Text.Json.JsonElement je)
+        {
+            if (je.ValueKind == System.Text.Json.JsonValueKind.Number && je.TryGetInt32(out var ji) && ji > 0)
+            {
+                result = ji;
+                return true;
+            }
+            if (je.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(je.GetString(), out var js) && js > 0)
+            {
+                result = js;
+                return true;
+            }
+        }
+        if (int.TryParse(val.ToString(), out var parsed) && parsed > 0)
+        {
+            result = parsed;
+            return true;
+        }
+        return false;
     }
 
     private static int CalculateMaskingCost(

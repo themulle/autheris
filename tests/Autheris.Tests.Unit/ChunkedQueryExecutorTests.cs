@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
+using NSubstitute;
 using Xunit;
 
 namespace Autheris.Tests.Unit;
@@ -197,6 +198,10 @@ public class ChunkedQueryExecutorTests
             }
         });
 
+        var devEnv = NSubstitute.Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        devEnv.EnvironmentName.Returns("Development");
+        var sqlExecutor = new SqlDataSourceExecutor(options: options, environment: devEnv);
+
         var executor = new ChunkedQueryExecutor(defaultChunkSize: 100);
         var executionService = new Autheris.Application.Services.GatewayExecutionService(
             repository,
@@ -204,7 +209,8 @@ public class ChunkedQueryExecutorTests
             cacheService,
             maskingProvider,
             executor,
-            options);
+            options,
+            dataSourceExecutors: new[] { sqlExecutor });
 
         // Grant consent for finance_items
         var childTableId = new Autheris.Domain.Common.TableIdentifier("finance", "dbo", "finance_items");

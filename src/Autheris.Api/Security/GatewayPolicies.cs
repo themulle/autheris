@@ -30,8 +30,6 @@ public static class GatewayPolicies
     public static readonly string[] SchemaAdminRoles = ["GovernanceAdmin", "SchemaAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin"];
     public static readonly string[] SchemaPublisherRoles = ["GovernanceAdmin", "SchemaAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin", "Developer", "DataOwner"];
 
-    private static readonly string[] RoleClaimTypes = [ClaimTypes.Role, "role", "roles"];
-
     /// <summary>
     /// K-K10: Checks if principal satisfies any of the strongly-typed GatewayRole requirements,
     /// respecting role hierarchy (e.g. ClusterAdmin implies GovernanceAdmin/DataSteward).

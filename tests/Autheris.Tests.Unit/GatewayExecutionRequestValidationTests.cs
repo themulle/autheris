@@ -196,6 +196,90 @@ public sealed class GatewayExecutionRequestValidationTests
         blocking.Gate!.SetResult();
         await running;
     }
+
+    [Fact]
+    public async Task TableQuery_WhenFilterFailsValidation_AuditsDenyAndDoesNotAuditAllow()
+    {
+        // SR15-32: When filter contains a denied/masked column, it throws GatewayInvalidQueryException.
+        // Audit MUST record TABLE_QUERY DENY with the filter expression, and MUST NOT record TABLE_QUERY ALLOW.
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(CreateMetadata());
+
+        var decision = TableAccessDecision.Allowed(
+            Table,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["secret_col"] = ColumnAccessLevel.Deny },
+            hasUnconstrainedColumnAllow: true);
+        var cache = Substitute.For<IConsentCacheService>();
+        cache.GetCachedDecisionAsync(Arg.Any<TenantId>(), Arg.Any<Sid>(), Arg.Any<TableIdentifier>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(decision);
+
+        var audit = Substitute.For<IAuditLogRepository>();
+        var service = new GatewayExecutionService(
+            metadataRepo,
+            Substitute.For<IConsentRepository>(),
+            audit,
+            Substitute.For<IConsentResolutionService>(),
+            cache,
+            Substitute.For<IColumnMaskingProvider>(),
+            options: Options.Create(new GatewayOptions()),
+            dataSourceExecutors: [new CapturingExecutor()]);
+
+        var filter = new TableFilterClause("secret_col = @p0", new Dictionary<string, object?> { ["@p0"] = "val" }, ["secret_col"]);
+        var request = new TablePageRequest(100, 0, Filter: filter);
+
+        await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
+            service.ExecuteTablePageAsync(CreateUser(), Table, request));
+
+        await audit.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == "TABLE_QUERY" && e.Decision == "DENY" && e.DetailsJson.Contains("secret_col")),
+            Arg.Any<CancellationToken>());
+
+        await audit.DidNotReceive().RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == "TABLE_QUERY" && e.Decision == "ALLOW"),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task TableQuery_WhenOrderByFailsValidation_AuditsDenyAndDoesNotAuditAllow()
+    {
+        // SR15-32: When orderBy contains a denied/masked column, it throws GatewayInvalidQueryException.
+        // Audit MUST record TABLE_QUERY DENY with order by details, and MUST NOT record TABLE_QUERY ALLOW.
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(CreateMetadata());
+
+        var decision = TableAccessDecision.Allowed(
+            Table,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["secret_col"] = ColumnAccessLevel.Deny },
+            hasUnconstrainedColumnAllow: true);
+        var cache = Substitute.For<IConsentCacheService>();
+        cache.GetCachedDecisionAsync(Arg.Any<TenantId>(), Arg.Any<Sid>(), Arg.Any<TableIdentifier>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(decision);
+
+        var audit = Substitute.For<IAuditLogRepository>();
+        var service = new GatewayExecutionService(
+            metadataRepo,
+            Substitute.For<IConsentRepository>(),
+            audit,
+            Substitute.For<IConsentResolutionService>(),
+            cache,
+            Substitute.For<IColumnMaskingProvider>(),
+            options: Options.Create(new GatewayOptions()),
+            dataSourceExecutors: [new CapturingExecutor()]);
+
+        var orderBy = new[] { new TableOrderBy("secret_col", false) };
+        var request = new TablePageRequest(100, 0, OrderBy: orderBy);
+
+        await Should.ThrowAsync<GatewayInvalidQueryException>(() =>
+            service.ExecuteTablePageAsync(CreateUser(), Table, request));
+
+        await audit.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == "TABLE_QUERY" && e.Decision == "DENY" && e.DetailsJson.Contains("secret_col")),
+            Arg.Any<CancellationToken>());
+
+        await audit.DidNotReceive().RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == "TABLE_QUERY" && e.Decision == "ALLOW"),
+            Arg.Any<CancellationToken>());
+    }
 }
 
 public sealed class TableReadConcurrencyGateTests

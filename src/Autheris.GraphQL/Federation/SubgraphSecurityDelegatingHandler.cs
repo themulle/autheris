@@ -22,6 +22,7 @@ public sealed class SubgraphSecurityDelegatingHandler : DelegatingHandler
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly ILogger<SubgraphSecurityDelegatingHandler> _logger;
     private readonly Autheris.Application.Federation.Interfaces.ISubgraphCanaryRouter? _canaryRouter;
+    private readonly IOptions<GatewayOptions>? _options;
     private readonly bool _isDev;
 
     public SubgraphSecurityDelegatingHandler(
@@ -37,6 +38,7 @@ public sealed class SubgraphSecurityDelegatingHandler : DelegatingHandler
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _canaryRouter = canaryRouter;
+        _options = options;
         // Relaxed SSRF validation only while DANGER bypasses are active (Development-only by startup validation).
         // WARN entries are permitted in Production and therefore must not relax the destination check.
         _isDev = options?.Value.HasAnyDangerBypassActive == true;
@@ -91,8 +93,15 @@ public sealed class SubgraphSecurityDelegatingHandler : DelegatingHandler
         // Apply Zero-Trust Security headers (Subject SID, Tenant, Roles) & SSRF check
         _propagationService.ApplySecurityHeaders(request, _subgraphName, principal, tenantId);
 
-        // Forward Authorization Bearer token downstream ONLY (NEVER forward Basic credentials to prevent confused deputy credential leaks)
-        if (httpContext?.Request.Headers.TryGetValue("Authorization", out var authVals) == true && authVals.Count > 0)
+        // Forward Authorization Bearer token downstream ONLY if explicitly configured on the subgraph AND NOT an MCP request
+        bool isMcp = httpContext?.Items.ContainsKey("IsMcpRequest") == true ||
+                     httpContext?.Request.Path.StartsWithSegments("/mcp") == true ||
+                     principal?.HasClaim("mcp.tool", "true") == true;
+
+        var subgraphConfig = _options?.Value.Federation.Subgraphs.Find(s => string.Equals(s.Name, _subgraphName, StringComparison.OrdinalIgnoreCase));
+        bool canForwardBearer = !isMcp && (_options?.Value.Federation.ForwardAuthorizationBearer == true || subgraphConfig?.ForwardClientBearerToken == true);
+
+        if (canForwardBearer && httpContext?.Request.Headers.TryGetValue("Authorization", out var authVals) == true && authVals.Count > 0)
         {
             var firstAuth = authVals[0];
             if (firstAuth != null && firstAuth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))

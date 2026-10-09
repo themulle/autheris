@@ -53,4 +53,55 @@ public sealed class EpochRedisFailureInf1Tests
 
         (await service.IsEpochValidAsync(Table, 3)).ShouldBeTrue();
     }
+
+    [Fact]
+    public async Task DegradedMode_TableWithSensitiveColumn_FailsClosed()
+    {
+        // SR15-41: In degraded mode (Redis disconnected), FailClosedOnSensitiveTables must fail closed
+        // not only on IsHighlySensitive, but also when any column is marked IsSensitive.
+        var multiplexer = Substitute.For<IConnectionMultiplexer>();
+        multiplexer.IsConnected.Returns(false); // degraded
+
+        var tableMetaRepo = Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>();
+        var metadata = new Autheris.Domain.Model.TableMetadata
+        {
+            Identifier = Table,
+            Table = new Autheris.Domain.Model.Table
+            {
+                TableName = Table.TableName,
+                SchemaName = Table.Schema,
+                SourceName = Table.Domain,
+                Sensitivity = "NORMAL", // IsHighlySensitive will be false
+                RequiresFourEyes = false
+            },
+            Columns =
+            [
+                new Autheris.Domain.Model.TableColumn { ColumnName = "id", IsSensitive = false },
+                new Autheris.Domain.Model.TableColumn { ColumnName = "salary", IsSensitive = true }
+            ]
+        };
+
+        tableMetaRepo.GetTableMetadataAsync(Table, Arg.Any<System.Threading.CancellationToken>())
+            .Returns(Task.FromResult<Autheris.Domain.Model.TableMetadata?>(metadata));
+
+        var sp = Substitute.For<IServiceProvider>();
+        sp.GetService(typeof(Autheris.Application.Interfaces.ITableMetadataRepository))
+            .Returns(tableMetaRepo);
+
+        var options = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions
+        {
+            Caching = new Autheris.Domain.Options.CachingOptions
+            {
+                EpochValidation = new Autheris.Domain.Options.EpochValidationOptions
+                {
+                    FailClosedOnSensitiveTables = true
+                }
+            }
+        });
+
+        var service = new EpochValidationService(options: options, multiplexer: multiplexer, serviceProvider: sp);
+
+        var isValid = await service.IsEpochValidAsync(Table, 1);
+        isValid.ShouldBeFalse();
+    }
 }

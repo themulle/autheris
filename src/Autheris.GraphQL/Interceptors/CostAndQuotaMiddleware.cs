@@ -77,8 +77,20 @@ public sealed class CostAndQuotaMiddleware
 
         var clientContext = await tierResolver.ResolveAsync(principal, apiKey, clientIp, context.RequestAborted).ConfigureAwait(false);
 
-        // 2. Calculate cost via QueryCostAnalyzerRule
-        int calculatedCost = QueryCostAnalyzerRule.CalculateCost(doc, context.Schema);
+        // 2. Calculate cost via QueryCostAnalyzerRule (incorporating actual runtime variable values)
+        Dictionary<string, object?>? runtimeVariables = null;
+        if (!context.VariableValues.IsDefaultOrEmpty)
+        {
+            runtimeVariables = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var coll in context.VariableValues)
+            {
+                foreach (var item in coll)
+                {
+                    runtimeVariables[item.Name] = item.Value;
+                }
+            }
+        }
+        int calculatedCost = QueryCostAnalyzerRule.CalculateCost(doc, context.Schema, variableValues: runtimeVariables);
 
         // 3. Check query cost against tier policy max limit
         if (calculatedCost > clientContext.Policy.MaxCostPerQuery)

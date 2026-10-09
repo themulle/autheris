@@ -55,6 +55,126 @@ public sealed class ODataTests
     }
 
     [Fact]
+    public void ODataCsdlGenerator_IncludesCoreVocabularyReference_ForExcelCompatibility()
+    {
+        var tables = new List<TableMetadata> { CreateSampleTable() };
+        var xml = ODataCsdlGenerator.GenerateMetadataXml(tables);
+
+        xml.ShouldContain("<edmx:Reference Uri=\"https://oasis-tcs.github.io/odata-vocabularies/vocabularies/Org.OData.Core.V1.xml\">");
+        xml.ShouldContain("<edmx:Include Namespace=\"Org.OData.Core.V1\" Alias=\"Core\" />");
+    }
+
+    [Fact]
+    public void ODataCsdlGenerator_MetadataConformsToOasisXsdSchemas()
+    {
+        var schemas = new System.Xml.Schema.XmlSchemaSet();
+        var edmPath = Path.Combine(AppContext.BaseDirectory, "Schemas", "edm.xsd");
+        var edmxPath = Path.Combine(AppContext.BaseDirectory, "Schemas", "edmx.xsd");
+
+        File.Exists(edmPath).ShouldBeTrue();
+        File.Exists(edmxPath).ShouldBeTrue();
+
+        schemas.Add("http://docs.oasis-open.org/odata/ns/edm", edmPath);
+        schemas.Add("http://docs.oasis-open.org/odata/ns/edmx", edmxPath);
+        schemas.Compile();
+
+        var sampleTable = CreateSampleTable();
+        var telemetryTable = new TableMetadata
+        {
+            Identifier = new TableIdentifier("lwetem_prod", "fms", "air1"),
+            Table = new Table { SchemaName = "fms", TableName = "air1" },
+            PrimaryKeyColumns = [],
+            Columns =
+            [
+                new TableColumn { ColumnName = "timestamp", DataType = "timestamp" },
+                new TableColumn { ColumnName = "vehicle_id", DataType = "varchar" },
+                new TableColumn { ColumnName = "pressure", DataType = "double" }
+            ]
+        };
+
+        var xml = ODataCsdlGenerator.GenerateMetadataXml([sampleTable, telemetryTable]);
+
+        var settings = new System.Xml.XmlReaderSettings
+        {
+            ValidationType = System.Xml.ValidationType.Schema,
+            Schemas = schemas
+        };
+
+        var errors = new List<string>();
+        settings.ValidationEventHandler += (sender, args) =>
+        {
+            errors.Add($"{args.Severity}: {args.Message} (Line {args.Exception?.LineNumber})");
+        };
+
+        using var stringReader = new StringReader(xml);
+        using var xmlReader = System.Xml.XmlReader.Create(stringReader, settings);
+        while (xmlReader.Read()) { }
+
+        errors.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void ODataCsdlGenerator_WhenTableHasNoPrimaryKeyAndNoIdColumn_UsesExistingColumnsAsKeyWithNullableFalse()
+    {
+        var table = new TableMetadata
+        {
+            Identifier = new TableIdentifier("lwetem_prod", "fms", "air1"),
+            Table = new Table { SchemaName = "fms", TableName = "air1" },
+            PrimaryKeyColumns = [],
+            Columns =
+            [
+                new TableColumn { ColumnName = "timestamp", DataType = "timestamp" },
+                new TableColumn { ColumnName = "vehicle_id", DataType = "varchar" },
+                new TableColumn { ColumnName = "pressure", DataType = "double" }
+            ]
+        };
+
+        var xml = ODataCsdlGenerator.GenerateMetadataXml([table]);
+
+        xml.ShouldNotContain("<PropertyRef Name=\"id\" />");
+        xml.ShouldContain("<PropertyRef Name=\"timestamp\" />");
+        xml.ShouldContain("<PropertyRef Name=\"vehicle_id\" />");
+        xml.ShouldContain("<PropertyRef Name=\"pressure\" />");
+        xml.ShouldContain("<Property Name=\"timestamp\" Type=\"Edm.DateTimeOffset\" Nullable=\"false\" />");
+        xml.ShouldContain("<Property Name=\"vehicle_id\" Type=\"Edm.String\" Nullable=\"false\" />");
+        xml.ShouldContain("<Property Name=\"pressure\" Type=\"Edm.Double\" Nullable=\"false\" />");
+
+        var doc = System.Xml.Linq.XDocument.Parse(xml);
+        var edmNs = System.Xml.Linq.XNamespace.Get("http://docs.oasis-open.org/odata/ns/edm");
+        var entityType = doc.Descendants(edmNs + "EntityType").First();
+        var keyPropertyRefs = entityType.Element(edmNs + "Key")!.Elements(edmNs + "PropertyRef").Select(p => p.Attribute("Name")!.Value).ToList();
+        var definedProperties = entityType.Elements(edmNs + "Property").Select(p => p.Attribute("Name")!.Value).ToHashSet();
+
+        foreach (var keyRef in keyPropertyRefs)
+        {
+            definedProperties.ShouldContain(keyRef);
+        }
+    }
+
+    [Fact]
+    public void ODataCsdlGenerator_WhenPrimaryKeyColumnDoesNotExistInTable_FallsBackSafelyToIdOrAllColumns()
+    {
+        var table = new TableMetadata
+        {
+            Identifier = new TableIdentifier("sales", "dbo", "records"),
+            Table = new Table { SchemaName = "dbo", TableName = "records" },
+            PrimaryKeyColumns = ["ghost_col"], // declared PK that does not exist in Columns
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "integer" },
+                new TableColumn { ColumnName = "name", DataType = "varchar" }
+            ]
+        };
+
+        var xml = ODataCsdlGenerator.GenerateMetadataXml([table]);
+
+        xml.ShouldNotContain("<PropertyRef Name=\"ghost_col\" />");
+        xml.ShouldContain("<PropertyRef Name=\"id\" />");
+        xml.ShouldContain("<Property Name=\"id\" Type=\"Edm.Int32\" Nullable=\"false\" />");
+        xml.ShouldContain("<Property Name=\"name\" Type=\"Edm.String\" />");
+    }
+
+    [Fact]
     public void ODataResponseFormatter_FormatsServiceDocumentCorrectly()
     {
         var tables = new List<TableMetadata> { CreateSampleTable() };
@@ -81,16 +201,12 @@ public sealed class ODataTests
             hasUnconstrainedColumnAllow: true
         );
 
-        execService.ExecuteTableQueryAsync(
+        execService.ExecuteTablePageAsync(
             Arg.Any<ClaimsPrincipal?>(),
             Arg.Is<TableIdentifier>(t => t.TableName == "invoices"),
-            Arg.Any<int?>(),
-            Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(),
-            Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Any<TablePageRequest>(),
             Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>((sampleRows, decision)));
+            .Returns(Task.FromResult(new TableQueryPage(sampleRows, decision, null)));
 
         var handler = new ODataHandler(metadataRepo, execService, logger);
 
@@ -110,16 +226,65 @@ public sealed class ODataTests
         result.Payload.ShouldNotBeNull();
 
         // Verify execution service was called with parsed select fields
-        await execService.Received().ExecuteTableQueryAsync(
+        await execService.Received().ExecuteTablePageAsync(
             Arg.Any<ClaimsPrincipal?>(),
             Arg.Is<TableIdentifier>(t => t.TableName == "invoices"),
-            first: 50,
-            after: 0,
-            queryArguments: null,
-            requestedFields: Arg.Is<IReadOnlyList<string>?>(f => f != null && f.SequenceEqual(new[] { "id", "customer", "amount" })),
-            requestHeaders: null,
-            ct: Arg.Any<CancellationToken>()
+            Arg.Is<TablePageRequest>(r => r.First == 51 && r.After == 0 && r.RequestHeaders == null &&
+                                          r.RequestedFields != null && r.RequestedFields.SequenceEqual(new[] { "id", "customer", "amount" })),
+            Arg.Any<CancellationToken>()
         );
+    }
+
+    [Fact]
+    public async Task ODataHandler_ExecuteEntitySetQueryAsync_WhenMoreRowsExistThanTop_EmitsNextLink()
+    {
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var execService = Substitute.For<IGatewayExecutionService>();
+        var logger = NullLogger<ODataHandler>.Instance;
+
+        var sampleRows = new List<IReadOnlyDictionary<string, object?>>
+        {
+            new Dictionary<string, object?> { ["id"] = 1, ["customer"] = "Customer A" },
+            new Dictionary<string, object?> { ["id"] = 2, ["customer"] = "Customer B" },
+            new Dictionary<string, object?> { ["id"] = 3, ["customer"] = "Customer C" }
+        };
+
+        var decision = TableAccessDecision.Allowed(
+            new TableIdentifier("sales", "dbo", "invoices"),
+            new Dictionary<string, ColumnAccessLevel>(),
+            hasUnconstrainedColumnAllow: true
+        );
+
+        execService.ExecuteTablePageAsync(
+            Arg.Any<ClaimsPrincipal?>(),
+            Arg.Any<TableIdentifier>(),
+            Arg.Any<TablePageRequest>(),
+            Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new TableQueryPage(sampleRows, decision, null)));
+
+        var handler = new ODataHandler(metadataRepo, execService, logger);
+
+        var result = await handler.ExecuteEntitySetQueryAsync(
+            principal: null,
+            serviceRootUrl: "https://gateway/odata/v4",
+            table: new TableIdentifier("sales", "dbo", "invoices"),
+            top: 2,
+            skip: 0,
+            select: "id,customer",
+            includeCount: false,
+            headers: null
+        );
+
+        result.Success.ShouldBeTrue();
+        result.StatusCode.ShouldBe(200);
+
+        var payload = result.Payload.ShouldBeOfType<Dictionary<string, object?>>();
+        var rows = (payload["value"] as System.Collections.IEnumerable)?.Cast<object?>().ToList();
+        rows.ShouldNotBeNull();
+        rows.Count.ShouldBe(2);
+
+        payload.ShouldContainKey("@odata.nextLink");
+        payload["@odata.nextLink"]!.ToString().ShouldBe("https://gateway/odata/v4/sales/dbo/invoices?$skip=2&$top=2&$select=id%2Ccustomer");
     }
 
     [Fact]
@@ -134,16 +299,8 @@ public sealed class ODataTests
             "No active consent granted for user SID"
         );
 
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(),
-            Arg.Any<TableIdentifier>(),
-            Arg.Any<int?>(),
-            Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(),
-            Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-            Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>((Array.Empty<IReadOnlyDictionary<string, object?>>(), decision)));
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
 
         var handler = new ODataHandler(metadataRepo, execService, logger, DevEnv());
 
@@ -177,16 +334,10 @@ public sealed class ODataTests
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         var execService = Substitute.For<IGatewayExecutionService>();
         var decision = TableAccessDecision.Denied(new TableIdentifier("sales", "dbo", "invoices"), "Casbin: sid S-1-5-21-1 tenant acme denied");
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableIdentifier>(t => t.TableName == "invoices"), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>((Array.Empty<IReadOnlyDictionary<string, object?>>(), decision)));
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableIdentifier>(t => t.TableName == "missing"), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableIdentifier>(t => t.TableName == "invoices"), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Is<TableIdentifier>(t => t.TableName == "missing"), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableQueryPage>>(
                 _ => throw new Autheris.Domain.Exceptions.TableNotFoundException(new TableIdentifier("acme", "dbo", "missing")));
 
         foreach (var handler in new[]
@@ -381,16 +532,8 @@ public sealed class ODataTests
             hasUnconstrainedColumnAllow: true
         );
 
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(),
-            Arg.Any<TableIdentifier>(),
-            Arg.Any<int?>(),
-            Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(),
-            Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-            Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>((Array.Empty<IReadOnlyDictionary<string, object?>>(), decision)));
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
 
         var handler = new ODataHandler(metadataRepo, execService, logger);
 
@@ -406,15 +549,11 @@ public sealed class ODataTests
         );
 
         result.Success.ShouldBeTrue();
-        await execService.Received().ExecuteTableQueryAsync(
+        await execService.Received().ExecuteTablePageAsync(
             Arg.Any<ClaimsPrincipal?>(),
             Arg.Any<TableIdentifier>(),
-            first: 100,
-            after: 0,
-            queryArguments: null,
-            requestedFields: null,
-            requestHeaders: null,
-            ct: Arg.Any<CancellationToken>()
+            Arg.Is<TablePageRequest>(r => r.First == 101 && r.After == 0 && r.RequestedFields == null && r.RequestHeaders == null),
+            Arg.Any<CancellationToken>()
         );
     }
 
@@ -431,16 +570,8 @@ public sealed class ODataTests
             hasUnconstrainedColumnAllow: true
         );
 
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(),
-            Arg.Any<TableIdentifier>(),
-            Arg.Any<int?>(),
-            Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(),
-            Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-            Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>((Array.Empty<IReadOnlyDictionary<string, object?>>(), decision)));
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
 
         var handler = new ODataHandler(metadataRepo, execService, logger);
 
@@ -456,15 +587,11 @@ public sealed class ODataTests
         );
 
         result.Success.ShouldBeTrue();
-        await execService.Received().ExecuteTableQueryAsync(
+        await execService.Received().ExecuteTablePageAsync(
             Arg.Any<ClaimsPrincipal?>(),
             Arg.Any<TableIdentifier>(),
-            first: 1000,
-            after: 10,
-            queryArguments: null,
-            requestedFields: null,
-            requestHeaders: null,
-            ct: Arg.Any<CancellationToken>()
+            Arg.Is<TablePageRequest>(r => r.First == 1001 && r.After == 10 && r.RequestedFields == null && r.RequestHeaders == null),
+            Arg.Any<CancellationToken>()
         );
     }
 
@@ -505,16 +632,8 @@ public sealed class ODataTests
             hasUnconstrainedColumnAllow: true
         );
 
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(),
-            Arg.Any<TableIdentifier>(),
-            Arg.Any<int?>(),
-            Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(),
-            Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
-            Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>((Array.Empty<IReadOnlyDictionary<string, object?>>(), decision)));
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
@@ -530,14 +649,10 @@ public sealed class ODataTests
         );
 
         result.Success.ShouldBeTrue();
-        await execService.Received().ExecuteTableQueryAsync(
+        await execService.Received().ExecuteTablePageAsync(
             Arg.Any<ClaimsPrincipal?>(),
             Arg.Any<TableIdentifier>(),
-            Arg.Any<int?>(),
-            Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(),
-            requestedFields: Arg.Is<IReadOnlyList<string>?>(f => f != null && f.SequenceEqual(new[] { "id", "customer", "amount" })),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(),
+            Arg.Is<TablePageRequest>(r => r.RequestedFields != null && r.RequestedFields.SequenceEqual(new[] { "id", "customer", "amount" })),
             Arg.Any<CancellationToken>()
         );
     }
@@ -580,11 +695,8 @@ public sealed class ODataTests
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableQueryPage>>(
                 _ => throw new TimeoutException("Database command timed out."));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
@@ -611,11 +723,8 @@ public sealed class ODataTests
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableQueryPage>>(
                 _ => throw new TestDbTimeoutException("SqlException: Execution Timeout Expired. The timeout period elapsed."));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
@@ -641,11 +750,8 @@ public sealed class ODataTests
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableQueryPage>>(
                 _ => throw new InvalidOperationException("Fatal unexpected engine crash"));
 
         var handlerDev = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Development"));
@@ -670,11 +776,8 @@ public sealed class ODataTests
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableQueryPage>>(
                 _ => throw new Autheris.Domain.Exceptions.GatewayUnauthorizedException("Authentication required"));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
@@ -692,11 +795,8 @@ public sealed class ODataTests
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         var execService = Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableQueryPage>>(
                 _ => throw new Autheris.Domain.Exceptions.GatewaySecurityException("Zero-Trust policy violation"));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Development"));
@@ -734,11 +834,8 @@ public sealed class ODataTests
             hasUnconstrainedColumnAllow: true
         );
 
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>((Array.Empty<IReadOnlyDictionary<string, object?>>(), decision)));
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null)));
 
         var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
         var headers = new Dictionary<string, string[]> { ["X-Tenant-ID"] = ["tenant_abc"] };
@@ -746,10 +843,9 @@ public sealed class ODataTests
         var result = await handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("sales", "dbo", "invoices"), 10, 0, null, false, headers);
 
         result.Success.ShouldBeTrue();
-        await execService.Received().ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            requestHeaders: headers, Arg.Any<CancellationToken>());
+        await execService.Received().ExecuteTablePageAsync(
+            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(),
+            Arg.Is<TablePageRequest>(r => r.RequestHeaders == headers), Arg.Any<CancellationToken>());
     }
 
     // ---- OData-Härtung (docs/plans/rls-subquery-in-strategy.md, O1-O12) ----
@@ -762,16 +858,13 @@ public sealed class ODataTests
     private static ODataHandler CreateHandlerThrowing(Exception exception, IGatewayExecutionService? execService = null)
     {
         execService ??= Substitute.For<IGatewayExecutionService>();
-        execService.ExecuteTableQueryAsync(
-            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<int?>(), Arg.Any<int?>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<IReadOnlyList<string>?>(),
-            Arg.Any<IReadOnlyDictionary<string, string[]>?>(), Arg.Any<CancellationToken>())
-            .Returns<Task<(IReadOnlyList<IReadOnlyDictionary<string, object?>>, TableAccessDecision)>>(_ => throw exception);
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns<Task<TableQueryPage>>(_ => throw exception);
         return new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance, DevEnv("Production"));
     }
 
     private static Task<ODataQueryResult> QueryAsync(ODataHandler handler, int? skip = 0, bool includeCount = false, CancellationToken ct = default) =>
-        handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("lwetem_prod", "fms", "air1"), 10, skip, null, includeCount, null, ct);
+        handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("lwetem_prod", "fms", "air1"), 10, skip, null, includeCount, null, ct: ct);
 
     [Fact]
     public async Task ODataHandler_InvalidQueryException_Returns400InvalidQueryOption()
@@ -786,16 +879,22 @@ public sealed class ODataTests
     }
 
     [Fact]
-    public async Task ODataHandler_CountTrue_Returns501_InsteadOfPageCount()
+    public async Task ODataHandler_CountTrue_WithoutTotalFromSource_Returns501_InsteadOfPageCount()
     {
+        // 4a.3: $count is the total of the data source; without it the page size is never reported as count.
         var execService = Substitute.For<IGatewayExecutionService>();
+        var rows = new List<IReadOnlyDictionary<string, object?>> { new Dictionary<string, object?> { ["id"] = 1 } };
+        var decision = TableAccessDecision.Allowed(new TableIdentifier("lwetem_prod", "fms", "air1"), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+        execService.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new TableQueryPage(rows, decision, TotalCount: null));
         var handler = new ODataHandler(Substitute.For<ITableMetadataRepository>(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await QueryAsync(handler, includeCount: true);
 
         result.StatusCode.ShouldBe(501);
         result.ErrorCode.ShouldBe("NotImplemented");
-        await execService.DidNotReceiveWithAnyArgs().ExecuteTableQueryAsync(default, default, default, default, default, default, default, default);
+        await execService.Received(1).ExecuteTablePageAsync(
+            Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Is<TablePageRequest>(r => r.IncludeTotalCount), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -809,7 +908,7 @@ public sealed class ODataTests
         result.StatusCode.ShouldBe(400);
         result.ErrorCode.ShouldBe("InvalidQueryOption");
         result.ErrorMessage.ShouldNotBeNull().ShouldContain("$skip");
-        await execService.DidNotReceiveWithAnyArgs().ExecuteTableQueryAsync(default, default, default, default, default, default, default, default);
+        await execService.DidNotReceiveWithAnyArgs().ExecuteTablePageAsync(default, default, default!, default);
     }
 
     [Fact]

@@ -1,7 +1,7 @@
 # F-AI-06: Explainable AI & Provenance Footnotes
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`IMcpProvenanceEnricher.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Interfaces/IMcpProvenanceEnricher.cs), [`McpProvenanceEnricher.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Services/McpProvenanceEnricher.cs)
+**Components:** [`IMcpProvenanceEnricher.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Interfaces/IMcpProvenanceEnricher.cs), [`McpProvenanceEnricher.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/McpProvenanceEnricher.cs)
 
 ---
 

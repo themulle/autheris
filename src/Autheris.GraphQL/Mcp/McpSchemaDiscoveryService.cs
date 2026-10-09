@@ -78,19 +78,9 @@ public sealed class McpSchemaDiscoveryService : IHostedService
                             var parts = tn.Value.Split('.');
                             if (parts.Length == 3) targetTable = new TableIdentifier(parts[0], parts[1], parts[2]);
                         }
-
-                        if (targetTable == null)
-                        {
-                            var parts = field.Name.Split('_');
-                            if (parts.Length >= 3)
-                            {
-                                targetTable = new TableIdentifier(parts[0], parts[1], string.Join('_', parts.Skip(2)));
-                            }
-                            else
-                            {
-                                targetTable = new TableIdentifier("default", "dbo", field.Name.ToLowerInvariant());
-                            }
-                        }
+                        // MCP-6: Do NOT guess TargetTable by splitting field names or assuming default.dbo.
+                        // When no explicit targetTable is provided, leave TargetTable null so that
+                        // AiDataGuardrailService and McpGraphQlTableResolver resolve the actual tables from the GraphQL operation AST.
 
                         var toolDef = new McpToolDefinition(toolName, description, inputSchema, targetOp, targetTable);
                         _toolRegistry.RegisterTool(toolDef);

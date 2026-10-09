@@ -27,6 +27,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<AiDataGuardrailService> _logger;
     private readonly IMcpQueryExecutor? _queryExecutor;
+    private readonly IConsentRepository? _consentRepository;
     private readonly IAuditLogRepository? _auditLogRepository;
     private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly ITableMetadataRepository? _tableMetadataRepository;
@@ -66,7 +67,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         ISemanticPromptGuardrail? promptGuardrail = null,
         IGoldenQueryService? goldenQueryService = null,
         IHitLStepUpApprovalService? stepUpApprovalService = null,
-        IGraphQlCatalogMap? graphQlCatalogMap = null)
+        IGraphQlCatalogMap? graphQlCatalogMap = null,
+        IConsentRepository? consentRepository = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -80,6 +82,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         _goldenQueryService = goldenQueryService;
         _stepUpApprovalService = stepUpApprovalService;
         _graphQlCatalogMap = graphQlCatalogMap;
+        _consentRepository = consentRepository;
     }
 
 
@@ -178,6 +181,20 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             ? await ResolveGraphQlTablesAsync(request.ArgumentsJson, cancellationToken).ConfigureAwait(false)
             : ParseTablesFromTool(tool, request.ArgumentsJson);
 
+        // 4b.4: For dataset tools requiring a dataset argument, validate argument before fail-closed ABAC.
+        if (string.Equals(tool.Name, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(tool.Name, McpDatasetTools.SampleRows, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "dataset", out var dsArg) || string.IsNullOrWhiteSpace(dsArg))
+            {
+                return new McpToolCallResult(
+                    IsSuccess: false,
+                    ContentJson: "{}",
+                    ErrorMessage: $"Missing or invalid required argument 'dataset' for tool '{tool.Name}'."
+                );
+            }
+        }
+
         // Security Hardening: For data access tools, target table must be resolvable.
         // If unresolvable, fail-closed to prevent bypassing Casbin ABAC and Four-Eyes gates.
         if (resolvedTables == null && (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) || !string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation)))
@@ -272,18 +289,83 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             }
         }
 
-        // 3. Four-Eyes Justification Gate (dataset tools that return no rows, such as describe_dataset, need no approval)
-        var needsFourEyesCheck = !McpDatasetTools.IsDatasetTool(tool.Name) || McpDatasetTools.ReadsRows(tool.Name);
+        // 3. Four-Eyes Justification Gate (tools that return no rows, such as describe_dataset, simulate_query, need no approval)
+        var needsFourEyesCheck = ToolReadsDatasetRows(tool);
         foreach (TableIdentifier? resolvedTable in needsFourEyesCheck ? resolvedTables ?? [] : [])
         {
-            if (_tableMetadataRepository == null)
+            if (_tableMetadataRepository == null || resolvedTable == null || resolvedTable.Value.Equals(McpDatasetTools.CatalogTable))
             {
-                break;
+                continue;
             }
 
             var meta = await _tableMetadataRepository.GetTableMetadataAsync(resolvedTable.Value, cancellationToken).ConfigureAwait(false);
+            if (meta != null && !meta.Table.IsActive)
+            {
+                activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+
+                _logger.LogWarning("Tool '{ToolName}' targets inactive table '{Table}'. Denying execution.", tool.Name, resolvedTable);
+
+                await RecordAuditEventAsync(
+                    tool.Name,
+                    sessionContext,
+                    decision: "DENY",
+                    details: $"Tool execution denied: target table {resolvedTable} is inactive.",
+                    isMasked: false,
+                    truncated: false,
+                    estimatedTokens: 0,
+                    cancellationToken).ConfigureAwait(false);
+
+                return new McpToolCallResult(
+                    IsSuccess: false,
+                    ContentJson: "{}",
+                    ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible."
+                );
+            }
+
+            // SEC-MCP-02 / SR-P2-07: Verify catalog visibility BEFORE checking RequiresFourEyes or requesting step-up.
+            // This prevents leaking secret table names and flooding approvers with unconsented step-up tickets.
             if (meta?.Table.RequiresFourEyes == true)
             {
+                var roles = sessionContext.Roles ?? [];
+                bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
+                               roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+
+                if (_consentRepository != null && !_options.Value.IsMcpAuthBypassed && !isAdmin)
+                {
+                    var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync([meta], principal, _consentRepository, cancellationToken).ConfigureAwait(false);
+                    bool isVisible = visibleTables.Any(t =>
+                        t.Identifier.Equals(resolvedTable.Value) ||
+                        (string.Equals(t.Identifier.Domain, resolvedTable.Value.Domain, StringComparison.OrdinalIgnoreCase) &&
+                         string.Equals(t.Identifier.TableName, resolvedTable.Value.TableName, StringComparison.OrdinalIgnoreCase)));
+
+                    if (!isVisible)
+                    {
+                        activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                        McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+
+                        _logger.LogWarning("Tool '{ToolName}' targets dataset '{Table}' which is not visible or consented to caller '{Caller}'. Denying execution before Four-Eyes gate.",
+                            tool.Name, resolvedTable, sessionContext.ServicePrincipalId);
+
+                        await RecordAuditEventAsync(
+                            tool.Name,
+                            sessionContext,
+                            decision: "DENY",
+                            details: $"Tool execution denied: target dataset {resolvedTable} is not visible or consented to caller.",
+                            isMasked: false,
+                            truncated: false,
+                            estimatedTokens: 0,
+                            cancellationToken).ConfigureAwait(false);
+
+                        return new McpToolCallResult(
+                            IsSuccess: false,
+                            ContentJson: "{}",
+                            ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible."
+                        );
+                    }
+                }
+
                 if (_stepUpApprovalService != null && _options.Value.HitLStepUp.Enabled)
                 {
                     var requesterSid = sessionContext.UserSid ?? sessionContext.ServicePrincipalId;
@@ -377,6 +459,34 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             }
 
             var queries = await _goldenQueryService.GetGoldenQueriesAsync(domain, tableName, cancellationToken).ConfigureAwait(false);
+
+            // MCP-5: Consent and visibility filtering for golden queries (fail-closed)
+            var isMcpAuthBypassed = _options.Value.IsMcpAuthBypassed;
+            var roles = sessionContext.Roles ?? [];
+            bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
+                           roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+
+            if (_consentRepository != null && !isMcpAuthBypassed && !isAdmin)
+            {
+                var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+                var allTables = _tableMetadataRepository != null
+                    ? await _tableMetadataRepository.GetAllTablesAsync(cancellationToken).ConfigureAwait(false)
+                    : Array.Empty<TableMetadata>();
+
+                var visibleTables = await McpCatalogVisibility.VisibleTablesAsync(allTables, principal, _consentRepository, cancellationToken).ConfigureAwait(false);
+                var visibleKeys = visibleTables
+                    .Select(t => (Domain: t.Identifier.Domain.ToLowerInvariant(), Table: t.Identifier.TableName.ToLowerInvariant()))
+                    .ToHashSet();
+
+                queries = queries
+                    .Where(q => visibleKeys.Contains((q.Domain.ToLowerInvariant(), q.TableName.ToLowerInvariant())))
+                    .ToList();
+            }
+            else if (!isMcpAuthBypassed && !isAdmin && string.Equals(sessionContext.UserSid, "ANONYMOUS_MCP_CLIENT", StringComparison.OrdinalIgnoreCase))
+            {
+                queries = Array.Empty<GoldenQuery>();
+            }
+
             rawDataJson = JsonSerializer.Serialize(new { tenantId = sessionContext.TenantId, queries });
         }
         else if (_queryExecutor != null)
@@ -440,8 +550,18 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
             int maxChars = maxTokens * 4;
             if (scrubbedJson.Length > maxChars)
             {
-                scrubbedJson = scrubbedJson[..maxChars] + " ... [TRUNCATED DUE TO MCP TOKEN BUDGET]";
-                estimatedTokens = maxTokens;
+                scrubbedJson = JsonSerializer.Serialize(new
+                {
+                    _meta = new
+                    {
+                        truncated = true,
+                        reason = "TOKEN_BUDGET_EXCEEDED",
+                        warning = "[TRUNCATED DUE TO MCP TOKEN BUDGET]",
+                        maxTokens = maxTokens,
+                        note = "Result exceeded token budget. Use pagination (offset/limit) or filters to narrow the result."
+                    }
+                });
+                estimatedTokens = Math.Max(1, scrubbedJson.Length / 4);
                 truncated = true;
             }
         }
@@ -610,6 +730,23 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("simulate_query", StringComparison.OrdinalIgnoreCase) ||
         McpDatasetTools.IsDatasetTool(name);
+
+    private static bool ToolReadsDatasetRows(McpToolDefinition tool)
+    {
+        if (McpDatasetTools.IsDatasetTool(tool.Name))
+        {
+            return McpDatasetTools.ReadsRows(tool.Name);
+        }
+
+        if (tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
+            tool.Name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase) ||
+            tool.Name.Equals("simulate_query", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
+    }
 
     private static TableIdentifier? ParseTableIdentifierFromTool(McpToolDefinition tool, string? argumentsJson = null)
     {

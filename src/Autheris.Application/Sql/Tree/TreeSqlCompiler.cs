@@ -459,7 +459,7 @@ public static partial class TreeSqlCompiler
         var rowFilter = plan.Access.Decision.CombinedRowFilterSql;
         if (!string.IsNullOrWhiteSpace(rowFilter))
         {
-            SqlSecurityValidator.ValidatePredicateSql(rowFilter, "CombinedRowFilterSql");
+            SqlSecurityValidator.ValidateRowFilter(plan.Access.Decision);
             where.Add($"({context.BindRowFilter(rowFilter, plan.Access.Decision.RowFilterParameters)})");
         }
 

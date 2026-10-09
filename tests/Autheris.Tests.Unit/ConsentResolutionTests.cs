@@ -12,7 +12,6 @@ public class ConsentResolutionTests
     private readonly TableIdentifier _testTable = new("finance", "dbo", "invoices");
     private readonly Sid _userSid = new("S-1-5-21-1001");
     private readonly Sid _groupFinance = new("S-1-5-21-2001");
-    private readonly Sid _groupManagers = new("S-1-5-21-2002");
     private readonly string _roleAnalyst = "FinanceAnalyst";
     private readonly ConsentResolutionService _service = new();
 
@@ -571,6 +570,46 @@ public class ConsentResolutionTests
         decision.CombinedRowFilterSql.ShouldNotBeNull();
         decision.CombinedRowFilterSql.ShouldContain("'ACME\\Sales'");
         decision.CombinedRowFilterSql.ShouldNotContain("'ACME\\\\Sales'");
+    }
+
+    [Fact]
+    public void ResolveAccess_WhenConsentBoundToOnPremSid_AndCallerHasOidPrimary_WithOnPremSidInAllUserSids_ShouldAllowAccess()
+    {
+        var onpremSid = new Sid("S-1-5-21-ONPREM-DAVID");
+        var entraOid = new Sid("c032cb03-518d-4e92-9430-803513a96860");
+
+        var allowConsent = CreateBaseConsent(ConsentEffect.Allow, GranteeType.User, onpremSid);
+
+        var decision = _service.ResolveAccess(
+            userSid: entraOid,
+            subjectGroupSids: new HashSet<Sid>(),
+            userRoles: new HashSet<string>(),
+            table: _testTable,
+            activeConsents: new[] { allowConsent },
+            allUserSids: new HashSet<Sid> { entraOid, onpremSid }
+        );
+
+        decision.IsAllowed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ResolveAccess_WhenConsentBoundToOnPremSid_AndCallerHasOidPrimary_WithoutOnPremSid_ShouldDenyAccess()
+    {
+        var onpremSid = new Sid("S-1-5-21-ONPREM-DAVID");
+        var entraOid = new Sid("c032cb03-518d-4e92-9430-803513a96860");
+
+        var allowConsent = CreateBaseConsent(ConsentEffect.Allow, GranteeType.User, onpremSid);
+
+        var decision = _service.ResolveAccess(
+            userSid: entraOid,
+            subjectGroupSids: new HashSet<Sid>(),
+            userRoles: new HashSet<string>(),
+            table: _testTable,
+            activeConsents: new[] { allowConsent },
+            allUserSids: new HashSet<Sid> { entraOid }
+        );
+
+        decision.IsAllowed.ShouldBeFalse();
     }
 }
 

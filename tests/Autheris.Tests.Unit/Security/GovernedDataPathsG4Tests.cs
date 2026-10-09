@@ -24,6 +24,7 @@ using Autheris.Application.Procedures.Services;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Serialization;
+using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -461,14 +462,28 @@ public sealed class GovernedDataPathsG4Tests
 
     // ------------------------------------------------------------------ Low: Arrow Flight SQL tickets
 
-    private static ArrowFlightSqlServer NewFlight(string? key = null) => new(
-        Substitute.For<IArrowExportService>(),
-        Substitute.For<ITableMetadataRepository>(),
-        Options.Create(new GatewayOptions
-        {
-            Arrow = new ArrowExportOptions { FlightTicketSigningKey = key }
-        }),
-        NullLogger<ArrowFlightSqlServer>.Instance);
+    private static ArrowFlightSqlServer NewFlight(string? key = null)
+    {
+        var sql = Substitute.For<IGovernedSqlExecutionService>();
+        sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(new GovernedSqlResult("SELECT 1", "SELECT 1", ["_col0"], [], 0, 1));
+        var provider = Substitute.For<IServiceProvider>();
+        provider.GetService(typeof(IGovernedSqlExecutionService)).Returns(sql);
+        var scope = Substitute.For<IServiceScope>();
+        scope.ServiceProvider.Returns(provider);
+        var scopeFactory = Substitute.For<IServiceScopeFactory>();
+        scopeFactory.CreateScope().Returns(scope);
+
+        return new(
+            Substitute.For<IArrowExportService>(),
+            Substitute.For<ITableMetadataRepository>(),
+            Options.Create(new GatewayOptions
+            {
+                Arrow = new ArrowExportOptions { FlightTicketSigningKey = key }
+            }),
+            NullLogger<ArrowFlightSqlServer>.Instance,
+            scopeFactory: scopeFactory);
+    }
 
     private static ClaimsPrincipal FlightUser(string sid, string tenant) =>
         new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", tenant)], "Bearer"));

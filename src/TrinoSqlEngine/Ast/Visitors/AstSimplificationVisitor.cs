@@ -20,8 +20,6 @@ using TrinoSqlEngine.Ast.Nodes;
 /// </summary>
 public sealed class AstSimplificationVisitor : SqlAstRewriter
 {
-    private static readonly LiteralExpression TrueLiteral = new(true, LiteralType.Boolean);
-    private static readonly LiteralExpression FalseLiteral = new(false, LiteralType.Boolean);
     private static readonly BinaryExpression CanonicalFalse = new(
         new LiteralExpression(1L, LiteralType.Integer),
         BinaryOperator.Equal,
@@ -337,41 +335,6 @@ public sealed class AstSimplificationVisitor : SqlAstRewriter
             l1.Type != LiteralType.Null && l2.Type != LiteralType.Null &&
             !Equals(l1.Value?.ToString(), l2.Value?.ToString()))
             return true;
-
-        return false;
-    }
-
-    private static bool HasDirectContradiction(List<Expression> operands)
-    {
-        // Finds pairs of (col = const1) and (col = const2) where const1 != const2
-        var columnValues = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var op in operands)
-        {
-            if (op is BinaryExpression { Operator: BinaryOperator.Equal } b)
-            {
-                ColumnReference? col = b.Left as ColumnReference ?? b.Right as ColumnReference;
-                LiteralExpression? lit = b.Left as LiteralExpression ?? b.Right as LiteralExpression;
-
-                if (col != null && lit != null && lit.Type != LiteralType.Null)
-                {
-                    string colKey = col.Name.NormalizedName;
-                    string val = lit.Value?.ToString() ?? string.Empty;
-
-                    if (columnValues.TryGetValue(colKey, out var existingVal))
-                    {
-                        if (!string.Equals(existingVal, val, StringComparison.Ordinal))
-                        {
-                            return true; // Contradiction! (col = 'a' AND col = 'b')
-                        }
-                    }
-                    else
-                    {
-                        columnValues[colKey] = val;
-                    }
-                }
-            }
-        }
 
         return false;
     }

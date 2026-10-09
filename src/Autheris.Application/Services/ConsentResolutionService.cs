@@ -22,13 +22,14 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         IReadOnlySet<string> userRoles,
         TableIdentifier table,
         IReadOnlyList<Consent> activeConsents,
-        DatabaseDialect dialect = DatabaseDialect.SqlServer)
+        DatabaseDialect dialect = DatabaseDialect.SqlServer,
+        IReadOnlySet<Sid>? allUserSids = null)
     {
         var now = DateTimeOffset.UtcNow;
 
         // 1. Identify applicable active consents for Subject Set S
         var applicable = activeConsents
-            .Where(c => c.IsActive(now) && c.TableIdentifier == table && IsSubjectMatch(c, userSid, subjectGroupSids, userRoles))
+            .Where(c => c.IsActive(now) && c.TableIdentifier == table && IsSubjectMatch(c, userSid, subjectGroupSids, userRoles, allUserSids))
             .ToList();
 
         // Separate into A (ALLOW) and D (DENY)
@@ -138,14 +139,24 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         }
 
         var earliestExpiry = consents
-            .Where(c => c.ValidTo > now)
+            .Where(c => c.ValidTo > now && c.ValidFrom <= now)
             .Select(c => c.ValidTo - now)
             .DefaultIfEmpty(ttl)
             .Min();
 
-        if (earliestExpiry < ttl)
+        // POL-8: If there is an upcoming scheduled DENY consent (ValidFrom > now),
+        // the cache TTL of an ALLOW decision must be bounded by ValidFrom - now so that the scheduled DENY takes effect on time!
+        var earliestUpcomingDeny = consents
+            .Where(c => c.Effect == ConsentEffect.Deny && !c.IsRevoked && c.ValidFrom > now)
+            .Select(c => c.ValidFrom - now)
+            .DefaultIfEmpty(ttl)
+            .Min();
+
+        var minWindow = earliestExpiry < earliestUpcomingDeny ? earliestExpiry : earliestUpcomingDeny;
+
+        if (minWindow < ttl)
         {
-            ttl = earliestExpiry > TimeSpan.FromSeconds(1) ? earliestExpiry : TimeSpan.FromSeconds(1);
+            ttl = minWindow > TimeSpan.FromSeconds(1) ? minWindow : TimeSpan.FromSeconds(1);
         }
 
         return ttl;
@@ -226,30 +237,8 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         Consent consent,
         Sid userSid,
         IReadOnlySet<Sid> subjectGroupSids,
-        IReadOnlySet<string> userRoles)
-    {
-        switch (consent.GranteeType)
-        {
-            case GranteeType.User:
-            case GranteeType.ServicePrincipal:
-                return consent.GranteeSid.HasValue && consent.GranteeSid.Value == userSid;
-
-            case GranteeType.Group:
-                return consent.GranteeSid.HasValue && subjectGroupSids.Contains(consent.GranteeSid.Value);
-
-            case GranteeType.Role:
-                if (!string.IsNullOrEmpty(consent.RoleName) && userRoles.Contains(consent.RoleName))
-                {
-                    return true;
-                }
-                if (consent.RoleId.HasValue && userRoles.Contains(consent.RoleId.Value.ToString()))
-                {
-                    return true;
-                }
-                return false;
-
-            default:
-                return false;
-        }
-    }
+        IReadOnlySet<string> userRoles,
+        IReadOnlySet<Sid>? allUserSids = null) =>
+        Autheris.Application.Policy.GranteeMatcher.Matches(
+            consent.GranteeType, consent.GranteeSid, consent.RoleName, consent.RoleId, userSid, subjectGroupSids, userRoles, allUserSids);
 }

@@ -39,6 +39,8 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
     private readonly GatewayOptions? _options;
     private readonly Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? _rebacEvaluator;
 
+    private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
+
     public StreamRlsPolicyEnforcer(
         IPolicyEnforcementService policyEnforcementService,
         ITableMetadataRepository metadataRepository,
@@ -50,8 +52,10 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         IConsentCacheService cacheService,
         IClientIpResolver? clientIpResolver = null,
         IOptions<GatewayOptions>? options = null,
-        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null)
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
     {
+        _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
         _policyEnforcementService = policyEnforcementService ?? throw new ArgumentNullException(nameof(policyEnforcementService));
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
@@ -146,6 +150,18 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
                 "Streaming event '{EventId}' on table '{Table}' denied for subscriber '{UserSid}' by consent policy",
                 cdcEvent.EventId, cdcEvent.Table.ToQualifiedName(), userSid.Value);
             return StreamSecurityDecision.Denied("Access denied by consent policy");
+        }
+
+        // Virtual filters: a change event cannot evaluate the filter's subquery, so an applying filter drops the event
+        // (fail closed), like an uncovered object.
+        var mandatory = await _mandatoryFilters.ResolveAsync(
+            new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, groupSids, roles, tenantId, metadata), ct).ConfigureAwait(false);
+        if (mandatory.IsDenied || mandatory.PredicateSql != null)
+        {
+            _logger.LogDebug(
+                "Streaming event '{EventId}' on table '{Table}' dropped for subscriber '{UserSid}': virtual filters apply.",
+                cdcEvent.EventId, cdcEvent.Table.ToQualifiedName(), userSid.Value);
+            return StreamSecurityDecision.Denied("Virtual filters cannot be enforced on change events");
         }
 
         // 6. Casbin ABAC Policy Enforcement as additional gate + row filter (with full ABAC context)

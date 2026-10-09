@@ -33,7 +33,8 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
         IClientIpResolver? clientIpResolver = null,
         IOptions<GatewayOptions>? options = null,
         IConsentCacheService? consentCache = null,
-        IRebacEvaluator? rebacEvaluator = null)
+        IRebacEvaluator? rebacEvaluator = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
     {
         _options = options?.Value;
         _policy = new TableAccessPolicy(
@@ -43,7 +44,8 @@ public sealed class DefaultCrossDomainAccessResolver : ICrossDomainAccessResolve
             policyEnforcementService,
             rebacEvaluator,
             clientIpResolver,
-            _options);
+            _options,
+            mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
     }
 
     public Task<TableAccessDecision> ResolveAccessAsync(

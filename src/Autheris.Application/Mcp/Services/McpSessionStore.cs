@@ -44,7 +44,9 @@ public sealed class McpSessionStore : IMcpSessionStore
         string? userSid = null,
         IReadOnlyList<string>? roles = null,
         IReadOnlyList<string>? groupSids = null,
-        string? clientIp = null)
+        string? clientIp = null,
+        bool isReadOnly = false,
+        IReadOnlyDictionary<string, string>? additionalClaims = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(servicePrincipalId);
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
@@ -89,7 +91,9 @@ public sealed class McpSessionStore : IMcpSessionStore
                 userSid,
                 roles,
                 groupSids,
-                clientIp);
+                clientIp,
+                isReadOnly,
+                additionalClaims);
             _sessions[sessionId] = session;
         }
 

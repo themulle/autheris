@@ -93,8 +93,14 @@ public sealed class DbtHealthExecutionMiddleware
                                     principal?.IsInRole("DataOwner") == true ||
                                     principal?.IsInRole("ClusterAdmin") == true;
 
-                if (!isPrivileged && accessResolver != null)
+                if (!isPrivileged)
                 {
+                    if (accessResolver == null)
+                    {
+                        // Do not disclose quarantine or degraded status if access cannot be verified; pass through to downstream
+                        continue;
+                    }
+
                     var targetTable = tableId;
                     if (tableRepo != null)
                     {

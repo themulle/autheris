@@ -259,7 +259,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
                 var paramNames = new List<string>();
                 foreach (var elem in inDoc.RootElement.EnumerateArray())
                 {
-                    var pName = $"@p_rls_{paramIndex++}";
+                    var pName = $"@__gql_rls_{paramIndex++}";
                     parameters[pName] = ExtractJsonElementValue(elem);
                     paramNames.Add(pName);
                 }
@@ -295,7 +295,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
                 };
             }
 
-            var pName = $"@p_rls_{paramIndex++}";
+            var pName = $"@__gql_rls_{paramIndex++}";
             parameters[pName] = ExtractJsonElementValue(doc.RootElement);
 
             return op switch

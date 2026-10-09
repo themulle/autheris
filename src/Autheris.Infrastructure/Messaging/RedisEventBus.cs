@@ -17,6 +17,8 @@ public sealed class RedisEventBus : IEventBus, IDisposable
     private readonly object _lock = new();
     private bool _disposed;
 
+    public event Action? ConnectionRestored;
+
     public RedisEventBus(
         IConnectionMultiplexer multiplexer,
         IOptions<GatewayOptions> options,
@@ -29,6 +31,12 @@ public sealed class RedisEventBus : IEventBus, IDisposable
         {
             _prefix += ":";
         }
+
+        _multiplexer.ConnectionRestored += (s, e) =>
+        {
+            _logger.LogInformation("Redis event bus connection restored. Firing ConnectionRestored callbacks.");
+            ConnectionRestored?.Invoke();
+        };
     }
 
     public async Task PublishAsync<T>(string channel, T message, CancellationToken ct = default)
@@ -46,6 +54,24 @@ public sealed class RedisEventBus : IEventBus, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to publish message of type {Type} to Redis channel {Channel}", typeof(T).Name, channel);
+            throw;
+        }
+    }
+
+    public async Task<long> IncrementCounterAsync(string key, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        try
+        {
+            var db = _multiplexer.GetDatabase();
+            var fullKey = $"{_prefix}{key}";
+            return await db.StringIncrementAsync(fullKey).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to increment Redis counter {Key}", key);
             throw;
         }
     }

@@ -201,7 +201,11 @@ public static class WebSqlEndpoints
             var timeout = trinoWaitTimeout ?? TimeSpan.FromSeconds(5);
             try
             {
-                var status = await statementManager.SubmitOrWaitAsync(governedRequest, user, tenantId, timeout, ct);
+                var trinoRequest = governedRequest with
+                {
+                    RowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Trino)
+                };
+                var status = await statementManager.SubmitOrWaitAsync(trinoRequest, user, tenantId, timeout, ct);
                 await WriteTrinoStatementResponseAsync(httpContext, status, ct);
                 return;
             }
@@ -212,16 +216,26 @@ public static class WebSqlEndpoints
             }
         }
 
-        // F-DATA-01: Parquet output (Accept: application/vnd.apache.parquet) of the fully governed result set
-        if (ParquetContentNegotiation.IsParquetRequested(httpContext.Request))
+        // F-DATA-01 / Befund 1.2: Parquet output (Accept: application/vnd.apache.parquet or ?format=parquet) of the fully governed result set
+        bool isParquet = ParquetContentNegotiation.IsParquetRequested(httpContext.Request) ||
+            string.Equals(httpContext.Request.Query["format"], "parquet", StringComparison.OrdinalIgnoreCase);
+
+        // Befund 1.2: Strict Content Negotiation. If Accept header requests non-supported formats (CSV, NDJSON, etc.), reject with 406.
+        if (httpContext.Request.Headers.Accept.Count > 0)
+        {
+            var acceptEval = ParquetContentNegotiation.Evaluate(httpContext.Request);
+            if (!acceptEval.ParquetPreferred && !acceptEval.HasJsonAlternative && !isParquet)
+            {
+                httpContext.Response.StatusCode = StatusCodes.Status406NotAcceptable;
+                return;
+            }
+        }
+
+        if (isParquet)
         {
             await HandleParquetWebSqlRequestAsync(httpContext, sqlService, gatewayOptions, logger, governedRequest, user, tenantId, ct);
             return;
         }
-
-        var webSqlOptions = gatewayOptions.Value.WebSql ?? new WebSqlOptions();
-        var sqlEngine = httpContext.RequestServices?.GetService<TrinoSqlEngine.ISqlEngine>();
-        long effectiveLimit = DetermineEffectiveLimit(sql, webSqlOptions, sqlEngine);
 
         // SEC M-10: The JSON writer is created lazily when the first result arrives. Policy/parse errors raised while the
         // statement is governed therefore never start the response, so the 4xx/5xx status and the curated body can still be sent.
@@ -229,6 +243,7 @@ public static class WebSqlEndpoints
         try
         {
             int rowCount = 0;
+            bool truncated = false;
             string[] columnNames = Array.Empty<string>();
 
             await sqlService.ExecuteGovernedQueryAsync(
@@ -245,11 +260,8 @@ public static class WebSqlEndpoints
                     w.WriteStartObject();
 
                     int fieldCount = reader.FieldCount;
-                    columnNames = new string[fieldCount];
-                    for (int i = 0; i < fieldCount; i++)
-                    {
-                        columnNames[i] = reader.GetName(i);
-                    }
+                    // WebSQL findings 2.3: unnamed and duplicate columns get unique names (_colN).
+                    columnNames = SqlResultColumns.UniqueNames(reader);
 
                     // Write "columns": [...]
                     w.WriteStartArray("columns");
@@ -293,6 +305,9 @@ public static class WebSqlEndpoints
                     }
 
                     w.WriteEndArray();
+
+                    // WebSQL findings 2.4: rows were cut only when the probe row beyond the limit existed.
+                    truncated = reader is RowLimitedDataReader { HasMoreRows: true };
                 },
                 ct);
 
@@ -309,7 +324,6 @@ public static class WebSqlEndpoints
                 writer.WriteEndArray();
             }
 
-            bool truncated = rowCount >= effectiveLimit;
             writer.WriteNumber("rowCount", rowCount);
             writer.WriteBoolean("truncated", truncated);
             writer.WriteEndObject();
@@ -357,6 +371,11 @@ public static class WebSqlEndpoints
         var configuredMaxRows = gatewayOptions.Value.ParquetEgress.MaxRowsPerFile;
         var maxRows = configuredMaxRows > 0 ? configuredMaxRows : 100000;
 
+        // Row limits of the Parquet transport (Gateway:RowLimits:Parquet, falling back to WebSql).
+        var rowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Parquet);
+        governedRequest = governedRequest with { RowLimit = rowLimit };
+        bool rowLimitCut = false;
+
         var rows = new List<IReadOnlyDictionary<string, object?>>();
         string[] columnNames = Array.Empty<string>();
 
@@ -369,7 +388,7 @@ public static class WebSqlEndpoints
                 async (reader, token) =>
                 {
                     int fieldCount = reader.FieldCount;
-                    columnNames = BuildUniqueColumnNames(reader);
+                    columnNames = SqlResultColumns.UniqueNames(reader);
 
                     // At most MaxRowsPerFile + 1 rows are read: the extra row only marks the export as truncated
                     // (X-Export-Truncated: true); the remaining result set is never materialized.
@@ -382,11 +401,14 @@ public static class WebSqlEndpoints
                         }
                         rows.Add(row);
                     }
+
+                    // WebSQL findings 2.4/4.2: the row limit cut the result (probe row existed) before the file limit.
+                    rowLimitCut = reader is RowLimitedDataReader { HasMoreRows: true };
                 },
                 ct);
 
             // An empty result (or no result set) is a Parquet file with zero rows and the result columns.
-            await ParquetResponseWriter.WriteAsync(httpContext, parquetService!, "websql", rows, columnNames, ct);
+            await ParquetResponseWriter.WriteAsync(httpContext, parquetService!, "websql", rows, columnNames, ct, rowLimitCut);
         }
         catch (Exception ex)
         {
@@ -694,32 +716,6 @@ public static class WebSqlEndpoints
         };
     }
 
-    private static string[] BuildUniqueColumnNames(DbDataReader reader)
-    {
-        var names = new string[reader.FieldCount];
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        for (int i = 0; i < names.Length; i++)
-        {
-            var baseName = reader.GetName(i);
-            if (string.IsNullOrWhiteSpace(baseName))
-            {
-                baseName = "column" + (i + 1);
-            }
-
-            var name = baseName;
-            var suffix = 1;
-            while (!seen.Add(name))
-            {
-                name = baseName + "_" + suffix;
-                suffix++;
-            }
-
-            names[i] = name;
-        }
-
-        return names;
-    }
-
     private static void WriteDbValue(Utf8JsonWriter writer, object? val)
     {
         if (val is null or DBNull)
@@ -797,10 +793,12 @@ public static class WebSqlEndpoints
             httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
             await httpContext.Response.WriteAsJsonAsync(new { error = "Statement not found or expired.", id = statementId }, ct);
         }
-        catch (SecurityException)
+        catch (SecurityException ex)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await httpContext.Response.WriteAsJsonAsync(new { error = "Forbidden", message = GenericForbiddenMessage }, ct);
+            // SEC-12H-06: Uniform 404 response to eliminate the enumeration oracle
+            logger.LogWarning(ex, "Unauthorized statement access attempt for {StatementId}", statementId);
+            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
+            await httpContext.Response.WriteAsJsonAsync(new { error = "Statement not found or expired.", id = statementId }, ct);
         }
         catch (Exception ex)
         {
@@ -833,7 +831,8 @@ public static class WebSqlEndpoints
         }
         catch (SecurityException)
         {
-            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+            // SEC-12H-06: Uniform 404 response to eliminate the enumeration oracle
+            httpContext.Response.StatusCode = StatusCodes.Status404NotFound;
         }
     }
 
@@ -891,9 +890,21 @@ public static class WebSqlEndpoints
         httpContext.Response.StatusCode = StatusCodes.Status200OK;
         httpContext.Response.ContentType = "application/json; charset=utf-8";
 
-        var trinoColumns = status.Columns != null
-            ? status.Columns.Select(c => new { name = c, type = "varchar" }).ToList()
-            : null;
+        // WebSQL findings 2.2: the type (and client type signature) of every column; varchar when unknown.
+        var trinoColumns = status.Columns?.Select((name, i) =>
+        {
+            var type = status.ColumnTypes != null && i < status.ColumnTypes.Count ? status.ColumnTypes[i] : TrinoColumnType.Varchar;
+            return new
+            {
+                name,
+                type = type.Name,
+                typeSignature = new
+                {
+                    rawType = type.RawType,
+                    arguments = type.Arguments.Select(value => new { kind = "LONG", value }).ToList()
+                }
+            };
+        }).ToList();
 
         var trinoStats = new
         {
@@ -914,12 +925,17 @@ public static class WebSqlEndpoints
         object? trinoError = null;
         if (status.State == "FAILED")
         {
+            var msg = status.ErrorMessage ?? GenericServerErrorMessage;
+            bool isInternalError = msg.Contains("Contact support", StringComparison.OrdinalIgnoreCase) ||
+                                   msg.Equals(GenericServerErrorMessage, StringComparison.OrdinalIgnoreCase) ||
+                                   msg.Equals("Statement execution failed.", StringComparison.OrdinalIgnoreCase);
+
             trinoError = new
             {
-                message = status.ErrorMessage ?? "Statement execution failed.",
-                errorCode = 1,
-                errorName = "SYNTAX_ERROR",
-                errorType = "USER_ERROR"
+                message = msg,
+                errorCode = isInternalError ? 2 : 1,
+                errorName = isInternalError ? "INTERNAL_ERROR" : "SYNTAX_ERROR",
+                errorType = isInternalError ? "INTERNAL_ERROR" : "USER_ERROR"
             };
         }
 
@@ -951,48 +967,5 @@ public static class WebSqlEndpoints
         }
 
         await httpContext.Response.WriteAsJsonAsync(responseObj, ct);
-    }
-
-    private static long DetermineEffectiveLimit(string sql, WebSqlOptions webSqlOptions, TrinoSqlEngine.ISqlEngine? sqlEngine)
-    {
-        long? explicitLimit = null;
-        if (sqlEngine != null)
-        {
-            try
-            {
-                var meta = sqlEngine.Analyze(sql.AsMemory());
-                if (meta.HasExplicitLimit && meta.ExplicitLimitValue is > 0)
-                {
-                    explicitLimit = meta.ExplicitLimitValue;
-                }
-            }
-            catch
-            {
-                // Fallback to regex if parse fails or engine throws
-            }
-        }
-
-        if (explicitLimit == null)
-        {
-            var match = System.Text.RegularExpressions.Regex.Match(sql, @"\bLIMIT\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
-            if (match.Success && long.TryParse(match.Groups[1].ValueSpan, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var parsedLimit))
-            {
-                explicitLimit = parsedLimit;
-            }
-        }
-
-        if (explicitLimit is > 0)
-        {
-            return webSqlOptions.MaxAllowedRows > 0
-                ? Math.Min(explicitLimit.Value, webSqlOptions.MaxAllowedRows)
-                : explicitLimit.Value;
-        }
-
-        var defaultLimit = webSqlOptions.DefaultMaxRows > 0 ? webSqlOptions.DefaultMaxRows : 1000;
-        if (webSqlOptions.MaxAllowedRows > 0 && defaultLimit > webSqlOptions.MaxAllowedRows)
-        {
-            defaultLimit = webSqlOptions.MaxAllowedRows;
-        }
-        return defaultLimit;
     }
 }

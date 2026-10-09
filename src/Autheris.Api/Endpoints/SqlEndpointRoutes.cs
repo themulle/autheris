@@ -14,6 +14,7 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.SqlEndpoints.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -69,7 +70,7 @@ public static class SqlEndpointRoutes
         HttpContext context,
         Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? loader = null)
     {
-        if (!IsListAdmin(context.User))
+        if (context.User.IsReadOnly() || !IsListAdmin(context.User))
         {
             return Results.Forbid();
         }
@@ -326,14 +327,22 @@ public static class SqlEndpointRoutes
         }
         catch (ArgumentException argEx)
         {
+            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = argEx.Message }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = !isProd ? argEx.Message : WebSqlEndpoints.GenericBadRequestMessage
+            }, ct).ConfigureAwait(false);
         }
         catch (SecurityException secEx)
         {
             logger.LogWarning(secEx, "Security policy violation when executing endpoint '{EndpointName}'.", name);
+            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
             httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await httpContext.Response.WriteAsJsonAsync(new { error = secEx.Message }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = (!isProd && secEx is Autheris.Application.Sql.WebSqlPolicyException) ? secEx.Message : WebSqlEndpoints.GenericForbiddenMessage
+            }, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -397,14 +406,22 @@ public static class SqlEndpointRoutes
         }
         catch (ArgumentException argEx)
         {
+            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await httpContext.Response.WriteAsJsonAsync(new { error = argEx.Message }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = !isProd ? argEx.Message : WebSqlEndpoints.GenericBadRequestMessage
+            }, ct).ConfigureAwait(false);
         }
         catch (SecurityException secEx)
         {
             logger.LogWarning(secEx, "Security policy violation when executing endpoint '{EndpointName}'.", name);
+            var isProd = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
             httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await httpContext.Response.WriteAsJsonAsync(new { error = secEx.Message }, ct).ConfigureAwait(false);
+            await httpContext.Response.WriteAsJsonAsync(new
+            {
+                error = (!isProd && secEx is Autheris.Application.Sql.WebSqlPolicyException) ? secEx.Message : WebSqlEndpoints.GenericForbiddenMessage
+            }, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -416,7 +433,10 @@ public static class SqlEndpointRoutes
 
     private static (bool Requested, IParquetExportService? Service) ResolveParquetService(HttpContext httpContext)
     {
-        if (!ParquetContentNegotiation.IsParquetRequested(httpContext.Request))
+        bool isParquet = ParquetContentNegotiation.IsParquetRequested(httpContext.Request) ||
+            string.Equals(httpContext.Request.Query["format"], "parquet", StringComparison.OrdinalIgnoreCase);
+
+        if (!isParquet)
         {
             return (false, null);
         }
@@ -434,7 +454,7 @@ public static class SqlEndpointRoutes
         if (parquet.Requested && parquet.Service != null)
         {
             // F-DATA-01: the governed (masked, row-filtered) result rows are written as Apache Parquet
-            await ParquetResponseWriter.WriteAsync(httpContext, parquet.Service, endpointName, result.Rows, result.Columns, ct).ConfigureAwait(false);
+            await ParquetResponseWriter.WriteAsync(httpContext, parquet.Service, endpointName, result.Rows, result.Columns, ct, result.Truncated).ConfigureAwait(false);
             return;
         }
 

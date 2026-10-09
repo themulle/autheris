@@ -36,6 +36,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DX-01** | Zero-Config Developer Quickstart & Dev Portal Hub | [f-dx-01-developer-quickstart.md](f-dx-01-developer-quickstart.md) |
 | **F-GOV-06** | Multi-Stage Pushdown Cascades & Cross-Domain Joins (not implemented) | [f-gov-06-cross-domain-joins.md](f-gov-06-cross-domain-joins.md) |
 | **F-GOV-08** | Dynamic Schema Contracts & Tag-Based Projection (@tag) | [f-gov-08-schema-contracts-tag-projection.md](f-gov-08-schema-contracts-tag-projection.md) |
+| **F-GOV-09** | Virtual Filters (Relation-Scoped Cross-Channel Mandatory Row Filtering) | [f-gov-09-virtual-filters.md](f-gov-09-virtual-filters.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |
 | **F-OPS-01** | AST-Aware Production Traffic Shadowing & Dark Replay | [f-ops-01-traffic-shadowing-dark-replay.md](f-ops-01-traffic-shadowing-dark-replay.md) |
 | **F-PERF-08** | Hierarchical Resource Groups & Workload Queuing | [f-perf-08-hierarchical-resource-groups.md](f-perf-08-hierarchical-resource-groups.md) |

@@ -135,6 +135,7 @@ public sealed class CoercionAndFanOutReviewTests
     public sealed class RootQuery
     {
         public RootObject Root => new();
+        public List<Child> GetItems(int first = 1) => new();
     }
 
     [Fact]
@@ -151,4 +152,25 @@ public sealed class CoercionAndFanOutReviewTests
         two.ShouldBeGreaterThan(one * 5);
         twoDeep.ShouldBeGreaterThanOrEqualTo(100);
     }
+
+    [Fact]
+    public async Task QueryCostAnalyzer_WithRuntimeVariables_CalculatesCostFromActualCoercedValue()
+    {
+        var schema = await new ServiceCollection()
+            .AddGraphQLServer()
+            .AddQueryType<RootQuery>()
+            .BuildSchemaAsync();
+
+        var query = Utf8GraphQLParser.Parse("query MyQuery($n: Int = 1) { items(first: $n) { name } }");
+
+        // Without runtime variables: uses default $n = 1
+        int costDefault = QueryCostAnalyzerRule.CalculateCost(query, schema);
+
+        // With runtime variables: $n = 500
+        var runtimeVars = new Dictionary<string, object?> { ["n"] = 500 };
+        int costRuntime = QueryCostAnalyzerRule.CalculateCost(query, schema, variableValues: runtimeVars);
+
+        costRuntime.ShouldBeGreaterThan(costDefault * 10);
+    }
 }
+

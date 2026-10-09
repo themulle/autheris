@@ -7,7 +7,8 @@ using Autheris.Domain.Model;
 /// <summary>
 /// SEC M-32: Merge semantics for catalog / metadata mirror syncs. Governance-relevant flags may only be tightened:
 /// four-eyes, sensitivity, column sensitivity and masking rules are never weakened, a deactivated table stays inactive,
-/// and data source routing fields (DataSourceType, HttpEndpoint, PluginName, SourceType) unknown to catalogs are preserved.
+/// and data source routing fields (DataSourceType, HttpEndpoint, PluginName, SourceType, SourceName) unknown to catalogs
+/// are preserved.
 /// Columns missing from the incoming snapshot keep their persisted protection.
 /// </summary>
 public static class CatalogGovernanceRatchet
@@ -28,7 +29,7 @@ public static class CatalogGovernanceRatchet
         {
             Id = tableId,
             SourceType = !string.IsNullOrWhiteSpace(exTable.SourceType) ? exTable.SourceType : inTable.SourceType,
-            SourceName = !string.IsNullOrWhiteSpace(exTable.SourceName) ? exTable.SourceName : inTable.SourceName,
+            SourceName = RatchetSourceName(exTable.SourceName, inTable.SourceName, existing.Identifier.Domain),
             SchemaName = inTable.SchemaName,
             TableName = inTable.TableName,
             DisplayName = !string.IsNullOrWhiteSpace(inTable.DisplayName) ? inTable.DisplayName : exTable.DisplayName,
@@ -104,6 +105,23 @@ public static class CatalogGovernanceRatchet
             ColumnMaskingRules = mergedRules,
             PrimaryKeyColumns = existing.PrimaryKeyColumns
         };
+    }
+
+    /// <summary>
+    /// EXT-2: SourceName selects the database connection (SqlDataSourceExecutor, procedures, plugins). A sync never
+    /// moves a table to another connection: a persisted SourceName is kept, and an unbound table (which runs on the
+    /// connection of its domain) may only be bound to exactly that domain.
+    /// </summary>
+    private static string RatchetSourceName(string? existing, string? incoming, string domain)
+    {
+        if (!string.IsNullOrWhiteSpace(existing))
+        {
+            return existing;
+        }
+
+        return !string.IsNullOrWhiteSpace(incoming) && string.Equals(incoming, domain, StringComparison.OrdinalIgnoreCase)
+            ? incoming
+            : existing ?? string.Empty;
     }
 
     public static string StricterSensitivity(string? existing, string? incoming)

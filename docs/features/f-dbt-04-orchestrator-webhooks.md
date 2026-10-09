@@ -1,7 +1,7 @@
 # F-DBT-4: Zero-Touch dbt Cloud & Orchestrator Webhook Integration
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`DbtWebhookEndpoints.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Endpoints/DbtWebhookEndpoints.cs), [`DbtWebhookSignatureValidator.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Dbt/Services/DbtWebhookSignatureValidator.cs)
+**Components:** [`DbtWebhookEndpoints.cs`](file:///root/autheris/src/Autheris.Api/Endpoints/DbtWebhookEndpoints.cs), [`DbtWebhookSignatureValidator.cs`](file:///root/autheris/src/Autheris.Application/Dbt/Services/DbtWebhookSignatureValidator.cs)
 
 ---
 

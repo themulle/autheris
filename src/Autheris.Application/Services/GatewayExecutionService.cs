@@ -64,8 +64,12 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IClientIpResolver? clientIpResolver = null,
         Autheris.Application.Connectors.IAutherisConnectorRegistry? connectorRegistry = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
-        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null)
+        Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null)
     {
+        _contractManager = contractManager;
+        _mandatoryFilters = mandatoryFilters;
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
         _auditLogRepository = auditLogRepository;
@@ -75,7 +79,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         _chunkedQueryExecutor = chunkedQueryExecutor ?? new ChunkedQueryExecutor(500);
         _options = options?.Value;
         _drainController = drainController;
-        _dataSourceExecutors = dataSourceExecutors;
+        _dataSourceExecutors = dataSourceExecutors ?? new IDataSourceExecutor[] { new SqlDataSourceExecutor(options: options, maskingProvider: maskingProvider) };
         _policyEnforcementService = policyEnforcementService;
         _clientIpResolver = clientIpResolver;
         _connectorRegistry = connectorRegistry;
@@ -125,6 +129,36 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         CancellationToken ct = default)
     {
+        var page = await ExecutePageCoreAsync(principal, table, first, after, queryArguments, requestedFields, requestHeaders, orderBy: null, filter: null, countTotal: false, ct)
+            .ConfigureAwait(false);
+        return (page.Rows, page.Decision);
+    }
+
+    public Task<TableQueryPage> ExecuteTablePageAsync(
+        ClaimsPrincipal? principal,
+        TableIdentifier table,
+        TablePageRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return ExecutePageCoreAsync(
+            principal, table, request.First, request.After, queryArguments: null, request.RequestedFields, request.RequestHeaders,
+            request.OrderBy, request.Filter, request.IncludeTotalCount, ct);
+    }
+
+    private async Task<TableQueryPage> ExecutePageCoreAsync(
+        ClaimsPrincipal? principal,
+        TableIdentifier table,
+        int? first,
+        int? after,
+        IReadOnlyDictionary<string, object?>? queryArguments,
+        IReadOnlyList<string>? requestedFields,
+        IReadOnlyDictionary<string, string[]>? requestHeaders,
+        IReadOnlyList<TableOrderBy>? orderBy,
+        TableFilterClause? filter,
+        bool countTotal,
+        CancellationToken ct)
+    {
         using var _ = _drainController?.TrackQuery();
         var resolved = await ResolveTableAccessAsync(principal, table, requestedFields, requestHeaders, ct);
         principal = resolved.Principal;
@@ -135,32 +169,27 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
         // Audit evaluation (F-OPS-02: W3C Trace Correlation)
         var traceId = Autheris.Application.Common.TraceContextResolver.GetCurrentTraceId();
-        await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
-        {
-            TenantId = tenantId,
-            EventType = "TABLE_QUERY",
-            ActorSid = userSid,
-            TargetTable = table.ToString(),
-            Decision = decision.IsAllowed ? "ALLOW" : "DENY",
-            TraceId = traceId,
-            DetailsJson = JsonSerializer.Serialize(new { is_allowed = decision.IsAllowed, reasons = decision.DeniedReasons })
-        }, ct);
 
         // Enforce Access
         if (!decision.IsAllowed)
         {
+            await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+            {
+                TenantId = tenantId,
+                EventType = "TABLE_QUERY",
+                ActorSid = userSid,
+                TargetTable = table.ToString(),
+                Decision = "DENY",
+                TraceId = traceId,
+                DetailsJson = JsonSerializer.Serialize(new { is_allowed = false, reasons = decision.DeniedReasons, virtual_filters = decision.AppliedVirtualFilters })
+            }, ct).ConfigureAwait(false);
+
             throw new GatewayForbiddenException($"Access to table '{table}' denied: {string.Join("; ", decision.DeniedReasons)}");
         }
 
         // Generate/Fetch query result via IDataSourceExecutor (SQL, Declarative HTTP, or Plugin)
         var maxRows = _options?.GraphQL?.MaxResponseRows > 0 ? _options.GraphQL.MaxResponseRows : 1000;
         var rowLimit = Math.Clamp(first ?? 50, 1, maxRows);
-
-        var executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
-        if (executor == null)
-        {
-            throw new GatewayNotImplementedException($"No executor is registered for DataSourceType '{metadata.Table.DataSourceType}'.");
-        }
 
         var execArgs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -183,9 +212,87 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
         // O1/O2/O13: requested columns are validated, never dropped silently (a dropped column used to widen the
         // projection to all columns). Unknown and denied columns are rejected with the same message.
-        var effectiveRequestedFields = (requestedFields != null && requestedFields.Count > 0)
-            ? ResolveRequestedFields(requestedFields, authorizedColumns)
-            : authorizedColumns;
+        List<string> effectiveRequestedFields;
+        var pageItems = new Dictionary<string, object?>(StringComparer.Ordinal);
+        IDataSourceExecutor? executor;
+        try
+        {
+            executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
+            if (executor == null)
+            {
+                throw new GatewayNotImplementedException($"No executor is registered for DataSourceType '{metadata.Table.DataSourceType}'.");
+            }
+
+            effectiveRequestedFields = (requestedFields != null && requestedFields.Count > 0)
+                ? await ResolveRequestedFieldsAsync(requestedFields, metadata, decision, authorizedColumns, tenantId, userSid, table, traceId, ct).ConfigureAwait(false)
+                : authorizedColumns;
+
+            // 4a.3 / 2.1: ordering, filtering and counting are pushed into the SQL statement; other data sources cannot do it (never ignored).
+            if (orderBy is { Count: > 0 } || countTotal || filter != null)
+            {
+                if (metadata.Table.DataSourceType != DataSourceType.Sql)
+                {
+                    throw new GatewayNotImplementedException("Filtering, ordering and counting are only supported for SQL data sources.");
+                }
+
+                if (orderBy is { Count: > 0 })
+                {
+                    pageItems[TableQueryItems.OrderBy] = ValidateOrderBy(orderBy, metadata, decision);
+                }
+
+                if (filter != null)
+                {
+                    ValidateFilter(filter, metadata, decision);
+                    pageItems[TableQueryItems.Filter] = filter;
+                }
+
+                if (countTotal)
+                {
+                    pageItems[TableQueryItems.CountTotal] = true;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // SR15-32: Validation/preparation failures are audited as DENY with predicate details
+            await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+            {
+                TenantId = tenantId,
+                EventType = "TABLE_QUERY",
+                ActorSid = userSid,
+                TargetTable = table.ToString(),
+                Decision = "DENY",
+                TraceId = traceId,
+                DetailsJson = JsonSerializer.Serialize(new
+                {
+                    is_allowed = false,
+                    reasons = new[] { ex.Message },
+                    virtual_filters = decision.AppliedVirtualFilters,
+                    filter = filter?.SqlPredicate,
+                    order_by = orderBy?.Select(o => $"{o.Column} {(o.Descending ? "DESC" : "ASC")}").ToArray()
+                })
+            }, ct).ConfigureAwait(false);
+            throw;
+        }
+
+        // SR15-32: ALLOW audit is recorded only after successful validation of all query parameters
+        await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+        {
+            TenantId = tenantId,
+            EventType = "TABLE_QUERY",
+            ActorSid = userSid,
+            TargetTable = table.ToString(),
+            Decision = "ALLOW",
+            TraceId = traceId,
+            DetailsJson = JsonSerializer.Serialize(new
+            {
+                is_allowed = true,
+                reasons = decision.DeniedReasons,
+                virtual_filters = decision.AppliedVirtualFilters,
+                filter = filter?.SqlPredicate,
+                order_by = orderBy?.Select(o => $"{o.Column} {(o.Descending ? "DESC" : "ASC")}").ToArray()
+            })
+        }, ct).ConfigureAwait(false);
 
         // O10: bound concurrent reads of the same table by the same user (each slow read holds a database worker).
         var maxConcurrentReads = _options?.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
@@ -214,7 +321,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 PushdownFilterSql: decision.CombinedRowFilterSql,
                 Limit: rowLimit,
                 Offset: after ?? 0,
-                RequestHeaders: requestHeaders);
+                RequestHeaders: requestHeaders,
+                Items: pageItems);
 
             rawRows = await Autheris.Application.Connectors.GovernedConnectorReader.ReadRawAsync(connector, session, metadata, maxRows: null, ct).ConfigureAwait(false);
 
@@ -233,7 +341,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 RequestHeaders: requestHeaders,
                 Limit: rowLimit,
                 Offset: after ?? 0,
-                Tenant: tenantId
+                Tenant: tenantId,
+                Items: pageItems
             );
 
             rawRows = await executor.ExecuteAsync(execContext, ct);
@@ -258,7 +367,58 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
                 MaxBytes: maxBytes));
 
-        return (processedRows, decision);
+        long? totalCount = null;
+        if (countTotal)
+        {
+            // The count is only exact when the row filter ran in the same statement (not applied afterwards in memory).
+            bool rowFilterInSql = rlsPushdownAlreadyOccurred || string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql);
+            if (!rowFilterInSql || !pageItems.TryGetValue(TableQueryItems.TotalCount, out var countObj) || countObj is not long count)
+            {
+                throw new GatewayNotImplementedException("The total row count cannot be determined for this data source.");
+            }
+
+            totalCount = count;
+        }
+
+        return new TableQueryPage(processedRows, decision, totalCount);
+    }
+
+    /// <summary>
+    /// 4a.3: ordering columns must exist and be readable in clear text. Ordering by a masked or denied column would
+    /// reveal the order of the protected values; unknown and forbidden columns get the same message (no oracle).
+    /// </summary>
+    private static IReadOnlyList<TableOrderBy> ValidateOrderBy(IReadOnlyList<TableOrderBy> orderBy, TableMetadata metadata, TableAccessDecision decision)
+    {
+        var validated = new List<TableOrderBy>(orderBy.Count);
+        foreach (var item in orderBy)
+        {
+            var column = metadata.GetColumn(item.Column);
+            if (column == null || decision.GetEffectiveColumnAccess(column.ColumnName, metadata) != ColumnAccessLevel.Clear)
+            {
+                throw new GatewayInvalidQueryException($"The column '{item.Column}' in '$orderby' does not exist or cannot be used for ordering.");
+            }
+
+            validated.Add(item with { Column = column.ColumnName });
+        }
+
+        return validated;
+    }
+
+    /// <summary>
+    /// Befund 2.1 & SR15-30: Zero-Trust filter column validation. Columns referenced in $filter must exist and be readable
+    /// in clear text. Filtering on masked or denied columns would turn pushdown queries into an inference oracle.
+    /// Unknown and forbidden/masked columns return the exact same GatewayInvalidQueryException to prevent column existence oracles.
+    /// </summary>
+    private static void ValidateFilter(TableFilterClause filter, TableMetadata metadata, TableAccessDecision decision)
+    {
+        foreach (var colName in filter.ReferencedColumns)
+        {
+            var column = metadata.GetColumn(colName);
+            if (column == null || decision.GetEffectiveColumnAccess(column.ColumnName, metadata) != ColumnAccessLevel.Clear)
+            {
+                throw new GatewayInvalidQueryException($"The column '{colName}' in '$filter' does not exist or cannot be used for filtering.");
+            }
+        }
     }
 
     /// <summary>
@@ -333,18 +493,51 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
     /// <summary>
     /// O1/O2/O13: maps requested columns to their catalog spelling (deduplicated, request order). Throws for any column
-    /// that is unknown or denied; the message is identical for both cases.
+    /// that is unknown or denied; the message is identical for both cases (no existence oracle). Denied columns are audited.
     /// </summary>
-    private static List<string> ResolveRequestedFields(IReadOnlyList<string> requestedFields, IReadOnlyList<string> authorizedColumns)
+    private async Task<List<string>> ResolveRequestedFieldsAsync(
+        IReadOnlyList<string> requestedFields,
+        TableMetadata metadata,
+        TableAccessDecision decision,
+        IReadOnlyList<string> authorizedColumns,
+        TenantId tenantId,
+        Sid userSid,
+        TableIdentifier table,
+        string? traceId,
+        CancellationToken ct)
     {
         var resolved = new List<string>(requestedFields.Count);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var requested in requestedFields)
         {
-            var catalogName = authorizedColumns.FirstOrDefault(c => string.Equals(c, requested?.Trim(), StringComparison.OrdinalIgnoreCase));
+            var trimmed = requested?.Trim();
+            var catalogCol = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, trimmed, StringComparison.OrdinalIgnoreCase));
+            if (catalogCol != null && decision.GetColumnAccess(catalogCol.ColumnName) == ColumnAccessLevel.Deny)
+            {
+                // O1: Gesperrte (Deny) Spalte: dieselbe Antwort wie unbekannt (kein Existenz-Orakel), Audit-Eintrag mit dem echten Grund.
+                await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    TenantId = tenantId,
+                    EventType = "COLUMN_ACCESS_DENIED",
+                    ActorSid = userSid,
+                    TargetTable = table.ToString(),
+                    Decision = "DENY",
+                    TraceId = traceId ?? string.Empty,
+                    DetailsJson = JsonSerializer.Serialize(new
+                    {
+                        column = catalogCol.ColumnName,
+                        reason = $"Column '{catalogCol.ColumnName}' access is denied by governance policy."
+                    })
+                }, ct).ConfigureAwait(false);
+
+                var echo = trimmed != null && EchoableColumnNameRegex().IsMatch(trimmed) ? trimmed : "(invalid name)";
+                throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
+            }
+
+            var catalogName = authorizedColumns.FirstOrDefault(c => string.Equals(c, trimmed, StringComparison.OrdinalIgnoreCase));
             if (catalogName == null)
             {
-                var echo = requested != null && EchoableColumnNameRegex().IsMatch(requested.Trim()) ? requested.Trim() : "(invalid name)";
+                var echo = trimmed != null && EchoableColumnNameRegex().IsMatch(trimmed) ? trimmed : "(invalid name)";
                 throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
             }
             if (seen.Add(catalogName))
@@ -367,8 +560,27 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
     }
 
+    private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
+    private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
+
     private TableAccessPolicy AccessPolicy() =>
-        new(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, _clientIpResolver, _options);
+        new(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, _clientIpResolver, _options,
+            _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+            _contractManager);
+
+    /// <summary>
+    /// Virtual filters: an in-memory row filter cannot evaluate their subqueries (it would return nothing and look like
+    /// "no data"). Sources that filter in memory refuse the request instead (403 with reason).
+    /// </summary>
+    public static void EnsureInMemoryFilterIsEnforceable(TableAccessDecision decision)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        if (decision.MandatoryRowPredicateSql != null)
+        {
+            throw new GatewayForbiddenException(
+                $"Virtual filters ({string.Join(", ", decision.AppliedVirtualFilters ?? [])}) cannot be enforced on this data source; it does not filter in the database.");
+        }
+    }
 
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
         List<IReadOnlyDictionary<string, object?>> rows,
@@ -744,96 +956,164 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         if (!decision.IsAllowed)
         {
             LastDispatchedChildQueryCount = 0;
+            return invoiceIds?.Distinct().ToDictionary(id => id, _ => new List<InvoiceItemRecord>())
+                   ?? new Dictionary<string, List<InvoiceItemRecord>>();
+        }
+
+        if (invoiceIds == null || invoiceIds.Count == 0)
+        {
+            LastDispatchedChildQueryCount = 0;
             return new Dictionary<string, List<InvoiceItemRecord>>();
         }
 
         var metadata = await _metadataRepository.GetTableMetadataAsync(childTableId, ct);
+        if (metadata == null)
+        {
+            LastDispatchedChildQueryCount = 0;
+            return invoiceIds.Distinct().ToDictionary(id => id, _ => new List<InvoiceItemRecord>());
+        }
 
-        // Sonderfall: Wenn IN-Liste aufgrund vieler IDs zu lang wird (RDBMS Parameter-/Puffer-Limit),
-        // teilen wir die Abfrage in mehrere parametrisierte Teilabfragen auf und aggregieren die Ergebnisse.
-        var (result, dispatchedQueries) = await _chunkedQueryExecutor.ExecuteGroupedWithMetricsAsync(
+        var executor = _dataSourceExecutors?.FirstOrDefault(e => e.SupportedType == metadata.Table.DataSourceType);
+        if (executor == null)
+        {
+            LastDispatchedChildQueryCount = 0;
+            return invoiceIds.Distinct().ToDictionary(id => id, _ => new List<InvoiceItemRecord>());
+        }
+
+        var tenantId = principal.GetTenantId();
+        var joinColumn = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "parent_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
+            ?? metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "invoice_id", StringComparison.OrdinalIgnoreCase))?.ColumnName
+            ?? "parent_id";
+
+        var (result, dispatchedQueries) = await _chunkedQueryExecutor.ExecuteGroupedWithMetricsAsync<string, InvoiceItemRecord>(
             invoiceIds,
-            (chunkKeys, _) =>
+            async (chunkKeys, chunkCt) =>
             {
                 var chunkResult = new Dictionary<string, List<InvoiceItemRecord>>(chunkKeys.Count);
-
-                foreach (var invId in chunkKeys)
+                foreach (var k in chunkKeys)
                 {
-                    var items = new List<InvoiceItemRecord>();
-                    // SEC (Low): effective column access (catalog sensitivity included), tenant-scoped HMAC, row filter on RAW values
-                    // (before masking) so a masked value can neither satisfy nor defeat the predicate.
-                    var effectiveMeta = metadata ?? new TableMetadata { Identifier = childTableId };
-                    var tenantValue = principal.GetTenantId().Value;
-                    var hmacDefault = _options?.DataMasking?.HmacKeyId;
-
-                    for (int i = 1; i <= 2; i++)
-                    {
-                        var rawNote = $"Confidential spec for item {i} of invoice {invId}";
-                        var rawProduct = $"Enterprise License Pack {i}";
-                        var rawPrice = 1250.00m * i;
-
-                        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
-                        {
-                            var rawRow = (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                            {
-                                ["id"] = $"{invId}-ITEM-{i}",
-                                ["invoice_id"] = invId,
-                                ["product_name"] = rawProduct,
-                                ["price"] = rawPrice,
-                                ["sensitive_note"] = rawNote
-                            };
-
-                            if (FilterRows(new List<IReadOnlyDictionary<string, object?>> { rawRow }, decision.CombinedRowFilterSql, effectiveMeta).Count == 0)
-                            {
-                                continue;
-                            }
-                        }
-
-                        object? maskedNote = rawNote;
-                        var noteAccess = decision.GetEffectiveColumnAccess("sensitive_note", effectiveMeta);
-
-                        if (noteAccess == ColumnAccessLevel.Deny)
-                        {
-                            maskedNote = null;
-                        }
-                        else if (noteAccess == ColumnAccessLevel.Mask)
-                        {
-                            var rule = metadata != null && metadata.ColumnMaskingRules.TryGetValue("sensitive_note", out var r)
-                                ? r
-                                : new MaskingRule { RuleType = "REDACT" };
-                            rule = ScopeRuleForTenant(rule, tenantValue, hmacDefault);
-                            maskedNote = _maskingProvider.MaskValue("sensitive_note", rawNote, rule);
-                        }
-
-                        var prodAccess = decision.GetEffectiveColumnAccess("product_name", effectiveMeta);
-                        string? prodName = prodAccess switch
-                        {
-                            ColumnAccessLevel.Clear => rawProduct,
-                            ColumnAccessLevel.Mask => "***",
-                            _ => null
-                        };
-
-                        var priceAccess = decision.GetEffectiveColumnAccess("price", effectiveMeta);
-                        decimal price = priceAccess switch
-                        {
-                            ColumnAccessLevel.Clear => rawPrice,
-                            _ => 0m
-                        };
-
-                        items.Add(new InvoiceItemRecord
-                        {
-                            Id = $"{invId}-ITEM-{i}",
-                            InvoiceId = invId,
-                            ProductName = prodName,
-                            Price = price,
-                            SensitiveNote = maskedNote?.ToString()
-                        });
-                    }
-
-                    chunkResult[invId] = items;
+                    chunkResult[k] = new List<InvoiceItemRecord>();
                 }
 
-                return Task.FromResult<IReadOnlyDictionary<string, List<InvoiceItemRecord>>>(chunkResult);
+                if (chunkKeys.Count == 0)
+                {
+                    return chunkResult;
+                }
+
+                var filterParams = new Dictionary<string, object?>(chunkKeys.Count);
+                var paramNames = new List<string>(chunkKeys.Count);
+                for (int i = 0; i < chunkKeys.Count; i++)
+                {
+                    var pName = $"@p_inv_{i}";
+                    paramNames.Add(pName);
+                    filterParams[pName] = chunkKeys[i];
+                }
+
+                var filterClause = new TableFilterClause(
+                    SqlPredicate: $"{joinColumn} IN ({string.Join(", ", paramNames)})",
+                    Parameters: filterParams,
+                    ReferencedColumns: new[] { joinColumn })
+                {
+                    DialectSqlFactory = d => $"{d.QuoteIdentifier(joinColumn)} IN ({string.Join(", ", paramNames)})"
+                };
+
+                var pageItems = new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    [TableQueryItems.Filter] = filterClause
+                };
+
+                var requestedColumns = metadata.Columns
+                    .Where(c => decision.GetColumnAccess(c.ColumnName) != ColumnAccessLevel.Deny)
+                    .Select(c => c.ColumnName)
+                    .ToList();
+
+                var execContext = new DataSourceExecutionContext(
+                    SourceName: metadata.Table.SourceName,
+                    Metadata: metadata,
+                    Principal: principal ?? new ClaimsPrincipal(new ClaimsIdentity()),
+                    AccessDecision: decision,
+                    Arguments: new Dictionary<string, object?> { ["limit"] = Math.Max(100, chunkKeys.Count * 10), ["offset"] = 0 },
+                    RequestedFields: requestedColumns,
+                    RequestHeaders: null,
+                    Limit: Math.Max(100, chunkKeys.Count * 10),
+                    Offset: 0,
+                    Tenant: tenantId,
+                    Items: pageItems
+                );
+
+                IReadOnlyList<IReadOnlyDictionary<string, object?>> rawRows;
+                try
+                {
+                    rawRows = await executor.ExecuteAsync(execContext, chunkCt).ConfigureAwait(false);
+                }
+                catch (GatewayNotImplementedException)
+                {
+                    return chunkResult;
+                }
+
+                var rlsPushdownAlreadyOccurred = execContext.Items.TryGetValue("RlsPushdownExecuted", out var p2) && p2 is true;
+                var inDbMaskingAlreadyOccurred = execContext.Items.TryGetValue("InDbColumnMaskingExecuted", out var m2) && m2 is true;
+
+                var maxBytes = _options?.GraphQL?.MaxResponseBytes > 0 ? _options.GraphQL.MaxResponseBytes : 10 * 1024 * 1024;
+                var processedRows = Autheris.Application.Connectors.GovernedConnectorReader.Apply(
+                    rawRows,
+                    metadata,
+                    decision,
+                    tenantId.Value,
+                    rlsPushdownAlreadyOccurred,
+                    inDbMaskingAlreadyOccurred,
+                    new Autheris.Application.Connectors.GovernedRowPolicy(
+                        _maskingProvider,
+                        _options?.DataMasking?.HmacKeyId,
+                        MaskingDisabled: _options?.IsColumnMaskingDisabled == true,
+                        MaxBytes: maxBytes));
+
+                for (int i = 0; i < processedRows.Count; i++)
+                {
+                    var row = processedRows[i];
+                    var raw = i < rawRows.Count ? rawRows[i] : null;
+
+                    var parentKey = row.TryGetValue(joinColumn, out var pkVal) ? pkVal?.ToString() ?? "" : "";
+                    if (string.IsNullOrEmpty(parentKey) && raw != null)
+                    {
+                        parentKey = raw.TryGetValue(joinColumn, out var rPk) ? rPk?.ToString() ?? "" : "";
+                    }
+                    if (string.IsNullOrEmpty(parentKey) && string.Equals(joinColumn, "parent_id", StringComparison.OrdinalIgnoreCase) && raw != null)
+                    {
+                        parentKey = raw.TryGetValue("invoice_id", out var altVal) ? altVal?.ToString() ?? "" : "";
+                    }
+
+                    if (string.IsNullOrEmpty(parentKey) || !chunkResult.TryGetValue(parentKey, out var list))
+                    {
+                        continue;
+                    }
+
+                    var id = row.TryGetValue("id", out var idVal) ? idVal?.ToString() ?? "" : "";
+                    if (string.IsNullOrEmpty(id) && raw != null)
+                    {
+                        id = raw.TryGetValue("id", out var rawId) ? rawId?.ToString() ?? "" : "";
+                    }
+
+                    var prodName = row.TryGetValue("product_name", out var prodVal) ? prodVal?.ToString() : null;
+                    var price = 0m;
+                    if (row.TryGetValue("price", out var priceVal) && priceVal != null)
+                    {
+                        if (priceVal is decimal d) price = d;
+                        else if (decimal.TryParse(priceVal.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var parsedPrice)) price = parsedPrice;
+                    }
+                    var sensitiveNote = row.TryGetValue("sensitive_note", out var noteVal) ? noteVal?.ToString() : null;
+
+                    list.Add(new InvoiceItemRecord
+                    {
+                        Id = id,
+                        InvoiceId = parentKey,
+                        ProductName = prodName,
+                        Price = price,
+                        SensitiveNote = sensitiveNote
+                    });
+                }
+
+                return (IReadOnlyDictionary<string, List<InvoiceItemRecord>>)chunkResult;
             },
             chunkSize: _options?.GraphQL?.MaxInClauseBatchSize,
             ct: ct);

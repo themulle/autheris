@@ -20,26 +20,7 @@ using Xunit;
 
 public sealed class CasbinModelContractTests
 {
-    private static readonly TableIdentifier HrTable = new("hr", "dbo", "employees");
     private static readonly TenantId TenantA = new("tenant-a");
-    private static readonly TenantId TenantB = new("tenant-b");
-
-    private const string ModelTemplate = @"
-[request_definition]
-r = sub, tenant, obj, act, ctx
-
-[policy_definition]
-p = sub, tenant, obj, act, sub_rule, eft
-
-[role_definition]
-g = _, _
-
-[policy_effect]
-e = some(where (p.eft == allow)) && !some(where (p.eft == deny))
-
-[matchers]
-m = {0}
-";
 
     private static string CreateModel(string matcher, string effect = "some(where (p.eft == allow)) && !some(where (p.eft == deny))", string policyDef = "sub, tenant, obj, act, sub_rule, eft") =>
         $@"

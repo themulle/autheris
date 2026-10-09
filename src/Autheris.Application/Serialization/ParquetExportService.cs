@@ -471,6 +471,7 @@ public sealed partial class ParquetExportService : IParquetExportService
         decimal => ColumnKind.Decimal,
         DateTime or DateTimeOffset or DateOnly => ColumnKind.DateTime,
         byte[] => ColumnKind.Binary,
+        string s when TryParseIsoDateTime(s, out _) => ColumnKind.DateTime,
         _ => ColumnKind.String
     };
 
@@ -598,6 +599,42 @@ public sealed partial class ParquetExportService : IParquetExportService
         }
     }
 
+    private static bool TryParseIsoDateTime(string s, out DateTime utc)
+    {
+        utc = default;
+        if (string.IsNullOrWhiteSpace(s) || s.Length < 10)
+        {
+            return false;
+        }
+
+        // Must match YYYY-MM-DD pattern
+        if (!char.IsDigit(s[0]) || !char.IsDigit(s[1]) || !char.IsDigit(s[2]) || !char.IsDigit(s[3]) ||
+            s[4] != '-' || !char.IsDigit(s[5]) || !char.IsDigit(s[6]) ||
+            s[7] != '-' || !char.IsDigit(s[8]) || !char.IsDigit(s[9]))
+        {
+            return false;
+        }
+
+        if (s.Length > 10 && s[10] != 'T' && s[10] != ' ')
+        {
+            return false;
+        }
+
+        if (DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dto))
+        {
+            utc = dto.UtcDateTime;
+            return true;
+        }
+
+        if (DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var dt))
+        {
+            utc = dt.Kind == DateTimeKind.Utc ? dt : DateTime.SpecifyKind(dt, DateTimeKind.Utc);
+            return true;
+        }
+
+        return false;
+    }
+
     private static DateTime ToUtcDateTime(object value) => value switch
     {
         DateTimeOffset dto => dto.UtcDateTime,
@@ -605,6 +642,7 @@ public sealed partial class ParquetExportService : IParquetExportService
         DateTime { Kind: DateTimeKind.Local } local => local.ToUniversalTime(),
         DateTime { Kind: DateTimeKind.Unspecified } unspecified => DateTime.SpecifyKind(unspecified, DateTimeKind.Utc),
         DateTime utc => utc,
+        string s when TryParseIsoDateTime(s, out var dt) => dt,
         _ => throw new InvalidOperationException($"Value of type '{value.GetType().Name}' is not a date/time value.")
     };
 

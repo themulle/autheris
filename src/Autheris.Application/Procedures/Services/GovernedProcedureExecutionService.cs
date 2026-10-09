@@ -46,6 +46,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly IProcedureRowScopeResolver? _rowScope;
     private readonly ILogger<GovernedProcedureExecutionService>? _logger;
 
+    private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
+
     public GovernedProcedureExecutionService(
         IProcedureRegistry registry,
         IProcedureInvoker invoker,
@@ -60,8 +62,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         ILogger<GovernedProcedureExecutionService>? logger = null,
         IProcedureRowScopeResolver? rowScope = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
-        IConsentCacheService? consentCache = null)
+        IConsentCacheService? consentCache = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
     {
+        _mandatoryFilters = mandatoryFilters;
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -206,6 +210,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 rowCount = governed.Rows.Count,
                 truncated = raw.Truncated,
                 rowsRemovedByScope,
+                virtual_filters = decisions
+                    .Where(d => d.Value.Decision.AppliedVirtualFilters is { Count: > 0 })
+                    .ToDictionary(d => d.Key.ToString(), d => d.Value.Decision.AppliedVirtualFilters),
                 returnedColumns = governed.Columns.Count,
                 droppedColumns = raw.Columns.Count - governed.Columns.Count,
                 parameterHashes = HashParameters(values)
@@ -298,7 +305,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     /// unless <paramref name="allowRowFilter"/> is set: the result table's filter is then enforced by a database key
     /// match after the call (<see cref="ApplyRowScopeAsync"/>).
     /// </summary>
-    private async Task<(TableAccessDecision Decision, TableMetadata Meta)?> EvaluateTableAsync(
+    internal async Task<(TableAccessDecision Decision, TableMetadata Meta)?> EvaluateTableAsync(
         string catalogDomain,
         string tableKey,
         ClaimsPrincipal user,
@@ -328,8 +335,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         // an additional restriction). Row filters (consent or Casbin) cannot be pushed into a procedure: they deny the
         // call unless the result table's filter is enforced by the row scope after the call.
         var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
-            ? TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
-            : await new Autheris.Application.Policy.TableAccessPolicy(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value)
+            ? await WithVirtualFiltersAsync(
+                TableAccessDecision.Allowed(tableId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true),
+                user, userSid, tenantId, meta, ct).ConfigureAwait(false)
+            : await new Autheris.Application.Policy.TableAccessPolicy(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value, _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance)
                 .DecideAsync(
                     new Autheris.Application.Policy.TableAccessQuery(
                         userSid,
@@ -339,7 +348,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                         meta,
                         user.Claims,
                         ClientIp: ResolveClientIp(user),
-                        ExtraAttributes: new Dictionary<string, object?> { ["gql.action"] = "read" }),
+                        ExtraAttributes: new Dictionary<string, object?> { ["gql.action"] = "read" },
+                        ObjectKind: FilterObjectKinds.ProcedureResult),
                     ct).ConfigureAwait(false);
 
         if (!decision.IsAllowed || (!allowRowFilter && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)))
@@ -350,7 +360,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         if (!consentBypassed && _policyEnforcement != null && _policyEnforcement.HasPolicies(tenantId))
         {
             // With ABAC active every catalog column carries an explicit level; columns outside the catalog are denied.
-            var explicitLevels = meta.Columns.ToDictionary(c => c.ColumnName, c => decision.GetColumnAccess(c.ColumnName), StringComparer.OrdinalIgnoreCase);
+            var explicitLevels = meta.Columns.ToDictionary(c => c.ColumnName, c => decision.GetEffectiveColumnAccess(c.ColumnName, meta), StringComparer.OrdinalIgnoreCase);
             decision = decision with { ColumnAccess = explicitLevels, HasUnconstrainedColumnAllow = false };
         }
 
@@ -629,6 +639,24 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     }
 
     // SEC (Low): no fallback to the caller-influenced token "ip" claim; unknown client -> IPAddress.None (fail closed).
+    /// <summary>
+    /// Virtual filters also apply with the consent bypass (decision 1), including this path without consent services
+    /// where <c>TableAccessPolicy</c> is not used.
+    /// </summary>
+    private async Task<TableAccessDecision> WithVirtualFiltersAsync(
+        TableAccessDecision decision, ClaimsPrincipal user, Sid userSid, TenantId tenantId, TableMetadata meta, CancellationToken ct)
+    {
+        var mandatory = await (_mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance).ResolveAsync(
+            new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, user.GetGroupSids(), user.GetUserRoles(), tenantId, meta, FilterObjectKinds.ProcedureResult),
+            ct).ConfigureAwait(false);
+        if (mandatory.IsDenied)
+        {
+            return TableAccessDecision.Denied(decision.Table, mandatory.DenyReason ?? "Denied by virtual filters.");
+        }
+
+        return mandatory.PredicateSql != null ? decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters) : decision;
+    }
+
     private System.Net.IPAddress ResolveClientIp(ClaimsPrincipal user)
     {
         return _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;

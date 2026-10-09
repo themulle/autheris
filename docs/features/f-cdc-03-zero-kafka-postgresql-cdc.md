@@ -1,7 +1,7 @@
 # F-CDC-03: Zero-Kafka PostgreSQL CDC via Logical Streaming Replication
 
 **Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`PostgreSqlLogicalReplicationService.cs`](file:///root/lis-git/autheris/src/Autheris.Infrastructure/Streaming/PostgreSqlLogicalReplicationService.cs), [`IStreamRlsPolicyEnforcer.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Streaming/Interfaces/IStreamRlsPolicyEnforcer.cs)
+**Components:** [`PostgreSqlLogicalReplicationService.cs`](file:///root/autheris/src/Autheris.Infrastructure/Streaming/PostgreSqlLogicalReplicationService.cs), [`IStreamRlsPolicyEnforcer.cs`](file:///root/autheris/src/Autheris.Application/Streaming/Interfaces/IStreamRlsPolicyEnforcer.cs)
 
 ---
 

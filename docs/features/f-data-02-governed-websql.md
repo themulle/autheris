@@ -26,6 +26,8 @@ Ad-hoc SQL queries are parsed using an ANTLR4 parser, checked against AST securi
   - The `catalog` part selects or validates against the target data source.
   - The rewriter strips the catalog prefix when generating backend SQL (`"dbo"."invoices"` for PostgreSQL, `[dbo].[invoices]` for MSSQL, `[invoices]` for SQLite), preventing cross-database collision errors.
 - **Deep AST SQL Injection Protection**: Prevents multi-statement attacks, system function execution, and comment-based evasion.
+- **Granular Transport Row Limits & Truncation Accuracy**: Configurable row limits per egress transport (`RowLimits:Trino`, `RowLimits:Parquet`, `RowLimits:FlightSql`) with accurate truncation reporting (only reported as truncated when rows were actually cut by the limit).
+- **Cross-Channel Virtual Filters Pushdown**: Seamlessly integrates relation-scoped Virtual Filters ([`F-GOV-09`](f-gov-09-virtual-filters.md)) into the AST security rewriter along with data-owner consents.
 - **Controlled DML Guardrails**: High-risk statements (`UPDATE`, `DELETE`) require special writer roles, are bounded by max affected row limits, and are logged to the cryptographic WORM audit chain.
 
 ---
@@ -159,6 +161,13 @@ curl -X POST http://localhost:8080/api/v1/sql \
       "MaxAffectedRows": 1000,
       "RejectUnfilteredDml": true,
       "ExecutionTimeoutSeconds": 30
+    },
+    "RowLimits": {
+      "Trino": { "DefaultMaxRows": 5000, "MaxAllowedRows": 25000 },
+      "Parquet": { "DefaultMaxRows": 50000, "MaxAllowedRows": 100000 },
+      "SqlEndpoints": { "DefaultMaxRows": 5000, "MaxAllowedRows": 20000 },
+      "ArrowExport": { "DefaultMaxRows": 25000, "MaxAllowedRows": 100000 },
+      "FlightSql": { "DefaultMaxRows": 25000, "MaxAllowedRows": 100000 }
     }
   }
 }

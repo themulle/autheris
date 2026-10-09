@@ -32,6 +32,9 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<UnifiedPolicyDecisionPoint> _logger;
 
+    private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
+    private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
+
     public UnifiedPolicyDecisionPoint(
         IConsentRepository consentRepository,
         IConsentResolutionService resolutionService,
@@ -39,8 +42,12 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
         IOptions<GatewayOptions> options,
         ILogger<UnifiedPolicyDecisionPoint> logger,
         IPolicyEnforcementService? policyEnforcementService = null,
-        IRebacEvaluator? rebacEvaluator = null)
+        IRebacEvaluator? rebacEvaluator = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null)
     {
+        _contractManager = contractManager;
+        _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
         _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
@@ -75,7 +82,7 @@ public sealed class UnifiedPolicyDecisionPoint : IUnifiedPolicyDecisionPoint
             // RV-01: unknown client IP must never satisfy loopback/internal-network allow rules (fail-closed).
             ClientIp: securityContext.ClientIp ?? IPAddress.None);
 
-        var decision = await new TableAccessPolicy(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, clientIpResolver: null, _options.Value)
+        var decision = await new TableAccessPolicy(_consentRepository, _resolutionService, _cacheService, _policyEnforcementService, _rebacEvaluator, clientIpResolver: null, _options.Value, _mandatoryFilters, _contractManager)
             .DecideAsync(query, ct).ConfigureAwait(false);
         if (!decision.IsAllowed)
         {

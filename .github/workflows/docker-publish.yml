@@ -28,10 +28,17 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Restore with Locked Mode
+        run: dotnet restore Autheris.sln --locked-mode
+
+      - name: Run Test Suite
+        run: dotnet test Autheris.sln -c Release --no-restore --verbosity normal
+
       - name: Publish Autheris
         run: |
           dotnet publish src/Autheris.Api/Autheris.Api.csproj \
             -c Release \
+            --no-restore \
             -o ./dist/publish
 
       - name: Set up Docker Buildx
@@ -44,10 +51,40 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Lowercase Repository Name
-        id: repo-name
+      - name: Compute Docker Image Tags
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
-          echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          TAGS=()
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [[ ! "$INPUT_TAG" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+              echo "Error: Invalid docker tag '$INPUT_TAG'" >&2
+              exit 1
+            fi
+            TAGS+=("${IMAGE}:${INPUT_TAG}")
+            if [ "$INPUT_TAG" = "latest" ]; then
+              TAGS+=("${IMAGE}:getting-started")
+            fi
+          elif [ "$REF_TYPE" = "tag" ]; then
+            TAGS+=("${IMAGE}:${REF_NAME}")
+            TAGS+=("${IMAGE}:latest")
+            TAGS+=("${IMAGE}:getting-started")
+          else
+            # Push on main
+            TAGS+=("${IMAGE}:latest")
+            TAGS+=("${IMAGE}:getting-started")
+            TAGS+=("${IMAGE}:${COMMIT_SHA}")
+          fi
+          TAGS_STR=$(printf "%s\n" "${TAGS[@]}")
+          echo "tags<<EOF" >> $GITHUB_OUTPUT
+          echo "$TAGS_STR" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -58,7 +95,4 @@ jobs:
           # Supply-chain attestations (SLSA provenance + SPDX SBOM) attached to the image
           provenance: mode=max
           sbom: true
-          tags: |
-            ${{ steps.repo-name.outputs.IMAGE_NAME }}:getting-started
-            ${{ steps.repo-name.outputs.IMAGE_NAME }}:latest
-            ${{ github.event.inputs.tag && format('{0}:{1}', steps.repo-name.outputs.IMAGE_NAME, github.event.inputs.tag) || '' }}
+          tags: ${{ steps.meta.outputs.tags }}

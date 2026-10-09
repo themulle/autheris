@@ -7,8 +7,10 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
 using Shouldly;
 using Xunit;
@@ -148,5 +150,129 @@ public sealed class McpSdkTransportTests : IClassFixture<WebApplicationFactory<P
         var response = await client.SendAsync(request);
 
         response.StatusCode.ShouldBe(HttpStatusCode.RequestEntityTooLarge);
+    }
+
+    [Fact]
+    public async Task ProtectedResourceMetadata_RootPath_ServesMetadataOrRedirectsAnonymously()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/.well-known/oauth-protected-resource");
+
+        // Must NOT return 401 Unauthorized for anonymous clients
+        response.StatusCode.ShouldNotBe(HttpStatusCode.Unauthorized);
+        (response.StatusCode == HttpStatusCode.OK ||
+         response.StatusCode == HttpStatusCode.Redirect ||
+         response.StatusCode == HttpStatusCode.TemporaryRedirect).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task AuthorizationServerMetadata_ReturnsConfiguredServersAnonymously()
+    {
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync("/.well-known/oauth-authorization-server");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("authorization_servers").EnumerateArray().Select(e => e.GetString()).ShouldContain(Authority);
+    }
+
+    [Fact]
+    public async Task McpDiscovery_OutsideDevWithoutOptIn_RequiresAuthentication()
+    {
+        var tempDb = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"gov-test-{Guid.NewGuid():N}.db");
+        try
+        {
+            var prodFactory = _factory.WithWebHostBuilder(b =>
+            {
+                b.UseEnvironment("Production");
+                b.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source={tempDb}");
+                b.UseSetting("Gateway:GovernanceDb:AuditHmacKeyVaultRef", "audit-hmac-key");
+                b.UseSetting("Gateway:GovernanceDb:AuditHmacKey", "0123456789012345678901234567890123456789");
+                b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "false");
+                b.UseSetting("Gateway:Mcp:AllowAnonymousDiscovery", "false");
+                b.ConfigureServices(services =>
+                {
+                    services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(new ConnectionItemsStartupFilter());
+                });
+            });
+
+            var client = prodFactory.CreateClient();
+            var response = await client.GetAsync("/.well-known/oauth-authorization-server");
+            response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        }
+        finally
+        {
+            if (System.IO.File.Exists(tempDb))
+            {
+                try { System.IO.File.Delete(tempDb); } catch { }
+            }
+        }
+    }
+
+    private sealed class ConnectionItemsStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
+    {
+        public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next)
+        {
+            return app =>
+            {
+                app.Use(async (context, nextMiddleware) =>
+                {
+                    if (context.Features.Get<Microsoft.AspNetCore.Connections.Features.IConnectionItemsFeature>() == null)
+                    {
+                        context.Features.Set<Microsoft.AspNetCore.Connections.Features.IConnectionItemsFeature>(new TestConnectionItemsFeature());
+                    }
+                    await nextMiddleware();
+                });
+                next(app);
+            };
+        }
+    }
+
+    private sealed class TestConnectionItemsFeature : Microsoft.AspNetCore.Connections.Features.IConnectionItemsFeature
+    {
+        public System.Collections.Generic.IDictionary<object, object?> Items { get; set; } = new SafeItemsDictionary();
+
+        private sealed class SafeItemsDictionary : System.Collections.Generic.IDictionary<object, object?>
+        {
+            private readonly System.Collections.Generic.Dictionary<object, object?> _dict = new();
+
+            public object? this[object key]
+            {
+                get => _dict.TryGetValue(key, out var val) ? val : null;
+                set => _dict[key] = value;
+            }
+
+            public System.Collections.Generic.ICollection<object> Keys => _dict.Keys;
+            public System.Collections.Generic.ICollection<object?> Values => _dict.Values;
+            public int Count => _dict.Count;
+            public bool IsReadOnly => false;
+            public void Add(object key, object? value) => _dict[key] = value;
+            public void Add(System.Collections.Generic.KeyValuePair<object, object?> item) => _dict.Add(item.Key, item.Value);
+            public void Clear() => _dict.Clear();
+            public bool Contains(System.Collections.Generic.KeyValuePair<object, object?> item) => ((System.Collections.Generic.ICollection<System.Collections.Generic.KeyValuePair<object, object?>>)_dict).Contains(item);
+            public bool ContainsKey(object key) => _dict.ContainsKey(key);
+            public void CopyTo(System.Collections.Generic.KeyValuePair<object, object?>[] array, int arrayIndex) => ((System.Collections.Generic.ICollection<System.Collections.Generic.KeyValuePair<object, object?>>)_dict).CopyTo(array, arrayIndex);
+            public System.Collections.Generic.IEnumerator<System.Collections.Generic.KeyValuePair<object, object?>> GetEnumerator() => _dict.GetEnumerator();
+            public bool Remove(object key) => _dict.Remove(key);
+            public bool Remove(System.Collections.Generic.KeyValuePair<object, object?> item) => ((System.Collections.Generic.ICollection<System.Collections.Generic.KeyValuePair<object, object?>>)_dict).Remove(item);
+            public bool TryGetValue(object key, out object? value) => _dict.TryGetValue(key, out value);
+            System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => _dict.GetEnumerator();
+        }
+    }
+
+    [Fact]
+    public async Task McpDiscovery_WithEmptyServers_Returns404NotFound()
+    {
+        var noAuthServerFactory = _factory.WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Gateway:Authentication:Adfs:Authority", "");
+            b.UseSetting("Gateway:Mcp:AllowAnonymousDiscovery", "true");
+        });
+
+        var client = noAuthServerFactory.CreateClient();
+        var response = await client.GetAsync("/.well-known/oauth-authorization-server");
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 }

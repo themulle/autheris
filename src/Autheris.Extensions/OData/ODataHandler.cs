@@ -27,8 +27,9 @@ public sealed partial class ODataHandler(
     /// </summary>
     public const int MaxSkip = 100_000;
 
-    /// <summary>O7: Retry-After for 503 responses (deadlock, failover, exhausted pool).</summary>
+    /// <summary>O7: Retry-After for 503/504 responses (deadlock, failover, exhausted pool, statement timeout).</summary>
     private const int UnavailableRetryAfterSeconds = 5;
+    private const int TimeoutRetryAfterSeconds = 5;
 
     // G3 / RR-L3: detailed denial and not-found messages are only returned in Development (fail-closed when unknown).
     private readonly bool _verboseErrors = string.Equals(environment?.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
@@ -109,6 +110,19 @@ public sealed partial class ODataHandler(
         return authorizedTables;
     }
 
+    public Task<ODataQueryResult> ExecuteEntitySetQueryAsync(
+        ClaimsPrincipal? principal,
+        string serviceRootUrl,
+        TableIdentifier table,
+        int? top,
+        int? skip,
+        string? select,
+        bool includeCount,
+        IReadOnlyDictionary<string, string[]>? headers,
+        string? orderBy = null,
+        CancellationToken ct = default) =>
+        ExecuteEntitySetQueryAsync(principal, serviceRootUrl, table, top, skip, select, includeCount, headers, orderBy, filter: null, ct);
+
     public async Task<ODataQueryResult> ExecuteEntitySetQueryAsync(
         ClaimsPrincipal? principal,
         string serviceRootUrl,
@@ -118,6 +132,8 @@ public sealed partial class ODataHandler(
         string? select,
         bool includeCount,
         IReadOnlyDictionary<string, string[]>? headers,
+        string? orderBy,
+        string? filter,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceRootUrl);
@@ -149,11 +165,34 @@ public sealed partial class ODataHandler(
             return Error(400, "InvalidQueryOption", $"The query parameter '$skip' must not exceed {MaxSkip}.");
         }
 
-        // O5: $count used to report the number of rows on the page, not the total. Until the engine reader can count
-        // with the same row filter, the option is answered with 501 instead of a wrong number.
-        if (includeCount)
+        // 4a.3: $orderby is a comma separated list of "property [asc|desc]".
+        IReadOnlyList<TableOrderBy>? orderByColumns = null;
+        if (orderBy != null)
         {
-            return Error(501, "NotImplemented", "The query option '$count' is not supported by this service.");
+            if (!TryParseOrderBy(orderBy, out var parsedOrder, out var orderError))
+            {
+                return Error(400, "InvalidQueryOption", orderError);
+            }
+
+            orderByColumns = parsedOrder;
+        }
+
+        // Befund 2.1: $filter pushdown parser with Zero-Trust tracking
+        TableFilterClause? filterClause = null;
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            try
+            {
+                filterClause = ODataFilterParser.Parse(filter);
+            }
+            catch (Autheris.Domain.Exceptions.GatewayInvalidQueryException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return Error(400, "InvalidQueryOption", $"Invalid $filter expression: {ex.Message}");
+            }
         }
 
         // Safe limit handling: default top 100, max 1000
@@ -161,9 +200,17 @@ public sealed partial class ODataHandler(
         var effectiveSkip = skip.HasValue ? Math.Max(0, skip.Value) : 0;
 
         IReadOnlyList<string>? requestedFields = null;
-        if (!string.IsNullOrWhiteSpace(select))
+        if (select != null)
         {
+            if (string.IsNullOrWhiteSpace(select))
+            {
+                return Error(400, "InvalidQueryOption", "The query parameter '$select' must specify at least one property.");
+            }
             var fields = select.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (fields.Length == 0)
+            {
+                return Error(400, "InvalidQueryOption", "The query parameter '$select' must specify at least one property.");
+            }
             foreach (var field in fields)
             {
                 if (!SafeIdentifierRegex().IsMatch(field))
@@ -182,19 +229,29 @@ public sealed partial class ODataHandler(
 
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rows;
         TableAccessDecision decision;
+        long? totalCount;
 
         try
         {
-            (rows, decision) = await _executionService.ExecuteTableQueryAsync(
-                principal: principal,
-                table: table,
-                first: effectiveTop,
-                after: effectiveSkip,
-                queryArguments: null,
-                requestedFields: requestedFields,
-                requestHeaders: headers,
-                ct: ct
-            ).ConfigureAwait(false);
+            // O5 / 4a.3 / 2.1: $count is the total under the same row filter and $filter, counted by the data source in the same statement
+            // context; a source that cannot count answers 501, never the number of rows on the page.
+            var page = await _executionService.ExecuteTablePageAsync(
+                principal,
+                table,
+                new TablePageRequest(
+                    First: effectiveTop + 1,
+                    After: effectiveSkip,
+                    RequestedFields: requestedFields,
+                    OrderBy: orderByColumns,
+                    Filter: filterClause,
+                    IncludeTotalCount: includeCount,
+                    RequestHeaders: headers),
+                ct).ConfigureAwait(false);
+            (rows, decision, totalCount) = (page.Rows, page.Decision, page.TotalCount);
+            if (includeCount && totalCount == null && decision.IsAllowed)
+            {
+                return Error(501, "NotImplemented", "The total row count cannot be determined for this data source.");
+            }
         }
         catch (Exception ex) when (ct.IsCancellationRequested)
         {
@@ -211,6 +268,11 @@ public sealed partial class ODataHandler(
         {
             _logger.LogWarning("OData query for {Table} throttled (too many concurrent reads).", table);
             return Error(429, "TooManyRequests", thEx.Message, thEx.RetryAfterSeconds);
+        }
+        catch (Autheris.Domain.Exceptions.GatewayNotImplementedException niEx)
+        {
+            _logger.LogWarning("OData query for {Table} uses an unsupported option: {Message}", table, niEx.Message);
+            return Error(501, "NotImplemented", niEx.Message);
         }
         catch (Autheris.Domain.Exceptions.GatewayUnsupportedColumnTypeException utEx)
         {
@@ -272,13 +334,7 @@ public sealed partial class ODataHandler(
         catch (Exception ex) when (DataAccessErrorClassifier.Classify(ex) == DataAccessErrorKind.Timeout)
         {
             _logger.LogWarning(ex, "OData query for {Table} timed out.", table);
-            return new ODataQueryResult(
-                Success: false,
-                StatusCode: 504,
-                Payload: ODataResponseFormatter.FormatErrorResponse("ExecutionTimeout", "The query exceeded the execution time limit. Narrow the query or check database locks."),
-                ErrorCode: "ExecutionTimeout",
-                ErrorMessage: "The query exceeded the execution time limit."
-            );
+            return Error(504, "ExecutionTimeout", "The query exceeded the execution time limit. Narrow the query or check database locks.", TimeoutRetryAfterSeconds);
         }
         catch (Exception ex) when (DataAccessErrorClassifier.Classify(ex) == DataAccessErrorKind.Unavailable)
         {
@@ -314,8 +370,14 @@ public sealed partial class ODataHandler(
             );
         }
 
-        int? totalCount = includeCount ? rows.Count : null;
-        var payload = ODataResponseFormatter.FormatEntitySetResponse(serviceRootUrl, table, rows, totalCount);
+        string? nextLink = null;
+        if (rows.Count > effectiveTop)
+        {
+            nextLink = BuildNextLink(serviceRootUrl, table, effectiveSkip + effectiveTop, top, select, orderBy, filter, includeCount);
+            rows = rows.Take(effectiveTop).ToList();
+        }
+
+        var payload = ODataResponseFormatter.FormatEntitySetResponse(serviceRootUrl, table, rows, totalCount, nextLink);
 
         return new ODataQueryResult(
             Success: true,
@@ -323,6 +385,90 @@ public sealed partial class ODataHandler(
             Payload: payload
         );
     }
+
+    private static string BuildNextLink(string serviceRootUrl, TableIdentifier table, int nextSkip, int? top, string? select, string? orderBy, string? filter, bool includeCount)
+    {
+        var cleanRoot = serviceRootUrl.TrimEnd('/');
+        var sb = new System.Text.StringBuilder();
+        sb.Append(cleanRoot).Append('/').Append(table.Domain).Append('/').Append(table.Schema).Append('/').Append(table.TableName);
+        sb.Append("?$skip=").Append(nextSkip);
+        if (top.HasValue)
+        {
+            sb.Append("&$top=").Append(top.Value);
+        }
+        if (!string.IsNullOrWhiteSpace(filter))
+        {
+            sb.Append("&$filter=").Append(Uri.EscapeDataString(filter));
+        }
+        if (!string.IsNullOrWhiteSpace(select))
+        {
+            sb.Append("&$select=").Append(Uri.EscapeDataString(select));
+        }
+        if (!string.IsNullOrWhiteSpace(orderBy))
+        {
+            sb.Append("&$orderby=").Append(Uri.EscapeDataString(orderBy));
+        }
+        if (includeCount)
+        {
+            sb.Append("&$count=true");
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 4a.3: parses "$orderby=a desc, b" into columns with direction. Only simple property names (no paths,
+    /// functions or expressions), each property at most once.
+    /// </summary>
+    internal static bool TryParseOrderBy(string orderBy, out IReadOnlyList<TableOrderBy> columns, out string error)
+    {
+        columns = Array.Empty<TableOrderBy>();
+        error = string.Empty;
+        var items = orderBy.Split(',', StringSplitOptions.TrimEntries);
+        if (items.Length == 0 || items.Any(string.IsNullOrEmpty))
+        {
+            error = "The query parameter '$orderby' must list at least one property.";
+            return false;
+        }
+
+        var parsed = new List<TableOrderBy>(items.Length);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items)
+        {
+            var parts = item.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length is < 1 or > 2 || !SafeIdentifierRegex().IsMatch(parts[0]))
+            {
+                error = $"The expression '{Truncate(item)}' in '$orderby' is not supported; use 'property [asc|desc]'.";
+                return false;
+            }
+
+            bool descending = false;
+            if (parts.Length == 2)
+            {
+                if (string.Equals(parts[1], "desc", StringComparison.OrdinalIgnoreCase))
+                {
+                    descending = true;
+                }
+                else if (!string.Equals(parts[1], "asc", StringComparison.OrdinalIgnoreCase))
+                {
+                    error = $"The direction '{Truncate(parts[1])}' in '$orderby' must be 'asc' or 'desc'.";
+                    return false;
+                }
+            }
+
+            if (!seen.Add(parts[0]))
+            {
+                error = $"The property '{parts[0]}' appears more than once in '$orderby'.";
+                return false;
+            }
+
+            parsed.Add(new TableOrderBy(parts[0], descending));
+        }
+
+        columns = parsed;
+        return true;
+    }
+
+    private static string Truncate(string value) => value.Length > 64 ? value[..64] : value;
 
     private static ODataQueryResult Error(int statusCode, string errorCode, string message, int? retryAfterSeconds = null) =>
         new(

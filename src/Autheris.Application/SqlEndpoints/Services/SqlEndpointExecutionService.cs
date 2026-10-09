@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.SqlEndpoints.Interfaces;
 using Autheris.Domain.Common;
@@ -80,7 +81,8 @@ public sealed class SqlEndpointExecutionService : ISqlEndpointExecutionService
             // annotation header (-- @name ...) and trailing ';' are only meaningful to the loader.
             Sql: SqlParameterExtractor.StripComments(endpoint.RawSql).Trim().TrimEnd(';').Trim(),
             Parameters: validatedParams,
-            DataSourceName: endpoint.DataSource);
+            DataSourceName: endpoint.DataSource,
+            RowLimit: SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions(), _options.Value.RowLimits?.SqlEndpoints));
 
         _logger?.LogDebug("Executing declarative SQL endpoint '{EndpointName}' with {ParamCount} parameters.", endpointName, endpoint.Parameters.Count);
 

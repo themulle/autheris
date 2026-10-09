@@ -28,7 +28,10 @@ public sealed record McpDatasetList(
     int Total,
     bool Truncated,
     string? Guidance = null,
-    IReadOnlyList<McpAccessPath>? Endpoints = null);
+    IReadOnlyList<McpAccessPath>? Endpoints = null,
+    int Offset = 0,
+    int Limit = 50,
+    int? NextOffset = null);
 
 /// <summary>A column the caller may see, as described by the MCP <c>describe_dataset</c> tool.</summary>
 /// <param name="Type">Data type in the source database.</param>

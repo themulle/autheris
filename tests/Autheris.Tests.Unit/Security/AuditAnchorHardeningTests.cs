@@ -154,6 +154,48 @@ public sealed class AuditAnchorHardeningTests : IDisposable
         Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBe(1); // no flush of the async channel needed
     }
 
+    [Fact]
+    public async Task Repository_TransactionRollback_DoesNotCorruptAuditChainOrTriggerViolation()
+    {
+        var worm = Path.Combine(_dir, "worm-rb");
+        var anchor = Path.Combine(_dir, "local-rb", "anchor.json");
+        var options = RepoOptions(worm, anchor, syncQuery: true);
+        using var repo = new SqliteGovernanceRepository(new EpochValidationService(), options);
+
+        // 1. Initial valid audit entry
+        await repo.RecordAuditEventAsync(NewEntry(1));
+        (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
+        var initialWormCount = Directory.Exists(worm) ? Directory.GetFiles(worm).Length : 0;
+
+        // 2. Perform a transaction that rolls back after inserting an audit event
+        await repo.LockAsync();
+        try
+        {
+            using var tx = repo.Connection.BeginTransaction();
+            await repo.RecordAuditEventInternalAsync(NewEntry(2), CancellationToken.None, tx);
+            // Simulate rollback by exiting using block without commit
+        }
+        finally
+        {
+            repo.RollbackPendingAuditTransactions();
+            repo.ReleaseLock();
+        }
+
+        // 3. WORM directory must NOT contain an anchor for sequence 2 (count remains initialWormCount)
+        var wormFilesAfterRollback = Directory.Exists(worm) ? Directory.GetFiles(worm).Length : 0;
+        wormFilesAfterRollback.ShouldBe(initialWormCount);
+
+        // 4. Verification must NOT fail or flag a violation
+        (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
+
+        // 5. Subsequent audit event must succeed and chain properly
+        await repo.RecordAuditEventAsync(NewEntry(3));
+        (await repo.VerifyAuditHashChainAsync()).ShouldBeTrue();
+
+        var wormFilesAfterCommit = Directory.Exists(worm) ? Directory.GetFiles(worm).Length : 0;
+        wormFilesAfterCommit.ShouldBe(initialWormCount + 1);
+    }
+
     private static AuditLogEntry NewEntry(int i, string? eventType = null) => new()
     {
         EventType = eventType ?? $"EVENT_{i}",

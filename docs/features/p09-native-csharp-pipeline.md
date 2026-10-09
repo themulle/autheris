@@ -1,7 +1,7 @@
 # P9: Native C# Ingress/Egress Pipeline & Dual-Mode Extensibility
 
 **Status:** [Done] (100% GA – Core Foundation)  
-**Components:** [`IGatewayMiddleware.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Interfaces/IGatewayMiddleware.cs), [`GatewayExecutionService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Services/GatewayExecutionService.cs)
+**Components:** [`IGatewayMiddleware.cs`](file:///root/autheris/src/Autheris.Application/Interfaces/IGatewayMiddleware.cs), [`GatewayExecutionService.cs`](file:///root/autheris/src/Autheris.Application/Services/GatewayExecutionService.cs)
 
 ---
 

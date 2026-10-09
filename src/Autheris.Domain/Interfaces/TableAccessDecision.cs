@@ -7,9 +7,27 @@ public record TableAccessDecision(
     string? CombinedRowFilterSql,
     IReadOnlyList<string> DeniedReasons,
     bool HasUnconstrainedColumnAllow = false,
-    IReadOnlyDictionary<string, object?>? RowFilterParameters = null
+    IReadOnlyDictionary<string, object?>? RowFilterParameters = null,
+    string? MandatoryRowPredicateSql = null,
+    IReadOnlyList<string>? AppliedVirtualFilters = null
 )
 {
+    /// <summary>
+    /// Virtual filters (design 3.3): adds a restrictive predicate with AND. It narrows what the consents allow and can
+    /// never be lifted by another consent (consent filters are combined with OR, this one is not).
+    /// </summary>
+    public TableAccessDecision WithMandatoryPredicate(string predicateSql, IReadOnlyList<string> appliedFilters)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(predicateSql);
+        ArgumentNullException.ThrowIfNull(appliedFilters);
+        return this with
+        {
+            CombinedRowFilterSql = string.IsNullOrWhiteSpace(CombinedRowFilterSql) ? predicateSql : $"({CombinedRowFilterSql}) AND ({predicateSql})",
+            MandatoryRowPredicateSql = predicateSql,
+            AppliedVirtualFilters = appliedFilters
+        };
+    }
+
     public ColumnAccessLevel GetColumnAccess(string columnName)
     {
         if (ColumnAccess.TryGetValue(columnName, out var lvl))

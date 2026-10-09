@@ -4,14 +4,17 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Security;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Thread-safe in-memory statement manager implementing the Trino REST client query lifecycle
@@ -22,25 +25,44 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WebSqlStatementManager>? _logger;
     private readonly TimeSpan _retentionPeriod;
+    private readonly int _maxSessionsPerUser;
+    private readonly int _maxTotalSessions;
     private readonly ConcurrentDictionary<string, StatementSession> _sessions = new(StringComparer.Ordinal);
     private readonly Timer? _cleanupTimer;
     private long _statementCounter;
     private bool _disposed;
 
-    private static readonly TimeSpan DefaultRetention = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan DefaultRetention = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan MaxWaitTimeout = TimeSpan.FromSeconds(300);
 
     public WebSqlStatementManager(
         IServiceScopeFactory scopeFactory,
         ILogger<WebSqlStatementManager>? logger = null,
-        TimeSpan? retentionPeriod = null)
+        IOptions<GatewayOptions>? options = null,
+        TimeSpan? retentionPeriod = null,
+        int? maxSessionsPerUser = null,
+        int? maxTotalSessions = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger;
-        _retentionPeriod = retentionPeriod ?? DefaultRetention;
 
-        // Clean up expired sessions periodically every 2 minutes
-        _cleanupTimer = new Timer(CleanupExpiredSessions, null, TimeSpan.FromMinutes(2), TimeSpan.FromMinutes(2));
+        var webSqlOpt = options?.Value?.WebSql;
+        _retentionPeriod = retentionPeriod ?? (webSqlOpt != null && webSqlOpt.StatementRetentionMinutes > 0
+            ? TimeSpan.FromMinutes(webSqlOpt.StatementRetentionMinutes)
+            : DefaultRetention);
+        _maxSessionsPerUser = maxSessionsPerUser ?? (webSqlOpt?.MaxConcurrentSessionsPerUser > 0 ? webSqlOpt.MaxConcurrentSessionsPerUser : 10);
+        _maxTotalSessions = maxTotalSessions ?? (webSqlOpt?.MaxTotalStatementSessions > 0 ? webSqlOpt.MaxTotalStatementSessions : 1000);
+
+        // Clean up expired sessions periodically every 1 minute
+        _cleanupTimer = new Timer(CleanupExpiredSessions, null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+    }
+
+    public WebSqlStatementManager(
+        IServiceScopeFactory scopeFactory,
+        ILogger<WebSqlStatementManager>? logger,
+        TimeSpan? retentionPeriod)
+        : this(scopeFactory, logger, options: null, retentionPeriod: retentionPeriod)
+    {
     }
 
     public async Task<StatementExecutionStatus> SubmitOrWaitAsync(
@@ -56,6 +78,74 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         PurgeExpiredSessions();
 
         string userSid = ResolveUserSid(user);
+
+        // SR15-17: enforce per-user concurrent active sessions and eviction of completed sessions
+        int activeUserCount = 0;
+        List<StatementSession>? userCompletedSessions = null;
+        int totalUserSessions = 0;
+
+        foreach (var s in _sessions.Values)
+        {
+            if (s.UserSid == userSid && s.TenantId == tenantId)
+            {
+                totalUserSessions++;
+                if (!s.ExecutionTask.IsCompleted)
+                {
+                    activeUserCount++;
+                }
+                else
+                {
+                    userCompletedSessions ??= new();
+                    userCompletedSessions.Add(s);
+                }
+            }
+        }
+
+        if (activeUserCount >= _maxSessionsPerUser)
+        {
+            throw new Autheris.Domain.Exceptions.GatewayThrottledException(
+                $"User '{userSid}' has reached the limit of {_maxSessionsPerUser} concurrent active statements. Wait for existing statements to complete.",
+                retryAfterSeconds: 5);
+        }
+
+        // Evict oldest completed sessions for this user if total sessions exceed quota
+        if (totalUserSessions >= _maxSessionsPerUser && userCompletedSessions != null)
+        {
+            var toEvict = userCompletedSessions.OrderBy(s => s.CreatedAt).Take(totalUserSessions - _maxSessionsPerUser + 1);
+            foreach (var old in toEvict)
+            {
+                if (_sessions.TryRemove(old.StatementId, out var removed))
+                {
+                    try { removed.Cts.Dispose(); } catch { }
+                }
+            }
+        }
+
+        // Global capacity check
+        if (_sessions.Count >= _maxTotalSessions)
+        {
+            var globalCompleted = _sessions.Values
+                .Where(s => s.ExecutionTask.IsCompleted)
+                .OrderBy(s => s.CreatedAt)
+                .Take(Math.Max(1, _sessions.Count - _maxTotalSessions + 1))
+                .ToList();
+
+            foreach (var old in globalCompleted)
+            {
+                if (_sessions.TryRemove(old.StatementId, out var removed))
+                {
+                    try { removed.Cts.Dispose(); } catch { }
+                }
+            }
+
+            if (_sessions.Count >= _maxTotalSessions)
+            {
+                throw new Autheris.Domain.Exceptions.GatewayThrottledException(
+                    "Global statement session capacity exceeded. Please retry later.",
+                    retryAfterSeconds: 5);
+            }
+        }
+
         long counter = Interlocked.Increment(ref _statementCounter);
         string statementId = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{counter:00000}_{Guid.NewGuid().ToString("N")[..6]}";
 
@@ -157,7 +247,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         return BuildStatus(session);
     }
 
-    private static StatementExecutionStatus BuildStatus(StatementSession session)
+    private StatementExecutionStatus BuildStatus(StatementSession session)
     {
         long elapsedMillis = session.Stopwatch.ElapsedMilliseconds;
 
@@ -188,13 +278,15 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         if (session.ExecutionTask.IsFaulted)
         {
             var ex = session.ExecutionTask.Exception?.InnerException ?? session.ExecutionTask.Exception;
+            _logger?.LogError(ex, "WebSQL async execution faulted for statement {StatementId}", session.StatementId);
+
             return new StatementExecutionStatus(
                 session.StatementId,
                 "FAILED",
                 Columns: null,
                 Data: null,
                 NextUri: null,
-                ErrorMessage: ex?.Message ?? "Query execution failed.",
+                ErrorMessage: SanitizeErrorMessage(ex),
                 ElapsedTimeMillis: elapsedMillis);
         }
 
@@ -203,6 +295,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             var result = session.ExecutionTask.Result;
             var columns = result.Columns;
             var data = ConvertRowsTo2DArray(result.Columns, result.Rows);
+            var columnTypes = EncodeTrinoTypes(result.ColumnDescriptions, columns, data);
 
             return new StatementExecutionStatus(
                 session.StatementId,
@@ -211,7 +304,8 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                 Data: data,
                 NextUri: null,
                 ErrorMessage: null,
-                ElapsedTimeMillis: elapsedMillis);
+                ElapsedTimeMillis: elapsedMillis,
+                ColumnTypes: columnTypes);
         }
 
         // Still running: provide continuation URI
@@ -223,6 +317,41 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             NextUri: $"/v1/statement/queued/{session.StatementId}",
             ErrorMessage: null,
             ElapsedTimeMillis: elapsedMillis);
+    }
+
+    /// <summary>
+    /// WebSQL findings 2.2: Trino type of every column, with the values in <paramref name="data"/> re-encoded in place
+    /// for that type. Without column descriptions (or when they do not match the columns) every column is announced as
+    /// varchar and the values stay unchanged.
+    /// </summary>
+    private static IReadOnlyList<TrinoColumnType> EncodeTrinoTypes(
+        IReadOnlyList<SqlResultColumn>? descriptions,
+        IReadOnlyList<string> columns,
+        IReadOnlyList<IReadOnlyList<object?>> data)
+    {
+        var types = new TrinoColumnType[columns.Count];
+        if (descriptions == null || descriptions.Count != columns.Count)
+        {
+            Array.Fill(types, TrinoColumnType.Varchar);
+            return types;
+        }
+
+        for (int c = 0; c < columns.Count; c++)
+        {
+            int column = c;
+            types[c] = TrinoColumnTypes.Map(descriptions[c], data.Select(row => row[column]));
+        }
+
+        foreach (var row in data)
+        {
+            var values = (object?[])row;
+            for (int c = 0; c < types.Length; c++)
+            {
+                values[c] = TrinoColumnTypes.Encode(values[c], types[c]);
+            }
+        }
+
+        return types;
     }
 
     private static IReadOnlyList<IReadOnlyList<object?>> ConvertRowsTo2DArray(
@@ -300,6 +429,34 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             try { session.Cts.Dispose(); } catch { }
         }
         _sessions.Clear();
+    }
+
+    private static string SanitizeErrorMessage(Exception? ex)
+    {
+        if (ex == null)
+        {
+            return "Statement execution failed.";
+        }
+
+        if (ex is OperationCanceledException or TimeoutException)
+        {
+            return "Query execution timed out or was canceled.";
+        }
+
+        if (ex is Autheris.Domain.Exceptions.GatewayInvalidQueryException or
+                  Antlr4.Runtime.Misc.ParseCanceledException or
+                  ArgumentException)
+        {
+            return ex.Message;
+        }
+
+        if (ex is Autheris.Domain.Exceptions.GatewaySecurityException or
+                  System.Security.SecurityException)
+        {
+            return "Access denied.";
+        }
+
+        return "The SQL statement could not be executed. Contact support with the trace id.";
     }
 
     private sealed class StatementSession

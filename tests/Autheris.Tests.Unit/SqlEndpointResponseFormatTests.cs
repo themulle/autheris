@@ -14,6 +14,7 @@ using Autheris.Application.SqlEndpoints.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -90,4 +91,63 @@ public sealed class SqlEndpointResponseFormatTests
         root.ValueKind.ShouldBe(JsonValueKind.Array);
         root.GetArrayLength().ShouldBe(1);
     }
+
+    [Fact]
+    public async Task HandleGetEndpoint_InProduction_SanitizesSecurityException()
+    {
+        var prodEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        prodEnv.EnvironmentName.Returns("Production");
+
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        services.AddSingleton(prodEnv);
+        var sp = services.BuildServiceProvider();
+
+        var context = CreateContext();
+        context.RequestServices = sp;
+
+        var execution = Substitute.For<ISqlEndpointExecutionService>();
+        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<GovernedSqlResult>(new System.Security.SecurityException("Secret table hr.salaries is denied")));
+
+        var options = Options.Create(new GatewayOptions());
+        await SqlEndpointRoutes.HandleGetEndpoint("customers", context, execution, options, NullLoggerFactory.Instance);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        var json = await JsonDocument.ParseAsync(context.Response.Body);
+        var error = json.RootElement.GetProperty("error").GetString();
+        error.ShouldBe(WebSqlEndpoints.GenericForbiddenMessage);
+        error.ShouldNotBeNull();
+        error.ShouldNotContain("Secret table hr.salaries");
+    }
+
+    [Fact]
+    public async Task HandleGetEndpoint_InProduction_SanitizesArgumentException()
+    {
+        var prodEnv = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        prodEnv.EnvironmentName.Returns("Production");
+
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        services.AddSingleton(prodEnv);
+        var sp = services.BuildServiceProvider();
+
+        var context = CreateContext();
+        context.RequestServices = sp;
+
+        var execution = Substitute.For<ISqlEndpointExecutionService>();
+        execution.ExecuteEndpointAsync(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, object?>?>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<GovernedSqlResult>(new ArgumentException("Invalid internal parameter @secretParam")));
+
+        var options = Options.Create(new GatewayOptions());
+        await SqlEndpointRoutes.HandleGetEndpoint("customers", context, execution, options, NullLoggerFactory.Instance);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        var json = await JsonDocument.ParseAsync(context.Response.Body);
+        var error = json.RootElement.GetProperty("error").GetString();
+        error.ShouldBe(WebSqlEndpoints.GenericBadRequestMessage);
+        error.ShouldNotBeNull();
+        error.ShouldNotContain("Invalid internal parameter @secretParam");
+    }
 }
+

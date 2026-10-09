@@ -10,6 +10,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
+using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -32,6 +34,10 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
     private readonly IConsentRepository? _consentRepo;
     private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly IClientIpResolver? _clientIpResolver;
+    private readonly IRebacEvaluator? _rebacEvaluator;
+    private readonly IAuditLogRepository? _auditRepository;
+
+    private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
 
     public IcebergRestCatalogFederationService(
         IIcebergMetadataReader metadataReader,
@@ -41,8 +47,12 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         IConsentResolutionService? consentService = null,
         IConsentRepository? consentRepo = null,
         IPolicyEnforcementService? policyEnforcementService = null,
-        IClientIpResolver? clientIpResolver = null)
+        IClientIpResolver? clientIpResolver = null,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        IRebacEvaluator? rebacEvaluator = null,
+        IAuditLogRepository? auditRepository = null)
     {
+        _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
         _metadataReader = metadataReader ?? throw new ArgumentNullException(nameof(metadataReader));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -51,6 +61,8 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         _consentRepo = consentRepo;
         _policyEnforcementService = policyEnforcementService;
         _clientIpResolver = clientIpResolver;
+        _rebacEvaluator = rebacEvaluator;
+        _auditRepository = auditRepository;
     }
 
     public async ValueTask<IReadOnlyList<string>> ListNamespacesAsync(string tenantId, ClaimsPrincipal principal, CancellationToken ct = default)
@@ -113,14 +125,48 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         ArgumentException.ThrowIfNullOrWhiteSpace(table);
         ArgumentNullException.ThrowIfNull(principal);
 
+        var actorSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "anonymous");
+
         // SEC-IRC-01: Authenticate caller and enforce fail-closed authorization
         if (principal.Identity?.IsAuthenticated != true)
         {
             _logger.LogWarning("Unauthenticated attempt to load Iceberg table '{Namespace}.{Table}' for tenant '{Tenant}'.", @namespace, table, tenantId);
+            if (_auditRepository != null)
+            {
+                await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    TenantId = new TenantId(tenantId),
+                    EventType = "Iceberg.LoadTable",
+                    ActorSid = actorSid,
+                    TargetTable = $"{tenantId}.{@namespace}.{table}",
+                    Decision = "DENY",
+                    DetailsJson = "{\"reason\":\"Unauthenticated caller\"}"
+                }, ct).ConfigureAwait(false);
+            }
             throw new SecurityException($"Unauthorized access to table '{@namespace}.{table}'.");
         }
 
-        var tableMeta = await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, ct).ConfigureAwait(false);
+        TableMetadata tableMeta;
+        try
+        {
+            tableMeta = await EnsureConsentedRawAccessAsync(tenantId, @namespace, table, principal, ct).ConfigureAwait(false);
+        }
+        catch (SecurityException ex)
+        {
+            if (_auditRepository != null)
+            {
+                await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    TenantId = new TenantId(tenantId),
+                    EventType = "Iceberg.LoadTable",
+                    ActorSid = actorSid,
+                    TargetTable = $"{tenantId}.{@namespace}.{table}",
+                    Decision = "DENY",
+                    DetailsJson = $"{{\"reason\":\"{ex.Message.Replace("\"", "\\\"")}\"}}"
+                }, ct).ConfigureAwait(false);
+            }
+            throw;
+        }
 
         var location = tableMeta.Table.Location ?? $"lakehouse/{tenantId}/{@namespace}/{table}";
 
@@ -129,6 +175,20 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
 
         var config = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var metadataLocation = $"{location.TrimEnd('/')}/metadata/v2.metadata.json";
+
+        // SR-P2-06 / SR15-18: Record ALLOW audit log
+        if (_auditRepository != null)
+        {
+            await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
+            {
+                TenantId = new TenantId(tenantId),
+                EventType = "Iceberg.LoadTable",
+                ActorSid = actorSid,
+                TargetTable = tableMeta.Identifier.ToString(),
+                Decision = "ALLOW",
+                DetailsJson = $"{{\"metadataLocation\":\"{metadataLocation}\"}}"
+            }, ct).ConfigureAwait(false);
+        }
 
         return new IcebergLoadTableResponse(
             metadataLocation,
@@ -208,6 +268,26 @@ public sealed class IcebergRestCatalogFederationService : IIcebergRestCatalogFed
         {
             _logger.LogWarning("Consent denied for user {User} accessing Iceberg table {TableId}", userSid, tableId);
             throw new SecurityException($"Access to table '{@namespace}.{table}' denied by policy.");
+        }
+
+        // Virtual filters restrict rows; raw metadata vending cannot enforce that (same as any row filter below).
+        var mandatory = await _mandatoryFilters.ResolveAsync(
+            new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, groupSids, roles, tenant, tableMeta), ct).ConfigureAwait(false);
+        if (mandatory.IsDenied || mandatory.PredicateSql != null)
+        {
+            _logger.LogWarning("Virtual filters apply to user {User} on Iceberg table {TableId}; raw access refused", userSid, tableId);
+            throw new SecurityException($"Direct Iceberg catalog access not permitted: Table '{@namespace}.{table}' is restricted by virtual filters.");
+        }
+
+        // SR-P2-06 / SR15-18: ReBAC evaluation on lakehouse Iceberg table access
+        if (RebacTableGate.IsEnforcedOnQueryPaths(_options.Value))
+        {
+            var rebacAllowed = await RebacTableGate.IsAllowedAsync(_rebacEvaluator, tenant, userSid, tableId, ct).ConfigureAwait(false);
+            if (!rebacAllowed)
+            {
+                _logger.LogWarning("ReBAC denied user {User} access to Iceberg table {TableId}", userSid, tableId);
+                throw new SecurityException($"Access to table '{@namespace}.{table}' denied by ReBAC policy.");
+            }
         }
 
         // Review G5: Casbin ABAC applies to raw access as well; an ABAC row filter cannot be enforced on raw metadata.

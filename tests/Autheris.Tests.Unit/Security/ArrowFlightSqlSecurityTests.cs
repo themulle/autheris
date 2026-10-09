@@ -158,10 +158,20 @@ public sealed class ArrowFlightSqlSecurityTests
         _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>(new[] { table1, tableOther }));
 
+        // Catalog domains are data sources; tenant-2's data source is not enabled for tenant-1.
+        var options = Options.Create(new GatewayOptions
+        {
+            WebSql = new WebSqlOptions
+            {
+                Enabled = true,
+                AllowedDataSources = ["tenant-1", "tenant-2"],
+                TenantDataSourceAllowlist = new(StringComparer.OrdinalIgnoreCase) { ["tenant-1"] = ["tenant-1"] }
+            }
+        });
         var server = new ArrowFlightSqlServer(
             _exportService,
             _metadataRepo,
-            _options,
+            options,
             NullLogger<ArrowFlightSqlServer>.Instance);
 
         // Wunsch 9: a GovernanceAdmin sees the whole catalog of the tenant, but still never another tenant's tables

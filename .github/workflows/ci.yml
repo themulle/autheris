@@ -21,14 +21,16 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Restore with Locked Mode
+        run: dotnet restore Autheris.sln --locked-mode
+
       - name: Vulnerable Package Audit
         run: |
-          # Both Autheris.sln and Autheris.slnx exist, so the solution must be named explicitly.
-          dotnet list Autheris.slnx package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
-          if grep -q "has the following vulnerable packages" vulnerable.txt; then
+          dotnet list Autheris.sln package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
+          if grep -qi "has the following vulnerable packages" vulnerable.txt; then
             echo "::error::Vulnerable NuGet packages detected"
             exit 1
           fi
 
       - name: Test Autheris Solution
-        run: dotnet test Autheris.sln -c Release --verbosity normal
+        run: dotnet test Autheris.sln -c Release --no-restore --verbosity normal

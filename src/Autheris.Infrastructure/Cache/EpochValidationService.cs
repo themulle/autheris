@@ -18,6 +18,7 @@ public sealed class EpochValidationService : IEpochValidationService
     private readonly string _redisPrefix;
     private readonly ConcurrentDictionary<string, long> _highestSeenRedisEpoch = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<EpochValidationService>? _logger;
+    private readonly IServiceProvider? _serviceProvider;
 
     // SEC H-01: Epoch values read from Redis/Garnet are not trusted blindly. Each node remembers the highest
     // epoch it has observed per table; a lower value (Redis restart without persistence, or a tampered key that
@@ -28,13 +29,27 @@ public sealed class EpochValidationService : IEpochValidationService
         IOptions<GatewayOptions>? options = null,
         IEventBus? eventBus = null,
         StackExchange.Redis.IConnectionMultiplexer? multiplexer = null,
-        ILogger<EpochValidationService>? logger = null)
+        ILogger<EpochValidationService>? logger = null,
+        IServiceProvider? serviceProvider = null)
     {
         _logger = logger;
         _options = options?.Value?.Caching?.EpochValidation ?? new EpochValidationOptions();
         _invalidationChannel = options?.Value?.Caching?.Redis?.InvalidationChannel ?? "consent:invalidations";
         _eventBus = eventBus ?? new Messaging.InProcessChannelEventBus();
         _multiplexer = multiplexer;
+        // The governance repository depends on this service; it is therefore resolved lazily from the provider
+        // (taking it in the constructor made both singletons wait for each other and the application never started).
+        _serviceProvider = serviceProvider;
+
+        if (_multiplexer != null)
+        {
+            _multiplexer.ConnectionRestored += (sender, args) =>
+            {
+                _logger?.LogInformation("Redis connection restored. Evicting local L1 epoch cache to synchronize with cluster (POL-9).");
+                _epochs.Clear();
+                _lastEpochRefresh.Clear();
+            };
+        }
 
         var prefix = options?.Value?.Caching?.Redis?.InstanceName ?? "autheris:";
         _redisPrefix = prefix.EndsWith(':') ? prefix : prefix + ":";
@@ -130,12 +145,28 @@ public sealed class EpochValidationService : IEpochValidationService
             // fail-closed on sensitive tables to prevent stale consent bypasses.
             if (_options.FailClosedOnSensitiveTables)
             {
-                var isSensitiveTable = key.Contains("sensitive") ||
-                                       key.Contains("employee") ||
-                                       key.Contains("hr") ||
-                                       key.Contains("patient") ||
-                                       key.Contains("salary");
-                if (isSensitiveTable)
+                var repo = _serviceProvider?.GetService(typeof(ITableMetadataRepository)) as ITableMetadataRepository;
+                bool isSensitive = true; // Fail closed if repository is unavailable or metadata lookup fails
+                if (repo != null)
+                {
+                    try
+                    {
+                        var metadata = await repo.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+                        if (metadata?.Table != null)
+                        {
+                            isSensitive = metadata.Table.IsHighlySensitive
+                                || (metadata.Columns != null && metadata.Columns.Any(c => c.IsSensitive))
+                                || (metadata.ColumnMaskingRules != null && metadata.ColumnMaskingRules.Count > 0);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger?.LogWarning(ex, "Failed to resolve table metadata for {Table} in degraded epoch mode; treating as highly sensitive (fail-closed).", table);
+                        isSensitive = true;
+                    }
+                }
+
+                if (isSensitive)
                 {
                     return false;
                 }

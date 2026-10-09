@@ -16,3 +16,8 @@ public interface ISchemaContractManager
     SchemaContractDefinition? GetContract(string contractName);
     string FilterSchemaSdl(string originalSdl, SchemaContractDefinition contract);
 }
+
+public static class SchemaContractConstants
+{
+    public const string ContractItemKey = "GatewayContract";
+}

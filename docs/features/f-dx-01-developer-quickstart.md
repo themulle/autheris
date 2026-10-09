@@ -1,7 +1,7 @@
 # F-DX-01: Zero-Config Developer Quickstart & Dev Portal Hub
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`QuickstartExtensions.cs`](file:///root/lis-git/autheris/src/Autheris.Api/Configuration/QuickstartExtensions.cs), [`TestAuthHandler.cs`](file:///root/lis-git/autheris/src/Autheris.Infrastructure/Security/TestAuthHandler.cs)
+**Components:** [`QuickstartExtensions.cs`](file:///root/autheris/src/Autheris.Api/Configuration/QuickstartExtensions.cs), [`TestAuthHandler.cs`](file:///root/autheris/src/Autheris.Infrastructure/Security/TestAuthHandler.cs)
 
 ---
 

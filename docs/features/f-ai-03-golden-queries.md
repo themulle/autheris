@@ -1,7 +1,7 @@
 # F-AI-03: Dynamic Few-Shot Golden Query Injection
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`IGoldenQueryService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Interfaces/IGoldenQueryService.cs), [`GoldenQueryService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Services/GoldenQueryService.cs)
+**Components:** [`IGoldenQueryService.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Interfaces/IGoldenQueryService.cs), [`GoldenQueryService.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/GoldenQueryService.cs)
 
 ---
 

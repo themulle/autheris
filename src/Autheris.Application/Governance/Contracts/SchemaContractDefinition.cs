@@ -11,6 +11,7 @@ public sealed class SchemaContractDefinition
     public string Name { get; init; } = string.Empty;
     public HashSet<string> IncludedTags { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public HashSet<string> ExcludedTags { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> AllowedTables { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public bool ExcludeInaccessible { get; init; } = true;
 
     public SchemaContractDefinition() { }
@@ -19,7 +20,8 @@ public sealed class SchemaContractDefinition
         string name,
         IEnumerable<string>? includedTags = null,
         IEnumerable<string>? excludedTags = null,
-        bool excludeInaccessible = true)
+        bool excludeInaccessible = true,
+        IEnumerable<string>? allowedTables = null)
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));
         if (includedTags != null)
@@ -29,6 +31,10 @@ public sealed class SchemaContractDefinition
         if (excludedTags != null)
         {
             foreach (var t in excludedTags) ExcludedTags.Add(t);
+        }
+        if (allowedTables != null)
+        {
+            foreach (var tbl in allowedTables) AllowedTables.Add(tbl);
         }
         ExcludeInaccessible = excludeInaccessible;
     }

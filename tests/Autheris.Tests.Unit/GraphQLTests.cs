@@ -14,31 +14,6 @@ namespace Autheris.Tests.Unit;
 public class GraphQLTests
 {
 
-    private static TableMetadata CreateSampleMetadata()
-    {
-        var table = new Table
-        {
-            SchemaName = "dbo",
-            TableName = "invoices",
-            DisplayName = "Customer Invoices"
-        };
-
-        var columns = new[]
-        {
-            new TableColumn { ColumnName = "id", DataType = "int" },
-            new TableColumn { ColumnName = "amount", DataType = "decimal" },
-            new TableColumn { ColumnName = "customer", DataType = "varchar" },
-            new TableColumn { ColumnName = "status", DataType = "varchar" }
-        };
-
-        return new TableMetadata
-        {
-            Table = table,
-            Identifier = new TableIdentifier("finance", "dbo", "invoices"),
-            Columns = columns
-        };
-    }
-
 
 
 

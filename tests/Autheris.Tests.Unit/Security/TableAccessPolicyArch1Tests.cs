@@ -86,17 +86,6 @@ public sealed class TableAccessPolicyArch1Tests
         return cache;
     }
 
-    /// <summary>ReBAC that only knows the canonical tuple <c>table:{Domain}.{TableName}</c>.</summary>
-    private static IRebacEvaluator RebacForCanonicalObject()
-    {
-        var evaluator = Substitute.For<IRebacEvaluator>();
-        evaluator.IsEnabled.Returns(true);
-        evaluator.CheckAsync(Arg.Any<RebacCheckRequest>(), Arg.Any<CancellationToken>())
-            .Returns(ci => new ValueTask<RebacCheckResult>(
-                ci.Arg<RebacCheckRequest>().Object == RebacTableGate.ObjectId(Table) ? RebacCheckResult.Permitted : RebacCheckResult.Denied));
-        return evaluator;
-    }
-
     private static IRebacEvaluator RebacDenyingAll()
     {
         var evaluator = Substitute.For<IRebacEvaluator>();
@@ -204,7 +193,7 @@ public sealed class TableAccessPolicyArch1Tests
         IRebacEvaluator? rebac = null,
         GatewayOptions? options = null,
         IConsentCacheService? cache = null) =>
-        new(NoConsents(), resolution, cache, casbin, rebac, clientIpResolver: null, options);
+        new(NoConsents(), resolution, cache, casbin, rebac, clientIpResolver: null, options, Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance);
 
     private static TableAccessQuery Query(RebacEnforcement rebac = RebacEnforcement.QueryPaths, params Claim[] claims) =>
         TableAccessQuery.ForPrincipal(User(claims), new Sid("S-1-5-21-USER"), new TenantId(Tenant), Meta(), rebac: rebac);
@@ -216,6 +205,19 @@ public sealed class TableAccessPolicyArch1Tests
 
         (await policy.DecideAsync(Query(RebacEnforcement.QueryPaths), default)).IsAllowed.ShouldBeTrue();
         (await policy.DecideAsync(Query(RebacEnforcement.WhenEnabled), default)).IsAllowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Policy_WithDangerBypassRebac_AllowsQueryWhenEnabled()
+    {
+        var optionsWithBypass = new GatewayOptions
+        {
+            Rebac = new RebacOptions { Enabled = true, EnforceOnQueryPaths = true },
+            Insecure = new InsecureGettingStartedOptions { danger_bypass_rebac = true }
+        };
+        var policy = Policy(ResolvesTo(true), rebac: RebacDenyingAll(), options: optionsWithBypass);
+
+        (await policy.DecideAsync(Query(RebacEnforcement.WhenEnabled), default)).IsAllowed.ShouldBeTrue();
     }
 
     [Fact]

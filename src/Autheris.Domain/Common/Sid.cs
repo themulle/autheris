@@ -92,6 +92,16 @@ public static class ClaimsPrincipalExtensions
         return result;
     }
 
+    /// <summary>
+    /// Returns all user-bound identifiers resolved as Sid objects.
+    /// Useful for matching access profiles and consents bound to on-prem SID or cloud OID.
+    /// </summary>
+    public static HashSet<Sid> GetAllUserSids(this System.Security.Claims.ClaimsPrincipal? principal)
+    {
+        if (principal == null) return [];
+        return principal.GetUserIdentifiers().Select(id => new Sid(id)).ToHashSet();
+    }
+
     public static HashSet<Sid> GetGroupSids(this System.Security.Claims.ClaimsPrincipal? principal)
     {
         if (principal == null) return [];

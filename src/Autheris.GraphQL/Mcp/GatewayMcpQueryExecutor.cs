@@ -99,7 +99,19 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             }
         }
 
+        if (sessionContext.AdditionalClaims != null)
+        {
+            foreach (var (k, v) in sessionContext.AdditionalClaims)
+            {
+                claims.Add(new Claim(k, v));
+            }
+        }
+
         var identity = new ClaimsIdentity(claims, "McpAuth");
+        if (sessionContext.IsReadOnly)
+        {
+            Autheris.Domain.Security.TokenAccessScope.MarkReadOnly(identity);
+        }
         var principal = new ClaimsPrincipal(identity);
 
         // Parse input arguments if provided
@@ -167,12 +179,36 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             }
         }
 
+        // 4b.2: Query Data Catalog Metadata using dataset catalog
+        if (tool.Name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExecuteQueryDataCatalogAsync(tool, principal, sessionContext, variables, cancellationToken).ConfigureAwait(false);
+        }
+
         // Standard GraphQL execution via HotChocolate IRequestExecutor
         // Hinweis (SEC M-17): Die Resolver lesen den Principal derzeit aus IHttpContextAccessor (HTTP-Aufrufer der MCP-Session),
         // nicht aus dem GlobalState "ClaimsPrincipal". Die hier aufgebaute MCP-Identität wirkt daher nur für Komponenten,
         // die den GlobalState auswerten; Resolver-Umstellung ist als Folgearbeit dokumentiert.
         if (!string.IsNullOrWhiteSpace(tool.TargetGraphQLOperation))
         {
+            if (principal.IsReadOnly())
+            {
+                try
+                {
+                    var doc = HotChocolate.Language.Utf8GraphQLParser.Parse(tool.TargetGraphQLOperation);
+                    if (Autheris.GraphQL.Interceptors.ReadOnlyOperationMiddleware.IsMutation(doc, null))
+                    {
+                        _logger.LogWarning("MCP tool '{ToolName}' rejected: read-only principal attempted mutation.", tool.Name);
+                        return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "This token only permits read access; mutations are rejected.");
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "Failed to parse target GraphQL operation for tool '{ToolName}'.", tool.Name);
+                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Invalid target operation for curated tool.");
+                }
+            }
+
             try
             {
                 var effectiveCallerSid = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
@@ -257,12 +293,21 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         }
 
         string? Text(string name) => variables.TryGetValue(name, out var v) ? v as string : null;
+        int? Number(string name) => variables.TryGetValue(name, out var v) ? v switch
+        {
+            int i => i,
+            long l => (int)l,
+            double d => (int)d,
+            _ => null
+        } : null;
 
         try
         {
             object result = tool.Name.ToLowerInvariant() switch
             {
-                McpDatasetTools.ListDatasets => await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), cancellationToken).ConfigureAwait(false),
+                McpDatasetTools.ListDatasets => (Number("offset") != null || Number("limit") != null)
+                    ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), cancellationToken).ConfigureAwait(false)
+                    : await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), cancellationToken).ConfigureAwait(false),
                 McpDatasetTools.DescribeDataset => await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, cancellationToken).ConfigureAwait(false),
                 _ => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables), cancellationToken).ConfigureAwait(false)
             };
@@ -292,6 +337,34 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             _logger.LogWarning(ex, "Dataset tool '{ToolName}' failed.", tool.Name);
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "Tool execution failed.");
         }
+    }
+
+    private async Task<string> ExecuteQueryDataCatalogAsync(
+        McpToolDefinition tool,
+        ClaimsPrincipal principal,
+        McpSessionContext sessionContext,
+        Dictionary<string, object?> variables,
+        CancellationToken cancellationToken)
+    {
+        if (_datasetCatalog == null)
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "The dataset catalog is not available.");
+        }
+
+        string? tableName = variables.TryGetValue("tableName", out var tn) ? tn as string : null;
+        var list = await _datasetCatalog.ListDatasetsAsync(principal, search: tableName, domain: null, ct: cancellationToken).ConfigureAwait(false);
+
+        var datasets = list?.Datasets ?? Array.Empty<McpDatasetSummary>();
+        var assets = datasets.Select(d => new
+        {
+            tableName = d.Id,
+            sensitivity = d.Sensitivity,
+            classification = d.Sensitivity,
+            owner = "data-governance@autheris.local",
+            tags = new string[] { "catalog", d.Sensitivity.ToLowerInvariant() }
+        }).ToList();
+
+        return JsonSerializer.Serialize(new { tenantId = sessionContext.TenantId, assets }, CamelCaseJsonOptions);
     }
 
     /// <summary>
@@ -352,9 +425,38 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return Invalid("Only queries are allowed over MCP; mutations and subscriptions are not available.");
         }
 
+        var op = operations[0];
+        if (variableValues != null && variableValues.Count > 0 && op.VariableDefinitions.Count > 0)
+        {
+            // 4b.3: If query uses variables for limits without explicit defaults in the AST,
+            // augment the operation's variable definitions with default values from the provided runtime variables
+            // so that QueryCostAnalyzerRule can evaluate the actual requested limit instead of assuming worst-case rows.
+            bool modified = false;
+            var newVarDefs = new List<VariableDefinitionNode>();
+            foreach (var vDef in op.VariableDefinitions)
+            {
+                if (variableValues.TryGetValue(vDef.Variable.Name.Value, out var val) && TryExtractPositiveInt(val, out var numVal))
+                {
+                    if (numVal <= 100_000)
+                    {
+                        newVarDefs.Add(vDef.WithDefaultValue(new IntValueNode(numVal)));
+                        modified = true;
+                        continue;
+                    }
+                }
+                newVarDefs.Add(vDef);
+            }
+
+            if (modified)
+            {
+                var newOp = op.WithVariableDefinitions(newVarDefs);
+                document = document.WithDefinitions(document.Definitions.Select(d => ReferenceEquals(d, op) ? (IDefinitionNode)newOp : d).ToList());
+            }
+        }
+
         var executor = await _executorProvider.GetExecutorAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         var requestBuilder = OperationRequestBuilder.New()
-            .SetDocument(query)
+            .SetDocument(document)
             .AddGlobalState("ClaimsPrincipal", principal);
         if (variableValues != null)
         {
@@ -505,6 +607,33 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         JsonValueKind.Null => null,
         _ => el.GetRawText()
     };
+
+    private static bool TryExtractPositiveInt(object? val, out int result)
+    {
+        result = 0;
+        if (val == null) return false;
+        if (val is int i) { result = i; return i > 0; }
+        if (val is long l && l <= int.MaxValue && l > 0) { result = (int)l; return true; }
+        if (val is JsonElement je)
+        {
+            if (je.ValueKind == JsonValueKind.Number && je.TryGetInt32(out var ji) && ji > 0)
+            {
+                result = ji;
+                return true;
+            }
+            if (je.ValueKind == JsonValueKind.String && int.TryParse(je.GetString(), out var js) && js > 0)
+            {
+                result = js;
+                return true;
+            }
+        }
+        if (int.TryParse(val.ToString(), out var parsed) && parsed > 0)
+        {
+            result = parsed;
+            return true;
+        }
+        return false;
+    }
 
     private static string FormatOperationResult(OperationResult op)
     {

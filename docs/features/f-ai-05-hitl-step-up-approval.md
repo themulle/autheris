@@ -1,7 +1,7 @@
 # F-AI-05: Human-in-the-Loop Step-Up Approval
 
 **Status:** [Done] (100% GA – Wave 1)  
-**Components:** [`IHitLStepUpApprovalService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Interfaces/IHitLStepUpApprovalService.cs), [`HitLStepUpApprovalService.cs`](file:///root/lis-git/autheris/src/Autheris.Application/Mcp/Services/HitLStepUpApprovalService.cs)
+**Components:** [`IHitLStepUpApprovalService.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Interfaces/IHitLStepUpApprovalService.cs), [`HitLStepUpApprovalService.cs`](file:///root/autheris/src/Autheris.Application/Mcp/Services/HitLStepUpApprovalService.cs)
 
 ---
 

@@ -12,7 +12,7 @@
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/themulle/autheris/pkgs/container/autheris)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20Onion-blue)](docs/architecture/arc42.md)
 [![Diagram](https://img.shields.io/badge/Diagram-Architecture%20%26%20Capabilities-informational)](#-architecture--capabilities-overview-at-a-glance)
-[![Features](https://img.shields.io/badge/Features-45%2B%20Enterprise%20Catalog-blueviolet)](docs/features/README.md)
+[![Features](https://img.shields.io/badge/Features-46%2B%20Enterprise%20Catalog-blueviolet)](docs/features/README.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1%20%2F%20Commercial-blue)](#-license)
 
 Autheris is a high-performance, secure, centralized enterprise GraphQL gateway built with **.NET 10** and **Hot Chocolate 16.6.7**. It provides unified GraphQL access to heterogeneous enterprise databases (**Microsoft SQL Server / MSSQL, SQLite, PostgreSQL, Databricks, Oracle**), modern **Apache Iceberg Lakehouses**, REST APIs, and federated **Hot Chocolate Fusion Subgraphs** while enforcing a strict **Zero-Trust Data-Owner-Consent** governance model.
@@ -20,7 +20,7 @@ Autheris is a high-performance, secure, centralized enterprise GraphQL gateway b
 Instead of traditional coarse-grained role-based access control (RBAC), access to tables, rows, and columns requires explicitly granted, time-bounded, and auditable consents governed directly by data owners.
 
 > 📚 **Product & Architecture Documentation**:
-> - [📋 Complete Enterprise Feature Catalog (docs/features/README.md)](docs/features/README.md) — Comprehensive inventory and deep-dive documentation for all 45+ enterprise features.
+> - [📋 Complete Enterprise Feature Catalog (docs/features/README.md)](docs/features/README.md) — Comprehensive inventory and deep-dive documentation for all 46+ enterprise features.
 > - [🏛️ Architecture Documentation (arc42.md)](docs/architecture/arc42.md) — System context, building blocks, runtime view, and quality goals.
 > - [🔒 Threat Model & Security Whitepaper](docs/threat-model/threat-model.md) — STRIDE analysis, attack surface, mitigation matrices, and cryptographic guarantees.
 > - [⚙️ Configuration Guide](docs/configuration-guide.md) — Comprehensive reference of all `appsettings.json` sections and environment variables.
@@ -49,7 +49,7 @@ Autheris is a **Zero-Trust Enterprise Data Access Gateway** that securely expose
 
 ## 🌟 Complete Enterprise Feature Inventory
 
-Autheris encompasses **45+ production-ready enterprise features**, documented in [`docs/features/`](docs/features/README.md). These capabilities are structured across 7 strategic pillars:
+Autheris encompasses **46+ production-ready enterprise features**, documented in [`docs/features/`](docs/features/README.md). These capabilities are structured across 7 strategic pillars:
 
 ### Pillar 1: Multi-Protocol Data Access & Execution Engines
 
@@ -63,6 +63,7 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
 - **Governed WebSQL Engine ([`F-DATA-02`](docs/features/f-data-02-governed-websql.md))**:
   - Secure HTTP-based SQL execution (`POST /api/v1/sql` & `/api/sql`) modeled after Trino/Presto — eliminates open database ports (1433/5432) across the corporate network.
   - AST-Level Security Linter & Rewriter (ANTLR4-based): Enforces strict read-only semantics (`SELECT`), rejects multiple statements (`;`), comments, and system functions (`@@`).
+  - Granular Transport Row Limits (`RowLimits`): Fine-tuned default and maximum row budgets per transport (`Trino`, `Parquet`, `SqlEndpoints`, `ArrowExport`, `FlightSql`) with accurate truncation reporting (only reported as truncated when rows were actually severed).
   - DML Guardrails (`WebSql.AllowDml`): DML requires dedicated `WebSql.DmlWriterRoles`; unfiltered `UPDATE`/`DELETE` queries (`WHERE 1=1`, `WHERE true`) are strictly rejected (`RejectUnfilteredDml`); automated transaction limits with rollback on exceeding `WebSql.MaxAffectedRows` (default: 1,000 rows); cryptographic audit logging of all DML events.
 - **Declarative SQL-to-API REST Engine & Auto-OpenAPI 3.0 ([`F-SQL-01`](docs/features/f-sql-01-declarative-sql-endpoints.md))**:
   - Zero-code REST endpoints directly from versioned `.sql` files (`GET` / `POST /api/v1/queries/{name}`).
@@ -72,11 +73,15 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
 - **Zero-Privilege Contract-First Stored Procedures ([`F-SQL-02`](docs/features/f-sql-02-governed-stored-procedures.md), `ADR-018`)**:
   - Declarative `.proc.yaml` contracts: Requires only `GRANT EXECUTE` in the production database (zero `VIEW DEFINITION` or DBA permissions required).
   - Source Column Governance (`source_table`, `source_column`): Transparently inherits table and column consents, ABAC rules, and masking policies onto stored procedure return types.
+  - Result Row Scope Filtering & Virtual Filters (`row_scope_key`): Enforces secondary row-level consent filtering and relation-scoped Virtual Filters ([`F-GOV-09`](docs/features/f-gov-09-virtual-filters.md)) against declared `result_table` keys.
+  - Sequential LOB streaming with dedicated byte budget (`MaxLobBytes`) preventing Large Object Heap fragmentation.
   - Fail-Closed Result Pruning: Undeclared result columns are stripped before leaving the gateway.
   - DDL Integrity Verification via SHA-256 (`integrity.ddl_hash`) to detect and reject unauthorized database schema drift.
   - Offline CI/CD generator tool (`ProcedureYamlGenerator`) for automated contract generation from staging databases.
 - **Dual-Access OData v4 & Dynamic OpenAPI 3.1 ([`F-API-03`](docs/features/f-api-03-odata-openapi.md))**:
   - Full-featured OData v4 endpoint (`/odata/v4/{domain}/{schema}/{table}`) for standard BI clients (Power BI, Microsoft Excel, Tableau) with CSDL `$metadata`.
+  - Native support for standard OData query options: `$select`, `$filter`, `$orderby` multi-column sorting, `$top`, `$skip`, and `$count` (`?$count=true` or `/table/$count`).
+  - Mandatory `OData-Version: 4.0` response header for seamless Excel, PowerQuery, and Power BI compatibility.
   - Dynamic OpenAPI 3.1 specification (`/odata/v4/$openapi`) with integrated offline-capable Swagger UI (`/docs`, `/ui/swagger`).
 - **Apache Arrow Flight SQL & Arrow Binary Egress ([`F-DATA-04`](docs/features/f-data-04-arrow-flight-sql.md))**:
   - High-speed zero-copy columnar data transport for Data Science (Python Pandas, Polars, Apache Spark) via Apache Arrow Flight SQL (`/api/v1/flight/sql/*`) and Arrow Binary Export (`/api/v1/export/arrow`).
@@ -104,6 +109,13 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
   - Dual Authorization & Segregation of Duties (SoD): Requesters cannot approve their own requests; duplicate approvals are strictly blocked.
   - Time-bounded vacation delegations (`DATA_OWNER_DELEGATIONS`).
   - Distributed idempotency and replay protection: 24-hour distributed idempotency keys (`RedisIdempotencyStore`) preventing duplicate submissions.
+- **Virtual Filters (Cross-Channel Relation-Scoped Mandatory Row Filtering, [`F-GOV-09`](docs/features/f-gov-09-virtual-filters.md))**:
+  - Declarative, relation-scoped mandatory row filtering enforced across all egress channels (WebSQL, GraphQL, OData, Arrow Flight, Stored Procedures).
+  - Reusable filter definitions (structured joins or Trino SQL expressions translated per target database dialect).
+  - Role- and identity-bound `AccessProfile`s with object pattern matching (`domain.schema.table[.column]`), time column windows, and fail-closed uncovered policies (`Deny` or `Skip`).
+  - GitOps-ready atomic synchronization (`/api/v1/governance/virtual-filters/sync/apply`) with `MaxRemovals` safety threshold and `force` gating for `FilterAdmin`.
+  - Live filter explanation endpoint (`/api/v1/governance/effective-filters`) simulating effective SQL and decision trees for auditors.
+  - Fail-closed transport safety: In-memory/Lakehouse endpoints return `403 Forbidden` if restricted by virtual filters; Envoy `ext_authz` and streaming subscriptions deny restricted callers.
 - **Relationship-Based Access Control / ReBAC ([`F-SEC-04`](docs/features/f-sec-04-rebac-openfga.md))**:
   - Fine-grained authorization following the Google Zanzibar / OpenFGA model (`/api/v1/rebac/tuples`, `/check`, `/batch-check`).
   - Graph-based relation evaluation (e.g., `user:alice` is `editor` of `folder:finance` -> inherits `viewer` of `report:q4`).
@@ -131,7 +143,9 @@ Autheris encompasses **45+ production-ready enterprise features**, documented in
 - **Enterprise MCP Server Gateway ([`ADR-014`](docs/adr/ADR-014-enterprise-model-context-protocol-and-ai-data-guardrails.md))**:
   - Streamable HTTP endpoint `/mcp` on the official MCP C# SDK (current protocol revisions, stateless, OAuth protected resource metadata for Entra ID / AD FS) and a standard I/O runner (`McpStdioRunner`) for AI agents (Claude, Cursor, LangChain).
 - **MCP Dataset Tools ([`F-AI-11`](docs/features/f-ai-11-mcp-dataset-tools.md))**:
-  - `list_datasets` and `describe_dataset` let agents discover every dataset they may use; `query_graphql` queries it through GraphQL, the preferred path. The other protocols (OData, OpenAPI, WebSQL, procedures, OLAP, Arrow) are listed too. Consent, row filters and masking apply as for the HTTP APIs.
+  - `list_datasets` (with `offset`/`limit` pagination) and `describe_dataset` let agents discover every dataset they may use; `query_graphql` queries datasets through GraphQL (the preferred path) with AST complexity budgets and parameter guards.
+  - Built-in `query_data_catalog` allows agents to inspect data catalog metadata, classifications, and data stewards.
+  - Enforces identical consent, ReBAC, column masking, and Virtual Filter restrictions as HTTP endpoints.
 - **Semantic MCP Compiler & Schema Grounding ([`F-AI-02`](docs/features/f-ai-02-semantic-mcp-compiler.md))**:
   - Automatically transforms GraphQL and relational database schemas into semantically enriched, LLM-optimized tool signatures.
 - **Dynamic Few-Shot Golden Query Injection ([`F-AI-03`](docs/features/f-ai-03-golden-queries.md))**:

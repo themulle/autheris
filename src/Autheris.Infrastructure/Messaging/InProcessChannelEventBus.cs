@@ -6,9 +6,13 @@ namespace Autheris.Infrastructure.Messaging;
 public sealed class InProcessChannelEventBus : IEventBus, IAsyncDisposable
 {
     private readonly ConcurrentDictionary<string, List<DelegateHandler>> _subscribers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _counters = new(StringComparer.OrdinalIgnoreCase);
     private readonly Channel<EventEnvelope> _channel;
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _consumerTask;
+
+    public event Action? ConnectionRestored;
+    public void SimulateConnectionRestored() => ConnectionRestored?.Invoke();
 
     private sealed record EventEnvelope(string Channel, object Message);
     private sealed record DelegateHandler(Func<object, Task> Handler);
@@ -38,6 +42,13 @@ public sealed class InProcessChannelEventBus : IEventBus, IAsyncDisposable
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         linkedCts.CancelAfter(TimeSpan.FromSeconds(1));
         await _channel.Writer.WriteAsync(new EventEnvelope(channel, message), linkedCts.Token);
+    }
+
+    public Task<long> IncrementCounterAsync(string key, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        var val = _counters.AddOrUpdate(key, 1, (_, current) => current + 1);
+        return Task.FromResult(val);
     }
 
     public IDisposable Subscribe<T>(string channel, Func<T, Task> handler)
