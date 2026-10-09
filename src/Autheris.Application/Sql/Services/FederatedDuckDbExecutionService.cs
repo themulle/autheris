@@ -102,7 +102,12 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     }
 
     private TableAccessPolicy AccessPolicy() =>
-        new(_consentRepository!, _consentResolution!, _consentCache, _policyEnforcement, _rebacEvaluator, _clientIpResolver, _options.Value,
+        new(_consentRepository!, _consentResolution!,
+            _consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            _policyEnforcement ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
+            _clientIpResolver,
+            _options.Value,
             _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             _contractManager,
             _accessProfileRepository,

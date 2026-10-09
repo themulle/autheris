@@ -6,6 +6,7 @@ using Autheris.Application.Caching.Interfaces;
 using Autheris.Application.Caching.Services;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
+using Autheris.Application.Services;
 using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
