@@ -11,6 +11,12 @@ if (args.Length > 0 && (args[0] == "hash-password" || args[0] == "--hash-passwor
     return;
 }
 
+if (args.Length > 0 && (args[0] == "healthcheck" || args[0] == "--healthcheck"))
+{
+    Environment.ExitCode = await Autheris.Api.Security.HealthCheckCli.RunAsync(args);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // SEC M-01: Kestrel limits (configurable via Gateway:Hosting). Global body limit is small (default 2 MB);

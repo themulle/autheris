@@ -551,8 +551,7 @@ Key configuration settings under the `Gateway` section:
         "UserHeader": "X-Forwarded-User",
         "GroupsHeader": "X-Forwarded-Groups",
         "RolesHeader": "X-Forwarded-Roles",
-        "SharedSecretHeader": "X-Forwarded-Secret",
-        "SharedSecret": "YOUR-SHARED-SECRET",
+        "SharedSecret": "<GENERATE_STRONG_SECRET>", // openssl rand -base64 32
         "RequireTrustedProxy": true,
         "TrustedNetworks": ["127.0.0.1/32", "::1/128", "10.244.0.0/16"]
       },
@@ -561,7 +560,7 @@ Key configuration settings under the `Gateway` section:
         "Users": [
           {
             "Username": "analyst",
-            "Password": "SecretPassword123!",
+            "Password": "<GENERATE_STRONG_SECRET>", // openssl rand -base64 32
             "Roles": ["DataConsumer"],
             "UserSid": "S-1-5-21-CONSUMER-1",
             "GroupSids": ["S-1-5-21-FINANCE-ANALYSTS"]

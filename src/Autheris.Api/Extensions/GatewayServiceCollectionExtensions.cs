@@ -119,8 +119,13 @@ public static class GatewayServiceCollectionExtensions
                 environment.IsDevelopment() || !opts.Authentication.ForwardAuth.Enabled || opts.Authentication.ForwardAuth.RequireTrustedProxy,
                 "Security violation: RequireTrustedProxy must not be set to false when ForwardAuth is enabled outside Development.")
             .Validate(opts =>
+#if AUTHERIS_TEST_AUTH
                 environment.IsDevelopment() || !opts.Authentication.EnableTestAuthHandler,
                 "Security violation: EnableTestAuthHandler may be true ONLY in the Development environment.")
+#else
+                !opts.Authentication.EnableTestAuthHandler,
+                "Security violation: EnableTestAuthHandler may be true ONLY in the Development environment.")
+#endif
             .Validate(opts =>
                 environment.IsDevelopment() || !opts.IsAnonymousAccessAllowed,
                 "Security violation: danger_allow_anonymous_access may be true ONLY in the Development environment.")
@@ -775,6 +780,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddHostedService<ForwardAuthSecretStartupValidator>();
 
         // 3. Windows Negotiate (Kerberos / NTLM) or TestAuthHandler
+#if AUTHERIS_TEST_AUTH
         bool isTestAuthAllowed = environment.IsDevelopment() &&
             (gatewayOptions.Authentication.EnableTestAuthHandler || gatewayOptions.IsAnonymousAccessAllowed);
 
@@ -784,6 +790,7 @@ public static class GatewayServiceCollectionExtensions
                 TestAuthHandler.SchemeName, _ => { });
         }
         else
+#endif
         {
             // Review E-2: never persist credentials on the (possibly shared, reverse-proxied) upstream connection, and
             // with RequireKerberosOnly reject every Negotiate identity that is not Kerberos (e.g. NTLM).
@@ -956,6 +963,7 @@ public static class GatewayServiceCollectionExtensions
                 }
 
                 // 3. Development Test Auth Simulation or Insecure Anonymous Access
+#if AUTHERIS_TEST_AUTH
                 if (isTestAuthAllowed)
                 {
                     if (context.Request.Headers.ContainsKey("X-Test-User-Sid") ||
@@ -965,6 +973,7 @@ public static class GatewayServiceCollectionExtensions
                         return TestAuthHandler.SchemeName;
                     }
                 }
+#endif
 
                 var isHtml = context.Request.Headers.Accept.Any(a => a != null && a.Contains("text/html", StringComparison.OrdinalIgnoreCase));
                 if (isHtml && gatewayOptions.Authentication.BasicAuth.Enabled)
