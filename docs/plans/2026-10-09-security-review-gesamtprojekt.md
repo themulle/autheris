@@ -194,7 +194,8 @@ Konfidenz: **bestätigt** = Code-Pfad vollständig nachvollzogen bzw. reproduzie
 - **Angriff:** `query($n:Int=1){a:t1(first:$n){…} b:t1(first:$n){…} …}` mit `{"n":5000}` liefert etwa 500 000 Zeilen pro Request (DB- und Speicher-DoS). Der MCP-Pfad ist nicht betroffen.
 - **Fix:** Kostenprüfung nach `UseOperationVariableCoercion` einhängen, gegen `min(Tier, MaxAllowedComplexity)`. Dazu ein Integrationstest über den echten Executor.
 
-### SG-11 OpenAPI-Ingestion: Katalog-Einträge in fremden Tenant-Domains, sofort aktiv, mit Angreifer-BaseUrl
+### SG-11 OpenAPI-Ingestion: Katalog-Einträge in fremden Tenant-Domains, sofort aktiv, mit Angreifer-BaseUrl [BEHOBEN]
+- **Status:** Behoben
 - **Konfidenz:** bestätigt (Cross-Tenant-Write); Folge durch Phantomspalten plausibel
 - **Fundstellen:** `GovernanceEndpoints.cs:53-89`, `src/Autheris.Application/DataCatalog/Services/OpenApiIngestionService.cs:57-66, 183-224`, `GatewayRole.cs` (TenantAdmin impliziert SchemaPublisher)
 - **Beschreibung:**
