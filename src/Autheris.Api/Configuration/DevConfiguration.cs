@@ -82,7 +82,11 @@ public static class DevConfiguration
         }
 
         var strict = string.Equals(preset, DevOptions.PresetStrict, StringComparison.OrdinalIgnoreCase);
+#if AUTHERIS_TEST_AUTH
         Pair("Dev:TestAuthHandler", "Authentication:EnableTestAuthHandler", !strict);
+#else
+        Pair("Dev:TestAuthHandler", "Authentication:EnableTestAuthHandler", false);
+#endif
         Pair("Dev:Tooling:BananaCakePop", "GraphQL:EnableBananaCakePop", true);
         Pair("Dev:Tooling:Introspection", "GraphQL:EnableIntrospection", !strict);
         Pair("Dev:DemoData", "GovernanceDb:SeedDemoData", true);

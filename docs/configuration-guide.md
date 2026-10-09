@@ -472,7 +472,7 @@ Automatische Synchronisation von Schema-Metadaten, Klassifikations-Tags (`PII.*`
   "Enabled": true,
   "ServerUrl": "https://openmetadata.corp.local/api/v1",
   "AuthToken": "eyJhbGciOi...",
-  "WebhookSecret": "OM-WEBHOOK-HMAC-SECRET-2026",
+  "WebhookSecret": "<GENERATE_STRONG_SECRET>", // openssl rand -base64 32
   "ServiceFilter": "enterprise_dw",
   "SyncIntervalMinutes": 30,
   "TagToMaskingRuleMap": {
@@ -913,7 +913,7 @@ Gateway__GraphQL__TrustedOrigins__1=https://portal.corp.local
 Gateway__OpenMetadata__Enabled=true
 Gateway__OpenMetadata__ServerUrl=https://openmetadata.corp.local/api/v1
 Gateway__OpenMetadata__AuthToken=eyJhbGciOi...
-Gateway__OpenMetadata__WebhookSecret=MyWebhookHmacSecretKey
+Gateway__OpenMetadata__WebhookSecret=<GENERATE_STRONG_SECRET> # openssl rand -base64 32
 ```
 
 ### 3.2 Beispiel Kubernetes Deployment & ConfigMap
@@ -1008,7 +1008,7 @@ metadata:
 spec:
   headers:
     customRequestHeaders:
-      X-Forwarded-Secret: "OM-SHARED-SECRET-TRAEFIK-TO-GATEWAY"
+      X-Forwarded-Secret: "<GENERATE_STRONG_SECRET>" # openssl rand -base64 32
 ```
 
 #### 3.3.3 Traefik IngressRoute

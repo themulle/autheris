@@ -227,15 +227,14 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:5050
-      HMAC_SECRET_KEY: "${GATEWAY_HMAC_SECRET:?set GATEWAY_HMAC_SECRET in .env (see .env.example)}"
-      GQL_PROD_BENCHMARK_SECRET_KEY: "${GATEWAY_HMAC_SECRET:?set GATEWAY_HMAC_SECRET in .env (see .env.example)}"
-      Gateway__DataMasking__HmacSecret: "${GATEWAY_HMAC_SECRET:?set GATEWAY_HMAC_SECRET in .env (see .env.example)}"
+      HMAC_SECRET_KEY: "${MASKING_HMAC_KEY:-${GATEWAY_HMAC_SECRET:?set MASKING_HMAC_KEY in .env}}"
+      GQL_PROD_BENCHMARK_SECRET_KEY: "${BENCHMARK_SECRET_KEY:-${GATEWAY_HMAC_SECRET:?set BENCHMARK_SECRET_KEY in .env}}"
       Gateway__Authentication__ForwardAuth__SharedSecret: "${FORWARD_AUTH_SHARED_SECRET:?set FORWARD_AUTH_SHARED_SECRET in .env (see .env.example)}"
       Gateway__Lakehouse__Storage__S3AccessKey: "${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env (see .env.example)}"
       Gateway__Lakehouse__Storage__S3SecretKey: "${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env (see .env.example)}"
-      Gateway__OpenMetadata__WebhookSecret: "${GATEWAY_HMAC_SECRET:?set GATEWAY_HMAC_SECRET in .env (see .env.example)}"
-      Gateway__Catalog__WebhookSecret: "${GATEWAY_HMAC_SECRET:?set GATEWAY_HMAC_SECRET in .env (see .env.example)}"
-      Gateway__Itsm__WebhookSecret: "${GATEWAY_HMAC_SECRET:?set GATEWAY_HMAC_SECRET in .env (see .env.example)}"
+      Gateway__OpenMetadata__WebhookSecret: "${OPENMETADATA_WEBHOOK_SECRET:-${GATEWAY_HMAC_SECRET:?set OPENMETADATA_WEBHOOK_SECRET in .env}}"
+      Gateway__Catalog__WebhookSecret: "${CATALOG_WEBHOOK_SECRET:-${GATEWAY_HMAC_SECRET:?set CATALOG_WEBHOOK_SECRET in .env}}"
+      Gateway__Itsm__WebhookSecret: "${ITSM_WEBHOOK_SECRET:-${GATEWAY_HMAC_SECRET:?set ITSM_WEBHOOK_SECRET in .env}}"
       DOTNET_RUNNING_IN_CONTAINER: "true"
       # Overrides for Postgres and Redis connection
       Gateway__DataSources__Connections__finance__ConnectionString: "Host=postgres;Port=5432;Database=governancedb;Username=gqluser;Password=${GQL_PG_PASSWORD:?set GQL_PG_PASSWORD in .env (see .env.example)};Pooling=true;Minimum Pool Size=5;Maximum Pool Size=100"

@@ -17,19 +17,76 @@ public sealed class DefaultEnvironmentSecretProvider : IKeyVaultSecretProvider
     private readonly IHostEnvironment _environment;
     private readonly Microsoft.Extensions.Logging.ILogger<DefaultEnvironmentSecretProvider>? _logger;
 
+    private readonly string _secretsDirectory;
+
     public DefaultEnvironmentSecretProvider(
         IConfiguration configuration,
         IHostEnvironment environment,
-        Microsoft.Extensions.Logging.ILogger<DefaultEnvironmentSecretProvider>? logger = null)
+        Microsoft.Extensions.Logging.ILogger<DefaultEnvironmentSecretProvider>? logger = null,
+        string? secretsDirectory = null)
     {
         _configuration = configuration;
         _environment = environment;
         _logger = logger;
+        _secretsDirectory = string.IsNullOrWhiteSpace(secretsDirectory) ? "/run/secrets" : Path.GetFullPath(secretsDirectory);
     }
 
     public byte[] GetSecretBytes(string secretRef)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(secretRef);
+
+        // SC-07: Support file: reference type for container secrets mounted under /run/secrets/
+        if (secretRef.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+        {
+            var filePath = secretRef["file:".Length..].Trim();
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                throw new InvalidOperationException($"Security error: Empty file path in secret reference ({DescribeReference(secretRef)}).");
+            }
+
+            var fullPath = Path.GetFullPath(filePath);
+            var allowedDir = _secretsDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            // Path-traversal and allowlist check
+            if (!fullPath.StartsWith(allowedDir + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+                !string.Equals(fullPath, allowedDir, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Security error: Secret file reference ({DescribeReference(secretRef)}) is outside the allowed directory '{allowedDir}'.");
+            }
+
+            if (!File.Exists(fullPath))
+            {
+                throw new InvalidOperationException($"Security error: Secret file ({DescribeReference(secretRef)}) does not exist.");
+            }
+
+            // Symlink check: ensure link target (if any) also stays inside allowlist
+            var fileInfo = new FileInfo(fullPath);
+            if (fileInfo.LinkTarget != null)
+            {
+                var target = fileInfo.ResolveLinkTarget(true);
+                if (target == null || (!target.FullName.StartsWith(allowedDir + Path.DirectorySeparatorChar, StringComparison.Ordinal) && !string.Equals(target.FullName, allowedDir, StringComparison.Ordinal)))
+                {
+                    throw new InvalidOperationException($"Security error: Secret file reference ({DescribeReference(secretRef)}) is a symlink resolving outside the allowed directory.");
+                }
+            }
+
+            var fileBytes = File.ReadAllBytes(fullPath);
+
+            // Trim trailing newlines (\r, \n) and trailing spaces
+            int length = fileBytes.Length;
+            while (length > 0 && (fileBytes[length - 1] == (byte)'\n' || fileBytes[length - 1] == (byte)'\r' || fileBytes[length - 1] == (byte)' '))
+            {
+                length--;
+            }
+
+            if (length < fileBytes.Length)
+            {
+                fileBytes = fileBytes[..length];
+            }
+
+            ValidateSecretLength(fileBytes, secretRef);
+            return fileBytes;
+        }
 
         var candidates = new List<string> { secretRef };
 
