@@ -125,7 +125,8 @@ public sealed class FinOpsBudgetMiddleware
         finally
         {
             sw.Stop();
-            // Record compute consumption asynchronously
+            // Record compute consumption asynchronously (minimum 1ms compute metering)
+            var computeMs = Math.Max(1, sw.ElapsedMilliseconds);
             await accountingService.RecordUsageAsync(
                 tenantId: tenantId,
                 principalId: principalId,
@@ -133,7 +134,7 @@ public sealed class FinOpsBudgetMiddleware
                 category: "HttpCompute",
                 promptTokens: 0,
                 completionTokens: 0,
-                computeMs: sw.ElapsedMilliseconds,
+                computeMs: computeMs,
                 tags: null,
                 ct: CancellationToken.None).ConfigureAwait(false);
         }
