@@ -38,6 +38,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
 
     private readonly GovernedSqlRewriter _rewriter;
     private readonly GovernedSqlExecutor _executor;
+    private readonly IMandatoryRowFilterResolver? _rowFilterResolver;
 
     public IReadOnlyList<SqlRewriteStageOrder> StageOrder => _rewriter.StageOrder;
 
@@ -109,6 +110,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             contractManager,
             accessProfileRepository,
             memoryCache);
+
+        _rowFilterResolver = mandatoryFilters;
 
         _executor = new GovernedSqlExecutor(
             _rewriter,
