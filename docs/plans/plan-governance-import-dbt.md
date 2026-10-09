@@ -302,3 +302,67 @@ Der Governance-Stream akzeptiert nun die Abschnitte `virtual_filters` und `acces
 | B-06 Typgerechtes REDACT | Unit | `ColumnMaskingProviderTests.cs` | Zahlen und Daten liefern `NULL` statt `0` oder `[GESCHÜTZT]`. |
 | R-50 Profile-Import | Integration | `DbtIntegrationTests.cs` | Import von `virtual_filters` und `access_profiles` liefert korrekte Zähler. |
 | R-51 Routinen-Warnung | Unit | `DbtTests.cs` | Prozeduren werden in `skippedRoutinesCount` erfasst, keine falschen Katalogwarnungen. |
+
+---
+
+## 5. Sicherheitskritische Aspekte & Härtungsanforderungen (Security Expert Review)
+
+### 5.1 Bedrohungsmodellierung & Angriffsvektoren (STRIDE / MITRE ATT&CK)
+
+| Vektor | Bedrohung (Threat) | Auswirkung bei unzureichender Härtung | MITRE ATT&CK |
+|---|---|---|---|
+| **T-01** | Kompromittierte CI/CD-Pipeline / Man-in-the-Middle beim Upload | Einschleusen manipulierter Metadaten (Entfernen von Maskierungsregeln für hochsensible Spalten). | T1195.002 (Compromise Software Supply Chain) |
+| **T-02** | Stille Lockerung von Schutzrichtlinien (Trojan Policy Relaxation) | Ein Entwickler lockert in dbt unbemerkt eine Maskierung von `NULLIFY` auf `NONE`. | T1565.001 (Data Manipulation) |
+| **T-03** | SQL-Injection über virtuelle Filter (`predicate_sql`) | Bösartiger SQL-Ausdruck im dbt-Filter liest Fremddaten aus oder erzeugt DoS (`1=1 OR 1=(SELECT ...)`). | T1190 (Exploit Public-Facing Application) |
+| **T-04** | Identifier-Injection über Tabellen- und Spaltennamen | Metadaten mit Sonderzeichen (`"customers; DROP TABLE..."`) brechen dynamische SQL-Generatoren. | T1059.004 (Unix Shell / SQL Command) |
+| **T-05** | JSON-Bombing / DoS-Angriff | Riesige JSON-Streams erschöpfen Speicher oder blockieren CPU dauerhaft. | T1499.002 (Endpoint DoS) |
+
+---
+
+### 5.2 Zwingende Sicherheitsanforderungen für die Implementierung
+
+#### 1. Zugriffsschutz & Autorisierung des Ingestion-Endpunkts
+- **Fail-Closed:** Der Endpunkt `POST /api/extensions/dbt/governance` und `/sync` darf **unter keinen Umständen anonym oder für Standard-Benutzer** erreichbar sein.
+- **Rollenbeschränkung:** Autorisierung ausschließlich mit der Rolle `ClusterAdmin` oder einem dedizierten Service-Principal mit Scope `governance:ingest`.
+- Standard-Entwicklertokens oder anonyme API-Schlüssel werden strikt mit `403 Forbidden` abgewiesen.
+
+#### 2. Das „Ratsche-Prinzip“ (Governance Ratchet) & Vier-Augen-Schutz
+- **Problem:** Im `replace`-Modus (B-02) können Maskierungsregeln entfernt oder gelockert werden (`relaxedMaskingRulesCount > 0`). Dies stellt ein massives Sicherheitsrisiko dar (Trojan Policy Relaxation).
+- **Sicherheits-Invariante:**
+  - In Nicht-Entwicklungsumgebungen (`Environment != "Development"`) darf ein Ingestion-Lauf, der Regeln **lockert oder entfernt**, **nicht stillschweigend** aktiv geschaltet werden.
+  - Entweder: Der Aufruf verlangt einen expliziten Admin-Freigabeparameter `allow_policy_relaxation: true` zusammen mit einer verpflichtenden Begründung (`relaxation_justification`).
+  - Oder: Gelockerte Regeln werden im Status `PendingApproval` abgelegt und erfordern die Freigabe eines zweiten Sicherheitsverantwortlichen (Vier-Augen-Prinzip, SG-22).
+  - Jede Lockerung erzeugt sofort ein High-Priority-Audit-Ereignis `GOVERNANCE_POLICY_RELAXED`.
+
+#### 3. SQL-Prädikats-Validierung (Schutz vor SQL-Injection in Filtern)
+- Die Attribute `predicate_sql` in `virtual_filters` und `row_filter_predicate` in `access_profiles` dürfen **niemals unvalidiert als Roh-Text** übernommen werden.
+- **Validierungs-Pipeline:**
+  1. Parsing des SQL-Strings mit `TrinoSqlParser.CreateExpression(predicateSql)`.
+  2. AST-Inspektion über einen `SecurityExpressionValidator`:
+     - **Verboten:** DDL/DML-Schlüsselwörter (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `EXEC`).
+     - **Verboten:** Subqueries (`QuerySpecification`, `ExistsExpression`) außerhalb zugelassener ReBAC-Filtertabellen.
+     - **Verboten:** Aufruf nicht-whitelisted Datenbankfunktionen (z. B. `xp_cmdshell`, `pg_read_file`, `LOAD_EXTENSION`, `SLEEP`).
+     - **Erlaubt:** Reine Boolesche Ausdrücke (`ComparisonExpression`, `LogicalBinaryExpression`, `InPredicate`, `BetweenPredicate`, `IsNullPredicate`, `LikePredicate`) über existierende Katalogspalten.
+  3. Schlägt die AST-Validierung fehl, bricht der gesamte Ingest mit `400 Bad Request` ab.
+
+#### 4. Identifier-Sanitization (Schutz vor Metadaten-Injection)
+- Alle Objektnamen (`table_name`, `column_name`, `filter_id`, `profile_id`) müssen strikt gegen folgendes Regex-Muster validiert werden:
+  \[
+  \text{Pattern: } \wedge[a-zA-Z\_][a-zA-Z0-9\_]*(\.[a-zA-Z\_][a-zA-Z0-9\_]*)*\$
+  \]
+  Eingaben mit Steuerzeichen, Semikolons, Anführungszeichen oder Newlines werden sofort mit `400 Bad Request` zurückgewiesen.
+
+#### 5. Denial-of-Service-Härtung (JSON-Streaming-Limits)
+- Der `DbtArtifactStreamingParser` arbeitet streamend via `Utf8JsonReader`:
+  - `MaxDepth = 32` (Verhindert Stack-Overflows durch rekursive JSON-Objekte).
+  - `MaxBodySize = 100 MB` auf Kestrel-Ebene fest konfiguriert.
+  - `MaxTablesPerIngest = 5.000`, `MaxColumnsPerTable = 1.000`.
+  - Bei Überschreiten bricht der Request deterministisch mit `413 Payload Too Large` ab.
+
+#### 6. Manipulationssicheres Audit-Logging der Ingestion
+- Jede Ingestion berechnet den SHA-256 Hash des Roh-Payloads.
+- Schreiben eines unveränderlichen Tier-A-Audit-Eintrags:
+  - EventType: `DBT_GOVERNANCE_INGESTED`
+  - Actor: Service-Principal / Deploy-Bot
+  - Details: `payload_sha256`, `tablesCount`, `columnsCount`, `removedMaskingRulesCount`, `relaxedMaskingRulesCount`, `warningsCount`.
+

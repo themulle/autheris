@@ -110,23 +110,17 @@ flowchart TD
     Trigger --> LockFile["packages.lock.json<br/>(Enthält nur linux-x64 RID-Pakete)"]
     LockFile --> Error["dotnet publish -r linux-arm64<br/>error NU1004: The lock file is not valid for target runtime"]
     
-    Fix["Lösung: -p:RestoreLockedMode=false beim publish-Schritt<br/>(Integrität wurde bereits in vorheriger Stufe validiert)"]
+    Fix["Lösung: Directory.Build.props Bedingung<br/>RestoreLockedMode nur aktiv wenn RuntimeIdentifier leer<br/>(Keine Workflow-Änderung erforderlich, PAT-sicher!)"]
     Error --> Fix
     Fix --> Success["100% Erfolgreiche Single-File Binaries für alle 4 Architekturen!"]
 ```
 
-**Workflow-Anpassung in `.github/workflows/release.yml`:**
-```yaml
-- name: Build and Package Binaries
-  run: |
-    dotnet publish src/Autheris.Api/Autheris.Api.csproj \
-      -c Release \
-      -r "$RID" \
-      --self-contained true \
-      -p:PublishSingleFile=true \
-      -p:RestoreLockedMode=false \
-      -o "$OUT_DIR"
+**Konfiguration in `Directory.Build.props`:**
+```xml
+<RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+<RestoreLockedMode Condition="('$(ContinuousIntegrationBuild)' == 'true' Or '$(GITHUB_ACTIONS)' == 'true') And '$(RuntimeIdentifier)' == ''">true</RestoreLockedMode>
 ```
+*Vorteil:* Die Integrität aller NuGet-Pakete wird im Standard-Build und Testlauf strikt gegen die Sperrdatei verifiziert (`RestoreLockedMode=true`). Beim Cross-Publishing für Fremd-Architekturen (`-r linux-arm64` etc.) blockiert NuGet nicht mit NU1004. Die Workflow-Datei `.github/workflows/release.yml` muss nicht geändert werden, wodurch Einschränkungen durch Personal Access Token (PAT) Scopes entfallen.
 
 ---
 
@@ -147,6 +141,46 @@ flowchart TD
 | **TrinoSqlEngine.Tests** | 1.395 | 1.395 | 0 | 0 |
 | **Autheris.Extensions.Tests** | 232 | 232 | 0 | 0 |
 | **Autheris.Tests.Architecture** | 12 | 12 | 0 | 0 |
-| **Autheris.Tests.Unit** | 3.511 | 3.511 | 0 | 0 |
+| **Autheris.Tests.Unit** | 3.536 | 3.536 | 0 | 0 |
 | **Autheris.Tests.Integration** | 319 | 319 | 0 | 0 |
-| **Gesamt** | **5.469** | **5.469 (100%)** | **0** | **0** |
+| **Gesamt** | **5.494** | **5.494 (100%)** | **0** | **0** |
+
+---
+
+## 6. Sicherheitskritische Aspekte & Continuous Security Testing (Security Expert Review)
+
+### 6.1 OWASP API Security Top 10 (2023) Zuordnungsmatrix
+
+| OWASP API Top 10 Risiko | Adressierter Befund | Implementierte Gegenmaßnahme |
+|---|---|---|
+| **API1:2023 - Broken Object Level Authorization (BOLA)** | SG-30 (Tenant Isolation) | Zwingende Mandantenvalidierung via `EndpointSecurity.GetRequestTenant`. Mandantenübergreifende Pfade werden blockiert. |
+| **API2:2023 - Broken Authentication** | SG-35, SG-36, SG-37 | `FixedTimeEquals` gegen Timing-Angriffe, künstliche Verzögerung in Produktion, zwingendes HTTPS für OIDC-Metadaten. |
+| **API3:2023 - Broken Object Property Level Authorization** | SG-26 (Catalog Projection) | Beschränkung von SELECT auf katalogisierte Spalten; Verhindern des Ausleitens interner Spalten (`ctid`, `xmin`). |
+| **API4:2023 - Unrestricted Resource Consumption** | SG-34, SG-29 | Vorab-JSON-Prüfung gegen OOM-Attacken, strikte Budgets für Differential Privacy mit Auditierung. |
+| **API5:2023 - Broken Function Level Authorization (BFLA)** | SG-25 (TableAccessPolicy) | Fail-Closed bei Schreiboperationen: Casbin-Aktion `"write"` oder `DmlWriterRoles`/`ClusterAdmin` erforderlich. |
+| **API8:2023 - Security Misconfiguration** | SG-22, SG-38 | Startup-Fehler bei deaktiviertem Vier-Augen-Prinzip in Prod; Bereinigung von Passwörtern in Benchmark-Configs. |
+| **API9:2023 - Improper Inventory Management** | SG-23 (Canary Routing) | Strikte Konjunktion (**AND**) verhindert unberechtigten Zugriff auf experimentelle/Canary-Subgraphen über Header-Spoofing. |
+
+---
+
+### 6.2 Zwingende Vorgaben für Continuous Security & DevSecOps
+
+#### 1. Zero Secret In Repository Policy
+- Konfigurationsdateien wie `appsettings.Benchmark.json` oder `appsettings.json` dürfen **keine echten Geheimnisse** oder Standard-Passwörter (`Password123!`, statische JWT-Schlüssel) enthalten.
+- Alle Secrets müssen über Umgebungsvariablen (`AUTHERIS_AUTH__...`), Docker Secrets oder Kubernetes Vault-Injektion bereitgestellt werden.
+- Verpflichtender CI-Check: Bei PRs wird automatisiert `gitleaks` bzw. Secret-Scrubbing ausgeführt.
+
+#### 2. Schutz vor Timing-Angriffen bei Authentifizierungsprüfungen (SG-35)
+- Bei String-Vergleichen von API-Keys, Hashes oder Passwörtern ist die Verwendung von `string.Equals()` oder `==` **strikt verboten**, da diese beim ersten abweichenden Zeichen abbrechen (Timing-Leck).
+- Pflicht: Ausschließliche Verwendung von `CryptographicOperations.FixedTimeEquals()`.
+
+#### 3. Continuous Dependency Vulnerability Auditing
+- In `Directory.Build.props` ist konfiguriert:
+  ```xml
+  <NuGetAudit>true</NuGetAudit>
+  <NuGetAuditMode>all</NuGetAuditMode>
+  <NuGetAuditLevel>moderate</NuGetAuditLevel>
+  <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
+  ```
+- Wird eine Komponente mit bekannter Schwachstelle (CVE moderate/high/critical) geladen, bricht der CI-Build sofort mit einem Compilerfehler ab.
+

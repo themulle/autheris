@@ -99,7 +99,41 @@ mindmap
 
 ---
 
-## 4. Quelltexte und Referenzdokumente
+## 4. Übergreifende Sicherheits- & Governance-Prinzipien (Security Expert Review)
+
+Alle fünf Fachpläne unterliegen sechs nicht verhandelbaren Sicherheits-Invarianten:
+
+```mermaid
+flowchart LR
+    Inv1["1. Fail-Closed Default<br/>(Im Zweifel verweigern)"]
+    Inv2["2. Krypto-Trennung<br/>(HMAC Kette vs. KMS Signer)"]
+    Inv3["3. AST-Sandbox<br/>(Kein Roh-SQL in Filtern)"]
+    Inv4["4. Vier-Augen-Prinzip<br/>(Kein heimliches Lockern)"]
+    Inv5["5. PII-Freies WORM<br/>(DSGVO Art. 17 Schutz)"]
+    Inv6["6. Transaktions-Atomizitaet<br/>(Kein Phantom-Audit)"]
+
+    Inv1 --- Inv2 --- Inv3
+    Inv4 --- Inv5 --- Inv6
+```
+
+1. **Fail-Closed als universelles Grundprinzip:**
+   - Bei unvollständiger Konfiguration, fehlenden Richtlinien, unbekannten Maskierungstypen oder gestörter Audit-Pipeline verweigert das Gateway den Zugriff (`403 Forbidden` bzw. `503 Service Unavailable`).
+   - Ein Fallback auf unmaskierte Klartextdaten oder das stillschweigende Übergehen von Schutzregeln ist architekturell ausgeschlossen.
+2. **Kryptografische Domänentrennung:**
+   - Symmetrischer Hochdurchsatz-Schlüssel (HMAC-SHA256) für die In-Process-Verkettung.
+   - Asymmetrische Hardwareschlüssel (KMS/HSM) für WORM-Anker-Zertifikate, die kein interner DBA manipulieren kann.
+3. **AST-Validierung dynamischer Ausdrücke:**
+   - Virtuelle Filter und Profil-Prädikate werden vor der Persistenz als syntaktische Bäume (AST) gegen eine strikte Whitelist geprüft (nur spaltenbezogene Boolesche Operatoren, keine DDL/DML, keine externen Funktionen).
+4. **Schutz vor heimlicher Schutzbedarfs-Lockerung (Ratsche & Vier-Augen):**
+   - Das Entfernen oder Abschwächen von Maskierungsregeln im dbt-Import oder das Vergeben von `Unmasked`-Profilen erfordert zwingend eine Begründung und die Freigabe eines zweiten Sicherheitsbeauftragten (SG-22).
+5. **Datenschutzkonformes WORM-Audit (DSGVO Art. 17 vs. Unveränderlichkeit):**
+   - Personenbezogene Literale werden vor dem Schreiben in unveränderliche Audit-Trails anonymisiert (`@p_redacted`), während die Integrität über deterministische Hashes gewahrt bleibt.
+6. **Transaktionale Koppelung von Daten & Audit:**
+   - Audit-Ereignisse für Berechtigungen und Profile werden in derselben DB-Transaktion persistiert. Ein Rollback verhindert Phantom-Einträge im Audit-Log.
+
+---
+
+## 5. Quelltexte und Referenzdokumente
 
 - [Plan 1: Governance-Import & dbt](plan-governance-import-dbt.md)
 - [Plan 2: Erweiterte Maskierungsregeln](plan-erweiterte-maskierungsregeln.md)
@@ -113,3 +147,4 @@ mindmap
 - [Befunde zur Audit-Architektur (AU-01 bis AU-19)](2026-10-09-audit-architektur-befunde.md)
 - [Feature Lückenloses Zugriffs-Audit](2026-10-09-feature-lueckenloses-zugriffs-audit.md)
 - [Security Review Gesamtprojekt (SG-01 bis SG-39)](2026-10-09-security-review-gesamtprojekt.md)
+

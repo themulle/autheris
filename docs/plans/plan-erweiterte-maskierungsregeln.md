@@ -275,3 +275,42 @@ private static string MaskPartial(string s, MaskingRule rule)
 | `PARTIAL_MASK` Short | Unit | `"AB"`, `p=2, s=1, fixed=true` | `"*****"` |
 | `REDACT` Decimal (B-06) | Unit | `12500.50m` (Gehalt/Preis) | `NULL` (nicht `0` oder `[GESCHÜTZT]`) |
 | `REDACT` Datetime (B-06) | Unit | `2026-10-09T10:00:00Z` | `NULL` |
+
+---
+
+## 7. Sicherheitskritische Aspekte & Krypto-Härtung (Security Expert Review)
+
+### 7.1 Bedrohungsmodellierung & Angriffsvektoren
+
+| Vektor | Bedrohung (Threat) | Schutzmechanismus (Countermeasure) |
+|---|---|---|
+| **Averaging Attack** | Angreifer führt 100 Abfragen auf dieselbe Maschine aus und mittelt das Rauschen heraus (Gesetz der großen Zahlen). | **Deterministisches Rauschen:** Jitter basiert auf `HMAC(K_tenant, Table \| PrimaryKey)`. Derselbe Datensatz liefert stets exakt denselben Versatz. |
+| **Length Oracle** | Variable Maskierungslänge (`fixed_length=false`) verrät die Zeichenanzahl von Namen/Kennungen ($k$-Anonymitätsverlust). | **Fixed-Length Enforcement:** Für hochsensible Identifikatoren (`SensitivityRank >= 3`) ist `fixed_length: true` Standard (`"*****"`). |
+| **Filter-Leakage** | Angreifer schließt über `WHERE lat BETWEEN 48.0 AND 48.5` auf unmaskierte Werte zurück. | **Fail-Closed Predicate Guard:** Filterung und Sortierung auf maskierten Spalten werden im `AstSecurityVisitor` mit `403 Forbidden` abgewiesen. |
+| **Topological Drift** | Unabhängiges Rauschen von Breite und Länge verschiebt Baumaschinen ins Meer oder auf Fabrikdächer. | **Gekoppelter Richtungsvektor:** Winkel $\theta$ und Distanz $r$ werden aus einem gemeinsamen Hash abgeleitet; polare Transformation. |
+| **Null-Island Trap** | Unmaskierte Null-Koordinaten `(0.0, 0.0)` werden verrauscht und erzeugen falsche GPS-Fixes vor der Küste Afrikas. | **Explicit Zero Guard:** `lat == 0.0 AND lon == 0.0` liefert immer exakt `0.0` (kein Rauschen bei fehlendem Fix). |
+
+---
+
+### 7.2 Kryptografische Vorgaben für die Implementierung
+
+#### 1. Verbot von Standard-Zufallsgeneratoren (PRNG)
+- Die Verwendung von `System.Random`, `RAND()` (SQL) oder ungesalzenem Hashing ist für die Rauschgenerierung **ausdrücklich untersagt**.
+- Standard-Zufall in SQL (`NEWID()`, `RANDOM()`) erzeugt bei wiederholten Abfragen andere Werte und ermöglicht das rechnerische Ausmitteln der echten Position innerhalb von Sekunden.
+- **Kryptografische Pflicht:**
+  - Jitter im Modus `noise` muss zwingend ein **geheimes Mandantengeheimnis** (\(K_{\text{tenant}}\), min. 256 Bit Entropie) verwenden.
+  - Das Geheimnis darf nicht im SQL-Querytext auftauchen, sondern muss per SQL-Parameter (`@p_jitter_key`) oder serverseitig in der Engine gebunden werden.
+
+#### 2. Schutz vor Längen-Orakeln bei `PARTIAL_MASK`
+- Wenn eine Kundennummer `KD-109` mit `p=3, s=0, fixed=false` zu `KD-***` maskiert wird, erfährt der Angreifer die genaue Länge (6 Zeichen).
+- Bei kleinen Wertebereichen (z. B. Postleitzahlen, Autokennzeichen, Nachnamen) reicht die Kombination aus Anfangsbuchstabe und exakter Zeichenlänge aus, um Personen eindeutig zu re-identifizieren (Verletzung von DSGVO Erwägungsgrund 26).
+- **Vorgabe:**
+  - Wenn `keep_prefix + keep_suffix >= Length`, darf keinesfalls ein Teil des Strings unmaskiert bleiben. Die Ausgabe muss auf die feste Maske (`"*****"`) umschalten.
+  - Für alle personenbezogenen Daten ist in den Default-Governance-Vorlagen `fixed_length: true` zu setzen.
+
+#### 3. Typgerechtes REDACT & Data Integrity (B-06)
+- Die Ersetzung von Zahlenwerten durch `0` oder `0.0` stellt ein **schwerwiegendes Integritätsrisiko** dar:
+  - Ein Saldo von `0.00 €` bedeutet "Konto ausgeglichen" – nicht "Maskiert / Zugriff verweigert".
+  - Eine Temperatur von `0 °C` oder eine Geschwindigkeit von `0 km/h` führt in Telemetriesystemen zu falschen Alarmen oder Berechnungen.
+- **Sicherheits-Invariante:** Maskierte Werte bei `REDACT` müssen im SQL-Standard zwingend `NULL` sein. Dadurch greift die dreiwertige SQL-Logik (Unknown), wodurch Aggregationen (`SUM`, `AVG`) nicht unbemerkt durch Phantom-Nullen verfälscht werden.
+

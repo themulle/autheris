@@ -262,3 +262,51 @@ public static class AuditCanonicalizer
    - DB-Wiederverfügbarkeit: Pipeline nimmt Betrieb auf, `_isAuditPipelineFaulted` setzt sich zurück.
 4. **Kanonisierungs- und Hash-Portabilitätstests:**
    - Ein Datensatz mit Newlines, Reitern und Umlauten liefert unter SQLite, PostgreSQL und SQL Server den identischen Hashwert.
+
+---
+
+## 5. Sicherheitskritische Aspekte & Krypto-Integrität (Security Expert Review)
+
+### 5.1 Bedrohungsmodellierung & Angriffsvektoren auf das Audit-System
+
+| Vektor | Bedrohung (Threat) | Schutzmechanismus (Countermeasure) |
+|---|---|---|
+| **Ketten-Neuschreiben** | Ein Angreifer mit DBA-Rechten ändert historische Zeilen und berechnet die HMAC-Kette neu. | **Asymmetrische KMS-Anker (AU-02):** Periodische Anker werden in externem HSM/KMS signiert. Der DBA besitzt den privaten Signaturschlüssel nicht. |
+| **Phantom-Audit-Angriff** | Ein Angreifer provoziert Rollbacks von Geschäftsaktionen, um falsche Freigaben im Audit vorzutäuschen. | **Transaktionale Kopplung (AU-04):** Audit-Insert und Geschäftsdaten laufen in derselben DB-Transaktion (atomarer Commit/Rollback). |
+| **DSGVO Art. 17 Dilemma** | Personenbezogene Daten landen im unveränderlichen Audit-Log und können nicht DSGVO-konform gelöscht werden. | **AST-Literal-Redaktion (AU-06):** SQL wird vor Speicherung parametrisiert (`@p_redacted`). PII berührt die Hash-Kette nie im Klartext. |
+| **Silent Log Drop** | Unter Last oder bei DB-Störung werden Audit-Ereignisse still verworfen (Verlust von Nachweisen). | **Resiliente Dead-Letter-Queue (AU-05):** Gesicherte Pufferung in `AUDIT_DEAD_LETTER` und Fail-Closed-Schutz bei Pufferüberlauf. |
+| **False Flag Denial of Service** | Treiberschnitte kürzen Spalten und lösen falsche Kettenbruch-Alarme (503 Service Unavailable) aus. | **Pre-Hash Length Guards & NVARCHAR(MAX) (AU-07):** Hashing erfolgt über typengerechte, ungeschnittene Repräsentationen. |
+
+---
+
+### 5.2 Zwingende Vorgaben für die Implementierung
+
+#### 1. Kryptografische Vertrauenszonen-Trennung (AU-01, AU-02, AU-03)
+- Der HMAC-Kettenschlüssel (zur kontinuierlichen Verkettung im Millisekundenbereich) und der Anker-Signaturschlüssel (für WORM-Snapshots) müssen in **unterschiedlichen Vertrauensdomänen** liegen:
+  - HMAC-Schlüssel: Im Speicher des Gateway-Containers (rotierbar via Vault).
+  - Anker-Signaturschlüssel: Asymmetrischer Schlüssel (RSA-4096 oder ECDSA P-256/P-384), dessen privater Schlüssel **niemals** den Key Vault / das HSM (z. B. Azure Key Vault Managed HSM, AWS CloudHSM) verlässt.
+- Im Code dürfen **keine festen Fallback-Schlüssel** existieren. Ist kein Schlüssel konfiguriert, schlägt der Start außerhalb von `Development` unweigerlich fehl (`InvalidOperationException`).
+
+#### 2. Transaktionsintegrität (Enrolled Transaction Pattern, AU-04)
+- **Problem:** Wenn `RecordAuditEventAsync` eine eigene Verbindung öffnet und sofort committed, entsteht bei einem anschließenden Scheitern des Geschäfts-Commits ein „Phantom-Ereignis“ (z. B. Consent als erteilt geloggt, obwohl die DB den Consent abgelehnt hat).
+- **Invariante:** Alle sicherheitsrelevanten Zustandsänderungen (Consent, Profilzuweisung, Filteraktivierung) müssen die transaktionale Signatur nutzen:
+  ```csharp
+  public Task RecordAuditEventAsync(AuditEvent evt, DbTransaction existingTx, CancellationToken ct);
+  ```
+  Scheitert die Transaktion, rollt die Datenbank den Geschäftsdatensatz **und** den Audit-Eintrag atomar zurück.
+
+#### 3. DSGVO-Konformität in WORM-Systemen (AU-06)
+- Ein unveränderlicher Audit-Trail (Write Once Read Many) steht im inhärenten Konflikt zum Recht auf Vergessenwerden (Art. 17 DSGVO), wenn Abfragen PII enthalten (`WHERE ssn = '123-45-678'`).
+- **Architektur-Vorgabe:**
+  - Rohes SQL wird durch den `AstSecurityVisitor` geschleust.
+  - Alle Literale (Zeichenketten, Zahlen, UUIDs) werden durch `@p_redacted` ersetzt.
+  - Das Original-SQL wird gehasht: `DetailsHash = SHA256(OriginalSql + TenantSalt)`.
+  - Bei Auskunftsanfragen (Art. 15) kann die Korrelation nachgewiesen werden, ohne dass sensible Klartextdaten dauerhaft im WORM-Log verbleiben.
+
+#### 4. Resilienz & Fail-Closed Richtlinie (AU-05)
+- Ein Ausfall des Audit-Speichers darf niemals zur unbemerkten Ausführung unprotokollierter Abfragen führen.
+- **Eskalationsstufen:**
+  1. *Stufe 1 (Transienter Fehler):* Retry bis zu 3-mal mit exponentiellem Backoff und Jitter.
+  2. *Stufe 2 (Dauerfehler DB):* Ausweichspeicherung in lokaler, verschlüsselter Dead-Letter-Tabelle / Datei.
+  3. *Stufe 3 (Pufferüberlauf):* Ist die Dead-Letter-Queue voll, schaltet das Gateway für autorisierte Datenabfragen in den Modus **Fail-Closed** (`503 Service Unavailable: Audit Pipeline Faulted`). Es werden keine sensiblen Daten ohne Audit-Garantie ausgeleitet!
+

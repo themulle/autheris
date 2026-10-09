@@ -340,3 +340,51 @@ Content-Type: application/json
      - `david` sieht `tem.gps_position.latitude` als echten Gleitkommawert.
      - `philipp` sieht `tem.gps_position.latitude` gerundet via `GEO_JITTER`.
      - Beide sehen genau 7.226 Krane (nur ungelieferte).
+
+---
+
+## 8. Sicherheitskritische Aspekte & Governance-Härtung (Security Expert Review)
+
+### 8.1 Bedrohungsmodellierung & Angriffsvektoren
+
+| Vektor | Bedrohung (Threat) | Schutzmechanismus (Countermeasure) |
+|---|---|---|
+| **Privilege Escalation** | Ein Administrator oder Citizen Developer gewährt sich selbst ein `Unmasked`-Profil (Self-Grant). | **Funktionstrennung (SoD):** Selbst-Zuweisung ist strikt verboten (`callerContext.Subject != request.Subject`). |
+| **Zombie Permissions** | Nach Widerruf eines Klartext-Profils greift der Nutzer weiter auf unmaskierte Daten über veraltete Caches zu. | **Cluster-weite Sofort-Invalidierung:** Event-basierte Löschung aus `IMemoryCache` und Erhöhung der Governance-Epoche. |
+| **Overbroad Wildcard** | Profil mit `TargetTables: ["*.*"]` und `Unmasked` schaltet versehentlich künftige Gehalts- und HR-Tabellen frei. | **Wildcard-Restriktion:** Für `Unmasked` ist `*.*` verboten. Mindestens der Schema-Name muss spezifiziert werden (`tem.*`). |
+| **Predicate Tampering** | Ein manipulierter `row_filter_predicate` (z. B. `'x'='x' OR 1=1`) hebelt die Zeilenisolation vollständig aus. | **AST-Sandbox-Validierung:** Prädikate werden vor Speicherung syntaktisch und semantisch gegen den Katalog geprüft. |
+| **Permanent Creep** | Unbefristete Klartext-Ausnahmen verbleiben dauerhaft im System (Privilege Creep). | **Erzwungene Befristung:** `Unmasked`-Profile verlangen zwingend `validDays` (maximal 180 Tage, Standard 90 Tage). |
+
+---
+
+### 8.2 Zwingende Härtungsvorgaben für die Implementierung
+
+#### 1. Vier-Augen-Prinzip & Funktionstrennung (Segregation of Duties)
+- Die Erteilung eines `Unmasked`-Profils stellt das Durchbrechen aller datenschutzrechtlichen Schutzschilde (Pseudonymisierung, Maskierung) dar.
+- **Implementierungspflicht:**
+  - Aufrufende Identität darf nicht identisch mit dem begünstigten `Subject` sein.
+  - Außerhalb der Entwicklungsumgebung muss das Anlegen von `Unmasked`-Profilen über den Approval-Workflow (`RequireApproval = true`, SG-22) laufen. Ein zweiter Administrator mit Rolle `SecurityOfficer` muss die Freigabe über ein separates Ticket oder API-Token bestätigen.
+
+#### 2. Nachweispflicht & Revisionssicherheit (DSGVO Art. 5 Abs. 2, Art. 30)
+- Jeder `bulk`-Consent oder Profil-Endpunkt verlangt zwingend:
+  - Ein Attribut `justification` (Mindestlänge 15 Zeichen, Validierungsfehler bei Fehlen).
+  - Ein Attribut `validDays` (1 bis 180 Tage).
+- Fehlt einer der Parameter bei `maskingMode == Unmasked`, antwortet die API zwingend mit `400 Bad Request`.
+- Das resultierende Audit-Ereignis `CONSENT_GRANTED` speichert Begründung, Ablaufdatum, erteilenden Administrator und Zielperson in der unveränderlichen Hash-Kette.
+
+#### 3. Konsistenz & Cluster-weite Cache-Invalidierung
+- Das Gateway betreibt zur Minimierung der Latenz einen In-Memory-Cache für Profilzuweisungen (`access_profile:{tenant}:{subject}`).
+- **Sicherheitsvorgabe:**
+  - Bei Aufruf von `DELETE /api/v1/profiles/{id}` oder `POST /api/v1/consents/bulk` muss nicht nur der lokale Node seinen Cache leeren.
+  - Über den `IDistributedClusterStateProvider` (SG-28) wird die Cache-Epoche des Mandanten inkrementiert (`IncrementEpochAsync($"profile_epoch:{tenant}")`).
+  - Alle replizierten Instanzen prüfen die Epoche und verwerfen veraltete Klartext-Rechte innerhalb von maximal 1 Sekunde.
+
+#### 4. Sandbox-Validierung für `row_filter_predicate`
+- Der Zeilenfilter wird bei der Abfrageausführung direkt in den SQL-AST des Nutzers eingebunden (`WHERE ... AND (<row_filter>)`).
+- **Verbotene Konstrukte im Prädikat:**
+  - Semikolons (SQL-Statement-Terminierung)
+  - SQL-Kommentare (`--`, `/* ... */`)
+  - Aggregatfunktionen (`COUNT`, `MAX`, `AVG`) im Filterprädikat
+  - Nicht-deterministische Funktionen
+- Die Validierung erfolgt zwingend beim Anlegen des Profils über `TrinoSqlParser.CreateExpression` und wirft bei Verstößen `ArgumentException` (400 Bad Request).
+
