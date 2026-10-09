@@ -1,6 +1,6 @@
 # Feature: Lückenloses Zugriffs-Audit („Audit by default“)
 
-**Stand:** 09.10.2026 · **Status:** Entwurf zur Abstimmung · **Zugehöriger Plan:** [Umsetzungsplan](2026-10-09-umsetzungsplan-lueckenloses-zugriffs-audit.md)
+**Stand:** 09.10.2026 · **Status:** Entwurf zur Abstimmung · **Zugehöriger Plan:** [Plan 6: Lückenloses Zugriffs-Audit](plan-lueckenloses-zugriffs-audit-by-default.md)
 **Anlass:** Frage „Werden in Autheris sämtliche Zugriffe geloggt?“ – Antwort der Bestandsaufnahme: **nein**.
 
 ## 1 Ausgangslage

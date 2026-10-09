@@ -14,7 +14,7 @@ Das Sicherheitsaudit der Build-, Deploy- und Supply-Chain-Infrastruktur bestäti
 Dieser Plan spezifiziert die Schließung dieser Punkte sowie zusätzlicher Lücken aus dem Plan-Review (Abschnitt 3.12). Zielbild: SLSA Build L3-fähige Pipeline, NIST SP 800-218 SSDF (PS.2, PS.3, PW.4, RV.1), BSI OPS.1.1.5 / SYS.1.6.
 
 **Leitplanken für alle Workflow-Änderungen:**
-- Jede neue Action wird auf den **vollständigen Commit-SHA** gepinnt (`uses: owner/action@<40-hex-SHA> # vX.Y.Z`), analog zum Bestand (`ci.yml:17,20`, `docker-publish.yml:24,27,45,48,90`). Tags wie `@master`, `@v3`, `@v1` sind verboten (Bestand würde sonst regressieren). SHAs werden bei Umsetzung per `gh api repos/<owner>/<action>/git/ref/tags/<tag>` ermittelt und von Dependabot (`github-actions`) gepflegt.
+- Jede neue Action wird auf den **vollständigen Commit-SHA** gepinnt (`uses: owner/action@<40-hex-SHA> # vX.Y.Z`), analog zum Bestand (`ci.yml:17,20`, `docker-publish.yml:24,27,45,48,90`). Tags wie `@master`, `@v3`, `@v1` sind verboten (Bestand würde sonst regressieren). SHAs werden bei Umsetzung per `gh api repos/<owner>/<action>/git/ref/tags/<tag>` ermittelt und von Dependabot (`github-actions`) gepflegt. Die SHAs in diesem Plan wurden am 2026-10-09 per `git ls-remote --tags` ermittelt, bei annotierten Tags als gepeelter `^{}`-Commit. `checkout`/`build-push-action` sind identisch mit dem Bestand.
 - `permissions` werden **pro Job** minimal vergeben, nicht workflow-weit.
 - `actions/checkout` mit `persist-credentials: false`, wo kein Push nötig ist.
 
@@ -97,7 +97,7 @@ jobs:
       attestations: write              # actions/attest-build-provenance
       security-events: write           # SARIF-Upload
     steps:
-      - uses: actions/checkout@<SHA> # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}   # exakt der getestete Commit
@@ -105,7 +105,7 @@ jobs:
 
       - name: Build image (local, not pushed)
         id: build-local
-        uses: docker/build-push-action@<SHA> # v7.4.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           load: true
@@ -113,7 +113,7 @@ jobs:
           tags: autheris:scan
 
       - name: Trivy scan (gate)
-        uses: aquasecurity/trivy-action@<SHA> # vX.Y.Z – nur gepinnter SHA, nie @master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0 – nur gepinnter SHA, nie @master/Tag (Tag-Hijack März 2026)
         with:
           image-ref: autheris:scan
           severity: CRITICAL,HIGH
@@ -124,12 +124,12 @@ jobs:
           output: trivy-results.sarif
       - name: Upload SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@<SHA> # vX
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with: { sarif_file: trivy-results.sarif }
 
       - name: Build and push
         id: push
-        uses: docker/build-push-action@<SHA> # v7.4.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: true
@@ -137,7 +137,7 @@ jobs:
           sbom: true
           tags: ${{ steps.meta.outputs.tags }}
 
-      - uses: sigstore/cosign-installer@<SHA> # vX.Y.Z
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Sign by digest (keyless)
         env:
           IMAGE: ghcr.io/${{ github.repository }}
@@ -178,10 +178,10 @@ Hinweise:
   run: |
     dotnet tool restore            # CycloneDX als gepinntes Tool in .config/dotnet-tools.json
     dotnet CycloneDX src/Autheris.Api/Autheris.Api.csproj -o artifacts -fn "Autheris-${RID}.cdx.json" -j
-- uses: actions/attest-build-provenance@<SHA> # vX.Y.Z
+- uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
   with:
     subject-path: 'artifacts/Autheris-*'
-- uses: actions/attest-sbom@<SHA> # vX.Y.Z   (optional: SBOM an Binary binden)
+- uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0   (optional: SBOM an Binary binden)
 - name: Sign checksums (keyless)
   run: cosign sign-blob --yes --bundle artifacts/SHA256SUMS.sigstore.json artifacts/SHA256SUMS
 ```
@@ -224,7 +224,16 @@ Zusätzlich `global.json` mit fixierter SDK-Version (`rollForward: latestFeature
 
 ### 3.5 SC-07: Getrennte Geheimnisse & Secret-Files
 
-Korrektur gegenüber Rev. 1: Die Namen `GATEWAY_MASKING_HMAC_KEY` etc. existieren nicht. Masking liest in Nicht-Development **ausschließlich** über `IKeyVaultSecretProvider` mit `Gateway:DataMasking:HmacSecretKeyVaultRef` (`ColumnMaskingProvider.cs:26-32`, Validator `GatewayServiceCollectionExtensions.cs:138-140`). Das in `deploy/podman-compose.yaml:232` gesetzte `Gateway__DataMasking__HmacSecret` ist daher vermutlich wirkungslos – vor Umsetzung klären.
+Korrektur gegenüber Rev. 1: Die Namen `GATEWAY_MASKING_HMAC_KEY` etc. existieren nicht. Masking liest in Nicht-Development **ausschließlich** über `IKeyVaultSecretProvider` mit `Gateway:DataMasking:HmacSecretKeyVaultRef` (`ColumnMaskingProvider.cs:26-32`, Validator `GatewayServiceCollectionExtensions.cs:138-140`).
+
+**Geklärt (Phase 0, Code-Analyse):** `Gateway__DataMasking__HmacSecret` (`deploy/podman-compose.yaml:232`) ist im Bench-Stack **wirkungslos**; der Masking-Key kommt faktisch aus `HMAC_SECRET_KEY` (`podman-compose.yaml:230`).
+- Options-Binding: `AddOptions<GatewayOptions>().Bind(GetSection("Gateway"))` (`GatewayServiceCollectionExtensions.cs:90-91`); `DataMaskingOptions` hat keine Property `HmacSecret` (`GatewayOptions.cs:797-803`), der Binder ignoriert den Key still (kein `ErrorOnUnknownConfiguration`).
+- `IKeyVaultSecretProvider` = `DefaultEnvironmentSecretProvider` (`GatewayServiceCollectionExtensions.cs:340`). Der liest `Gateway:DataMasking:HmacSecret` nur als Well-known-Alias, wenn die Referenz **exakt** `hmac-masking-secret`, `HMAC_SECRET` oder `HMAC_SECRET_KEY` lautet (`DefaultEnvironmentSecretProvider.cs:77-85`).
+- Der Bench-Container überschreibt `appsettings.json`/`.Production.json` mit `appsettings.Benchmark.json` (`deploy/containers/gqlgateway-api/Containerfile:50-52`, `ASPNETCORE_ENVIRONMENT=Production` in `podman-compose.yaml:228`). Dort gilt `HmacSecretKeyVaultRef: "hmac-secret-key"` (`appsettings.Benchmark.json:122`). Das ist kein Alias, aber der normalisierte Kandidat `HMAC_SECRET_KEY` (`DefaultEnvironmentSecretProvider.cs:54-55`) trifft `IConfiguration["HMAC_SECRET_KEY"]` (Env-Provider von `WebApplication.CreateBuilder`, `Program.cs:14`) ⇒ Wert von `HMAC_SECRET_KEY`.
+- Produktiv-Default `GQL-HMAC-SECRET-KEY` (`src/Autheris.Api/appsettings.json:89`) ⇒ Kandidat `GQL_HMAC_SECRET_KEY`; `Gateway__DataMasking__HmacSecret` greift auch dort nicht.
+- Derselbe Ref wird zusätzlich als Master-Key für Audit-HMAC (`*GovernanceRepository.cs:138-143`), Consent-Cache (`ConsentCacheService.cs:416`), HitL (`HitLStepUpApprovalService.cs:30`) und WebSQL-In-DB-Masking (`GovernedSqlExecutionService.cs:1919-1928`) genutzt. Wer `HMAC_SECRET_KEY` rotiert, rotiert auch diese.
+
+**Plan-Konsequenz:** Zeile `Gateway__DataMasking__HmacSecret` in `podman-compose.yaml:232` ersatzlos streichen. Der Masking-Key wird über `HmacSecretKeyVaultRef` → (nach 3.5) `file:/run/secrets/masking_hmac_key` geliefert. `HMAC_SECRET_KEY` entfällt dann. Den Alias-Zweig `DefaultEnvironmentSecretProvider.cs:77-85` nicht erweitern; er sollte langfristig entfallen. Zusätzlich ein Startup-Warnlog (einmalig, kein Hot-Path), wenn ein `Gateway:DataMasking:HmacSecret`-Key gesetzt ist, aber nicht gelesen wird. **Performance:** Secrets werden nur einmal im Konstruktor gelesen (`ColumnMaskingProvider.cs:26-28`, Singleton). Der `file:`-Provider liest ebenfalls nur beim Start und cacht nichts pro Request, daher keine Laufzeitkosten.
 
 - In `deploy/podman-compose.yaml:230-238` und `deploy/.env.example`/`generate-env.sh` fünf getrennte Secrets: `MASKING_HMAC_KEY`, `OPENMETADATA_WEBHOOK_SECRET`, `CATALOG_WEBHOOK_SECRET`, `ITSM_WEBHOOK_SECRET`, `BENCHMARK_SECRET_KEY` (je ≥ 32 Byte, `openssl rand`).
 - Auslieferung als Podman/Compose-`secrets:` (gemountet unter `/run/secrets/<name>`, Mode 0400, Owner = App-UID) statt Env.
@@ -235,10 +244,21 @@ Korrektur gegenüber Rev. 1: Die Namen `GATEWAY_MASKING_HMAC_KEY` etc. existiere
 
 ### 3.6 SC-05 & SC-06: Benchmark-Images
 
-- `benchmarks/load/docker/Dockerfile.gql:29-37`: `USER $APP_UID`; `ASPNETCORE_ENVIRONMENT=Benchmark` (nicht `Development`); Config als `appsettings.Benchmark.json` kopieren (behebt Mismatch Zeile 37 vs. 32). `EnableTestAuthHandler` entfällt nach 3.1 ohnehin im Release-Build ⇒ Bench-Auth auf ForwardAuth umstellen. Label `org.opencontainers.image.description="BENCHMARK ONLY – never publish"`.
+**Geklärt (Phase 0): Es gibt zwei getrennte Bench-Startpfade.** Beide müssen gehärtet werden.
+
+| Pfad | Einstieg | Compose / Image | Effektive Umgebung |
+|---|---|---|---|
+| **A – lokaler Podman-Stack** (`deploy/`) | `make -C deploy bench` / `make up` (`deploy/Makefile:10-12,45-49`) → `deploy/run-benchmark.sh` (`:131` `COMPOSE_FILE=podman-compose.yaml`, `:157` `stage_sources.sh`, `:173` `up -d --build`) | `deploy/podman-compose.yaml` (+ optional `podman-compose.openmetadata.yaml`, `run-benchmark.sh:103`), Image `deploy/containers/gqlgateway-api/Containerfile` | `Production` (`podman-compose.yaml:228`, `Containerfile:57`) mit `appsettings.Benchmark.json` als `appsettings.json`/`.Production.json`/`.Development.json` (`Containerfile:50-52`), User `appuser` (`Containerfile:54`) |
+| **B – Hetzner-Vergleichsbench** (`benchmarks/load/`) | `benchmarks/load/run_single_host.sh` → `scripts/01_hetzner_setup.sh`, `02_init_database.sh`, `03_start_gateways.sh` (`:28` `docker compose … up -d --build`), `04_run_benchmarks.sh` (`run_single_host.sh:118-141`) | `benchmarks/load/docker/docker-compose.yml` bzw. `docker-compose.gateway.yml` bei Remote-DB (`03_start_gateways.sh:10-13`), Image `Dockerfile.gql` | `Development` (`Dockerfile.gql:32`, `docker-compose.yml:150`) mit `EnableTestAuthHandler=true` und `danger_bypass_consent_checks=true` (`docker-compose.yml:159-160`), läuft als root (kein `USER`). `appsettings.bench.json` wird als `appsettings.Production.json` kopiert (`Dockerfile.gql:43`) und deshalb **nie geladen**. |
+
+Befund Pfad A: `deploy/scripts/stage_sources.sh:7-11` sucht die Quellen in `../gql`, `/root/gql`, `deploy/gql` und **nicht** im eigenen Repo. Auf dem Entwicklerhost existiert `/root/gql`, und der Stack baut damit einen **fremden Checkout**. Ist `deploy/src_build/src` schon vorhanden, wird er ohne Prüfung wiederverwendet (`stage_sources.sh:15-18`). Damit misst der Bench nicht zuverlässig den aktuellen Code. Die Entfernung aus 3.10 ist deshalb Voraussetzung für jeden Smoke-Test in Phase 2.
+
+Konsequenzen:
+- `benchmarks/load/docker/Dockerfile.gql:28-43`: `USER $APP_UID`; `ASPNETCORE_ENVIRONMENT=Benchmark` (nicht `Development`); Config als `appsettings.Benchmark.json` kopieren (behebt Mismatch Zeile 43 vs. 32). `docker-compose.yml:150` und `docker-compose.gateway.yml:96` entsprechend anpassen.
+- **Performance-Vorgabe:** Pfad B ist ein Vergleichsbenchmark. Die Umstellung von `Development` auf `Benchmark`/ForwardAuth ändert die gemessene Pipeline (Auth-Handler, Consent-Checks, Dev-Diagnostik). Vor der Umstellung einen Baseline-Lauf (`run_single_host.sh --quick`) sichern, danach erneut messen. Zusätzliche Prüfungen (Audit, Consent) bleiben über die vorhandenen Config-Optionen schaltbar. Ein Security-Default, der Laufzeit kostet, wird nicht implizit aktiviert, sondern explizit per Option im Bench-Profil gesetzt und im Report ausgewiesen. Rein startzeitbezogene Härtungen (Non-root, Secret-Files, Env-Name, Warn-Logs) haben keine Laufzeitkosten. `EnableTestAuthHandler` entfällt nach 3.1 ohnehin im Release-Build ⇒ Bench-Auth auf ForwardAuth umstellen. Label `org.opencontainers.image.description="BENCHMARK ONLY – never publish"`.
 - `deploy/containers/gqlgateway-api/Containerfile:50-52`: nur `appsettings.Benchmark.json` kopieren, keine Kopie nach `appsettings.Development.json`/`appsettings.Production.json`.
 - TLS: `TrustServerCertificate=True` (`podman-compose.yaml:242`) und fehlendes `SSL Mode` (Zeile 241) entweder über explizites, beim Start als `DANGER` geloggtes `danger_allow_insecure_transport` (nur zulässig, wenn `Environment == Benchmark`) oder echte TLS-Zertifikate (selbstsignierte CA, im Gateway-Container als Trust-Anchor). `Insecure.warn_allow_unsigned_s3_requests` analog.
-- Zuerst klären (Review: „stack either fails closed or something else relaxes the check"): Bench-Stack einmal starten und dokumentieren, welche Prüfung greift.
+- Zuerst klären (Review: „stack either fails closed or something else relaxes the check"): Pfad A (s. o.) nach Entfernen von `stage_sources.sh` einmal aus dem Repo-Root starten und dokumentieren, welche Prüfung greift.
 
 **Verifikation:** `podman run --rm <bench-image> id -u` ≠ 0; Startup-Log enthält `DANGER`-Zeile; Test: `danger_allow_insecure_transport=true` in `Production` ⇒ Startabbruch.
 
@@ -322,7 +342,7 @@ services:
 
 Reihenfolge so gewählt, dass keine neue CI-Pflicht vor ihrer Baseline aktiviert wird.
 
-1. **Phase 0 (Baseline, nicht blockierend):** `global.json`; Gitleaks, CodeQL, Trivy, Hadolint, Coverage zunächst **report-only** einführen; Funde triagieren (Allowlist/`.trivyignore` mit Ablaufdatum). Klären: Bench-Stack-Startpfad (3.6), Wirksamkeit `Gateway__DataMasking__HmacSecret` (3.5).
+1. **Phase 0 (Baseline, nicht blockierend):** `global.json`; Gitleaks, CodeQL, Trivy, Hadolint, Coverage zunächst **report-only** einführen; Funde triagieren (Allowlist/`.trivyignore` mit Ablaufdatum). ~~Klären: Bench-Stack-Startpfad (3.6), Wirksamkeit `Gateway__DataMasking__HmacSecret` (3.5)~~ **geklärt:** Es gibt zwei Startpfade, A `deploy/` (Podman, `Production`) und B `benchmarks/load/` (Docker, `Development`), siehe 3.6. `stage_sources.sh` baut aus `/root/gql` statt aus dem Repo. `Gateway__DataMasking__HmacSecret` ist wirkungslos, der Masking-Key kommt aus `HMAC_SECRET_KEY` (siehe 3.5). Zusätzlich: Performance-Baseline beider Bench-Pfade sichern, bevor Phase 2 etwas am Bench-Profil ändert.
 2. **Phase 1 (Code & Compiler-Schranken):** SC-04 (Build-Symbol + Publish-Check), SC-07 (`file:`-Provider, getrennte Secrets), SC-13, SC-14.
 3. **Phase 2 (Container & Compose):** SC-05, SC-06, SC-08, SC-09, SC-10, SC-11, SC-12, SC-18 – je Service einzeln, nach jedem Schritt Bench-Stack-Smoke-Test.
 4. **Phase 3 (CI/CD & Release):** SC-17, SC-15, SC-16, SC-03 (Gates auf blockierend schalten + Branch-Ruleset), SC-02, zuletzt SC-01 (Tag-Politik + Digest-Pinning in `docker-compose.yml`, da Konsumenten betroffen → Changelog-Hinweis).

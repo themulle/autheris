@@ -10,13 +10,29 @@
 
 | Plan / Dokument | Thema / Feature | Behandelte Befunde & Anforderungen | Status |
 |---|---|---|---|
-| **[Plan 1: Distributed State & Invalidation](plan-architektur-distributed-state-invalidation.md)** | Cache-Konsistenz, ReBAC-Invalidierung & Shared State | **AR-01, AR-02, AR-03, AR-04, AR-12** | Bereit zur Umsetzung ⏳ |
-| **[Plan 2: God-Classes & Modularisierung](plan-architektur-refactoring-godclasses-modules.md)** | Refactoring von `GovernedSqlExecutionService`, DI Composition Root & Repositories | **AR-05, AR-06, AR-07, AR-11, AR-18** | Bereit zur Umsetzung ⏳ |
-| **[Plan 3: Performance & Caching](plan-architektur-performance-caching-dialekte.md)** | Epochen-Pipelining, Bounded LRU Plan-Cache & Dialekt-Konsistenz | **AR-08, AR-09, AR-10, AR-13, AR-14, AR-15, AR-19** | Bereit zur Umsetzung ⏳ |
-| **[Plan 4: Supply Chain, CI & Deploy](plan-security-supply-chain-ci-deploy.md)** | Container-Scanning (Trivy), Cosign-Signierung, Attestations & Root-Drop | **SC-01 bis SC-18** | Bereit zur Umsetzung ⏳ |
-| **[Plan 5: PoC Arrow/OLAP & MCP Staging](plan-poc-arrow-olap-rebac-und-mcp-staging.md)** | ReBAC-Fallback für Arrow/OLAP, anonyme OAuth-Discovery & JSON-RPC-Batches | **Befunde 3.1 & 3.2** | Bereit zur Umsetzung ⏳ |
-| **[Plan 6: Lückenloses Zugriffs-Audit](plan-lueckenloses-zugriffs-audit-by-default.md)** | „Audit by Default“ über alle Endpunkte & Middleware, Denial-Audit | **Lücken L-1 bis L-9 (Phasen 0 bis 7)** | Bereit zur Umsetzung ⏳ |
-| **[Plan 7: WebSQL API Federation Join](plan-websql-heterogene-api-federation-join.md)** | Heterogene Joins zwischen SQL-Tabellen und Web-APIs via WebSQL & DuckDB Routing | **WebSQL Query Federation & API Joins** | Bereit zur Umsetzung ⏳ |
+| **[Plan 1: Distributed State & Invalidation](plan-architektur-distributed-state-invalidation.md)** | Cache-Konsistenz, ReBAC-Invalidierung & Shared State | **AR-01, AR-02, AR-03, AR-04, AR-12** | Rev. 2 (Review 09.10.) – umsetzungsreif ✅ |
+| **[Plan 2: God-Classes & Modularisierung](plan-architektur-refactoring-godclasses-modules.md)** | Refactoring von `GovernedSqlExecutionService`, DI Composition Root & Repositories | **AR-05, AR-06, AR-07, AR-11, AR-18** | Rev. 2 – umsetzungsreif ✅ |
+| **[Plan 3: Performance & Caching](plan-architektur-performance-caching-dialekte.md)** | Epochen-Pipelining, Bounded LRU Plan-Cache & Dialekt-Konsistenz | **AR-08, AR-09, AR-10, AR-13, AR-14, AR-15, AR-19** | Rev. 2 – umsetzungsreif ✅ |
+| **[Plan 4: Supply Chain, CI & Deploy](plan-security-supply-chain-ci-deploy.md)** | Container-Scanning (Trivy), Cosign-Signierung, Attestations & Root-Drop | **SC-01 bis SC-18** | Rev. 2 – umsetzungsreif ✅ |
+| **[Plan 5: PoC Arrow/OLAP & MCP Staging](plan-poc-arrow-olap-rebac-und-mcp-staging.md)** | ReBAC-Fallback für Arrow/OLAP, anonyme OAuth-Discovery & JSON-RPC-Batches | **Befunde 3.1 & 3.2** | Rev. 2 – umsetzungsreif ✅ |
+| **[Plan 6: Lückenloses Zugriffs-Audit](plan-lueckenloses-zugriffs-audit-by-default.md)** | „Audit by Default“ über alle Endpunkte & Middleware, Denial-Audit | **Lücken L-1 bis L-9 (Phasen 0 bis 7)** | Rev. 2 – umsetzungsreif ✅ |
+| **[Plan 7: WebSQL API Federation Join](plan-websql-heterogene-api-federation-join.md)** | Heterogene Joins zwischen SQL-Tabellen und Web-APIs via WebSQL & DuckDB Routing | **WebSQL Query Federation & API Joins** | Rev. 2 – umsetzungsreif ab Phase 0 ✅ |
+
+### 1.1 Entscheidungen aus dem Review (09.10.2026)
+
+Leitlinie: Laufzeit-Performance im Standardbetrieb darf nicht sinken; was nur mit Latenzkosten geht, ist per Option zuschaltbar (Default aus). Jeder Plan enthält dazu ein Benchmark-Abnahmekriterium (≤ +3 % auf dem Hot-Path).
+
+| Plan | Entscheidung |
+|---|---|
+| Plan 1 | AR-12 per Option A (zustandsloser Matcher), B nur als Fallback. Epoch/Generation lokal 1 s gehalten (`0` = strikt), später im MGET aus Plan 3 – kein Zusatz-Roundtrip. |
+| Plan 2 | ADR „Erlaubte Fremdabhängigkeiten“: Casbin.NET und HotChocolate.Language bleiben (Namespace-Whitelist), `DeclarativeHttpDataSourceExecutor` → Infrastructure, MemoryPack bleibt in Domain (arc42 4.1 korrigieren). |
+| Plan 3 | Micro-Cache Default aus; Spalten-Hash/Policy-Fingerprint vorberechnet bzw. wiederverwendet (keine Zusatzkosten je Request). |
+| Plan 4 | Action-SHAs per `git ls-remote` gesetzt (Stand 09.10.2026). `Gateway__DataMasking__HmacSecret` ist wirkungslos (kein Options-Property) → streichen; Key kommt aus `HMAC_SECRET_KEY`. Zwei Bench-Startpfade dokumentiert; `stage_sources.sh` baut aus fremdem Checkout (`/root/gql`) → Entfernung ist Voraussetzung für Phase 2. Secrets nur beim Start gelesen, keine Laufzeitkosten. |
+| Plan 5 | RFC 8414: Variante A – Endpunkt entfernt (`404`). JSON-RPC-Batches werden mit `-32600` abgelehnt. |
+| Plan 6 | Katalog-Audit verdichtet (Option `Full`); `SynchronousQueryAudit` Option, Default aus (fail-closed über Kanal-Annahme vor dem ersten Byte); Retention je Klasse mit Mindestwerten; regulatorische Pflichtereignisse fest aktiv; p95 Lesepfad ≤ 3 % / ≤ 0,5 ms. |
+| Plan 7 | Option `WebSqlOptions.CrossSource.Enabled` (Default `false`, Lazy-Routing ohne Zusatzkosten). Phase 0 (Ablehnung von HTTP/Plugin/Lakehouse-Tabellen im SQL-Pfad, heute fail-open) läuft **unbedingt** – Sicherheitsfix, reiner Enum-Vergleich. v1 ohne Bind-Joins, ohne Pagination, ohne Spill, ohne `ForwardBearerToken`-Quellen. HMAC-Joins über Quellen (E-5) vorbehaltlich Bestätigung Datenschutz. |
+
+Der frühere Umsetzungsplan zum Zugriffs-Audit ist in Plan 6 aufgegangen und entfernt.
 
 ---
 
@@ -45,9 +61,10 @@ flowchart TD
         SUPPLY["Plan 4: Supply-Chain, Cosign & Deploy-Härtung<br/>(SC-01..18)"]
     end
 
-    subgraph Egress["3. Egress- & Audit-Vollständigkeit (Plan 5 & 6)"]
+    subgraph Egress["3. Egress- & Audit-Vollständigkeit (Plan 5, 6 & 7)"]
         POC["Plan 5: PoC Arrow/OLAP & MCP Staging<br/>(3.1 & 3.2)"]
         AUDIT["Plan 6: Lückenloses Zugriffs-Audit<br/>(L-1..L-9, Phasen 0..7)"]
+        WEBSQL["Plan 7: WebSQL Cross-Source Join<br/>(Phase 0 = Sicherheitsfix, vorziehbar)"]
     end
 
     STATE --> MODULAR
@@ -56,6 +73,8 @@ flowchart TD
     MODULAR --> AUDIT
     PERF --> POC
     POC --> AUDIT
+    PERF --> WEBSQL
+    AUDIT --> WEBSQL
 ```
 
 ---

@@ -68,6 +68,7 @@ sequenceDiagram
   2. Hash der Katalog-Spaltenliste (`tableColumnsMap`, `:339,542`), da sie die `*`-Expansion / `EnforceCatalogProjection` steuert. Eine Spaltenänderung im Katalog darf keinen alten Plan treffen.
   3. Hash von `allowedFunctions` (`:707`) bzw. `AdditionalAllowedFunctions`, sofern der Rewriter sie nutzt.
   - Zusätzlich zum Hash-Vergleich wird beim Treffer neben `RawSql` auch ein `PolicyFingerprint`-String (kanonische Policy-Eingaben) per `string.Equals` verglichen, um 64-bit-Kollisionen über Policy-Kontexte hinweg auszuschließen (heute nur `RawSql`, `:63`). Leere `rawSql`-Überladungen (`:39-47`, `:80-89`) werden entfernt, da sie den Kollisionsschutz aushebeln.
+- **Performance-Leitplanke (Entscheidung 09.10.2026):** Die zusätzlichen Key-Bestandteile kosten keine Arbeit je Request: der Spalten-Hash wird beim Laden/Invalidieren des Katalogs je Tabelle vorberechnet und am Metadaten-Objekt gehalten; `PolicyFingerprint` ist derselbe kanonische String, aus dem heute schon `policyHash` gebildet wird (einmal bauen, für Hash und Vergleich wiederverwenden). Abnahme über `PlanCacheBenchmark`: Hit-Pfad ≤ +3 % Zeit und keine zusätzliche Allokation gegenüber dem Stand vor der Änderung.
 - **Metriken** (Prometheus-Stil wie `ConsentCacheService.cs:82-85`):
   - `autheris_plan_cache_hits_total`
   - `autheris_plan_cache_misses_total`

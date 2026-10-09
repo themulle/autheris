@@ -73,7 +73,7 @@ flowchart TD
 #### 3.2.1 Anonyme OAuth-Discovery-Endpunkte (nur öffentliche Metadaten)
 In `src/Autheris.Api/Endpoints/McpEndpoints.cs` und `src/Autheris.Api/Mcp/GatewayMcpOAuth.cs`:
 - **RFC 9728 (Pflicht laut MCP-Autorisierungsspezifikation):** `/.well-known/oauth-protected-resource` und `/.well-known/oauth-protected-resource/mcp` sind **immer** anonym erreichbar, sobald MCP-OAuth aktiv ist (auch in Produktion, unabhängig von `AllowAnonymousDiscovery`). Der `WWW-Authenticate`-Header der 401-Antwort verweist bereits darauf; ein geschütztes Metadaten-Dokument macht die Discovery unbrauchbar.
-- **RFC 8414:** Autheris ist **nicht** Authorization Server. `/.well-known/oauth-authorization-server` am Gateway ist nicht spezifikationskonform, wenn `issuer` (Entra/AD FS) nicht der abrufenden Origin entspricht (RFC 8414 §3.3). Variante A (empfohlen): Endpunkt entfernen bzw. auf `404` belassen – Clients holen AS-Metadaten beim Issuer (`authorization_servers` aus RFC 9728). Variante B (Kompatibilität für Clients, die den Pfad direkt anfragen): bleibt hinter `AllowAnonymousDiscovery`, liefert nur die **echten** Issuer-Endpunkte (keine aus String-Konkatenation erfundenen `/oauth2/v2.0/...`-Pfade für AD FS), `response_types_supported = ["code"]` (kein Implicit `token`), kein nicht-standardisiertes Feld `authorization_servers`.
+- **RFC 8414:** Autheris ist **nicht** Authorization Server. `/.well-known/oauth-authorization-server` am Gateway ist nicht spezifikationskonform, wenn `issuer` (Entra/AD FS) nicht der abrufenden Origin entspricht (RFC 8414 §3.3). **Entscheidung (09.10.2026): Variante A** – Endpunkt wird entfernt (`404`); Clients holen AS-Metadaten beim Issuer (`authorization_servers` aus RFC 9728). Begründung: spezifikationskonform, kleinste Angriffsfläche, kein Pflegeaufwand für IdP-spezifische Pfade. Verworfen: Variante B (bereinigter Endpunkt hinter `AllowAnonymousDiscovery`) – nur nachziehen, falls ein Pflicht-Client nachweislich ausschließlich den Gateway-Pfad abfragt (dann eigene Story mit echten Issuer-Endpunkten, `response_types_supported = ["code"]`, ohne `authorization_servers`).
 - `/.well-known/openid-configuration` wird **nicht** am Gateway registriert (gehört zum IdP).
 - Inhalt ausschließlich öffentlich: Issuer-URLs, Scopes, Bearer-Methoden, Ressourcenname. Keine Tenant-IDs anderer Mandanten, keine Client-IDs/Secrets, keine internen Hosts, keine Konfigurationsdetails. Antwort mit `Cache-Control: public, max-age=3600`, Rate-Limiting über die bestehende Anonymous-Policy.
 
@@ -98,7 +98,7 @@ In `src/Autheris.Api/Extensions/GatewayServiceCollectionExtensions.cs` (Policy-R
 ## 4. Phasenplan & Durchführung (TDD: Test rot → Implementierung → grün)
 
 0. **Phase 0 (Analyse):** Reproduktion von Befund 3.1 (Flight/OLAP-403 mit `Rebac.Enabled` und ohne Tupel) und Ursache des leeren Iceberg-Listings als fehlschlagende Integrationstests festhalten. Prüfen, wie das SDK 2.2.0 Batch-Arrays heute beantwortet.
-1. **Phase 1 (Discovery & CORS):** RFC-9728-Endpunkte immer anonym; Entscheidung A/B für RFC 8414; `McpDeveloperCors` inkl. Start-Validierung.
+1. **Phase 1 (Discovery & CORS):** RFC-9728-Endpunkte immer anonym; RFC 8414 entfernen (Variante A); `McpDeveloperCors` inkl. Start-Validierung.
 2. **Phase 2 (Batch-Ablehnung):** Spezifikationskonforme `-32600`-Antwort für Arrays.
 3. **Phase 3 (ReBAC-Hierarchie):** Parent-Objekt-IDs, Struktur-Tupel-Pflege, Tests für Flight/OLAP/Iceberg.
 4. **Phase 4 (Abnahme):** `verify-autheris.sh` des PoC (Repo `POC_Backstage_citizen_dev`) um Fälle zu 3.1/3.2 erweitern und gegen das Image laufen lassen.
@@ -111,7 +111,7 @@ In `src/Autheris.Api/Extensions/GatewayServiceCollectionExtensions.cs` (Policy-R
 - [ ] `GET /.well-known/oauth-protected-resource/mcp` ohne Auth in `Production` (mit `AllowAnonymousDiscovery = false`) → `200`, `resource` endet auf `/mcp`, `authorization_servers` enthält den konfigurierten Issuer.
 - [ ] Antwort enthält nur die Felder `resource`, `authorization_servers`, `scopes_supported`, `bearer_methods_supported`, `resource_name` (Allowlist-Assertion; keine Secrets/Client-IDs).
 - [ ] `401` von `POST /mcp` enthält `WWW-Authenticate` mit `resource_metadata=` (bestehender Test bleibt grün).
-- [ ] Variante A: `GET /.well-known/oauth-authorization-server` → `404`. Variante B: `issuer` ist gesetzt, `response_types_supported == ["code"]`, kein Feld `authorization_servers`.
+- [ ] `GET /.well-known/oauth-authorization-server` → `404` (Variante A).
 - [ ] `GET /.well-known/openid-configuration` am Gateway → `404`.
 
 **Batching (Integration):**

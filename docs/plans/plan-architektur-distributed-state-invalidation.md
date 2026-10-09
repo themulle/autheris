@@ -97,6 +97,8 @@ public interface IAccessProfileCache
 - **Single-Node ohne Cluster-Store:** `InMemoryClusterStateProvider` liefert den Epoch lokal; gleiches Verhalten, ohne Netzwerk.
 - **Endpoints:** `InvalidateTenantAsync` wird **nach** dem DB-Commit aufgerufen; scheitert der Epoch-Bump, antwortet der Endpoint mit `503` und schreibt ein Audit-Event (`PROFILE_INVALIDATION_FAILED`). Die DB-Änderung bleibt bestehen; Peers sind über den nicht lesbaren/unveränderten Epoch höchstens bis zum L1-TTL stale → deshalb zusätzlich: bei fehlgeschlagenem Bump lokales L1 vollständig leeren und den Tenant für `≤ TTL` als „non-authoritative“ markieren (L1-Bypass auf diesem Knoten).
 
+- **Performance-Leitplanke (Entscheidung 09.10.2026):** Kein zusätzlicher Netzwerk-Roundtrip je Request im Normalbetrieb. `profile_epoch:{tenant}` und `rebac:generation:{tenant}` werden mit dem lokalen Fenster `AccessProfileEpochCacheMilliseconds` bzw. `Rebac.GenerationCacheMilliseconds` (Default je 1000, Range 0–5000; `0` = strikt je Request) gehalten und – sobald Plan 3 §2.1 umgesetzt ist – im selben `MGET` wie die Tabellen-Epochen gelesen. Abnahme: Benchmark `DecideAsync` (Cache-Hit) ≤ +3 % gegenüber heute bei Default-Konfiguration.
+
 ### 3.2 AR-02: Awaited ReBAC-Invalidierung mit Generation-Validierung
 
 - `IRebacEvaluator.InvalidateTenantCache(string)` → `Task InvalidateTenantCacheAsync(string tenantId, CancellationToken ct = default)` (Tenant-Typ bleibt `string`, da `RebacTuple.TenantId` string ist; Umstellung auf `TenantId` ist nicht Teil dieses Plans). Aufrufer `RebacEndpoints.cs:102,144` und Tests (`RebacClusterInvalidationTests`, `RebacCacheGenerationTests`, `RebacZanzibarTests`) werden angepasst.
@@ -152,7 +154,7 @@ Snapshot-Publikation (`Volatile.Read`/`Interlocked.Exchange`) ist **bereits umge
 1. **Phase 1 (AR-01):** `IAccessProfileCache` + `InMemory`/Cluster-Epoch, Entfernung aller statischen Member in `TableAccessPolicy`, Endpoint-Umstellung inkl. 503/Audit, Epoch ohne TTL.
 2. **Phase 2 (AR-02 + AR-03):** Async-Invalidierung, Generation-Pull-Validierung im ReBAC-Decision-Cache, Degraded-State, `ConnectionRestored` für Profile, Drop-Metrik/Routing im In-Process-Bus, `IEventBus`-Doku.
 3. **Phase 3 (AR-04):** `TryConsumeBudgetAsync` (Lua + InMemory), DP-Engine-Umstellung fail-closed, FinOps-Hard-Limit fail-closed, ADR-017-Status.
-4. **Phase 4 (AR-12):** Entfernung `lock (enforcer)` per Option A (Fallback B).
+4. **Phase 4 (AR-12):** Entfernung `lock (enforcer)` per **Option A (entschieden 09.10.2026**; Option B nur, falls der Property-Test keine Ergebnisgleichheit erreicht).
 5. Phasen sind unabhängig voneinander mergebar; Phase 2 hängt nur am Pattern aus Phase 1 (Epoch-Pull), nicht am Code.
 
 **Rollout:** Epoch-Keying ändert nur L1-Schlüssel (kein persistierter Zustand) → kein Migrationsschritt. DP-Budgets starten nach Deploy mit leerem Tageszähler (dokumentieren; optional Seed aus lokalem Stand verwerfen). Mixed-Version-Cluster während Rolling-Update: alte Knoten ignorieren `profile_epoch` → Rolling-Update-Fenster ≤ 5 min Stale-Risiko, im Release-Hinweis nennen.
