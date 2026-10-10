@@ -274,8 +274,8 @@ The profile response echoes `strategy`, `pushdown_format` and `max_pushdown_keys
 
 A request that violates one of these rules answers HTTP 400 and stores nothing; a file repository sync with such a binding is rejected as a whole:
 
-- An unknown `strategy` or `pushdown_format` value.
-- `max_pushdown_keys` outside `1..1000`, or above the gateway-wide `VirtualFilters:Federation:MaxPushdownKeys`: error code `VF_PUSHDOWN_KEY_BUDGET_INVALID`.
+- An unknown `strategy`, `pushdown_format` or `uncovered` value. Values must match exactly (snake_case, lower case, as listed above); other cases, names without underscores and numbers are rejected: error code `VF_BINDING_INVALID`.
+- `max_pushdown_keys` outside `1..1000`, or an explicitly sent value above the gateway-wide `Gateway:VirtualFilters:Federation:MaxPushdownKeys`: error code `VF_PUSHDOWN_KEY_BUDGET_INVALID`. A binding that omits `max_pushdown_keys` keeps the default `100` and is not checked against the gateway-wide limit; at query time the effective budget is the lower of the two.
 - A `pushdown_format` that no endpoint can satisfy (`repeated_param`, `odata_in`), or, when `target` is an exact `source.schema.table` name of a catalog table with an `HttpEndpointDescriptor`, one that the endpoint's capability cannot satisfy (`comma_separated` needs a query-parameter list, `post_batch` a JSON array body; a path lookup satisfies none): error code `VF_PUSHDOWN_FORMAT_UNSUPPORTED`. The check uses the same capability logic as the planner. For a glob or regex target the endpoints are not known at write time, so the planner decides per table at query time (`format_unsupported`: Tier 3, or a denial for `PushdownOnly`).
 
 The error body is `{ "error": "...", "code": "VF_..." }`.
@@ -407,7 +407,7 @@ Tier 3 semi-join over 50,000 upstream rows against 10,000 authorized keys, half 
 - A path-template endpoint is only read through the path lookup: a full read is denied (`VF_PATH_TEMPLATE_UNFILLABLE`).
 - A 404 for a key is treated as "key not present"; a misconfigured base path that answers 404 yields an empty result (visible as `upstreamKeysNotFound` in the audit).
 - A revoked key stays authorized for up to `KeyCacheTtlSeconds`.
-- Bindings are checked against the catalog and the endpoint at query time (`VF_BINDING_MISCONFIGURED`), not when the profile is written.
+- A binding whose `target` is an exact `source.schema.table` name is checked against the catalog table's endpoint capability when the profile is written (`pushdown_format`, error code `VF_PUSHDOWN_FORMAT_UNSUPPORTED`). A glob or regex `target` can match many endpoints, so it is checked at query time (`VF_BINDING_MISCONFIGURED`, `format_unsupported`), not when the profile is written. `max_pushdown_keys` is checked at write time for every binding that sets it, against `1..1000` and the gateway-wide `Gateway:VirtualFilters:Federation:MaxPushdownKeys`.
 - Metrics per tier are not exported; the audit records carry the tier and the denial code.
 - Upstream rows count against `MaxStagedRowsPerTable` before the semi-join, so a large API without a pushdown capability can exceed the budget.
 - A `NULL` or unconvertible key in the key source is dropped (counted in `droppedKeys`) and never authorizes a row.
