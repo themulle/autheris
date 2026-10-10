@@ -36,6 +36,17 @@ public static class DatabaseDialectExtensions
         };
     }
 
+    /// <summary>
+    /// Parameter marker in SQL text. Oracle uses <c>:name</c>; the other dialects use <c>@name</c>. Hard-coded <c>@</c> markers
+    /// are forbidden on governed paths (SEC-ADG-03): ODP.NET would not even recognize them.
+    /// </summary>
+    public static string FormatParameterMarker(this DatabaseDialect dialect, string name) =>
+        dialect == DatabaseDialect.Oracle ? ":" + name : "@" + name;
+
+    /// <summary>Provider-side parameter name matching <see cref="FormatParameterMarker"/> (Oracle has no prefix).</summary>
+    public static string FormatParameterName(this DatabaseDialect dialect, string name) =>
+        dialect == DatabaseDialect.Oracle ? name : "@" + name;
+
     public static string QuoteQualifiedColumn(this DatabaseDialect dialect, string qualifiedColumn)
     {
         if (string.IsNullOrWhiteSpace(qualifiedColumn))

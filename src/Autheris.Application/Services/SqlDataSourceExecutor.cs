@@ -15,6 +15,9 @@ namespace Autheris.Application.Services;
 
 public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 {
+    private const string PaginationLimitName = "gql_limit";
+    private const string PaginationOffsetName = "gql_offset";
+
     private readonly ISqlConnectionFactory? _connectionFactory;
     private readonly IOptions<GatewayOptions>? _options;
     private readonly ILogger<SqlDataSourceExecutor>? _logger;
@@ -131,6 +134,11 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandTimeout = Math.Max(1, connOptions.CommandTimeoutSeconds);
+        if (dialect == DatabaseDialect.Oracle)
+        {
+            // SEC-ADG-03: ODP.NET binds by position unless BindByName is set; every marker below is also dialect-aware.
+            Autheris.Application.Sql.OracleBindByName.Enable(command);
+        }
 
         // 1. Column Projections (Zero-Trust: Only authorized requested fields + dialect-specific special type mapping)
         var columnsToSelect = (context.RequestedFields != null && context.RequestedFields.Count > 0)
@@ -206,10 +214,11 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             _options?.Value?.DataSources?.TenantColumnExemptTables);
         if (tenantColumn != null)
         {
-            var pTenant = $"@p_tenant_{paramIndex++}";
+            var tenantParamName = $"p_tenant_{paramIndex++}";
+            var pTenant = dialect.FormatParameterMarker(tenantParamName);
             whereParts.Add($"{dialect.QuoteIdentifier(tenantColumn)} = {pTenant}");
             var tp = command.CreateParameter();
-            tp.ParameterName = pTenant;
+            tp.ParameterName = dialect.FormatParameterName(tenantParamName);
             tp.Value = tenantVal;
             command.Parameters.Add(tp);
         }
@@ -217,14 +226,23 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {
             Autheris.Application.Sql.SqlSecurityValidator.ValidateRowFilter(context.AccessDecision);
-            whereParts.Add($"({context.AccessDecision.CombinedRowFilterSql})");
+            var rowFilterSql = context.AccessDecision.CombinedRowFilterSql;
+            if (dialect == DatabaseDialect.Oracle)
+            {
+                // The producers render @name markers; Oracle only knows :name (and is bound by name).
+                var rowFilterNames = (context.AccessDecision.RowFilterParameters?.Keys ?? Enumerable.Empty<string>())
+                    .Select(k => k.TrimStart('@', ':')).ToHashSet(StringComparer.Ordinal);
+                rowFilterSql = Autheris.Application.Sql.OracleBindByName.RewriteMarkers(rowFilterSql, rowFilterNames);
+            }
+
+            whereParts.Add($"({rowFilterSql})");
 
             if (context.AccessDecision.RowFilterParameters != null)
             {
                 foreach (var (pName, pVal) in context.AccessDecision.RowFilterParameters)
                 {
                     var p = command.CreateParameter();
-                    p.ParameterName = pName;
+                    p.ParameterName = dialect.FormatParameterName(pName.TrimStart('@', ':'));
                     p.Value = pVal ?? DBNull.Value;
                     command.Parameters.Add(p);
                 }
@@ -249,11 +267,11 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                     throw new SecurityException($"Zero-Trust violation: Filtering on column '{matchingCol.ColumnName}' in table '{metadata.Identifier}' is not permitted (access level: {access}).");
                 }
 
-                var paramName = $"@p{paramIndex++}";
-                whereParts.Add($"{dialect.QuoteIdentifier(matchingCol.ColumnName)} = {paramName}");
+                var argParamName = $"p{paramIndex++}";
+                whereParts.Add($"{dialect.QuoteIdentifier(matchingCol.ColumnName)} = {dialect.FormatParameterMarker(argParamName)}");
 
                 var p = command.CreateParameter();
-                p.ParameterName = paramName;
+                p.ParameterName = dialect.FormatParameterName(argParamName);
                 p.Value = argVal;
                 command.Parameters.Add(p);
             }
@@ -276,12 +294,18 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             }
 
             var filterPredicate = filterClause.GetSqlPredicate(dialect);
+            if (dialect == DatabaseDialect.Oracle)
+            {
+                filterPredicate = Autheris.Application.Sql.OracleBindByName.RewriteMarkers(
+                    filterPredicate, filterClause.Parameters.Keys.Select(k => k.TrimStart('@', ':')).ToHashSet(StringComparer.Ordinal));
+            }
+
             whereParts.Add($"({filterPredicate})");
 
             foreach (var (pName, pVal) in filterClause.Parameters)
             {
                 var p = command.CreateParameter();
-                p.ParameterName = pName;
+                p.ParameterName = dialect.FormatParameterName(pName.TrimStart('@', ':'));
                 p.Value = pVal ?? DBNull.Value;
                 command.Parameters.Add(p);
             }
@@ -302,15 +326,29 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         var limit = Math.Max(1, context.Limit);
         var offset = Math.Max(0, context.Offset);
 
-        var limitParam = command.CreateParameter();
-        limitParam.ParameterName = "@gql_limit";
-        limitParam.Value = limit;
-        command.Parameters.Add(limitParam);
+        var limitMarker = dialect.FormatParameterMarker(PaginationLimitName);
+        var offsetMarker = dialect.FormatParameterMarker(PaginationOffsetName);
 
-        var offsetParam = command.CreateParameter();
-        offsetParam.ParameterName = "@gql_offset";
-        offsetParam.Value = offset;
-        command.Parameters.Add(offsetParam);
+        // Parameters are added in the order their markers appear in the statement text (SQL Server and Oracle: OFFSET first,
+        // SQLite and PostgreSQL: LIMIT first). Oracle is additionally bound by name.
+        void AddPaginationParameter(string logicalName, int value)
+        {
+            var pagination = command.CreateParameter();
+            pagination.ParameterName = dialect.FormatParameterName(logicalName);
+            pagination.Value = value;
+            command.Parameters.Add(pagination);
+        }
+
+        if (dialect is DatabaseDialect.SqlServer or DatabaseDialect.Oracle)
+        {
+            AddPaginationParameter(PaginationOffsetName, offset);
+            AddPaginationParameter(PaginationLimitName, limit);
+        }
+        else
+        {
+            AddPaginationParameter(PaginationLimitName, limit);
+            AddPaginationParameter(PaginationOffsetName, offset);
+        }
 
         switch (dialect)
         {
@@ -321,7 +359,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 var pkCol = metadata.PrimaryKeyColumns.FirstOrDefault(pk => metadata.HasColumn(pk));
                 var orderCol = pkCol ?? metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, "id", StringComparison.OrdinalIgnoreCase))?.ColumnName;
                 var orderClause = requestedOrder ?? (orderCol != null ? dialect.QuoteIdentifier(orderCol) : "(SELECT 1)");
-                sqlBuilder.Append($" ORDER BY {orderClause} OFFSET @gql_offset ROWS FETCH NEXT @gql_limit ROWS ONLY");
+                sqlBuilder.Append($" ORDER BY {orderClause} OFFSET {offsetMarker} ROWS FETCH NEXT {limitMarker} ROWS ONLY");
                 break;
 
             case DatabaseDialect.Oracle:
@@ -329,7 +367,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 {
                     sqlBuilder.Append($" ORDER BY {requestedOrder}");
                 }
-                sqlBuilder.Append(" OFFSET @gql_offset ROWS FETCH NEXT @gql_limit ROWS ONLY");
+                sqlBuilder.Append($" OFFSET {offsetMarker} ROWS FETCH NEXT {limitMarker} ROWS ONLY");
                 break;
 
             case DatabaseDialect.Sqlite:
@@ -339,7 +377,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 {
                     sqlBuilder.Append($" ORDER BY {requestedOrder}");
                 }
-                sqlBuilder.Append(" LIMIT @gql_limit OFFSET @gql_offset");
+                sqlBuilder.Append($" LIMIT {limitMarker} OFFSET {offsetMarker}");
                 break;
         }
 
@@ -389,10 +427,15 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 await using var countCommand = connection.CreateCommand();
                 countCommand.CommandTimeout = command.CommandTimeout;
                 countCommand.Transaction = tx;
+                if (dialect == DatabaseDialect.Oracle)
+                {
+                    Autheris.Application.Sql.OracleBindByName.Enable(countCommand);
+                }
+
                 countCommand.CommandText = $"SELECT COUNT(*){fromClause}{whereClause}";
                 foreach (DbParameter parameter in command.Parameters)
                 {
-                    if (parameter.ParameterName is "@gql_limit" or "@gql_offset")
+                    if (parameter.ParameterName.TrimStart('@', ':') is PaginationLimitName or PaginationOffsetName)
                     {
                         continue;
                     }

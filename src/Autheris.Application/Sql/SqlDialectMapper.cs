@@ -38,5 +38,5 @@ public static class SqlDialectMapper
     };
 
     public static bool IsExecutable(DatabaseDialect dialect) =>
-        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite;
+        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite or DatabaseDialect.Oracle;
 }

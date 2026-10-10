@@ -4,11 +4,26 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Hosting;
+using Oracle.ManagedDataAccess.Client;
 
 namespace Autheris.Infrastructure.Persistence;
 
 public sealed class SqlConnectionFactory : ISqlConnectionFactory
 {
+    private readonly bool _requireOracleTcps;
+
+    public SqlConnectionFactory()
+        : this(null)
+    {
+    }
+
+    /// <summary>Oracle connections must use TCPS everywhere except in Development.</summary>
+    public SqlConnectionFactory(IHostEnvironment? environment)
+    {
+        _requireOracleTcps = environment is null || !environment.IsDevelopment();
+    }
+
     /// <summary>RR-L5-01: Session settings required by the literal escaping in <c>DatabaseDialect.EscapeSqlLiteral</c>.</summary>
     public const string PostgreSqlSessionInitializationSql = "SET standard_conforming_strings = on";
 
@@ -28,12 +43,19 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             throw UnsupportedProvider(options.Provider);
         }
 
-        // Architecture 5: Oracle and Databricks are dialects without a driver here.
+        if (dialect == DatabaseDialect.Oracle)
+        {
+            // WP-F1: validated before any network traffic.
+            OracleConnectionStringPolicy.Validate(options.ConnectionString, _requireOracleTcps);
+        }
+
+        // Architecture 5: Databricks is a dialect without a driver here.
         DbConnection connection = dialect switch
         {
             DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),
             DatabaseDialect.SqlServer => new SqlConnection(options.ConnectionString),
             DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(options.ConnectionString),
+            DatabaseDialect.Oracle => new OracleConnection(options.ConnectionString),
             _ => throw UnsupportedProvider(options.Provider)
         };
 
@@ -49,6 +71,14 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
                 await using var initCmd = pgConn.CreateCommand();
                 initCmd.CommandText = PostgreSqlSessionInitializationSql;
                 await initCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            if (connection is OracleConnection)
+            {
+                // WP-F2: pinned and verified on every pool rental, so one tenant's session state never reaches another.
+                await using var pinCmd = connection.CreateCommand();
+                pinCmd.CommandText = OracleSessionInitialization.PinAndVerifyBlock;
+                await pinCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
             if (options.ReadUncommitted && connection is SqlConnection)

@@ -197,6 +197,13 @@ public sealed class SqlDataMaskingProvider
             return null;
         }
 
+        if (dialect == DatabaseDialect.Oracle)
+        {
+            // SEC-ADG-15: no in-database HMAC on Oracle without a DBMS_CRYPTO grant; the column is redacted (fail closed), never
+            // rendered through the SQLite UDF.
+            return null;
+        }
+
         var masterKey = GetMasterHmacKey();
         if (masterKey == null)
         {
@@ -227,23 +234,27 @@ public sealed class SqlDataMaskingProvider
                     outerPad[i] = (byte)(keyBytes[i] ^ 0x5c);
                 }
 
-                internalParameters["@" + paramBase + "_i"] = innerPad;
-                internalParameters["@" + paramBase + "_o"] = outerPad;
+                internalParameters[dialect.FormatParameterMarker(paramBase + "_i")] = innerPad;
+                internalParameters[dialect.FormatParameterMarker(paramBase + "_o")] = outerPad;
             }
             else
             {
-                internalParameters["@" + paramBase] = hexKey;
+                internalParameters[dialect.FormatParameterMarker(paramBase)] = hexKey;
             }
         }
 
+        var keyMarker = dialect.FormatParameterMarker(paramBase);
+        var outerMarker = dialect.FormatParameterMarker(paramBase + "_o");
+        var innerMarker = dialect.FormatParameterMarker(paramBase + "_i");
         return dialect switch
         {
             DatabaseDialect.PostgreSql =>
-                $"ENCODE(HMAC(CAST(\"{columnName.Replace("\"", "\"\"")}\" AS TEXT), CAST(@{paramBase} AS TEXT), 'sha256'), 'hex')",
+                $"ENCODE(HMAC(CAST(\"{columnName.Replace("\"", "\"\"")}\" AS TEXT), CAST({keyMarker} AS TEXT), 'sha256'), 'hex')",
             DatabaseDialect.SqlServer =>
-                $"CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', @{paramBase}_o + HASHBYTES('SHA2_256', @{paramBase}_i + CAST(CAST([{columnName.Replace("]", "]]")}] AS NVARCHAR(MAX)) AS VARBINARY(MAX)))), 2)",
-            _ =>
-                $"gateway_hmac_sha256(CAST(\"{columnName.Replace("\"", "\"\"")}\" AS TEXT), @{paramBase})"
+                $"CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', {outerMarker} + HASHBYTES('SHA2_256', {innerMarker} + CAST(CAST([{columnName.Replace("]", "]]")}] AS NVARCHAR(MAX)) AS VARBINARY(MAX)))), 2)",
+            DatabaseDialect.Sqlite =>
+                $"gateway_hmac_sha256(CAST(\"{columnName.Replace("\"", "\"\"")}\" AS TEXT), {keyMarker})",
+            _ => null
         };
     }
 

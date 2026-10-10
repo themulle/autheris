@@ -895,6 +895,16 @@
           "OpenTelemetry.Api": "1.19.1"
         }
       },
+      "Oracle.ManagedDataAccess.Core": {
+        "type": "Transitive",
+        "resolved": "23.26.301",
+        "contentHash": "hhl6m5sam9vWNXt4Xad+bAcB+VBMBxya16/P+R3xRMKzNVl/6ssF6HuNZNeofD+5qDaTRqhWbKjdFn65rD5KYw==",
+        "dependencies": {
+          "System.Diagnostics.PerformanceCounter": "8.0.0",
+          "System.DirectoryServices.Protocols": "8.0.2",
+          "System.Security.Cryptography.Pkcs": "8.0.1"
+        }
+      },
       "Parquet.Net": {
         "type": "Transitive",
         "resolved": "6.1.0",
@@ -1042,6 +1052,14 @@
           "System.Security.Cryptography.ProtectedData": "9.0.18"
         }
       },
+      "System.Diagnostics.PerformanceCounter": {
+        "type": "Transitive",
+        "resolved": "8.0.0",
+        "contentHash": "lX6DXxtJqVGWw7N/QmVoiCyVQ+Q/Xp+jVXPr3gLK1jJExSn1qmAjJQeb8gnOYeeBTG3E3PmG1nu92eYj/TEjpg==",
+        "dependencies": {
+          "System.Configuration.ConfigurationManager": "8.0.0"
+        }
+      },
       "System.DirectoryServices.Protocols": {
         "type": "Transitive",
         "resolved": "10.0.12",
@@ -1151,6 +1169,7 @@
           "Microsoft.Garnet": "[2.2.0, )",
           "Npgsql": "[10.0.3, )",
           "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.19.1, )",
+          "Oracle.ManagedDataAccess.Core": "[23.26.301, )",
           "StackExchange.Redis": "[3.3.1, )",
           "System.Numerics.Tensors": "[10.0.12, )",
           "prometheus-net": "[8.2.1, )"

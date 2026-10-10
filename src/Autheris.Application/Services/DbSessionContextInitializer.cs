@@ -89,6 +89,12 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
             return null;
         }
 
+        if (dialect == DatabaseDialect.Oracle)
+        {
+            await ExecuteOracleInitAsync(connection, tx: null, ct).ConfigureAwait(false);
+            return null;
+        }
+
         if (HasNoSessionState(dialect))
         {
             return null;
@@ -116,6 +122,10 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
         else if (dialect == DatabaseDialect.SqlServer)
         {
             await ExecuteSqlServerInitAsync(connection, tx, tenantId, userSid, purpose, ct).ConfigureAwait(false);
+        }
+        else if (dialect == DatabaseDialect.Oracle)
+        {
+            await ExecuteOracleInitAsync(connection, tx, ct).ConfigureAwait(false);
         }
         else if (!HasNoSessionState(dialect))
         {
@@ -158,6 +168,21 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
         AddParameter(cmd, "@tenant", tenantId.Value);
         AddParameter(cmd, "@sid", userSid ?? string.Empty);
         AddParameter(cmd, "@purpose", purpose ?? string.Empty);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// WP-F2: client identifier and module for the Oracle session. The identifier is an opaque correlation id (never the tenant
+    /// id in clear); NLS semantics are pinned and verified by the connection factory on every pool rental. Only bound values.
+    /// </summary>
+    private static async Task ExecuteOracleInitAsync(DbConnection connection, DbTransaction? tx, CancellationToken ct)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "BEGIN DBMS_SESSION.SET_IDENTIFIER(:corr); DBMS_APPLICATION_INFO.SET_MODULE(:module, NULL); END;";
+        Autheris.Application.Sql.OracleBindByName.Enable(cmd);
+        AddParameter(cmd, "corr", Guid.NewGuid().ToString("N"));
+        AddParameter(cmd, "module", "autheris");
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 

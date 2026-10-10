@@ -35,7 +35,6 @@ public sealed class FailClosedDialectDefaultsTests
     [Theory]
     [InlineData((DatabaseDialect)0)]
     [InlineData((DatabaseDialect)99)]
-    [InlineData(DatabaseDialect.Oracle)] // no session initialization until WP-F2: fail closed
     public async Task DbSessionContextInitializer_UnknownDialect_Throws(DatabaseDialect dialect)
     {
         var sut = new DbSessionContextInitializer();
