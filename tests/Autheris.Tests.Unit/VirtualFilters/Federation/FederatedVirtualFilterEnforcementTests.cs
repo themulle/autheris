@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.VirtualFilters.Federation;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Security.Claims;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -250,5 +251,70 @@ public sealed class FederatedVirtualFilterEnforcementTests
 
         (await Ids(pipeline, Join)).ShouldBe(["1", "3"]);
         pipeline.KeySetProvider.CalledFilters.ShouldBe(["vf_customers"]);
+    }
+
+    // ----- WI-11: consent bypass without consent services still resolves Virtual Filters (SEC-19, ST-36) -----
+
+    private static ClaimsPrincipal UserWithoutSid() =>
+        new(new ClaimsIdentity([new Claim(ClaimTypes.Name, "nobody"), new Claim("tenant_id", Tenant.Value)], "Test"));
+
+    private static (StubTableConnector Crm, FederatedServiceHarness.Pipeline Pipeline) BypassSetup(
+        IMandatoryRowFilterResolver? resolver = null, VirtualFilterSnapshot? snapshot = null)
+    {
+        var crm = new StubTableConnector("crm_api",
+            [Row(("id", "1"), ("name", "A"), ("status", "OPEN")), Row(("id", "2"), ("name", "B"), ("status", "OPEN")), Row(("id", "3"), ("name", "C"), ("status", "OPEN"))]);
+        var erp = new StubTableConnector("erp", [Row(("id", "10"), ("customer_id", "1")), Row(("id", "11"), ("customer_id", "2")), Row(("id", "12"), ("customer_id", "3"))]);
+        var provider = new FakeKeySetProvider().With("vf_customers", ["1"], ["3"]);
+        var pipeline = Build(
+            [(Crm, crm), (Erp, erp)],
+            consents: null,
+            snapshot ?? AliceSnapshot("crm_api.*.*", "crm_api.public.customers"),
+            provider,
+            consentBypass: true,
+            resolverOverride: resolver);
+        return (crm, pipeline);
+    }
+
+    [Fact]
+    public async Task ConsentBypassWithoutConsentServices_VirtualFilterStillApplied()
+    {
+        var (crm, pipeline) = BypassSetup();
+
+        (await Ids(pipeline, Join)).ShouldBe(["1", "3"]);
+        crm.UpstreamCalls.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ConsentBypassWithoutConsentServices_ResolverDenies_QueryDenied()
+    {
+        var resolver = Substitute.For<IMandatoryRowFilterResolver>();
+        resolver.ResolveAsync(Arg.Any<MandatoryFilterQuery>(), Arg.Any<CancellationToken>())
+            .Returns(ValueTask.FromResult(MandatoryFilterOutcome.Deny("VF_BINDING_MISCONFIGURED: bad binding")));
+        resolver.HasActiveProfilesAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>()).Returns(ValueTask.FromResult(true));
+        var (crm, pipeline) = BypassSetup(resolver);
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => pipeline.RunAsync(Join));
+
+        ex.ErrorCode.ShouldBe("VF_BINDING_MISCONFIGURED");
+        crm.UpstreamCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ConsentBypass_CallerWithoutSid_AndAnActiveProfile_IsDeniedEnforcementUnavailable()
+    {
+        var (crm, pipeline) = BypassSetup();
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => pipeline.RunAsAsync(UserWithoutSid(), Join));
+
+        ex.ErrorCode.ShouldBe("VF_ENFORCEMENT_UNAVAILABLE");
+        crm.UpstreamCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ConsentBypass_CallerWithoutSid_AndNoProfile_IsNotDeniedByVirtualFilters()
+    {
+        var (_, pipeline) = BypassSetup(snapshot: new VirtualFilterSnapshot(1, [], []));
+
+        (await pipeline.RunAsAsync(UserWithoutSid(), "SELECT o.id FROM erp.public.orders o JOIN crm_api.public.customers c ON o.customer_id = c.id")).Rows.Count.ShouldBe(3);
     }
 }

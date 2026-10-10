@@ -87,20 +87,24 @@ internal static class FederatedServiceHarness
 
         public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> RunAsync(string sql) => (await RunFullAsync(sql)).Rows;
 
-        public Task<GovernedSqlResult> RunFullAsync(string sql) =>
-            Service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql, Transport: "WebSql"), User(AliceSid), Tenant);
+        public Task<GovernedSqlResult> RunFullAsync(string sql) => RunAsAsync(User(AliceSid), sql);
+
+        public Task<GovernedSqlResult> RunAsAsync(System.Security.Claims.ClaimsPrincipal user, string sql) =>
+            Service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql, Transport: "WebSql"), user, Tenant);
     }
 
     internal static Pipeline Build(
         IReadOnlyList<(TableMetadata Table, StubTableConnector Stub)> tables,
-        IConsentRepository consents,
+        IConsentRepository? consents,
         VirtualFilterSnapshot? snapshot = null,
         FakeKeySetProvider? keySets = null,
         bool withPlanner = true,
         int? timeoutSeconds = null,
         int? maxStagedRowsPerTable = null,
         VirtualFilterFederationOptions? federation = null,
-        List<(LogLevel Level, string Message)>? logs = null)
+        List<(LogLevel Level, string Message)>? logs = null,
+        bool consentBypass = false,
+        IMandatoryRowFilterResolver? resolverOverride = null)
     {
         var repository = Substitute.For<ITableMetadataRepository>();
         foreach (var (table, _) in tables)
@@ -118,7 +122,8 @@ internal static class FederatedServiceHarness
                 CrossSource = new CrossSourceOptions { Enabled = true, AllowedTransports = ["WebSql"], TimeoutSeconds = timeoutSeconds ?? 0, MaxStagedRowsPerTable = maxStagedRowsPerTable ?? 0 }
             },
             DuckDbOlap = new DuckDbOlapOptions { Enabled = true, MaxMemory = "256MB", MaxTempDirectorySize = "0B" },
-            VirtualFilters = new VirtualFilterOptions { Federation = federation ?? new VirtualFilterFederationOptions() }
+            VirtualFilters = new VirtualFilterOptions { Federation = federation ?? new VirtualFilterFederationOptions() },
+            Insecure = new InsecureGettingStartedOptions { danger_bypass_consent_checks = consentBypass }
         };
 
         var resolver = new MandatoryRowFilterResolver(
@@ -136,9 +141,9 @@ internal static class FederatedServiceHarness
             Staging(StubRegistry.For(tables.ToArray()), options, audit, logs == null ? null : new ListLogger<FederatedStagingService>(logs)),
             new DuckDbOlapEngine(options.DuckDbOlap, NullLogger<DuckDbOlapEngine>.Instance),
             sqlEngine: FastSqlEngine.Default,
-            consentResolution: new ConsentResolutionService(),
+            consentResolution: consents == null ? null : new ConsentResolutionService(),
             consentRepository: consents,
-            mandatoryFilters: resolver,
+            mandatoryFilters: resolverOverride ?? resolver,
             logger: logs == null ? null : new ListLogger<FederatedDuckDbExecutionService>(logs),
             vfPlanner: withPlanner ? new VirtualFilterFederationPlanner(keySetProvider, Options.Create(options)) : null);
 

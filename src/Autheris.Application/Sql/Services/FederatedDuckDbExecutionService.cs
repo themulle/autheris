@@ -388,6 +388,16 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
 
         var userSid = userSidNullable ?? new Sid("anonymous");
+        if (userSidNullable == null && _mandatoryFilters != null &&
+            await _mandatoryFilters.HasActiveProfilesAsync(tenantId, ct).ConfigureAwait(false))
+        {
+            // SEC-19: under the consent bypass the identity is synthetic and matches no grantee; Virtual Filters of the
+            // tenant cannot be applied, so the query is denied instead of running unfiltered.
+            throw new GatewaySecurityException(
+                "Virtual Filters are configured for this tenant but the caller has no subject identity.",
+                VirtualFilterErrorCodes.EnforcementUnavailable);
+        }
+
         var groupSids = user.GetGroupSids();
         var roles = user.GetUserRoles();
         var clientIp = ResolveClientIp(user);
@@ -419,7 +429,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
             var colList = resolved.Metadata.Columns.Select(c => c.ColumnName).ToList();
             var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
-                ? TableAccessDecision.Allowed(resolved.ResolvedIdentifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
+                ? await WithVirtualFiltersAsync(
+                    TableAccessDecision.Allowed(resolved.ResolvedIdentifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true),
+                    new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, groupSids, roles, tenantId, resolved.Metadata),
+                    ct).ConfigureAwait(false)
                 : await AccessPolicy().DecideAsync(
                     new TableAccessQuery(userSid, tenantId, groupSids, roles, resolved.Metadata, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute),
                     ct).ConfigureAwait(false);
@@ -456,6 +469,25 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
 
         return (decisions, userSid);
+    }
+
+    /// <summary>
+    /// Virtual Filters also apply under the consent bypass without consent services, where <c>TableAccessPolicy</c> is
+    /// not used (same rule as the procedure channel): a deny stays a deny, a predicate with its bindings is attached.
+    /// </summary>
+    private async Task<TableAccessDecision> WithVirtualFiltersAsync(
+        TableAccessDecision decision, Autheris.Application.VirtualFilters.MandatoryFilterQuery query, CancellationToken ct)
+    {
+        var mandatory = await (_mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance)
+            .ResolveAsync(query, ct).ConfigureAwait(false);
+        if (mandatory.IsDenied)
+        {
+            return TableAccessDecision.Denied(decision.Table, mandatory.DenyReason ?? "Denied by virtual filters.");
+        }
+
+        return mandatory.PredicateSql != null
+            ? decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings)
+            : decision;
     }
 
     private async Task RecordStartAuditAsync(

@@ -79,6 +79,13 @@ public interface IVirtualFilterPredicateBuilder
 public interface IMandatoryRowFilterResolver
 {
     ValueTask<MandatoryFilterOutcome> ResolveAsync(MandatoryFilterQuery query, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether the tenant has any Virtual Filter profile. A caller without a subject identity cannot be matched to a
+    /// grantee, so a channel that would otherwise substitute an anonymous identity must deny when this is true. An
+    /// implementation that cannot tell answers true (fail closed).
+    /// </summary>
+    ValueTask<bool> HasActiveProfilesAsync(TenantId tenant, CancellationToken ct = default);
 }
 
 /// <summary>Explicit "no virtual filters" (tests and tools); production wiring always uses <see cref="MandatoryRowFilterResolver"/>.</summary>
@@ -88,6 +95,8 @@ public sealed class NullMandatoryRowFilterResolver : IMandatoryRowFilterResolver
 
     public ValueTask<MandatoryFilterOutcome> ResolveAsync(MandatoryFilterQuery query, CancellationToken ct = default) =>
         ValueTask.FromResult(MandatoryFilterOutcome.None);
+
+    public ValueTask<bool> HasActiveProfilesAsync(TenantId tenant, CancellationToken ct = default) => ValueTask.FromResult(false);
 }
 
 /// <summary>Columns a filter needs on the protected object.</summary>
@@ -186,6 +195,19 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         var outcome = Resolve(snapshot, query, trace: null);
         _memo[key] = outcome;
         return outcome;
+    }
+
+    public async ValueTask<bool> HasActiveProfilesAsync(TenantId tenant, CancellationToken ct = default)
+    {
+        try
+        {
+            var snapshot = await _snapshots.GetAsync(ct).ConfigureAwait(false);
+            return snapshot.Profiles.Any(p => p.TenantId == tenant);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return true;   // without the current profiles nothing can be ruled out (fail closed)
+        }
     }
 
     /// <summary>Same resolution as <see cref="ResolveAsync"/>, with the reason for every profile and binding (no memo).</summary>
