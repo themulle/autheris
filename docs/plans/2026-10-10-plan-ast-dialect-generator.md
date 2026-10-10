@@ -1633,3 +1633,12 @@ Scope: capability entry (65,535 binds, 63-byte identifier limit measured in byte
 Execution evidence on `postgres:16-alpine` (Testcontainers): tenant isolation on a `citext` column and on a non-deterministic ICU collation (a plain `=` returns both `acme` and `ACME`), consent filters, policy-subquery tenant predicate, a hostile `search_path` plus a `pg_temp` decoy table (the secured query still reads `public.orders`), plan-cache rebinding per tenant, hostile tenant and user values, redact/partial/HMAC (matches a reference HMAC-SHA256)/jitter masks, bind-limit probe at 65,535 parameters.
 
 Semantic notes: PostgreSQL folds unquoted identifiers to lower case, catalog columns are emitted exactly as cataloged, so a mixed-case catalog column must be quoted by the user (Trino semantics differ); `standard_conforming_strings` has no effect because no string literal is emitted. The unqualified table alias keeps the user's folding (unquoted names stay unquoted). Session `search_path` pinning (INV-14) belongs to the runtime session initializer and is not part of this branch; the compiler does not depend on it.
+
+## Implementation Log — D4 / Stream F
+
+| Package | Status | Notes |
+|---|---|---|
+| WP-D4 | Done (branch `feat/ast-failclosed-fixes`) | `ToMaskTargetDialect` throws for unmapped dialects (F-1). `DbSessionContextInitializer.ResolveDialect` throws for unknown providers; `InitializeSessionAsync` has explicit PostgreSQL, SQL Server and no-session-state (SQLite, Databricks) branches and throws `NotSupportedException` for anything else, including Oracle until WP-F2 (SEC-ADG-14). Tests: `FailClosedDialectDefaultsTests` (incl. `NoDialectDefaultFallback_InSrc`). Known unrelated unit failure: `WormConfigurationAuditServiceTests.AuditConfigurationSnapshotAsync_MintsWormRecordOnStartup_AndSuppressesDuplicates`. |
+| WP-F4 | Not started | Re-scoped by the stakeholder: SQL Server SELECT first; Oracle continues later on `feat/ast-oracle`. |
+| WP-F1 | Not started | As above. |
+| WP-F2 | Not started | As above. The Oracle branch of `InitializeSessionAsync` is currently fail-closed (throws). |

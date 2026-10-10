@@ -547,6 +547,19 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             _ => 16
         };
 
+    /// <summary>
+    /// WP-D4 (F-1): the one mapping from a catalog dialect to the mask SQL dialect. Fail-closed: a dialect without
+    /// an explicit mapping (any other or undefined value) throws instead of receiving PostgreSQL mask SQL.
+    /// </summary>
+    public static TrinoSqlEngine.TargetSqlDialect ToMaskTargetDialect(DatabaseDialect dialect) => dialect switch
+    {
+        DatabaseDialect.PostgreSql => TrinoSqlEngine.TargetSqlDialect.PostgreSql,
+        DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
+        DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
+        DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
+        _ => throw new NotSupportedException($"No mask SQL mapping exists for dialect '{dialect}'.")
+    };
+
     public static string BuildMaskedColumnProjection(string columnName, string? dataType, DatabaseDialect dialect, TableMetadata tableMeta)
     {
         ArgumentNullException.ThrowIfNull(tableMeta);
@@ -564,13 +577,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             }
             else if (ruleType == "GEO_JITTER")
             {
-                var targetDialect = dialect switch
-                {
-                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
-                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
-                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
-                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
-                };
+                var targetDialect = ToMaskTargetDialect(dialect);
                 maskExpr = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
                     columnName,
                     "GEO_JITTER",
@@ -579,13 +586,7 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             }
             else if (ruleType == "PARTIAL_MASK")
             {
-                var targetDialect = dialect switch
-                {
-                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
-                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
-                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
-                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
-                };
+                var targetDialect = ToMaskTargetDialect(dialect);
                 maskExpr = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
                     columnName,
                     "PARTIAL_MASK",
