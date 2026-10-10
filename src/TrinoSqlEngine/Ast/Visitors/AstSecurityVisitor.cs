@@ -31,6 +31,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     private readonly RlsOptions _options;
     private readonly ISqlEngine _engine;
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
+    // CR-ADG-32: names of non-recursive CTEs whose body is being visited; a reference to one of them (not shadowed) is a self-reference.
+    private readonly List<string> _definingNonRecursiveCtes = new();
     private readonly TypedPolicyContext? _typed;
     private readonly Stack<SecurityScope> _securityScopes = new();
     private int _subqueryDepth = 0;
@@ -130,7 +132,16 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 }
 
                 // Non-recursive: visit the CTE body BEFORE adding the name to the scope (Exit-timing, SEC-CTE & SEC C-02)
-                var cteQuery = (SelectStatement)WithScope(SecurityScope.CteBody, () => Visit(cte.Query));
+                if (!node.With.IsRecursive) _definingNonRecursiveCtes.Add(cteKey);
+                SelectStatement cteQuery;
+                try
+                {
+                    cteQuery = (SelectStatement)WithScope(SecurityScope.CteBody, () => Visit(cte.Query));
+                }
+                finally
+                {
+                    if (!node.With.IsRecursive) _definingNonRecursiveCtes.RemoveAt(_definingNonRecursiveCtes.Count - 1);
+                }
                 _cteScopeStack.Peek().Add(cteKey);
 
                 // CR-ADG-01 / INV-11: on the typed path the definition is emitted as the delimited scope key, so the gateway's

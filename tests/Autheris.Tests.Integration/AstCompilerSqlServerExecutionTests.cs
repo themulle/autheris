@@ -281,7 +281,7 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     public async Task CteBodyReadingThePhysicalTable_IsSecured_OnACaseSensitiveDatabase()
     {
         if (!_db.IsAvailable) return;
-        Ids(await RunAsync("WITH orders AS (SELECT Id FROM orders) SELECT Id FROM orders", "other", connectionString: _fixture.CaseSensitiveConnectionString))
+        Ids(await RunAsync("WITH orders AS (SELECT Id FROM dbo.Orders) SELECT Id FROM orders", "other", connectionString: _fixture.CaseSensitiveConnectionString))
             .ShouldBe(new List<int> { 5 });
     }
 
@@ -357,9 +357,9 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     public async Task CteNamedLikeTheTable_DoesNotLeakThePhysicalTable()
     {
         if (!_db.IsAvailable) return;
-        // T-SQL CTEs may self-reference implicitly; the physical table is emitted schema-qualified, so it still resolves
-        // to dbo.Orders (secured) and the user-level CTE name is separate.
-        var rows = await RunAsync("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders", "other");
+        // A self-reference needs WITH RECURSIVE (CR-ADG-32), so the body names the physical table schema-qualified; it still
+        // resolves to dbo.Orders (secured) and the user-level CTE name is separate.
+        var rows = await RunAsync("WITH orders AS (SELECT id FROM dbo.orders) SELECT id FROM orders", "other");
         Ids(rows).ShouldBe(new List<int> { 5 });
     }
 

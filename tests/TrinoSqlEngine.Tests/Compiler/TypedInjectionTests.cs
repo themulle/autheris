@@ -177,11 +177,13 @@ public class TypedInjectionTests
     }
 
     [Fact]
-    public void CteNamedLikeAPhysicalTable_BodyReference_IsStillSecuredAndQualified()
+    public void CteNamedLikeAPhysicalTable_QualifiedBodyReference_IsStillSecured_AndSelfReferenceIsRejected()
     {
         _rowFilters.Predicates[Orders] = RegionEu();
         var typed = NewContext();
-        var secured = Secure("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders", typed);
+        Assert.Throws<System.Security.SecurityException>(() => Secure("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders", typed));
+        typed = NewContext();
+        var secured = Secure("WITH orders AS (SELECT id FROM dbo.orders) SELECT id FROM orders", typed);
 
         var verifier = typed.CreateVerifier();
         verifier.Verify(secured, CancellationToken.None);   // does not throw

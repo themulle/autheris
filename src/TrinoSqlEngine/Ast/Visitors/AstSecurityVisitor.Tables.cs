@@ -25,6 +25,13 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         string simpleName = node.Name.SimpleName;
         string scopeKey = SqlIdentifierHelper.FoldIdentifierForScope(node.Name.Parts[^1]);
 
+        // CR-ADG-32: a self-reference requires WITH RECURSIVE on every dialect (SQL Server and Oracle would otherwise recurse silently
+        // while the gateway would treat a catalog-named reference as a secured physical scan).
+        if (node.Name.IsSimple && !_cteScopeStack.Peek().Contains(scopeKey) && _definingNonRecursiveCtes.Contains(scopeKey))
+        {
+            throw new SecurityException("A CTE that references itself requires WITH RECURSIVE.");
+        }
+
         // SEC C-02: Only simple (unqualified) names in CTE scope are considered CTEs
         if (node.Name.IsSimple && _cteScopeStack.Peek().Contains(scopeKey))
         {

@@ -23,21 +23,42 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
 {
     public const string TenantCollisionCode = "TENANT_ID_COLLISION";
 
-    private TenantCollisionGuard? _guard;
+    // Cached per options instance: a configuration reload yields a new instance, which rebuilds the guard.
+    private (GatewayOptions Options, TenantCollisionGuard Guard)? _cached;
 
     private TenantCollisionGuard? ResolveGuard(HttpContext context)
     {
-        var existing = _guard;
-        if (existing != null) return existing;
-        var options = context.RequestServices?.GetService<IOptions<GatewayOptions>>()?.Value;
-        return options == null ? null : _guard = TenantCollisionGuard.FromOptions(options);
+        GatewayOptions? options;
+        try
+        {
+            options = context.RequestServices?.GetService<IOptionsMonitor<GatewayOptions>>()?.CurrentValue;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        if (options == null) return null;
+        var cached = _cached;
+        if (cached is { } c && ReferenceEquals(c.Options, options)) return c.Guard;
+        try
+        {
+            var guard = TenantCollisionGuard.FromOptions(options);
+            _cached = (options, guard);
+            return guard;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
-    /// <summary>B-1: a tenant whose id collides case-insensitively with another configured tenant is denied (fail closed).</summary>
+    /// <summary>B-1: a tenant whose id collides case-insensitively with another configured tenant is denied (fail closed); so is any request whose guard cannot be resolved.</summary>
     private async Task<bool> DenyCollidingTenantAsync(HttpContext context, SecurityPrincipalContext securityContext)
     {
         var guard = ResolveGuard(context);
-        if (guard is not { HasCollisions: true } || !guard.IsDenied(securityContext.TenantId.Value))
+        var unresolved = guard == null;
+        if (!unresolved && (!guard!.HasCollisions || !guard.IsDenied(securityContext.TenantId.Value)))
         {
             return false;
         }
@@ -55,7 +76,7 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
                     TargetTable = string.Empty,
                     Decision = "DENY",
                     TraceId = context.TraceIdentifier,
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = "tenant id collides case-insensitively with another tenant id", path = context.Request.Path.Value })
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = unresolved ? "tenant collision guard could not be resolved (fail closed)" : "tenant id collides case-insensitively with another tenant id", path = context.Request.Path.Value })
                 }, context.RequestAborted).ConfigureAwait(false);
             }
         }

@@ -69,9 +69,9 @@ public class CteShadowingTests
 
     [Theory]
     [MemberData(nameof(Dialects))]
-    public void CteShadowingPhysicalName_StillSecuresThePhysicalTableInsideTheBody(TargetSqlDialect dialect)
+    public void CteShadowingPhysicalName_StillSecuresTheQualifiedPhysicalTableInsideTheBody(TargetSqlDialect dialect)
     {
-        var c = Compile("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders", dialect);
+        var c = Compile("WITH orders AS (SELECT id FROM dbo.orders) SELECT id FROM orders", dialect);
         Assert.Contains(c.Parameters, p => p.Origin == ParameterOrigin.Tenant);
         Assert.Contains(new SecurityPredicateId("dbo.Orders", 0), c.AppliedPredicates);
     }
@@ -130,5 +130,35 @@ public class CteShadowingTests
             "WITH \"Chain\" AS (SELECT 1 AS id) SELECT id FROM (WITH \"chain\" AS (SELECT 2 AS id) SELECT id FROM \"chain\") t", dialect));
         Assert.Throws<System.Security.SecurityException>(() => Compile(
             "WITH \"Chain\" AS (SELECT 1 AS id), \"chain\" AS (SELECT 2 AS id) SELECT id FROM \"chain\"", dialect));
+    }
+
+    /// <summary>CR-ADG-32: a self-reference needs WITH RECURSIVE on every dialect, even where the database would allow it without.</summary>
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void NonRecursiveWith_SelfReference_IsRejected(TargetSqlDialect dialect)
+    {
+        Assert.Throws<System.Security.SecurityException>(() => Compile(
+            "WITH chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n + 1 FROM chain c WHERE c.n < 3) SELECT id, n FROM chain", dialect));
+        Assert.Throws<System.Security.SecurityException>(() => Compile(
+            "WITH orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT o.id, o.n + 1 FROM orders o WHERE o.n < 3) SELECT id FROM orders", dialect));
+        Assert.Throws<System.Security.SecurityException>(() => Compile(
+            "WITH \"chain\" AS (SELECT id FROM (SELECT id FROM \"chain\") x) SELECT id FROM \"chain\"", dialect));
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void NonRecursiveWith_WithoutSelfReference_StillCompiles(TargetSqlDialect dialect)
+    {
+        Compile("WITH a AS (SELECT id FROM orders), b AS (SELECT id FROM a) SELECT id FROM b", dialect);
+        Compile("WITH a AS (WITH a AS (SELECT 1 AS id) SELECT id FROM a) SELECT id FROM a", dialect);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void RecursiveKeyword_IsEmittedPerDialect(TargetSqlDialect dialect)
+    {
+        var c = Compile(RecursiveChain, dialect);
+        bool keyword = Regex.IsMatch(c.Sql, @"(?i)\bWITH\s+RECURSIVE\b");
+        Assert.Equal(dialect is not (TargetSqlDialect.SqlServer or TargetSqlDialect.Oracle), keyword);
     }
 }

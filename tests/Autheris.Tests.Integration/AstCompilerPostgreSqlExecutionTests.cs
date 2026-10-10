@@ -274,7 +274,7 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
 
         var rows = await RunAsync("SELECT id FROM orders", "acme", prepare: hostile);
         Ids(rows).ShouldBe(new List<int> { 1, 2, 6 });                  // never 99 or 77
-        (await RunAsync("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders", "other", prepare: hostile)).Select(r => Convert.ToInt32(r[0])).ShouldBe(new List<int> { 5 });
+        (await RunAsync("WITH orders AS (SELECT id FROM public.orders) SELECT id FROM orders", "other", prepare: hostile)).Select(r => Convert.ToInt32(r[0])).ShouldBe(new List<int> { 5 });
     }
 
     [Fact]

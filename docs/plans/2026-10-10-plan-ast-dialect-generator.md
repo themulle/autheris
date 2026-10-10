@@ -2,13 +2,15 @@
 
 **Document ID:** `PLAN-AST-DIALECT-GEN-16` (implementation plan, Phase 2 of the 6-phase lifecycle)
 **Date:** 2026-10-10
-**Status:** IN PROGRESS - Phase 4 loop-back 2 (§21): CR-ADG-25..29 and the B-1 request-time denial fixed on `feat/ast-dql`, awaiting Phase 5 re-review loop 2; `feat/ast-dml` may branch from `feat/ast-dql`
+**Status:** IN PROGRESS - Phase 5 DQL review approved (§19.9, loop 2); Minor follow-ups CR-ADG-30 and -32 fixed (§22), CR-ADG-31 tracked as X1 precondition; open question OQ-GQL (GraphQL path); `feat/ast-dml` (WP-A7) branches from `fe9d3f7`
 **Author:** Solution Architect (`csharp-architect`); Phase 3 review (§16) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
 **Supersedes:** [2026-10-06-implementation-plan-ast-dialect-generator.md](2026-10-06-implementation-plan-ast-dialect-generator.md) (German draft, kept for history only)
 **Amends:** [ADR-017 §2](../adr/ADR-017-distributed-state-ast-generator-and-rbac.md) (amendment text in §13; Phase 6 writes it)
 **Branch base:** `feat/ast-target-dialect-generator` (commit `6985be1`)
+
+**Index:** DQL review loop 3 (CR-ADG-30..32 fixes, CR-ADG-31 X1 precondition, OQ-GQL) is in [§22](#22-implementation-log--dql-review-loop-3); open question OQ-GQL is in §15.
 
 ---
 
@@ -1194,6 +1196,7 @@ Please review and extend this plan with security test criteria. Specific decisio
 | OQ-4 | **Non-AST string consumers (§7.3).** GraphQL tree compiler, lakehouse, streaming, procedures and data query service keep consuming `CombinedRowFilterSql`, rendered from typed IR. Moving them onto typed IR is a follow-up track. Agreed? | Yes, follow-up track. |
 | OQ-5 | **Source semantics (§3.3).** Backend semantics with Trino syntax (no null-ordering or integer-division shims), matching today's legacy behavior. Agreed? | Yes. |
 | OQ-6 | **Literal allow-list (§3.4).** Structural integers and keywords inline; all values bound. Agreed interpretation of "nothing reaches the database as raw text"? | Yes. |
+| OQ-GQL | **GraphQL path does not use the typed policy IR (open question, no work started).** See §22.3. | Awaiting stakeholder decision. |
 | OQ-7 | **Branch protection.** Making `sql-compiler-gate` a required check needs repository-admin action. | The repository owner enables it in WP-E2. |
 
 **Benchmark results (filled by WP-E1):** legacy versus AST P95/P99 and allocated bytes per bucket: _pending WP-E1_.
@@ -1573,6 +1576,8 @@ Affected work packages and test criteria (additions to §11 and §16.8):
 
 ## 17. Changelog
 
+- 2026-10-10: Added §22 "Implementation Log — DQL review loop 3": CR-ADG-30 (`199d2a1`) and CR-ADG-32 (`5f98531`, test alignment `9f30f17`) fixed; CR-ADG-31 recorded as X1 precondition 6; open question OQ-GQL (GraphQL tree compiler) added.
+- 2026-10-10: Added §19.9 "Re-review (loop 2)" (`csharp-code-reviewer`) of `feat/ast-dql` at `fe9d3f7`: CR-ADG-25..29 and the B-1 request-time denial verified (red-first for CR-ADG-28 and B-1 confirmed by behavioral mutants); new Minor/Nit findings CR-ADG-30..32; verdict approved.
 - 2026-10-10: Added §19.8 "Re-review (loop 1)" (`csharp-code-reviewer`) of `feat/ast-dql` at `4e0be2d`: CR-ADG-01 and CR-ADG-02 closed, all loop-1 fixes verified, new findings CR-ADG-25 (Major: unrestricted CAST target types on PostgreSQL and DuckDB) and CR-ADG-26..29 (Minor); verdict changes requested (narrow); `feat/ast-dml` may branch from `feat/ast-dql`.
 - 2026-10-10: Added §19 "Phase 5 Code Review — DQL" (`csharp-code-reviewer`): verdict changes requested on all five DQL branches; findings CR-ADG-01..24 (Blockers: CTE name resolution differs from Oracle and case-sensitive SQL Server, reproduced as a cross-tenant read on Oracle Free; unmapped functions pass through, `reflect` executed on the Spark proxy), mutation results, reviewer-observed build and test counts, judgement of the §18 deviations and the `feat/ast-dql` integration plan.
 - 2026-10-10: Added §16.11 recording stakeholder decisions B-1 (exact tenant comparison, reject new case-colliding tenants, fail-close existing collisions, no ID rewrite), B-2 (HMAC unavailable degrades to Redact) and B-3 (over-limit consent IN lists denied, array binding deferred as WP-A9).
@@ -1866,6 +1871,65 @@ The architecture suite (18) did not kill either wrapper mutant; the unit and con
 2. `feat/ast-dml` may branch from `feat/ast-dql` now; merge the CR-ADG-25 fix forward.
 3. Phase 5 re-review loop 2 covers only CR-ADG-25..29.
 
+### 19.9 Re-review (loop 2)
+
+**Scope:** `5b99bbd..fe9d3f7` on `feat/ast-dql` (§21): CR-ADG-25..29 and the B-1 request-time denial (CR-ADG-08). Method: code reading, compile probes on all five dialects, targeted mutants and reverts in a scratch worktree (behavioral mutants where a plain revert only breaks compilation), and a full reviewer-run of every suite (`-m:2`).
+
+**Verdict: APPROVED.** CR-ADG-25..29 and B-1 are closed. The three new findings below are Minor or Nit and do not block. They are fixed on `feat/ast-dql` and merged forward into `feat/ast-dml`, which branches from `fe9d3f7`.
+
+#### 19.9.1 Focus areas
+
+| Area | Result |
+|---|---|
+| Recursive CTE RLS (CR-ADG-29) | Both the anchor and the recursive members are secured. For example, `WITH RECURSIVE r(n) AS (SELECT id FROM orders UNION ALL SELECT ... FROM r JOIN entitlements ...)` secures `orders` and `entitlements` on all five dialects; the self-reference is emitted exactly like the definition (`"r"`, `[r]`, `` `r` ``). A self-reference never resolves to a physical table: if the name is a catalog table it is rejected (`orders`, `"ORDERS"`, and a sibling named like a catalog table, all case-insensitive through catalog resolution); otherwise it is the CTE. A self-reference with a different case or quoting, or with a schema qualifier (`"R"` vs `r`, `dbo.r`), is treated as physical and rejected because it is not in the catalog. A forward reference between CTEs fails closed. CTE names that differ only in case in the visible scope are rejected (nested and sibling). Without `RECURSIVE`, a self-reference named like a catalog table is still a secured physical scan (secure; on SQL Server and Oracle it is no longer a recursion, see CR-ADG-32). |
+| CAST allowlist (CR-ADG-25) | The type set is closed on every dialect. Rejected: `regclass`, `regrole`, `regproc`, `oid`, `xml`, `xmltype`, `json` (PostgreSQL/DuckDB), quoted types (`"regclass"`), qualified types (a parse error), `array(...)`, `row(...)`, intervals, non-numeric and oversized type parameters (`decimal(regclass)`, `varchar(regclass)`, `varchar(99999999999)`). `TRY_CAST` uses the same set (and is unsupported on PostgreSQL and Oracle). The `::` shorthand is not in the grammar (parse error). `decimal(38,10)`, `timestamp(3) with time zone` and `text` (PostgreSQL/DuckDB only) compile. SQL Server maps `json` to `nvarchar(max)` in its own closed map, which is acceptable. |
+| Delimited function names (CR-ADG-26) | Rejected on every dialect, including `"count"(*)`. |
+| FILTER emulation (CR-ADG-27) | `COUNT(CASE WHEN ... THEN 1 END)` now compiles on SQL Server and Oracle. |
+| Oracle transaction wrapper (CR-ADG-28) | `transaction.Connection` is the wrapper. A command accepts only wrapper transactions. |
+| B-1 guard | **Case-insensitive:** the denied set uses `OrdinalIgnoreCase`, so every spelling of a colliding group, including ones that are not configured, is denied. **Audit failure:** the exception is logged and the 403 is still returned; the request never reaches `next`. **Ordering:** after `UseAuthentication`, `TokenRevocation`, `ClaimsNormalization`, `ReadOnlyToken`, `UseAuthorization` and the post-auth rate limiter; before `ResourceGroup`, `FinOpsBudget`, the GraphQL and extensibility middleware and endpoint execution. The tenant is resolved from the authenticated principal in the same middleware before the check, and every earlier exit (403, 401, 400) is a denial. Limits: CR-ADG-30 and CR-ADG-31. |
+
+#### 19.9.2 New findings
+
+| ID | Sev. | Location | Finding | Fix |
+|---|---|---|---|---|
+| CR-ADG-30 | Minor | `SecurityContextResolutionMiddleware.cs` (`ResolveGuard`, `_guard`) | The guard is built once per middleware instance (a singleton) from `IOptions<GatewayOptions>`. A configuration reload that introduces a collision is not seen until restart. If the options cannot be resolved, the guard is `null` and the request is allowed (fail open, although the options are always registered in practice). | Use `IOptionsMonitor` and rebuild on change; deny (or 500) when the options are missing. **Fixed in `199d2a1`** (see §22). |
+| CR-ADG-31 | Minor (recorded limit) | `TenantCollisionGuard.ConfiguredTenantIds` | Only configured tenant ids take part. A collision between two tenants that exist only in the identity provider (or between one configured id and a token-only id with no configured partner in the group) is not detected. Data isolation still holds through the binary tenant comparison (INV-15). | Keep the tenant-registry guard (Stream D) as an X1 precondition; §21.2 already records the limit. **Open, tracked as X1 precondition 6 (§20.3).** |
+| CR-ADG-32 | Nit | `AstSecurityVisitor.cs` (non-recursive WITH) | On SQL Server and Oracle a CTE can recurse without `RECURSIVE`. In Trino syntax without `RECURSIVE`, a self-reference named like a catalog table becomes a secured scan of that table instead of a recursion. This is secure but silently changes the query. | Reject a non-recursive CTE whose body references its own name (`WITH RECURSIVE` required). **Fixed in `5f98531`**, test alignment in `9f30f17` (see §22). |
+
+#### 19.9.3 Mutation and revert results (scratch worktree on `fe9d3f7`, reverted after each run)
+
+| Mutant | Suite | Result |
+|---|---|---|
+| CAST type set open (`_ => type.Normalized`) | `TrinoSqlEngine.Tests` (2,131) | Killed (20) |
+| Delimited function names allowed | `TrinoSqlEngine.Tests` | Killed (8) |
+| Recursive CTE named like a catalog table allowed | `TrinoSqlEngine.Tests` | Killed (5) |
+| Recursive CTE name not in scope for its own body | `TrinoSqlEngine.Tests` | Killed (10) |
+| Case-only CTE ambiguity check off | `TrinoSqlEngine.Tests` | Killed (5) |
+| FILTER constant unregistered | `TrinoSqlEngine.Tests` | Killed (2) |
+| **B-1:** request-time check skipped (behavioral) | Unit, tenant collision tests | Killed (4) |
+| **B-1:** guard case-sensitive | Unit | Killed (2) |
+| **B-1:** audit failure propagates | Unit | Killed (1, `AuditFailure_StillDenies`) |
+| **B-1:** commit `8b0320d` (src) reverted | Unit | Red (test project no longer compiles: missing `TenantCollisionGuard`) |
+| **CR-ADG-28:** `transaction.Connection` returns the raw driver connection (behavioral) | Unit Oracle tests / Architecture (19) / Oracle Free (43) | Killed by unit (1, `Transaction_Connection_IsTheWrapper_AndItsCommandsBindByName`); Architecture and Oracle Free green |
+| **CR-ADG-28:** commit `2d40603` (src) reverted | Unit / Architecture / Oracle Free | Red in unit (the test project no longer compiles); Architecture 19/19 and Oracle Free 43/43 green |
+
+Red-first is therefore confirmed for CR-ADG-28 and B-1 by behavioral mutants, not only by compile breaks. The CR-ADG-28 transaction path is covered by unit tests only: no Oracle Free test goes through `tx.Connection` (Nit; add one in the DML loop, where transactions matter).
+
+#### 19.9.4 Build and test evidence (observed by the reviewer on `fe9d3f7`)
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror -m:2` | 0 warnings, 0 errors |
+| `tests/TrinoSqlEngine.Tests` | 2,131 / 2,131 |
+| `tests/Autheris.Tests.Unit` | 4,021 / 4,022 (only the known `WormConfigurationAuditServiceTests` failure) |
+| `tests/Autheris.Tests.Architecture` | 19 / 19 |
+| `AstCompiler*` integration tests, `CI=true` (SQL Server, PostgreSQL, Oracle Free, Spark proxy, provider smoke tests) | 177 / 177, none skipped |
+
+#### 19.9.5 Next steps
+
+1. Fix CR-ADG-30..32 on `feat/ast-dql` and merge forward into `feat/ast-dml`. No further DQL review loop is needed; the fixes are checked in the DML review.
+2. X1 preconditions are unchanged (§20.3), plus the tenant registry for IdP-only collisions (CR-ADG-31).
+
 ## 20. Implementation Log — DQL review loop 1
 
 Track `PLAN-AST-DIALECT-GEN-16`, Phase 4 loop-back after the Phase 5 review (§19). Integration branch `feat/ast-dql` = `feat/ast-oracle-select` + review commit `bed21ac` + merge of `feat/ast-databricks-select` (`92cbf9c`, `--no-ff`, no rebase). The five additive conflicts (plan §18 table and sections, `DialectCapabilities.cs`, `DialectCapabilityTable.cs`, `ICompiledSqlBinder.cs`, `TenantPredicateFactory.cs`) were resolved by keeping both sides (`RawCast` and `CastBinary`, both capability entries, both binders, both tenant-comparison cases). The merged tree built with 0 warnings and passed all suites before the first fix. Every finding was fixed test-first on `feat/ast-dql` (the stacked branches stay frozen). Evidence: see 20.4.
@@ -1923,6 +1987,7 @@ Logged deviations (review items that are deliberately not implemented as specifi
 3. The request-time tenant collision guard (20.2).
 4. `trustedSigners` or signature mode for `Oracle.*` (CR-ADG-18) and the Oracle driver license review (release gate).
 5. Databricks stays Experimental until the live G9 job (and C3) are green.
+6. CR-ADG-31: collisions between tenants that exist only in the identity provider are not detected by the request-time guard (it only sees configured tenant ids). Data isolation still holds through the binary tenant comparison (INV-15). Closing this needs the Stream D tenant registry.
 
 ### 20.4 Evidence
 
@@ -1957,6 +2022,9 @@ Phase 4 loop-back for the re-review §19.8 (findings CR-ADG-25..29) and the B-1 
 | CR-ADG-28 | `2d40603` | `BindByNameOracleTransaction` wraps the driver transaction; `Connection` is the gateway wrapper, so `transaction.Connection.CreateCommand()` binds by name. A command accepts only the wrapper transaction (`SecurityException` otherwise). Unit tests with a fake inner transaction; architecture test `RawOracleTransaction_IsOnlyUsedByTheWrapper`. |
 | CR-ADG-29 | `6ecf3d4` | For `WITH RECURSIVE` the CTE name is in scope for its own body, so the self-reference resolves to the CTE while the base tables of the anchor and recursive members are secured (execution tests on PostgreSQL, SQL Server, Oracle Free). A recursive CTE named like a catalog table is rejected (`SecurityException`; typed path: catalog resolution, legacy path: policy provider). CTE names that differ only in case within the visible scope (nested or sibling) are rejected, so binding never depends on the engine's case folding. Non-recursive shadowing of a physical table is unchanged (secure body, CR-ADG-01). |
 | CR-ADG-08 (B-1) | `8b0320d` | See 21.2. |
+| CR-ADG-30 | `199d2a1` | Fixed in loop 3, see §22. |
+| CR-ADG-31 | open | Recorded limit; X1 precondition 6 (§20.3). Needs the Stream D tenant registry. |
+| CR-ADG-32 | `5f98531` | Fixed in loop 3, see §22. |
 
 ### 21.2 B-1 decision: request-time denial
 
@@ -1984,3 +2052,37 @@ Observed on `feat/ast-dql` after the last fix commit (`CI=true`, `TESTCONTAINERS
 | `AstCompilerDatabricksSparkExecutionTests` | 39 / 39 |
 | All `AstCompiler*` integration tests in one run | 177 / 177 (the four container classes plus the three provider smoke tests) |
 | `AstCompilerDuckDbExecutionTests` (in process, in the unit project) | 41 / 41 |
+
+## 22. Implementation Log — DQL review loop 3
+
+Phase 4 loop-back for the Minor and Nit findings of the re-review §19.9 (CR-ADG-30..32), on `feat/ast-dql`, test-first.
+
+### 22.1 Status per finding
+
+| ID | Commit | Resolution |
+|---|---|---|
+| CR-ADG-30 | `199d2a1` | The B-1 tenant collision guard is recomputed from `IOptionsMonitor<GatewayOptions>` whenever the options change. If the options cannot be resolved, the request is denied (fail closed) instead of allowed. |
+| CR-ADG-31 | open | Recorded limit. Tenants that exist only in the identity provider are not seen by the guard. Data isolation still holds through the binary tenant comparison. It is an X1 precondition (§20.3 item 6) and needs the Stream D tenant registry. |
+| CR-ADG-32 | `5f98531`, `9f30f17` | A CTE that references its own name requires `WITH RECURSIVE` on every dialect. Without it the compiler rejects the query with `SecurityException` ("A CTE that references itself requires WITH RECURSIVE.") instead of silently treating the self-reference as a scan of the catalog table. |
+
+### 22.2 Test changes in `5f98531` and `9f30f17`
+
+- `5f98531` adds the red-first tests for the self-reference rule (non-recursive self-reference rejected, `WITH RECURSIVE` still accepted and secured on all dialects).
+- The full unit run exposed one existing test that relied on the old behavior: `AstCompilerDuckDbExecutionTests.CteNamedLikeTheTable_UnionJoinSubquery_AreSecured` used `WITH orders AS (SELECT id FROM orders) SELECT id FROM orders`. It is changed in `9f30f17` to assert the new `SecurityException` for that query. It adds a case where a CTE named like the table does not reference itself (`WITH orders AS (SELECT id FROM entitlements) SELECT id FROM orders`) and still compiles and executes. The join, union and subquery assertions of the test are unchanged.
+
+### 22.3 OQ-GQL: GraphQL tree compiler and the typed policy IR (open question, no work started)
+
+Finding: `src/Autheris.Application/Sql/Tree/TreeSqlCompiler.cs` (about lines 452-462) still emits a plain `tenant_col = @p` predicate and injects `CombinedRowFilterSql` and `BuildDialectMaskExpression` as text. Therefore the byte-exact tenant comparison (B-1, SEC-ADG-04) and the typed policy IR do not apply on the GraphQL path. This is the GraphQL part of OQ-4 (§7.3, §16.7).
+
+Candidate direction, not decided: a `GraphQlAstBuilder` frontend that builds AST nodes from the GraphQL plan, plus structural `JsonObject` and `JsonArrayAggregate` nodes rendered per dialect behind a `SupportsJsonAggregation` capability, so that the text path can be removed.
+
+Status: awaiting stakeholder decision. No work has started.
+
+### 22.4 Evidence
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror -m:2` | 0 warnings, 0 errors |
+| `tests/TrinoSqlEngine.Tests` | 2,146 / 2,146 passed |
+| `AstCompiler*` integration tests | 177 / 177 passed |
+| `tests/Autheris.Tests.Unit` | 4,023 / 4,024 passed (only the known `WormConfigurationAuditServiceTests` failure) |
