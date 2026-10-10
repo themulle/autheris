@@ -69,15 +69,8 @@ public sealed class FederatedVirtualFilterPushdownTests(FederatedVirtualFilterWe
 
         var ids = await fixture.ColumnAsync(Query(table));
 
-        // Only authorized customers come back. A path lookup sends one request per key and the executor concatenates the
-        // answers, so an upstream that answers every request with all rows repeats each authorized row once per request
-        // (a correctness quirk of the upstream, never a leak): the set of rows is what the gateway guarantees.
-        ids.Distinct().OrderBy(i => i, System.StringComparer.Ordinal).ShouldBe(Authorized);
-        if (table != Tables.Path)
-        {
-            ids.ShouldBe(Authorized);
-        }
-
+        // CR-01: the rows never depend on what the upstream does with the keys, a path lookup included (one row per key).
+        ids.ShouldBe(Authorized);
         fixture.Crm.Requests.ShouldNotBeEmpty();
     }
 

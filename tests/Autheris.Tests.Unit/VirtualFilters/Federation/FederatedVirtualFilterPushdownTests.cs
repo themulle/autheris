@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Shouldly;
 using Xunit;
 using static Autheris.Tests.Unit.VirtualFilters.Federation.FederatedServiceHarness;
@@ -36,9 +37,21 @@ public sealed class FederatedVirtualFilterPushdownTests
             });
     }
 
-    private static (StubTableConnector Crm, Pipeline Pipeline) Setup(string param = "ids")
+    private static TableMetadata PathCrm() => WithEndpoint(
+        HttpTable("crm_api", "public", "customers", "id", "name"),
+        new HttpEndpointDescriptor
+        {
+            BaseUrl = "https://api.example.internal",
+            PathTemplate = "/customers/{id}",
+            BatchType = HttpBatchType.ParallelSingleRequests,
+            BatchParamName = "ids",
+            PrimaryKeyField = "id",
+            CompleteResponse = true
+        });
+
+    private static (StubTableConnector Crm, Pipeline Pipeline) Setup(string param = "ids", bool path = false)
     {
-        var crmTable = Crm(param);
+        var crmTable = path ? PathCrm() : Crm(param);
         var crm = new StubTableConnector("crm_api",
             [Row(("id", "1"), ("name", "A")), Row(("id", "2"), ("name", "B")), Row(("id", "3"), ("name", "C")), Row(("id", "4"), ("name", "D"))]);
         var erp = new StubTableConnector("erp", [Row(("id", "10"), ("customer_id", "1")), Row(("id", "11"), ("customer_id", "2")), Row(("id", "12"), ("customer_id", "3"))]);
@@ -84,6 +97,38 @@ public sealed class FederatedVirtualFilterPushdownTests
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => pipeline.RunAsync(Join));
 
         ex.ErrorCode.ShouldBe("VF_PUSHDOWN_ARGUMENT_CONFLICT");
+        crm.UpstreamCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task PathLookup_UpstreamIgnoresTheKey_OneRequestPerKey_ExactlyOneRowPerAuthorizedKey()
+    {
+        // CR-01: the stub answers every request with all four rows (it ignores the key); the result is still 1 and 3, once each.
+        var (crm, pipeline) = Setup(path: true);
+
+        var rows = await pipeline.RunAsync(Join);
+
+        rows.Select(r => (string)r["id"]!).OrderBy(i => i, StringComparer.Ordinal).ShouldBe(["1", "3"]);
+        crm.UpstreamCalls.ShouldBe(2);
+        crm.LastSession!.Arguments.ShouldNotContainKey("ids");   // the connector never sees the batch argument (it would fan out itself)
+    }
+
+    [Fact]
+    public async Task PathLookup_FullScan_IsDenied_ConnectorNeverCalled()
+    {
+        var crmTable = PathCrm();
+        var crm = new StubTableConnector("crm_api", [Row(("id", "1"), ("name", "A"))]);
+        var erp = new StubTableConnector("erp", [Row(("id", "10"), ("customer_id", "1"))]);
+        var pipeline = Build(
+            [(crmTable, crm), (Erp, erp)],
+            Consents(Allow(crmTable.Identifier), Allow(Erp.Identifier)),
+            AliceSnapshot("crm_api.*.*", "crm_api.public.customers"),
+            new FakeKeySetProvider().With("vf_customers", ["1"]),
+            federation: new VirtualFilterFederationOptions { PushdownEnabled = false });
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => pipeline.RunAsync(Join));
+
+        ex.ErrorCode.ShouldBe("VF_PATH_TEMPLATE_UNFILLABLE");
         crm.UpstreamCalls.ShouldBe(0);
     }
 }

@@ -46,6 +46,12 @@ public static class VirtualFilterErrorCodes
     /// <summary>A pushdown argument would overwrite an argument the gateway already set.</summary>
     public const string PushdownArgumentConflict = "VF_PUSHDOWN_ARGUMENT_CONFLICT";
 
+    /// <summary>
+    /// The upstream would have to be read with a path template the gateway cannot fill (a full scan, an unsafe or
+    /// over-budget key set, or a placeholder other than the key). Never sent unexpanded (CR-01).
+    /// </summary>
+    public const string PathTemplateUnfillable = "VF_PATH_TEMPLATE_UNFILLABLE";
+
     private static readonly IReadOnlyList<string> CodesInDenyReasons = [PatternEvaluationFailed, BindingMisconfigured];
 
     /// <summary>The Virtual Filter error code a deny reason starts with (<c>CODE: ...</c>), if any.</summary>

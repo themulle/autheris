@@ -133,6 +133,27 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
         PreparedTable table,
         IReadOnlyList<(AppliedVirtualFilterBinding Pair, VirtualFilterKeySet Keys)> loaded)
     {
+        var plan = DecideTier(statement, tables, table, loaded);
+
+        // CR-01: what is fetched must never depend on a request the gateway cannot form. A read of a path template that
+        // keeps a placeholder (a full scan, an unsafe or over-budget key set, the switch off, a second placeholder) would go
+        // upstream with the braces unexpanded and answer 404 or 400, or worse, something else. It is denied before any call.
+        if (!plan.SkipUpstream && HttpKeyPushdownCapability.HasUnfillablePlaceholder(table.Metadata.HttpEndpoint, plan.PathLookup?.Argument))
+        {
+            throw new GatewaySecurityException(
+                $"The Virtual Filter bindings of '{table.Metadata.Identifier}' need a read of a path template that cannot be filled with the authorized keys.",
+                VirtualFilterErrorCodes.PathTemplateUnfillable);
+        }
+
+        return plan;
+    }
+
+    private VirtualFilterTablePlan DecideTier(
+        SqlStatement? statement,
+        IReadOnlyList<ResolvedSourceTable> tables,
+        PreparedTable table,
+        IReadOnlyList<(AppliedVirtualFilterBinding Pair, VirtualFilterKeySet Keys)> loaded)
+    {
         var enforcement = VirtualFilterEnforcement.Create(table.Metadata, loaded);
 
         // Tier 0: nothing can be authorized, whatever the strategy; the read path still runs all guards.
@@ -189,8 +210,15 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
                 return new VirtualFilterTablePlan(enforcement, VirtualFilterTier.EmptyKeySet, skipUpstream: true, candidate.Reason);
             case PushdownStatus.Pushable:
                 var args = new Dictionary<string, object?> { [candidate.ParameterName!] = candidate.Values!.ToList() };
+                VirtualFilterPathLookup? pathLookup = null;
+                if (candidate.PathKeyField != null)
+                {
+                    int keyPair = pushPairs.FindIndex(p => p.Columns.Length == 1 && string.Equals(p.Columns[0], candidate.PathKeyField, StringComparison.OrdinalIgnoreCase));
+                    pathLookup = new VirtualFilterPathLookup(candidate.PathKeyField, table.Columns[keyPair][0], table.KeyTypes[keyPair][0], candidate.Values!);
+                }
+
                 return new VirtualFilterTablePlan(
-                    enforcement, isPointLookup ? VirtualFilterTier.PointLookup : VirtualFilterTier.Pushdown, skipUpstream: false, candidate.Reason, args);
+                    enforcement, isPointLookup ? VirtualFilterTier.PointLookup : VirtualFilterTier.Pushdown, skipUpstream: false, candidate.Reason, args, pathLookup);
             default:
                 return needsPushdown
                     ? throw PushdownDenied(table, candidate.Status == PushdownStatus.OverLimit

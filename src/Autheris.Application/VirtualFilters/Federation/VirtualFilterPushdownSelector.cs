@@ -23,7 +23,9 @@ internal enum PushdownStatus
     Disjoint
 }
 
-internal sealed record PushdownCandidate(PushdownStatus Status, string Reason, string? ParameterName = null, IReadOnlyList<string>? Values = null);
+/// <summary><paramref name="PathKeyField"/> is set when the values are sent one per request into the path template.</summary>
+internal sealed record PushdownCandidate(
+    PushdownStatus Status, string Reason, string? ParameterName = null, IReadOnlyList<string>? Values = null, string? PathKeyField = null);
 
 /// <summary>One (filter, binding) pair with its key set and, for a point lookup, the queried keys.</summary>
 internal sealed record PushdownPair(
@@ -85,7 +87,7 @@ internal static class VirtualFilterPushdownSelector
             return new(PushdownStatus.OverLimit, "key_count_over_limit");
         }
 
-        var values = common.Select(k => Text(k[0])).OrderBy(v => v, StringComparer.Ordinal).ToList();
+        var values = common.Select(k => VirtualFilterKeyCanonicalizer.FormatCanonical(k[0])).OrderBy(v => v, StringComparer.Ordinal).ToList();
         if (values.Any(v => !capability.IsValueEligible(v)))
         {
             return new(PushdownStatus.Unavailable, "value_not_pushable");
@@ -102,21 +104,12 @@ internal static class VirtualFilterPushdownSelector
             return new(PushdownStatus.OverLimit, "url_too_long");
         }
 
-        return new(PushdownStatus.Pushable, "pushdown", capability.ParameterName, values);
+        return new(PushdownStatus.Pushable, "pushdown", capability.ParameterName, values, capability.Kind == HttpKeyPushdownKind.PathLookup ? capability.KeyField : null);
     }
 
     private static bool Satisfies(HttpKeyPushdownKind kind, PushdownParameterFormat format) =>
         (kind == HttpKeyPushdownKind.QueryParameterList && format == PushdownParameterFormat.CommaSeparated) ||
         (kind == HttpKeyPushdownKind.JsonBodyArray && format == PushdownParameterFormat.PostBatch);
-
-    private static string Text(object canonical) => canonical switch
-    {
-        string s => s,
-        long l => l.ToString(CultureInfo.InvariantCulture),
-        decimal d => d.ToString(CultureInfo.InvariantCulture),
-        Guid g => g.ToString("D", CultureInfo.InvariantCulture),
-        _ => Convert.ToString(canonical, CultureInfo.InvariantCulture) ?? string.Empty
-    };
 
     private static int EstimateUrlLength(HttpEndpointDescriptor descriptor, string parameter, IReadOnlyList<string> values)
     {

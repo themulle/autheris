@@ -11,6 +11,7 @@ using Autheris.Application.Connectors;
 using Autheris.Application.Connectors.Adapters;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Services;
+using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
@@ -118,19 +119,20 @@ public sealed class FederatedStagingService : IFederatedStagingService
             }
 
             var sessionArgs = new Dictionary<string, object?> { ["limit"] = budget.MaxStagedRowsPerTable + 1 };
-            // F-GOV-14 (AC-8.5): the pushdown restricts what is fetched; it can never overwrite a gateway argument.
-            if (req.VirtualFilterPlan?.PushdownArguments is { } pushdown)
+            // F-GOV-14 (AC-8.5): the pushdown restricts what is fetched; it can never overwrite a gateway argument. A path
+            // lookup does not pass its key list to the connector (the executor would fan out and concatenate the answers);
+            // the lookup reader below sends one request per key and restricts and de-duplicates the answers (CR-01).
+            var vfPlan = req.VirtualFilterPlan;
+            var pathLookup = vfPlan is { SkipUpstream: false } ? vfPlan.PathLookup : null;
+            if (pathLookup != null)
+            {
+                EnsureNoArgumentConflict(sessionArgs, pathLookup.Argument, req.Metadata);
+            }
+            else if (vfPlan?.PushdownArguments is { } pushdown)
             {
                 foreach (var (name, value) in pushdown)
                 {
-                    if (sessionArgs.Keys.Any(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        _logger.LogWarning("Federated staging denied table {Table}: the pushdown argument collides with a gateway argument.", req.Metadata.Identifier);
-                        throw new GatewaySecurityException(
-                            $"The Virtual Filter pushdown of '{req.Metadata.Identifier}' conflicts with a gateway argument.",
-                            Autheris.Application.VirtualFilters.Federation.VirtualFilterErrorCodes.PushdownArgumentConflict);
-                    }
-
+                    EnsureNoArgumentConflict(sessionArgs, name, req.Metadata);
                     sessionArgs[name] = value;
                 }
             }
@@ -161,11 +163,19 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 VirtualFilterEnforcement: req.VirtualFilterPlan?.Enforcement,
                 SkipUpstream: req.VirtualFilterPlan?.SkipUpstream == true);
 
+            var readConnector = connector;
+            PathLookupConnector? lookupConnector = null;
+            if (pathLookup != null)
+            {
+                lookupConnector = new PathLookupConnector(connector, pathLookup, req.Metadata.HttpEndpoint?.MaxConcurrentRequests ?? 1);
+                readConnector = lookupConnector;
+            }
+
             GovernedReadResult readResult;
             try
             {
                 readResult = await GovernedConnectorReader.ReadAsync(
-                    connector,
+                    readConnector,
                     session,
                     req.Metadata,
                     rowPolicy,
@@ -207,7 +217,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     ["inDbMaskingExecuted"] = readResult.InDbMaskingExecuted,
                     ["filterPushedDown"] = req.PushdownFilter != null
                 };
-                if (req.VirtualFilterPlan is { } vfPlan)
+                if (vfPlan != null)
                 {
                     // F-GOV-14 (FR-9): which tier read the table and how many rows the gateway enforcement removed (no key values).
                     auditDetails["vfTier"] = vfPlan.Tier.ToString();
@@ -215,6 +225,12 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     auditDetails["pushdownKeyCount"] = vfPlan.PushdownArguments?.Values.OfType<System.Collections.ICollection>().Sum(c => c.Count) ?? 0;
                     auditDetails["rowsReceived"] = readResult.RowsBeforeVirtualFilter ?? 0;
                     auditDetails["rowsKept"] = rows.Count;
+                    if (lookupConnector != null)
+                    {
+                        // CR-01: the upstream was asked once per key; a 404 means "key not present" and is recorded here.
+                        auditDetails["upstreamRequests"] = lookupConnector.Stats.Requests;
+                        auditDetails["upstreamKeysNotFound"] = lookupConnector.Stats.KeysNotFound;
+                    }
                 }
 
                 await _auditRepo.RecordAuditEventAsync(new AuditLogEntry
@@ -255,6 +271,17 @@ public sealed class FederatedStagingService : IFederatedStagingService
         }
 
         return stagedSources;
+    }
+
+    private void EnsureNoArgumentConflict(Dictionary<string, object?> sessionArgs, string name, TableMetadata metadata)
+    {
+        if (sessionArgs.Keys.Any(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            _logger.LogWarning("Federated staging denied table {Table}: the pushdown argument collides with a gateway argument.", metadata.Identifier);
+            throw new GatewaySecurityException(
+                $"The Virtual Filter pushdown of '{metadata.Identifier}' conflicts with a gateway argument.",
+                Autheris.Application.VirtualFilters.Federation.VirtualFilterErrorCodes.PushdownArgumentConflict);
+        }
     }
 
     private IAutherisConnector? ResolveConnector(TableMetadata metadata)

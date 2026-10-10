@@ -62,9 +62,17 @@ public sealed class CountingCrmApiHandler : HttpMessageHandler
 
     public IReadOnlyList<CrmRequest> Requests => _requests.ToArray();
 
+    /// <summary>Customers that no longer exist upstream: <c>GET /api/v1/customers/{id}</c> answers 404 for them (HonorFilters).</summary>
+    public ConcurrentDictionary<int, bool> MissingIds { get; } = new();
+
+    /// <summary>Customers whose lookup fails with a server error (HonorFilters).</summary>
+    public ConcurrentDictionary<int, bool> FailingIds { get; } = new();
+
     public void Reset()
     {
         _requests.Clear();
+        MissingIds.Clear();
+        FailingIds.Clear();
         Mode = CrmApiMode.HonorFilters;
     }
 
@@ -92,8 +100,20 @@ public sealed class CountingCrmApiHandler : HttpMessageHandler
         }
         else if (path.StartsWith("/api/v1/customers/", StringComparison.Ordinal))
         {
+            // A path-aware upstream: a placeholder that was never expanded ("{id}") or a malformed key is a 404, like on a real
+            // API, so a request for an unexpanded template can never silently succeed (CR-01).
             var key = Uri.UnescapeDataString(path["/api/v1/customers/".Length..]);
-            rows = honor && int.TryParse(key, out var id)
+            if (!int.TryParse(key, out var id) || (honor && (MissingIds.ContainsKey(id) || All().All(c => c.Id != id))))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+
+            if (honor && FailingIds.ContainsKey(id))
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+            }
+
+            rows = honor
                 ? All().Where(c => c.Id == id).Select(c => Row(c.Id, c.Name, c.Tenant))
                 : All().Select(c => Row(c.Id, c.Name, c.Tenant));
         }
@@ -378,7 +398,9 @@ INSERT INTO client_authorization VALUES
   (105, 'T2', 1),
   (103, 'T1', 0),                       -- inactive
   (104, 'T2', 0),                       -- inactive
-  (NULL, 'T1', 1);                      -- NULL key";
+  (NULL, 'T1', 1),                      -- NULL key
+  (201, 'T1', 3), (202, 'T1', 3), (203, 'T1', 3), (204, 'T1', 3), (205, 'T1', 3), (206, 'T1', 3),
+  (207, 'T1', 3), (208, 'T1', 3), (209, 'T1', 3), (210, 'T1', 3), (211, 'T1', 3), (212, 'T1', 3);   -- 12 keys: over the path-lookup budget";
         cmd.ExecuteNonQuery();
     }
 
@@ -456,6 +478,7 @@ INSERT INTO orders VALUES (1, 101), (2, 102), (3, 103), (4, 105), (5, 999);";
         await admin.SaveFilterAsync(KeyFilter("vf_clients", "authz", ClientAuthorization, ["ca.client_id"]), actor);
         await admin.SaveFilterAsync(KeyFilter("vf_clients_tenant", "authz", ClientAuthorization, ["ca.client_id", "ca.tenant_code"]), actor);
         await admin.SaveFilterAsync(KeyFilter("vf_clients_none", "authz", ClientAuthorization, ["ca.client_id"], activeValue: "2"), actor);
+        await admin.SaveFilterAsync(KeyFilter("vf_clients_many", "authz", ClientAuthorization, ["ca.client_id"], activeValue: "3"), actor);
         await admin.SaveFilterAsync(KeyFilter("vf_clients_down", "authz_down", ClientAuthorizationDown, ["ca.client_id"]), actor);
     }
 

@@ -65,6 +65,16 @@ public static class VirtualFilterKeyCanonicalizer
         return result != null;
     }
 
+    /// <summary>The invariant text of a canonical key component, as it is sent to an upstream (pushdown values, path keys).</summary>
+    internal static string FormatCanonical(object canonical) => canonical switch
+    {
+        string s => s,
+        long l => l.ToString(CultureInfo.InvariantCulture),
+        decimal d => d.ToString(CultureInfo.InvariantCulture),
+        Guid g => g.ToString("D", CultureInfo.InvariantCulture),
+        _ => Convert.ToString(canonical, CultureInfo.InvariantCulture) ?? string.Empty
+    };
+
     private static string Normalize(string? dataType)
     {
         var text = (dataType ?? string.Empty).Trim().ToLowerInvariant();

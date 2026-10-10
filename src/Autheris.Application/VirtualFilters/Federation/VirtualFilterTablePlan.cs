@@ -26,6 +26,13 @@ public enum VirtualFilterTier
 public sealed record VirtualFilterKeySetAudit(string Filter, string Source, string BindingHash, string Strategy, int KeyCount, int DroppedKeys, bool CacheHit);
 
 /// <summary>
+/// F-GOV-14 (CR-01): a path lookup. <paramref name="Values"/> are the authorized (and queried) keys, one request each;
+/// <paramref name="Argument"/> is the path placeholder the key fills and <paramref name="Column"/> the column of the
+/// returned rows that must equal the requested key (<paramref name="KeyType"/> is its canonical type).
+/// </summary>
+public sealed record VirtualFilterPathLookup(string Argument, string Column, VirtualFilterKeyType KeyType, IReadOnlyList<string> Values);
+
+/// <summary>
 /// F-GOV-14 (WI-6): the plan of one protected HTTP table. <see cref="Enforcement"/> is always present, also when
 /// <see cref="SkipUpstream"/> is set, so the governed read path runs the same guards and coverage check for a table
 /// that is not read as for one that is (SEC-13). Only the planner creates plans.
@@ -37,7 +44,8 @@ public sealed class VirtualFilterTablePlan
         VirtualFilterTier tier,
         bool skipUpstream,
         string reason,
-        IReadOnlyDictionary<string, object?>? pushdownArguments = null)
+        IReadOnlyDictionary<string, object?>? pushdownArguments = null,
+        VirtualFilterPathLookup? pathLookup = null)
     {
         ArgumentNullException.ThrowIfNull(enforcement);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
@@ -46,6 +54,7 @@ public sealed class VirtualFilterTablePlan
         SkipUpstream = skipUpstream;
         Reason = reason;
         PushdownArguments = pushdownArguments;
+        PathLookup = pathLookup;
     }
 
     /// <summary>The gateway semi-join of the table; never null.</summary>
@@ -64,6 +73,13 @@ public sealed class VirtualFilterTablePlan
     /// when the table is read without a key restriction. The staging service refuses an argument name that is already set.
     /// </summary>
     public IReadOnlyDictionary<string, object?>? PushdownArguments { get; }
+
+    /// <summary>
+    /// Set when the keys are fetched one request per key into the path template (<c>ParallelSingleRequests</c>). The staging
+    /// service then reads through the path lookup reader (row restriction, de-duplication, 404 as "key not present")
+    /// instead of passing <see cref="PushdownArguments"/> to the connector.
+    /// </summary>
+    public VirtualFilterPathLookup? PathLookup { get; }
 
     /// <summary>The key sets read for this table, one per applied (filter, binding) pair, in order (audit).</summary>
     public IReadOnlyList<VirtualFilterKeySetAudit> KeySets { get; private set; } = [];

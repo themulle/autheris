@@ -66,6 +66,52 @@ public readonly record struct HttpKeyPushdownCapability(HttpKeyPushdownKind Kind
         }
     }
 
+    /// <summary>
+    /// True when the path template still contains a <c>{placeholder}</c> other than <paramref name="filledKeyField"/> (the
+    /// one a path lookup fills per request). The gateway fills nothing else in a cross-source read, so such a request
+    /// would go upstream with the braces unexpanded (CR-01).
+    /// </summary>
+    public static bool HasUnfillablePlaceholder(HttpEndpointDescriptor? descriptor, string? filledKeyField = null)
+    {
+        var template = descriptor?.PathTemplate;
+        if (string.IsNullOrEmpty(template))
+        {
+            return false;
+        }
+
+        int i = 0;
+        while (i < template.Length)
+        {
+            char c = template[i];
+            if (c == '}')
+            {
+                return true;   // a stray brace is never a valid, fillable template
+            }
+
+            if (c != '{')
+            {
+                i++;
+                continue;
+            }
+
+            int close = template.IndexOf('}', i + 1);
+            if (close < 0)
+            {
+                return true;
+            }
+
+            var name = template.AsSpan(i + 1, close - i - 1).Trim();
+            if (filledKeyField == null || !name.Equals(filledKeyField.AsSpan().Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            i = close + 1;
+        }
+
+        return false;
+    }
+
     /// <summary>Whether <paramref name="value"/> can be sent in this kind of request unchanged and safely.</summary>
     public bool IsValueEligible(string value)
     {

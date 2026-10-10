@@ -194,7 +194,6 @@ public sealed class VirtualFilterStrategyMatrixTests
     [InlineData(PushdownParameterFormat.PostBatch, HttpBatchType.JsonBodyArray, "/customers", true)]
     [InlineData(PushdownParameterFormat.PostBatch, HttpBatchType.QueryParameterList, "/customers", false)]
     [InlineData(PushdownParameterFormat.CommaSeparated, HttpBatchType.JsonBodyArray, "/customers", false)]
-    [InlineData(PushdownParameterFormat.CommaSeparated, HttpBatchType.ParallelSingleRequests, "/customers/{id}", false)]
     public async Task AssertedFormat_MustMatchTheEndpointCapability(PushdownParameterFormat format, HttpBatchType batch, string path, bool pushed)
     {
         var plan = await PlanAsync(Scan, Endpoint(batch, path: path), [Pair(VirtualFilterExecutionStrategy.Adaptive, format)], Keys("1"));
@@ -251,31 +250,91 @@ public sealed class VirtualFilterStrategyMatrixTests
     }
 
     [Fact]
-    public async Task PathLookup_UnsafeKeys_AreNeverPushed_AdaptiveFullFetch_PushdownOnlyDenied()
+    public async Task PathLookup_UnsafeKeys_AreNeverPushed_AdaptiveDeniedUnfillable_PushdownOnlyDenied()
     {
-        // ST-29: 'A/B', '..' and '' on a PathLookup table.
+        // ST-29: 'A/B', '..' and '' on a PathLookup table. CR-01: the template cannot be filled, so no full scan either.
         var table = Endpoint(HttpBatchType.ParallelSingleRequests, path: "/api/v1/customers/{id}");
         foreach (var unsafeKey in new[] { "A/B", "..", "" })
         {
             var keys = Keys("1", unsafeKey);
-            (await PlanAsync(Scan, table, [Pair(VirtualFilterExecutionStrategy.Adaptive)], keys)).Tier.ShouldBe(VirtualFilterTier.FullFetch);
+            var adaptive = await Should.ThrowAsync<GatewaySecurityException>(() => PlanAsync(Scan, table, [Pair(VirtualFilterExecutionStrategy.Adaptive)], keys));
+            adaptive.ErrorCode.ShouldBe("VF_PATH_TEMPLATE_UNFILLABLE");
             var ex = await Should.ThrowAsync<GatewaySecurityException>(() => PlanAsync(Scan, table, [Pair(VirtualFilterExecutionStrategy.PushdownOnly)], keys));
             ex.ErrorCode.ShouldBe("VF_PUSHDOWN_UNAVAILABLE");
         }
     }
 
     [Fact]
-    public async Task PathLookup_MoreKeysThanMaxRequests_AdaptiveFullFetch_PushdownOnlyDeniedLimitExceeded()
+    public async Task PathLookup_MoreKeysThanMaxRequests_AdaptiveDeniedUnfillable_PushdownOnlyDeniedLimitExceeded()
     {
-        // ST-32
+        // ST-32 and CR-01: over the path-lookup budget is denied, never read as a full scan.
         var table = Endpoint(HttpBatchType.ParallelSingleRequests, path: "/api/v1/customers/{id}");
         var keys = Keys(Enumerable.Range(1, 4).Select(i => i.ToString()).ToArray());
         var options = new VirtualFilterFederationOptions { MaxPathLookupRequests = 3 };
 
-        (await PlanAsync(Scan, table, [Pair(VirtualFilterExecutionStrategy.Adaptive)], keys, options)).Tier.ShouldBe(VirtualFilterTier.FullFetch);
+        var adaptive = await Should.ThrowAsync<GatewaySecurityException>(() => PlanAsync(Scan, table, [Pair(VirtualFilterExecutionStrategy.Adaptive)], keys, options));
+        adaptive.ErrorCode.ShouldBe("VF_PATH_TEMPLATE_UNFILLABLE");
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => PlanAsync(Scan, table, [Pair(VirtualFilterExecutionStrategy.PushdownOnly)], keys, options));
         ex.ErrorCode.ShouldBe("VF_PUSHDOWN_LIMIT_EXCEEDED");
         Pushed(await PlanAsync(Scan, table, [Pair(VirtualFilterExecutionStrategy.Adaptive)], keys, new VirtualFilterFederationOptions { MaxPathLookupRequests = 4 })).ShouldBe(["1", "2", "3", "4"]);
+    }
+
+    [Fact]
+    public async Task PathLookup_DuckDbHashJoin_WantsAFullRead_IsDeniedBecauseTheTemplateCannotBeFilled()
+    {
+        var table = Endpoint(HttpBatchType.ParallelSingleRequests, path: "/api/v1/customers/{id}");
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => PlanAsync(Scan, table, [Pair(VirtualFilterExecutionStrategy.DuckDbHashJoin)], Keys("1", "2")));
+
+        ex.ErrorCode.ShouldBe("VF_PATH_TEMPLATE_UNFILLABLE");
+    }
+
+    [Fact]
+    public async Task PathLookup_PushdownSwitchOff_DeniesInsteadOfScanning()
+    {
+        var table = Endpoint(HttpBatchType.ParallelSingleRequests, path: "/api/v1/customers/{id}");
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() =>
+            PlanAsync(Scan, table, [Pair(VirtualFilterExecutionStrategy.Adaptive)], Keys("1"), new VirtualFilterFederationOptions { PushdownEnabled = false }));
+
+        ex.ErrorCode.ShouldBe("VF_PATH_TEMPLATE_UNFILLABLE");
+    }
+
+    [Fact]
+    public async Task PathLookup_EmptyAndMissCases_StillSkipTheUpstream_NoDenial()
+    {
+        var table = Endpoint(HttpBatchType.ParallelSingleRequests, path: "/api/v1/customers/{id}");
+
+        var empty = await PlanAsync(Scan, table, [Pair(VirtualFilterExecutionStrategy.Adaptive)], Keys());
+        var miss = await PlanAsync(Miss, table, [Pair(VirtualFilterExecutionStrategy.Adaptive)], Keys("1"));
+
+        empty.SkipUpstream.ShouldBeTrue();
+        miss.SkipUpstream.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task PathLookup_Plan_CarriesTheLookupSpec_OtherKindsDoNot()
+    {
+        var path = await PlanAsync(Scan, Endpoint(HttpBatchType.ParallelSingleRequests, path: "/api/v1/customers/{id}"), [Pair(VirtualFilterExecutionStrategy.Adaptive)], Keys("2", "1"));
+        var qpl = await PlanAsync(Scan, Endpoint(), [Pair(VirtualFilterExecutionStrategy.Adaptive)], Keys("1"));
+
+        path.PathLookup.ShouldNotBeNull();
+        path.PathLookup!.Argument.ShouldBe("id");
+        path.PathLookup.Column.ShouldBe("id");
+        path.PathLookup.KeyType.ShouldBe(VirtualFilterKeyType.Text);
+        path.PathLookup.Values.ShouldBe(["1", "2"]);
+        qpl.PathLookup.ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData(HttpBatchType.QueryParameterList, "/customers/{region}/items")]
+    [InlineData(HttpBatchType.ParallelSingleRequests, "/regions/{region}/customers/{id}")]
+    public async Task AnyPlaceholderThePlanCannotFill_IsDenied(HttpBatchType batch, string path)
+    {
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() =>
+            PlanAsync(Scan, Endpoint(batch, path: path), [Pair(VirtualFilterExecutionStrategy.Adaptive)], Keys("1")));
+
+        ex.ErrorCode.ShouldBe("VF_PATH_TEMPLATE_UNFILLABLE");
     }
 
     [Theory]
