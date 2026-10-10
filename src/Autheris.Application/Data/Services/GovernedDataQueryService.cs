@@ -28,6 +28,12 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
     private const int DefaultLimit = 50;
     private const int MaxLimit = 1000;
 
+    /// <summary>
+    /// Largest pagination window (offset + limit + 1) a single request may span. It matches the default
+    /// WebSql.MaxAllowedRows, which the SQL layer enforces as hard row cap anyway.
+    /// </summary>
+    private const int MaxPaginationWindow = 10_000;
+
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IUnifiedPolicyDecisionPoint _pdp;
     private readonly IGovernedSqlExecutionService _sqlExecutionService;
@@ -155,8 +161,19 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         var limit = request.Limit > 0 ? Math.Min(request.Limit, MaxLimit) : DefaultLimit;
         var offset = request.Offset >= 0 ? request.Offset : 0;
 
+        // Pagination is applied here, not as OFFSET text in the generated SQL: the SQL engine's grammar only accepts the
+        // Trino form (OFFSET n LIMIT m) while the legacy token-stream rewriter hands the text unchanged to SQLite,
+        // SQL Server, PostgreSQL and the cross-source planner, none of which share that form. A plain LIMIT is
+        // understood and translated per target by every path, so the query reads offset + limit + 1 rows and the
+        // first <offset> rows are skipped below (the extra row populates HasMore).
+        if ((long)offset + limit + 1 > MaxPaginationWindow)
+        {
+            throw new ArgumentException(
+                $"Pagination window too large: offset + limit must not exceed {MaxPaginationWindow - 1}.", nameof(request));
+        }
+
         var sb = new StringBuilder();
-        sb.Append("SELECT ").Append(string.Join(", ", columnsToSelect)).Append(" FROM ").Append(request.Table.ToQualifiedName());
+        sb.Append("SELECT ").Append(string.Join(", ", columnsToSelect)).Append(" FROM ").Append(request.Table.ToString());
 
         var predicates = new List<string>();
         if (!string.IsNullOrWhiteSpace(request.FilterExpression))
@@ -187,8 +204,8 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             sb.Append(" ORDER BY ").Append(string.Join(", ", metadata.PrimaryKeyColumns));
         }
 
-        // Fetch Limit + 1 to accurately populate HasMore
-        sb.Append(" LIMIT ").Append(limit + 1).Append(" OFFSET ").Append(offset);
+        // Fetch offset + limit + 1 rows: the skipped window plus one row to accurately populate HasMore
+        sb.Append(" LIMIT ").Append(offset + limit + 1);
         var sql = sb.ToString();
 
         // 6. Execution & Routing
@@ -228,9 +245,9 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         }
 
         // 7. Paging Envelope & Masking Enforcement
-        var rawRows = sqlResult.Rows;
-        bool hasMore = rawRows.Count > limit;
-        var pagedRows = rawRows.Take(limit).ToList();
+        var windowRows = offset > 0 ? sqlResult.Rows.Skip(offset).ToList() : sqlResult.Rows;
+        bool hasMore = windowRows.Count > limit;
+        var pagedRows = windowRows.Take(limit).ToList();
 
         var columnInfos = new List<DatasetColumnInfo>(columnsToSelect.Count);
         foreach (var col in columnsToSelect)

@@ -24,6 +24,8 @@ using Microsoft.Extensions.Logging;
 /// </summary>
 public static class DatasetDataEndpoints
 {
+    private const string GenericForbiddenMessage = "The request was rejected by the gateway security policy.";
+
     public static IEndpointRouteBuilder MapDatasetDataEndpoints(this IEndpointRouteBuilder app)
     {
         // 1. GET /api/v1/data/{domain}/{schema}/{table}
@@ -200,6 +202,14 @@ public static class DatasetDataEndpoints
             logger.LogWarning("Invalid query parameters for {Table}: {Message}", tableId, ex.Message);
             httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
             await httpContext.Response.WriteAsJsonAsync(new { error = ex.Message }, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is GatewaySecurityException or System.Security.SecurityException)
+        {
+            // Policy denials from the SQL/federation layer (e.g. cross-source disabled, incomplete HTTP response,
+            // WebSQL policy) are fail-closed 403s, never 500s. Details stay in the log, not in the response.
+            logger.LogWarning("Governed data query denied for {Table}: {Message}", tableId, ex.Message);
+            httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await httpContext.Response.WriteAsJsonAsync(new { error = GenericForbiddenMessage }, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
