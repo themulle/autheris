@@ -1525,7 +1525,19 @@ public sealed class CrossSourceOptions
     public int TimeoutSeconds { get; init; } = 30;
     public int MaxParallelSourceReads { get; init; } = 4;
     public bool AllowNonEquiJoins { get; init; } = false;
-    public List<string> AllowedHttpAuthModes { get; init; } = ["None", "StaticApiKey", "ClientCredentials"];
+
+    /// <summary>
+    /// HTTP data source authentication modes allowed in federated queries. When not configured: None, StaticApiKey and
+    /// ClientCredentials. A configured list replaces that default entirely. Nullable on purpose: the configuration
+    /// binder appends to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON array counts as
+    /// "not configured"; to permit no federated HTTP source, set <see cref="Enabled"/> to false.
+    /// </summary>
+    public List<string>? AllowedHttpAuthModes { get; init; }
+
+    private static readonly string[] DefaultAllowedHttpAuthModes = ["None", "StaticApiKey", "ClientCredentials"];
+
+    /// <summary>Configured <see cref="AllowedHttpAuthModes"/> or the default list.</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedHttpAuthModes() => AllowedHttpAuthModes ?? (IReadOnlyList<string>)DefaultAllowedHttpAuthModes;
 }
 
 public sealed class WebSqlPlanCacheOptions
