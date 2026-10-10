@@ -31,6 +31,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
+using TrinoSqlEngine.Ast.Builder;
+using TrinoSqlEngine.Ast.Nodes;
 
 public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionService
 {
@@ -61,6 +63,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
+    private readonly IVirtualFilterFederationPlanner? _vfPlanner;
     private readonly ILogger<FederatedDuckDbExecutionService>? _logger;
 
     public FederatedDuckDbExecutionService(
@@ -81,7 +84,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
-        ILogger<FederatedDuckDbExecutionService>? logger = null)
+        ILogger<FederatedDuckDbExecutionService>? logger = null,
+        IVirtualFilterFederationPlanner? vfPlanner = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
@@ -101,6 +105,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache;
         _logger = logger;
+        _vfPlanner = vfPlanner;
     }
 
     private TableAccessPolicy AccessPolicy() =>
@@ -279,24 +284,25 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         try
         {
-            // Phase A: Authorize ALL tables before any read (INV-1, INV-2)
-            var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, ct).ConfigureAwait(false);
-
-            // F-GOV-14: Virtual Filters on HTTP tables are not evaluated here until the federation planner (WI-6) supplies
-            // a gateway enforcement; without it the governed read denies every HTTP table with an applied Virtual Filter
-            // (fail closed). The former short-circuit / pushdown / join path trusted the upstream and is removed.
-            var plan = _planner.Plan(request.Sql, metadata, routing.Tables, decisions, crossSourceOptions);
-
-            // Start Audit (fail-closed, INV-17)
-            await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, ct).ConfigureAwait(false);
-
-            // Budget and Timeout (INV-12, INV-13)
+            // Budget and Timeout (INV-12, INV-13). SEC-12: the timeout also covers authorization, planning and key loading.
             int timeoutSeconds = crossSourceOptions.TimeoutSeconds > 0
                 ? crossSourceOptions.TimeoutSeconds
                 : (_options.Value.WebSql?.ExecutionTimeoutSeconds > 0 ? _options.Value.WebSql.ExecutionTimeoutSeconds : 30);
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+            // Phase A: Authorize ALL tables before any read (INV-1, INV-2)
+            var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, timeoutCts.Token).ConfigureAwait(false);
+
+            // F-GOV-14 (WI-6): the planner decides per protected HTTP table how the authorized keys are loaded and enforced
+            // (single policy decision point: the decisions). Without a planner a table with applied Virtual Filters is denied.
+            var statement = ParseStatement(request.Sql);
+            var vfPlans = await PlanVirtualFiltersAsync(statement, routing.Tables, decisions, tenantId, timeoutCts.Token).ConfigureAwait(false);
+            var plan = _planner.Plan(request.Sql, metadata, routing.Tables, decisions, crossSourceOptions, vfPlans, statement);
+
+            // Start Audit (fail-closed, INV-17)
+            await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, ct).ConfigureAwait(false);
 
             var budget = new FederationBudget(
                 MaxTableCount: maxTables,
@@ -329,6 +335,38 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             await RecordFailureAuditAsync(request, tenantId, user, ex).ConfigureAwait(false);
             throw;
         }
+    }
+
+    private SqlStatement ParseStatement(string sql)
+    {
+        var (tree, _) = _sqlEngine.Parse(sql.AsMemory());
+        return new SqlAstBuilder().BuildStatement(tree);
+    }
+
+    private async Task<IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>?> PlanVirtualFiltersAsync(
+        SqlStatement statement,
+        IReadOnlyList<ResolvedSourceTable> tables,
+        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
+        TenantId tenantId,
+        CancellationToken ct)
+    {
+        if (_vfPlanner == null)
+        {
+            // ST-22: no planner, no enforcement; a protected table is never read without it.
+            foreach (var table in tables)
+            {
+                if (VirtualFilterFederationPlanner.RequiresEnforcement(table.Metadata, CrossSourcePlanner.RequireDecision(decisions, table)))
+                {
+                    throw new GatewaySecurityException(
+                        $"The Virtual Filters of '{table.Metadata.Identifier}' cannot be enforced: no federation planner is configured.",
+                        VirtualFilterErrorCodes.EnforcementUnavailable);
+                }
+            }
+
+            return null;
+        }
+
+        return await _vfPlanner.PlanAsync(statement, tables, decisions, tenantId, ct).ConfigureAwait(false);
     }
 
     private async Task<(Dictionary<TableIdentifier, TableAccessDecision> Decisions, Sid UserSid)> AuthorizeAllTablesAsync(

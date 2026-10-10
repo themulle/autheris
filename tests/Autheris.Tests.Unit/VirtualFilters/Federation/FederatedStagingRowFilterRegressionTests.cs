@@ -114,10 +114,112 @@ public sealed class FederatedStagingRowFilterRegressionTests
         plan.StagingRequests.Count.ShouldBe(2);
         foreach (var request in plan.StagingRequests)
         {
-            var items = request.SessionItems ?? new Dictionary<string, object?>();
-            items.ShouldNotContainKey("VirtualFilterFederationHandled");
-            items.ShouldNotContainKey(GovernedConnectorReader.RlsPushdownExecutedKey);
-            items.ShouldNotContainKey(GovernedConnectorReader.InDbColumnMaskingExecutedKey);
+            request.VirtualFilterPlan.ShouldBeNull();   // no plan was supplied; nothing relaxes row filtering
         }
+
+        // WI-6: the generic staging hooks of e7ee288 are gone; the only extension point is the typed plan.
+        var members = typeof(Autheris.Application.Olap.StagingTableRequest).GetProperties().Select(p => p.Name).ToList();
+        members.ShouldNotContain("SessionItems");
+        members.ShouldNotContain("CustomArguments");
+        members.ShouldNotContain("PreloadedRows");
+    }
+
+    private static Autheris.Application.Olap.StagingTableRequest Request(
+        TableMetadata table, TableAccessDecision decision, Autheris.Application.VirtualFilters.Federation.VirtualFilterTablePlan? plan) =>
+        new(new TrinoSqlEngine.Analysis.TableAccessTarget(table.Identifier.Domain, table.Identifier.Schema, table.Identifier.TableName, null, table.Identifier.ToString()),
+            table, decision, "s0", table.Columns.Select(c => c.ColumnName).ToList(), VirtualFilterPlan: plan);
+
+    private static (TableAccessDecision Decision, Autheris.Application.VirtualFilters.Federation.VirtualFilterEnforcement Enforcement) Protected(
+        TableMetadata table, params string[] authorizedIds)
+    {
+        var pair = VirtualFilterEnforcementFixture.PairById();
+        var decision = Unrestricted(table).WithMandatoryPredicate("EXISTS (SELECT 1 FROM vf)", ["vf_customers"], [pair]);
+        var keys = VirtualFilterEnforcementFixture.Keys(
+            [Autheris.Application.VirtualFilters.Federation.VirtualFilterKeyType.Text], authorizedIds.Select(i => new object?[] { i }).ToArray());
+        return (decision, VirtualFilterEnforcementFixture.Enforcement(table, (pair, keys)));
+    }
+
+    private static readonly TableMetadata Customers = VirtualFilterEnforcementFixture.Customers("varchar");
+
+    [Fact]
+    public async Task Stage_PlanWithEnforcement_KeepsOnlyAuthorizedRows()
+    {
+        var stub = new StubTableConnector("crm_api", [VirtualFilterEnforcementFixture.Customer("1"), VirtualFilterEnforcementFixture.Customer("2")]);
+        var (decision, enforcement) = Protected(Customers, "2");
+        var plan = new Autheris.Application.VirtualFilters.Federation.VirtualFilterTablePlan(
+            enforcement, Autheris.Application.VirtualFilters.Federation.VirtualFilterTier.FullFetch, skipUpstream: false, "full_fetch");
+
+        var staged = await Staging(StubRegistry.For((Customers, stub))).StageAsync([Request(Customers, decision, plan)], User(), Tenant, Budget());
+
+        stub.UpstreamCalls.ShouldBe(1);
+        staged.ShouldHaveSingleItem().GovernedRows.ShouldHaveSingleItem()["id"].ShouldBe("2");
+    }
+
+    [Fact]
+    public async Task Stage_SkipUpstream_ConnectorIsResolvedButNeverCalled_EmptyTable()
+    {
+        // SEC-13: the connector is resolved (so a missing one still denies), the call is skipped.
+        var stub = new StubTableConnector("crm_api", [VirtualFilterEnforcementFixture.Customer("1")]);
+        var (decision, enforcement) = Protected(Customers, "1");
+        var plan = new Autheris.Application.VirtualFilters.Federation.VirtualFilterTablePlan(
+            enforcement, Autheris.Application.VirtualFilters.Federation.VirtualFilterTier.EmptyKeySet, skipUpstream: true, "empty_key_set");
+
+        var staged = await Staging(StubRegistry.For((Customers, stub))).StageAsync([Request(Customers, decision, plan)], User(), Tenant, Budget());
+
+        stub.UpstreamCalls.ShouldBe(0);
+        var table = staged.ShouldHaveSingleItem();
+        table.GovernedRows.ShouldBeEmpty();
+        table.StagingTableName.ShouldBe("s0");
+    }
+
+    [Fact]
+    public async Task Stage_SkipUpstream_NoConnector_IsDeniedLikeAHit()
+    {
+        var (decision, enforcement) = Protected(Customers, "1");
+        var plan = new Autheris.Application.VirtualFilters.Federation.VirtualFilterTablePlan(
+            enforcement, Autheris.Application.VirtualFilters.Federation.VirtualFilterTier.EmptyKeySet, skipUpstream: true, "empty_key_set");
+        var emptyRegistry = NSubstitute.Substitute.For<Autheris.Application.Connectors.IAutherisConnectorRegistry>();
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() =>
+            Staging(emptyRegistry).StageAsync([Request(Customers, decision, plan)], User(), Tenant, Budget()));
+
+        ex.ErrorCode.ShouldBe("CONNECTOR_UNAVAILABLE");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Stage_SkipUpstream_HttpTableGuards_StillDeny_AsForAHit(bool forwardBearer)
+    {
+        // ST-24 (staging half): ForwardBearerToken / CompleteResponse=false deny for a miss exactly as for a hit.
+        var table = Customers with
+        {
+            Table = new Table
+            {
+                TableName = "customers",
+                SchemaName = "public",
+                SourceType = "Http",
+                DataSourceType = DataSourceType.HttpDeclarative,
+                SourceName = "crm_api",
+                IsActive = true,
+                HttpEndpoint = new HttpEndpointDescriptor
+                {
+                    BaseUrl = "https://api.example.internal",
+                    PathTemplate = "/customers",
+                    AuthMode = forwardBearer ? HttpAuthMode.ForwardBearerToken : HttpAuthMode.None,
+                    CompleteResponse = forwardBearer
+                }
+            }
+        };
+        var stub = new StubTableConnector("crm_api", [VirtualFilterEnforcementFixture.Customer("1")]);
+        var (decision, enforcement) = Protected(table, "1");
+        var plan = new Autheris.Application.VirtualFilters.Federation.VirtualFilterTablePlan(
+            enforcement, Autheris.Application.VirtualFilters.Federation.VirtualFilterTier.EmptyKeySet, skipUpstream: true, "empty_key_set");
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() =>
+            Staging(StubRegistry.For((table, stub))).StageAsync([Request(table, decision, plan)], User(), Tenant, Budget()));
+
+        ex.ErrorCode.ShouldBe(forwardBearer ? "AUTH_MODE_UNSUPPORTED" : "INCOMPLETE_HTTP_RESPONSE");
+        stub.UpstreamCalls.ShouldBe(0);
     }
 }

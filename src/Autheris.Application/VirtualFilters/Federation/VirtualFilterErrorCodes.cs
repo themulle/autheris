@@ -40,7 +40,7 @@ public static class VirtualFilterErrorCodes
     /// <summary>A <c>PushdownOnly</c> binding needs a key pushdown the table or the gateway cannot provide.</summary>
     public const string PushdownUnavailable = "VF_PUSHDOWN_UNAVAILABLE";
 
-    private static readonly IReadOnlyList<string> CodesInDenyReasons = [PatternEvaluationFailed];
+    private static readonly IReadOnlyList<string> CodesInDenyReasons = [PatternEvaluationFailed, BindingMisconfigured];
 
     /// <summary>The Virtual Filter error code a deny reason starts with (<c>CODE: ...</c>), if any.</summary>
     public static bool TryGetCode(string? denyReason, out string code)

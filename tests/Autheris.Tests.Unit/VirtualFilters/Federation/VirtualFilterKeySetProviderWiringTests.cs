@@ -58,5 +58,6 @@ public sealed class VirtualFilterKeySetProviderWiringTests : IDisposable
         second.Count.ShouldBe(3);
         provider.GetRequiredService<VirtualFilterKeySetCache>().CurrentEstimatedSize.ShouldBeGreaterThan(0);
         provider.GetRequiredService<ITableMetadataRepository>().ShouldBeSameAs(_db.Catalog);
+        provider.GetRequiredService<IVirtualFilterFederationPlanner>().ShouldBeOfType<VirtualFilterFederationPlanner>();
     }
 }

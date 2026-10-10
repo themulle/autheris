@@ -48,8 +48,10 @@ public sealed class FederatedVirtualFilterDuckDbTests
     }
 
     [Fact]
-    public void CrossSourcePlanner_WithVirtualFilterJoinSpec_InjectsJoinAndStagingRequest()
+    public void CrossSourcePlanner_WithVirtualFilterPlan_DoesNotRewriteTheQuery_AndStagesNoKeyRelation()
     {
+        // F-GOV-14 WI-6: the Virtual Filter is a gateway semi-join at staging; the former INNER JOIN against a preloaded
+        // key relation (row multiplication, query shape bypasses) is gone.
         var sql = "SELECT id, name FROM web_crm.public.customers";
         var metadata = Engine.Analyze(sql.AsMemory());
         var webMeta = CreateWebTable("web_crm", "customers", ["id", "name"]);
@@ -60,48 +62,10 @@ public sealed class FederatedVirtualFilterDuckDbTests
             [webMeta.Identifier] = TableAccessDecision.Allowed(webMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
         };
 
-        var filter = new VirtualFilter
-        {
-            TenantId = new TenantId("tenant-alpha"),
-            Name = "vf_allowed",
-            Source = "mssql_corp",
-            KeyColumns = new[] { "client.customer_id" }
-        };
+        var plan = new CrossSourcePlanner(Engine).Plan(sql, metadata, [resolvedTable], decisions, new CrossSourceOptions { Enabled = true });
 
-        var binding = new FilterBinding
-        {
-            FilterName = "vf_allowed",
-            TargetPattern = "^web_crm\\.public\\.customers$",
-            ColumnMap = new Dictionary<string, string> { ["customer_id"] = "id" }
-        };
-
-        var vfJoinSpec = new VirtualFilterJoinSpec(
-            webMeta.Identifier,
-            filter,
-            binding,
-            new List<IReadOnlyDictionary<string, object?>>
-            {
-                new Dictionary<string, object?> { ["customer_id"] = "47" }
-            });
-
-        var planner = new CrossSourcePlanner(Engine);
-        var plan = planner.Plan(
-            sql,
-            metadata,
-            [resolvedTable],
-            decisions,
-            new CrossSourceOptions { Enabled = true },
-            virtualFilterJoins: new[] { vfJoinSpec });
-
-        // There should be 2 staging requests: web_crm.public.customers (s0) and virtual filter (s1)
-        plan.StagingRequests.Count.ShouldBe(2);
-        var vfStaging = plan.StagingRequests.FirstOrDefault(r => r.PreloadedRows != null);
-        vfStaging.ShouldNotBeNull();
-        vfStaging.PreloadedRows.ShouldNotBeNull();
-        vfStaging.PreloadedRows.Count.ShouldBe(1);
-
-        // Generated DuckDB SQL must contain INNER JOIN
-        plan.GeneratedDuckDbSql.ShouldContain("JOIN");
-        plan.GeneratedDuckDbSql.ShouldContain("customer_id");
+        plan.StagingRequests.Count.ShouldBe(1);
+        plan.StagingNames.Count.ShouldBe(1);
+        plan.GeneratedDuckDbSql.ShouldNotContain("JOIN");
     }
 }

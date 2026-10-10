@@ -252,8 +252,10 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                 {
                     if (profile.Uncovered == UncoveredPolicy.Deny)
                     {
-                        uncoveredDeny = MandatoryFilterOutcome.Deny(
-                            $"Virtual filters: '{table.ToString()}' is in the scope of the profile '{profile.Name}' but no filter of the profile covers it (uncovered: deny).");
+                        // A binding that matched the object but lacks catalog columns is a misconfiguration (ST-37), not "uncovered".
+                        uncoveredDeny = MandatoryFilterOutcome.Deny(missingBinding != null
+                            ? $"{VirtualFilterErrorCodes.BindingMisconfigured}: '{table.ToString()}' matches filter '{missingBinding.Value.Filter.Name}' in profile '{profile.Name}', but lacks required column(s): {string.Join(", ", missingBinding.Value.Missing)} (uncovered: deny, fail-closed)."
+                            : $"Virtual filters: '{table.ToString()}' is in the scope of the profile '{profile.Name}' but no filter of the profile covers it (uncovered: deny).");
                         if (trace == null)
                         {
                             return uncoveredDeny;
@@ -263,7 +265,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                     {
                         // SR15-13: Matching binding lacks required columns, and profile is not covered by another filter -> fail-closed (Deny)
                         uncoveredDeny = MandatoryFilterOutcome.Deny(
-                            $"Virtual filters: '{table.ToString()}' matches filter '{missingBinding.Value.Filter.Name}' in profile '{profile.Name}', but lacks required column(s): {string.Join(", ", missingBinding.Value.Missing)} (uncovered: deny, fail-closed).");
+                            $"{VirtualFilterErrorCodes.BindingMisconfigured}: '{table.ToString()}' matches filter '{missingBinding.Value.Filter.Name}' in profile '{profile.Name}', but lacks required column(s): {string.Join(", ", missingBinding.Value.Missing)} (uncovered: deny, fail-closed).");
                         if (trace == null)
                         {
                             return uncoveredDeny;
@@ -359,7 +361,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException or RegexMatchTimeoutException)
         {
-            return MandatoryFilterOutcome.Deny($"Virtual filters: the filter '{currentFilter}' could not be evaluated for '{table.ToString()}' ({ex.Message}).");
+            return MandatoryFilterOutcome.Deny($"{VirtualFilterErrorCodes.BindingMisconfigured}: the filter '{currentFilter}' could not be evaluated for '{table.ToString()}' ({ex.Message}).");
         }
     }
 

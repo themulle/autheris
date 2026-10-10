@@ -23,12 +23,6 @@ public sealed record CrossSourcePlan(
     IReadOnlyList<StagingTableRequest> StagingRequests,
     IReadOnlyList<string> StagingNames);
 
-public sealed record VirtualFilterJoinSpec(
-    TableIdentifier TargetTable,
-    VirtualFilter Filter,
-    FilterBinding Binding,
-    IReadOnlyList<IReadOnlyDictionary<string, object?>> AllowedKeyTuples);
-
 public interface ICrossSourcePlanner
 {
     CrossSourcePlan Plan(
@@ -37,8 +31,8 @@ public interface ICrossSourcePlanner
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
-        IReadOnlyList<VirtualFilterJoinSpec>? virtualFilterJoins = null,
-        IReadOnlyDictionary<TableIdentifier, IReadOnlyDictionary<string, object?>>? targetCustomArguments = null);
+        IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans = null,
+        SqlStatement? statement = null);
 }
 
 public sealed class CrossSourcePlanner : ICrossSourcePlanner
@@ -85,14 +79,20 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         CrossSourceOptions options) =>
         Plan(rawSql, metadata, tables, decisions, options, null, null);
 
+    /// <summary>
+    /// Plans the staging requests and the DuckDB query. <paramref name="virtualFilterPlans"/> (WI-6) are attached to the
+    /// staging request of their table; the user query is never rewritten for Virtual Filters. <paramref name="statement"/>
+    /// is the already parsed user statement (parsed here when it is not supplied).
+    /// </summary>
+
     public CrossSourcePlan Plan(
         string rawSql,
         SqlQueryMetadata metadata,
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
-        IReadOnlyList<VirtualFilterJoinSpec>? virtualFilterJoins = null,
-        IReadOnlyDictionary<TableIdentifier, IReadOnlyDictionary<string, object?>>? targetCustomArguments = null)
+        IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? virtualFilterPlans = null,
+        SqlStatement? statement = null)
     {
         ArgumentNullException.ThrowIfNull(rawSql);
         ArgumentNullException.ThrowIfNull(metadata);
@@ -123,6 +123,20 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         for (int i = 0; i < tables.Count; i++)
         {
             GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(tables[i].Target, tables[i].Metadata, tableDecisions[i], metadata);
+        }
+
+        // A Virtual Filter plan for a table that is not part of the query cannot be attached; deny instead of ignoring it.
+        if (virtualFilterPlans != null)
+        {
+            foreach (var planned in virtualFilterPlans.Keys)
+            {
+                if (!tables.Any(t => DecisionKey(t) == planned))
+                {
+                    throw new GatewaySecurityException(
+                        $"A Virtual Filter plan targets '{planned}', which is not part of the query; the query is denied.",
+                        VirtualFilterErrorCodes.EnforcementIncomplete);
+                }
+            }
         }
 
         // 3. Non-equi join / Cartesian product check (INV-12)
@@ -236,11 +250,8 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 }
             }
 
-            IReadOnlyDictionary<string, object?>? customArgs = null;
-            if (targetCustomArguments != null && targetCustomArguments.TryGetValue(identifier, out var ca))
-            {
-                customArgs = ca;
-            }
+            VirtualFilterTablePlan? vfPlan = null;
+            virtualFilterPlans?.TryGetValue(identifier, out vfPlan);
 
             stagingRequests.Add(new StagingTableRequest(
                 t.Target,
@@ -249,91 +260,18 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 stagingName,
                 projected.ToList(),
                 PushdownFilter: null,
-                CustomArguments: customArgs));
+                VirtualFilterPlan: vfPlan));
         }
 
-        // 5. AST rewrite to target s0, s1, etc.
-        var (tree, _) = _sqlEngine.Parse(rawSql.AsMemory());
-        var builder = new SqlAstBuilder();
-        var ast = builder.BuildStatement(tree);
+        // 5. AST rewrite to target s0, s1, etc. (the user query is not touched for Virtual Filters)
+        if (statement == null)
+        {
+            var (tree, _) = _sqlEngine.Parse(rawSql.AsMemory());
+            statement = new SqlAstBuilder().BuildStatement(tree);
+        }
 
         var rewriter = new FederationAstRewriter(targetToStaging, targetToAlias, tables);
-        var rewrittenAst = (SqlStatement)rewriter.Visit(ast);
-
-        if (virtualFilterJoins != null && virtualFilterJoins.Count > 0)
-        {
-            foreach (var vf in virtualFilterJoins)
-            {
-                string vfStagingName = $"s{stagingRequests.Count}";
-                stagingNames.Add(vfStagingName);
-
-                var keyCols = vf.Filter.KeyColumns.Select(VirtualFilterNames.ColumnOf).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-                var vfColumns = keyCols.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList();
-                var vfMeta = new TableMetadata
-                {
-                    Identifier = new TableIdentifier(vf.Filter.Source, "virtual_filter", vf.Filter.Name),
-                    Table = new Table { DataSourceType = DataSourceType.Sql, IsActive = true },
-                    Columns = vfColumns
-                };
-
-                var vfTarget = new TableAccessTarget(vf.Filter.Source, "virtual_filter", vf.Filter.Name, null, $"{vf.Filter.Source}.virtual_filter.{vf.Filter.Name}");
-                var vfDecision = TableAccessDecision.Allowed(vfMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
-
-                stagingRequests.Add(new StagingTableRequest(
-                    Reference: vfTarget,
-                    Metadata: vfMeta,
-                    Decision: vfDecision,
-                    StagingName: vfStagingName,
-                    Projection: keyCols,
-                    PreloadedRows: vf.AllowedKeyTuples));
-
-                if (!identifierToStaging.TryGetValue(vf.TargetTable, out var targetStaging))
-                {
-                    throw new GatewaySecurityException(
-                        $"The Virtual Filter '{vf.Filter.Name}' targets a table that is not part of the query; the query is denied.",
-                        VirtualFilterErrorCodes.EnforcementIncomplete);
-                }
-
-                string effectiveTarget = identifierToAlias.TryGetValue(vf.TargetTable, out var ta) ? ta : targetStaging;
-
-                var pairConditions = new List<Expression>();
-                foreach (var keyCol in vf.Filter.KeyColumns)
-                {
-                    var filterKey = VirtualFilterNames.ColumnOf(keyCol);
-                    var targetCol = vf.Binding.ColumnMap != null && vf.Binding.ColumnMap.TryGetValue(filterKey, out var mapped)
-                        ? mapped
-                        : filterKey;
-
-                    pairConditions.Add(new BinaryExpression(
-                        new ColumnReference(new SqlQualifiedName([new SqlIdentifier(effectiveTarget, false), new SqlIdentifier(targetCol, false)])),
-                        BinaryOperator.Equal,
-                        new ColumnReference(new SqlQualifiedName([new SqlIdentifier(vfStagingName, false), new SqlIdentifier(filterKey, false)]))));
-                }
-
-                Expression? overallCondition = null;
-                foreach (var pair in pairConditions)
-                {
-                    overallCondition = overallCondition == null
-                        ? pair
-                        : new BinaryExpression(overallCondition, BinaryOperator.And, pair);
-                }
-
-                if (rewrittenAst is SelectStatement selectStatement && selectStatement.Body is QuerySpecification querySpec && querySpec.From != null && overallCondition != null)
-                {
-                    rewrittenAst = selectStatement with
-                    {
-                        Body = querySpec with
-                        {
-                            From = new JoinedTableSource(
-                                querySpec.From,
-                                JoinType.Inner,
-                                new NamedTableSource(new SqlQualifiedName([new SqlIdentifier(vfStagingName, false)]), null),
-                                new OnJoinCondition(overallCondition))
-                        }
-                    };
-                }
-            }
-        }
+        var rewrittenAst = (SqlStatement)rewriter.Visit(statement);
 
         var generator = SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.DuckDb);
         var duckSql = generator.GenerateSql(rewrittenAst);
@@ -358,6 +296,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         private readonly Dictionary<string, string> _targetToStaging;
         private readonly Dictionary<string, string> _targetToAlias;
         private readonly IReadOnlyList<ResolvedSourceTable> _tables;
+        private readonly HashSet<string> _cteNames = new(StringComparer.OrdinalIgnoreCase);
 
         public FederationAstRewriter(
             Dictionary<string, string> targetToStaging,
@@ -369,8 +308,20 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             _tables = tables;
         }
 
+        public override SqlNode VisitCommonTableExpression(CommonTableExpression node)
+        {
+            // A CTE name is visible to its own body (recursive) and to everything after it.
+            _cteNames.Add(node.Name.Value);
+            return base.VisitCommonTableExpression(node);
+        }
+
         public override SqlNode VisitNamedTableSource(NamedTableSource node)
         {
+            if (node.Name.Parts.Count == 1 && _cteNames.Contains(node.Name.Parts[0].Value))
+            {
+                return node;   // reference to a CTE of the query, not to a source table
+            }
+
             var rawName = string.Join(".", node.Name.Parts.Select(p => p.Value));
             string? stagingName = null;
 
@@ -387,7 +338,11 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 }
             }
 
-            stagingName ??= "s0";
+            // ST-27: a name that is neither a resolved table nor a CTE is never guessed (no "s0" fallback).
+            if (stagingName == null)
+            {
+                throw new WebSqlPolicyException($"Table '{rawName}' is not part of the resolved cross-source tables.");
+            }
 
             SqlIdentifier? alias = node.Alias;
             if (alias == null && _targetToAlias.TryGetValue(rawName, out var a))

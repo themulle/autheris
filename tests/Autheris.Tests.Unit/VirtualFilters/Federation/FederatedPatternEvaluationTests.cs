@@ -42,7 +42,7 @@ public sealed class FederatedPatternEvaluationTests
         ex.ShouldNotBeOfType<GatewayForbiddenException>();   // the specific code, not a generic forbidden
         crm.UpstreamCalls.ShouldBe(0);
         erp.UpstreamCalls.ShouldBe(0);
-        await pipeline.KeySetProvider.DidNotReceiveWithAnyArgs().GetAsync(default!, default!, default, default);
+        pipeline.KeySetProvider.Calls.ShouldBeEmpty();
         await pipeline.Audit.Received(1).RecordAuditEventAsync(
             Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlQueryDenied &&
                                        e.DetailsJson != null &&

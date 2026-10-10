@@ -9,9 +9,8 @@ using static Autheris.Tests.Unit.VirtualFilters.Federation.FederatedServiceHarne
 using static Autheris.Tests.Unit.VirtualFilters.Federation.FederatedVfPipelineHarness;
 
 /// <summary>
-/// F-GOV-14 WI-5 interim state: the legacy short-circuit evaluator and key provider are removed. Until the federation
-/// planner (WI-6) supplies a gateway enforcement, a Virtual Filter on an HTTP table denies every WebSQL cross-source
-/// query shape (fail closed); a point lookup no longer returns a silent empty result.
+/// F-GOV-14 WI-6 (ST-22): without a registered federation planner, a Virtual Filter on an HTTP table denies every WebSQL
+/// cross-source query shape (fail closed) before any key is loaded or any upstream call is made.
 /// </summary>
 public sealed class FederatedVirtualFilterInterimTests
 {
@@ -21,15 +20,21 @@ public sealed class FederatedVirtualFilterInterimTests
     [Theory]
     [InlineData("SELECT c.id, o.id FROM crm_api.public.customers c JOIN erp.public.orders o ON o.customer_id = c.id WHERE c.id = 999")]
     [InlineData("SELECT c.id, o.id FROM crm_api.public.customers c JOIN erp.public.orders o ON o.customer_id = c.id")]
-    public async Task VirtualFilterOnHttpTable_WithoutEnforcement_IsForbidden(string sql)
+    public async Task VirtualFilterOnHttpTable_WithoutPlanner_IsDeniedEnforcementUnavailable(string sql)
     {
         var crm = new StubTableConnector("crm_api", [Row(("id", "1"), ("name", "Alpha")), Row(("id", "999"), ("name", "Omega"))]);
         var erp = new StubTableConnector("erp", [Row(("id", "10"), ("customer_id", "999"))]);
         var pipeline = Build(
             [(CrmCustomers, crm), (ErpOrders, erp)],
             Consents(Allow(CrmCustomers.Identifier), Allow(ErpOrders.Identifier)),
-            AliceSnapshot("crm_api.*.*", "crm_api.public.customers"));
+            AliceSnapshot("crm_api.*.*", "crm_api.public.customers"),
+            withPlanner: false);
 
-        await Should.ThrowAsync<GatewayForbiddenException>(() => pipeline.RunAsync(sql));
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => pipeline.RunAsync(sql));
+
+        ex.ErrorCode.ShouldBe("VF_ENFORCEMENT_UNAVAILABLE");
+        crm.UpstreamCalls.ShouldBe(0);
+        erp.UpstreamCalls.ShouldBe(0);
+        pipeline.KeySetProvider.Calls.ShouldBeEmpty();
     }
 }

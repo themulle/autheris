@@ -17,6 +17,8 @@ namespace Autheris.Application.Connectors;
 /// kept), <paramref name="MaxBytes"/> after projection. <paramref name="MaskingDisabled"/> is the Development-only
 /// DANGER switch. <paramref name="VirtualFilterEnforcement"/> (F-GOV-14, C-6) is the gateway semi-join for the
 /// table's applied Virtual Filters; it is passed here explicitly and never through <c>session.Items</c>.
+/// <paramref name="SkipUpstream"/> (WI-6, Tier 0) skips only the connector call: all guards and the coverage check still
+/// run, and it requires an enforcement (otherwise the read is denied).
 /// </summary>
 public sealed record GovernedRowPolicy(
     IColumnMaskingProvider MaskingProvider,
@@ -24,7 +26,8 @@ public sealed record GovernedRowPolicy(
     bool MaskingDisabled = false,
     int? MaxRows = null,
     long? MaxBytes = null,
-    VirtualFilterEnforcement? VirtualFilterEnforcement = null);
+    VirtualFilterEnforcement? VirtualFilterEnforcement = null,
+    bool SkipUpstream = false);
 
 /// <summary>
 /// Rows after governance. <paramref name="RowsBeforeVirtualFilter"/> is the number of upstream rows the Virtual
@@ -95,7 +98,16 @@ public static class GovernedConnectorReader
             decision = decision.WithoutEnforcedVirtualFilters(enforcement.Bindings);
         }
 
-        var rawRows = await ReadRawAsync(connector, session, metadata, policy.MaxRows, ct).ConfigureAwait(false);
+        if (policy.SkipUpstream && enforcement == null)
+        {
+            throw new GatewaySecurityException(
+                $"The upstream read of '{metadata.Identifier}' can only be skipped together with a Virtual Filter enforcement.",
+                VirtualFilterErrorCodes.EnforcementIncomplete);
+        }
+
+        var rawRows = policy.SkipUpstream
+            ? new List<IReadOnlyDictionary<string, object?>>()
+            : await ReadRawAsync(connector, session, metadata, policy.MaxRows, ct).ConfigureAwait(false);
         int? rowsBeforeVirtualFilter = null;
         if (enforcement != null)
         {

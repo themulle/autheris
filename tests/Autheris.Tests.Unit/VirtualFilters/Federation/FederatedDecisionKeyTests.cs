@@ -78,10 +78,16 @@ public sealed class FederatedDecisionKeyTests
     [InlineData(SqlFirst)]
     public async Task SameSchemaAndTableName_VirtualFilterOnTheHttpTable_IsNeverDroppedByTheOtherDecision(string sql)
     {
-        // ST-1 / ST-2: the HTTP table keeps its own decision with the applied Virtual Filter; until the gateway-side
-        // enforcement exists that decision is denied (403), the rows are never returned unfiltered.
-        var pipeline = Build(Consents(Allow(CrmCustomers.Identifier), Allow(ErpCustomers.Identifier)), FederatedServiceHarness.AliceSnapshot("crm_api.*.*", "crm_api.public.customers"));
+        // ST-1 / ST-2: the HTTP table keeps its own decision with the applied Virtual Filter, in either FROM order; only
+        // the authorized HTTP rows (ids 1 and 3) come back although the SQL table has no Virtual Filter.
+        var pipeline = Build(
+            Consents(Allow(CrmCustomers.Identifier), Allow(ErpCustomers.Identifier)),
+            FederatedServiceHarness.AliceSnapshot("crm_api.*.*", "crm_api.public.customers"));
+        pipeline.KeySetProvider.With("vf_customers", ["1"], ["3"]);
 
-        await Should.ThrowAsync<GatewayForbiddenException>(() => RunAsync(pipeline, sql));
+        var rows = await RunAsync(pipeline, sql);
+
+        rows.ShouldBe(["1|OPEN|100", "3|OPEN|300"]);
+        pipeline.KeySetProvider.CalledFilters.ShouldBe(["vf_customers"]);
     }
 }

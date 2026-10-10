@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
+using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using TrinoSqlEngine.Analysis;
@@ -16,9 +17,7 @@ public sealed record StagingTableRequest(
     string StagingName,
     IReadOnlyList<string> Projection,
     TableFilterClause? PushdownFilter = null,
-    IReadOnlyDictionary<string, object?>? SessionItems = null,
-    IReadOnlyDictionary<string, object?>? CustomArguments = null,
-    IReadOnlyList<IReadOnlyDictionary<string, object?>>? PreloadedRows = null);
+    VirtualFilterTablePlan? VirtualFilterPlan = null);
 
 public sealed record FederationBudget(
     int MaxTableCount,

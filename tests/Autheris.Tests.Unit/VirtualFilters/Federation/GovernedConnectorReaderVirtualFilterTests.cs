@@ -148,4 +148,65 @@ public sealed class GovernedConnectorReaderVirtualFilterTests
         result.Rows.Count.ShouldBe(1);
         result.RowsBeforeVirtualFilter.ShouldBeNull();
     }
+    private static GovernedRowPolicy SkipPolicy(VirtualFilterEnforcement? enforcement) =>
+        new(Substitute.For<IColumnMaskingProvider>(), HmacKeyId: null, VirtualFilterEnforcement: enforcement, SkipUpstream: true);
+
+    [Fact]
+    public async Task ReadAsync_SkipUpstream_ConnectorIsNeverCalled_ZeroRows()
+    {
+        // WI-6 Tier 0: the coverage check runs, only the connector call is skipped.
+        var stub = new StubTableConnector("crm_api", [Ticket("1", "OPEN")]);
+        var enforcement = Enforcement(Table, (PairById(), Keys([VirtualFilterKeyType.Text], ["1"])));
+
+        var result = await GovernedConnectorReader.ReadAsync(stub.Connector, Session(Decision(null, null, PairById())), Table, SkipPolicy(enforcement), CancellationToken.None);
+
+        result.Rows.ShouldBeEmpty();
+        result.RowsBeforeVirtualFilter.ShouldBe(0);
+        stub.UpstreamCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ReadAsync_SkipUpstreamWithoutEnforcement_IsDeniedBeforeAnyCall()
+    {
+        var stub = new StubTableConnector("crm_api", [Ticket("1", "OPEN")]);
+        var decision = TableAccessDecision.Allowed(Table.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() =>
+            GovernedConnectorReader.ReadAsync(stub.Connector, Session(decision), Table, SkipPolicy(null), CancellationToken.None));
+
+        ex.ErrorCode.ShouldBe("VF_ENFORCEMENT_INCOMPLETE");
+        stub.UpstreamCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ReadAsync_SkipUpstreamWithEnforcementCoveringSubset_IsDeniedLikeAHit()
+    {
+        // SEC-13: a miss must not return rows (here: an empty 200) where the same query with a hit is denied.
+        var other = new AppliedVirtualFilterBinding(KeyFilter("vf_account", "account_id"), new FilterBinding { FilterName = "vf_account", TargetPattern = "crm_api.public.customers" }, 1);
+        var stub = new StubTableConnector("crm_api", [Ticket("1", "OPEN")]);
+        var enforcement = Enforcement(Table, (PairById(), Keys([VirtualFilterKeyType.Text], ["1"])));
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() =>
+            GovernedConnectorReader.ReadAsync(stub.Connector, Session(Decision(null, null, PairById(), other)), Table, SkipPolicy(enforcement), CancellationToken.None));
+
+        ex.ErrorCode.ShouldBe("VF_ENFORCEMENT_INCOMPLETE");
+        stub.UpstreamCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ReadAsync_SkipUpstream_ResidualFilterThatCannotBeEnforcedInMemory_ReturnsWhatAHitReturns()
+    {
+        // The in-memory evaluator is fail-closed by under-returning (no exception) for a filter it cannot evaluate; a skipped
+        // read must be indistinguishable from a read (SEC-13), so both return no rows and only the read calls the connector.
+        var stub = new StubTableConnector("crm_api", [Ticket("1", "OPEN")]);
+        var enforcement = Enforcement(Table, (PairById(), Keys([VirtualFilterKeyType.Text], ["1"])));
+        var decision = Decision("id IN (SELECT id FROM other_table)", null, PairById());
+
+        var skipped = await GovernedConnectorReader.ReadAsync(stub.Connector, Session(decision), Table, SkipPolicy(enforcement), CancellationToken.None);
+        var read = await GovernedConnectorReader.ReadAsync(stub.Connector, Session(decision), Table, Policy(enforcement), CancellationToken.None);
+
+        skipped.Rows.ShouldBeEmpty();
+        read.Rows.ShouldBeEmpty();
+        stub.UpstreamCalls.ShouldBe(1);   // only the non-skipping read reached the connector
+    }
 }

@@ -75,14 +75,14 @@ internal static class FederatedServiceHarness
     }
 
     /// <summary>
-    /// The service under test. <see cref="KeySetProvider"/> is a probe: a denied query must never load authorized keys
-    /// (it is wired into the service by the federation planner, WI-6).
+    /// The service under test. <see cref="KeySetProvider"/> is the key set source of the federation planner (WI-6):
+    /// tests configure the authorized keys per filter name and assert which filters were loaded.
     /// </summary>
     internal sealed class Pipeline
     {
         public required FederatedDuckDbExecutionService Service { get; init; }
         public required IAuditLogRepository Audit { get; init; }
-        public required IVirtualFilterKeySetProvider KeySetProvider { get; init; }
+        public required FakeKeySetProvider KeySetProvider { get; init; }
 
         public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> RunAsync(string sql)
         {
@@ -94,7 +94,11 @@ internal static class FederatedServiceHarness
     internal static Pipeline Build(
         IReadOnlyList<(TableMetadata Table, StubTableConnector Stub)> tables,
         IConsentRepository consents,
-        VirtualFilterSnapshot? snapshot = null)
+        VirtualFilterSnapshot? snapshot = null,
+        FakeKeySetProvider? keySets = null,
+        bool withPlanner = true,
+        int? timeoutSeconds = null,
+        int? maxStagedRowsPerTable = null)
     {
         var repository = Substitute.For<ITableMetadataRepository>();
         foreach (var (table, _) in tables)
@@ -109,7 +113,7 @@ internal static class FederatedServiceHarness
                 Enabled = true,
                 DefaultDataSourceName = tables[0].Table.Identifier.Domain,
                 AllowedDataSources = tables.Select(t => t.Table.Identifier.Domain).Distinct().ToList(),
-                CrossSource = new CrossSourceOptions { Enabled = true, AllowedTransports = ["WebSql"] }
+                CrossSource = new CrossSourceOptions { Enabled = true, AllowedTransports = ["WebSql"], TimeoutSeconds = timeoutSeconds ?? 0, MaxStagedRowsPerTable = maxStagedRowsPerTable ?? 0 }
             },
             DuckDbOlap = new DuckDbOlapOptions { Enabled = true, MaxMemory = "256MB", MaxTempDirectorySize = "0B" }
         };
@@ -119,7 +123,7 @@ internal static class FederatedServiceHarness
             new MandatoryRowFilterResolverTests.PlaceholderPredicates());
 
         var audit = Substitute.For<IAuditLogRepository>();
-        var keySetProvider = Substitute.For<IVirtualFilterKeySetProvider>();
+        var keySetProvider = keySets ?? new FakeKeySetProvider();
 
         var service = new FederatedDuckDbExecutionService(
             Options.Create(options),
@@ -131,7 +135,8 @@ internal static class FederatedServiceHarness
             sqlEngine: FastSqlEngine.Default,
             consentResolution: new ConsentResolutionService(),
             consentRepository: consents,
-            mandatoryFilters: resolver);
+            mandatoryFilters: resolver,
+            vfPlanner: withPlanner ? new VirtualFilterFederationPlanner(keySetProvider) : null);
 
         return new Pipeline { Service = service, Audit = audit, KeySetProvider = keySetProvider };
     }
