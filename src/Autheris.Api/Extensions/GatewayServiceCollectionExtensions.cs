@@ -179,7 +179,10 @@ public static class GatewayServiceCollectionExtensions
                 "Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.")
             .ValidateOnStart();
 
-        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>, Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator>();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>>(sp =>
+            new Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator(
+                configuration,
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator>>()));
 
         var gatewayOptions = configuration.GetSection(GatewayOptions.SectionName).Get<GatewayOptions>() ?? new GatewayOptions();
         ValidateGatewayOptions(gatewayOptions, environment);
