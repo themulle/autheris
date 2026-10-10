@@ -28,6 +28,11 @@ Dieses Konzept definiert den End-to-End-Lebenszyklus zur Registrierung, Zuweisun
    - **Bedarfsgesteuertes 4-Augen-Prinzip (Conditional):** 1-stufig für Standard-Daten (`INTERNAL`), automatisches 4-Augen-Prinzip erst ab konfigurierbarem Schwellwert (z. B. `CONFIDENTIAL`) oder bei strittigen Feldern (`is_disputed = true`).
    - **Striktes 2-stufiges 4-Augen-Prinzip (Dual-Sign-Off):** Data Owner $\rightarrow$ Governance Reviewer mit Segregation of Duties.
    - Beide Rollen können **pro Feld / Option individuelle Kommentare** und Korrekturen erfassen.
+7. **Enterprise Orchestration Triad (Konfiguration, Skripte & Plugin-DLLs):**  
+   Um beliebige firmenspezifische Governance-Workflows ohne starre Code-Vorgaben zu unterstützen, setzt Autheris auf ein 3-Säulen-Modell:
+   - **Säule 1 (Deklarative Konfiguration):** Reine Labels und Schwellwerte in JSON/YAML für 80 % der Standardfälle (sofort einsatzbereit ohne Build/Code).
+   - **Säule 2 (Skripte & Event-Driven REST-API):** Externe Automatisierung über beliebige Skripte (Python, PowerShell, Bash) oder Workflow-Engines (ServiceNow, Airflow, n8n), die auf CloudEvents reagieren und den Status per REST-API fortschreiben (Zero Blast Radius).
+   - **Säule 3 (In-Process C# Plugin-DLLs):** Optionale Erweiterung über `IGovernanceWorkflowHook` in `Autheris.Extensions` für Teams mit tiefem .NET-Know-how.
 
 ---
 
@@ -225,6 +230,73 @@ public sealed record GovernanceWorkflowNotification(
 * **CloudEvents v1.0 Webhook (F-EVT-01 & ITSM):** Standardisiertes Event zur automatischen Ticketerstellung in ServiceNow oder Jira Service Desk.
 
 ---
+
+### 3.3 Externe Workflow-Orchestrierung via Skripte & REST-State-Machine (Säule 2 – Zero Blast Radius)
+
+Um kundenspezifische Freigabelogiken (z. B. Abfrage firmeninterner CMDBs, LDAP-Gruppen oder benutzerdefinierte Routing-Algorithmen) abzubilden, fungiert Autheris als **autoritative Zustandsmaschine (State Machine)**, überlässt die Ausführung der Logik jedoch externen Skripten oder Tools:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant GW as Autheris Gateway & State Machine
+    participant SCRIPT as Kunden-Skript / CI / Workflow (Python, PowerShell, ServiceNow, Airflow)
+    participant CORP as Interne Firmen-Infrastruktur (LDAP, SAP, CMDB, Jira)
+    participant DB as WORM Audit Log & Policy Engine
+
+    GW->>SCRIPT: 1. Event: autheris.governance.table.imported (Webhook / CloudEvent)
+    Note over SCRIPT: Skript läuft isoliert außerhalb des Gateways (Zero Blast Radius)
+    SCRIPT->>CORP: 2. Fragt firmeninterne Systeme ab (z. B. "Wem gehört Schema X?")
+    CORP-->>SCRIPT: 3. Liefert: "Owner: Team-Alpha, 4-Augen via Jira Ticket SEC-402"
+    SCRIPT->>CORP: 4. Erstellt Jira-Freigabeticket oder holt Vorqualifizierung ein
+    Note over SCRIPT: Sobald Entscheidung vorliegt (manuell oder skriptgesteuert):
+    SCRIPT->>GW: 5. POST /api/v1/governance/tables/{id}/classify (Statusfortschreibung)
+    Note over GW: Validiert Berechtigung & HMAC-Signatur
+    GW->>DB: 6. Mintet WORM-Audit-Block & aktualisiert Zustand (CLASSIFIED)
+    GW-->>SCRIPT: 7. 200 OK (Policies clusterweit scharfgeschaltet)
+```
+
+#### API-Endpunkte für externe Skripte (State-Fortschreibung):
+* `POST /api/v1/governance/tables/{id}/owner`: Weist den berechneten Owner zu.
+* `POST /api/v1/governance/tables/{id}/classify`: Schreibt Spalteneinstufungen, Maskings und Freigabestatus fort (`status: APPROVED | REJECTED | PENDING_REVIEW`).
+* `POST /api/v1/governance/tables/{id}/transition`: Atomarer Übergang in den nächsten Lebenszyklus-Zustand.
+
+#### Vorteile für das Unternehmen:
+1. **Zero Blast Radius:** Selbst wenn ein Kunden-Skript abstürzt oder eine Endlosschleife hat, bleibt das hochperformante Autheris-Gateway (50.000 Queries/s) vollkommen stabil und unbeeinflusst.
+2. **Technologie-Agnostisch:** Data Engineers schreiben in **Python**, Admins in **PowerShell**, IT-Teams binden **ServiceNow, Jira oder Airflow** an.
+3. **Kein Neu-Deployment:** Geschäftslogik im Skript kann jederzeit geändert werden, ohne dass Autheris neu gebaut oder Container neu gestartet werden müssen.
+
+---
+
+### 3.4 In-Process C# Plugin-Interface (Säule 3 – `Autheris.Extensions`)
+
+Für Enterprise-Kunden mit starkem .NET-Know-how, die sub-millisekundenkritische Prüfungen oder tiefe Anbindungen an interne C#-Klassenbibliotheken direkt im Gateway-Prozess ausführen wollen, bietet `Autheris.Extensions` ein Hook-Interface:
+
+```csharp
+namespace Autheris.Extensions.Governance;
+
+public interface IGovernanceWorkflowHook
+{
+    /// <summary>
+    /// Wird vor der Klassifizierung aufgerufen (kann Spalten-Labels oder Owner programmatisch modifizieren).
+    /// </summary>
+    ValueTask<ClassificationProposalDecision> OnBeforeClassifyAsync(
+        TableClassificationContext context, 
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Wird bei jedem Zustandsübergang der State Machine gefeuert.
+    /// </summary>
+    ValueTask OnWorkflowTransitionAsync(
+        WorkflowTransitionEvent transitionEvent, 
+        CancellationToken ct = default);
+}
+```
+
+Kunden kompilieren eine Klassenbibliothek (`.dll`), implementieren `IGovernanceWorkflowHook` und registrieren diese über die Dependency Injection (`IServiceCollection.AddGovernanceWorkflowHook<CustomCompanyHook>()`).
+
+---
+
+## 4. Hierarchische Owner-Zuweisung (DB -> Schema -> Tabelle)
 
 Damit der Data Governance Expert nicht hunderte Tabellen einzeln zuweisen muss, unterstützt Autheris eine dreistufige Vererbungskaskade:
 
@@ -599,9 +671,36 @@ public sealed record WormClassificationRecord(
 2. **Lückenlose Prüfpfad-Verifikation:** Auditoren und Datenschutzprüfer können anhand der SHA-256-Kette mathematisch beweisen, dass die Klassifizierung seit dem Tag der Freigabe unverändert ist.
 3. **Hardware-/Cloud-WORM-Unterstützung:** Nahtlose Integration mit physischen WORM-Appliances (NetApp SnapLock, Dell EMC Centera) über Dateisystem-Mounts (`ChainAnchorWormDirectory`) sowie Cloud-WORM (AWS S3 Object Lock / Azure Immutable Blob).
 
+### 9.3 WORM-Versiegelung von Konfigurationsänderungen (`WormConfigurationRecord`)
+
+Nicht nur Spalteneinstufungen, sondern auch **jede wirksame Änderung der Governance-Konfiguration selbst** (Workflow-Profile, 4-Augen-Schwellwerte, Schutzstufen-Labels, Maskierungsregeln) wird revisionssicher auf dem WORM-Laufwerk und in der Governance-DB versiegelt:
+
+#### 1. Erfassungszeitpunkte:
+* **Beim Startup / Bootstrapping:** Ermittlung des SHA-256-Hashes der aktiven Konfiguration. Weicht dieser vom zuletzt versiegelten Stand ab, mintet Autheris sofort einen neuen Konfigurations-WORM-Block.
+* **Zur Laufzeit (Dynamic Reload):** Bei Kubernetes ConfigMap-Reloads (`IOptionsMonitor`) oder Updates über die Admin-REST-API.
+
+#### 2. WORM-Struktur (`WormConfigurationRecord`):
+```csharp
+public sealed record WormConfigurationRecord(
+    Guid ConfigAuditId,
+    long PolicyEpoch,
+    string Trigger, // "STARTUP_BOOTSTRAP" | "CONFIGMAP_RELOAD" | "ADMIN_API_UPDATE"
+    string ActorSid, // "SYSTEM" oder Administrator-UPN
+    string Sha256ConfigHash,
+    string PreviousConfigHash,
+    IReadOnlyList<string> ModifiedSections, // e.g. ["Workflow.ApprovalPipeline", "SensitivityLevels"]
+    string CanonicalConfigJson, // Vollständiger deterministischer JSON-Snapshot
+    string WormSignature,
+    DateTimeOffset TimestampUtc);
+```
+
+#### 3. Auditorische Relevanz (Anti-Backdoor-Garantie):
+* **Lückenloser Gültigkeitsnachweis:** Jede Spaltenfreigabe (`WormClassificationRecord`) referenziert den zum Entscheidungszeitpunkt gültigen `Sha256ConfigHash`. Ein Auditor kann nachweisen, welche Regeln zu jenem Zeitpunkt exakt galten.
+* **Schutz vor heimlichen Änderungen:** Schwellwerte (z. B. 4-Augen-Prinzip) können nicht temporär gelockert und danach zurückgestellt werden, ohne dass ein unveränderbarer WORM-Block entsteht.
+
 ---
 
-### 9.3 Architektonische Leitplanken & AppSec-Sicherheits-Guardrails (Review-Ergänzungen)
+### 9.4 Architektonische Leitplanken & AppSec-Sicherheits-Guardrails (Review-Ergänzungen)
 
 Aus dem gemeinsamen Review des **Solution Architects** und des **Security Experts** ergeben sich folgende verbindliche Implementierungs-Vorgaben:
 
@@ -643,34 +742,28 @@ Aus dem gemeinsamen Review des **Solution Architects** und des **Security Expert
 
 ```mermaid
 flowchart LR
-    AP1["AP-1: Import & Hierarchie<br/>• data_owner = null<br/>• DB/Schema/Table Kaskade"] --> AP2["AP-2: Konfigurierbare Taxonomie<br/>• Dynamische Ränge & Maskings<br/>• Zwischenstufen"]
-    AP2 --> AP3["AP-3: OpenJEV Classifier<br/>• Prompt/Schema Generierung<br/>• Confidence & is_disputed"]
-    AP3 --> AP4["AP-4: Dual-Sign-Off & Änderungen<br/>• Data Owner + Governance Reviewer<br/>• Downgrade-Schutz & Kommentare"]
-    AP4 --> AP5["AP-5: WORM-Sealing<br/>• Unveränderbare Archivierung<br/>• Audit-Chain & Time-Travel"]
-    AP4 --> AP6["AP-6: Workflow-Engine & Messaging<br/>• Deklarative Pipelines & Profile<br/>• Teams / Slack / Mail / CloudEvents"]
+    AP1["AP-1: Import & Kaskade<br/>• data_owner = null<br/>• DB/Schema/Table Kaskade"] --> AP2["AP-2: Label-Taxonomie<br/>• Generische Ränge 1..N<br/>• PII- & Masking-Registry"]
+    AP2 --> AP3["AP-3: Classification Engine<br/>• Regex & dbt-Metadaten<br/>• Optionaler OpenJEV Classifier"]
+    AP3 --> AP4["AP-4: State Machine & Approvals<br/>• 1-stufig, 4-Augen & 2FA<br/>• SoD-Anti-Self-Approval"]
+    AP4 --> AP5["AP-5: WORM & Audit-Chain<br/>• Daten-Entscheidungen<br/>• Config-Snapshot-Epochs"]
+    AP4 --> AP6["AP-6: Scripting & Plugins<br/>• State Machine REST API<br/>• IGovernanceWorkflowHook"]
 ```
 
-1. **AP-1: Unklassifizierter Import & Hierarchische Owner-Zuweisung:**  
-   Import ohne Owner-Zwang; Zuweisung durch den Data Governance Expert auf DB-, Schema- oder Tabellenebene mit Vererbung.
-2. **AP-2: Konfigurierbare Taxonomie & Maskierungs-Registry:**  
-   Schutzstufen mit numerischen Rängen (inkl. Zwischenstufen) und benannte Maskierungsregeln mit Parametern.
-3. **AP-3: Dynamischer OpenJEV Classifier mit Strittigkeits-Kennzeichnung:**  
-   Laufzeit-Generierung des Prompts/Schemas; Erkennung unstrittiger vs. strittiger Felder (`is_disputed`).
-4. **AP-4: Dual-Sign-Off & Änderungs-Management (Change Management):**  
-   2-Stufen-Freigabe mit SoD-Prüfung, Feld-Kommentaren und obligatorischem 4-Augen-Prozess bei Klassifizierungs-Downgrades.
-5. **AP-5: WORM-Drive-Archivierung & Revisionssicherheit:**  
-   Lückenloser Export aller Klassifizierungszustände und Änderungen auf das WORM-Laufwerk (`IAuditWormExportService` / `ChainAnchorWormDirectory`).
-6. **AP-6: Deklarative Workflow-Engine & Messaging-Notification-Dispatcher:**  
-   Konfigurierbare State-Machine-Profile (`MetadataFirst`, `HumanInTheLoop`, `ConditionalDualStage`) sowie Multi-Channel-Benachrichtigungen via Microsoft Teams, Slack, SMTP-Mail und CloudEvents v1.0.
+1. **AP-1: Unklassifizierter Import & Hierarchische Owner-Zuweisung:** Import ohne Owner-Zwang; hierarchische Vererbung DB $\rightarrow$ Schema $\rightarrow$ Tabelle.
+2. **AP-2: Generische Label-Taxonomie & PII-Registry:** Beliebige Labels (L1–L4, TISAX, ISO) und parametrisierte Maskierungsregeln mit "Batteries Included"-Defaults.
+3. **AP-3: Classification Engine (Zero-AI fähig & optionales OpenJEV):** Deterministische Regex-Heuristik (`namePatterns`) als Basis, dynamischer LLM-Prompt/Schema-Generator als zuschaltbares Addon.
+4. **AP-4: Workflow State Machine & Freigabepipeline:** 1-stufig oder 2-stufiges 4-Augen-Prinzip, SoD-Schutz (`DataOwnerSid != ReviewerSid`), Step-Up 2FA/MFA ab Schwellwert.
+5. **AP-5: WORM-Drive & Audit-Chain Versiegelung:** Revisionssichere Archivierung aller Datenentscheidungen UND Konfigurations-Snapshots (`WormConfigurationRecord`).
+6. **AP-6: Skript-Schnittstelle & C#-Plugin-Architektur:** REST-Endpunkte für externe Automatisierung (Python/PowerShell/ServiceNow) und `IGovernanceWorkflowHook` in `Autheris.Extensions`.
 
 ---
 
 ## 11. Zusammenfassung
 
 Dieses Modell stellt sicher, dass:
-1. Der **Import niemals blockiert** wird, wenn noch kein Owner bekannt ist.
-2. Der **Data Governance Expert** den Owner flexibel pro Datenbank, Schema oder Einzelobjekt zuweist.
-3. Die **KI als Assistenzsystem** (OpenJEV-Style) Schutzstufen und Maskings vorschlägt und strittige Fälle markiert.
-4. Der **Freigabeprozess vollständig konfigurierbar ist** – wahlweise 1-stufig (autonom durch den Data Owner) oder als revisionssicheres 2-stufiges 4-Augen-Prinzip (Fachbereich + DPO/Compliance) mit Feld-Kommentaren.
-5. **Nachträgliche Änderungen jederzeit möglich sind** – mit schnellen Upgrades und konfigurierbarem 4-Augen-Schutz (`RequireFourEyesOnDowngrades`) bei Downgrades.
-6. **Jeder Vorgang, jede Änderung und jede Freigabe unveränderbar auf einem WORM-Drive versiegelt** wird.
+1. Der **Import niemals blockiert** wird (`data_owner: null`, Fail-Closed).
+2. Schutzklassen **reine konfigurierbare Labels mit Rang-Hierarchie** sind (keine starren Enums).
+3. Das System **100 % autark ohne KI** funktioniert (deterministischer Regex- & Metadaten-Pfad).
+4. Der **Freigabeprozess flexibel als 1-stufig, bedarfsorientiert oder 2-stufiges 4-Augen-Prinzip** (mit optionaler 2FA/MFA) konfiguriert werden kann.
+5. Das **3-Säulen-Modell** einfache Configs, externe Skripte (Python/PowerShell) und native C#-Plugins vereint.
+6. **Sowohl Klassifizierungen als auch Konfigurationsänderungen lückenlos auf WORM versiegelt** werden.

@@ -52,6 +52,7 @@ public sealed class GatewayOptions
     [Required] public RowFilterOptions RowFilters { get; init; } = new();
     [Required] public VirtualFilterOptions VirtualFilters { get; init; } = new();
     [Required] public LoggingOptions Logging { get; init; } = new();
+    [Required] public ClassificationOptions Classification { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".

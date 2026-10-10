@@ -131,6 +131,9 @@ public static class GatewayGovernanceServiceExtensions
         // Dynamic Schema Contracts (@tag / @inaccessible) (F-GOV-08)
         services.AddSingleton<ISchemaContractManager, SchemaContractManager>();
 
+        // Governance Data Classification Engine & Workflows
+        services.AddAutherisDataClassification();
+
         return services;
     }
 }
