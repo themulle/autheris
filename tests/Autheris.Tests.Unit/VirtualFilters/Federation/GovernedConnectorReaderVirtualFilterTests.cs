@@ -209,4 +209,31 @@ public sealed class GovernedConnectorReaderVirtualFilterTests
         read.Rows.ShouldBeEmpty();
         stub.UpstreamCalls.ShouldBe(1);   // only the non-skipping read reached the connector
     }
+
+    [Fact]
+    public async Task ReadAsync_NoEnforcement_VirtualFilterOnAnHttpTable_ThrowsBeforeTheUpstreamIsRead()
+    {
+        // CR-10 (D-12): other channels (OData, REST) pass no enforcement; the denial must come before any egress, not after
+        // unauthorized rows reached the gateway memory.
+        var stub = new StubTableConnector("crm_api", [Ticket("1", "OPEN"), Ticket("2", "OPEN")]);
+        var session = Session(Decision(null, null, PairById()));
+
+        var ex = await Should.ThrowAsync<GatewayForbiddenException>(() =>
+            GovernedConnectorReader.ReadAsync(stub.Connector, session, Table, Policy(enforcement: null), CancellationToken.None));
+
+        ex.ShouldNotBeNull();
+        stub.UpstreamCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task ReadAsync_NoEnforcement_NoVirtualFilter_StillReadsTheHttpTable()
+    {
+        var stub = new StubTableConnector("crm_api", [Ticket("1", "OPEN")]);
+        var decision = TableAccessDecision.Allowed(Table.Identifier, new Dictionary<string, ColumnAccessLevel>(), "name = 'OPEN'", hasUnconstrainedColumnAllow: true);
+
+        var result = await GovernedConnectorReader.ReadAsync(stub.Connector, Session(decision), Table, Policy(enforcement: null), CancellationToken.None);
+
+        result.Rows.ShouldHaveSingleItem();
+        stub.UpstreamCalls.ShouldBe(1);
+    }
 }

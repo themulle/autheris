@@ -105,6 +105,18 @@ public static class GovernedConnectorReader
                 VirtualFilterErrorCodes.EnforcementIncomplete);
         }
 
+        // SEC-2 (F-GOV-14): an HTTP API cannot evaluate the gateway's row filter or masking rules, so a declarative HTTP
+        // connector never relaxes enforcement by self-attestation; the gateway always filters and masks its rows.
+        var mayAttest = metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative;
+
+        // CR-10 (D-12): a table that cannot attest and carries a Virtual Filter predicate without an enforcement (OData, REST
+        // and the other channels, which do not federate) is denied before the upstream is read: no egress for nothing and
+        // no unauthorized row in gateway memory. After the read the same check would deny, too late.
+        if (!mayAttest && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+        {
+            GatewayExecutionService.EnsureInMemoryFilterIsEnforceable(decision);
+        }
+
         var rawRows = policy.SkipUpstream
             ? new List<IReadOnlyDictionary<string, object?>>()
             : await ReadRawAsync(connector, session, metadata, policy.MaxRows, ct).ConfigureAwait(false);
@@ -115,9 +127,6 @@ public static class GovernedConnectorReader
             rawRows = enforcement.Apply(rawRows);
         }
 
-        // SEC-2 (F-GOV-14): an HTTP API cannot evaluate the gateway's row filter or masking rules, so a declarative HTTP
-        // connector never relaxes enforcement by self-attestation; the gateway always filters and masks its rows.
-        var mayAttest = metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative;
         var pushedDown = mayAttest && IsSet(session.Items, RlsPushdownExecutedKey);
         var masked = mayAttest && IsSet(session.Items, InDbColumnMaskingExecutedKey);
         var rows = Apply(rawRows, metadata, decision, session.Tenant?.Value, pushedDown, masked, policy);

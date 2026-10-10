@@ -141,6 +141,7 @@ public sealed class FederatedVirtualFilterFailClosedTests(FederatedVirtualFilter
         using var response = await fixture.Client().GetAsync($"/odata/v4/crm_api/public/{Tables.QueryParameterList}");
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        fixture.Crm.Requests.ShouldBeEmpty();   // CR-10: denied before the upstream was read
     }
 
     [Fact]
@@ -155,6 +156,7 @@ public sealed class FederatedVirtualFilterFailClosedTests(FederatedVirtualFilter
 
         response.IsSuccessStatusCode.ShouldBeFalse();
         (await response.Content.ReadAsStringAsync()).ShouldNotContain("Customer ");
+        fixture.Crm.Requests.ShouldBeEmpty();   // CR-10: no upstream read, no unauthorized rows in gateway memory
     }
 
     [Fact]
