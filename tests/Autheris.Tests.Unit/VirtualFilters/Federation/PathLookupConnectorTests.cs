@@ -189,4 +189,74 @@ public sealed class PathLookupConnectorTests
         max.ShouldBeLessThanOrEqualTo(2);
         connector.Stats.Requests.ShouldBe(6);
     }
+
+    [Fact]
+    public async Task EachRequest_GetsItsOwnItemsDictionary_NotTheCallersSharedOne()
+    {
+        var seen = new List<IDictionary<string, object?>>();
+        var inner = Substitute.For<IAutherisConnector>();
+        var recordSource = Substitute.For<IConnectorRecordSource>();
+        inner.RecordSource.Returns(recordSource);
+        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns(ci =>
+            {
+                var items = ci.ArgAt<ConnectorSessionContext>(1).Items;
+                lock (seen)
+                {
+                    seen.Add(items);
+                }
+
+                items["written-by-connector"] = true;
+                return Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>([]);
+            });
+        var connector = new PathLookupConnector(inner, Lookup(values: ["1", "2", "3"]), maxConcurrency: 3);
+        var session = Session();
+        session.Items["caller"] = 1;
+
+        await connector.RecordSource.ReadBatchAsync(ConnectorSplit.Default("s"), session);
+
+        seen.Count.ShouldBe(3);
+        seen.Distinct().Count().ShouldBe(3);
+        seen.ShouldAllBe(items => !ReferenceEquals(items, session.Items));
+        seen.ShouldAllBe(items => items.ContainsKey("caller"));
+        session.Items.ContainsKey("written-by-connector").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task FirstFailure_CancelsTheSiblingRequestsStillInFlight()
+    {
+        var cancelled = 0;
+        var inner = Substitute.For<IAutherisConnector>();
+        var recordSource = Substitute.For<IConnectorRecordSource>();
+        inner.RecordSource.Returns(recordSource);
+        recordSource.ReadBatchAsync(Arg.Any<ConnectorSplit>(), Arg.Any<ConnectorSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns(async ci =>
+            {
+                var key = (string)ci.ArgAt<ConnectorSessionContext>(1).Arguments["id"]!;
+                if (key == "1")
+                {
+                    await Task.Delay(20);
+                    throw new HttpRequestException("boom");
+                }
+
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, ci.ArgAt<CancellationToken>(2));
+                }
+                catch (OperationCanceledException)
+                {
+                    Interlocked.Increment(ref cancelled);
+                    throw;
+                }
+
+                return (IReadOnlyList<IReadOnlyDictionary<string, object?>>)[];
+            });
+        var connector = new PathLookupConnector(inner, Lookup(values: ["1", "2", "3"]), maxConcurrency: 3);
+
+        var read = connector.RecordSource.ReadBatchAsync(ConnectorSplit.Default("s"), Session());
+
+        var ex = await Should.ThrowAsync<HttpRequestException>(() => read).WaitAsync(TimeSpan.FromSeconds(5));
+        ex.Message.ShouldBe("boom");
+        cancelled.ShouldBe(2);
+    }
 }

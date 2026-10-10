@@ -83,10 +83,12 @@ internal sealed class PathLookupConnector : IAutherisConnector
             using var throttle = new SemaphoreSlim(owner._maxConcurrency, owner._maxConcurrency);
             var perKey = new IReadOnlyDictionary<string, object?>?[lookup.Values.Count];
 
+            // The first failure cancels the sibling requests still in flight (CR-18).
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var tasks = new Task[lookup.Values.Count];
             for (int i = 0; i < tasks.Length; i++)
             {
-                tasks[i] = ReadKeyAsync(i, split, session, throttle, perKey, ct);
+                tasks[i] = ReadKeyGuardedAsync(i, split, session, throttle, perKey, linked);
             }
 
             await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -102,6 +104,25 @@ internal sealed class PathLookupConnector : IAutherisConnector
             }
 
             return rows;
+        }
+
+        private async Task ReadKeyGuardedAsync(
+            int index,
+            ConnectorSplit split,
+            ConnectorSessionContext session,
+            SemaphoreSlim throttle,
+            IReadOnlyDictionary<string, object?>?[] results,
+            CancellationTokenSource linked)
+        {
+            try
+            {
+                await ReadKeyAsync(index, split, session, throttle, results, linked.Token).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await linked.CancelAsync().ConfigureAwait(false);
+                throw;
+            }
         }
 
         private async Task ReadKeyAsync(
@@ -121,7 +142,9 @@ internal sealed class PathLookupConnector : IAutherisConnector
                 {
                     [lookup.Argument] = key
                 };
-                var single = session with { Arguments = arguments };
+
+                // Own copy of the items per request: the shared dictionary is not thread-safe (CR-18).
+                var single = session with { Arguments = arguments, Items = new Dictionary<string, object?>(session.Items) };
                 owner.Stats.Request();
                 IReadOnlyList<IReadOnlyDictionary<string, object?>> batch;
                 try
