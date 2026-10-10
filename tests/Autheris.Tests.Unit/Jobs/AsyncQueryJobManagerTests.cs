@@ -289,7 +289,8 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
         var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
         var anonymous = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tenant_id", "tenant-a") }, "TestAuth"));
 
-        await Should.ThrowAsync<System.Security.SecurityException>(() =>
+        var ex = await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewaySecurityException>(() =>
             manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), anonymous, new TenantId("tenant-a")));
+        ex.ErrorCode.ShouldBe("ASYNC_JOB_OWNER_UNRESOLVABLE");
     }
 }

@@ -80,7 +80,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
         // Canonical owner (same resolution as the status/result/cancel endpoints). Fail-closed: a principal without a
         // resolvable identity must not become a shared "anonymous" owner.
         var userSid = AsyncJobOwner.Resolve(user)
-                      ?? throw new SecurityException("Async jobs require an authenticated principal with a resolvable user identity.");
+                      ?? throw new Autheris.Domain.Exceptions.GatewaySecurityException("Async jobs require an authenticated principal with a resolvable user identity.", "ASYNC_JOB_OWNER_UNRESOLVABLE");
 
         var jobId = Guid.NewGuid().ToString("D");
         var format = string.IsNullOrWhiteSpace(request.Format) ? "json" : request.Format.Trim().ToLowerInvariant();
