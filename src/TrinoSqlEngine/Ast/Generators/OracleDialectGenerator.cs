@@ -24,6 +24,19 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 
     protected override string? FromlessSource => "DUAL";
 
+    /// <summary>Trino <c>strpos(s, t)</c> is Oracle <c>INSTR(s, t)</c> (same argument order); other functions pass through.</summary>
+    protected override void GenerateFunctionCall(FunctionCallExpression fn, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        if (fn.Name.Parts.Count == 1 && !fn.Name.Parts[0].IsQuoted && fn.Window == null && fn.Arguments.Count == 2 &&
+            fn.Name.Parts[0].Value.Equals("strpos", StringComparison.OrdinalIgnoreCase))
+        {
+            base.GenerateFunctionCall(fn with { Name = new SqlQualifiedName("INSTR") }, ref builder, context);
+            return;
+        }
+
+        base.GenerateFunctionCall(fn, ref builder, context);
+    }
+
     /// <summary>Wunsch 4: Oracle has no IS DISTINCT FROM; DECODE treats two NULLs as equal.</summary>
     protected override void FormatIsDistinctFrom(ref ValueStringBuilder builder, IsDistinctFromExpression dist, SqlEmitterContext context)
     {

@@ -63,6 +63,9 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
     /// <summary>The provider has no boolean parameter type (Oracle before 23ai): booleans are bound as 0/1.</summary>
     protected virtual bool BooleanAsInteger => false;
 
+    /// <summary>Provider enum name (for example Oracle <c>OracleDbType.TimeStamp</c>) that keeps sub-second precision of timestamps.</summary>
+    protected virtual string? ProviderTimestampTypeName => null;
+
     public bool CanBind(TargetSqlDialect dialect) => dialect == Dialect;
 
     public void Bind(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues)
@@ -135,6 +138,15 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
         _ => throw new SecurityException($"Unsupported client parameter value type '{value.GetType().Name}'.")
     };
 
+    private static bool TrySetProviderType(DbParameter parameter, string? enumName)
+    {
+        if (enumName is null) return false;
+        var property = parameter.GetType().GetProperty("OracleDbType");
+        if (property is null || !property.PropertyType.IsEnum || !Enum.TryParse(property.PropertyType, enumName, out var value)) return false;
+        property.SetValue(parameter, value);
+        return true;
+    }
+
     private void Configure(DbParameter parameter, SqlParameterType type, object? value)
     {
         if (value is null or DBNull || type == SqlParameterType.Null)
@@ -192,7 +204,11 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
                 parameter.Value = value is DateOnly dateOnly ? dateOnly.ToDateTime(TimeOnly.MinValue) : Convert.ToDateTime(value, CultureInfo.InvariantCulture);
                 break;
             case SqlParameterType.Timestamp:
-                parameter.DbType = TimestampDbType;
+                if (!TrySetProviderType(parameter, ProviderTimestampTypeName))
+                {
+                    parameter.DbType = TimestampDbType;
+                }
+
                 parameter.Value = Convert.ToDateTime(value, CultureInfo.InvariantCulture);
                 break;
             case SqlParameterType.TimestampTz:
@@ -253,7 +269,8 @@ public sealed class PostgreSqlCompiledSqlBinder : DbCommandCompiledSqlBinder
 public sealed class OracleCompiledSqlBinder : DbCommandCompiledSqlBinder
 {
     protected override TargetSqlDialect Dialect => TargetSqlDialect.Oracle;
-    protected override DbType TimestampDbType => DbType.DateTime2;
+    protected override DbType TimestampDbType => DbType.DateTime;
+    protected override string? ProviderTimestampTypeName => "TimeStamp";
     protected override bool BooleanAsInteger => true;
 
     protected override void PrepareCommand(DbCommand command)

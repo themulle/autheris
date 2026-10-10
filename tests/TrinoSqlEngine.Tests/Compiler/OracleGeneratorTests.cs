@@ -107,6 +107,9 @@ public class OracleGeneratorTests
     }
 
     [Fact]
+    public void Strpos_MapsToInstr() => Assert.Contains("INSTR(\"A\", :p1)", Gen("SELECT strpos(a, 'x') FROM t").Sql);
+
+    [Fact]
     public void TryCast_IsRejected() => Assert.ThrowsAny<Exception>(() => Gen("SELECT TRY_CAST(a AS integer) FROM t"));
 
     [Theory]

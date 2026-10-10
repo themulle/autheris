@@ -17,7 +17,7 @@ public sealed class SqlDialectConsistencyTests
     [InlineData(DatabaseDialect.SqlServer, TargetSqlDialect.SqlServer, true)]
     [InlineData(DatabaseDialect.PostgreSql, TargetSqlDialect.PostgreSql, true)]
     [InlineData(DatabaseDialect.Sqlite, TargetSqlDialect.Sqlite, true)]
-    [InlineData(DatabaseDialect.Oracle, TargetSqlDialect.Oracle, false)]
+    [InlineData(DatabaseDialect.Oracle, TargetSqlDialect.Oracle, true)]
     public void SqlDialectMapper_MapsDialectsCorrectly(DatabaseDialect dialect, TargetSqlDialect expectedTarget, bool expectedExecutable)
     {
         SqlDialectMapper.TryToTargetDialect(dialect, out var target).ShouldBeTrue();
@@ -41,7 +41,7 @@ public sealed class SqlDialectConsistencyTests
         foreach (DatabaseDialect dialect in Enum.GetValues<DatabaseDialect>())
         {
             bool isExec = SqlDialectMapper.IsExecutable(dialect);
-            bool factorySupports = dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite;
+            bool factorySupports = dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite or DatabaseDialect.Oracle;
             isExec.ShouldBe(factorySupports, $"Mismatch for dialect {dialect}: IsExecutable={isExec}, Factory={factorySupports}");
         }
     }

@@ -73,6 +73,8 @@ public static class OracleConnectionStringPolicy
 public static class OracleSessionInitialization
 {
     public const string PinAndVerifyBlock = """
+        DECLARE
+          v_comp VARCHAR2(64);
         BEGIN
           EXECUTE IMMEDIATE 'ALTER SESSION SET NLS_COMP = ''BINARY''';
           EXECUTE IMMEDIATE 'ALTER SESSION SET NLS_SORT = ''BINARY''';
@@ -84,7 +86,8 @@ public static class OracleSessionInitialization
           EXECUTE IMMEDIATE 'ALTER SESSION SET NLS_TIMESTAMP_TZ_FORMAT = ''YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM''';
           EXECUTE IMMEDIATE 'ALTER SESSION SET TIME_ZONE = ''+00:00''';
           DBMS_SESSION.CLEAR_IDENTIFIER;
-          IF SYS_CONTEXT('USERENV', 'NLS_COMP') <> 'BINARY'
+          SELECT value INTO v_comp FROM nls_session_parameters WHERE parameter = 'NLS_COMP';
+          IF v_comp <> 'BINARY'
              OR SYS_CONTEXT('USERENV', 'NLS_SORT') <> 'BINARY'
              OR SYS_CONTEXT('USERENV', 'NLS_DATE_FORMAT') <> 'YYYY-MM-DD'
              OR SYS_CONTEXT('USERENV', 'NLS_TERRITORY') <> 'AMERICA' THEN

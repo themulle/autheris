@@ -94,7 +94,7 @@ public sealed class OracleRuntimeTests
 
         sql.ShouldContain("DBMS_SESSION.CLEAR_IDENTIFIER");
         sql.ShouldContain("RAISE_APPLICATION_ERROR");
-        sql.ShouldContain("SYS_CONTEXT('USERENV', 'NLS_COMP')");
+        sql.ShouldContain("nls_session_parameters WHERE parameter = 'NLS_COMP'");
         sql.ShouldNotContain("@");
     }
 

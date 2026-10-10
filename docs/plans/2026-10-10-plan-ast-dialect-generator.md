@@ -1594,7 +1594,7 @@ Priority order and stacked branches (each branch is based on the head of the pre
 | 2 | `feat/ast-duckdb-select` | DuckDB SELECT | see 18.3 |
 | 3 | `feat/ast-postgres-select` | PostgreSQL SELECT | see 18.4 |
 | 4 | `feat/ast-databricks-select` | Databricks SELECT | planned |
-| 5 | `feat/ast-oracle-select` | Oracle SELECT, based on the PostgreSQL head plus `feat/ast-failclosed-fixes` (WP-D4), WP-F1..F4 | planned |
+| 5 | `feat/ast-oracle-select` | Oracle SELECT, based on the PostgreSQL head plus `feat/ast-failclosed-fixes` (WP-D4), WP-F1..F4 | see 18.6 |
 | later | `feat/ast-dml` | A7 (DML, MERGE) for all dialects | deferred; not started in this work |
 
 ### 18.2 Branch `feat/ast-mssql-select`
@@ -1642,3 +1642,15 @@ Semantic notes: PostgreSQL folds unquoted identifiers to lower case, catalog col
 | WP-F4 | Not started | Re-scoped by the stakeholder: SQL Server SELECT first; Oracle continues later on `feat/ast-oracle`. |
 | WP-F1 | Not started | As above. |
 | WP-F2 | Not started | As above. The Oracle branch of `InitializeSessionAsync` is currently fail-closed (throws). |
+
+### 18.6 Branch `feat/ast-oracle-select` (based on `feat/ast-postgres-select`, plus `feat/ast-failclosed-fixes` merged)
+
+The branch is based on the PostgreSQL head as instructed; it does not contain the Databricks branch, so merging both into one line needs a conflict resolution in the capability table and the generator factory (additive entries).
+
+Compiler: capability entry (32,767 binds, confirmed on Oracle Free by `OracleBindLimitProbe`; separate 1,000-item IN limit, ORA-01795; 128-byte identifiers; `:pN`), bound-literal emission with reviewed constant fragments, `FROM DUAL`, structural pagination, typed masks (HMAC degrades to Redact, `InDbHmac = false`; the optional `DBMS_CRYPTO` grant probe of WP-F6 is not implemented), tenant comparison `col = t AND UTL_RAW.CAST_TO_RAW(col) = UTL_RAW.CAST_TO_RAW(t)` (exact under `NLS_COMP`/`NLS_SORT` and column collations), `OracleCompiledSqlBinder` in the engine (WP-F3: `BindByName = true` enforced, command without the property rejected, empty tenant or policy string rejected, timestamps through `OracleDbType.TimeStamp`).
+
+Runtime: WP-F1 (`Oracle.ManagedDataAccess.Core` 23.26.301 in Infrastructure and the integration tests, lock files regenerated, NuGet audit clean; license is the Oracle Free Use Terms and Conditions and needs legal review before release; `OracleConnectionStringPolicy` rejects DBA privileges, OS authentication, proxy logins, SYS/SYSTEM and requires TCPS outside Development), WP-F2 (a constant PL/SQL block pins and verifies NLS and time zone on every pool rental inside the database and clears the client identifier; the session initializer sets an opaque client identifier and module with bound values), WP-F4 (`SqlDataSourceExecutor` uses dialect-aware markers, adds pagination parameters in text order, enables `BindByName`, rewrites known `@name` markers of producers to `:name` for Oracle; HMAC masks on Oracle redact instead of using the SQLite UDF; an architecture test forbids hard-coded `@` markers in both files).
+
+Evidence on Oracle Free (`gvenzl/oracle-free:23-slim-faststart`, through `SqlConnectionFactory`, `DbSessionContextInitializer` and the binder): a logon trigger makes every session case-insensitive and linguistic, the pinned session still isolates tenants `acme` and `ACME`; the pool (size 1) never leaks NLS state or a client identifier across rentals; offset/limit are bound to the right slots by name; consent filters, policy subquery, CTE/union/join scopes, shapes, hostile values, masks, 1,000-item IN list accepted and 1,001 rejected, 32,767-bind probe.
+
+Not done: the startup validator wiring (plaintext password outside Development, B-1 tenant-collision check), `CURRENT_SCHEMA` pinning (every emitted name is schema-qualified, INV-11), the hostile-session variants of the other consumers, Databricks/Oracle in the cutover. DBA prerequisite (B-5): the application account needs `CREATE SESSION` and `ALTER SESSION`.
