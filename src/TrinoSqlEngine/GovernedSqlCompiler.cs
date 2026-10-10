@@ -112,6 +112,12 @@ internal sealed class GovernedSqlCompiler
             throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, request.Statements.ToString());
         }
 
+        if (request.Policy.Dml is null || request.Policy.Dml != DmlGuardOptions.Strict)
+        {
+            // CR-ADG-38: guards are not a per-request choice; a relaxed switch is a configuration error, never a silent no-op.
+            throw new SqlCompileConfigurationException();
+        }
+
         CheckBudget(request, clock, token);
 
         // 2. cache: a hit still validates every table dependency and rebinds the current values (INV-12)

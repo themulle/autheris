@@ -178,13 +178,11 @@ public class DmlCompileTests
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void Insert_TenantColumnMissing_IsRejected_UnderStrict_AndForced_WhenNotRequired(TargetSqlDialect dialect)
+    public void Insert_TenantColumnMissing_IsRejected_AndTheRequirementCannotBeRelaxedPerRequest(TargetSqlDialect dialect)
     {
         RejectedSecurity(dialect, "INSERT INTO orders (id, status) VALUES (1, 'open')");
         var relaxed = DmlGuardOptions.Strict with { RequireTenantColumnInInsert = false };
-        var c = Compile(dialect, "INSERT INTO orders (id, status) VALUES (1, 'open')", dml: relaxed);
-        Assert.Equal(1, Tenants(c));
-        Assert.Contains("TenantId", c.Sql);
+        Assert.Throws<SqlCompileConfigurationException>(() => Compile(dialect, "INSERT INTO orders (id, status) VALUES (1, 'open')", dml: relaxed));
     }
 
     [Theory]
@@ -388,14 +386,38 @@ public class DmlCompileTests
         Assert.Equal(SqlStatementClass.Update, Compile(dialect, "UPDATE orders SET status = 'x' WHERE id = 7").StatementClass);
     }
 
+    // CR-ADG-38: a security guard cannot be relaxed per request on the typed path; there is no silent no-op and no weaker mode.
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void Update_PolicyColumnAssignment_IsAllowed_WhenTheGuardIsSwitchedOff(TargetSqlDialect dialect)
+    public void Update_PolicyColumnAssignment_StaysRejected_WhenTheGuardIsSwitchedOff_AsAConfigurationError(TargetSqlDialect dialect)
     {
         RegionPolicy();
         var relaxed = DmlGuardOptions.Strict with { RejectPolicyColumnAssignment = false };
-        Assert.Equal(SqlStatementClass.Update, Compile(dialect, "UPDATE orders SET region = 'US' WHERE id = 7", dml: relaxed).StatementClass);
+        Assert.Throws<SqlCompileConfigurationException>(() => Compile(dialect, "UPDATE orders SET region = 'US' WHERE id = 7", dml: relaxed));
     }
+
+    [Theory]
+    [MemberData(nameof(DialectData))]
+    public void EveryRelaxedDmlGuardSwitch_IsRejected_WithATypedConfigurationError_ForAnyStatement(TargetSqlDialect dialect)
+    {
+        var switches = typeof(DmlGuardOptions).GetProperties().Where(p => p.PropertyType == typeof(bool)).ToList();
+        Assert.Equal(9, switches.Count);   // a new switch must be added to the strict check, not skipped
+        foreach (var guard in switches)
+        {
+            var relaxed = DmlGuardOptions.Strict with { };
+            typeof(DmlGuardOptions).GetProperty(guard.Name)!.SetValue(relaxed, false);
+            Assert.NotEqual(DmlGuardOptions.Strict, relaxed);
+            var ex = Assert.Throws<SqlCompileConfigurationException>(() => Compile(dialect, "SELECT id FROM orders", dml: relaxed));
+            Assert.DoesNotContain(guard.Name, ex.Message);
+            Assert.Throws<SqlCompileConfigurationException>(() => Compile(dialect, "UPDATE orders SET status = 'x' WHERE id = 1", dml: relaxed));
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(DialectData))]
+    public void EnforceWithCheckOptionFalse_IsRejected_NotSilentlyIgnored(TargetSqlDialect dialect) =>
+        Assert.Throws<SqlCompileConfigurationException>(() =>
+            Compile(dialect, "INSERT INTO orders (id, tenantid) VALUES (1, 'acme')", dml: DmlGuardOptions.Strict with { EnforceWithCheckOption = false }));
 
     [Theory]
     [MemberData(nameof(DialectData))]
@@ -748,11 +770,12 @@ public class DmlCompileTests
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void DmlGuardOptions_ArePartOfTheCacheKey_AStrictRequestIsNeverServedARelaxedCompile(TargetSqlDialect dialect)
+    public void ARelaxedDmlGuard_IsRejected_AndNeverCached_AStrictRequestIsUnaffected(TargetSqlDialect dialect)
     {
         var relaxed = DmlGuardOptions.Strict with { RejectUnfilteredDml = false };
-        Assert.Equal(SqlStatementClass.Update, Compile(dialect, "UPDATE orders SET status = 'x'", dml: relaxed).StatementClass);
+        Assert.Throws<SqlCompileConfigurationException>(() => Compile(dialect, "UPDATE orders SET status = 'x'", dml: relaxed));
         Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "UPDATE orders SET status = 'x'"));
+        Assert.Equal(0, _engine.CompileCache.Stats.Entries);
         Assert.Equal(0, _engine.CompileCache.Stats.Hits);
     }
 

@@ -15,7 +15,12 @@ public enum StatementPermissions { ReadOnly = 0, Insert = 1, Update = 2, Delete 
 
 public enum GovernedSubqueryStrategy { Correlated = 0 }
 
-/// <summary>DML guard switches (plan 4.1), enforced by the typed security visitor and proved by the coverage verifier. <see cref="Strict"/> is the default.</summary>
+/// <summary>
+/// DML guard switches (plan 4.1), enforced by the typed security visitor and proved by the coverage verifier. <see cref="Strict"/> is
+/// the only value the governed compiler accepts (CR-ADG-38): any other combination is rejected with a
+/// <see cref="SqlCompileConfigurationException"/>. The type stays so that the injector and verifier can be unit-tested against
+/// each switch.
+/// </summary>
 public sealed record DmlGuardOptions(
     bool EnforceWithCheckOption,
     bool RequireTenantColumnInInsert,
@@ -132,5 +137,17 @@ public sealed class SqlCompileNotSupportedException : SecurityException
         : base($"Not yet supported by the governed SQL compiler: {reason} ({detail}).")
     {
         Reason = reason;
+    }
+}
+
+/// <summary>
+/// CR-ADG-38: the compile request asks for a weaker security posture than the governed path allows (for example a relaxed DML
+/// guard). The guards are fixed; they cannot be relaxed per request. The message names no setting and no value.
+/// </summary>
+public sealed class SqlCompileConfigurationException : SecurityException
+{
+    public SqlCompileConfigurationException()
+        : base("The governed SQL compiler does not allow a security guard to be relaxed per request.")
+    {
     }
 }
