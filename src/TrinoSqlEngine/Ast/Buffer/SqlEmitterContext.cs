@@ -189,12 +189,23 @@ public sealed class SqlEmitterContext
         _ => throw new ArgumentOutOfRangeException(nameof(style), style, "Unknown marker style.")
     };
 
+    /// <summary>
+    /// CR-ADG-05: key by CLR type plus a lossless value text. Date and time types use the round-trip format (they keep every
+    /// tick and the kind or offset); culture-invariant default formatting loses fractional seconds and merged distinct literals.
+    /// </summary>
     private static string ValueKey(object? value) => value switch
     {
         null => "null",
-        byte[] bytes => Convert.ToHexString(bytes),
-        IFormattable f => f.ToString(null, CultureInfo.InvariantCulture),
-        _ => value.ToString() ?? string.Empty
+        byte[] bytes => "bytes:" + Convert.ToHexString(bytes),
+        DateTime dt => "DateTime:" + dt.ToString("O", CultureInfo.InvariantCulture),
+        DateTimeOffset dto => "DateTimeOffset:" + dto.ToString("O", CultureInfo.InvariantCulture),
+        DateOnly date => "DateOnly:" + date.ToString("O", CultureInfo.InvariantCulture),
+        TimeOnly time => "TimeOnly:" + time.ToString("O", CultureInfo.InvariantCulture),
+        TimeSpan span => "TimeSpan:" + span.ToString("c", CultureInfo.InvariantCulture),
+        double d => "Double:" + d.ToString("R", CultureInfo.InvariantCulture),
+        float f => "Single:" + f.ToString("R", CultureInfo.InvariantCulture),
+        IFormattable f => value.GetType().Name + ":" + f.ToString(null, CultureInfo.InvariantCulture),
+        _ => value.GetType().Name + ":" + (value.ToString() ?? string.Empty)
     };
 
     public void CheckParameterBudget(int additional = 1)
