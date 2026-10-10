@@ -1163,3 +1163,15 @@ killed. "Killed" means at least one suite failed.
 **Verdict (loop 1): APPROVED.** CR-01..CR-15 are resolved and verified by tests and mutation runs. No Blocker or Major
 finding remains. CR-17..CR-19 are non-blocking follow-ups for the next change in this area. CR-16 and CR-20 go to Phase 6
 (documentation), which may start now.
+
+## Implementation Log — review loop 2
+
+Fixes for the non-blocking findings CR-17..CR-19 of the re-review (loop 1), each test-first and in its own commit.
+
+| ID | Change | Test |
+|---|---|---|
+| CR-17 | `ResponseSizeLimitingHandler.BytesRead` throws `InvalidOperationException` for a stream that is neither seekable nor capped, instead of returning 0 (fail closed). | `BytesRead_OfANonSeekableStreamThatDoesNotCount_FailsClosed` (replaces the old "is zero" test) |
+| CR-18 | `PathLookupConnector` gives every per-key request its own copy of `session.Items`. The first non-cancellation failure cancels the sibling requests through a linked `CancellationTokenSource`. | `EachRequest_GetsItsOwnItemsDictionary_NotTheCallersSharedOne`, `FirstFailure_CancelsTheSiblingRequestsStillInFlight` |
+| CR-19 | `HttpDataSourceOptions` moved from `GatewayOptions.cs` to `Domain/Options/HttpDataSourceOptions.cs` (same namespace, no behaviour change). | none (pure move; build and existing options tests) |
+
+**Verification:** `dotnet build Autheris.sln -warnaserror`: 0 warnings, 0 errors. Unit suite: 4,378 total, 4,377 passed, 1 failed (the known WORM test). Integration filter `FederatedVirtualFilter|WebSql|CrossSource|RowFilterChannelParity`: 77 total, 76 passed, 1 failed (the pre-existing `sql-endpoint` parity row).
