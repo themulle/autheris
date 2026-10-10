@@ -28,6 +28,7 @@
 | [`2026-10-10-konzept-datenklassifizierung-ki-vorklassifizierung.md`](file:///root/autheris/doc/plan/2026-10-10-konzept-datenklassifizierung-ki-vorklassifizierung.md)<br/>`PLAN-GOV-KI-13` | **Data Object Classification & AI Pre-Classification** | Fail-Closed `UNCLASSIFIED` initial state; optional AI pre-classification with 150ms timeout guard; auto-preclassify at confidence $\ge 95\%$; dual-sign-off workflows | **IMPLEMENTED / IN REVIEW 🛡️** | Finalize UI workflow endpoints and telemetry hooks |
 | [`2026-10-10-implementierungsplan-offline-doc-mcp-gateway.md`](file:///root/autheris/doc/plan/2026-10-10-implementierungsplan-offline-doc-mcp-gateway.md)<br/>`PLAN-OFFLINE-DOC-MCP-12` | **Offline Doc- & Runbook-MCP Gateway** | Ingestion pipeline for Markdown, arc42, Runbooks, OpenAPI, Error Catalogs; local BM25/SIMD hybrid search; `GatewayMcpServer` stdio/SSE bridge | **IN PROGRESS / DRAFT 🛡️** | Implement BM25 SIMD vector tokenizer and document deposit endpoint |
 | [`2026-10-10-konzept-universelle-dokumentenablage-mcp.md`](file:///root/autheris/doc/plan/2026-10-10-konzept-universelle-dokumentenablage-mcp.md)<br/>`PLAN-UNIVERSAL-DOC-STORE-14` | **Universal Document Store for Multi-App MCP** | 4 deposit options (GitOps, S3/MinIO, Ingestion API/MCP-Deposit, Shared Volume); 100% Air-Gapped/Offline support; Multi-App catalog & search | **CONCEPT COMPLETE 📚** | Draft concrete storage abstraction interfaces in `Autheris.Application` |
+| [`2026-10-10-req-ast-dialect-generator.md`](file:///root/autheris/doc/plan/2026-10-10-req-ast-dialect-generator.md)<br/>`PLAN-AST-DIALECT-GEN-16` | **AST Target Dialect Generator: Governed Cutover from Legacy `RlsListener`** | PRD (Phase 1) for promoting the existing `AstCompiler` pipeline (`SqlAstBuilder` → `AstSecurityVisitor` → `ISqlDialectGenerator`) from opt-in to default via per-dialect increments, real shadow comparison, differential/property testing and a kill switch; supersedes German draft [`2026-10-06-implementation-plan-ast-dialect-generator.md`](file:///root/autheris/doc/plan/2026-10-06-implementation-plan-ast-dialect-generator.md); refines [ADR-017 §2](file:///root/autheris/docs/adr/ADR-017-distributed-state-ast-generator-and-rbac.md) | **PROPOSED 📝** | Phase 2 architecture plan |
 | [`README.md`](file:///root/autheris/doc/plan/README.md)<br/>`PLAN-AGENT-GOV-DOCS-01` | **Agent Governance & English Documentation Standards** | Project-wide English documentation policy; central `doc/plan/` repository; agent refinement lifecycle rules; root `AGENTS.md` & `CLAUDE.md` | **ACTIVE & ADOPTED ✅** | Ongoing enforcement across all sub-agent and tool invocations |
 
 ---
@@ -52,6 +53,10 @@ flowchart TD
         UDS["PLAN-UNIVERSAL-DOC-STORE-14<br/>Universal Multi-App Document Store"]
     end
 
+    subgraph SqlCompiler ["SQL Compiler & Dialect Pushdown"]
+        ADG["PLAN-AST-DIALECT-GEN-16<br/>AST Target Dialect Generator (Legacy Cutover)"]
+    end
+
     MP --> AG
     MP --> DK
     MP --> VF
@@ -60,6 +65,8 @@ flowchart TD
 
     DM <--> UDS
     DK -.-> VF
+    MP --> ADG
+    VF -.->|"SqlFilterCompiler uses AstCompiler"| ADG
 ```
 
 ---
