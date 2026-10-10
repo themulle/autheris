@@ -46,4 +46,48 @@ public sealed class AsyncQueryJobResultPathTraversalTests : IDisposable
 
         ex.ErrorCode.ShouldBe("JOB_RESULT_PATH_FORBIDDEN");
     }
+
+    [Fact]
+    public async Task GetJobResultStreamAsync_SiblingDirectoryWithScratchPrefix_IsDenied()
+    {
+        var environment = Substitute.For<IHostEnvironment>();
+        environment.ContentRootPath.Returns(_root);
+        var audit = Substitute.For<IAuditLogRepository>();
+        var manager = new AsyncQueryJobManager(audit, environment: environment);
+
+        // .../scratch/jobs-evil/x shares the string prefix of .../scratch/jobs but is a different directory.
+        var evilDir = manager.ScratchDirectory + "-evil";
+        Directory.CreateDirectory(evilDir);
+        var evilFile = Path.Combine(evilDir, "x");
+        await File.WriteAllTextAsync(evilFile, "secret");
+        manager.UpdateJob(new AsyncJobDescriptor(
+            "job-2", "tenant-a", "alice", "SELECT 1", "json", AsyncJobState.Completed, DateTimeOffset.UtcNow,
+            ResultFilePath: evilFile));
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(
+            () => manager.GetJobResultStreamAsync("job-2", new TenantId("tenant-a"), "alice"));
+
+        ex.ErrorCode.ShouldBe("JOB_RESULT_PATH_FORBIDDEN");
+        await audit.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.Decision == "DENY"),
+            Arg.Any<System.Threading.CancellationToken>());
+    }
+
+    [Fact]
+    public async Task GetJobResultStreamAsync_FileInsideScratch_IsStreamed()
+    {
+        var environment = Substitute.For<IHostEnvironment>();
+        environment.ContentRootPath.Returns(_root);
+        var manager = new AsyncQueryJobManager(Substitute.For<IAuditLogRepository>(), environment: environment);
+
+        var inside = Path.Combine(manager.ScratchDirectory, "ok.json");
+        await File.WriteAllTextAsync(inside, "{}");
+        manager.UpdateJob(new AsyncJobDescriptor(
+            "job-3", "tenant-a", "alice", "SELECT 1", "json", AsyncJobState.Completed, DateTimeOffset.UtcNow,
+            ResultFilePath: inside));
+
+        await using var stream = await manager.GetJobResultStreamAsync("job-3", new TenantId("tenant-a"), "alice");
+
+        stream.ShouldNotBeNull();
+    }
 }

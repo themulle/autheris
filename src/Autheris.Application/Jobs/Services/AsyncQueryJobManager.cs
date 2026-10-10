@@ -153,8 +153,18 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
 
         var fullResultPath = Path.GetFullPath(job.ResultFilePath);
         var fullScratchPath = Path.GetFullPath(_scratchDirectory);
-        if (!fullResultPath.StartsWith(fullScratchPath, StringComparison.OrdinalIgnoreCase))
+        // Containment needs a trailing separator: ".../jobs-evil/x" must not match the ".../jobs" prefix.
+        var scratchPrefix = Path.TrimEndingDirectorySeparator(fullScratchPath) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!fullResultPath.StartsWith(scratchPrefix, comparison))
         {
+            await RecordAuditAsync(
+                job,
+                new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userSid), new Claim("tenant_id", tenantId.Value)], "JobAuth")),
+                AuditEventTypes.AsyncJobDownloaded,
+                "DENY",
+                "Job result path is outside the scratch directory.",
+                ct).ConfigureAwait(false);
             throw new Autheris.Domain.Exceptions.GatewaySecurityException("Unauthorized path traversal detected in job result retrieval.", "JOB_RESULT_PATH_FORBIDDEN");
         }
 
