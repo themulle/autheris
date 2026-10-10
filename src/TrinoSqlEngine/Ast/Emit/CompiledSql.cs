@@ -38,7 +38,32 @@ public sealed record CompiledSql(
     TargetSqlDialect Dialect,
     SqlStatementClass StatementClass,
     ImmutableArray<SecurityPredicateId> AppliedPredicates,
-    string CompilerVersion);
+    string CompilerVersion,
+    int? ExpectedAffectedRows = null)
+{
+    /// <summary>
+    /// CR-ADG-35: true for an INSERT with check-option semantics. The executor must run the statement inside a transaction and call
+    /// <see cref="DmlCheckOption.Enforce"/> with the affected row count before it commits; a difference rolls the transaction back.
+    /// </summary>
+    public bool RequiresRowCountCheck => ExpectedAffectedRows.HasValue;
+}
+
+/// <summary>The row-count contract of an INSERT with check-option semantics (CR-ADG-35).</summary>
+public static class DmlCheckOption
+{
+    /// <summary>
+    /// Throws <see cref="DmlCheckOptionViolationException"/> when <paramref name="affectedRows"/> differs from the expected count. The
+    /// caller rolls the transaction back on that exception. A statement without the check passes unchanged.
+    /// </summary>
+    public static void Enforce(CompiledSql compiled, int affectedRows)
+    {
+        System.ArgumentNullException.ThrowIfNull(compiled);
+        if (compiled.ExpectedAffectedRows is { } expected && affectedRows != expected)
+        {
+            throw new DmlCheckOptionViolationException(compiled.Dialect);
+        }
+    }
+}
 
 /// <summary>Supplies gateway-bound values for <see cref="PolicyParameterExpression"/> nodes; query literals come from the AST.</summary>
 public sealed record ParameterSource(

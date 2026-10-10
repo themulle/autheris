@@ -56,7 +56,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     break;
                 case MergeInsertClause insert:
                 {
-                    RejectInsertIntoPolicyTable(entry);
+                    RejectMergeInsertIntoPolicyTable(entry);
                     var columns = ResolveInsertColumns(entry, insert.Columns, masked, out int tenantIndex);
                     var values = ForceTenantInRow(entry, columns, insert.Values, tenantIndex);
                     RejectMaskedReads(masked, targetNames, values);
@@ -107,16 +107,87 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         return new UpdateStatement(new NamedTableSource(entry.Identity.ToQualifiedName(), null), assignments, combined);
     }
 
+    /// <summary>Qualifier of the inserted values inside the check-option source (CR-ADG-35).</summary>
+    internal static readonly SqlIdentifier InsertCheckAlias = new("autheris_ins", IsQuoted: true);
+
     private SqlNode SecureInsertTyped(InsertStatement node)
     {
         _rootLimitHandled = true;
         var entry = ResolveDmlTarget(node.TargetTable);
-        RejectInsertIntoPolicyTable(entry);
+        bool checkOption = RequiresInsertCheckOption(entry, node.Source);
         var masked = MaskedColumnsOf(entry);
         var columns = ResolveInsertColumns(entry, node.Columns, masked, out int tenantIndex);
         var forced = ForceTenantInSource(entry, columns, node.Source, tenantIndex);
         var source = (QueryBody)WithScope(SecurityScope.DmlSource, () => Visit(forced));
+        if (checkOption)
+        {
+            source = WrapInCheckOption(entry, columns, (ValuesQueryBody)source);
+        }
+
         return new InsertStatement(new NamedTableSource(entry.Identity.ToQualifiedName(), null), columns.Columns, source);
+    }
+
+    /// <summary>
+    /// CR-ADG-35: INSERT into a table with a plain (non-consent, non-correlated) admin row predicate is allowed with check-option
+    /// semantics: <c>INSERT ... SELECT v.cols FROM (SELECT row UNION ALL ...) v WHERE policy(v)</c>. The caller compares the affected
+    /// count with <c>ExpectedAffectedRows</c> inside a transaction. Consent-filtered and correlated policies, INSERT ... SELECT and
+    /// engines without an INSERT row count stay rejected (typed).
+    /// </summary>
+    private bool RequiresInsertCheckOption(TableCatalogEntry entry, QueryBody source)
+    {
+        var id = entry.Identity;
+        bool consent = _options.TablesWithConsentRowFilter.Contains(id.ToString()) || _options.TablesWithConsentRowFilter.Contains(id.Table);
+        if (!_typed!.RowFilters.ShouldApplyPolicy(id) && !consent) return false;
+        if (consent)
+        {
+            throw new SecurityException("INSERT into a table with a consent-based row policy is not permitted.");
+        }
+
+        if (source is not ValuesQueryBody)
+        {
+            throw new SecurityException("INSERT ... SELECT into a table with a row-level policy is not permitted; use VALUES (check option).");
+        }
+
+        if (!_typed.Capabilities.ReportsInsertRowCount)
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "INSERT check option needs an affected row count that this dialect does not report");
+        }
+
+        return true;
+    }
+
+    private QueryBody WrapInCheckOption(TableCatalogEntry entry, InsertColumns columns, ValuesQueryBody values)
+    {
+        var typed = _typed!;
+        var tid = entry.Identity;
+        var written = columns.Columns.Select(c => c.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var policy = typed.RowFilters.GetPredicate(tid);
+        if (policy.ReferencedColumns.Any(c => !written.Contains(c)))
+        {
+            // the check cannot be evaluated over a value the statement does not supply (a column default is not visible here)
+            throw new SecurityException("An INSERT into a table with a row-level policy must supply every column the policy references.");
+        }
+
+        var expression = BuildPolicyExpression(entry);
+        var alias = InsertCheckAlias;
+
+        QueryBody RowSelect(RowValueExpression row) => new QuerySpecification(
+            false,
+            row.Elements.Select((e, i) => (SelectItem)new ColumnSelectItem(e, columns.Columns[i])).ToList(),
+            null, null, null, null);
+
+        QueryBody inner = RowSelect(values.Rows[0]);
+        for (int i = 1; i < values.Rows.Count; i++)
+        {
+            inner = new SetOperationQuery(inner, SetOperator.Union, Distinct: false, RowSelect(values.Rows[i]));
+        }
+
+        var derived = new SubqueryTableSource(new SelectStatement(null, inner, null, null), alias);
+        var check = new SecurityPredicateExpression(Qualify(expression, alias), new SecurityPredicateId(tid.ToString(), 1), SecurityScope.InsertCheck);
+        var projections = columns.Columns
+            .Select(c => (SelectItem)new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[] { alias, c })), null))
+            .ToList();
+        return new QuerySpecification(false, projections, derived, check, null, null);
     }
 
     // ---- target, columns, assignments ----
@@ -209,15 +280,14 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
-    private void RejectInsertIntoPolicyTable(TableCatalogEntry entry)
+    private void RejectMergeInsertIntoPolicyTable(TableCatalogEntry entry)
     {
-        if (!_options.RejectConsentFilteredInsert) return;
         var id = entry.Identity;
         if (_typed!.RowFilters.ShouldApplyPolicy(id) ||
             _options.TablesWithConsentRowFilter.Contains(id.ToString()) || _options.TablesWithConsentRowFilter.Contains(id.Table))
         {
-            // SQ-07: the written row cannot be verified against the row policy, so a table with a policy is not writable by INSERT.
-            throw new SecurityException("INSERT into a table with a row-level policy is not permitted.");
+            // SQ-07: the written row of a MERGE cannot be verified against the row policy (no check-option row count), so it is not writable.
+            throw new SecurityException("MERGE INSERT into a table with a row-level policy is not permitted.");
         }
     }
 
@@ -401,22 +471,30 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
         if (typed.RowFilters.ShouldApplyPolicy(tid))
         {
-            var predicate = typed.RowFilters.GetPredicate(tid);
-            typed.AddValues(predicate.Parameters);
-            var expression = (Expression)new PolicySubqueryTenantRewriter(typed).Visit(predicate.Expression);
-            expression = (Expression)new PolicyColumnTypeAnnotator(entry).Visit(expression);
-            bool referencesTarget = AstReflection.Collect<ColumnReference>(expression).Any(c =>
-                c.Name.Parts.Count >= 2 && string.Equals(c.Name.Parts[^2].Value, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase));
-            if (referencesTarget)
-            {
-                // SEC-ADG-06 item 2: a correlated row filter cannot be bound to a DML target.
-                throw new SecurityException("Correlated row filters are not supported for UPDATE, DELETE and MERGE statements.");
-            }
-
+            var expression = BuildPolicyExpression(entry);
             predicates.Add(new SecurityPredicateExpression(Qualify(expression, qualifier), new SecurityPredicateId(tid.ToString(), 1), scope));
         }
 
         return predicates;
+    }
+
+    /// <summary>The row policy of a DML target as an expression over the target's columns (parameters registered); a correlated policy is rejected.</summary>
+    private Expression BuildPolicyExpression(TableCatalogEntry entry)
+    {
+        var typed = _typed!;
+        var predicate = typed.RowFilters.GetPredicate(entry.Identity);
+        typed.AddValues(predicate.Parameters);
+        var expression = (Expression)new PolicySubqueryTenantRewriter(typed).Visit(predicate.Expression);
+        expression = (Expression)new PolicyColumnTypeAnnotator(entry).Visit(expression);
+        bool referencesTarget = AstReflection.Collect<ColumnReference>(expression).Any(c =>
+            c.Name.Parts.Count >= 2 && string.Equals(c.Name.Parts[^2].Value, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase));
+        if (referencesTarget)
+        {
+            // SEC-ADG-06 item 2: a correlated row filter cannot be bound to a DML target (nor to the inserted values).
+            throw new SecurityException("Correlated row filters are not supported for INSERT, UPDATE, DELETE and MERGE statements.");
+        }
+
+        return expression;
     }
 
     private static Expression Qualify(Expression predicate, SqlIdentifier? qualifier) =>

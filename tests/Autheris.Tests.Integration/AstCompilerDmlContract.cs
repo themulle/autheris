@@ -4,6 +4,7 @@ using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Data.Common;
 using System.Globalization;
 using System.Linq;
 using System.Security;
@@ -56,6 +57,42 @@ public abstract class AstCompilerDmlContract
     protected abstract string UserTable(string logical);
 
     protected abstract Task<int> ExecuteAsync(CompiledSql compiled);
+
+    /// <summary>
+    /// The row-count contract of CR-ADG-35 (the runtime executors adopt it at X1): run the statement in a transaction, compare the
+    /// affected count with <c>ExpectedAffectedRows</c> and roll back on any difference with a typed error.
+    /// </summary>
+    protected abstract Task<int> ExecuteInTransactionAsync(CompiledSql compiled);
+
+    /// <summary>The shared transaction harness for the ADO.NET dialects.</summary>
+    protected static async Task<int> RunCheckedAsync(DbConnection connection, bool ownsConnection, Action<DbCommand> bind, CompiledSql compiled,
+        System.Data.IsolationLevel isolation = System.Data.IsolationLevel.ReadCommitted)
+    {
+        try
+        {
+            if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync();
+            await using var tx = await connection.BeginTransactionAsync(isolation);
+            try
+            {
+                await using var cmd = connection.CreateCommand();
+                cmd.Transaction = tx;
+                bind(cmd);
+                int affected = await cmd.ExecuteNonQueryAsync();
+                DmlCheckOption.Enforce(compiled, affected);
+                await tx.CommitAsync();
+                return affected;
+            }
+            catch
+            {
+                await tx.RollbackAsync();
+                throw;
+            }
+        }
+        finally
+        {
+            if (ownsConnection) await connection.DisposeAsync();
+        }
+    }
 
     protected abstract Task<List<object?[]>> QueryAsync(string sql);
 
@@ -155,6 +192,14 @@ public abstract class AstCompilerDmlContract
     {
         var compiled = Engine.Compile(sql.AsMemory(), Request(tenant), CancellationToken.None);
         return await ExecuteAsync(compiled);
+    }
+
+    /// <summary>Compiles through the governed path and executes with the row-count check (CR-ADG-35).</summary>
+    protected async Task<int> ExecCheckedAsync(string sql, string tenant)
+    {
+        var compiled = Engine.Compile(sql.AsMemory(), Request(tenant), CancellationToken.None);
+        compiled.RequiresRowCountCheck.ShouldBeTrue();
+        return await ExecuteInTransactionAsync(compiled);
     }
 
     /// <summary>Runs an INSERT and checks the reported row count where the engine reports one.</summary>
@@ -372,12 +417,59 @@ public abstract class AstCompilerDmlContract
         await SecurityRejectedAsync(() => ExecAsync($"INSERT INTO {O} (id, tenantid, region, status, amount, email) VALUES (400, 'acme', 'EU', 'x', 1, 'w@x.y')", "acme"));
     }
 
+    // CR-ADG-35: INSERT into a table with an admin row policy has check-option semantics (Delta reports no count and stays rejected).
+    private const string PolicyColumns = "(id, tenantid, region, status, amount)";
+
     [Fact]
-    public async Task Insert_IntoATableWithARowPolicy_IsRejected()
+    public async Task Insert_IntoAPolicyTable_ThatSatisfiesThePolicy_IsWritten()
     {
         if (!Available()) return;
         RegionEuPolicy();
-        await SecurityRejectedAsync(() => ExecAsync($"INSERT INTO {O} (id, tenantid, region, status, amount) VALUES (30, 'acme', 'US', 'x', 1)", "acme"));
+        if (!ReportsInsertCount)
+        {
+            var ex = await Should.ThrowAsync<SqlCompileNotSupportedException>(() => ExecAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 1)", "acme"));
+            ex.Reason.ShouldBe(SqlCompileNotSupportedReason.Construct);
+            return;
+        }
+
+        (await ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 1), (11, 'acme', 'EU', 'new', 2)", "acme")).ShouldBe(2);
+        var rows = await OrdersAsync();
+        rows.Where(r => r.Id >= 10).Select(r => (r.Id, r.Tenant)).ShouldBe(new[] { (10, "acme"), (11, "acme") });
+    }
+
+    [Fact]
+    public async Task Insert_IntoAPolicyTable_ThatViolatesThePolicy_IsRolledBack_NothingIsWritten()
+    {
+        if (!Available() || !ReportsInsertCount) return;
+        RegionEuPolicy();
+        var before = await SnapshotAsync();
+        var ex = await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'US', 'new', 1)", "acme"));
+        ex.Code.ShouldBe("DML_CHECK_OPTION_VIOLATION");
+        ex.ToString().ShouldNotContain("US");
+        (await SnapshotAsync()).ShouldBe(before);
+    }
+
+    [Fact]
+    public async Task Insert_MultiRow_WithOneViolatingRow_RollsBackAllRows()
+    {
+        if (!Available() || !ReportsInsertCount) return;
+        RegionEuPolicy();
+        var before = await SnapshotAsync();
+        await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync(
+            $"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 1), (11, 'acme', 'US', 'new', 2), (12, 'acme', 'EU', 'new', 3)", "acme"));
+        (await SnapshotAsync()).ShouldBe(before);   // the two passing rows are not left behind
+        (await ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 1)", "acme")).ShouldBe(1);   // key 10 is still free
+    }
+
+    [Fact]
+    public async Task Insert_IntoAPolicyTable_SelectSourceOrMissingPolicyColumn_IsRejectedBeforeExecution()
+    {
+        if (!Available()) return;
+        RegionEuPolicy();
+        var before = await SnapshotAsync();
+        await SecurityRejectedAsync(() => ExecAsync($"INSERT INTO {O} (id, tenantid, region, status, amount) SELECT 20, 'acme', 'EU', 'x', 1 FROM {E} WHERE id = 1", "acme"));
+        await SecurityRejectedAsync(() => ExecAsync($"INSERT INTO {O} (id, tenantid, status, amount) VALUES (21, 'acme', 'x', 1)", "acme"));
+        (await SnapshotAsync()).ShouldBe(before);
     }
 
     [Fact]

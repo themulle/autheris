@@ -209,10 +209,95 @@ public class DmlCompileTests
 
     [Theory]
     [MemberData(nameof(DialectData))]
-    public void Insert_IntoATableWithARowPolicy_IsRejected(TargetSqlDialect dialect)
+    public void Insert_IntoATableWithARowPolicy_CompilesWithTheCheckOption_AndExpectsOneRowPerValuesRow(TargetSqlDialect dialect)
+    {
+        if (dialect == TargetSqlDialect.Databricks) return;   // no INSERT row count, see the Delta test below
+        RegionPolicy();
+        var one = Compile(dialect, "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')");
+        Assert.True(one.RequiresRowCountCheck);
+        Assert.Equal(1, one.ExpectedAffectedRows);
+        Assert.Contains(new SecurityPredicateId("dbo.Orders", 1), one.AppliedPredicates);
+        Assert.Contains(one.Parameters, p => p.Origin == ParameterOrigin.Policy && Equals(p.Value, "EU"));
+        Assert.Contains(one.Parameters, p => p.Origin == ParameterOrigin.Tenant);
+        Assert.Contains("WHERE", one.Sql);
+        Assert.Contains("autheris_ins", one.Sql);
+
+        var three = Compile(dialect, "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU'), (2, 'acme', 'US'), (3, 'acme', 'EU')");
+        Assert.True(three.RequiresRowCountCheck);
+        Assert.Equal(3, three.ExpectedAffectedRows);
+        Assert.Equal(2, CountOf(three.Sql, "UNION ALL"));
+    }
+
+    [Theory]
+    [MemberData(nameof(DialectData))]
+    public void Insert_IntoATableWithoutARowPolicy_NeedsNoRowCountCheck(TargetSqlDialect dialect)
+    {
+        var c = Compile(dialect, "INSERT INTO orders (id, tenantid) VALUES (1, 'acme'), (2, 'acme')");
+        Assert.False(c.RequiresRowCountCheck);
+        Assert.Null(c.ExpectedAffectedRows);
+        // a user SELECT over a derived table is never mistaken for the check-option shape
+        var viaSelect = Compile(dialect, "INSERT INTO orders (id, tenantid) SELECT d.orderid, 'acme' FROM (SELECT orderid FROM entitlements) d WHERE d.orderid > 1");
+        Assert.False(viaSelect.RequiresRowCountCheck);
+    }
+
+    [Fact]
+    public void Insert_CheckOption_OnDelta_IsRejectedWithATypedError_BecauseNoRowCountIsReported()
     {
         RegionPolicy();
+        var ex = Assert.Throws<SqlCompileNotSupportedException>(() =>
+            Compile(TargetSqlDialect.Databricks, "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')"));
+        Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+        Assert.Contains("row count", ex.Message);
+        Assert.False(DialectCapabilityTable.Default.Get(TargetSqlDialect.Databricks).ReportsInsertRowCount);
+    }
+
+    [Theory]
+    [MemberData(nameof(DialectData))]
+    public void Insert_IntoAPolicyTable_ConsentCorrelatedSelectOrMissingPolicyColumn_StaysRejected(TargetSqlDialect dialect)
+    {
+        if (dialect == TargetSqlDialect.Databricks) return;
+        RegionPolicy();
+        // INSERT ... SELECT has no countable source
+        RejectedSecurity(dialect, "INSERT INTO orders (id, tenantid, region) SELECT id, 'acme', 'EU' FROM entitlements");
+        // the policy column is not supplied, so the check cannot be evaluated
+        RejectedSecurity(dialect, "INSERT INTO orders (id, tenantid) VALUES (1, 'acme')");
+        // a consent-based policy
+        var consent = Request(dialect);
+        consent = consent with { Policy = consent.Policy with { TablesWithConsentRowFilter = new HashSet<string> { "Orders" } } };
+        Assert.ThrowsAny<SecurityException>(() => _engine.Compile("INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')".AsMemory(), consent, CancellationToken.None));
+        // a correlated policy
+        _rowFilters.Predicates[Orders] = PolicyPredicate.Create(
+            new BinaryExpression(
+                new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier(RowFilterAliases.Target), new SqlIdentifier("Id", true) })),
+                BinaryOperator.Equal, new PolicyParameterExpression("__pol_id", SqlParameterType.Int64)),
+            new Dictionary<string, PolicyValue> { ["__pol_id"] = new(1L, SqlParameterType.Int64) });
         RejectedSecurity(dialect, "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')");
+        // MERGE INSERT into a policy table stays rejected
+        RegionPolicy();
+        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN NOT MATCHED THEN INSERT (id, tenantid, region) VALUES (s.id, 'acme', 'EU')");
+    }
+
+    [Fact]
+    public void TheRowCountContract_RollsBackOnAnyDifference_AndSurvivesTheCache()
+    {
+        RegionPolicy();
+        const string sql = "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU'), (2, 'acme', 'US')";
+        var first = Compile(TargetSqlDialect.SqlServer, sql);
+        var cached = Compile(TargetSqlDialect.SqlServer, sql);
+        Assert.Equal(1, _engine.CompileCache.Stats.Hits);
+        Assert.Equal(2, cached.ExpectedAffectedRows);
+        DmlCheckOption.Enforce(first, 2);   // all rows pass: no exception
+        foreach (int affected in new[] { 0, 1, 3 })
+        {
+            var ex = Assert.Throws<DmlCheckOptionViolationException>(() => DmlCheckOption.Enforce(cached, affected));
+            Assert.Equal(GovernedSqlErrorCodes.CheckOptionViolation, ex.Code);
+            Assert.Equal("DML_CHECK_OPTION_VIOLATION", ex.Code);
+            Assert.Null(ex.InnerException);
+            Assert.DoesNotContain("EU", ex.ToString());
+        }
+
+        // statements without the check are never affected
+        DmlCheckOption.Enforce(Compile(TargetSqlDialect.SqlServer, "DELETE FROM orders WHERE id = 1"), 99);
     }
 
     [Theory]

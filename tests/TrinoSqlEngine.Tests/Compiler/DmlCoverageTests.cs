@@ -125,6 +125,54 @@ public class DmlCoverageTests
         });
     }
 
+    // CR-ADG-35: the verifier proves the check-option shape; it does not trust the injector.
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void Insert_IntoAPolicyTable_WithoutTheCheckPredicate_OrWithAForeignTenantRow_IsRejectedByTheVerifier(TargetSqlDialect dialect)
+    {
+        if (dialect == TargetSqlDialect.Databricks) return;
+        _rowFilters.NoPolicy.Remove(Orders);
+        _rowFilters.Predicates[Orders] = PolicyPredicate.Create(
+            new BinaryExpression(Col("Region"), BinaryOperator.Equal, new PolicyParameterExpression("__pol_region", SqlParameterType.String)),
+            new Dictionary<string, PolicyValue> { ["__pol_region"] = new("EU", SqlParameterType.String) });
+        const string sql = "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU'), (2, 'acme', 'US')";
+
+        // the check predicate removed
+        Mutant(dialect, sql, s => { var i = (InsertStatement)s; return i with { Source = ((QuerySpecification)i.Source) with { Where = null } }; });
+        // the check predicate with the wrong scope
+        Mutant(dialect, sql, s =>
+        {
+            var i = (InsertStatement)s;
+            var spec = (QuerySpecification)i.Source;
+            var sp = (SecurityPredicateExpression)spec.Where!;
+            return i with { Source = spec with { Where = sp with { Scope = SecurityScope.Root } } };
+        });
+        // a plain VALUES source in a policy table
+        Mutant(dialect, sql, s => ((InsertStatement)s) with { Source = new ValuesQueryBody(new[] { new RowValueExpression(new Expression[] { new LiteralExpression(1L, LiteralType.Integer) }) }) });
+        // a row without the bound tenant
+        Mutant(dialect, sql, s =>
+        {
+            var i = (InsertStatement)s;
+            var spec = (QuerySpecification)i.Source;
+            var derived = (SubqueryTableSource)spec.From!;
+            var union = (SetOperationQuery)derived.Subquery.Body;
+            var row = (QuerySpecification)union.Right;
+            var projections = row.Projections.ToList();
+            projections[1] = new ColumnSelectItem(new LiteralExpression("other", LiteralType.String), ((ColumnSelectItem)projections[1]).Alias);
+            var mutatedBody = union with { Right = row with { Projections = projections } };
+            return i with { Source = spec with { From = derived with { Subquery = derived.Subquery with { Body = mutatedBody } } } };
+        });
+        // a DISTINCT row set would silently drop rows and defeat the count
+        Mutant(dialect, sql, s =>
+        {
+            var i = (InsertStatement)s;
+            var spec = (QuerySpecification)i.Source;
+            var derived = (SubqueryTableSource)spec.From!;
+            var union = (SetOperationQuery)derived.Subquery.Body;
+            return i with { Source = spec with { From = derived with { Subquery = derived.Subquery with { Body = union with { Distinct = true } } } } };
+        });
+    }
+
     [Theory]
     [MemberData(nameof(Dialects))]
     public void Merge_WithoutTheOnPredicate_WithTheInsertTenantReplaced_OrWithAnUnknownClause_IsRejectedByTheVerifier(TargetSqlDialect dialect)

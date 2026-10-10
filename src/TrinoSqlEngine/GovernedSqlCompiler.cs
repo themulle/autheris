@@ -194,7 +194,7 @@ internal sealed class GovernedSqlCompiler
         Pass("emit");
         var generator = SqlDialectGeneratorFactory.GetGenerator(request.TargetDialect);
         var compiled = generator.Generate(secured, new ParameterSource(typed.PolicyValues, ClientNoValues), token)
-            with { AppliedPredicates = applied };
+            with { AppliedPredicates = applied, ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured) };
 
         // 10. output budget
         long limit = (long)request.MaxExpansionFactor * Math.Max(rawSql.Length, MinimumInputForExpansion);

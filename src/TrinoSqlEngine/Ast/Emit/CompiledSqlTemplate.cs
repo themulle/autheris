@@ -36,7 +36,8 @@ public sealed record CompiledSqlTemplate(
     SqlStatementClass StatementClass,
     ImmutableArray<SecurityPredicateId> AppliedPredicates,
     string CompilerVersion,
-    ImmutableArray<TableDependency> Dependencies)
+    ImmutableArray<TableDependency> Dependencies,
+    int? ExpectedAffectedRows = null)
 {
     public static CompiledSqlTemplate From(string keyMaterial, CompiledSql compiled, ImmutableArray<TableDependency> dependencies) =>
         new(
@@ -49,7 +50,8 @@ public sealed record CompiledSqlTemplate(
             compiled.StatementClass,
             compiled.AppliedPredicates,
             compiled.CompilerVersion,
-            dependencies);
+            dependencies,
+            compiled.ExpectedAffectedRows);
 
     /// <summary>Rebinds the slots with the values of the current request.</summary>
     public CompiledSql Rebind(IReadOnlyDictionary<string, PolicyValue> policyValues)
@@ -72,7 +74,7 @@ public sealed record CompiledSqlTemplate(
             parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType));
         }
 
-        return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion);
+        return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion, ExpectedAffectedRows);
     }
 }
 

@@ -137,14 +137,14 @@ public sealed partial class SecurityCoverageVerifier
         }
 
         /// <summary>Insert columns: cataloged, unique, not masked; the tenant column is present when the table has one.</summary>
-        private int VerifyInsertColumns(TableCoverageRequirement requirement, IReadOnlyList<SqlIdentifier>? columns)
+        private int VerifyInsertColumns(TableCoverageRequirement requirement, IReadOnlyList<SqlIdentifier>? columns, bool allowCheckOption = false)
         {
             if (columns is null || columns.Count == 0)
             {
                 throw new SecurityCoverageException("A governed INSERT must list its target columns.");
             }
 
-            if (Owner._dml.RejectConsentFilteredInsert && requirement.RootPredicates.Any(p => p.Ordinal == 1))
+            if (!allowCheckOption && Owner._dml.RejectConsentFilteredInsert && requirement.RootPredicates.Any(p => p.Ordinal == 1))
             {
                 throw new SecurityCoverageException("An INSERT into a table with a row policy cannot be verified against the policy.");
             }
@@ -228,11 +228,93 @@ public sealed partial class SecurityCoverageVerifier
             }
 
             var requirement = RequireTarget(insert.TargetTable);
-            int tenantIndex = VerifyInsertColumns(requirement, insert.Columns);
+            var policyIds = requirement.RootPredicates.Where(p => p.Ordinal == 1).ToList();
+            int tenantIndex = VerifyInsertColumns(requirement, insert.Columns, allowCheckOption: true);
             Body(insert.Source, ImmutableHashSet<string>.Empty, policyScope: false);
-            VerifyInsertSourceShape(insert.Source, insert.Columns!.Count, tenantIndex);
+            if (policyIds.Count > 0)
+            {
+                // CR-ADG-35: a table with a row policy accepts only the check-option shape, with the policy over the inserted values.
+                VerifyCheckOptionSource(insert.Source, insert.Columns!, tenantIndex, policyIds);
+                foreach (var id in policyIds)
+                {
+                    if (!Applied.Contains(id)) Applied.Add(id);
+                }
+            }
+            else
+            {
+                VerifyInsertSourceShape(insert.Source, insert.Columns!.Count, tenantIndex);
+            }
+
             CountSecuredReference();
             Exit();
+        }
+
+        /// <summary>
+        /// <c>SELECT v.c1, ... FROM (SELECT row UNION ALL SELECT row ...) v WHERE &lt;policy over v&gt;</c>: the policy is a top-level conjunct
+        /// with the check scope, every row carries the bound tenant, the projection is exactly the listed columns of the derived table.
+        /// </summary>
+        private void VerifyCheckOptionSource(QueryBody source, IReadOnlyList<SqlIdentifier> columns, int tenantIndex, List<SecurityPredicateId> policyIds)
+        {
+            if (source is not QuerySpecification { Distinct: false, GroupBy: null, Having: null, From: SubqueryTableSource derived } spec ||
+                !string.Equals(derived.Alias.Value, Visitors.AstSecurityVisitor.InsertCheckAlias.Value, StringComparison.Ordinal) ||
+                derived.ColumnAliases is not null ||
+                derived.Subquery is not { With: null, OrderBy: null, Pagination: null } inner)
+            {
+                throw new SecurityCoverageException("An INSERT into a table with a row policy does not have the check-option shape.");
+            }
+
+            if (spec.Projections.Count != columns.Count)
+            {
+                throw new SecurityCoverageException("An INSERT check-option projection does not match the column list.");
+            }
+
+            for (int i = 0; i < columns.Count; i++)
+            {
+                if (spec.Projections[i] is not ColumnSelectItem { Expression: ColumnReference { Name.Parts.Count: 2 } reference } ||
+                    !string.Equals(reference.Name.Parts[0].Value, derived.Alias.Value, StringComparison.Ordinal) ||
+                    !string.Equals(reference.Name.Parts[1].Value, columns[i].Value, StringComparison.Ordinal))
+                {
+                    throw new SecurityCoverageException("An INSERT check-option projection does not match the column list.");
+                }
+            }
+
+            var present = new List<SecurityPredicateExpression>();
+            ConjunctNodes(spec.Where, present);
+            foreach (var id in policyIds)
+            {
+                if (!present.Any(p => p.Id == id && p.Scope == SecurityScope.InsertCheck))
+                {
+                    throw new SecurityCoverageException("An INSERT into a table with a row policy is missing its check predicate.");
+                }
+            }
+
+            VerifyCheckOptionRows(inner.Body, columns.Count, tenantIndex);
+        }
+
+        private void VerifyCheckOptionRows(QueryBody body, int columnCount, int tenantIndex)
+        {
+            RuntimeHelpers.EnsureSufficientExecutionStack();
+            switch (body)
+            {
+                case SetOperationQuery { Operator: SetOperator.Union, Distinct: false } setOp:
+                    VerifyCheckOptionRows(setOp.Left, columnCount, tenantIndex);
+                    VerifyCheckOptionRows(setOp.Right, columnCount, tenantIndex);
+                    break;
+                case QuerySpecification { Distinct: false, From: null, Where: null, GroupBy: null, Having: null } row:
+                    if (row.Projections.Count != columnCount || row.Projections.Any(p => p is not ColumnSelectItem))
+                    {
+                        throw new SecurityCoverageException("An INSERT check-option row does not match the column list.");
+                    }
+
+                    if (tenantIndex >= 0 && !IsTenantParameter(((ColumnSelectItem)row.Projections[tenantIndex]).Expression))
+                    {
+                        throw new SecurityCoverageException("An INSERT row does not carry the bound tenant.");
+                    }
+
+                    break;
+                default:
+                    throw new SecurityCoverageException("An INSERT check-option source shape cannot be verified.");
+            }
         }
 
         public void Update(UpdateStatement update)

@@ -127,6 +127,10 @@ public sealed class AstCompilerDatabricksSparkDmlExecutionTests : AstCompilerDml
             "tenantid", 1)
     }, _schema);
 
+    // Delta reports no INSERT row count, so the compiler never produces a check-option statement for it (CR-ADG-35).
+    protected override Task<int> ExecuteInTransactionAsync(CompiledSql compiled) =>
+        throw new NotSupportedException("Delta has no row-count check option.");
+
     protected override async Task<int> ExecuteAsync(CompiledSql compiled)
     {
         var response = await _spark.SendAsync(new JsonObject

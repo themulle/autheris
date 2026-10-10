@@ -23,7 +23,10 @@ public enum SecurityScope
     PolicySubquery,
 
     /// <summary>MERGE target predicate in the ON condition.</summary>
-    MergeOn
+    MergeOn,
+
+    /// <summary>INSERT check option (CR-ADG-35): the row policy evaluated over the inserted values, in the WHERE of the insert source.</summary>
+    InsertCheck
 }
 
 /// <summary>

@@ -77,6 +77,9 @@ public sealed class AstCompilerDuckDbDmlExecutionTests : AstCompilerDmlContract,
         return Task.FromResult(cmd.ExecuteNonQuery());
     }
 
+    protected override Task<int> ExecuteInTransactionAsync(CompiledSql compiled) =>
+        RunCheckedAsync(_conn, false, cmd => _binder.Bind(cmd, compiled, new Dictionary<string, object?>()), compiled, System.Data.IsolationLevel.Unspecified);
+
     protected override Task<List<object?[]>> QueryAsync(string sql)
     {
         using var cmd = _conn.CreateCommand();

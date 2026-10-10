@@ -178,7 +178,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "DBX-PARAM",
         DmlStatements: AllDml,
-        SupportsSubqueryInDmlCondition: false);                    // Delta: DELTA_UNSUPPORTED_SUBQUERY at analysis (CR-ADG-39)
+        SupportsSubqueryInDmlCondition: false,
+        ReportsInsertRowCount: false);                              // Delta INSERT returns an empty result: no check-option row count (CR-ADG-35)                    // Delta: DELTA_UNSUPPORTED_SUBQUERY at analysis (CR-ADG-39)
 
     // Declared after the static capability entries: static initializers run in textual order.
     public static DialectCapabilityTable Default { get; } = new();
