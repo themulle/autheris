@@ -2,6 +2,7 @@ namespace TrinoSqlEngine.Ast.Nodes;
 
 using System;
 using System.Collections.Generic;
+using TrinoSqlEngine.Ast.Emit;
 
 public abstract record Expression : SqlNode;
 
@@ -13,6 +14,15 @@ public sealed record ColumnReference(SqlQualifiedName Name) : Expression;
 /// as the legacy rewriter does. The AST builder never creates it, so client SQL can never produce this node.
 /// </summary>
 public sealed record TrustedSqlExpression(string Sql) : Expression;
+
+/// <summary>
+/// A value bound by the gateway (tenant, policy, mask argument). It never originates from request text; the value comes from
+/// the <see cref="ParameterSource"/> at emission time, so the AST (and a cached template) stays value-free.
+/// </summary>
+public sealed record PolicyParameterExpression(
+    string Name,
+    SqlParameterType Type,
+    ParameterOrigin Origin = ParameterOrigin.Policy) : Expression;
 
 public sealed record ParameterReference(
     string Name,

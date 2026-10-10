@@ -1,7 +1,12 @@
 namespace TrinoSqlEngine.Ast.Generators;
 
 using System;
+using System.Collections.Immutable;
 using System.Globalization;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using TrinoSqlEngine.Ast.Capabilities;
+using TrinoSqlEngine.Ast.Emit;
 using System.Text.RegularExpressions;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Buffer;
@@ -15,6 +20,62 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
 {
     public abstract TargetSqlDialect TargetDialect { get; }
     public abstract int MaxParameterBudget { get; }
+
+    /// <summary>Capabilities from the capability table; a dialect without an entry throws (fail closed).</summary>
+    public virtual DialectCapabilities Capabilities => DialectCapabilityTable.Default.Get(TargetDialect);
+
+    /// <summary>
+    /// Generates parameterized SQL: every client, tenant, policy and mask value is collected as a
+    /// <see cref="BoundParameter"/> and counted against the capability bind limit. The emitted text is verified by
+    /// <see cref="EmittedSqlInvariantChecker"/> before it is returned.
+    /// </summary>
+    public virtual CompiledSql Generate(SqlStatement statement, ParameterSource values, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(statement);
+        ArgumentNullException.ThrowIfNull(values);
+
+        var capabilities = Capabilities;
+        cancellationToken.ThrowIfCancellationRequested();
+        var context = new SqlEmitterContext(TargetDialect, capabilities, values, cancellationToken);
+        Span<char> initialBuffer = stackalloc char[512];
+        var builder = new ValueStringBuilder(initialBuffer);
+        string sql;
+        try
+        {
+            GenerateSql(statement, ref builder, context);
+            sql = builder.ToString();
+        }
+        catch (InsufficientExecutionStackException)
+        {
+            // SEC-ADG-05: a StackOverflowException cannot be caught, so deep trees are rejected before the stack runs out.
+            throw new SqlLimitExceededException(SqlLimitKind.NestingDepth, TargetDialect, 0, 0);
+        }
+        finally
+        {
+            builder.Dispose();
+        }
+
+        var parameters = context.Parameters;
+        EmittedSqlInvariantChecker.Check(sql, TargetDialect, parameters, context.Ranges, structuralOnly: !BindLiterals);
+
+        return new CompiledSql(
+            sql,
+            parameters,
+            TargetDialect,
+            statement switch
+            {
+                SelectStatement => SqlStatementClass.Select,
+                InsertStatement => SqlStatementClass.Insert,
+                UpdateStatement => SqlStatementClass.Update,
+                DeleteStatement => SqlStatementClass.Delete,
+                _ => throw new NotSupportedException($"Unsupported statement type: {statement.GetType().Name}")
+            },
+            ImmutableArray<SecurityPredicateId>.Empty,
+            CompilerInfo.Version);
+    }
+
+    /// <summary>Literals are bound instead of inlined (WP-A3). Off until literal parameterization is enabled.</summary>
+    protected virtual bool BindLiterals => false;
 
     public virtual string GenerateSql(SqlStatement statement)
     {
@@ -59,6 +120,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void GenerateSelect(SelectStatement statement, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         if (statement.With != null)
         {
             GenerateWithClause(statement.With, ref builder, context);
@@ -113,6 +175,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void GenerateQueryBody(QueryBody body, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (body)
         {
             case QuerySpecification spec:
@@ -214,6 +277,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void GenerateTableSource(TableSource source, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
         switch (source)
         {
             case NamedTableSource named:
@@ -400,8 +464,18 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
     // Expression emitter
     public virtual void GenerateExpression(Expression expression, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        context.Tick();
         switch (expression)
         {
+            case PolicyParameterExpression policyParameter:
+                if (!context.IsBound)
+                {
+                    throw new NotSupportedException("Policy parameters require a bound emitter context (use Generate).");
+                }
+
+                builder.Append(context.BindPolicy(policyParameter));
+                break;
             case ColumnReference col:
                 FormatQualifiedName(ref builder, col.Name, context);
                 break;
@@ -606,6 +680,12 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void FormatParameter(ref ValueStringBuilder builder, ParameterReference param, SqlEmitterContext context)
     {
+        if (context.IsBound)
+        {
+            builder.Append(context.BindClient(param));
+            return;
+        }
+
         // Wunsch 4: a client parameter (@name → __param_name) stays a named placeholder. The caller binds by name and
         // restores @name after the rewrite (GovernedSqlExecutionService.RestoreClientParameters); a positional marker
         // ($1, @p0, ?1) could not be bound, because no mapping is returned.

@@ -37,6 +37,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             UsingJoinCondition using_ => VisitUsingJoinCondition(using_),
             ColumnReference cr => VisitColumnReference(cr),
             ParameterReference p => VisitParameterReference(p),
+            PolicyParameterExpression policyParameter => policyParameter,
             LiteralExpression lit => VisitLiteralExpression(lit),
             BinaryExpression b => VisitBinaryExpression(b),
             UnaryExpression un => VisitUnaryExpression(un),
