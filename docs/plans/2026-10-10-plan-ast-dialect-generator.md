@@ -2,7 +2,7 @@
 
 **Document ID:** `PLAN-AST-DIALECT-GEN-16` (implementation plan, Phase 2 of the 6-phase lifecycle)
 **Date:** 2026-10-10
-**Status:** IN PROGRESS - Phase 5 code review of the DQL branches delivered (§19, changes requested); next: Phase 4 fixes on `feat/ast-dql`
+**Status:** IN PROGRESS - Phase 5 re-review loop 1 delivered (§19.8, changes requested: CR-ADG-25); `feat/ast-dml` may branch from `feat/ast-dql`
 **Author:** Solution Architect (`csharp-architect`); Phase 3 review (§16) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
@@ -1573,6 +1573,7 @@ Affected work packages and test criteria (additions to §11 and §16.8):
 
 ## 17. Changelog
 
+- 2026-10-10: Added §19.8 "Re-review (loop 1)" (`csharp-code-reviewer`) of `feat/ast-dql` at `4e0be2d`: CR-ADG-01 and CR-ADG-02 closed, all loop-1 fixes verified, new findings CR-ADG-25 (Major: unrestricted CAST target types on PostgreSQL and DuckDB) and CR-ADG-26..29 (Minor); verdict changes requested (narrow); `feat/ast-dml` may branch from `feat/ast-dql`.
 - 2026-10-10: Added §19 "Phase 5 Code Review — DQL" (`csharp-code-reviewer`): verdict changes requested on all five DQL branches; findings CR-ADG-01..24 (Blockers: CTE name resolution differs from Oracle and case-sensitive SQL Server, reproduced as a cross-tenant read on Oracle Free; unmapped functions pass through, `reflect` executed on the Spark proxy), mutation results, reviewer-observed build and test counts, judgement of the §18 deviations and the `feat/ast-dql` integration plan.
 - 2026-10-10: Added §16.11 recording stakeholder decisions B-1 (exact tenant comparison, reject new case-colliding tenants, fail-close existing collisions, no ID rewrite), B-2 (HMAC unavailable degrades to Redact) and B-3 (over-limit consent IN lists denied, array binding deferred as WP-A9).
 - 2026-10-10: Added §16 "Phase 3 Security Review" (`csharp-security-expert`): findings SEC-ADG-01..29, hardened invariants (INV-9 retired; INV-11..INV-17 added), STRIDE mapping, answers to the §14 hand-off, minimum CI gate additions M-1..M-12 and new gate G10, Stream F for the Oracle runtime (SD-8), security test criteria per work package, residual-risk assessment for the §7.3 string consumers, and stakeholder decisions B-1..B-5. Status set to Phase 3 delivered; next milestone Phase 4 TDD implementation.
@@ -1787,6 +1788,83 @@ Exact tenant comparison: `CAST(col AS BINARY) = CAST(t AS BINARY)` only. The Spa
 Evidence: golden-SQL style generator tests, and execution on the Spark proxy (`apache/spark:4.0.0-python3`, pinned by digest, ANSI mode and variable substitution on, driven by `tests/Autheris.Tests.Integration/Spark/runner.py` over stdin because the Docker daemon cannot see bind mounts): RLS visibility, collation collision on a `UTF8_LCASE` column, policy subquery, shapes, hostile values including `${...}`, masks. Resolved `(verify)` items: `OFFSET` and `TIMESTAMP_NTZ` work on Spark; `LATERAL` is only probed informationally and stays rejected until Databricks SQL is probed (G9).
 
 Not done on this branch (follow-ups): the REST connector (C3, not needed for SELECT compilation; the binder produces named typed parameters that map 1:1 to the Statement Execution API), the live secret-gated job (G9/C5; the provisional bind budget stays), the 300-fixture conformance matrix (about 60 generator cases exist), Delta DML (belongs to `feat/ast-dml`). OSS Spark is not Databricks SQL (risk R-7).
+
+### 19.8 Re-review (loop 1)
+
+**Scope:** the delta from the review commit `bed21ac` to `feat/ast-dql` at `4e0be2d`: the merge `92cbf9c` (`feat/ast-databricks-select`, five additive conflicts kept on both sides) and the 21 fix commits logged in §20. I re-read every fix, probed the two former blockers at compile level on all five dialects, re-ran the security mutants, and ran every suite myself in scratch worktrees (`-m:2`). An out-of-memory episode on the machine killed one integration run, so I repeated it; every count below comes from a complete run.
+
+**Verdict: CHANGES REQUESTED (narrow).** Both blockers are closed and all 24 findings are fixed or deviate acceptably. One new Major remains, CR-ADG-25: an unrestricted `CAST` target type on PostgreSQL bypasses the `to_reg*` denylist. It is a small fix in one generator. `feat/ast-dml` may branch from `feat/ast-dql` now; land CR-ADG-25 on `feat/ast-dql` and merge it forward.
+
+#### 19.8.1 Blockers
+
+| ID | Result | Evidence |
+|---|---|---|
+| CR-ADG-01 | **Closed** | On the typed path the CTE definition is emitted as the delimited scope key, and every reference is rewritten to the same identifier; the user spelling is kept only as the alias. The verifier requires delimited definitions and compares references ordinally. Probes on all five dialects, each emitting the reference identical to its definition or securing the physical table: mixed quoting (`"orders"` versus `orders`/`Orders`/`ORDERS`); a nested `WITH "Orders"` inside a subquery under an outer `WITH orders`; CTE references inside `UNION ALL` branches and `EXISTS`; a CTE named like the schema (`WITH "dbo" ... FROM dbo.orders`, which is secured and schema-qualified); sibling CTEs; a CTE joined with the physical table. The Oracle Free and case-sensitive SQL Server execution tests are green. Residual (Minor, availability only): see CR-ADG-29. |
+| CR-ADG-02 | **Closed for function calls; one gap for casts (CR-ADG-25)** | Without an explicit list, the allowlist is the dialect function map; a caller list can only narrow it. Rejected: `reflect`, `java_method`, `secret`, `IS_ROLEMEMBER`, `DATABASE_PRINCIPAL_ID`, `DBURITYPE`, `XMLTYPE`, `try`, `transform` (and arrays), `pg_catalog.lower`, `dbo.lower`, `system.query`, `UNNEST`; `current_user`/`current_schema`/`current_catalog`, `AT TIME ZONE`, binary literals and `LISTAGG ... WITHIN GROUP` are rejected by the builder. Window functions and aggregates go through the same name allowlist. The per-dialect maps contain no dangerous entries. Accepted risks: ReDoS through `regexp_replace` on Databricks (Java regex), and `FORMAT` (CLR) on SQL Server, which can cost CPU. Not covered: `CAST` target types (CR-ADG-25) and quoted function names (CR-ADG-26). |
+
+#### 19.8.2 New findings
+
+| ID | Sev. | Location | Finding | Fix |
+|---|---|---|---|---|
+| CR-ADG-25 | Major | `PostgreSqlDialectGenerator.cs:23-29` (`_ => type.Normalized`), `SqlDialectGeneratorBase.Functions.cs:47` (DuckDB inherits the pass-through) | `CAST` target types are not allowlisted on PostgreSQL and DuckDB. `CAST(x AS regclass)`, `xml`, `xmltype` and `json` compile and are emitted verbatim. On PostgreSQL, `CAST($1 AS regclass)` (also `regrole`, `regnamespace`, `regproc`) returns the object name or an error, which is exactly the catalog-probing oracle that SEC P-02 blocks by denylisting `to_regclass` and similar functions. SQL Server, Oracle and Databricks already reject unknown target types. | Use a closed per-dialect type map, as Oracle and Databricks do: reject any type outside the reviewed set and every `reg*` type. Add `Cast_ToUnlistedType_IsRejected_PerDialect`. |
+| CR-ADG-26 | Minor | `SqlFunctionPolicy` (case-insensitive match) plus generator emission | A delimited function name (`"lower"(x)`) passes the case-insensitive allowlist and is emitted delimited. On PostgreSQL and Oracle a delimited name with a different case bypasses the built-in and resolves to a schema function of that exact name. Exploiting it needs a database object created by someone else, so it is a hardening issue. | Reject delimited function names, or emit the canonical unquoted name of the allowlist entry. |
+| CR-ADG-27 | Minor | `SqlDialectGeneratorBase.Functions.cs:214` | The `FILTER` emulation for `COUNT(*)` on SQL Server and Oracle emits an unregistered inline `1`. The checker correctly rejects it (`unregistered-numeric-token`), so `COUNT(*) FILTER (WHERE ...)` always fails, with a misleading error class. | Register the constant as structural, or bind it. |
+| CR-ADG-28 | Minor | `BindByNameOracleConnection.cs:54` | `BeginDbTransaction` returns the raw `OracleTransaction`; its `Connection` is the unwrapped `OracleConnection`, so `transaction.Connection.CreateCommand()` returns a command without `BindByName`. No consumer does this today. | Wrap the transaction (`Connection` returns the wrapper). Extend the architecture test to `DbTransaction.Connection`. |
+| CR-ADG-29 | Minor | `AstSecurityVisitor.cs:118-133` | `WITH RECURSIVE`: the injector never puts the CTE name in scope for its own body. A recursive CTE whose name is not in the catalog is rejected; one named like a catalog table silently becomes a secured physical scan, which is secure but changes the query's meaning. Nested CTEs that differ only in case may bind a different CTE (never a physical table) on case-insensitive engines. | Add the name to the body scope for `WITH RECURSIVE` (the verifier already models this), and reject CTE names that differ only in case within one statement. |
+
+#### 19.8.3 Reported deviations: judgement
+
+| Deviation | Judgement |
+|---|---|
+| CR-ADG-08: B-1 enforced as a startup refusal outside Development, not as a per-tenant denial | Accepted on security grounds: it is stricter. It does not match decision B-1 as written, and one collision takes down every tenant, so the stakeholder must acknowledge it. The request-time guard stays an X1 precondition (§20.3 item 3). |
+| CR-ADG-08: `CURRENT_SCHEMA` unpinned | Accepted. Since CR-ADG-01 no unqualified table or CTE name reaches Oracle, and `UTL_RAW` is `SYS`-qualified (CR-ADG-24). |
+| CR-ADG-08: client identifier cleared at the next rental | Accepted. The identifier is an opaque GUID and is cleared before any statement of the next rental. |
+| CR-ADG-09: only tenant and policy binds typed from the catalog | Accepted. User literals are an X1 precondition (§20.3 item 1). |
+| CR-ADG-10: collation property without a loader | Accepted. The default keeps the exact binary comparison (fail safe), and Databricks is Experimental. |
+| CR-ADG-18: `trustedSigners` not added | Accepted as deferred. Without an Oracle author signature, a nuget.org repository signer with an owner list is the only option, and `require` mode touches every package. Track it with the license review as a release gate. |
+| CR-ADG-20: partially done | Accepted. The IL scan replaces the string search; `NoRewriterDescendsIntoSecurityPredicate` needs internal types. |
+| CR-ADG-12: benchmark not run | Run by the reviewer (Release, `compile`): cache hit **20.4 µs** (limit 250 µs), cache miss **1.11 ms** (limit 10 ms). |
+| Oracle at Production (compiler) tier while WP-F5 and the license review are open | Accepted for the integration branch. 41 Oracle Free tests run through the factory, the session pinning and the binder (image pinned by digest). Oracle must not ship in a release before the license review. |
+
+#### 19.8.4 Mutation results (scratch worktree on `4e0be2d`, reverted after each run)
+
+The three former survivors were rewritten as stealthy mutants: the verifier and the checker still run, but their exceptions are swallowed.
+
+| Mutant | `TrinoSqlEngine.Tests` (2,074) | Other suites | Result |
+|---|---|---|---|
+| Coverage verifier exceptions swallowed | 10 failed | — | Killed (was a survivor) |
+| Emitted-text checker exceptions swallowed | 15 failed | — | Killed (was a survivor) |
+| Template cached before verification | 8 failed | — | Killed (was a survivor) |
+| CTE reference keeps the user spelling | 22 failed | — | Killed |
+| CTE reference keeps the user spelling and the verifier re-folds | 7 failed | — | Killed |
+| Function allowlist falls back to the denylist (`null`) | 7 failed | — | Killed |
+| SQL Server varbinary conjunct neutralized | 1 failed | — | Killed |
+| PostgreSQL `textsend` conjunct neutralized | 2 failed | — | Killed |
+| DuckDB `encode` conjunct neutralized | 2 failed | — | Killed |
+| Oracle `UTL_RAW` conjunct neutralized | 2 failed | — | Killed |
+| Databricks always plain `col = :t` | 7 failed | — | Killed |
+| Wrapper does not set `BindByName` | 0 failed | Unit Oracle tests: 2 failed; Oracle Free: 40 of 41 failed (execution assertion) | Killed |
+| Factory returns a raw `OracleConnection` | not run | Unit: 1 failed; Oracle Free: 3 failed (one `ORA-01722` from positional misbinding) | Killed |
+
+The architecture suite (18) did not kill either wrapper mutant; the unit and container tests do.
+
+#### 19.8.5 Build and test evidence (observed by the reviewer on `4e0be2d`)
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror -m:2` | 0 warnings, 0 errors |
+| `tests/TrinoSqlEngine.Tests` | 2,074 / 2,074 passed |
+| `tests/Autheris.Tests.Unit` | 4,012 / 4,013 passed (only the known `WormConfigurationAuditServiceTests` failure) |
+| `tests/Autheris.Tests.Architecture` | 18 / 18 passed |
+| `AstCompiler*` integration tests, `CI=true` (SQL Server 40, PostgreSQL 45, Oracle Free 41, Spark proxy 39, provider smoke tests 3) | 168 / 168 passed, none skipped |
+| DuckDB in-process execution tests | inside the 4,012 unit passes |
+| Compile-path benchmark (Release) | hit 20.4 µs, miss 1.11 ms (within NFR-2 limits) |
+
+#### 19.8.6 Next steps
+
+1. Fix CR-ADG-25 on `feat/ast-dql` (TDD); CR-ADG-26..29 may follow in the same loop.
+2. `feat/ast-dml` may branch from `feat/ast-dql` now; merge the CR-ADG-25 fix forward.
+3. Phase 5 re-review loop 2 covers only CR-ADG-25..29.
 
 ## 20. Implementation Log — DQL review loop 1
 
