@@ -11,7 +11,6 @@ using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Application.VirtualFilters;
-using Autheris.Application.VirtualFilters.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;

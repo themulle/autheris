@@ -807,3 +807,85 @@ timeout CTS around key loading (C-5/SEC-12, WI-6); upstream egress still happens
 Verification: `dotnet build Autheris.sln` 0 warnings, 0 errors; unit tests 4066 passed, 1 failed (the pre-existing
 `WormConfigurationAuditServiceTests` failure). Integration (same filter as batch A): 61 passed, 3 failed (the same
 pre-existing `sql-endpoint` channel parity rows).
+
+### Implementation Log — batch C
+
+**Phase 4, batch C** (`csharp-tdd-developer`, 2026-10-10): WI-6 (earlier session, listed for completeness), WI-7, WI-8,
+WI-9, WI-10, WI-11, WI-20, WI-12..WI-15, WI-17. WI-16 is deferred (optional SQL Server key source variant).
+
+| WI | Status | Commit | Tests (ST) |
+|---|---|---|---|
+| WI-6 | Done | `1ef93d8`, `e93a2bf` | `VirtualFilterFederationPlannerTests`, `FederatedVirtualFilterEnforcementTests` (ST-10, ST-22..ST-24, ST-27, ST-37), `FederatedStagingRowFilterRegressionTests` |
+| WI-7 | Done | `a02c29b` | `VirtualFilterPointLookupExtractorTests`, `FederatedVirtualFilterPointLookupTests` (ST-25 half, ST-26) |
+| WI-8 | Done | `4e4dbea` | `HttpKeyPushdownCapabilityTests` (ST-28, ST-29), `VirtualFilterStrategyMatrixTests` (strategy matrix, ST-25, ST-29, ST-32), `FederatedVirtualFilterPushdownTests` (AC-8.5) |
+| WI-9 | Done | `20cb948` | `VirtualFilterModelTests`, `SqliteVirtualFilterBindingFederationTests` |
+| WI-10 | Done | `79fd18a` | `FederatedVirtualFilterAuditTests` (ST-33, ST-34, ST-35) |
+| WI-11 | Done | `58feb1b` | `FederatedVirtualFilterEnforcementTests` (ST-36) |
+| WI-20 | Done | `43994f1` | `ResponseSizeLimitingHandlerTests` (ST-31) |
+| WI-12 | Done | `9b9093e` | `FederatedVirtualFilterTierTests` (E2E-1, E2E-2, E2E-7) |
+| WI-13 | Done | `10894d6` | `FederatedVirtualFilterPushdownTests` (E2E-3) |
+| WI-14 | Done | `43db32d` | `FederatedVirtualFilterShapeTests` (E2E-4, E2E-6, E2E-9) |
+| WI-15 | Done (REST part see below) | `21ec3eb` | `FederatedVirtualFilterFailClosedTests` (E2E-5, E2E-8, D-12), `WebSqlGatewayDenialMappingTests` (ST-35 HTTP half) |
+| WI-16 | Deferred (optional) | - | SQL Server key source variant is not a release gate; the SQLite suite is the gate |
+| WI-17 | Done | (this log) | grep guards, build with `-warnaserror`, full unit suite, integration suite |
+
+Deviations and refinements (all in the fail-closed direction unless noted):
+
+- WI-7: the planner decides a point lookup per pair. A pair is "decided by the query" only when every target column has a
+  predicate; literals are canonicalized with M2, and a text column is only matched by text literals (a numeric literal on
+  a text column is a scan). `MaxPointLookupTuples` and `PushdownEnabled` were added to `VirtualFilterFederationOptions`
+  (`PushdownEnabled = false` also switches the Tier 1 short-circuit off; enforcement is unaffected). A hit with
+  `ShortCircuitOnly` needs pushdown (WI-8). `VirtualFilterPointLookupKeys` holds the literal-to-key conversion so the
+  planner stays below 350 lines.
+- WI-8: Tier values. A point lookup miss is `PointLookup` + skip; a point lookup hit that is pushed is `PointLookup`
+  (not skipped); a scan that is pushed is `Pushdown`; disjoint key sets of several pairs on the key column are skipped
+  with tier `EmptyKeySet` and reason `key_sets_disjoint`. `PushdownOnly` combined with `DuckDbHashJoin` (or
+  `PushdownEnabled = false`) denies with `VF_PUSHDOWN_UNAVAILABLE` instead of choosing one side. `PushdownFormat` is
+  null by default; an asserted format that the endpoint cannot satisfy is `format_unsupported` (Tier 3 or denial); a
+  stored legacy `CommaSeparated` is treated as an assertion. A path lookup (`PathLookup`) satisfies no asserted format.
+  New options: `MaxPushdownKeys` (1,000), `MaxPushdownUrlLength` (2,048), `MaxPathLookupRequests` (10).
+  `VF_PUSHDOWN_LIMIT_EXCEEDED` and `VF_PUSHDOWN_ARGUMENT_CONFLICT` were added to `VirtualFilterErrorCodes`.
+  Known quirk (not a leak): a path lookup sends one request per key and the executor concatenates the answers; an
+  upstream that ignores the key and answers every request with all rows repeats each authorized row once per request
+  (E2E-3 asserts the row set for that case). `PushdownUrlFormatter`, `SqlPointLookupExtractor` and their tests were
+  deleted (superseded).
+- WI-9: the canonical hash of a binding no longer contains the removed `CompositeKeys`, so stored definition hashes of
+  bindings written by `e7ee288` change (the feature is unreleased; old JSON with the property still loads).
+- WI-10: the correlation id is `Activity.Current?.TraceId`, otherwise one generated id per query, and travels to the
+  staging service as `FederationBudget.AuditCorrelationId`. The failure audit of a `GatewaySecurityException` stores
+  `error = "Access denied (<code>)"` instead of the exception message (SEC-11). The key set reads are audited after the
+  start record (`kind = virtualFilterKeySource`, `TargetTable` is the domain-qualified identifier).
+- WI-11: `IMandatoryRowFilterResolver` gained `HasActiveProfilesAsync(tenant)` (SEC-19): without a subject identity under
+  the consent bypass, a tenant that has Virtual Filter profiles is denied with `VF_ENFORCEMENT_UNAVAILABLE`. A snapshot
+  that cannot be loaded answers true (deny).
+- WI-20: `ResponseSizeLimitingHandler` is registered on the named client `DeclarativeHttp` with the cap
+  `WebSql:CrossSource:MaxStagedBytesPerTable` (default 32 MB); it applies to every use of that client, not only to
+  federation. A declared `Content-Length` above the cap aborts before reading. The limiting stream reports the bytes read
+  as `Length` because the paged executor path reads `stream.Length`.
+- WI-15 (found by the end-to-end tests): the WebSQL endpoint (`WebSqlEndpoints.WriteWebSqlErrorAsync`) did not map
+  `GatewaySecurityException`, so every stable denial code (including the pre-existing `TABLE_DENIED`,
+  `ROW_LIMIT_EXCEEDED`) answered HTTP 500. It now answers 403 with the generic message (the code stays in the audit
+  record). `WebSqlEndpoints.cs` (1,020 lines, pre-existing violation of the 800-line rule) grew by 14 lines.
+- WI-15 / D-12: OData on a protected web-api table answers 403. The REST dataset channel (`/api/v1/data/...`) does not
+  reach the Virtual Filter logic on a web-api table at all: `GovernedDataQueryService` builds `LIMIT .. OFFSET ..` SQL
+  that the cross-source parser rejects (pre-existing, independent of Virtual Filters), so it answers 500 with no rows. The
+  test asserts "no rows and no success" instead of 403. Not changed (out of scope, fail closed).
+- Not changed: `CrossSourcePlanner` still uses `ToQualifiedName()` for the short-name maps (`targetToStaging`,
+  `targetToAlias`); they are only used when exactly one table carries the short name (batch A, SEC-1). No decision or
+  plan dictionary is keyed by it.
+
+Open points for Phase 5/6: `FederatedDuckDbExecutionService.cs` is 648 lines (budget 700, no extraction needed);
+`docs/features/f-gov-14-federated-virtual-filters.md` must be rewritten to the implemented behaviour (Phase 6).
+
+Verification (WI-17): `dotnet build Autheris.sln -warnaserror` 0 warnings, 0 errors. Unit tests: 4,295 passed, 1 failed
+(the pre-existing `WormConfigurationAuditServiceTests.AuditConfigurationSnapshotAsync_MintsWormRecordOnStartup_AndSuppressesDuplicates`),
+0 skipped. Integration tests (full suite, `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal`): 355 passed, 8 failed,
+0 skipped; all 8 also fail on the batch B head `320e721` and are unrelated (the three `sql-endpoint` channel parity
+rows and `EndToEndSqliteTests.DeclarativeEndpoint_*` x2, `OpenApiDocsEndToEndTests.DeclarativeEndpointSpec_*`:
+declarative SQL endpoints are not registered in this environment; `AuditEndpointCoverageTests` reports 12 unclassified
+routes; `InvalidTenantClaimIntegrationTests` fails with an `ArgumentException` in the test host). The 25 new federation
+end-to-end tests and the VirtualFilter, WebSql, CrossSource and RowFilterChannelParity suites are green. Grep guards:
+`VirtualFilterFederationHandled`, `SetInMemoryTuples`, `VirtualFilterJoinSpec`, `PushdownUrlFormatter`,
+`PreloadedRows`, `EvaluateVirtualFiltersAsync` and `"anonymous"` in `VirtualFilters/` have no production hits (tests
+mention the first and `PreloadedRows` only to assert their absence); no Virtual Filter type is written to `session.Items`.
+Line counts of touched files: all below 800 except the pre-existing `WebSqlEndpoints.cs` (1,020) and `GatewayOptions.cs`.
