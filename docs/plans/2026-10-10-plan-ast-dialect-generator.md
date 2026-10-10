@@ -2086,3 +2086,42 @@ Status: awaiting stakeholder decision. No work has started.
 | `tests/TrinoSqlEngine.Tests` | 2,146 / 2,146 passed |
 | `AstCompiler*` integration tests | 177 / 177 passed |
 | `tests/Autheris.Tests.Unit` | 4,023 / 4,024 passed (only the known `WormConfigurationAuditServiceTests` failure) |
+
+## 23. Implementation Log — DML
+
+Track `PLAN-AST-DIALECT-GEN-16`, WP-A7 on branch `feat/ast-dml` (from `feat/ast-dql`, merged forward with `git merge`; legacy stays the default, no cutover). Tests were written first per statement type; the compile-level tests ran red ("not yet supported") before the injector existed.
+
+### 23.1 Design
+
+- **Gate:** a DML class compiles only when `CompileRequest.Statements` allows it and the dialect's capability entry lists it (`DialectCapabilities.DmlStatements`, `MergeShape`); otherwise `SqlCompileNotSupportedException(StatementClass | Construct)`. Capability table version `cap-3`.
+- **Injection (`AstSecurityVisitor.TypedDml`):** target and written columns are emitted as catalog-canonical delimited names; INSERT needs a column list; the tenant value of every written row must be a literal equal to the caller's tenant and is replaced by the bound tenant parameter (INSERT VALUES, INSERT SELECT incl. set operations, MERGE INSERT; absent tenant column is rejected under `RequireTenantColumnInInsert`, appended otherwise). Tenant and policy predicates are opaque `SecurityPredicateExpression` conjuncts of the WHERE (UPDATE/DELETE, scope `DmlTarget`) or of the ON (MERGE, scope `MergeOn`, columns qualified by the target alias; an unaliased target gets its table name as alias). The user part is parenthesized so an OR cannot absorb them.
+- **Guards:** unfiltered-DML/tautology guard on the user WHERE or ON; masked columns cannot be written or read in SET, WHERE, ON, WHEN conditions or inserted values (`DmlMaskedReadGuard`, used by injector and verifier); assignments to the tenant column or to any column referenced by the applicable row policy are rejected (SEC-ADG-06, `DmlGuardOptions.RejectPolicyColumnAssignment`); correlated target policies and INSERT into tables with a row policy are rejected; duplicate columns, unknown columns and tables are rejected; the enforced row limit never applies to DML; `t@branch` and INSERT sources with WITH/ORDER BY/LIMIT are rejected instead of silently dropped.
+- **Verifier:** `SecurityCoverageVerifier` proves INSERT/UPDATE/DELETE/MERGE independently (canonical names, required predicates as conjuncts with the right scope, forced tenant, column rules, masked reads, closed clause set). Debug-seam mutation tests show it rejects faulty trees and caches nothing.
+- **MERGE:** new nodes `MergeStatement`, `MergeUpdateClause`, `MergeDeleteClause`, `MergeInsertClause` (closed; the grammar has neither `BY SOURCE` nor `BY TARGET`, both pinned by tests). Source secured like DQL; target predicates in ON. SQL Server appends exactly one `;` registered as `EmittedRangeKind.StatementTerminator` (checker accepts it only as the last character of a SQL Server MERGE, SEC-ADG-08 c). Oracle form: parenthesized ON, clause condition as clause WHERE, at most one UPDATE and one INSERT clause; a stand-alone DELETE or repeated clause kinds are rejected fail closed (`MergeClauseShape.OracleSingleClause`; Oracle deletes only rows it updated, different semantics).
+- **RETURNING/OUTPUT, UPDATE ... FROM, DELETE ... USING, joins in UPDATE/DELETE:** not in the grammar, parse-rejected (pinned per dialect). They are not enabled.
+- **R-12:** `DmlErrorSanitizer` maps provider errors (SQL Server number, PostgreSQL SQLSTATE, Oracle number, DuckDB message, Delta error class) to `DmlConstraintViolationException` (fixed message, no inner exception, no key value or names). Wiring into the runtime executors belongs to X1.
+- **Limits:** bind limits apply to multi-row INSERT (`SqlLimitExceededException(BindParameters)`; for dialects with large limits the 64 K text guard fires first unless raised), IN-list limits apply to DML WHERE.
+
+### 23.2 Dialect by statement matrix
+
+| Dialect | INSERT | UPDATE | DELETE | MERGE |
+|---|---|---|---|---|
+| SQL Server | supported | supported | supported | supported (trailing `;`) |
+| DuckDB (DuckDB.NET 1.5.6, MERGE available) | supported | supported | supported | supported |
+| PostgreSQL 16 | supported | supported | supported | supported |
+| Databricks (Delta, Experimental tier) | supported | supported | supported | supported |
+| Oracle Free 23ai | supported | supported | supported | UPDATE + INSERT clauses, one of each; DELETE clause fail closed |
+
+Backend limits kept fail closed: open-source Delta refuses subqueries in UPDATE/DELETE conditions (`DELTA_UNSUPPORTED_SUBQUERY`) and UPDATE on non-Delta tables (backend error, nothing written); Delta INSERT returns no row count.
+
+### 23.3 Evidence infrastructure
+
+All five execution classes derive from `AstCompilerDmlContract` (31 shared scenarios: per-tenant UPDATE/DELETE/MERGE isolation incl. case variants on case-insensitive columns, forced tenant on INSERT, policy and masked columns, unfiltered DML, MERGE source and target, constraint errors, hostile tenant values, plan-cache rebinding, RETURNING/OUTPUT rejection). The Spark proxy has a Delta variant: an image derived from the digest-pinned Spark image (`tests/Autheris.Tests.Integration/Spark/Dockerfile`), Delta jars downloaded at image build time and SHA-256 verified (`fetch-delta.py`), no runtime resolution (SEC-ADG-24).
+
+### 23.4 SEC-ADG coverage
+
+SEC-ADG-06 (policy-column assignment, correlated target policy), SEC-ADG-07 (DML targets are catalog canonical names, never CTEs), SEC-ADG-08 a-d (closed MERGE set and grammar pin, masked columns in ON/WHEN/SET, `;` only at the registered SQL Server MERGE position, key-free constraint errors), INV-2, INV-5, INV-6, INV-10, INV-11, INV-12 (DML templates are value-free and rebind), INV-13, INV-15, INV-16 (no tenant value in rejection messages). Not applicable: SEC-ADG-16 item 2 (still the X1 precondition of 20.3).
+
+### 23.5 Evidence
+
+Observed after the merge of `feat/ast-dql` (25b0e27): `dotnet build Autheris.sln -warnaserror -m:2` 0 warnings; `TrinoSqlEngine.Tests` 2,471 / 2,471; `Autheris.Tests.Unit` 4,023 / 4,024 (known WORM failure); `Autheris.Tests.Architecture` 19 / 19. Container classes (`CI=true`): SQL Server DML 33, DuckDB DML 32, PostgreSQL DML 33, Oracle DML 36, Spark/Delta DML 34; existing DQL classes SQL Server 42, PostgreSQL 50, Oracle 43, Spark 39; all `AstCompiler*` integration tests 345 / 345.
