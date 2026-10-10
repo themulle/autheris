@@ -28,6 +28,17 @@ Accept: application/json
 - `$filter` (string): OData-compliant filter expression translated to AST predicates.
 - `Accept` Header: Supports `application/json`, `application/vnd.apache.parquet`, or `application/vnd.apache.arrow.stream`.
 
+#### Pagination Window:
+Paging is applied by the service, not by an `OFFSET` clause in the generated SQL: a request reads `$skip + $top + 1` rows with a plain `LIMIT` (the extra row populates `hasMore`) and skips the first `$skip` rows. Consequently `$skip + $top` is bounded by the effective window cap, which is the smallest of:
+- `10000` (absolute limit),
+- `WebSql.MaxAllowedRows` (when greater than 0),
+- `DuckDbOlap.MaxResultRows` (for sources served by cross-source federation, such as HTTP and lakehouse tables).
+
+A request whose `$skip + $top + 1` exceeds this cap is answered with `400 Bad Request`. If the SQL layer nevertheless truncates the result before the requested window is complete, the request fails closed with `400` instead of returning a short page with `hasMore=false`.
+
+#### Cross-Source Transport:
+REST reads of federated sources use the transport name `Rest`. Federation is only permitted for transports listed in `WebSql.CrossSource.AllowedTransports` (default: `WebSql`, `Trino`); `Rest` must be added explicitly to enable REST federation. A request without a transport is rejected. Policy denials are returned as a generic `403` that does not disclose the federation policy or the table.
+
 ### 2.2 System Virtual Tables
 
 Virtual system tables are mapped under `domain = "governance"`, providing metadata introspection:
