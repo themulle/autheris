@@ -39,7 +39,14 @@ public enum TenantComparisonStyle
     /// so the comparison is exact even when the column has a non-deterministic (case- or accent-insensitive) ICU collation or
     /// the type is <c>citext</c>.
     /// </summary>
-    TextSendBytea
+    TextSendBytea,
+
+    /// <summary>
+    /// Oracle: <c>col = t AND UTL_RAW.CAST_TO_RAW(CAST(col AS VARCHAR2(4000))) = UTL_RAW.CAST_TO_RAW(CAST(t AS VARCHAR2(4000)))</c>.
+    /// RAW comparison is byte-exact whatever <c>NLS_COMP</c>, <c>NLS_SORT</c> or the column collation (for example
+    /// <c>BINARY_CI</c>) say. The binder rejects an empty tenant string because Oracle treats it as NULL.
+    /// </summary>
+    RawCast
 }
 
 /// <summary>Declarative Trino-function to dialect rule. No matching rule means the function is rejected (INV-1).</summary>

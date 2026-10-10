@@ -138,7 +138,6 @@ public class CompileApiTests
     [InlineData(TargetSqlDialect.Ansi)]
     [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Snowflake)]
-    [InlineData(TargetSqlDialect.Oracle)]
     public void NonSqlServerDialects_FailClosed_WithATypedNotYetSupportedError(TargetSqlDialect dialect)
     {
         var ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile("SELECT id FROM orders", Request(dialect: dialect)));
@@ -447,7 +446,7 @@ public class CompileApiTests
 
         var rejections = new List<Exception>
         {
-            Record.Exception(() => Compile("SELECT id FROM orders", request with { TargetDialect = TargetSqlDialect.Oracle }))!,
+            Record.Exception(() => Compile("SELECT id FROM orders", request with { TargetDialect = TargetSqlDialect.Snowflake }))!,
             Record.Exception(() => Compile("DELETE FROM orders WHERE id = 1", request))!,
             Record.Exception(() => Compile("SELECT id FROM orders WHERE id IN (" + string.Join(",", Enumerable.Range(1, 2200)) + ")", request))!,
             Record.Exception(() => Compile("SELECT * FROM mystery", request))!,

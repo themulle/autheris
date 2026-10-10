@@ -99,6 +99,34 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "PG-PROTO");
 
+    private static readonly DialectCapabilities Oracle = new(
+        Dialect: TargetSqlDialect.Oracle,
+        Tier: DialectSupportTier.Production,
+        MaxBindParameters: 32767,                                  // follows jOOQ; confirmed by the Oracle Free probe test
+        MaxInListItems: 1000,                                      // ORA-01795, kept separate from the bind limit
+        MaxIdentifierLength: 128,                                  // bytes, Oracle 12.2+
+        IdentifierLengthUnit: IdentifierLengthUnit.Bytes,
+        IdentifierOpenQuote: '"',
+        IdentifierCloseQuote: '"',
+        MarkerStyle: ParameterMarkerStyle.ColonNamedOrdinal,
+        SupportsMarkerReuse: true,
+        Pagination: PaginationStyle.OffsetFetch,
+        SupportsWithTies: true,
+        SupportsNullsFirstLast: true,
+        Booleans: BooleanRepresentation.Number1,
+        SupportsMerge: true,
+        SupportsLateral: true,
+        SupportsGroupingSets: true,
+        SupportsFilterClause: false,
+        SupportsTryCast: false,
+        LimitGuaranteed: true,
+        InDbHmac: false,                                           // true only after a DBMS_CRYPTO grant probe (WP-F6)
+        TenantComparison: TenantComparisonStyle.RawCast,
+        BindExpressionTemplates: SqlServerBindTemplates,
+        Functions: DialectFunctionMap.Empty,
+        AllowedTableFunctions: FrozenSet<string>.Empty,
+        LimitSource: "JOOQ");
+
     // Declared after the static capability entries: static initializers run in textual order.
     public static DialectCapabilityTable Default { get; } = new();
 
@@ -110,7 +138,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         {
             [TargetSqlDialect.SqlServer] = SqlServer,
             [TargetSqlDialect.DuckDb] = DuckDb,
-            [TargetSqlDialect.PostgreSql] = PostgreSql
+            [TargetSqlDialect.PostgreSql] = PostgreSql,
+            [TargetSqlDialect.Oracle] = Oracle
         }.ToFrozenDictionary();
     }
 

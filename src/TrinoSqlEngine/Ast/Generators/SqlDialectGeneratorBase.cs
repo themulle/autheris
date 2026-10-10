@@ -193,6 +193,9 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
     }
 
+    /// <summary>A table-less SELECT needs a dummy source on some dialects (Oracle: DUAL).</summary>
+    protected virtual string? FromlessSource => null;
+
     protected virtual bool ShouldEmitOrderByBeforePagination(SelectStatement statement) => true;
 
     protected virtual void GenerateWithClause(WithClause with, ref ValueStringBuilder builder, SqlEmitterContext context)
@@ -272,6 +275,11 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         {
             builder.Append(" FROM ");
             GenerateTableSource(spec.From, ref builder, context);
+        }
+        else if (FromlessSource is { } dummy)
+        {
+            builder.Append(" FROM ");
+            builder.Append(dummy);
         }
 
         if (spec.Where != null)

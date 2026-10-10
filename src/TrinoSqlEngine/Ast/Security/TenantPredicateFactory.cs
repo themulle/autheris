@@ -66,6 +66,16 @@ public static class TenantPredicateFactory
                     BinaryOperator.And,
                     new BinaryExpression(Raw(Column()), BinaryOperator.Equal, Raw(Param())));
             }
+            case TenantComparisonStyle.RawCast:
+            {
+                static Expression Raw(Expression operand) =>
+                    new FunctionCallExpression(new SqlQualifiedName("UTL_RAW", "CAST_TO_RAW"), new[] { (Expression)new CastExpression(operand, "varchar") });
+
+                return new BinaryExpression(
+                    new BinaryExpression(Column(), BinaryOperator.Equal, Param()),
+                    BinaryOperator.And,
+                    new BinaryExpression(Raw(Column()), BinaryOperator.Equal, Raw(Param())));
+            }
             default:
                 throw new NotSupportedException($"No binary-exact tenant comparison is defined for {capabilities.Dialect}.");
         }

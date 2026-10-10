@@ -50,6 +50,19 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
     /// <summary>The provider-side parameter name. Positional providers (Npgsql with <c>$n</c>) use an empty name.</summary>
     protected virtual string ParameterNameFor(BoundParameter parameter) => parameter.Name;
 
+    /// <summary>Provider-specific command setup before any parameter is added (for example Oracle <c>BindByName</c>).</summary>
+    protected virtual void PrepareCommand(DbCommand command)
+    {
+    }
+
+    /// <summary>Provider-specific rejection of a value that would be bound (fail closed).</summary>
+    protected virtual void ValidateValue(BoundParameter parameter, object? value)
+    {
+    }
+
+    /// <summary>The provider has no boolean parameter type (Oracle before 23ai): booleans are bound as 0/1.</summary>
+    protected virtual bool BooleanAsInteger => false;
+
     public bool CanBind(TargetSqlDialect dialect) => dialect == Dialect;
 
     public void Bind(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues)
@@ -68,6 +81,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
             throw new InvalidOperationException("The command already has parameters; the binder owns all parameters of a governed command.");
         }
 
+        PrepareCommand(command);
         command.CommandText = compiled.Sql;
         command.CommandType = CommandType.Text;
 
@@ -91,6 +105,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
                 throw new SecurityException("Positional client parameters are not supported.");
             }
 
+            ValidateValue(bound, value);
             if (RejectsEmbeddedNul && value is string text && text.Contains('\0', StringComparison.Ordinal))
             {
                 throw new SecurityException("A string parameter contains an embedded NUL character, which the provider would truncate.");
@@ -162,6 +177,13 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
                 parameter.Value = Convert.ToDouble(value, CultureInfo.InvariantCulture);
                 break;
             case SqlParameterType.Boolean:
+                if (BooleanAsInteger)
+                {
+                    parameter.DbType = DbType.Int32;
+                    parameter.Value = Convert.ToBoolean(value, CultureInfo.InvariantCulture) ? 1 : 0;
+                    break;
+                }
+
                 parameter.DbType = DbType.Boolean;
                 parameter.Value = Convert.ToBoolean(value, CultureInfo.InvariantCulture);
                 break;
@@ -220,4 +242,40 @@ public sealed class PostgreSqlCompiledSqlBinder : DbCommandCompiledSqlBinder
     protected override bool RejectsEmbeddedNul => true;
     protected override DbType TimestampDbType => DbType.DateTime2;   // Npgsql: timestamp without time zone (DbType.DateTime is timestamptz)
     protected override string ParameterNameFor(BoundParameter parameter) => string.Empty;
+}
+
+/// <summary>
+/// Oracle binder (<c>Oracle.ManagedDataAccess</c>). ODP.NET binds by POSITION unless <c>BindByName</c> is true; with reused
+/// markers and out-of-order parameters positional binding would bind a tenant value to a user slot (SEC-ADG-03). The binder sets
+/// <c>BindByName = true</c> and verifies it; a command without that property is rejected. An empty tenant or policy string is
+/// rejected because Oracle treats it as NULL (SEC-ADG-17). Markers are <c>:p1..:pN</c>, parameter names <c>p1..pN</c>.
+/// </summary>
+public sealed class OracleCompiledSqlBinder : DbCommandCompiledSqlBinder
+{
+    protected override TargetSqlDialect Dialect => TargetSqlDialect.Oracle;
+    protected override DbType TimestampDbType => DbType.DateTime2;
+    protected override bool BooleanAsInteger => true;
+
+    protected override void PrepareCommand(DbCommand command)
+    {
+        var property = command.GetType().GetProperty("BindByName");
+        if (property is null || property.PropertyType != typeof(bool) || !property.CanWrite || !property.CanRead)
+        {
+            throw new SecurityException("The Oracle command does not expose BindByName; positional binding is not permitted.");
+        }
+
+        property.SetValue(command, true);
+        if (!(bool)property.GetValue(command)!)
+        {
+            throw new SecurityException("BindByName could not be enabled on the Oracle command.");
+        }
+    }
+
+    protected override void ValidateValue(BoundParameter parameter, object? value)
+    {
+        if (parameter.Origin is ParameterOrigin.Tenant or ParameterOrigin.Policy && value is string { Length: 0 })
+        {
+            throw new SecurityException("An empty tenant or policy string is rejected on Oracle (it would be NULL).");
+        }
+    }
 }
