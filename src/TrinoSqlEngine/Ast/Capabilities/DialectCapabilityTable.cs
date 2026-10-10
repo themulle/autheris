@@ -177,7 +177,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.Databricks, DatabricksRewrites),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "DBX-PARAM",
-        DmlStatements: AllDml);
+        DmlStatements: AllDml,
+        SupportsSubqueryInDmlCondition: false);                    // Delta: DELTA_UNSUPPORTED_SUBQUERY at analysis (CR-ADG-39)
 
     // Declared after the static capability entries: static initializers run in textual order.
     public static DialectCapabilityTable Default { get; } = new();

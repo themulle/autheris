@@ -455,10 +455,12 @@ public class DmlCompileTests
     [MemberData(nameof(DialectData))]
     public void Update_SubqueriesInWhereAndSet_AreSecuredOnEverySource(TargetSqlDialect dialect)
     {
-        var c = Compile(dialect, "UPDATE orders SET status = (SELECT max(id) FROM entitlements) WHERE id IN (SELECT orderid FROM entitlements WHERE id > 3)");
+        // Databricks refuses a subquery in the condition (CR-ADG-39): its WHERE stays plain
+        string where = dialect == TargetSqlDialect.Databricks ? "id = 1" : "id IN (SELECT orderid FROM entitlements WHERE id > 3)";
+        var c = Compile(dialect, "UPDATE orders SET status = (SELECT max(id) FROM entitlements) WHERE " + where);
         Assert.Equal(1, Tenants(c));
         Assert.Contains(new SecurityPredicateId("dbo.Entitlements", 0), c.AppliedPredicates);
-        Assert.True(CountOf(c.Sql, "[Entitlements]", "\"Entitlements\"", "`Entitlements`") >= 2);
+        Assert.True(CountOf(c.Sql, "[Entitlements]", "\"Entitlements\"", "`Entitlements`") >= (dialect == TargetSqlDialect.Databricks ? 1 : 2));
     }
 
     [Theory]
@@ -527,9 +529,37 @@ public class DmlCompileTests
     [MemberData(nameof(DialectData))]
     public void Delete_SubqueryInWhere_IsSecured(TargetSqlDialect dialect)
     {
+        if (dialect == TargetSqlDialect.Databricks) return;   // CR-ADG-39: rejected at compile time, see the next test
         var c = Compile(dialect, "DELETE FROM orders WHERE id IN (SELECT orderid FROM entitlements)");
         Assert.Contains(new SecurityPredicateId("dbo.Entitlements", 0), c.AppliedPredicates);
         Assert.Equal(1, Tenants(c));
+    }
+
+    // CR-ADG-39: Delta refuses a subquery in the condition of UPDATE and DELETE at analysis; the compiler says so with a typed error.
+    [Fact]
+    public void Databricks_SubqueryInUpdateOrDeleteCondition_IsRejectedAtCompileTime_WithATypedError()
+    {
+        foreach (var sql in new[]
+                 {
+                     "DELETE FROM orders WHERE id IN (SELECT orderid FROM entitlements)",
+                     "DELETE FROM orders WHERE EXISTS (SELECT 1 FROM entitlements e WHERE e.orderid = 1)",
+                     "UPDATE orders SET status = 'x' WHERE id = (SELECT max(orderid) FROM entitlements)",
+                     "UPDATE orders SET status = 'x' WHERE id > ANY (SELECT orderid FROM entitlements)"
+                 })
+        {
+            var ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(TargetSqlDialect.Databricks, sql));
+            Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+            Assert.DoesNotContain("entitlements", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // plain conditions and every other dialect are unaffected
+        Compile(TargetSqlDialect.Databricks, "DELETE FROM orders WHERE id = 1");
+        Assert.False(DialectCapabilityTable.Default.Get(TargetSqlDialect.Databricks).SupportsSubqueryInDmlCondition);
+        foreach (var dialect in Dialects.Where(d => d != TargetSqlDialect.Databricks))
+        {
+            Assert.True(DialectCapabilityTable.Default.Get(dialect).SupportsSubqueryInDmlCondition);
+            Compile(dialect, "DELETE FROM orders WHERE id IN (SELECT orderid FROM entitlements)");
+        }
     }
 
     // CR-ADG-36: the injected mask of a secured subquery is not a user read of the target's masked column.
@@ -788,8 +818,10 @@ public class DmlCompileTests
         foreach (var sql in new[]
                  {
                      "INSERT INTO orders (id, tenantid) SELECT id, 'acme' FROM entitlements",
-                     "UPDATE orders SET status = (SELECT max(id) FROM entitlements) WHERE id IN (SELECT orderid FROM entitlements)",
-                     "DELETE FROM orders WHERE id IN (SELECT orderid FROM entitlements)"
+                     dialect == TargetSqlDialect.Databricks
+                         ? "UPDATE orders SET status = (SELECT max(id) FROM entitlements) WHERE id = 1"
+                         : "UPDATE orders SET status = (SELECT max(id) FROM entitlements) WHERE id IN (SELECT orderid FROM entitlements)",
+                     dialect == TargetSqlDialect.Databricks ? "DELETE FROM orders WHERE id = 1" : "DELETE FROM orders WHERE id IN (SELECT orderid FROM entitlements)"
                  })
         {
             var c = _engine.Compile(sql.AsMemory(), request, CancellationToken.None);

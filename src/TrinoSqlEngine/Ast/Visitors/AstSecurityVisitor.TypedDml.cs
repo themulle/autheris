@@ -84,6 +84,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         var targetNames = new List<string> { entry.Identity.Table, node.TargetTable.Name.SimpleName };
 
         RejectMaskedReads(masked, targetNames, node.Where);
+        RejectUnsupportedSubquery(node.Where);
         EnsureFilteredDml(node.Where, "DELETE");
         var where = node.Where != null ? (Expression)WithScope(SecurityScope.DmlSource, () => Visit(node.Where)) : null;
         var combined = AndInjected(where, BuildTargetPredicates(entry, SecurityScope.DmlTarget, null));
@@ -99,6 +100,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
         var assignments = SecureAssignments(entry, node.Assignments, masked, targetNames);
         RejectMaskedReads(masked, targetNames, node.Where);
+        RejectUnsupportedSubquery(node.Where);
         EnsureFilteredDml(node.Where, "UPDATE");
         var where = node.Where != null ? (Expression)WithScope(SecurityScope.DmlSource, () => Visit(node.Where)) : null;
         var combined = AndInjected(where, BuildTargetPredicates(entry, SecurityScope.DmlTarget, null));
@@ -131,6 +133,22 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             ?? throw new SecurityException("A DML target could not be resolved against the catalog.");
         _typed.RecordDependency(target.Name, entry);
         return entry;
+    }
+
+    /// <summary>CR-ADG-39: a dialect whose engine refuses a subquery in the condition of UPDATE or DELETE is rejected here, typed, before the backend.</summary>
+    private void RejectUnsupportedSubquery(Expression? condition)
+    {
+        if (condition is null || _typed!.Capabilities.SupportsSubqueryInDmlCondition) return;
+        bool subquery = false;
+        AstReflection.Walk(condition, node =>
+        {
+            if (node is SelectStatement) subquery = true;
+            return !subquery;
+        });
+        if (subquery)
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "subquery in an UPDATE or DELETE condition");
+        }
     }
 
     private HashSet<string> MaskedColumnsOf(TableCatalogEntry entry) =>

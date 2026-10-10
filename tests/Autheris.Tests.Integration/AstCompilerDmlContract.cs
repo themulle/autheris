@@ -256,9 +256,9 @@ public abstract class AstCompilerDmlContract
         if (!Available()) return;
         if (!SupportsSubqueryInDmlWhere)
         {
-            // the engine refuses the statement: the backend error is the fail-closed outcome and nothing is written
+            // the compiler refuses the statement with a typed error (CR-ADG-39), before the backend; nothing is written
             var before = await SnapshotAsync();
-            await RejectedAsync(() => ExecAsync($"UPDATE {O} SET status = 'viaSub' WHERE id IN (SELECT orderid FROM {E})", "acme"));
+            await Should.ThrowAsync<SqlCompileNotSupportedException>(() => ExecAsync($"UPDATE {O} SET status = 'viaSub' WHERE id IN (SELECT orderid FROM {E})", "acme"));
             (await SnapshotAsync()).ShouldBe(before);
             return;
         }

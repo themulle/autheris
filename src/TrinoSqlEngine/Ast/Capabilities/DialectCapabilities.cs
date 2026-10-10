@@ -122,10 +122,11 @@ public sealed record DialectCapabilities(
     IReadOnlySet<string> AllowedTableFunctions,
     string LimitSource,
     StatementPermissions DmlStatements = StatementPermissions.ReadOnly,
-    MergeClauseShape MergeShape = MergeClauseShape.Ansi)
+    MergeClauseShape MergeShape = MergeClauseShape.Ansi,
+    bool SupportsSubqueryInDmlCondition = true)
 {
     /// <summary>Version of the capability data. Part of the compile cache key (SEC-ADG-01).</summary>
-    public const string TableVersion = "cap-3";
+    public const string TableVersion = "cap-4";
 }
 
 /// <summary>
