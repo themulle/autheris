@@ -49,8 +49,10 @@ public class AuditEndpointCoverageTests : IClassFixture<WebApplicationFactory<Pr
             "TokenRevocationEndpoints writes the TOKEN_REVOKED record itself after revocation; " +
             "403/401/errors are finalized by AccessAuditMiddleware.",
         ["ANY /graphql/{**slug}"] =
-            "GraphQL data access is audited per query by the governed SQL executor (table-level TABLE_QUERY records); " +
-            "HTTP-level denials (401/403/429/5xx) and exceptions are finalized by AccessAuditMiddleware.",
+            "GraphQL data access is audited by GatewayExecutionService, which records a per-table ALLOW/DENY decision for every table a query touches; " +
+            "HTTP-level denials (401/403/429/5xx) and exceptions are finalized by AccessAuditMiddleware. " +
+            "Residual gap: parse, validation, depth and cost rejections and introspection return HTTP 200 with GraphQL errors, " +
+            "are not audited, and read no data.",
     };
 
     public AuditEndpointCoverageTests(WebApplicationFactory<Program> factory)
