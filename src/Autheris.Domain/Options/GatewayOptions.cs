@@ -391,8 +391,9 @@ public sealed class ReverseProxyOptions
     /// <summary>
     /// Networks whose X-Forwarded-* headers are trusted. When not configured, only loopback (127.0.0.1/32, ::1/128) is
     /// trusted. A configured list replaces the default entirely. Nullable on purpose: the configuration binder appends
-    /// to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON array counts as "not
-    /// configured"; to trust no forwarded headers at all, set <see cref="Enabled"/> to false.
+    /// to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON array is logged
+    /// as a startup warning and treated as not configured (loopback is always trusted); to trust no forwarded headers
+    /// at all, set <see cref="Enabled"/> to false.
     /// </summary>
     public List<string>? KnownNetworks { get; init; }
 
@@ -450,8 +451,8 @@ public sealed class ForwardAuthOptions
     /// GovernanceAdmin, SecurityAdmin, PrivacyAdmin, BreakGlassOperator) are never accepted from headers.
     /// When not configured, GatewayUser, Consumer, Analyst and Developer are accepted; a configured list replaces that
     /// default entirely. Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty
-    /// default could not be narrowed. An empty JSON array counts as "not configured"; a list containing only a role
-    /// name that no proxy asserts accepts no header role.
+    /// default could not be narrowed. An empty JSON array aborts the start (it would silently apply the default); a list containing only a
+    /// role name that no proxy asserts accepts no header role.
     /// </summary>
     public List<string>? AllowedRoles { get; init; }
 
@@ -525,7 +526,8 @@ public sealed class BasicAuthSessionOptions
     /// Environments in which the session cookie may be enabled. "Production" is never accepted. When not configured,
     /// only Development is allowed; a configured list replaces that default entirely. Nullable on purpose: the
     /// configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON
-    /// array counts as "not configured"; to disable the session everywhere, set <see cref="Enabled"/> to false.
+    /// array aborts the start (it would silently apply the default); to disable the session everywhere, set
+    /// <see cref="Enabled"/> to false.
     /// </summary>
     public List<string>? AllowedEnvironments { get; init; }
 
@@ -584,7 +586,8 @@ public sealed class EntraIdAuthOptions
     /// here is read-only: writes over HTTP, GraphQL mutations and WebSQL DML are rejected.
     /// When not configured, "Agent.Read" is the read-only scope; a configured list replaces that default entirely.
     /// Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty default could not be
-    /// replaced. An empty JSON array counts as "not configured".
+    /// replaced. An empty JSON array is logged as a startup warning and treated as not configured: the default
+    /// (Agent.Read) is more restrictive than no read-only scope, so the start is not aborted.
     /// </summary>
     public List<string>? ReadOnlyScopes { get; init; }
 
@@ -1270,7 +1273,8 @@ public sealed class ExtensibilityOptions
     /// BreakGlassOperator, ClusterAdmin, GovernanceAdmin and SecurityAdmin. A configured list replaces that default
     /// entirely, so an operator who restricts the list gets exactly what was configured. Nullable on purpose: the
     /// configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON
-    /// array counts as "not configured"; to permit break-glass for nobody, set <see cref="EnableBreakGlass"/> to false.
+    /// array aborts the start (it would silently apply the default); to permit break-glass for nobody, set
+    /// <see cref="EnableBreakGlass"/> to false.
     /// </summary>
     public List<string>? BreakGlassAllowedRoles { get; init; }
 
@@ -1357,8 +1361,10 @@ public sealed class SystemMetricsOptions
     /// <summary>
     /// Roles that may read the system metrics endpoints. When not configured: GovernanceAdmin, ClusterAdmin and
     /// SecurityAdmin. A configured list replaces that default entirely. Nullable on purpose: the configuration binder
-    /// appends to pre-filled lists, so a non-empty default could not be narrowed. An empty list never opens the
-    /// endpoints; the endpoint then requires GovernanceAdmin only.
+    /// appends to pre-filled lists, so a non-empty default could not be narrowed. A configured empty JSON array
+    /// aborts the start (it would silently apply the default); to switch the endpoints off set <see cref="Enabled"/>
+    /// (or <see cref="ExposeRestEndpoints"/>) to false. A list that is empty only when built in code (not through
+    /// configuration) makes the endpoints require GovernanceAdmin.
     /// </summary>
     public List<string>? AllowedRoles { get; init; }
 
