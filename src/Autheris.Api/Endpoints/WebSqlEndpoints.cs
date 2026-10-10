@@ -527,6 +527,20 @@ public static class WebSqlEndpoints
                 }, ct);
                 break;
 
+            case Autheris.Domain.Exceptions.GatewaySecurityException gatewayDenied:
+                // F-GOV-14: stable denial codes (Virtual Filters, staging guards) are 403 with the generic message; the code
+                // is in the audit record, never in the response (same mapping as GatewayExceptionHandler).
+                logger.LogWarning(gatewayDenied, "WebSQL denied by the gateway ({ErrorCode}). TraceId={TraceId}", gatewayDenied.ErrorCode, httpContext.TraceIdentifier);
+                httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
+                httpContext.Response.ContentType = "application/json; charset=utf-8";
+                await httpContext.Response.WriteAsJsonAsync(new
+                {
+                    error = "Forbidden",
+                    message = GenericForbiddenMessage,
+                    traceId = httpContext.TraceIdentifier
+                }, ct);
+                break;
+
             case SecurityException secEx:
                 logger.LogWarning(secEx, "WebSQL Security Violation. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
