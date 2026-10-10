@@ -227,28 +227,72 @@ Damit der Data Governance Expert nicht hunderte Tabellen einzeln zuweisen muss, 
 
 ## 5. Frei konfigurierbare Schutzstufen & Maskierungsregeln
 
-### 5.1 Dynamische Schutzstufen & Zwischenstufen (`SensitivityLevels`)
-Unternehmen definieren ihre Schutzstufen in `GatewayOptions.Classification.SensitivityLevels`. Durch numerische Ränge mit Abständen (`10, 20, 25, 30, 35, 40, 50`) können jederzeit beliebig feingliedrige Zwischenstufen eingefügt werden:
+### 5.1 Generische Schutzklassen als reine Labels & Ränge (`SensitivityLevels`)
+
+In Autheris gibt es **keine fest im Code verdrahteten Enums** für Schutzklassen. Schutzklassen sind **reine deklarative Metadaten-Labels (Schlagworte / Tags)** mit einem frei wählbaren numerischen Hierarchie-Level (`level` / `rank`, z. B. 1 bis 4 oder 10 bis 50). 
+
+Jedes Unternehmen definiert seine eigene Nomenklatur, Schwellwerte und Governance-Regeln vollständig über die Konfiguration:
 
 ```json
 {
   "Gateway": {
     "Classification": {
-      "DefaultSensitivity": "UNCLASSIFIED",
-      "FourEyesThresholdRank": 35,
+      "DefaultSensitivityKey": "L1_INTERNAL",
+      "FourEyesThresholdRank": 3,              // Frei konfigurierbar: z.B. 4-Augen ab Level 3
+      "StepUpAuthThresholdRank": 4,            // Frei konfigurierbar: 2FA/MFA Pflicht ab Level 4
+      "AutoApproveMaxRank": 1,                 // KI-Auto-Approve nur für Level <= 1
+
+      // Universelle Label-Definition (Beispiel 1: Numerische Enterprise-Stufen 1 bis 4)
       "SensitivityLevels": [
-        { "key": "PUBLIC", "displayName": "Öffentlich", "rank": 10, "requiresFourEyes": false, "maxConsentTtlDays": 365 },
-        { "key": "INTERNAL", "displayName": "Unternehmensintern", "rank": 20, "requiresFourEyes": false, "maxConsentTtlDays": 180 },
-        { "key": "INTERNAL_AUDIT_ONLY", "displayName": "Intern (Nur Revision & Compliance)", "rank": 25, "requiresFourEyes": false, "maxConsentTtlDays": 90 },
-        { "key": "CONFIDENTIAL", "displayName": "Vertraulich", "rank": 30, "requiresFourEyes": false, "maxConsentTtlDays": 60 },
-        { "key": "CONFIDENTIAL_FINANCE", "displayName": "Vertraulich (Finanzen)", "rank": 35, "requiresFourEyes": true, "maxConsentTtlDays": 30 },
-        { "key": "RESTRICTED", "displayName": "Streng vertraulich", "rank": 40, "requiresFourEyes": true, "requiresStepUpAuth": true, "maxConsentTtlDays": 30 },
-        { "key": "STRICTLY_CONFIDENTIAL", "displayName": "Höchste Geheimhaltung", "rank": 50, "requiresFourEyes": true, "requiresStepUpAuth": true, "maxConsentTtlDays": 7 }
+        { 
+          "key": "L1_PUBLIC", 
+          "displayName": "Stufe 1: Öffentlich", 
+          "description": "Frei zugängliche Daten, Pressemitteilungen, öffentliche Stammdaten.",
+          "rank": 1, 
+          "requiresFourEyes": false, 
+          "requiresStepUpAuth": false, 
+          "maxConsentTtlDays": 365 
+        },
+        { 
+          "key": "L2_INTERNAL", 
+          "displayName": "Stufe 2: Intern", 
+          "description": "Betriebsinterne Informationen ohne direkten Personen- oder Finanzbezug.",
+          "rank": 2, 
+          "requiresFourEyes": false, 
+          "requiresStepUpAuth": false, 
+          "maxConsentTtlDays": 180 
+        },
+        { 
+          "key": "L3_CONFIDENTIAL", 
+          "displayName": "Stufe 3: Vertraulich", 
+          "description": "Sensible Geschäftsdaten, Kundendaten, Standard-PII, interne Verträge.",
+          "rank": 3, 
+          "requiresFourEyes": true,             // 4-Augen-Prinzip greift hier
+          "requiresStepUpAuth": false, 
+          "maxConsentTtlDays": 60 
+        },
+        { 
+          "key": "L4_STRICTLY_CONFIDENTIAL", 
+          "displayName": "Stufe 4: Höchst vertraulich", 
+          "description": "Gehälter, Gesundheitsdaten, M&A-Planungen, biometrische Daten.",
+          "rank": 4, 
+          "requiresFourEyes": true, 
+          "requiresStepUpAuth": true,          // 2-Faktor-Authentifizierung (MFA) zwingend erforderlich
+          "maxConsentTtlDays": 7 
+        }
       ]
     }
   }
 }
 ```
+
+#### Branchenspezifische Taxonomie-Beispiele (Drop-In via Config):
+* **TISAX / Automobilindustrie:** `NORMAL (Rank 1)` $\rightarrow$ `HOCH (Rank 2)` $\rightarrow$ `SEHR_HOCH (Rank 3)`. (4-Augen z.B. ab `HOCH`).
+* **Behörden / VS-Einstufung:** `OFFEN (Rank 1)` $\rightarrow$ `VS_NFD (Rank 2)` $\rightarrow$ `VS_VERTRAULICH (Rank 3)` $\rightarrow$ `GEHEIM (Rank 4)`. (2FA z.B. ab `VS_VERTRAULICH`).
+* **Minimalistisches Startup / Data Mesh:** `GREEN (Rank 1)` $\rightarrow$ `YELLOW (Rank 2)` $\rightarrow$ `RED (Rank 3)`. (4-Augen komplett deaktiviert via `EnableFourEyes: false`).
+
+#### Dynamische KI-Prompt-Synthese (OpenJEV-Style):
+Da die Schutzklassen reine Labels sind, liest die KI-Engine beim Start die Liste der aktiven `SensitivityLevels` inklusive ihrer fachlichen `description` aus der Konfiguration aus und generiert das LLM-Prompting-Template und das JSON-Schema **on-the-fly**. Wenn ein Unternehmen von 4 Stufen auf 3 Stufen wechselt oder deutsche Bezeichner nutzt, passt sich die KI ohne Re-Kompilierung sofort an.
 
 ---
 
