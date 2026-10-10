@@ -705,3 +705,43 @@ connector / `CountingCrmApiHandler`.
 
 Cross-reference: the Phase-2 tests listed in WI-1..WI-15 remain required; ST-n criteria are additional, and where an
 ST-n names the same scenario as a Phase-2 test, the stricter assertion applies.
+
+### Implementation Log
+
+**Phase 4, batch A** (`csharp-tdd-developer`, 2026-10-10): WI-1, WI-18, WI-2.
+
+| WI | Status | Commit | Tests (ST) |
+|---|---|---|---|
+| WI-1 | Done | `5390057` | `FederatedStagingRowFilterRegressionTests` (ST-4, ST-5, planner sets no suppression item) |
+| WI-18 | Done | `b02bb4f` | `FederatedDecisionKeyTests` (ST-1, ST-2 at service level with real policy, staging and DuckDB), `CrossSourcePlannerTests` (ST-1, ST-3) |
+| WI-2 | Done | `fa3e12b` | `TargetPatternMatcherTests` (ST-6, ST-8, ST-9), `MandatoryRowFilterResolverCrossSourceTests` (ST-6..ST-8), `FederatedPatternEvaluationTests` (ST-7, ST-8 service level) |
+
+Shared test helpers: `VirtualFilters/Federation/FederatedVfPipelineHarness.cs` (tables, counting connector stub, real
+staging) and `FederatedServiceHarness.cs` (real consent policy, resolver, router, planner, staging, DuckDB).
+
+Deviations and refinements (all in the fail-closed direction):
+
+- WI-1 / SEC-2: `GovernedConnectorReader.ReadAsync` ignores `RlsPushdownExecuted` and `InDbColumnMaskingExecuted` for
+  `HttpDeclarative` tables (no HTTP connector sets them legitimately); flags of other connector types are unchanged.
+  The explicit enforcement parameter of C-6 follows with WI-4.
+- WI-18: the decision map is typed `IReadOnlyDictionary<TableIdentifier, TableAccessDecision>` (compile-time guard
+  instead of a normalized string); `CrossSourcePlanner.DecisionKey` / `RequireDecision` are the single key function and
+  lookup. A self-joined table is authorized once. Pushdown arguments and `VirtualFilterJoinSpec` (both deleted in WI-6)
+  use the same key; a join spec for a table not in the query denies (`VF_ENFORCEMENT_INCOMPLETE`) instead of falling
+  back to `s0`. Short SQL names (`schema.table`, `table`) are mapped for staging/alias rewriting only when exactly one
+  table carries them. Not changed: the rewriter's `?? "s0"` fallback for unknown table names (CTE names); left to
+  WI-6 / ST-27.
+- WI-2: the regex body must also parse on its own, so a pattern like `x)|(?:.*` cannot close the anchoring group. A
+  regex binding pattern now means a full-name match for same-source bindings too (before, it was parsed as a glob and
+  never matched). An invalid stored glob pattern now denies instead of being retried as a regex. The pattern deny is
+  carried as reason prefix `VF_PATTERN_EVALUATION_FAILED:` and raised as `GatewaySecurityException` with that code by
+  `FederatedDuckDbExecutionService`; its failure audit now classifies `GatewaySecurityException` as
+  `WEBSQL_QUERY_DENIED` with `reasonCode = ErrorCode` (the message/payload hardening of SEC-11 stays in WI-10).
+  `VirtualFilterErrorCodes` was introduced with the two codes used so far. `Autheris.Domain` got
+  `InternalsVisibleTo(Autheris.Tests.Unit)` for the timeout-propagation test.
+
+Verification: `dotnet build Autheris.sln` 0 warnings, 0 errors; unit tests 3945 passed, 1 failed (pre-existing
+`WormConfigurationAuditServiceTests.AuditConfigurationSnapshotAsync_MintsWormRecordOnStartup_AndSuppressesDuplicates`,
+PLAN-GOV-KI-13). Integration (filter `Federat|WebSql|CrossSource|VirtualFilter|RowFilterChannelParity`): 61 passed,
+3 failed; the 3 failures (`*ChannelParityTests` channel `sql-endpoint`, "Declarative SQL endpoint 'air1_ids' is not
+registered") fail identically on the baseline `fb5f3f5` and are unrelated.
