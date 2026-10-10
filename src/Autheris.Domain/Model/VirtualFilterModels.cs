@@ -370,6 +370,14 @@ public sealed record FilterBinding
             : ObjectPattern.Parse(TargetPattern).MatchesObject(table);
     }
 
+    /// <summary>SHA-256 over the canonical binding (value identity, independent of the profile it belongs to).</summary>
+    public string ComputeHash()
+    {
+        var sb = new StringBuilder();
+        AppendCanonical(sb);
+        return VirtualFilterNames.Sha256(sb.ToString());
+    }
+
     internal void AppendCanonical(StringBuilder sb) =>
         sb.Append("binding=").Append(FilterName)
           .Append(" target=").Append(TargetPattern)

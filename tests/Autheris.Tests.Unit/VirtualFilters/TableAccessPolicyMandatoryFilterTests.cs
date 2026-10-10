@@ -113,6 +113,31 @@ public sealed class TableAccessPolicyMandatoryFilterTests
     }
 
     [Fact]
+    public async Task Restrict_AfterVirtualFilter_ResidualKeepsAbacFilter()
+    {
+        // F-GOV-14 WI-3: once the gateway enforces the Virtual Filter itself, only its predicate is dropped; the consent
+        // filter before it and the Casbin restriction after it stay in force.
+        var casbin = Substitute.For<IPolicyEnforcementService>();
+        casbin.HasPolicies(Arg.Any<TenantId>()).Returns(true);
+        casbin.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
+            .Returns(TableAccessDecision.Allowed(Air1.Identifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: "CASBIN", hasUnconstrainedColumnAllow: true));
+
+        var decision = await Policy(Consents(Allow(Air1.Identifier, RegionEu())), casbin: casbin).DecideAsync(Query(Air1), CancellationToken.None);
+
+        decision.CombinedRowFilterSql.ShouldNotBeNull().ShouldEndWith(" AND (P_filter_a(client_id))) AND (CASBIN)");
+        var pair = decision.AppliedVirtualFilterBindings.ShouldNotBeNull().ShouldHaveSingleItem();
+        pair.Filter.Name.ShouldBe("filter_a");
+        pair.SnapshotGeneration.ShouldBe(1);
+
+        var residual = decision.WithoutEnforcedVirtualFilters([pair]);
+
+        residual.CombinedRowFilterSql.ShouldNotBeNull().ShouldContain("region");
+        residual.CombinedRowFilterSql.ShouldEndWith(") AND (CASBIN)");
+        residual.CombinedRowFilterSql.ShouldNotContain("P_filter_a");
+        residual.MandatoryRowPredicateSql.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task CasbinRestriction_IsAddedOnTop()
     {
         var casbin = Substitute.For<IPolicyEnforcementService>();

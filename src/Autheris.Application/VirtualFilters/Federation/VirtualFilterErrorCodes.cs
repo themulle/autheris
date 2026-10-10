@@ -14,7 +14,7 @@ public static class VirtualFilterErrorCodes
     public const string PatternEvaluationFailed = "VF_PATTERN_EVALUATION_FAILED";
 
     /// <summary>A table of the query has no decision, or an applied Virtual Filter is not enforced.</summary>
-    public const string EnforcementIncomplete = "VF_ENFORCEMENT_INCOMPLETE";
+    public const string EnforcementIncomplete = Autheris.Domain.Interfaces.TableAccessDecision.VirtualFilterEnforcementIncompleteCode;
 
     private static readonly IReadOnlyList<string> CodesInDenyReasons = [PatternEvaluationFailed];
 

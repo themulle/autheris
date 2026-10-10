@@ -214,11 +214,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
 
             if (!string.IsNullOrWhiteSpace(casbinDecision.CombinedRowFilterSql))
             {
-                var mergedFilter = !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql)
-                    ? $"({decision.CombinedRowFilterSql}) AND ({casbinDecision.CombinedRowFilterSql})"
-                    : casbinDecision.CombinedRowFilterSql;
-
-                decision = decision with { CombinedRowFilterSql = mergedFilter };
+                decision = decision.WithAdditionalRowFilter(casbinDecision.CombinedRowFilterSql);
             }
         }
 

@@ -30,9 +30,13 @@ public sealed record MandatoryFilterOutcome(bool IsDenied, string? DenyReason, s
 
     public static MandatoryFilterOutcome Deny(string reason) => new(true, reason, null, Array.Empty<string>());
 
+    /// <summary>F-GOV-14 (M1): the effective (filter, binding) pairs behind <see cref="PredicateSql"/>, one per identity.</summary>
+    public IReadOnlyList<AppliedVirtualFilterBinding> AppliedBindings { get; init; } = Array.Empty<AppliedVirtualFilterBinding>();
+
     public bool Equals(MandatoryFilterOutcome? other) =>
         other is not null && IsDenied == other.IsDenied && DenyReason == other.DenyReason &&
-        PredicateSql == other.PredicateSql && AppliedFilters.SequenceEqual(other.AppliedFilters);
+        PredicateSql == other.PredicateSql && AppliedFilters.SequenceEqual(other.AppliedFilters) &&
+        AppliedBindings.SequenceEqual(other.AppliedBindings);
 
     public override int GetHashCode() => HashCode.Combine(IsDenied, DenyReason, PredicateSql);
 }
@@ -338,7 +342,14 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             }
 
             var predicate = parts.Count == 1 ? parts[0] : string.Join(" AND ", parts.Select(p => $"({p})"));
-            return new MandatoryFilterOutcome(false, null, predicate, effective.Select(a => a.Filter.Name).Distinct(StringComparer.Ordinal).ToList());
+            var appliedBindings = effective
+                .Select(a => new AppliedVirtualFilterBinding(a.Filter, a.Binding, snapshot.Generation))
+                .Distinct()
+                .ToList();
+            return new MandatoryFilterOutcome(false, null, predicate, effective.Select(a => a.Filter.Name).Distinct(StringComparer.Ordinal).ToList())
+            {
+                AppliedBindings = appliedBindings
+            };
         }
         catch (TargetPatternEvaluationException ex)
         {
