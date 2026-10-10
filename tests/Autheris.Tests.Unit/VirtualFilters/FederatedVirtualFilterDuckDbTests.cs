@@ -55,9 +55,9 @@ public sealed class FederatedVirtualFilterDuckDbTests
         var webMeta = CreateWebTable("web_crm", "customers", ["id", "name"]);
         var resolvedTable = new ResolvedSourceTable(metadata.ReferencedTables[0], webMeta.Identifier, webMeta, "web_crm");
 
-        var decisions = new Dictionary<string, TableAccessDecision>
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
         {
-            [webMeta.Identifier.ToQualifiedName()] = TableAccessDecision.Allowed(webMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+            [webMeta.Identifier] = TableAccessDecision.Allowed(webMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
         };
 
         var filter = new VirtualFilter
@@ -76,7 +76,7 @@ public sealed class FederatedVirtualFilterDuckDbTests
         };
 
         var vfJoinSpec = new VirtualFilterJoinSpec(
-            webMeta.Identifier.ToQualifiedName(),
+            webMeta.Identifier,
             filter,
             binding,
             new List<IReadOnlyDictionary<string, object?>>

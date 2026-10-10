@@ -6,6 +6,7 @@ using System.Linq;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -22,7 +23,7 @@ public sealed record CrossSourcePlan(
     IReadOnlyList<string> StagingNames);
 
 public sealed record VirtualFilterJoinSpec(
-    string TargetTableQualifiedName,
+    TableIdentifier TargetTable,
     VirtualFilter Filter,
     FilterBinding Binding,
     IReadOnlyList<IReadOnlyDictionary<string, object?>> AllowedKeyTuples);
@@ -33,10 +34,10 @@ public interface ICrossSourcePlanner
         string rawSql,
         SqlQueryMetadata metadata,
         IReadOnlyList<ResolvedSourceTable> tables,
-        IReadOnlyDictionary<string, TableAccessDecision> decisions,
+        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
         IReadOnlyList<VirtualFilterJoinSpec>? virtualFilterJoins = null,
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>>? targetCustomArguments = null);
+        IReadOnlyDictionary<TableIdentifier, IReadOnlyDictionary<string, object?>>? targetCustomArguments = null);
 }
 
 public sealed class CrossSourcePlanner : ICrossSourcePlanner
@@ -48,11 +49,38 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         _sqlEngine = sqlEngine ?? throw new ArgumentNullException(nameof(sqlEngine));
     }
 
+    /// <summary>
+    /// SEC-1 (F-GOV-14): the one key of the access decision of a cross-source table: the full, source-qualified
+    /// identifier (<c>domain.schema.table</c>, case-insensitive). Never the schema-qualified name, which collides for
+    /// tables of different sources.
+    /// </summary>
+    public static TableIdentifier DecisionKey(ResolvedSourceTable table)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        return table.Metadata.Identifier;
+    }
+
+    /// <summary>The decision of a table; a missing decision denies (fail closed), it is never defaulted to "allowed".</summary>
+    public static TableAccessDecision RequireDecision(
+        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
+        ResolvedSourceTable table)
+    {
+        ArgumentNullException.ThrowIfNull(decisions);
+        if (decisions.TryGetValue(DecisionKey(table), out var decision) && decision != null)
+        {
+            return decision;
+        }
+
+        throw new GatewaySecurityException(
+            $"No access decision exists for table '{DecisionKey(table)}'; the cross-source query is denied.",
+            "VF_ENFORCEMENT_INCOMPLETE");
+    }
+
     public CrossSourcePlan Plan(
         string rawSql,
         SqlQueryMetadata metadata,
         IReadOnlyList<ResolvedSourceTable> tables,
-        IReadOnlyDictionary<string, TableAccessDecision> decisions,
+        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options) =>
         Plan(rawSql, metadata, tables, decisions, options, null, null);
 
@@ -60,10 +88,10 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         string rawSql,
         SqlQueryMetadata metadata,
         IReadOnlyList<ResolvedSourceTable> tables,
-        IReadOnlyDictionary<string, TableAccessDecision> decisions,
+        IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         CrossSourceOptions options,
         IReadOnlyList<VirtualFilterJoinSpec>? virtualFilterJoins = null,
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>>? targetCustomArguments = null)
+        IReadOnlyDictionary<TableIdentifier, IReadOnlyDictionary<string, object?>>? targetCustomArguments = null)
     {
         ArgumentNullException.ThrowIfNull(rawSql);
         ArgumentNullException.ThrowIfNull(metadata);
@@ -84,13 +112,16 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
         }
 
-        // 2. Guardrails SEC-JOIN-01 and SEC-FILTER-01 on all tables (INV-4)
-        foreach (var t in tables)
+        // 2. Every table has its own decision (SEC-1, fail closed); guardrails SEC-JOIN-01 and SEC-FILTER-01 (INV-4)
+        var tableDecisions = new TableAccessDecision[tables.Count];
+        for (int i = 0; i < tables.Count; i++)
         {
-            if (decisions.TryGetValue(t.Metadata.Identifier.ToQualifiedName(), out var decision))
-            {
-                GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(t.Target, t.Metadata, decision, metadata);
-            }
+            tableDecisions[i] = RequireDecision(decisions, tables[i]);
+        }
+
+        for (int i = 0; i < tables.Count; i++)
+        {
+            GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(tables[i].Target, tables[i].Metadata, tableDecisions[i], metadata);
         }
 
         // 3. Non-equi join / Cartesian product check (INV-12)
@@ -105,11 +136,37 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         // 4. Staging names and minimal projections
         var targetToStaging = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var targetToAlias = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var identifierToStaging = new Dictionary<TableIdentifier, string>();
+        var identifierToAlias = new Dictionary<TableIdentifier, string>();
         var tableNameCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var t in tables)
         {
             tableNameCounts[t.Target.TableName] = tableNameCounts.GetValueOrDefault(t.Target.TableName) + 1;
+        }
+
+        // Short names (schema.table, table) are only usable when exactly one distinct table carries them (SEC-1).
+        var shortNameOwners = new Dictionary<string, HashSet<TableIdentifier>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in tables)
+        {
+            var id = DecisionKey(t);
+            foreach (var name in new[] { id.ToQualifiedName(), id.TableName, t.Target.TableName })
+            {
+                if (!shortNameOwners.TryGetValue(name, out var owners))
+                {
+                    shortNameOwners[name] = owners = [];
+                }
+
+                owners.Add(id);
+            }
+        }
+
+        void MapName(Dictionary<string, string> map, string name, string value, bool shortName)
+        {
+            if (!shortName || shortNameOwners[name].Count == 1)
+            {
+                map[name] = value;
+            }
         }
 
         var stagingRequests = new List<StagingTableRequest>(tables.Count);
@@ -127,15 +184,20 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 alias = t.Target.TableName;
             }
 
-            targetToStaging[t.Target.FullName] = stagingName;
-            targetToStaging[t.Metadata.Identifier.ToQualifiedName()] = stagingName;
-            targetToStaging[t.Target.TableName] = stagingName;
+            var identifier = DecisionKey(t);
+            identifierToStaging[identifier] = stagingName;
+            MapName(targetToStaging, t.Target.FullName, stagingName, shortName: false);
+            MapName(targetToStaging, identifier.ToString(), stagingName, shortName: false);
+            MapName(targetToStaging, identifier.ToQualifiedName(), stagingName, shortName: true);
+            MapName(targetToStaging, t.Target.TableName, stagingName, shortName: true);
 
             if (!string.IsNullOrWhiteSpace(alias))
             {
-                targetToAlias[t.Target.FullName] = alias;
-                targetToAlias[t.Metadata.Identifier.ToQualifiedName()] = alias;
-                targetToAlias[t.Target.TableName] = alias;
+                identifierToAlias[identifier] = alias;
+                MapName(targetToAlias, t.Target.FullName, alias, shortName: false);
+                MapName(targetToAlias, identifier.ToString(), alias, shortName: false);
+                MapName(targetToAlias, identifier.ToQualifiedName(), alias, shortName: true);
+                MapName(targetToAlias, t.Target.TableName, alias, shortName: true);
                 if (!string.IsNullOrWhiteSpace(t.Target.Alias))
                 {
                     targetToAlias[t.Target.Alias] = alias;
@@ -143,8 +205,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
 
             // Minimal projection
-            decisions.TryGetValue(t.Metadata.Identifier.ToQualifiedName(), out var dec);
-            dec ??= TableAccessDecision.Allowed(t.Metadata.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+            var dec = tableDecisions[i];
 
             var projected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             bool selectAll = metadata.ProjectedColumns.Any(p => p == "*");
@@ -174,9 +235,8 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 }
             }
 
-            var qualName = t.Metadata.Identifier.ToQualifiedName();
             IReadOnlyDictionary<string, object?>? customArgs = null;
-            if (targetCustomArguments != null && targetCustomArguments.TryGetValue(qualName, out var ca))
+            if (targetCustomArguments != null && targetCustomArguments.TryGetValue(identifier, out var ca))
             {
                 customArgs = ca;
             }
@@ -226,8 +286,14 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                     Projection: keyCols,
                     PreloadedRows: vf.AllowedKeyTuples));
 
-                string targetStaging = targetToStaging.TryGetValue(vf.TargetTableQualifiedName, out var ts) ? ts : "s0";
-                string effectiveTarget = targetToAlias.TryGetValue(vf.TargetTableQualifiedName, out var ta) ? ta : targetStaging;
+                if (!identifierToStaging.TryGetValue(vf.TargetTable, out var targetStaging))
+                {
+                    throw new GatewaySecurityException(
+                        $"The Virtual Filter '{vf.Filter.Name}' targets a table that is not part of the query; the query is denied.",
+                        "VF_ENFORCEMENT_INCOMPLETE");
+                }
+
+                string effectiveTarget = identifierToAlias.TryGetValue(vf.TargetTable, out var ta) ? ta : targetStaging;
 
                 var pairConditions = new List<Expression>();
                 foreach (var keyCol in vf.Filter.KeyColumns)

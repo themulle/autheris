@@ -351,7 +351,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
     }
 
-    private async Task<(Dictionary<string, TableAccessDecision> Decisions, Sid UserSid)> AuthorizeAllTablesAsync(
+    private async Task<(Dictionary<TableIdentifier, TableAccessDecision> Decisions, Sid UserSid)> AuthorizeAllTablesAsync(
         SqlQueryMetadata metadata,
         IReadOnlyList<ResolvedSourceTable> tables,
         ClaimsPrincipal user,
@@ -377,10 +377,19 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             ["action"] = isDml ? "write" : "read"
         };
 
-        var decisions = new Dictionary<string, TableAccessDecision>(StringComparer.OrdinalIgnoreCase);
+        // SEC-1 (F-GOV-14): one decision per source-qualified table (CrossSourcePlanner.DecisionKey); a table that occurs
+        // several times (self-join) is decided once and every occurrence uses that same decision.
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>();
 
         foreach (var resolved in tables)
         {
+            var decisionKey = CrossSourcePlanner.DecisionKey(resolved);
+            if (decisions.TryGetValue(decisionKey, out var known))
+            {
+                GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(resolved.Target, resolved.Metadata, known, metadata);
+                continue;
+            }
+
             if (!consentBypassed && (_consentRepository == null || _consentResolution == null))
             {
                 _logger?.LogError("WebSQL cannot evaluate consents (consent services not available); denying access (fail-closed).");
@@ -413,7 +422,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             // SEC-JOIN-01 & SEC-FILTER-01 Zero-Trust Guardrails (INV-4)
             GovernedSqlExecutionService.EnforceMaskedColumnGuardrails(resolved.Target, resolved.Metadata, decision, metadata);
 
-            decisions[resolved.ResolvedIdentifier.ToQualifiedName()] = decision;
+            decisions[decisionKey] = decision;
         }
 
         return (decisions, userSid);
@@ -528,7 +537,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         return table;
     }
 
-    private async Task<(bool ShortCircuited, OlapQueryResult? EmptyResult, List<VirtualFilterJoinSpec> VfJoins, Dictionary<string, IReadOnlyDictionary<string, object?>> TargetArgs)>
+    private async Task<(bool ShortCircuited, OlapQueryResult? EmptyResult, List<VirtualFilterJoinSpec> VfJoins, Dictionary<TableIdentifier, IReadOnlyDictionary<string, object?>> TargetArgs)>
         EvaluateVirtualFiltersAsync(
             string sql,
             SqlQueryMetadata metadata,
@@ -538,7 +547,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             CancellationToken ct)
     {
         var vfJoins = new List<VirtualFilterJoinSpec>();
-        var targetArgs = new Dictionary<string, IReadOnlyDictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
+        var targetArgs = new Dictionary<TableIdentifier, IReadOnlyDictionary<string, object?>>();
 
         var (tree, _) = _sqlEngine.Parse(sql.AsMemory(), AnalysisTokenOptions, ct);
         var builder = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder();
@@ -620,7 +629,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                                 customArgs[batchParam] = allowedKeys.ToList();
                             }
 
-                            targetArgs[resolved.Metadata.Identifier.ToQualifiedName()] = customArgs;
+                            targetArgs[CrossSourcePlanner.DecisionKey(resolved)] = customArgs;
                         }
                         else
                         {
@@ -632,7 +641,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                     {
                         var allowedTuples = await _keyProvider.GetAllowedKeyTuplesAsync(filter, user, tenantId, filter.KeyColumns, ct).ConfigureAwait(false);
                         vfJoins.Add(new VirtualFilterJoinSpec(
-                            TargetTableQualifiedName: resolved.Metadata.Identifier.ToQualifiedName(),
+                            TargetTable: CrossSourcePlanner.DecisionKey(resolved),
                             Filter: filter,
                             Binding: binding,
                             AllowedKeyTuples: allowedTuples));

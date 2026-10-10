@@ -40,7 +40,7 @@ public sealed class FederatedStagingRowFilterRegressionTests
         const string sql = "SELECT id, status FROM crm_api.public.tickets";
         var metadata = Engine.Analyze(sql.AsMemory());
         var resolved = new ResolvedSourceTable(metadata.ReferencedTables[0], Tickets.Identifier, Tickets, "crm_api");
-        var decisions = new Dictionary<string, TableAccessDecision> { [Tickets.Identifier.ToQualifiedName()] = decision };
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision> { [Tickets.Identifier] = decision };
 
         var plan = new CrossSourcePlanner(Engine).Plan(sql, metadata, [resolved], decisions, new CrossSourceOptions { Enabled = true });
 
@@ -95,10 +95,10 @@ public sealed class FederatedStagingRowFilterRegressionTests
         var orders = SqlTable("erp", "public", "orders", "id", "ticket_id");
         const string sql = "SELECT t.id, o.id FROM crm_api.public.tickets t JOIN erp.public.orders o ON o.ticket_id = t.id";
         var metadata = Engine.Analyze(sql.AsMemory());
-        var decisions = new Dictionary<string, TableAccessDecision>
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
         {
-            [Tickets.Identifier.ToQualifiedName()] = Unrestricted(Tickets),
-            [orders.Identifier.ToQualifiedName()] = Unrestricted(orders).WithMandatoryPredicate("ticket_id IN (1)", ["vf_orders"])
+            [Tickets.Identifier] = Unrestricted(Tickets),
+            [orders.Identifier] = Unrestricted(orders).WithMandatoryPredicate("ticket_id IN (1)", ["vf_orders"])
         };
 
         var plan = new CrossSourcePlanner(Engine).Plan(
