@@ -1577,3 +1577,43 @@ Affected work packages and test criteria (additions to §11 and §16.8):
 - 2026-10-10: Added §16 "Phase 3 Security Review" (`csharp-security-expert`): findings SEC-ADG-01..29, hardened invariants (INV-9 retired; INV-11..INV-17 added), STRIDE mapping, answers to the §14 hand-off, minimum CI gate additions M-1..M-12 and new gate G10, Stream F for the Oracle runtime (SD-8), security test criteria per work package, residual-risk assessment for the §7.3 string consumers, and stakeholder decisions B-1..B-5. Status set to Phase 3 delivered; next milestone Phase 4 TDD implementation.
 - 2026-10-10: Added §3.6 "Reference design: Trino's own JDBC pushdown generator" (per user input): adopted `PreparedQuery`/`QueryParameter`, bind-expression templates, the declarative function-rewrite DSL and capability flags; rejected domain compaction (AP-11).
 - 2026-10-10: Initial English implementation plan (Phase 2). Supersedes the German 2026-10-06 plan. Incorporates stakeholder decisions SD-1..SD-7 (single path, pre-merge evidence gate, bind-everything, typed policy IR, DML and `MERGE` in the first cut, Snowflake experimental, ADR-017 amendment, Databricks production dialect). Defines architecture, interfaces, capability table, removal list, consumer migration, gate G1-G9, work packages in streams A-E plus the cutover, risks, rollback and the Phase 3 hand-off.
+
+---
+
+## 18. Implementation Log - Stream A (compiler core, DQL first)
+
+### 18.1 Re-scope and branch stack (stakeholder decisions during Phase 4)
+
+All DQL (SELECT) for every dialect comes first. DML and MERGE (WP-A7) start only after all DQL branches are done (separate step, branch `feat/ast-dml`). Legacy stays the default; there is no cutover (WP-X1 is not part of this work). DML, MERGE, non-SELECT statements and every dialect without a capability entry fail closed through `ISqlEngine.Compile` with the typed `SqlCompileNotSupportedException`.
+
+Priority order and stacked branches (each branch is based on the head of the previous one):
+
+| # | Branch | Content | Status |
+|---|---|---|---|
+| 1 | `feat/ast-mssql-select` | Core (A1-A6, A8 for SELECT) plus SQL Server | see 18.2 |
+| 2 | `feat/ast-duckdb-select` | DuckDB SELECT | planned |
+| 3 | `feat/ast-postgres-select` | PostgreSQL SELECT | planned |
+| 4 | `feat/ast-databricks-select` | Databricks SELECT | planned |
+| 5 | `feat/ast-oracle-select` | Oracle SELECT, based on the PostgreSQL head plus `feat/ast-failclosed-fixes` (WP-D4), WP-F1..F4 | planned |
+| later | `feat/ast-dml` | A7 (DML, MERGE) for all dialects | deferred; not started in this work |
+
+### 18.2 Branch `feat/ast-mssql-select`
+
+Work packages (one commit each): A1 capability table (SQL Server entry only), A2 `CompiledSql`, parameter accounting, `SqlServerCompiledSqlBinder`, `EmittedSqlInvariantChecker`, A3 literal parameterization, A4 opaque `SecurityPredicateExpression` plus `SecurityCoverageVerifier`, A5 typed policy IR, `PolicyExpressionParser` with cache, typed injection in `AstSecurityVisitor`, A6 `MaskExpression`, A8 `ISqlEngine.Compile`, `GovernedSqlCompiler`, value-free `CompiledSqlTemplateCache`, SQL Server Testcontainer execution tests.
+
+SEC-ADG coverage on this branch: -01 (value-free template, canonical request key, full-material compare, per-table dependency revalidation and value rebinding), -04 (binary-exact tenant predicate incl. zero-padding fix found by the container test), -05 (stack guards in all rewriters, verifier and generators; compile budget; AstDepth, SecuredTableReferences, EmittedSqlLength, expansion factor limits), -06/-07/-08 only the SELECT-relevant parts (-07 canonical schema-qualified names and symbol-based CTE handling; -06 `ReferencedColumns` exposed, DML rejection is A7), -10/-12/-14/-17/-22 not applicable or covered elsewhere, -11 (tenant predicate in policy subqueries, depth 1), -15 (HMAC degrades to Redact when `InDbHmac = false`), -18 (explicit LIKE ESCAPE and escaped values), -19 (generated markers, reserved client-name prefixes, positional parameters rejected), -20 (parse cache key, negative entries, per-partition share), -22 (table functions rejected by the builder), -23 (typed exceptions without values, `CompiledSqlDigest`, bound values redacted from `ToString`), INV-11 (partial: schema-qualified canonical names; session `search_path` belongs to the runtime streams), INV-13, INV-15, INV-16.
+
+Deviations from the plan text (all fail-closed or stricter):
+
+- `GenerateGovernedSql` keeps its legacy pass order; the new order (simplify the user tree before injection) lives only in `GovernedSqlCompiler`, so legacy tests and consumers are untouched.
+- `PolicyParameterExpression` has `Origin` and `IsLikePattern`; `MaskExpression` has `DataType`; `MaskArguments` has `HmacKeyOuter` (SQL Server HMAC uses two key pads); `BoundParameter` has `SourceName`; `PolicyValue`, `BoundParameter` and `TenantBinding` override `ToString` to hide values.
+- `ITableCatalog`/`TableCatalogEntry` supply canonical names, columns, data types, tenant column and version. A table that is not in the catalog is rejected (INV-11).
+- Admin policy literals and `:name` markers become policy parameters; every literal inside an injected predicate is rejected by the verifier (INV-5), except the canonical `1 = 0` / `1 = 1`.
+- Positional `?` client parameters are rejected (only named parameters through `__param_<name>` are supported on the compiler path).
+- Expansion factor is measured against `max(input length, 64)`; `CompileRequest` has the extra properties `CompileTimeout` and `MaxExpansionFactor`; the enum for the subquery strategy is `GovernedSubqueryStrategy` (the Domain already has `RowFilterSubqueryStrategy`).
+- SEC-ADG-16 item 2 (bind types from catalog column types) is not implemented; literals use their literal type (partial, deferred).
+- Function mapping is limited to `length`, `char_length`, `ceil` and `strpos` for SQL Server; other functions pass through unchanged.
+- The architecture tests are placed in `tests/TrinoSqlEngine.Tests` (`NoRewriterDescendsIntoSecurityPredicate`, `AllowExperimentalDialect_OnlyInTests`).
+- `GatewayStartupValidator` checks for existing tenant ID case collisions (decision B-1), the audit wiring of `CompiledSqlDigest`, and the Application consumers are cutover work and not part of this branch.
+
+Deferred to separate branches: `feat/ast-dml` (A7, DML and MERGE), then X1 after all dialects.
