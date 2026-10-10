@@ -1551,12 +1551,29 @@ These lists add to the "Tests first" lists in §11. A work package is not done u
 | B-4 | **Databricks live workspace provider** (OQ-2, still open). | G9, Databricks production listing | Unchanged: held until the first green G9. |
 | B-5 | **Oracle production prerequisites** from the DBA side: TCPS, a non-privileged runtime account, schema-qualified catalog entries and, optionally, the `DBMS_CRYPTO` grant. | WP-F5 | Required before Oracle is listed as `Production`. |
 
+### 16.11 Stakeholder decisions B-1, B-2, B-3 (resolved before Phase 4)
+
+| ID | Decision (binding) | Effect |
+|---|---|---|
+| B-1 | **Tenant comparison is always exact (binary, per dialect).** New tenants whose ID collides case-insensitively with an existing tenant are rejected. Existing IDs are **not** rewritten. A startup check reports existing case-insensitive collisions and **fail-closes the colliding tenants** (all their requests are denied until an operator resolves the collision). | The binary `TenantPredicateTemplate` (SEC-ADG-04) is mandatory on every dialect (A1). Registry uniqueness is enforced on tenant creation (Stream D/application scope; not Stream A). Startup collision check and fail-close are tracked outside Stream A. Test criteria added below. |
+| B-2 | **Where HMAC masking is unavailable (Databricks; Oracle without the `DBMS_CRYPTO` grant; DuckDB), the mask degrades to Redact.** Gateway-side HMAC stays rejected. | `DialectCapabilities.InDbHmac` (A1) drives `MaskExpression` emission (A6): `Hmac` with `InDbHmac = false` is emitted as `Redact`. No fallback to another dialect's HMAC function. |
+| B-3 | **Consent IN lists that exceed the bind limit or the IN-list limit are denied** with a typed error (`SqlLimitExceededException`, Kind `BindParameters` or `InListItems`) and a metric (`autheris.sql.limit_rejected`). Array/TVP binding is a **deferred follow-up work package** (WP-A9, not scheduled in this track). | SEC-ADG-27 default (reject) applies. No array-bound `BindExpressionTemplate` is built. AP-11 stays: never compact. |
+
+Affected work packages and test criteria (additions to §11 and §16.8):
+
+- **WP-A1:** `CapabilityTable_TenantPredicateTemplate_IsBinaryExact_PerDialect` is mandatory (B-1). `CapabilityTable_InDbHmac_PerDialect` asserts PostgreSQL, SQL Server and SQLite `true`; Oracle `false` by default (becomes `true` only through the probe in WP-F6); Databricks and DuckDB `false` (B-2). `Limit_OverInList_DeniedWithTypedError_NoArrayBinding` (B-3).
+- **WP-A2/A8:** the limit counter `autheris.sql.limit_rejected{dialect,kind}` is incremented for every IN-list and bind rejection (B-3).
+- **WP-A6:** `Hmac_DegradesToRedact_WhenInDbHmacFalse` is required for Databricks, DuckDB and Oracle-without-grant (B-2).
+- **WP-D1/D2, WP-F6, WP-B5 (other streams):** `TenantCaseCollision_IsIsolated` runs with tenants `acme` and `ACME`; registry rejects a new case-insensitive duplicate; startup check fail-closes existing collisions without rewriting IDs; consent IN-list over the limit is denied, not chunked, not compacted (B-1, B-3). Oracle HMAC without grant redacts (B-2).
+- **§16.10:** B-1, B-2 and B-3 are resolved by this section. B-4 and B-5 remain open.
+
 **Phase 3 sign-off:** granted for Phase 4 to start on Streams A-F, subject to the mandatory mitigations above. The final sign-off for WP-X1 is given on the cutover PR, against the §16.5 precondition and the final `accepted-differences.json`.
 
 ---
 
 ## 17. Changelog
 
+- 2026-10-10: Added §16.11 recording stakeholder decisions B-1 (exact tenant comparison, reject new case-colliding tenants, fail-close existing collisions, no ID rewrite), B-2 (HMAC unavailable degrades to Redact) and B-3 (over-limit consent IN lists denied, array binding deferred as WP-A9).
 - 2026-10-10: Added §16 "Phase 3 Security Review" (`csharp-security-expert`): findings SEC-ADG-01..29, hardened invariants (INV-9 retired; INV-11..INV-17 added), STRIDE mapping, answers to the §14 hand-off, minimum CI gate additions M-1..M-12 and new gate G10, Stream F for the Oracle runtime (SD-8), security test criteria per work package, residual-risk assessment for the §7.3 string consumers, and stakeholder decisions B-1..B-5. Status set to Phase 3 delivered; next milestone Phase 4 TDD implementation.
 - 2026-10-10: Added §3.6 "Reference design: Trino's own JDBC pushdown generator" (per user input): adopted `PreparedQuery`/`QueryParameter`, bind-expression templates, the declarative function-rewrite DSL and capability flags; rejected domain compaction (AP-11).
 - 2026-10-10: Initial English implementation plan (Phase 2). Supersedes the German 2026-10-06 plan. Incorporates stakeholder decisions SD-1..SD-7 (single path, pre-merge evidence gate, bind-everything, typed policy IR, DML and `MERGE` in the first cut, Snowflake experimental, ADR-017 amendment, Databricks production dialect). Defines architecture, interfaces, capability table, removal list, consumer migration, gate G1-G9, work packages in streams A-E plus the cutover, risks, rollback and the Phase 3 hand-off.
