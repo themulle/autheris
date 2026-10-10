@@ -230,7 +230,7 @@ public sealed class AstCompilerOracleExecutionTests : IClassFixture<AstCompilerO
     [Fact]
     public async Task CteBodyReadingThePhysicalTable_IsSecured()
     {
-        Ids(await RunAsync("WITH \"orders\" AS (SELECT id FROM orders) SELECT id FROM \"orders\"", "other")).ShouldBe(new List<int> { 5 });
+        Ids(await RunAsync("WITH \"orders\" AS (SELECT id FROM AUTH_APP.orders) SELECT id FROM \"orders\"", "other")).ShouldBe(new List<int> { 5 });
     }
 
     // ---- gateway path: session semantics (SEC-ADG-14, INV-14) ----
@@ -393,7 +393,7 @@ public sealed class AstCompilerOracleExecutionTests : IClassFixture<AstCompilerO
     [Fact]
     public async Task CteNamedLikeTheTable_UnionJoinSubquery_AreSecured()
     {
-        Ids(await RunAsync("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders", "other")).ShouldBe(new List<int> { 5 });
+        Ids(await RunAsync("WITH orders AS (SELECT id FROM AUTH_APP.orders) SELECT id FROM orders", "other")).ShouldBe(new List<int> { 5 });
         var rows = await RunAsync(
             "WITH o AS (SELECT id, status FROM orders) SELECT o.id FROM o JOIN orders p ON p.id = o.id WHERE o.id IN (SELECT id FROM orders) " +
             "UNION ALL SELECT id FROM orders WHERE id = (SELECT max(id) FROM orders)", "acme");
