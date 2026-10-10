@@ -194,8 +194,8 @@ public sealed class ResponseSizeLimitingHandlerTests
     }
 
     [Fact]
-    public void BytesRead_OfANonSeekableStreamThatDoesNotCount_IsZero()
+    public void BytesRead_OfANonSeekableStreamThatDoesNotCount_FailsClosed()
     {
-        ResponseSizeLimitingHandler.BytesRead(new EndlessStream()).ShouldBe(0);
+        Should.Throw<InvalidOperationException>(() => ResponseSizeLimitingHandler.BytesRead(new EndlessStream()));
     }
 }

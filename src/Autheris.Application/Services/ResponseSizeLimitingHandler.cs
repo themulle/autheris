@@ -47,12 +47,20 @@ public sealed class ResponseSizeLimitingHandler : DelegatingHandler
 
     /// <summary>
     /// The bytes a response body stream has handed out so far: the length of a seekable stream, the running count of a
-    /// capped body stream, otherwise 0. <see cref="Stream.Length"/> of a non-seekable stream throws by contract (CR-09).
+    /// capped body stream; any other stream throws (fail closed, CR-17). <see cref="Stream.Length"/> of a non-seekable stream throws by contract (CR-09).
     /// </summary>
     internal static long BytesRead(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        return stream is LimitedStream limited ? limited.BytesRead : stream.CanSeek ? stream.Length : 0;
+        if (stream is LimitedStream limited)
+        {
+            return limited.BytesRead;
+        }
+
+        return stream.CanSeek
+            ? stream.Length
+            : throw new InvalidOperationException(
+                "The size of the response body cannot be determined: the stream is neither seekable nor size-capped.");
     }
 
     private static GatewaySecurityException Exceeded(long max) =>
