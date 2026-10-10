@@ -6,15 +6,13 @@
 
 ---
 
-## 1. Aktive Implementierungspläne (Noch OFFEN ⏳)
+## 1. Aktive Implementierungspläne (0 OFFEN 🎉)
 
-Basierend auf der Produktmanager-Gap-Analyse wurde der architektonische Implementierungsplan **Plan 9** erstellt und zur Umsetzung freigegeben:
+Aktuell befinden sich **keine offenen Implementierungspläne** in der Warteschlange. Alle bisherigen Arbeitspakete (Pläne 1 bis 11) wurden erfolgreich implementiert, architektonisch verifiziert und durch automatisierte Tests abgesichert.
 
 | Plan / Dokument | Thema / Feature | Behandelte Anforderungen & Komponenten | Status |
 |---|---|---|---|
-| **[Plan 9: Restliche Lücken – Onboarding, Paginierung, UI & Jobs](2026-10-09-implementierungsplan-restliche-luecken-onboarding-pagination-ui-jobs.md)** | • **AP-9.1:** Verbindungstest für Datenquellen (`POST /api/v1/catalog/datasources/{id}/test`)<br>• **AP-9.2:** Multi-Page HTTP Staging Pagination Engine (`offset/limit`, `nextLink`, `cursor`)<br>• **AP-9.3:** 2FA & HitL Web Console im DevPortal (`/portal/2fa/enroll`, `/portal/approvals`)<br>• **AP-9.4:** Async Long-Running Query Job Engine (`/api/v1/jobs/query`, `GET /status`, `GET /result`) | **R-55, R-56, R-60, R-64 UX, F-DATA-05**<br>• `DatasourceTestingService.cs`<br>• `DeclarativeHttpDataSourceExecutor.cs`<br>• `DevPortalEndpoints.cs`<br>• `AsyncQueryJobManager.cs` | **VOLLSTÄNDIG IMPLEMENTIERT & VERIFIZIERT ✅** |
-| **[Plan 10: MCP Schema-RAG & Hybrid-Vektorsuche](2026-10-09-implementierungsplan-mcp-schema-rag-vektorsuche-katalog.md)** | • **AP-10.1:** Domänenmodelle & Optionen (`CatalogSearchModels.cs`, `CatalogSearchOptions.cs`)<br>• **AP-10.2:** In-Memory Okapi BM25 Term Indexer (`Bm25SearchIndex.cs`, `SmartSchemaTokenizer.cs`)<br>• **AP-10.3:** On-Premises Embeddings & SIMD Cosine Matcher (`LocalDeterministicEmbeddingGenerator.cs`, `System.Numerics.Tensors`)<br>• **AP-10.4:** Reciprocal Rank Fusion (RRF) & Hybrid Search Engine (`CatalogSearchEngine.cs`, `CatalogSearchSnapshot.cs`)<br>• **AP-10.5:** MCP-Tool & API Integration mit ReBAC-Filterung (`search_catalog`, `CatalogDiscoveryService.cs`, `CatalogApiEndpoints.cs`) | **F-AI-12, MCP Schema Scale, Tausende Tabellen**<br>• `ICatalogSearchEngine.cs`<br>• `CatalogSearchEngine.cs`<br>• `LocalDeterministicEmbeddingGenerator.cs`<br>• `McpDatasetTools.cs`<br>• `CatalogDiscoveryService.cs` | **VOLLSTÄNDIG IMPLEMENTIERT & VERIFIZIERT ✅** |
-| **[Plan 11: High Availability, Kubernetes & Operational Excellence](2026-10-09-implementierungsplan-high-availability-kubernetes-operational-excellence.md)** | • **AP-11.1:** Beseitigung verbleibender In-Memory-Zustände (`HitLStepUpApprovalService`, `McpSessionStore`, `TokenRevocationService`, Redis Subscriptions)<br>• **AP-11.2:** Distributed Locking & Leader Election (`IDistributedLockProvider`, `CDC Poller`, `Metadata Sync`, `Recertification`)<br>• **AP-11.3:** Kubernetes-Native Bereitstellung & Helm Chart (`deploy/helm/autheris`, `PDB`, `TopologySpreadConstraints`, `HPA`)<br>• **AP-11.4:** Resilienz externer Persistenz (CloudNative-PG Postgres HA, Redis Sentinel Fallback)<br>• **AP-11.5:** Operational Excellence (Prometheus SLI/SLO Alerting, Argo Rollouts Canary, Chaos Mesh Testing) | **Enterprise HA, K8s Multi-Node, Operational Excellence**<br>• `IDistributedLockProvider.cs`<br>• `RedisDistributedLockProvider.cs`<br>• `deploy/helm/autheris/*`<br>• `HitLStepUpApprovalService.cs`<br>• `prometheusrule.yaml` | **VOLLSTÄNDIG IMPLEMENTIERT & VERIFIZIERT ✅** |
+| *Keine offenen Pläne* | Alle Anforderungen erfolgreich umgesetzt | Vollständige Testabdeckung & Verifikation | **ABGESCHLOSSEN ✅** |
 
 ---
 
@@ -108,8 +106,5 @@ flowchart TD
 
 ---
 
-- **Aktive Implementierungspläne:**
-  - [Plan 9: Restliche Lücken – Onboarding, Paginierung, UI & Jobs](2026-10-09-implementierungsplan-restliche-luecken-onboarding-pagination-ui-jobs.md)
-  - [Plan 10: MCP Schema-RAG & Hybrid-Vektorsuche](2026-10-09-implementierungsplan-mcp-schema-rag-vektorsuche-katalog.md)
-  - [Plan 11: High Availability, Kubernetes & Operational Excellence](2026-10-09-implementierungsplan-high-availability-kubernetes-operational-excellence.md)
-- **Historische Pläne (1–8, SQL-AST Härtung, Feature Requests):** Vollständig implementiert, verifiziert und in der Git-Historie archiviert.
+- **Aktive Implementierungspläne:** Keine offenen Pläne (0 OFFEN).
+- **Historische Pläne (1–11, SQL-AST Härtung, Feature Requests):** Vollständig implementiert, verifiziert und in der Git-Historie archiviert.
