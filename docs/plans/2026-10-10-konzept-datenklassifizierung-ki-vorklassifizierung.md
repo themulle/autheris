@@ -296,9 +296,101 @@ Da die Schutzklassen reine Labels sind, liest die KI-Engine beim Start die Liste
 
 ---
 
-### 5.2 Frei konfigurierbare Maskierungsstrategien (`MaskingRules`)
+### 5.2 Konfigurierbare PII- & Semantik-Kategorien mit vernünftigen Out-of-the-Box Defaults (`PiiCategories`)
 
-Kunden können neben Standard-Maskings eigene benannte Maskierungsregeln mit individuellen Parametern hinterlegen:
+Genauso wie Schutzklassen sind auch **PII-Felder, Finanz- und Gesundheitsdatentypen reine konfigurierbare semantische Labels**. Jedes Unternehmen oder jede Gesetzgebung (DSGVO/GDPR, CCPA, HIPAA, PCI-DSS, TISAX, FINMA) definiert eigene Kategorien oder Branchenbezeichner (z. B. `PATIENT_ID`, `SAP_KUNNR`, `AHV_NUMMER`).
+
+Autheris liefert einen **umfassenden, standardkonformen Satz vernünftiger Standard-Vorgaben ("Batteries Included")** mit. Diese greifen automatisch, wenn der Kunde nichts konfiguriert, können aber per Konfiguration beliebig erweitert oder überschrieben werden:
+
+```json
+{
+  "Gateway": {
+    "Classification": {
+      // 1. Semantische PII-Kategorien (Defaults & Custom Extensions)
+      "PiiCategories": [
+        {
+          "key": "IBAN",
+          "displayName": "Internationale Bankkontonummer",
+          "description": "Bankverbindung nach ISO 13616 / SEPA.",
+          "defaultSensitivityRank": 3,
+          "defaultMaskingRule": "IBAN_STANDARD_4_4",
+          "namePatterns": ["^iban$", ".*_iban$", "^bank_account.*", "^kto_nr$"]
+        },
+        {
+          "key": "CREDIT_CARD",
+          "displayName": "Kreditkartennummer (PAN)",
+          "description": "16-stellige Zahlungs- und Kreditkartennummern (PCI-DSS Scope).",
+          "defaultSensitivityRank": 4,
+          "defaultMaskingRule": "CREDIT_CARD_LAST_4",
+          "namePatterns": [".*credit.*card.*", ".*pan.*", ".*cc_num.*"]
+        },
+        {
+          "key": "EMAIL",
+          "displayName": "E-Mail-Adresse",
+          "description": "Personenbezogene geschäftliche oder private Mailadresse.",
+          "defaultSensitivityRank": 2,
+          "defaultMaskingRule": "EMAIL_DOMAIN_RETAIN",
+          "namePatterns": ["^email$", ".*_email$", "^mail$", ".*_mail$"]
+        },
+        {
+          "key": "PHONE_NUMBER",
+          "displayName": "Telefon- / Mobilnummer",
+          "description": "Festnetz- oder Mobiltelefonnummer nach E.164.",
+          "defaultSensitivityRank": 2,
+          "defaultMaskingRule": "PHONE_RETAIN_COUNTRY_CODE",
+          "namePatterns": [".*phone.*", ".*telefon.*", ".*mobil.*", ".*fax.*"]
+        },
+        {
+          "key": "IP_ADDRESS",
+          "displayName": "IP-Adresse (IPv4 / IPv6)",
+          "description": "Netzwerkadresse (nach DSGVO personenbezogenes Datum).",
+          "defaultSensitivityRank": 2,
+          "defaultMaskingRule": "IP_ANONYMIZE_SUBNET",
+          "namePatterns": ["^ip$", ".*_ip$", "^ip_address$", "^client_ip$"]
+        },
+        {
+          "key": "BIRTH_DATE",
+          "displayName": "Geburtsdatum",
+          "description": "Geburtsdatum einer natürlichen Person.",
+          "defaultSensitivityRank": 3,
+          "defaultMaskingRule": "DATE_TRUNCATE_TO_YEAR",
+          "namePatterns": [".*birth.*", ".*dob.*", ".*geburtsdatum.*"]
+        },
+        {
+          "key": "FULL_NAME",
+          "displayName": "Vollständiger Name / Person",
+          "description": "Vorname, Nachname oder zusammengesetzter Personenname.",
+          "defaultSensitivityRank": 2,
+          "defaultMaskingRule": "NAME_INITIALS_ONLY",
+          "namePatterns": ["^name$", "^full_name$", "^nachname$", "^vorname$", ".*_name$"]
+        },
+        {
+          "key": "GEO_LOCATION",
+          "displayName": "Geokoordinaten",
+          "description": "GPS-Koordinaten (Latitude / Longitude).",
+          "defaultSensitivityRank": 2,
+          "defaultMaskingRule": "GEO_DISTRICT_500M",
+          "namePatterns": ["^lat$", "^lon$", "^latitude$", "^longitude$", ".*_geo.*"]
+        },
+        {
+          "key": "HEALTH_DATA",
+          "displayName": "Gesundheitsdaten (Art. 9 DSGVO / HIPAA)",
+          "description": "Diagnosen, Laborwerte, ICD-10-Codes oder Patientenhistorie.",
+          "defaultSensitivityRank": 4,
+          "defaultMaskingRule": "REDACT_COMPLETELY",
+          "namePatterns": [".*diagnos.*", ".*icd10.*", ".*health.*", ".*befund.*"]
+        }
+      ]
+    }
+  }
+}
+```
+
+---
+
+### 5.3 Frei konfigurierbare Maskierungsstrategien (`MaskingRules`) & Zuordnung
+
+Jede Maskierungsregel kann individuell mit Algorithmus und Parametern definiert werden:
 
 ```json
 {
@@ -309,32 +401,67 @@ Kunden können neben Standard-Maskings eigene benannte Maskierungsregeln mit ind
           "name": "IBAN_STANDARD_4_4",
           "baseStrategy": "PARTIAL_MASK",
           "parameters": { "prefixLength": 4, "suffixLength": 4, "maskChar": "*" }
+          // Ergibt: "DE89 **************** 1234"
         },
         {
-          "name": "IBAN_RETAIN_BLZ",
+          "name": "CREDIT_CARD_LAST_4",
           "baseStrategy": "PARTIAL_MASK",
-          "parameters": { "prefixLength": 8, "suffixLength": 2, "maskChar": "X" }
+          "parameters": { "prefixLength": 0, "suffixLength": 4, "maskChar": "*" }
+          // Ergibt: "************1234"
         },
         {
           "name": "EMAIL_DOMAIN_RETAIN",
           "baseStrategy": "REGEX_REPLACE",
           "parameters": { "pattern": "(?<=.)[^@\\n](?=[^@\\n]*?@)", "replacement": "*" }
+          // Ergibt: "m*****e@company.com"
+        },
+        {
+          "name": "PHONE_RETAIN_COUNTRY_CODE",
+          "baseStrategy": "PARTIAL_MASK",
+          "parameters": { "prefixLength": 3, "suffixLength": 2, "maskChar": "X" }
+          // Ergibt: "+49 XXXXXXXX 89"
+        },
+        {
+          "name": "IP_ANONYMIZE_SUBNET",
+          "baseStrategy": "IP_MASK",
+          "parameters": { "subnetMaskIpv4": 24, "subnetMaskIpv6": 48 }
+          // Ergibt: "192.168.1.0"
+        },
+        {
+          "name": "DATE_TRUNCATE_TO_YEAR",
+          "baseStrategy": "DATE_TRUNCATE",
+          "parameters": { "granularity": "YEAR" }
+          // Ergibt: "1985-01-01 00:00:00"
+        },
+        {
+          "name": "NAME_INITIALS_ONLY",
+          "baseStrategy": "NAME_TOKENIZE",
+          "parameters": { "mode": "INITIAL_DOT" }
+          // Ergibt: "M. M."
         },
         {
           "name": "GEO_DISTRICT_500M",
           "baseStrategy": "GEO_JITTER",
           "parameters": { "jitterRadiusMeters": 500 }
+          // Addiert deterministisches Rauschen von +/- 500m
+        },
+        {
+          "name": "REDACT_COMPLETELY",
+          "baseStrategy": "CONSTANT_REPLACE",
+          "parameters": { "replacementValue": "[REDACTED]" }
         }
-      ],
-      "AutoMaskingPolicyMatrix": [
-        { "piiType": "PII_DIRECT", "namePattern": "iban", "ruleName": "IBAN_STANDARD_4_4" },
-        { "piiType": "PII_DIRECT", "namePattern": "email", "ruleName": "EMAIL_DOMAIN_RETAIN" },
-        { "piiType": "PII_INDIRECT", "namePattern": "lat|lon", "ruleName": "GEO_DISTRICT_500M" }
       ]
     }
   }
 }
 ```
+
+#### Zusammenspiel mit der KI & Fachexperten:
+1. **KI-Vorqualifizierung:** Das LLM erhält die `PiiCategories` und wählt für jede Spalte die passende Kategorie und die zugehörige `defaultMaskingRule` aus.
+2. **Review & Override:** Der Data Owner sieht im Freigabe-Cockpit:
+   * Erkannte Kategorie: `IBAN` (Vorschlag: `IBAN_STANDARD_4_4`)
+   * Er kann mit einem Klick eine alternative Regel (z. B. `REDACT_COMPLETELY`) auswählen oder die Erkennung anpassen.
+3. **Eigene Firmen-Kategorien (Custom PII):** Ein Kunde kann in 3 Zeilen JSON eine neue Kategorie anlegen (z. B. `"CUSTOMER_LOYALTY_ID"`), ein Regex-Pattern hinterlegen und mit einer Maskierungsregel verknüpfen – ohne Software-Update.
 
 ---
 
