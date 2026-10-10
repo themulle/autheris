@@ -74,8 +74,47 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             CompilerInfo.Version);
     }
 
-    /// <summary>Literals are bound instead of inlined (WP-A3). Off until literal parameterization is enabled.</summary>
+    /// <summary>
+    /// Literals are bound instead of inlined on a bound emitter context (WP-A3, INV-4). A dialect opts in once its inline
+    /// structural positions are registered with the emitter context. Off for dialects without a governed path.
+    /// </summary>
     protected virtual bool BindLiterals => false;
+
+    /// <summary>Appends a validated integer at an allow-listed inline position (row count, ordinal, frame offset) and registers it.</summary>
+    protected static void AppendInlineInteger(ref ValueStringBuilder builder, long value, SqlEmitterContext context)
+    {
+        int start = builder.Length;
+        builder.Append(value);
+        context.RegisterInlineNumericPosition(start, builder.Length - start);
+    }
+
+    /// <summary>Appends constant generator text that may contain digits (types, fixed templates) and registers it as structural.</summary>
+    protected static void AppendStructural(ref ValueStringBuilder builder, SqlEmitterContext context, string text)
+    {
+        int start = builder.Length;
+        builder.Append(text);
+        context.RegisterInlineNumericPosition(start, builder.Length - start);
+    }
+
+    /// <summary>
+    /// Row counts and ordinals are structural integers that stay inline (plan 3.4); any other expression is emitted normally.
+    /// </summary>
+    protected void GenerateStructuralInteger(Expression expression, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        if (context.IsBound && BindLiterals && expression is LiteralExpression { Type: LiteralType.Integer, Value: not null } literal)
+        {
+            AppendInlineInteger(ref builder, Convert.ToInt64(literal.Value, CultureInfo.InvariantCulture), context);
+            return;
+        }
+
+        GenerateExpression(expression, ref builder, context);
+    }
+
+    /// <summary>Binds an integer value with the narrowest fitting integer type.</summary>
+    protected static string BindInteger(long value, SqlEmitterContext context) =>
+        context.BindValue(value is >= int.MinValue and <= int.MaxValue ? (int)value : value,
+            value is >= int.MinValue and <= int.MaxValue ? SqlParameterType.Int32 : SqlParameterType.Int64,
+            ParameterOrigin.QueryLiteral);
 
     public virtual string GenerateSql(SqlStatement statement)
     {
@@ -398,7 +437,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         {
             if (i > 0) builder.Append(", ");
             var el = orderBy.Elements[i];
-            GenerateExpression(el.Expression, ref builder, context);
+            GenerateStructuralInteger(el.Expression, ref builder, context);
             builder.Append(el.Direction == SortDirection.Descending ? " DESC" : " ASC");
             if (el.NullOrder == NullOrdering.First) builder.Append(" NULLS FIRST");
             else if (el.NullOrder == NullOrdering.Last) builder.Append(" NULLS LAST");
@@ -614,7 +653,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(cast.IsTryCast ? "TRY_CAST(" : "CAST(");
                 GenerateExpression(cast.Operand, ref builder, context);
                 builder.Append(" AS ");
-                builder.Append(FormatTypeName(ParseTypeName(cast.TargetType)));
+                AppendStructural(ref builder, context, FormatTypeName(ParseTypeName(cast.TargetType)));
                 builder.Append(')');
                 break;
             case RowValueExpression row:
@@ -659,6 +698,17 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void FormatBinaryExpression(ref ValueStringBuilder builder, BinaryExpression b, SqlEmitterContext context)
     {
+        // The canonical tautology and deny-all (1 = 1, 1 = 0) are the only constants emitted as text (plan 3.4).
+        if (context.IsBound && BindLiterals && b.Operator == BinaryOperator.Equal &&
+            b.Left is LiteralExpression { Type: LiteralType.Integer, Value: not null } left &&
+            b.Right is LiteralExpression { Type: LiteralType.Integer, Value: not null } right &&
+            Convert.ToInt64(left.Value, CultureInfo.InvariantCulture) == 1 &&
+            Convert.ToInt64(right.Value, CultureInfo.InvariantCulture) is 0 or 1)
+        {
+            AppendStructural(ref builder, context, Convert.ToInt64(right.Value, CultureInfo.InvariantCulture) == 1 ? "1 = 1" : "1 = 0");
+            return;
+        }
+
         bool parensLeft = NeedsParentheses(b.Left, b.Operator, isLeft: true);
         bool parensRight = NeedsParentheses(b.Right, b.Operator, isLeft: false);
 
@@ -1026,7 +1076,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         foreach (var expr in groupBy.GroupingExpressions)
         {
             if (!first) builder.Append(", ");
-            GenerateExpression(expr, ref builder, context);
+            GenerateStructuralInteger(expr, ref builder, context);
             first = false;
         }
 
@@ -1055,7 +1105,7 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
                 for (int j = 0; j < set.Count; j++)
                 {
                     if (j > 0) builder.Append(", ");
-                    GenerateExpression(set[j], ref builder, context);
+                    GenerateStructuralInteger(set[j], ref builder, context);
                 }
                 if (parenthesize) builder.Append(')');
             }
@@ -1175,20 +1225,20 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             if (window.Frame.End != null)
             {
                 builder.Append("BETWEEN ");
-                FormatFrameBound(ref builder, window.Frame.Start);
+                FormatFrameBound(ref builder, window.Frame.Start, context);
                 builder.Append(" AND ");
-                FormatFrameBound(ref builder, window.Frame.End);
+                FormatFrameBound(ref builder, window.Frame.End, context);
             }
             else
             {
-                FormatFrameBound(ref builder, window.Frame.Start);
+                FormatFrameBound(ref builder, window.Frame.Start, context);
             }
         }
 
         builder.Append(')');
     }
 
-    private static void FormatFrameBound(ref ValueStringBuilder builder, FrameBound bound)
+    private static void FormatFrameBound(ref ValueStringBuilder builder, FrameBound bound, SqlEmitterContext context)
     {
         switch (bound.Kind)
         {
@@ -1196,11 +1246,11 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             case FrameBoundKind.UnboundedFollowing: builder.Append("UNBOUNDED FOLLOWING"); break;
             case FrameBoundKind.CurrentRow: builder.Append("CURRENT ROW"); break;
             case FrameBoundKind.Preceding:
-                builder.Append(bound.Offset.ToString(CultureInfo.InvariantCulture));
+                AppendInlineInteger(ref builder, bound.Offset, context);
                 builder.Append(" PRECEDING");
                 break;
             case FrameBoundKind.Following:
-                builder.Append(bound.Offset.ToString(CultureInfo.InvariantCulture));
+                AppendInlineInteger(ref builder, bound.Offset, context);
                 builder.Append(" FOLLOWING");
                 break;
         }
@@ -1337,6 +1387,12 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             return;
         }
 
+        if (context.IsBound && BindLiterals)
+        {
+            FormatBoundLiteral(ref builder, lit, context);
+            return;
+        }
+
         switch (lit.Type)
         {
             case LiteralType.Boolean:
@@ -1357,6 +1413,68 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             default:
                 builder.Append(lit.Value.ToString() ?? string.Empty);
                 break;
+        }
+    }
+
+    /// <summary>INV-4: a literal value reaches the database only as a bound parameter.</summary>
+    private void FormatBoundLiteral(ref ValueStringBuilder builder, LiteralExpression lit, SqlEmitterContext context)
+    {
+        switch (lit.Type)
+        {
+            case LiteralType.Boolean:
+            {
+                // TRUE and FALSE are keywords (plan 3.4); the dialect spells them as a registered structural token.
+                int start = builder.Length;
+                FormatBoolean(ref builder, (bool)lit.Value!, context);
+                context.RegisterInlineNumericPosition(start, builder.Length - start);
+                break;
+            }
+            case LiteralType.Integer:
+                builder.Append(BindInteger(Convert.ToInt64(lit.Value, CultureInfo.InvariantCulture), context));
+                break;
+            case LiteralType.Decimal:
+            {
+                decimal value = lit.Value switch
+                {
+                    decimal d => d,
+                    double dbl => (decimal)dbl,
+                    _ => decimal.Parse(Convert.ToString(lit.Value, CultureInfo.InvariantCulture)!, NumberStyles.Float, CultureInfo.InvariantCulture)
+                };
+                builder.Append(context.BindValue(value, SqlParameterType.Decimal, ParameterOrigin.QueryLiteral));
+                break;
+            }
+            case LiteralType.String:
+                builder.Append(context.BindValue(lit.Value!.ToString() ?? string.Empty, SqlParameterType.String, ParameterOrigin.QueryLiteral));
+                break;
+            case LiteralType.Binary:
+                builder.Append(context.BindValue(ParseBinaryLiteral(lit.Value!.ToString() ?? string.Empty), SqlParameterType.Binary, ParameterOrigin.QueryLiteral));
+                break;
+            default:
+                throw new NotSupportedException($"Unsupported literal type: {lit.Type}");
+        }
+    }
+
+    private static byte[] ParseBinaryLiteral(string literal)
+    {
+        string checkedLiteral = TrinoSqlEngine.Ast.SqlSafeTokens.EnsureBinaryLiteral(literal);
+        string hex = checkedLiteral[2..^1].Replace(" ", string.Empty, StringComparison.Ordinal);
+        return Convert.FromHexString(hex);
+    }
+
+    /// <summary>Parses the value of a DATE/TIME/TIMESTAMP literal into a typed .NET value; unparsable values fail closed.</summary>
+    protected static (object Value, SqlParameterType Type) ParseTypedLiteralValue(TypedLiteralExpression literal)
+    {
+        string text = literal.Value.Trim();
+        switch (literal.Kind)
+        {
+            case TypedLiteralKind.Date when DateOnly.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date):
+                return (date.ToDateTime(TimeOnly.MinValue), SqlParameterType.Date);
+            case TypedLiteralKind.Time when TimeOnly.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var time):
+                return (time.ToTimeSpan(), SqlParameterType.Time);
+            case TypedLiteralKind.Timestamp when DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var timestamp):
+                return (timestamp, SqlParameterType.Timestamp);
+            default:
+                throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"The {literal.Kind} literal value is not a valid {literal.Kind} value.");
         }
     }
 }

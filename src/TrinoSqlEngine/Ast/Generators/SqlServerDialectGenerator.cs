@@ -4,6 +4,7 @@ using System;
 using System.Globalization;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Buffer;
+using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
@@ -14,6 +15,9 @@ using TrinoSqlEngine.Ast.Nodes;
 public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 {
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.SqlServer;
+
+    // WP-A3: every inline structural position of this generator is registered with the emitter context.
+    protected override bool BindLiterals => true;
 
     protected override bool SupportsTryCast => true;
     protected override bool SupportsJoinUsing => false;
@@ -103,7 +107,7 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
         {
             builder.Append("((DATEPART(weekday, ");
             GenerateExpression(source, ref builder, context);
-            builder.Append(") + @@DATEFIRST + 5) % 7 + 1)");
+            AppendStructural(ref builder, context, ") + @@DATEFIRST + 5) % 7 + 1)");
             return;
         }
 
@@ -145,7 +149,15 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
     protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context)
     {
         builder.Append("CAST(");
-        FormatStringLiteral(ref builder, literal.Value, context);
+        if (context.IsBound)
+        {
+            var (value, type) = ParseTypedLiteralValue(literal);
+            builder.Append(context.BindValue(value, type, ParameterOrigin.QueryLiteral));
+        }
+        else
+        {
+            FormatStringLiteral(ref builder, literal.Value, context);
+        }
         builder.Append(literal.Kind switch
         {
             TypedLiteralKind.Date => " AS date)",
@@ -165,7 +177,7 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
         builder.Append("DATEADD(");
         builder.Append(DateUnitName(unit));
         builder.Append(", ");
-        builder.Append(amount.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        builder.Append(context.IsBound ? BindInteger(amount, context) : amount.ToString(System.Globalization.CultureInfo.InvariantCulture));
         builder.Append(", ");
         GenerateExpression(source, ref builder, context);
         builder.Append(')');
@@ -190,12 +202,12 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
                 GenerateExpression(source, ref builder, context);
                 builder.Append("), MONTH(");
                 GenerateExpression(source, ref builder, context);
-                builder.Append("), 1) AS datetimeoffset)");
+                AppendStructural(ref builder, context, "), 1) AS datetimeoffset)");
                 return;
             case DateUnit.Year:
                 builder.Append("CAST(DATEFROMPARTS(YEAR(");
                 GenerateExpression(source, ref builder, context);
-                builder.Append("), 1, 1) AS datetimeoffset)");
+                AppendStructural(ref builder, context, "), 1, 1) AS datetimeoffset)");
                 return;
             default:
                 throw UnsupportedDateFunction("date_trunc", unit, TargetDialect);
@@ -246,7 +258,7 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
             base.GenerateExpression(expression, ref builder, context);
             context.InProjectionContext = prevProj;
             context.InPredicateContext = prevPred;
-            builder.Append(" THEN 1 ELSE 0 END");
+            AppendStructural(ref builder, context, " THEN 1 ELSE 0 END");
             return;
         }
 
@@ -306,16 +318,16 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
             {
                 builder.Append("CASE WHEN ");
                 GenerateExpression(el.Expression, ref builder, context);
-                builder.Append(" IS NULL THEN 0 ELSE 1 END, ");
+                AppendStructural(ref builder, context, " IS NULL THEN 0 ELSE 1 END, ");
             }
             else if (el.NullOrder == NullOrdering.Last && el.Direction == SortDirection.Ascending)
             {
                 builder.Append("CASE WHEN ");
                 GenerateExpression(el.Expression, ref builder, context);
-                builder.Append(" IS NULL THEN 1 ELSE 0 END, ");
+                AppendStructural(ref builder, context, " IS NULL THEN 1 ELSE 0 END, ");
             }
 
-            GenerateExpression(el.Expression, ref builder, context);
+            GenerateStructuralInteger(el.Expression, ref builder, context);
             builder.Append(el.Direction == SortDirection.Descending ? " DESC" : " ASC");
         }
     }
@@ -335,18 +347,18 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
         builder.Append("OFFSET ");
         if (pagination.Offset != null)
         {
-            GenerateExpression(pagination.Offset, ref builder, context);
+            GenerateStructuralInteger(pagination.Offset, ref builder, context);
         }
         else
         {
-            builder.Append('0');
+            AppendInlineInteger(ref builder, 0, context);
         }
         builder.Append(" ROWS");
 
         if (pagination.Limit != null)
         {
             builder.Append(" FETCH NEXT ");
-            GenerateExpression(pagination.Limit, ref builder, context);
+            GenerateStructuralInteger(pagination.Limit, ref builder, context);
             builder.Append(pagination.WithTies ? " ROWS WITH TIES" : " ROWS ONLY");
         }
     }
