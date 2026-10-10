@@ -26,6 +26,9 @@ internal static class DmlMaskedReadGuard
                 {
                     case SecurityPredicateExpression:
                         return false;
+                    case MaskExpression:
+                        // CR-ADG-36: an injected mask (inside a secured subquery) names the masked column only to hide it, it is not a read
+                        return false;
                     case ColumnReference column when IsTargetColumn(column.Name, maskedColumns, targetNames):
                         violation = "A masked column of the DML target is read by the statement.";
                         return false;

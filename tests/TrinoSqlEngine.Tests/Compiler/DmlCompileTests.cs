@@ -489,6 +489,19 @@ public class DmlCompileTests
         Assert.Equal(1, Tenants(c));
     }
 
+    // CR-ADG-36: the injected mask of a secured subquery is not a user read of the target's masked column.
+    [Theory]
+    [MemberData(nameof(DialectData))]
+    public void Update_SubqueryOverAMaskedTable_ThatDoesNotReadTheMaskedColumn_Compiles(TargetSqlDialect dialect)
+    {
+        MaskEmail();
+        var c = Compile(dialect, "UPDATE orders SET status = (SELECT max(o2.status) FROM orders o2 WHERE o2.id = 1) WHERE id = 1");
+        Assert.Equal(SqlStatementClass.Update, c.StatementClass);
+        // reading the masked column of the target stays rejected, directly and through the subquery
+        RejectedSecurity(dialect, "UPDATE orders SET status = email WHERE id = 1");
+        RejectedSecurity(dialect, "UPDATE orders SET status = (SELECT max(o2.status) FROM orders o2 WHERE o2.id = 1) WHERE email = 'x'");
+    }
+
     // ---- MERGE ----
 
     /// <summary>Oracle has neither a stand-alone MERGE DELETE nor repeated clause kinds (see <see cref="MergeClauseShape"/>).</summary>
