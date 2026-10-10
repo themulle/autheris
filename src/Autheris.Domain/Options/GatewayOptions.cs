@@ -1353,7 +1353,19 @@ public sealed class SystemMetricsOptions
 {
     public bool Enabled { get; init; } = true;
     public bool ExposeRestEndpoints { get; init; } = true;
-    public List<string> AllowedRoles { get; init; } = ["GovernanceAdmin", "ClusterAdmin", "SecurityAdmin"];
+
+    /// <summary>
+    /// Roles that may read the system metrics endpoints. When not configured: GovernanceAdmin, ClusterAdmin and
+    /// SecurityAdmin. A configured list replaces that default entirely. Nullable on purpose: the configuration binder
+    /// appends to pre-filled lists, so a non-empty default could not be narrowed. An empty list never opens the
+    /// endpoints; the endpoint then requires GovernanceAdmin only.
+    /// </summary>
+    public List<string>? AllowedRoles { get; init; }
+
+    private static readonly string[] DefaultAllowedRoles = ["GovernanceAdmin", "ClusterAdmin", "SecurityAdmin"];
+
+    /// <summary>Configured <see cref="AllowedRoles"/> or the default list.</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedRoles() => AllowedRoles ?? (IReadOnlyList<string>)DefaultAllowedRoles;
 }
 
 public sealed class GoldenQueryOptions
