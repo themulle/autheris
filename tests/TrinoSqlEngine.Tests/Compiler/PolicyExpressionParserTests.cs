@@ -402,7 +402,7 @@ public class PolicyExpressionParserTests
         SelectStatement Stmt(Expression inner) => new(null,
             new QuerySpecification(false, new SelectItem[] { new WildcardSelectItem(null) },
                 new SubqueryTableSource(new SelectStatement(null,
-                    new QuerySpecification(false, new SelectItem[] { new WildcardSelectItem(null) },
+                    new QuerySpecification(false, new SelectItem[] { new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier("Id", true) })), new SqlIdentifier("Id", true)) },
                         new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("dbo", true), new SqlIdentifier("Orders", true) }), null),
                         new SecurityPredicateExpression(inner, id, SecurityScope.Root), null, null), null, null),
                     new SqlIdentifier("o", true)), null, null, null), null, null);

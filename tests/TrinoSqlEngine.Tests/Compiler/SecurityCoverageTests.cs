@@ -28,7 +28,7 @@ public class SecurityCoverageTests
     /// <summary>Secured derived table: (SELECT * FROM [dbo].[table] WHERE predicate) AS alias.</summary>
     private static SubqueryTableSource Secured(string table, string alias, Expression? where) =>
         new(new SelectStatement(null,
-                new QuerySpecification(false, new SelectItem[] { new WildcardSelectItem(null) },
+                new QuerySpecification(false, new SelectItem[] { new ColumnSelectItem(Col("id"), new SqlIdentifier("id", true)) },
                     new NamedTableSource(Canonical(table), null), where, null, null), null, null),
             new SqlIdentifier(alias, true));
 
@@ -45,8 +45,9 @@ public class SecurityCoverageTests
         if (name.Parts.Count == 0) return null;
         return name.SimpleName.ToLowerInvariant() switch
         {
-            "t" => new TableCoverageRequirement("dbo.t", "dbo", "t", ImmutableArray.Create(RootId), ImmutableArray.Create(new SecurityPredicateId("dbo.t", 0))),
-            "u" => new TableCoverageRequirement("dbo.u", "dbo", "u", ImmutableArray.Create(TenantId), ImmutableArray.Create(TenantId)),
+            "t" => new TableCoverageRequirement("dbo.t", "dbo", "t", ImmutableArray.Create(RootId), ImmutableArray.Create(new SecurityPredicateId("dbo.t", 0)),
+                MaskedColumns: ImmutableHashSet.Create("secret"), CatalogColumns: ImmutableHashSet.Create("id", "secret")),
+            "u" => new TableCoverageRequirement("dbo.u", "dbo", "u", ImmutableArray.Create(TenantId), ImmutableArray.Create(TenantId), CatalogColumns: ImmutableHashSet.Create("id")),
             _ => null
         };
     });
@@ -101,6 +102,103 @@ public class SecurityCoverageTests
         _ = scope;
     }
 
+    // ---- CR-ADG-06: the shape of the secured derived table is proven, not assumed ----
+
+    private static SelectStatement Derived(
+        IReadOnlyList<SelectItem>? projections = null,
+        Expression? where = null,
+        bool distinct = false,
+        GroupByClause? groupBy = null,
+        Expression? having = null,
+        OrderByClause? orderBy = null,
+        PaginationClause? pagination = null,
+        WithClause? with = null)
+    {
+        projections ??= new SelectItem[] { new ColumnSelectItem(Col("id"), new SqlIdentifier("id", true)) };
+        var inner = new SelectStatement(with,
+            new QuerySpecification(distinct, projections, new NamedTableSource(Canonical("t"), null),
+                where ?? Pred(RootId, SecurityScope.Root), groupBy, having), orderBy, pagination);
+        return Select(new SubqueryTableSource(inner, new SqlIdentifier("t", true)));
+    }
+
+    [Fact]
+    public void SecuredDerivedTable_CanonicalShape_Passes()
+    {
+        Verify(Derived());
+        Verify(Derived(where: new BinaryExpression(Pred(RootId, SecurityScope.Root), And, Pred(RootId, SecurityScope.Root))));
+    }
+
+    [Fact]
+    public void SecuredDerivedTable_Wildcard_IsRejected() =>
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(new SelectItem[] { new WildcardSelectItem(null) })));
+
+    [Fact]
+    public void SecuredDerivedTable_ComputedProjection_IsRejected() =>
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(new SelectItem[]
+        {
+            new ColumnSelectItem(new BinaryExpression(Col("id"), Add, Int(1)), new SqlIdentifier("id", true))
+        })));
+
+    [Fact]
+    public void SecuredDerivedTable_UncatalogedColumn_IsRejected() =>
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(new SelectItem[]
+        {
+            new ColumnSelectItem(Col("hidden"), new SqlIdentifier("hidden", true))
+        })));
+
+    [Fact]
+    public void SecuredDerivedTable_ProjectionUnderAnotherName_IsRejected() =>
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(new SelectItem[]
+        {
+            new ColumnSelectItem(Col("id"), new SqlIdentifier("other", true))
+        })));
+
+    [Fact]
+    public void SecuredDerivedTable_WhereWithAnExtraNonPredicateConjunct_IsRejected() =>
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(
+            where: new BinaryExpression(Pred(RootId, SecurityScope.Root), And, new BinaryExpression(Col("secret"), Equal, Int(1))))));
+
+    [Fact]
+    public void SecuredDerivedTable_MaskedColumnInWhere_IsRejected() =>
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(
+            where: new BinaryExpression(new BinaryExpression(Col("secret"), Equal, Int(1)), And, Pred(RootId, SecurityScope.Root)))));
+
+    [Fact]
+    public void SecuredDerivedTable_MaskedColumnInGroupBy_IsRejected() =>
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(groupBy: new GroupByClause(new Expression[] { Col("secret") }, null))));
+
+    [Fact]
+    public void SecuredDerivedTable_Having_Distinct_AreRejected()
+    {
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(having: new BinaryExpression(Col("id"), Equal, Int(1)))));
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(distinct: true)));
+    }
+
+    [Fact]
+    public void SecuredDerivedTable_OrderByOnTheMaskedColumn_IsRejected() =>
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(orderBy: new OrderByClause(new[]
+        {
+            new OrderByElement(Col("secret"))
+        }))));
+
+    [Fact]
+    public void SecuredDerivedTable_PaginationOrWith_AreRejected()
+    {
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(pagination: new PaginationClause(null, Int(5)))));
+        Assert.Throws<SecurityCoverageException>(() => Verify(Derived(with: new WithClause(false, new[]
+        {
+            new CommonTableExpression(new SqlIdentifier("c", true), null, SelectBody(new ValuesQueryBody(new[] { new RowValueExpression(new Expression[] { Int(1) }) })))
+        }))));
+    }
+
+    [Fact]
+    public void PhysicalTable_AsABranchOfASetOperation_IsRejected_EvenWithThePredicate()
+    {
+        var branch = Spec(new NamedTableSource(Canonical("t"), null), Pred(RootId, SecurityScope.Root));
+        var stmt = SelectBody(new SetOperationQuery(branch, SetOperator.Union, false, branch));
+        Assert.Throws<SecurityCoverageException>(() => Verify(stmt));
+    }
+
     [Fact]
     public void Verifier_Throws_WhenPredicateInJoinOnInsteadOfDerivedWhere()
     {
@@ -121,8 +219,10 @@ public class SecurityCoverageTests
     {
         var hidden = new BinaryExpression(Pred(RootId, SecurityScope.Root), Or, new BinaryExpression(Col("x"), Equal, Int(1)));
         Assert.Throws<SecurityCoverageException>(() => Verify(Select(Secured("t", "a", hidden))));
+        // CR-ADG-06: the secured WHERE holds security predicates only; a user conjunct next to them is a shape violation.
         var conjunct = new BinaryExpression(new BinaryExpression(Col("x"), Equal, Int(1)), And, Pred(RootId, SecurityScope.Root));
-        Verify(Select(Secured("t", "a", conjunct)));
+        Assert.Throws<SecurityCoverageException>(() => Verify(Select(Secured("t", "a", conjunct))));
+        Verify(Select(Secured("t", "a", new BinaryExpression(Pred(RootId, SecurityScope.Root), And, Pred(RootId, SecurityScope.Root)))));
     }
 
     [Fact]

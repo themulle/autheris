@@ -191,6 +191,7 @@ public sealed class TypedPolicyContext
             : ImmutableArray.Create(new SecurityPredicateId(id.ToString(), 0));
         var root = RowFilters.ShouldApplyPolicy(id) ? tenant.Add(new SecurityPredicateId(id.ToString(), 1)) : tenant;
         var masked = entry.Columns.Where(c => Masks.HasMask(id, c.Name)).Select(c => c.Name).ToImmutableHashSet(StringComparer.Ordinal);
-        return new TableCoverageRequirement(id.ToString(), id.Schema, id.Table, root, tenant, masked, id.Catalog);
+        var columns = entry.Columns.Select(c => c.Name).ToImmutableHashSet(StringComparer.Ordinal);
+        return new TableCoverageRequirement(id.ToString(), id.Schema, id.Table, root, tenant, masked, id.Catalog, columns);
     }
 }

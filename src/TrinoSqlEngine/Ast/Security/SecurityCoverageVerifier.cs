@@ -29,6 +29,7 @@ public sealed class SecurityCoverageException : SecurityException
 /// <param name="RootPredicates">Predicates required when the table is referenced by the user query.</param>
 /// <param name="PolicySubqueryPredicates">Predicates required when the table is referenced inside a policy subquery (tenant only).</param>
 /// <param name="MaskedColumns">Canonical names of columns that must be projected as <see cref="MaskExpression"/> (never raw).</param>
+/// <param name="CatalogColumns">Canonical names of the cataloged columns; a secured derived table may project only these (CR-ADG-06). Null: any named column.</param>
 public sealed record TableCoverageRequirement(
     string Identity,
     string Schema,
@@ -36,7 +37,8 @@ public sealed record TableCoverageRequirement(
     ImmutableArray<SecurityPredicateId> RootPredicates,
     ImmutableArray<SecurityPredicateId> PolicySubqueryPredicates,
     ImmutableHashSet<string>? MaskedColumns = null,
-    string? Catalog = null);
+    string? Catalog = null,
+    ImmutableHashSet<string>? CatalogColumns = null);
 
 /// <summary>
 /// Production post-condition of the compiler (runs on every compile). It walks the final AST and proves that every physical
@@ -129,7 +131,7 @@ public sealed class SecurityCoverageVerifier
                 }
             }
 
-            Body(s.Body, scope, policyScope);
+            Body(s.Body, scope, policyScope, s);
             if (s.OrderBy != null)
             {
                 foreach (var el in s.OrderBy.Elements) Expr(el.Expression, scope, policyScope);
@@ -144,13 +146,13 @@ public sealed class SecurityCoverageVerifier
             Exit();
         }
 
-        private void Body(QueryBody body, ImmutableHashSet<string> cte, bool policyScope)
+        private void Body(QueryBody body, ImmutableHashSet<string> cte, bool policyScope, SelectStatement? enclosing = null)
         {
             Enter();
             switch (body)
             {
                 case QuerySpecification spec:
-                    Spec(spec, cte, policyScope);
+                    Spec(spec, cte, policyScope, enclosing);
                     break;
                 case SetOperationQuery setOp:
                     Body(setOp.Left, cte, policyScope);
@@ -168,7 +170,7 @@ public sealed class SecurityCoverageVerifier
             Exit();
         }
 
-        private void Spec(QuerySpecification spec, ImmutableHashSet<string> cte, bool policyScope)
+        private void Spec(QuerySpecification spec, ImmutableHashSet<string> cte, bool policyScope, SelectStatement? enclosing)
         {
             foreach (var item in spec.Projections)
             {
@@ -177,7 +179,7 @@ public sealed class SecurityCoverageVerifier
 
             if (spec.From is NamedTableSource named && !IsCte(named, cte))
             {
-                Physical(named, spec.Where, policyScope, spec.Projections);
+                Physical(named, spec, enclosing, policyScope);
             }
             else if (spec.From != null)
             {
@@ -233,8 +235,10 @@ public sealed class SecurityCoverageVerifier
             Exit();
         }
 
-        private void Physical(NamedTableSource table, Expression? where, bool policyScope, IReadOnlyList<SelectItem> projections)
+        private void Physical(NamedTableSource table, QuerySpecification spec, SelectStatement? enclosing, bool policyScope)
         {
+            var where = spec.Where;
+            var projections = spec.Projections;
             var requirement = owner._requirementOf(table.Name)
                 ?? throw new SecurityCoverageException("A table reference could not be resolved against the catalog.");
 
@@ -249,6 +253,8 @@ public sealed class SecurityCoverageVerifier
             {
                 throw new SecurityCoverageException("A physical table is not emitted as its schema-qualified canonical name.");
             }
+
+            VerifyShape(requirement, spec, enclosing, policyScope);
 
             if (!policyScope && requirement.MaskedColumns is { Count: > 0 } masked)
             {
@@ -271,6 +277,76 @@ public sealed class SecurityCoverageVerifier
             if (++_securedReferences > owner._maxSecuredTableReferences)
             {
                 throw new SqlLimitExceededException(SqlLimitKind.SecuredTableReferences, owner._dialect, _securedReferences, owner._maxSecuredTableReferences);
+            }
+        }
+
+        /// <summary>
+        /// CR-ADG-06: the physical table must be the single source of a pure secured derived table: it is the only body of its
+        /// SELECT (no WITH, ORDER BY, pagination, set operation), there is no DISTINCT, GROUP BY or HAVING, the WHERE consists
+        /// of security predicates only, and the projections are exactly cataloged columns or their mask expressions (no
+        /// wildcard, no computed expression). A bare physical reference inside a policy subquery of a table without a tenant
+        /// column has no predicate to carry and is exempt.
+        /// </summary>
+        private static void VerifyShape(TableCoverageRequirement requirement, QuerySpecification spec, SelectStatement? enclosing, bool policyScope)
+        {
+            var required = policyScope ? requirement.PolicySubqueryPredicates : requirement.RootPredicates;
+            if (policyScope && required.IsEmpty)
+            {
+                return;
+            }
+
+            if (enclosing is null || !ReferenceEquals(enclosing.Body, spec) || enclosing.With is not null || enclosing.OrderBy is not null || enclosing.Pagination is not null)
+            {
+                throw new SecurityCoverageException("A physical table is not the single source of a secured derived table.");
+            }
+
+            if (spec.Distinct || spec.GroupBy is not null || spec.Having is not null)
+            {
+                throw new SecurityCoverageException("A secured derived table must not use DISTINCT, GROUP BY or HAVING.");
+            }
+
+            StrictConjuncts(spec.Where);
+
+            foreach (var item in spec.Projections)
+            {
+                if (item is not ColumnSelectItem { Alias: { IsQuoted: true } alias } column)
+                {
+                    throw new SecurityCoverageException("A secured derived table may only project cataloged columns under their own name.");
+                }
+
+                var reference = column.Expression switch
+                {
+                    ColumnReference r => r,
+                    MaskExpression m => m.Column,
+                    _ => throw new SecurityCoverageException("A secured derived table may only project cataloged columns or their mask expressions.")
+                };
+
+                if (reference.Name.Parts.Count != 1 || !reference.Name.Parts[0].IsQuoted ||
+                    !string.Equals(reference.Name.Parts[0].Value, alias.Value, StringComparison.Ordinal) ||
+                    (requirement.CatalogColumns is not null && !requirement.CatalogColumns.Contains(alias.Value)))
+                {
+                    throw new SecurityCoverageException("A secured derived table projects a column that is not a cataloged column.");
+                }
+            }
+        }
+
+        private static void StrictConjuncts(Expression? where)
+        {
+            switch (where)
+            {
+                case null:
+                case SecurityPredicateExpression:
+                    return;
+                case ParenthesizedExpression p:
+                    StrictConjuncts(p.Expression);
+                    return;
+                case BinaryExpression { Operator: BinaryOperator.And } b:
+                    RuntimeHelpers.EnsureSufficientExecutionStack();
+                    StrictConjuncts(b.Left);
+                    StrictConjuncts(b.Right);
+                    return;
+                default:
+                    throw new SecurityCoverageException("The WHERE of a secured derived table may only contain security predicates.");
             }
         }
 
