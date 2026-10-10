@@ -1,6 +1,7 @@
 namespace TrinoSqlEngine.Ast.Generators;
 
 using System;
+using System.Collections.Frozen;
 using System.Globalization;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Buffer;
@@ -239,6 +240,135 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
             builder.Append(value ? '1' : '0');
         }
     }
+
+    // ---- typed column masks (WP-A6) ----
+
+    private static readonly System.Text.RegularExpressions.Regex NativeTypeRegex = new(
+        @"\A(?<name>[a-z][a-z0-9]*)(?:\((?<args>max|[0-9]{1,4}(?:, ?[0-9]{1,4})?)\))?\z",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+        TimeSpan.FromMilliseconds(100));
+
+    private static readonly FrozenSet<string> NumericOrTemporalTypes = new[]
+    {
+        "int", "bigint", "smallint", "tinyint", "decimal", "numeric", "money", "smallmoney", "float", "real", "bit",
+        "date", "datetime", "datetime2", "datetimeoffset", "smalldatetime", "time", "uniqueidentifier"
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    private static readonly FrozenSet<string> TextAndBinaryTypes = new[]
+    {
+        "char", "varchar", "nchar", "nvarchar", "binary", "varbinary", "text", "ntext"
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// A catalog (SQL Server native) type name validated against a closed set; an unknown or malformed type fails closed.
+    /// </summary>
+    private static (string Text, bool NumericOrTemporal) NativeType(string? dataType)
+    {
+        if (string.IsNullOrWhiteSpace(dataType))
+        {
+            throw new System.Security.SecurityException("A typed column mask requires the catalog data type of the column.");
+        }
+
+        var match = NativeTypeRegex.Match(dataType.Trim());
+        if (!match.Success)
+        {
+            throw new System.Security.SecurityException("The catalog data type of a masked column is not permitted.");
+        }
+
+        string name = match.Groups["name"].Value.ToLowerInvariant();
+        bool numeric = NumericOrTemporalTypes.Contains(name);
+        if (!numeric && !TextAndBinaryTypes.Contains(name))
+        {
+            throw new System.Security.SecurityException("The catalog data type of a masked column is not permitted.");
+        }
+
+        string args = match.Groups["args"].Success ? "(" + match.Groups["args"].Value.Replace(" ", string.Empty, StringComparison.Ordinal).ToLowerInvariant() + ")" : string.Empty;
+        return (name + args, numeric);
+    }
+
+    protected override void FormatMask(ref ValueStringBuilder builder, MaskExpression mask, SqlEmitterContext context)
+    {
+        var (type, numeric) = NativeType(mask.DataType);
+        string column = "[" + mask.Column.Name.SimpleName.Replace("]", "]]", StringComparison.Ordinal) + "]";
+        var args = mask.Arguments;
+
+        switch (mask.Kind)
+        {
+            case Governance.MaskKind.Nullify:
+                AppendStructural(ref builder, context, "CAST(NULL AS " + type + ")");
+                break;
+
+            case Governance.MaskKind.Redact:
+                if (numeric)
+                {
+                    AppendStructural(ref builder, context, "CAST(NULL AS " + type + ")");
+                }
+                else
+                {
+                    builder.Append(context.BindPolicy(args.Constant ?? throw MissingArgument(mask, "Constant")));
+                }
+
+                break;
+
+            case Governance.MaskKind.Constant:
+                builder.Append("CAST(");
+                builder.Append(context.BindPolicy(args.Constant ?? throw MissingArgument(mask, "Constant")));
+                AppendStructural(ref builder, context, " AS " + type + ")");
+                break;
+
+            case Governance.MaskKind.PartialMask:
+            {
+                string prefix = context.BindPolicy(args.KeepPrefix ?? throw MissingArgument(mask, "KeepPrefix"));
+                string suffix = context.BindPolicy(args.KeepSuffix ?? throw MissingArgument(mask, "KeepSuffix"));
+                string maskChar = context.BindPolicy(args.MaskChar ?? throw MissingArgument(mask, "MaskChar"));
+                string keep = "(" + prefix + " + " + suffix + ")";
+                Put(ref builder, "CASE WHEN ", column, " IS NULL THEN NULL WHEN LEN(", column, ") <= ", keep, " THEN REPLICATE(", maskChar, ", ");
+                AppendInlineInteger(ref builder, 5, context);
+                Put(ref builder, ") ELSE CONCAT(LEFT(", column, ", ", prefix, "), REPLICATE(", maskChar,
+                    ", CASE WHEN LEN(", column, ") > ", keep, " THEN LEN(", column, ") - ", keep, " ELSE ");
+                AppendInlineInteger(ref builder, 5, context);
+                Put(ref builder, " END), RIGHT(", column, ", ", suffix, ")) END");
+                break;
+            }
+
+            case Governance.MaskKind.Hmac:
+            {
+                // HMAC-SHA256 from two bound key pads (inner, outer); the algorithm literal is a reviewed constant (HASHBYTES needs one).
+                string inner = context.BindPolicy(args.HmacKey ?? throw MissingArgument(mask, "HmacKey"));
+                string outer = context.BindPolicy(args.HmacKeyOuter ?? throw MissingArgument(mask, "HmacKeyOuter"));
+                AppendConstantFragment(ref builder, context, "CONVERT(VARCHAR(64), HASHBYTES('SHA2_256', ");
+                builder.Append(outer);
+                AppendConstantFragment(ref builder, context, " + HASHBYTES('SHA2_256', ");
+                builder.Append(inner);
+                AppendConstantFragment(ref builder, context, " + CAST(CAST(");
+                builder.Append(column);
+                AppendConstantFragment(ref builder, context, " AS NVARCHAR(MAX)) AS VARBINARY(MAX)))), 2)");
+                break;
+            }
+
+            case Governance.MaskKind.GeoJitter:
+            {
+                int decimals = Math.Clamp(args.Decimals ?? 2, 0, 6);
+                Put(ref builder, "CASE WHEN ", column, " IS NULL OR ", column, " = ");
+                AppendStructural(ref builder, context, "0.0");
+                Put(ref builder, " THEN ", column, " ELSE ROUND(", column, ", ");
+                AppendInlineInteger(ref builder, decimals, context);
+                builder.Append(") END");
+                break;
+            }
+
+            default:
+                throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect);
+        }
+    }
+
+    private static void Put(ref ValueStringBuilder builder, params ReadOnlySpan<string> parts)
+    {
+        foreach (var part in parts) builder.Append(part);
+    }
+
+    private static System.Security.SecurityException MissingArgument(MaskExpression mask, string argument) =>
+        new($"The {mask.Kind} mask requires the {argument} argument.");
 
     protected override string GetBinaryOperatorString(BinaryOperator op)
     {

@@ -1,6 +1,7 @@
 namespace TrinoSqlEngine.Ast.Visitors;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -11,6 +12,7 @@ using System.Text.RegularExpressions;
 using Antlr4.Runtime;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Builder;
+using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Security;
 using TrinoSqlEngine.Governance;
@@ -277,8 +279,6 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             fingerprint = predicate.Fingerprint;
         }
 
-        typed.RecordTable(new TableUsage(tid, applies, fingerprint, "-"));
-
         Expression? where = null;
         foreach (var conjunct in conjuncts)
         {
@@ -286,16 +286,26 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         }
 
         var projections = new List<SelectItem>(entry.Columns.Length);
+        var maskFingerprints = new List<string>();
         foreach (var column in entry.Columns)
         {
             var colId = new SqlIdentifier(column.Name, IsQuoted: true);
+            var columnRef = new ColumnReference(new SqlQualifiedName(new[] { colId }));
             if (typed.Masks.HasMask(tid, column.Name))
             {
-                throw new NotSupportedException("Typed column masks are not available yet.");
+                var spec = DegradeUnavailableMask(typed, typed.Masks.GetMask(tid, column.Name), column.Name);
+                typed.AddValues(spec.Parameters);
+                maskFingerprints.Add($"{column.Name}:{spec.Kind}:{AstReflection.Fingerprint(spec.Arguments)}");
+                projections.Add(new ColumnSelectItem(new MaskExpression(spec.Kind, columnRef, spec.Arguments, column.DataType), colId));
             }
-
-            projections.Add(new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[] { colId })), colId));
+            else
+            {
+                projections.Add(new ColumnSelectItem(columnRef, colId));
+            }
         }
+
+        typed.RecordTable(new TableUsage(tid, applies, fingerprint,
+            maskFingerprints.Count == 0 ? "-" : AstReflection.Fingerprint(maskFingerprints)));
 
         var canonical = new SqlQualifiedName(new[] { new SqlIdentifier(tid.Schema, true), new SqlIdentifier(tid.Table, true) });
         var innerAlias = referencesTarget ? new SqlIdentifier(RowFilterAliases.Target) : null;
@@ -303,6 +313,27 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             new QuerySpecification(false, projections, new NamedTableSource(canonical, innerAlias), where, null, null),
             null, null);
         return new SubqueryTableSource(inner, node.Alias ?? new SqlIdentifier(node.Name.SimpleName, IsQuoted: true));
+    }
+
+    /// <summary>
+    /// Decision B-2: where the dialect cannot compute an HMAC in the database (<c>InDbHmac = false</c>) an HMAC mask degrades
+    /// to Redact (fail closed). Gateway-side HMAC is rejected for WebSQL because user SQL could aggregate or sort the raw value.
+    /// The key parameters of the degraded mask are dropped, so the key never reaches the statement.
+    /// </summary>
+    private static MaskSpec DegradeUnavailableMask(TypedPolicyContext typed, MaskSpec spec, string column)
+    {
+        if (spec.Kind != MaskKind.Hmac || typed.Capabilities.InDbHmac)
+        {
+            return spec;
+        }
+
+        string name = "__mask_redact_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(column)))[..8].ToLowerInvariant();
+        var constant = new PolicyParameterExpression(name, SqlParameterType.String, ParameterOrigin.Mask);
+        return new MaskSpec(
+            MaskKind.Redact,
+            new MaskArguments(Constant: constant),
+            new Dictionary<string, PolicyValue> { [name] = new PolicyValue("[REDACTED]", SqlParameterType.String) }
+                .ToFrozenDictionary(StringComparer.Ordinal));
     }
 
     private SubqueryTableSource CreateSecuredSubqueryTableSource(

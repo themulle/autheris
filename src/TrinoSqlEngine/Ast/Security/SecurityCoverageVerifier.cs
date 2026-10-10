@@ -26,12 +26,14 @@ public sealed class SecurityCoverageException : SecurityException
 /// <param name="Table">Catalog canonical table name (exact case).</param>
 /// <param name="RootPredicates">Predicates required when the table is referenced by the user query.</param>
 /// <param name="PolicySubqueryPredicates">Predicates required when the table is referenced inside a policy subquery (tenant only).</param>
+/// <param name="MaskedColumns">Canonical names of columns that must be projected as <see cref="MaskExpression"/> (never raw).</param>
 public sealed record TableCoverageRequirement(
     string Identity,
     string Schema,
     string Table,
     ImmutableArray<SecurityPredicateId> RootPredicates,
-    ImmutableArray<SecurityPredicateId> PolicySubqueryPredicates);
+    ImmutableArray<SecurityPredicateId> PolicySubqueryPredicates,
+    ImmutableHashSet<string>? MaskedColumns = null);
 
 /// <summary>
 /// Production post-condition of the compiler (runs on every compile). It walks the final AST and proves that every physical
@@ -167,7 +169,7 @@ public sealed class SecurityCoverageVerifier
 
             if (spec.From is NamedTableSource named && !IsCte(named, cte))
             {
-                Physical(named, spec.Where, policyScope);
+                Physical(named, spec.Where, policyScope, spec.Projections);
             }
             else if (spec.From != null)
             {
@@ -223,7 +225,7 @@ public sealed class SecurityCoverageVerifier
             Exit();
         }
 
-        private void Physical(NamedTableSource table, Expression? where, bool policyScope)
+        private void Physical(NamedTableSource table, Expression? where, bool policyScope, IReadOnlyList<SelectItem> projections)
         {
             var requirement = owner._requirementOf(table.Name)
                 ?? throw new SecurityCoverageException("A table reference could not be resolved against the catalog.");
@@ -235,6 +237,11 @@ public sealed class SecurityCoverageVerifier
                 !string.Equals(parts[1].Value, requirement.Table, StringComparison.Ordinal))
             {
                 throw new SecurityCoverageException("A physical table is not emitted as its schema-qualified canonical name.");
+            }
+
+            if (!policyScope && requirement.MaskedColumns is { Count: > 0 } masked)
+            {
+                VerifyMasks(masked, projections);
             }
 
             var required = policyScope ? requirement.PolicySubqueryPredicates : requirement.RootPredicates;
@@ -253,6 +260,40 @@ public sealed class SecurityCoverageVerifier
             if (++_securedReferences > owner._maxSecuredTableReferences)
             {
                 throw new SqlLimitExceededException(SqlLimitKind.SecuredTableReferences, owner._dialect, _securedReferences, owner._maxSecuredTableReferences);
+            }
+        }
+
+        private static void VerifyMasks(ImmutableHashSet<string> masked, IReadOnlyList<SelectItem> projections)
+        {
+            foreach (var item in projections)
+            {
+                if (item is not ColumnSelectItem column)
+                {
+                    throw new SecurityCoverageException("A table with masked columns is projected with a wildcard.");
+                }
+
+                if (column.Expression is MaskExpression mask)
+                {
+                    string outName = column.Alias?.Value ?? string.Empty;
+                    if (!string.Equals(mask.Column.Name.SimpleName, outName, StringComparison.Ordinal))
+                    {
+                        throw new SecurityCoverageException("A mask expression is projected under a different column name.");
+                    }
+
+                    continue;
+                }
+
+                bool leaksRaw = false;
+                AstReflection.Walk(column.Expression, node =>
+                {
+                    if (node is MaskExpression) return false;
+                    if (node is ColumnReference reference && masked.Contains(reference.Name.SimpleName)) leaksRaw = true;
+                    return true;
+                });
+                if (leaksRaw)
+                {
+                    throw new SecurityCoverageException("A masked column is projected without its mask expression.");
+                }
             }
         }
 
@@ -326,6 +367,8 @@ public sealed class SecurityCoverageVerifier
                     break;
                 case TypedLiteralExpression or IntervalLiteralExpression or DateFunctionExpression when _insidePredicate > 0:
                     throw new SecurityCoverageException("An injected security predicate contains a raw literal value.");
+                case MaskExpression:
+                    break;
                 case ColumnReference or ParameterReference or PolicyParameterExpression
                     or TypedLiteralExpression or IntervalLiteralExpression or CurrentDateTimeExpression:
                     break;

@@ -57,6 +57,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             PolicyParameterExpression policyParameter => policyParameter,
             // INV-3: injected security predicates are opaque; a rewriter never descends into them.
             SecurityPredicateExpression securityPredicate => securityPredicate,
+            MaskExpression mask => mask,
             LiteralExpression lit => VisitLiteralExpression(lit),
             BinaryExpression b => VisitBinaryExpression(b),
             UnaryExpression un => VisitUnaryExpression(un),

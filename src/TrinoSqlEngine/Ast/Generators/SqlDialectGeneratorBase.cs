@@ -88,6 +88,18 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         context.RegisterInlineNumericPosition(start, builder.Length - start);
     }
 
+    /// <summary>Appends reviewed constant template text (it may contain quotes and digits) and registers it as a constant fragment.</summary>
+    protected static void AppendConstantFragment(ref ValueStringBuilder builder, SqlEmitterContext context, string text)
+    {
+        int start = builder.Length;
+        builder.Append(text);
+        context.RegisterConstantFragment(start, builder.Length - start);
+    }
+
+    /// <summary>Renders a typed column mask. Dialects without a governed path reject masks (fail closed).</summary>
+    protected virtual void FormatMask(ref ValueStringBuilder builder, MaskExpression mask, SqlEmitterContext context) =>
+        throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect);
+
     /// <summary>Appends constant generator text that may contain digits (types, fixed templates) and registers it as structural.</summary>
     protected static void AppendStructural(ref ValueStringBuilder builder, SqlEmitterContext context, string text)
     {
@@ -507,6 +519,9 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         context.Tick();
         switch (expression)
         {
+            case MaskExpression mask:
+                FormatMask(ref builder, mask, context);
+                break;
             case SecurityPredicateExpression securityPredicate:
                 // Always parenthesized: the injected predicate must never combine with neighbouring operators by precedence.
                 builder.Append('(');

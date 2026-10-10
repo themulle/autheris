@@ -19,7 +19,11 @@ public sealed class PolicyConflictException : SecurityException
 }
 
 /// <summary>The tenant value the compiler binds for every tenant-scoped table (never request text).</summary>
-public sealed record TenantBinding(string ParameterName, object Value, SqlParameterType Type);
+public sealed record TenantBinding(string ParameterName, object Value, SqlParameterType Type)
+{
+    // INV-16: the tenant value never appears in logs, spans or exception text.
+    public override string ToString() => $"TenantBinding {{ ParameterName = {ParameterName}, Type = {Type} }}";
+}
 
 /// <summary>
 /// A typed row-level-security predicate (plan 4.4): an AST that contains <see cref="PolicyParameterExpression"/> nodes and

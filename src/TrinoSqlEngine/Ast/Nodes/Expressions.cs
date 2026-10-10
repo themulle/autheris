@@ -3,6 +3,7 @@ namespace TrinoSqlEngine.Ast.Nodes;
 using System;
 using System.Collections.Generic;
 using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Governance;
 
 public abstract record Expression : SqlNode;
 
@@ -26,6 +27,17 @@ public sealed record PolicyParameterExpression(
     SqlParameterType Type,
     ParameterOrigin Origin = ParameterOrigin.Policy,
     bool IsLikePattern = false) : Expression;
+
+/// <summary>
+/// Semantic column mask, rendered per dialect by the generator (replaces raw trusted SQL fragments). The masked column is
+/// referenced by the node only; the value never reaches the output. All arguments are bound parameters (INV-4).
+/// <paramref name="DataType"/> is the catalog data type of the column; typed masks require it. The node is opaque to rewriters.
+/// </summary>
+public sealed record MaskExpression(
+    MaskKind Kind,
+    ColumnReference Column,
+    MaskArguments Arguments,
+    string? DataType = null) : Expression;
 
 public sealed record ParameterReference(
     string Name,

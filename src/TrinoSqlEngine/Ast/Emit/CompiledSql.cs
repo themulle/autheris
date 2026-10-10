@@ -24,7 +24,11 @@ public readonly record struct BoundParameter(
     object? Value,
     SqlParameterType Type,
     ParameterOrigin Origin,
-    string? SourceName = null);
+    string? SourceName = null)
+{
+    // INV-16: bound values never appear in logs, spans or exception text.
+    public override string ToString() => $"BoundParameter {{ Marker = {Marker}, Type = {Type}, Origin = {Origin} }}";
+}
 
 /// <summary>Compiled, parameterized SQL (plan 4.2).</summary>
 public sealed record CompiledSql(
