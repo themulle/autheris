@@ -465,19 +465,28 @@ public class CompileApiTests
     [Fact]
     public void Compile_SpanAttributes_AndCounters_CarryNoValues()
     {
+        // The listeners are process-wide and other test classes compile in parallel: only observe this thread.
+        int testThread = Environment.CurrentManagedThreadId;
         var tags = new Dictionary<string, object?>();
         using var listener = new ActivityListener
         {
             ShouldListenTo = s => s.Name == CompilerTelemetry.ActivitySourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
-            ActivityStopped = a => { foreach (var t in a.TagObjects) tags[t.Key] = t.Value; }
+            ActivityStopped = a =>
+            {
+                if (Environment.CurrentManagedThreadId != testThread) return;
+                foreach (var t in a.TagObjects) tags[t.Key] = t.Value;
+            }
         };
         ActivitySource.AddActivityListener(listener);
 
         var rejected = new List<(string Name, long Value, KeyValuePair<string, object?>[] Tags)>();
         using var meter = new MeterListener();
         meter.InstrumentPublished = (i, l) => { if (i.Meter.Name == CompilerTelemetry.MeterName) l.EnableMeasurementEvents(i); };
-        meter.SetMeasurementEventCallback<long>((i, v, t, _) => rejected.Add((i.Name, v, t.ToArray())));
+        meter.SetMeasurementEventCallback<long>((i, v, t, _) =>
+        {
+            if (Environment.CurrentManagedThreadId == testThread) rejected.Add((i.Name, v, t.ToArray()));
+        });
         meter.Start();
 
         Compile("SELECT id FROM orders WHERE status = 'open'", Request(tenant: "acme-secret"));
@@ -526,13 +535,7 @@ public class CompileApiTests
 
     // ---- tenant isolation property at the API level ----
 
-    [Fact]
-    public void TenantPredicate_IsBinaryExact_InTheEmittedSql()
-    {
-        var c = Compile("SELECT id FROM orders");
-        Assert.Contains("CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max))", c.Sql);
-        Assert.Contains("DATALENGTH(CAST([TenantId] AS nvarchar(max)))", c.Sql);
-    }
+    // The binary-exact tenant comparison is asserted on the node structure (TenantPredicateStructureTests), not on SQL text.
 
     private static int CountOf(string s, string needle)
     {

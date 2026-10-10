@@ -69,6 +69,15 @@ internal sealed class GovernedSqlCompiler
         }
     }
 
+    /// <summary>Test seam hook (Debug builds only; the call is removed from Release builds).</summary>
+    [Conditional("DEBUG")]
+    private static void Pass(string name)
+    {
+#if DEBUG
+        CompilerTestSeams.Current?.OnPass?.Invoke(name);
+#endif
+    }
+
     private static void CheckBudget(CompileRequest request, Stopwatch clock, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -120,11 +129,13 @@ internal sealed class GovernedSqlCompiler
         typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps);
 
         // 3. token guards + parse
+        Pass("parse");
         var (tree, _) = _engine.Parse(sql, request.TokenGuards, token);
         EnsureQueryStatement(tree);
         CheckBudget(request, clock, token);
 
         // 4. build + validate the user tree
+        Pass("build");
         var builderOptions = new AstBuilderOptions
         {
             EnforceReadOnlyQueries = true,
@@ -135,26 +146,39 @@ internal sealed class GovernedSqlCompiler
             RejectTimeTravelQueries = true
         };
         var ast = new SqlAstBuilder(builderOptions).BuildStatement(tree);
+        Pass("validate");
         new AstValidationVisitor { CancellationToken = token }.Validate(ast);
 
         // 5. simplify the USER tree only: injected predicates do not exist yet (INV-3 by construction)
+        Pass("simplify");
         var simplified = (SqlStatement)new AstSimplificationVisitor { CancellationToken = token }.Visit(ast);
         CheckBudget(request, clock, token);
 
         // 6. typed security injection
+        Pass("inject");
         var secured = (SqlStatement)new AstSecurityVisitor(BuildOptions(request, typed), _engine, typed)
         {
             CancellationToken = token
         }.Visit(simplified);
         CheckBudget(request, clock, token);
 
+#if DEBUG
+        if (CompilerTestSeams.Current?.FaultyInjector is { } faultyInjector)
+        {
+            secured = (SqlStatement)faultyInjector(secured);
+        }
+#endif
+
         // 7. production coverage proof (does not trust the injector)
+        Pass("verify");
         var applied = typed.CreateVerifier(request.TargetDialect).Verify(secured, token);
 
         // 8. dialect capabilities
+        Pass("capabilities");
         DialectCapabilityValidator.Validate(secured, caps);
 
         // 9. emit (+ bind limit and emitted-text checker inside)
+        Pass("emit");
         var generator = SqlDialectGeneratorFactory.GetGenerator(request.TargetDialect);
         var compiled = generator.Generate(secured, new ParameterSource(typed.PolicyValues.ToFrozenDictionary(StringComparer.Ordinal), new Dictionary<string, object?>()), token)
             with { AppliedPredicates = applied };

@@ -44,6 +44,9 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         {
             GenerateSql(statement, ref builder, context);
             sql = builder.ToString();
+#if DEBUG
+            sql = TrinoSqlEngine.CompilerTestSeams.Current?.FaultyEmitter?.Invoke(sql) ?? sql;
+#endif
         }
         catch (InsufficientExecutionStackException)
         {
