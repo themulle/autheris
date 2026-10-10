@@ -12,6 +12,8 @@ using Antlr4.Runtime;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Ast.Security;
+using TrinoSqlEngine.Governance;
 
 /// <summary>
 /// Core security and governance visitor implementing:
@@ -27,15 +29,63 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
     private readonly RlsOptions _options;
     private readonly ISqlEngine _engine;
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
+    private readonly TypedPolicyContext? _typed;
+    private readonly Stack<SecurityScope> _securityScopes = new();
     private int _subqueryDepth = 0;
     private bool _rootLimitHandled = false;
 
-    public AstSecurityVisitor(RlsOptions? options = null, ISqlEngine? engine = null)
+    /// <param name="typedPolicy">
+    /// When set, row-level security comes from typed providers: injected predicates are wrapped in
+    /// <see cref="SecurityPredicateExpression"/>, physical names come from the catalog, and values are parameters. The legacy
+    /// string providers of <paramref name="options"/> are not consulted for tables.
+    /// </param>
+    public AstSecurityVisitor(RlsOptions? options = null, ISqlEngine? engine = null, TypedPolicyContext? typedPolicy = null)
     {
         _options = options ?? new RlsOptions();
         _engine = engine ?? new FastSqlEngine();
+        _typed = typedPolicy;
         _cteScopeStack.Push(new HashSet<string>(StringComparer.Ordinal));
     }
+
+    private SecurityScope CurrentScope =>
+        _securityScopes.Count > 0 ? _securityScopes.Peek() : (_subqueryDepth <= 1 ? SecurityScope.Root : SecurityScope.Subquery);
+
+    private SqlNode WithScope(SecurityScope scope, Func<SqlNode> visit)
+    {
+        if (_typed is null) return visit();
+        _securityScopes.Push(scope);
+        try
+        {
+            return visit();
+        }
+        finally
+        {
+            _securityScopes.Pop();
+        }
+    }
+
+    public override SqlNode VisitSetOperationQuery(SetOperationQuery node)
+    {
+        if (_typed is null) return base.VisitSetOperationQuery(node);
+        var left = (QueryBody)WithScope(SecurityScope.SetOperationBranch, () => Visit(node.Left));
+        var right = (QueryBody)WithScope(SecurityScope.SetOperationBranch, () => Visit(node.Right));
+        return ReferenceEquals(left, node.Left) && ReferenceEquals(right, node.Right) ? node : node with { Left = left, Right = right };
+    }
+
+    public override SqlNode VisitExistsExpression(ExistsExpression node) =>
+        WithScope(SecurityScope.ExistsSubquery, () => base.VisitExistsExpression(node));
+
+    public override SqlNode VisitInSubqueryExpression(InSubqueryExpression node) =>
+        WithScope(SecurityScope.InSubquery, () => base.VisitInSubqueryExpression(node));
+
+    public override SqlNode VisitScalarSubqueryExpression(ScalarSubqueryExpression node) =>
+        WithScope(SecurityScope.ScalarSubquery, () => base.VisitScalarSubqueryExpression(node));
+
+    public override SqlNode VisitLateralTableSource(LateralTableSource node) =>
+        WithScope(SecurityScope.Lateral, () => base.VisitLateralTableSource(node));
+
+    public override SqlNode VisitSubqueryTableSource(SubqueryTableSource node) =>
+        WithScope(SecurityScope.Subquery, () => base.VisitSubqueryTableSource(node));
 
     /// <summary>
     /// A policy filter as an expression: verbatim and parenthesized when it is gateway-rendered target-dialect SQL
@@ -68,7 +118,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             foreach (var cte in node.With.Ctes)
             {
                 // Visit CTE body BEFORE adding CTE name to current scope (Exit-timing, SEC-CTE & SEC C-02)
-                var cteQuery = (SelectStatement)Visit(cte.Query);
+                var cteQuery = (SelectStatement)WithScope(SecurityScope.CteBody, () => Visit(cte.Query));
                 string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(cte.Name);
                 _cteScopeStack.Peek().Add(cteKey);
                 ctes.Add(cte with { Query = cteQuery });
@@ -172,6 +222,11 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             return node;
         }
 
+        if (_typed != null)
+        {
+            return SecureTyped(node);
+        }
+
         bool shouldApplyRls = _options.PolicyProvider.ShouldApplyPolicy(normalizedName);
         bool hasMasking = HasMaskingForTable(normalizedName);
         bool enforceCatalog = _options.EnforceCatalogProjection && _options.TableColumnsProvider != null && _options.TableColumnsProvider(normalizedName) is { Count: > 0 };
@@ -182,6 +237,72 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         }
 
         return CreateSecuredSubqueryTableSource(node, normalizedName, shouldApplyRls, hasMasking);
+    }
+
+    /// <summary>
+    /// Typed injection (WP-A5): the table becomes <c>(SELECT cataloged columns FROM [schema].[table] WHERE tenant AND policy)</c>.
+    /// The tenant predicate (binary-exact) always applies when the catalog declares a tenant column; the policy predicate
+    /// applies when the provider says so. Both are opaque <see cref="SecurityPredicateExpression"/> nodes.
+    /// </summary>
+    private SubqueryTableSource SecureTyped(NamedTableSource node)
+    {
+        var typed = _typed!;
+        var entry = typed.Catalog.Resolve(node.Name)
+            ?? throw new SecurityException("A table reference could not be resolved against the catalog.");
+        var tid = entry.Identity;
+        var scope = CurrentScope;
+
+        var conjuncts = new List<Expression>(2);
+        var tenant = typed.BuildTenantPredicate(entry);
+        if (tenant != null)
+        {
+            var id = new SecurityPredicateId(tid.ToString(), 0);
+            conjuncts.Add(new SecurityPredicateExpression(tenant, id, scope));
+            typed.RecordApplied(id);
+        }
+
+        bool applies = typed.RowFilters.ShouldApplyPolicy(tid);
+        bool referencesTarget = false;
+        string fingerprint = "-";
+        if (applies)
+        {
+            var predicate = typed.RowFilters.GetPredicate(tid);
+            typed.AddValues(predicate.Parameters);
+            var expression = (Expression)new PolicySubqueryTenantRewriter(typed).Visit(predicate.Expression);
+            referencesTarget = AstReflection.Collect<ColumnReference>(expression).Any(c =>
+                c.Name.Parts.Count >= 2 && string.Equals(c.Name.Parts[^2].Value, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase));
+            var id = new SecurityPredicateId(tid.ToString(), 1);
+            conjuncts.Add(new SecurityPredicateExpression(expression, id, scope));
+            typed.RecordApplied(id);
+            fingerprint = predicate.Fingerprint;
+        }
+
+        typed.RecordTable(new TableUsage(tid, applies, fingerprint, "-"));
+
+        Expression? where = null;
+        foreach (var conjunct in conjuncts)
+        {
+            where = where is null ? conjunct : new BinaryExpression(where, BinaryOperator.And, conjunct);
+        }
+
+        var projections = new List<SelectItem>(entry.Columns.Length);
+        foreach (var column in entry.Columns)
+        {
+            var colId = new SqlIdentifier(column.Name, IsQuoted: true);
+            if (typed.Masks.HasMask(tid, column.Name))
+            {
+                throw new NotSupportedException("Typed column masks are not available yet.");
+            }
+
+            projections.Add(new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[] { colId })), colId));
+        }
+
+        var canonical = new SqlQualifiedName(new[] { new SqlIdentifier(tid.Schema, true), new SqlIdentifier(tid.Table, true) });
+        var innerAlias = referencesTarget ? new SqlIdentifier(RowFilterAliases.Target) : null;
+        var inner = new SelectStatement(null,
+            new QuerySpecification(false, projections, new NamedTableSource(canonical, innerAlias), where, null, null),
+            null, null);
+        return new SubqueryTableSource(inner, node.Alias ?? new SqlIdentifier(node.Name.SimpleName, IsQuoted: true));
     }
 
     private SubqueryTableSource CreateSecuredSubqueryTableSource(

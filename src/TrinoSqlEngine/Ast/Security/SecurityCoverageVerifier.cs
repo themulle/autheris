@@ -88,6 +88,7 @@ public sealed class SecurityCoverageVerifier
     {
         private int _ticks;
         private int _depth;
+        private int _insidePredicate;
         private int _securedReferences;
         public List<SecurityPredicateId> Applied { get; } = new();
 
@@ -276,6 +277,11 @@ public sealed class SecurityCoverageVerifier
             }
         }
 
+        private static bool IsCanonicalConstant(BinaryExpression b) =>
+            b.Left is LiteralExpression { Value: { } l } && b.Right is LiteralExpression { Value: { } r } &&
+            Convert.ToInt64(l, System.Globalization.CultureInfo.InvariantCulture) == 1 &&
+            Convert.ToInt64(r, System.Globalization.CultureInfo.InvariantCulture) is 0 or 1;
+
         private static bool ContainsSelect(Expression e) => e switch
         {
             ExistsExpression or InSubqueryExpression or ScalarSubqueryExpression or QuantifiedComparisonExpression => true,
@@ -297,16 +303,38 @@ public sealed class SecurityCoverageVerifier
                         throw new SecurityCoverageException("Nested policy subqueries are not permitted.");
                     }
 
-                    Expr(sp.Predicate, cte, policyScope: true);
+                    _insidePredicate++;
+                    try
+                    {
+                        Expr(sp.Predicate, cte, policyScope: true);
+                    }
+                    finally
+                    {
+                        _insidePredicate--;
+                    }
+
                     break;
                 case TrustedSqlExpression:
                     throw new SecurityCoverageException("Raw trusted SQL fragments are not permitted on the typed compiler path.");
-                case ColumnReference or ParameterReference or PolicyParameterExpression or LiteralExpression
+                case LiteralExpression literal:
+                    // INV-5: injected predicates carry parameters, never raw values. NULL and booleans are keywords.
+                    if (_insidePredicate > 0 && literal.Type is not (LiteralType.Null or LiteralType.Boolean))
+                    {
+                        throw new SecurityCoverageException("An injected security predicate contains a raw literal value.");
+                    }
+
+                    break;
+                case TypedLiteralExpression or IntervalLiteralExpression or DateFunctionExpression when _insidePredicate > 0:
+                    throw new SecurityCoverageException("An injected security predicate contains a raw literal value.");
+                case ColumnReference or ParameterReference or PolicyParameterExpression
                     or TypedLiteralExpression or IntervalLiteralExpression or CurrentDateTimeExpression:
                     break;
                 case ParenthesizedExpression p:
                     Expr(p.Expression, cte, policyScope);
                     break;
+                case BinaryExpression { Operator: BinaryOperator.Equal, Left: LiteralExpression { Type: LiteralType.Integer }, Right: LiteralExpression { Type: LiteralType.Integer } } canonical
+                    when _insidePredicate > 0 && IsCanonicalConstant(canonical):
+                    break; // the canonical tautology and deny-all (1 = 1, 1 = 0)
                 case BinaryExpression b:
                     Expr(b.Left, cte, policyScope);
                     Expr(b.Right, cte, policyScope);

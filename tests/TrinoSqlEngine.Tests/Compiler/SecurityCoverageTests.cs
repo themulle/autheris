@@ -23,7 +23,7 @@ public class SecurityCoverageTests
         new(new[] { new SqlIdentifier("dbo", true), new SqlIdentifier(table, true) });
 
     private static Expression Pred(SecurityPredicateId id, SecurityScope scope, Expression? inner = null) =>
-        new SecurityPredicateExpression(inner ?? new BinaryExpression(Col("tenant"), Equal, Int(1)), id, scope);
+        new SecurityPredicateExpression(inner ?? new BinaryExpression(Col("tenant"), Equal, new PolicyParameterExpression("t", SqlParameterType.String)), id, scope);
 
     /// <summary>Secured derived table: (SELECT * FROM [dbo].[table] WHERE predicate) AS alias.</summary>
     private static SubqueryTableSource Secured(string table, string alias, Expression? where) =>
@@ -310,6 +310,8 @@ public class SecurityCoverageTests
         foreach (var type in rewriterTypes)
         {
             if (type == typeof(AstSecurityVisitor)) continue; // creates the nodes; never re-enters them (tested below)
+            // Producers that run before an expression is wrapped in a SecurityPredicateExpression need constructor arguments.
+            if (type.Name is "PolicySubqueryTenantRewriter" or "PolicyShaper") continue;
             var rewriter = (SqlAstRewriter)Activator.CreateInstance(type, BindingFlags.Default | BindingFlags.OptionalParamBinding, null, Array.Empty<object>(), null)!;
             var result = rewriter.Visit(stmt);
             Assert.True(ContainsStatementPredicate(result, injected), $"{type.Name} rewrote an injected security predicate");

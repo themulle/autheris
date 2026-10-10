@@ -18,11 +18,14 @@ public sealed record TrustedSqlExpression(string Sql) : Expression;
 /// <summary>
 /// A value bound by the gateway (tenant, policy, mask argument). It never originates from request text; the value comes from
 /// the <see cref="ParameterSource"/> at emission time, so the AST (and a cached template) stays value-free.
+/// <paramref name="IsLikePattern"/> marks an admin-authored LIKE pattern whose wildcards are intentional; any other policy
+/// value used as a LIKE pattern is escaped (SEC-ADG-18).
 /// </summary>
 public sealed record PolicyParameterExpression(
     string Name,
     SqlParameterType Type,
-    ParameterOrigin Origin = ParameterOrigin.Policy) : Expression;
+    ParameterOrigin Origin = ParameterOrigin.Policy,
+    bool IsLikePattern = false) : Expression;
 
 public sealed record ParameterReference(
     string Name,

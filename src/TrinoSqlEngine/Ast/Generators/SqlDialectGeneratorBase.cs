@@ -544,6 +544,18 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
             case LikeExpression lk:
                 GeneratePredicateOperand(lk.Operand, ref builder, context);
                 builder.Append(lk.IsNotLike ? " NOT LIKE " : " LIKE ");
+                if (context.IsBound && lk.Escape == null && lk.Pattern is PolicyParameterExpression policyPattern)
+                {
+                    // SEC-ADG-18: LIKE semantics differ per dialect ([...] classes, default escapes). A policy pattern always has
+                    // an explicit ESCAPE from a constant template, and structured values are escaped when bound.
+                    builder.Append(context.BindPolicy(policyPattern, escapeLikePattern: !policyPattern.IsLikePattern));
+                    builder.Append(" ESCAPE ");
+                    int escapeStart = builder.Length;
+                    builder.Append("'\\'");
+                    context.RegisterConstantFragment(escapeStart, builder.Length - escapeStart);
+                    break;
+                }
+
                 GeneratePredicateOperand(lk.Pattern, ref builder, context);
                 if (lk.Escape != null)
                 {

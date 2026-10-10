@@ -95,7 +95,7 @@ public sealed class SqlEmitterContext
         Bind($"{(int)type}|{(int)origin}|{ValueKey(value)}", value, type, origin, null);
 
     /// <summary>Binds a gateway value for a policy parameter node; the value comes from the <see cref="ParameterSource"/>.</summary>
-    public string BindPolicy(PolicyParameterExpression parameter)
+    public string BindPolicy(PolicyParameterExpression parameter, bool escapeLikePattern = false)
     {
         ArgumentNullException.ThrowIfNull(parameter);
         if (Values is null || !Values.PolicyValues.TryGetValue(parameter.Name, out var policyValue))
@@ -104,7 +104,30 @@ public sealed class SqlEmitterContext
             throw new SecurityException($"No value was supplied for policy parameter '{parameter.Name}'.");
         }
 
+        if (escapeLikePattern)
+        {
+            // SEC-ADG-18: a value used as a LIKE pattern must not act as a pattern (%, _, [ and the escape character).
+            if (policyValue.Value is not string text)
+            {
+                throw new SecurityException("A LIKE pattern parameter must be a string.");
+            }
+
+            return Bind($"PL|{parameter.Name}", EscapeLike(text), policyValue.Type, parameter.Origin, parameter.Name);
+        }
+
         return Bind($"P|{parameter.Name}", policyValue.Value, policyValue.Type, parameter.Origin, parameter.Name);
+    }
+
+    private static string EscapeLike(string text)
+    {
+        var sb = new System.Text.StringBuilder(text.Length + 4);
+        foreach (char c in text)
+        {
+            if (c is '\\' or '%' or '_' or '[') sb.Append('\\');
+            sb.Append(c);
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>Binds a client named parameter; the binder resolves the value per request.</summary>
