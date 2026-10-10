@@ -583,6 +583,22 @@ public class DmlCompileTests
             "WHEN NOT MATCHED THEN INSERT VALUES (s.id, 'acme', 'new')");
     }
 
+    // CR-ADG-33: the source qualifier must differ from the target qualifier and the target table name, case-insensitively.
+    [Theory]
+    [MemberData(nameof(DialectData))]
+    public void Merge_SourceAliasEqualToTheTargetAlias_IsRejected_InAnyCase(TargetSqlDialect dialect)
+    {
+        const string tail = " ON t.id = 1 WHEN MATCHED THEN UPDATE SET status = 'x'";
+        RejectedSecurity(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) t" + tail);
+        RejectedSecurity(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) T" + tail);
+        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements t" + tail);
+        RejectedSecurity(dialect, "MERGE INTO orders USING (SELECT id FROM entitlements) orders ON orders.id = 1 WHEN MATCHED THEN UPDATE SET status = 'x'");
+        RejectedSecurity(dialect, "MERGE INTO orders USING (SELECT id FROM entitlements) ORDERS ON orders.id = 1 WHEN MATCHED THEN UPDATE SET status = 'x'");
+        RejectedSecurity(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) orders" + tail);
+        // a distinct alias still compiles
+        Assert.Equal(SqlStatementClass.Merge, Compile(dialect, "MERGE INTO orders t USING (SELECT id FROM entitlements) s ON t.id = s.id WHEN MATCHED THEN UPDATE SET status = 'x'").StatementClass);
+    }
+
     [Theory]
     [MemberData(nameof(DialectData))]
     public void MergeInsert_OnATableWithARowPolicy_IsRejected(TargetSqlDialect dialect)

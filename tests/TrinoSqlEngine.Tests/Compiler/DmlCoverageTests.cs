@@ -140,6 +140,13 @@ public class DmlCoverageTests
         });
         Mutant(dialect, sql, s => ((MergeStatement)s) with { Clauses = ((MergeStatement)s).Clauses.Append(new NotMatchedBySourceDelete()).ToList() });
         Mutant(dialect, sql, s => ((MergeStatement)s) with { Target = ((MergeStatement)s).Target with { Alias = null } });
+        // CR-ADG-33: a source that reuses the target alias is rejected by the verifier, independently of the injector
+        Mutant(dialect, sql, s =>
+        {
+            var m = (MergeStatement)s;
+            var source = Assert.IsType<SubqueryTableSource>(m.Source);
+            return m with { Source = source with { Alias = new SqlIdentifier(m.Target.Alias!.Value.ToUpperInvariant()) } };
+        });
     }
 
     private sealed record NotMatchedBySourceDelete() : MergeClause((Expression?)null);

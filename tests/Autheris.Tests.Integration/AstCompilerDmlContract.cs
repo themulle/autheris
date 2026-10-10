@@ -439,6 +439,20 @@ public abstract class AstCompilerDmlContract
     }
 
     [Fact]
+    public async Task Merge_SourceAliasEqualToTheTargetAlias_IsRejectedByTheCompiler_BeforeAnyExecution()
+    {
+        if (!await MergeAvailableAsync()) return;   // CR-ADG-33
+        var before = await SnapshotAsync();
+        foreach (var source in new[] { $"(SELECT * FROM {E}) t", $"(SELECT * FROM {E}) T", $"{E} t" })
+        {
+            // a SecurityException comes from the compiler; a provider error would be a DbException, so nothing reached the database
+            await SecurityRejectedAsync(() => ExecAsync($"MERGE INTO {O} t USING {source} ON t.id = 1 WHEN MATCHED THEN UPDATE SET status = 'merged'", "acme"));
+        }
+
+        (await SnapshotAsync()).ShouldBe(before);
+    }
+
+    [Fact]
     public async Task Merge_Insert_WritesTheCallersTenant_NeverTheSourceTenant()
     {
         if (!await MergeAvailableAsync()) return;

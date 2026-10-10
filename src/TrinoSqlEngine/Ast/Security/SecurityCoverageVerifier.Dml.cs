@@ -284,6 +284,11 @@ public sealed partial class SecurityCoverageVerifier
             var requirement = RequireTarget(merge.Target);
             RequirePredicates(requirement, merge.On, SecurityScope.MergeOn);
             var names = new[] { merge.Target.Alias.Value, requirement.Table };
+            if (!MergeAliasGuard.IsDisjoint(merge.Source, new[] { merge.Target.Alias.Value, requirement.Table, merge.Target.Name.SimpleName }))
+            {
+                throw new SecurityCoverageException("A MERGE source alias equals the target alias or table name.");
+            }
+
             NoMaskedReads(requirement, names, merge.On);
             Expr(merge.On, ImmutableHashSet<string>.Empty, policyScope: false);
             Source(merge.Source, ImmutableHashSet<string>.Empty, policyScope: false);

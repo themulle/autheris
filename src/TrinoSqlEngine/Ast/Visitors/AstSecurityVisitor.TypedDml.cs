@@ -31,6 +31,12 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         var targetNames = new List<string> { alias.Value, entry.Identity.Table, node.Target.Name.SimpleName };
         var masked = MaskedColumnsOf(entry);
 
+        // CR-ADG-33: isolation must never depend on a backend name-resolution error for a source that reuses the target's name.
+        if (!MergeAliasGuard.IsDisjoint(node.Source, targetNames))
+        {
+            throw new SecurityException("A MERGE source alias must differ from the target alias and the target table name.");
+        }
+
         // user part checks run on the user tree, before any injected predicate exists
         RejectMaskedReads(masked, targetNames, node.On);
         EnsureFilteredDml(node.On, "MERGE");
