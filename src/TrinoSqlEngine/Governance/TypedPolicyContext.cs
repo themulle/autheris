@@ -13,7 +13,6 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Security;
 
 /// <summary>Policy state of one table that took part in a compile; recorded for the value-free plan template (SEC-ADG-01).</summary>
-public sealed record TableUsage(TableIdentity Identity, bool PolicyApplied, string PredicateFingerprint, string MaskFingerprint);
 
 /// <summary>A catalog table the compile resolved, with the fingerprint of everything that decided its injection.</summary>
 public sealed record TableDependency(SqlQualifiedName Name, string Fingerprint);
@@ -25,8 +24,6 @@ public sealed record TableDependency(SqlQualifiedName Name, string Fingerprint);
 public sealed class TypedPolicyContext
 {
     private readonly Dictionary<string, PolicyValue> _values = new(StringComparer.Ordinal);
-    private readonly List<SecurityPredicateId> _applied = new();
-    private readonly List<TableUsage> _tables = new();
     private readonly List<TableDependency> _dependencies = new();
 
     public TypedPolicyContext(
@@ -51,11 +48,6 @@ public sealed class TypedPolicyContext
 
     /// <summary>Values to bind, by parameter name (tenant, policy and mask parameters of every applied table).</summary>
     public IReadOnlyDictionary<string, PolicyValue> PolicyValues => _values;
-
-    /// <summary>Root predicate ids that were injected (policy subquery tenant predicates are not listed).</summary>
-    public ImmutableArray<SecurityPredicateId> AppliedPredicates => _applied.ToImmutableArray();
-
-    public IReadOnlyList<TableUsage> Tables => _tables;
 
     public ImmutableArray<TableDependency> Dependencies => _dependencies.ToImmutableArray();
 
@@ -88,16 +80,6 @@ public sealed class TypedPolicyContext
         }
 
         _values[name] = value;
-    }
-
-    public void RecordApplied(SecurityPredicateId id)
-    {
-        if (!_applied.Contains(id)) _applied.Add(id);
-    }
-
-    public void RecordTable(TableUsage usage)
-    {
-        if (!_tables.Contains(usage)) _tables.Add(usage);
     }
 
     /// <summary>Records that <paramref name="name"/> resolved to <paramref name="entry"/> (plan template dependency).</summary>

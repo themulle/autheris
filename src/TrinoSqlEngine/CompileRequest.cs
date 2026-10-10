@@ -52,7 +52,11 @@ public sealed record CompileRequest
     public long EnforcedMaxRows { get; init; }
     public bool TranslateTrinoDateFunctions { get; init; }
 
-    /// <summary>The compiler always projects only cataloged columns; the flag exists so the key reflects the caller's intent.</summary>
+    /// <summary>
+    /// Intentionally has no effect on the output (CR-ADG-23): the compiler always projects only cataloged columns, because the
+    /// verifier proves that shape (CR-ADG-06). The flag stays so that the plan-cache key reflects the caller's intent and a future
+    /// opt-out would not silently share cached templates with the strict default.
+    /// </summary>
     public bool EnforceCatalogProjection { get; init; } = true;
 
     public IReadOnlySet<string>? AllowedFunctions { get; init; }

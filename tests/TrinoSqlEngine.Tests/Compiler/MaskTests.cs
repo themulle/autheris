@@ -234,7 +234,6 @@ public class MaskTests
         Assert.Equal("nvarchar(200)", mask.DataType);
         Assert.All(items.Where(i => i.Alias!.Value != "Email"), i => Assert.IsType<ColumnReference>(i.Expression));
         Assert.Equal("[REDACTED]", typed.PolicyValues["__mask_email"].Value);
-        Assert.NotEqual("-", typed.Tables.Single().MaskFingerprint);
         typed.CreateVerifier().Verify(secured, CancellationToken.None);
     }
 

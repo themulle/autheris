@@ -85,7 +85,6 @@ public class TypedInjectionTests
         Assert.All(inner.Projections, p => Assert.IsType<ColumnSelectItem>(p));
         Assert.Equal(6, inner.Projections.Count);
 
-        Assert.Contains(typed.AppliedPredicates, id => id == new SecurityPredicateId("dbo.Orders", 1));
         Assert.Equal("EU", typed.PolicyValues["__pol_region"].Value);
         Assert.Equal("acme", typed.PolicyValues["__autheris_tenant"].Value);
     }

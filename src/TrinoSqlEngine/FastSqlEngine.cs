@@ -27,140 +27,6 @@ public sealed class ThrowingErrorListener : BaseErrorListener, IAntlrErrorListen
     }
 }
 
-/// <summary>
-/// SEC P-04: Immutable, per-call token-level security switches. Passed explicitly to
-/// <see cref="FastSqlEngine.Parse(ReadOnlyMemory{char}, SqlTokenSecurityOptions?, CancellationToken)"/> so that
-/// concurrent callers sharing one engine instance can never influence each other's checks.
-/// </summary>
-public sealed record SqlTokenSecurityOptions
-{
-    /// <summary>All switches off (pure syntax parsing, e.g. Trino compliance fixtures).</summary>
-    public static SqlTokenSecurityOptions None { get; } = new();
-
-    /// <summary>Strict preset with all token security switches enabled.</summary>
-    public static SqlTokenSecurityOptions Strict { get; } = new()
-    {
-        RejectComments = true,
-        RejectBackslashInStrings = true,
-        RejectEscapedStringLiterals = true,
-        RejectDollarQuoting = true,
-        RejectBracketLexerDifferentials = true,
-        RejectNonAsciiIdentifiers = true,
-        RejectDotsInQuotedIdentifiers = true,
-        RejectTimeTravelQueries = true,
-        RejectVariableSubstitutionSequences = true
-    };
-
-    /// <summary>SQ-02: Reject comments.</summary>
-    public bool RejectComments { get; init; }
-
-    /// <summary>SQ-01: Reject backslashes in string literals.</summary>
-    public bool RejectBackslashInStrings { get; init; }
-
-    /// <summary>SQ-01: Reject E'...' string type constructors.</summary>
-    public bool RejectEscapedStringLiterals { get; init; }
-
-    /// <summary>SQ-02: Reject dollar-quoted strings.</summary>
-    public bool RejectDollarQuoting { get; init; }
-
-    /// <summary>
-    /// SQL-1: Reject '[' / ']' tokens and string literals / quoted identifiers containing '[', ']', '--' or '/*'.
-    /// SQL Server and SQLite lex [...] as a quoted identifier while the Trino grammar lexes it as array syntax, so
-    /// string content for the gateway could become executable SQL (and comment out appended filters) on the backend.
-    /// </summary>
-    public bool RejectBracketLexerDifferentials { get; init; }
-
-    /// <summary>SQ-10: Reject unquoted identifiers containing non-ASCII characters.</summary>
-    public bool RejectNonAsciiIdentifiers { get; init; }
-
-    /// <summary>SQ-11: Reject dots inside quoted identifiers.</summary>
-    public bool RejectDotsInQuotedIdentifiers { get; init; }
-
-    /// <summary>SQ-13: Reject time-travel syntax (FOR TIMESTAMP/VERSION AS OF).</summary>
-    public bool RejectTimeTravelQueries { get; init; }
-
-    /// <summary>
-    /// SEC-ADG-10: Reject <c>${</c> in any token. Spark and Databricks may substitute <c>${...}</c> variables in statement text
-    /// before parsing, which could change a statement after the gateway checked it.
-    /// </summary>
-    public bool RejectVariableSubstitutionSequences { get; init; }
-
-    /// <summary>
-    /// Derives the token switches from <see cref="RlsOptions"/>. Dollar quoting is always rejected for SQL Server targets.
-    /// </summary>
-    public static SqlTokenSecurityOptions FromRlsOptions(RlsOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        return new SqlTokenSecurityOptions
-        {
-            RejectComments = options.RejectComments,
-            RejectBackslashInStrings = options.RejectBackslashInStrings,
-            RejectEscapedStringLiterals = options.RejectEscapedStringLiterals,
-            RejectDollarQuoting = options.RejectDollarQuoting || options.TargetDialect == TargetSqlDialect.SqlServer,
-            RejectBracketLexerDifferentials = options.RejectBracketLexerDifferentials
-                || options.TargetDialect == TargetSqlDialect.SqlServer
-                || options.TargetDialect == TargetSqlDialect.Sqlite,
-            RejectNonAsciiIdentifiers = options.RejectNonAsciiIdentifiers,
-            RejectDotsInQuotedIdentifiers = options.RejectDotsInQuotedIdentifiers,
-            RejectTimeTravelQueries = options.RejectTimeTravelQueries,
-            RejectVariableSubstitutionSequences = options.TargetDialect == TargetSqlDialect.Databricks
-        };
-    }
-}
-
-/// <summary>
-/// SQ-08: Cooperative cancellation flag for a single parse. ANTLR has no native cancellation; the flag is checked by
-/// <see cref="CancellableTokenStream"/> on every token access (adaptive prediction and matching).
-/// </summary>
-internal sealed class ParseCancellation
-{
-    private volatile bool _canceled;
-
-    public bool IsCanceled => _canceled;
-
-    public void Cancel() => _canceled = true;
-
-    public void ThrowIfCanceled()
-    {
-        if (_canceled)
-        {
-            throw new ParseCanceledException("SQL parsing was aborted because the parse time budget was exceeded or the caller canceled the request.");
-        }
-    }
-}
-
-/// <summary>
-/// SQ-08: Token stream that aborts the parser (via <see cref="ParseCanceledException"/>) as soon as the parse is canceled.
-/// </summary>
-internal sealed class CancellableTokenStream : CommonTokenStream
-{
-    private readonly ParseCancellation _cancellation;
-
-    public CancellableTokenStream(ITokenSource tokenSource, ParseCancellation cancellation)
-        : base(tokenSource)
-    {
-        _cancellation = cancellation;
-    }
-
-    public override IToken LT(int k)
-    {
-        _cancellation.ThrowIfCanceled();
-        return base.LT(k);
-    }
-
-    public override int LA(int i)
-    {
-        _cancellation.ThrowIfCanceled();
-        return base.LA(i);
-    }
-
-    public override void Consume()
-    {
-        _cancellation.ThrowIfCanceled();
-        base.Consume();
-    }
-}
-
 public sealed partial class FastSqlEngine : ISqlEngine
 {
     /// <summary>Thread-safe default shared instance of <see cref="FastSqlEngine"/>.</summary>
@@ -755,24 +621,26 @@ public sealed partial class FastSqlEngine : ISqlEngine
         }
     }
 
-    /// <summary>
-    /// Architecture A3: High-level Façade method for secure RLS rewriting.
-    /// SEC P-04: The token security switches are derived from <paramref name="options"/> per call and passed to the
-    /// parser as an immutable object; the engine's own properties are neither read nor modified.
-    /// </summary>
-    private Lazy<GovernedSqlCompiler>? _compiler;
+    private readonly Lazy<GovernedSqlCompiler> _compiler;
+
+    public FastSqlEngine()
+    {
+        _compiler = new Lazy<GovernedSqlCompiler>(
+            () => new GovernedSqlCompiler(this, Ast.Capabilities.DialectCapabilityTable.Default, CompileCache));
+    }
 
     /// <summary>Cache of verified, value-free compile templates (SEC-ADG-01).</summary>
     public Ast.Emit.CompiledSqlTemplateCache CompileCache { get; } = new();
 
     /// <inheritdoc />
-    public Ast.Emit.CompiledSql Compile(ReadOnlyMemory<char> sql, CompileRequest request, CancellationToken cancellationToken)
-    {
-        var compiler = (_compiler ??= new Lazy<GovernedSqlCompiler>(
-            () => new GovernedSqlCompiler(this, Ast.Capabilities.DialectCapabilityTable.Default, CompileCache))).Value;
-        return compiler.Compile(sql, request, cancellationToken);
-    }
+    public Ast.Emit.CompiledSql Compile(ReadOnlyMemory<char> sql, CompileRequest request, CancellationToken cancellationToken) =>
+        _compiler.Value.Compile(sql, request, cancellationToken);
 
+    /// <summary>
+    /// Architecture A3: High-level Façade method for secure RLS rewriting.
+    /// SEC P-04: The token security switches are derived from <paramref name="options"/> per call and passed to the
+    /// parser as an immutable object; the engine's own properties are neither read nor modified.
+    /// </summary>
     public string RewriteRls(ReadOnlyMemory<char> sql, RlsOptions? options = null)
     {
         return RewriteRls(sql, options, CancellationToken.None);
