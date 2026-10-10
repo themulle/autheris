@@ -2,7 +2,7 @@
 
 **Document ID:** `PLAN-AST-DIALECT-GEN-16` (implementation plan, Phase 2 of the 6-phase lifecycle)
 **Date:** 2026-10-10
-**Status:** IN PROGRESS - Phase 5 DML review delivered (§19.10, changes requested: CR-ADG-33); DQL approved (§19.9)
+**Status:** IN PROGRESS - Phase 4 loop-back for the DML review done (§24, CR-ADG-33..41 fixed on `feat/ast-dml`), awaiting the Phase 5 delta re-review; DQL approved (§19.9)
 **Author:** Solution Architect (`csharp-architect`); Phase 3 review (§16) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
@@ -1576,6 +1576,7 @@ Affected work packages and test criteria (additions to §11 and §16.8):
 
 ## 17. Changelog
 
+- 2026-10-10: Added §24 "Implementation Log — DML review loop 1": CR-ADG-33..41 fixed on `feat/ast-dml` (one commit per finding); CR-ADG-35 decided by the orchestrator under stakeholder delegation (check-option INSERT for admin row policies, row-count contract in `CompiledSql`); CR-ADG-34 delivered as a total error mapper, runtime wiring stays at X1.
 - 2026-10-10: Added §19.10 "Phase 5 Code Review — DML" (`csharp-code-reviewer`) of `feat/ast-dml` at `78a6c42`: verdict changes requested (narrow) for CR-ADG-33 (MERGE source/target alias collision; all engines refuse it today, the compiler must too); CR-ADG-34 (generic error mapping) and CR-ADG-35 (check option instead of rejecting INSERT into policy tables) added as X1 preconditions; Minor/Nit CR-ADG-36..41.
 - 2026-10-10: Added §22 "Implementation Log — DQL review loop 3": CR-ADG-30 (`199d2a1`) and CR-ADG-32 (`5f98531`, test alignment `9f30f17`) fixed; CR-ADG-31 recorded as X1 precondition 6; open question OQ-GQL (GraphQL tree compiler) added.
 - 2026-10-10: Added §19.9 "Re-review (loop 2)" (`csharp-code-reviewer`) of `feat/ast-dql` at `fe9d3f7`: CR-ADG-25..29 and the B-1 request-time denial verified (red-first for CR-ADG-28 and B-1 confirmed by behavioral mutants); new Minor/Nit findings CR-ADG-30..32; verdict approved.
@@ -2200,3 +2201,63 @@ SEC-ADG-06 (policy-column assignment, correlated target policy), SEC-ADG-07 (DML
 ### 23.5 Evidence
 
 Observed after the merge of `feat/ast-dql` (25b0e27): `dotnet build Autheris.sln -warnaserror -m:2` 0 warnings; `TrinoSqlEngine.Tests` 2,471 / 2,471; `Autheris.Tests.Unit` 4,023 / 4,024 (known WORM failure); `Autheris.Tests.Architecture` 19 / 19. Container classes (`CI=true`): SQL Server DML 33, DuckDB DML 32, PostgreSQL DML 33, Oracle DML 36, Spark/Delta DML 34; existing DQL classes SQL Server 42, PostgreSQL 50, Oracle 43, Spark 39; all `AstCompiler*` integration tests 345 / 345.
+
+## 24. Implementation Log — DML review loop 1
+
+Track `PLAN-AST-DIALECT-GEN-16`, Phase 4 loop-back after the Phase 5 DML review (§19.10). Branch `feat/ast-dml`, fast-forwarded to `f18d492`; one commit per finding (Phase 4 developer, Sonnet). Every finding was fixed test-first: the failing test was observed red (or, for compile-level changes, the test was written against the new API and the old behaviour was shown to fail) before the fix.
+
+### 24.1 Status per finding
+
+| ID | Status | Commit | Notes |
+|---|---|---|---|
+| CR-ADG-33 | Fixed | `724f795` | `MergeAliasGuard` collects the qualifiers of the top-level MERGE source (alias, or the table's own name; derived, lateral and joined sources) and rejects any that equals the target alias, the target table name or the unqualified table name, case-insensitively. It runs in the injector (`AstSecurityVisitor.TypedDml.cs`, before any user part is processed) and, independently, in the verifier (`SecurityCoverageVerifier.Dml.cs`). Compile tests on all five dialects (`t`/`t`, `t`/`T`, source table named like the alias, unaliased target equal to the source alias), a verifier mutant on all five dialects, and one execution contract test (`Merge_SourceAliasEqualToTheTargetAlias_IsRejectedByTheCompiler_BeforeAnyExecution`): the error is a `SecurityException` from the compiler (a provider error would be a `DbException`) and the table snapshot is unchanged. |
+| CR-ADG-34 | Fixed (compile side); wiring at X1 | `c5654e4` | `DmlErrorSanitizer.Map(dialect, exception)` is total. Constraint categories stay (`DmlConstraintViolationException`, code `DML_CONSTRAINT_VIOLATION`); conversion, truncation and overflow errors become `SQL_DATA_ERROR` (SQL Server 2628, 8152, 245, 8114, 242, 241, 220, 232, 295, 9803; Oracle 12899, 1722, 1858, 1861, 1840, 1843, 1438, 1401, 1476, 6502, 1830; PostgreSQL SQLSTATE class 22; DuckDB `Conversion Error` and out of range; Delta `CAST_INVALID_INPUT`, `CAST_OVERFLOW`, `ARITHMETIC_OVERFLOW`, `NUMERIC_VALUE_OUT_OF_RANGE`, `DELTA_EXCEED_CHAR_VARCHAR_LIMIT`); every other provider error becomes `SQL_PROVIDER_ERROR`. All three are `GovernedSqlException` with a fixed message, the dialect and no inner exception. SQL Server 547 is split by the message class (read, never echoed): `CHECK constraint` is `Check`, `FOREIGN KEY` or `REFERENCE constraint` is `ForeignKey`, an unknown class is not guessed and maps to the generic provider error. Per-provider tests assert that a value, column name, table name and driver detail do not survive (`ToString()` of the mapped error). **Wiring into the runtime executors stays at X1** (§20.3): the mapper has no production caller yet. |
+| CR-ADG-35 | Fixed; decision recorded in 24.2 | `5b3088f` | See 24.2. |
+| CR-ADG-36 | Fixed | `805242c` | `DmlMaskedReadGuard` no longer descends into `MaskExpression` (the injected mask only names the column to hide it). Test on all five dialects: an UPDATE with a subquery over the masked table that does not read the masked column compiles; reading the masked column directly or in the WHERE next to the subquery stays rejected. |
+| CR-ADG-37 | Fixed (best effort, documented) | `3b964e9` | The tautology check now catches `x IS NOT NULL OR x IS NULL` (either order, parenthesized), `NOT (false)`, `NOT (1 = 0)`, `NOT (NOT (true))`, `1 = 1 OR ...` in either position, and these combined with `AND true`. A new constant-false evaluator (`IsTriviallyFalse`) backs the `NOT` case. The check remains a safety net, not a proof: the tenant and policy predicates are always ANDed, so no tautology can widen the row set beyond the caller's own rows. |
+| CR-ADG-38 | Fixed | `4a0ee49` | The typed path accepts only `DmlGuardOptions.Strict`; any other value (any single switch false, or a null) throws the new `SqlCompileConfigurationException` (a `SecurityException`, fixed message, names no setting) for every statement class, before the cache is consulted, so nothing relaxed is ever compiled or cached. `EnforceWithCheckOption = false` is therefore rejected, not silently ignored. The record stays so the injector and verifier can be unit-tested per switch. Pinned by: a test that every one of the 9 boolean switches, relaxed alone, is rejected on every dialect (a new switch fails the count assertion), and an architecture test that scans the IL of every production assembly for calls to the `DmlGuardOptions` constructor, copy (`<Clone>$`) or setters and to `GovernancePolicy.Dml`'s setter outside the options type (with a positive control). Existing tests that relaxed a switch (`Update_PolicyColumnAssignment_IsAllowed_WhenTheGuardIsSwitchedOff`, `Insert_TenantColumnMissing_...`, the cache-key relaxation test) now assert the rejection. |
+| CR-ADG-39 | Fixed | `1b2ac90` | New capability flag `SupportsSubqueryInDmlCondition` (false for Databricks, true elsewhere; capability table version `cap-4`). The injector rejects any subquery in an UPDATE or DELETE condition with `SqlCompileNotSupportedException(Construct)` before the backend is involved. The Spark contract tests now expect the typed error instead of a backend error. |
+| CR-ADG-40 | Fixed | `1bd24c9` | `SecurityContextResolutionMiddleware` stores a private immutable `GuardCacheEntry(Options, Guard)` reference in a `volatile` field (replaces the nullable value tuple). A reflection test pins a reference-type, volatile field whose members are init-only. |
+| CR-ADG-41 | Fixed | `9dbb5f0` | `FastSqlEngine.MaxQueryLength` is part of the compile cache key (`maxq=`), because the length check lives in `Parse`, which a cache hit skips. Test: a template compiled under the default limit is not served after the limit is lowered (the call throws `ArgumentOutOfRangeException`, no further hit). |
+
+### 24.2 CR-ADG-35 decision and implementation
+
+**Decision:** resolved by the orchestrator under stakeholder delegation. Keep rejecting INSERT for tables with a consent-based or correlated row policy. For plain admin row predicates, allow INSERT with check-option semantics; Delta stays rejected because it reports no INSERT row count.
+
+**Compile contract.**
+
+- INSERT ... VALUES into a table whose row policy is a plain, non-correlated predicate compiles as `INSERT INTO t (cols) SELECT v.cols FROM (SELECT row1 UNION ALL SELECT row2 ...) v WHERE <policy over v>`. The derived table alias is the quoted `autheris_ins`; the policy columns are qualified with it (nested policy subqueries keep their own scope and tenant predicate). Each row select carries the bound tenant parameter (forced by the existing tenant rule). The policy is a `SecurityPredicateExpression` with the new scope `InsertCheck` and id `(table, 1)`.
+- The policy must be evaluable over the written values: every policy column must be in the INSERT column list (a column default is not visible to the compiler), otherwise the statement is rejected with a `SecurityException`.
+- `CompiledSql` carries `ExpectedAffectedRows` (the number of VALUES rows) and the computed flag `RequiresRowCountCheck`; both survive the template cache (`CompiledSqlTemplate.ExpectedAffectedRows`, rebound on a hit). Non-check statements have `null` and `false`. `DmlCheckOption.Enforce(compiled, affectedRows)` throws `DmlCheckOptionViolationException` (code `DML_CHECK_OPTION_VIOLATION`, fixed message, no value, no inner exception) on any difference.
+- **Executor contract (for X1):** run the statement inside a transaction; when `RequiresRowCountCheck`, call `DmlCheckOption.Enforce` with the driver's affected count before the commit; on the exception roll back. Only a statement with `RequiresRowCountCheck` needs this; the call is a no-op otherwise.
+- The verifier proves the shape independently of the injector: the policy conjunct with scope `InsertCheck` must be present, the projection must be exactly the listed columns of the derived table, the derived table may only be a `UNION ALL` (not DISTINCT) of FROM-less, WHERE-less row selects, and every row must carry the bound tenant. Mutants: predicate removed, wrong scope, plain VALUES source, a row with a foreign tenant, DISTINCT rows (all rejected on every dialect).
+- Still rejected with typed or security errors: consent-based policies (`TablesWithConsentRowFilter`), correlated policies, INSERT ... SELECT into a policy table (not countable), MERGE INSERT into a policy table, and Delta/Databricks (`SqlCompileNotSupportedException(Construct)`, reason: "INSERT check option needs an affected row count that this dialect does not report"; new capability flag `ReportsInsertRowCount`, false for Databricks; capability table version `cap-5`).
+
+**Execution evidence.** The shared contract (`AstCompilerDmlContract`) has a transaction harness (`RunCheckedAsync`: begin, execute, `DmlCheckOption.Enforce`, commit, roll back on any exception) that every ADO.NET dialect class uses. Three scenarios run on SQL Server, PostgreSQL, Oracle Free and DuckDB: an insert that satisfies the policy is written (two rows); an insert that violates it is rolled back and the table snapshot is unchanged; a three-row insert with one violating row is rolled back as a whole and the key of a passing row is still free afterwards. A fourth scenario (INSERT ... SELECT and a missing policy column) is rejected by the compiler before the database. On Delta the same test asserts the typed compile error.
+
+**Known limit (documented, fail closed in the safe direction).** The check compares bound values with the database's default collation, not with the target column's collation. If the read filter is case-insensitive and the check is not, an insert such as `'eu'` for `Region = 'EU'` can be rolled back although a read would have shown it (a false reject). The opposite direction (a row passes the check but a read does not show it) hides a row from its writer but never exposes it to anyone else.
+
+### 24.3 X1 preconditions (updated)
+
+1. CR-ADG-34: wire `DmlErrorSanitizer.Map` into every runtime executor on the governed compile and execute path (SQL Server, PostgreSQL, Oracle, DuckDB, Spark/Delta client), and log the original error server-side only.
+2. CR-ADG-35: wire `DmlCheckOption.Enforce` into the DML executors (transaction, compare, rollback) for statements with `RequiresRowCountCheck`.
+3. The earlier preconditions of §20.3 stand.
+
+### 24.4 Evidence
+
+Observed on `feat/ast-dml` after the last fix commit (`CI=true`, `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal`, `-m:2`):
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror -m:2` | 0 warnings, 0 errors |
+| `tests/TrinoSqlEngine.Tests` | 2,540 / 2,540 passed (2,471 before the loop) |
+| `tests/Autheris.Tests.Unit` | 4,024 / 4,025 passed; the failure is the known `WormConfigurationAuditServiceTests` |
+| `tests/Autheris.Tests.Architecture` | 21 / 21 passed (19 before; two new DML-guard scans) |
+| All `AstCompiler*` integration tests in one run | 365 / 365 passed, none skipped |
+| Per class | SQL Server DML 37, PostgreSQL DML 37, Oracle Free DML 40, DuckDB DML 36, Spark/Delta DML 38; DQL classes SQL Server 42, PostgreSQL 50, Oracle 43, Spark 39; three provider smoke tests |
+
+### 24.5 Changes for the release notes
+
+- A request that sets any `DmlGuardOptions` switch other than the strict value is now rejected with `SqlCompileConfigurationException`.
+- INSERT into a table with an admin row policy is now supported (VALUES only) with a row-count check that the executor must perform.
+- `CompiledSql` has two new members (`ExpectedAffectedRows`, `RequiresRowCountCheck`); the capability record has `SupportsSubqueryInDmlCondition` and `ReportsInsertRowCount` (table version `cap-5`).
