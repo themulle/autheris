@@ -257,7 +257,28 @@ An access profile binds it to the Web-API table (`PUT /api/v1/governance/access-
 }
 ```
 
-The governance HTTP bodies carry `filter`, `target`, `object_kinds`, `time_column` and `map`. `Strategy`, `PushdownFormat` and `MaxPushdownKeys` of a binding are stored with the profile (`VirtualFilterStore`); a binding written through these bodies uses the defaults `Adaptive`, `null` and `100`.
+The governance HTTP bodies (`PUT /api/v1/governance/access-profiles/{name}` and the profiles of a file repository sync) carry these binding fields:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `filter` | string | required | Name of the Virtual Filter. |
+| `target` | string | profile scope | Target pattern or regex (section 2.8). |
+| `object_kinds` | string list | `["relation", "procedure_result"]` | `relation`, `procedure_result`. |
+| `time_column` | string | none | Column compared with the filter's validity window. |
+| `map` | object | same name | Key column of the filter to column of the protected object. |
+| `strategy` | string | `adaptive` | `adaptive`, `short_circuit_only`, `duckdb_hash_join`, `pushdown_only` (section 3.2). |
+| `pushdown_format` | string | none (endpoint capability) | `comma_separated`, `post_batch`; `repeated_param` and `odata_in` are recognized but always rejected (see below). |
+| `max_pushdown_keys` | integer | `100` | Per-binding key budget. |
+
+The profile response echoes `strategy`, `pushdown_format` and `max_pushdown_keys` for every binding. The values are part of the binding's canonical hash and therefore of the profile's `definition_hash`, so a change follows the same authorization, audit, draft and approval path as any other binding field. Omitted fields keep the defaults.
+
+A request that violates one of these rules answers HTTP 400 and stores nothing; a file repository sync with such a binding is rejected as a whole:
+
+- An unknown `strategy` or `pushdown_format` value.
+- `max_pushdown_keys` outside `1..1000`, or above the gateway-wide `VirtualFilters:Federation:MaxPushdownKeys`: error code `VF_PUSHDOWN_KEY_BUDGET_INVALID`.
+- A `pushdown_format` that no endpoint can satisfy (`repeated_param`, `odata_in`), or, when `target` is an exact `source.schema.table` name of a catalog table with an `HttpEndpointDescriptor`, one that the endpoint's capability cannot satisfy (`comma_separated` needs a query-parameter list, `post_batch` a JSON array body; a path lookup satisfies none): error code `VF_PUSHDOWN_FORMAT_UNSUPPORTED`. The check uses the same capability logic as the planner. For a glob or regex target the endpoints are not known at write time, so the planner decides per table at query time (`format_unsupported`: Tier 3, or a denial for `PushdownOnly`).
+
+The error body is `{ "error": "...", "code": "VF_..." }`.
 
 The Web-API table is a catalog entry with an `HttpEndpointDescriptor`. Tier 2 needs these fields:
 
@@ -387,7 +408,6 @@ Tier 3 semi-join over 50,000 upstream rows against 10,000 authorized keys, half 
 - A 404 for a key is treated as "key not present"; a misconfigured base path that answers 404 yields an empty result (visible as `upstreamKeysNotFound` in the audit).
 - A revoked key stays authorized for up to `KeyCacheTtlSeconds`.
 - Bindings are checked against the catalog and the endpoint at query time (`VF_BINDING_MISCONFIGURED`), not when the profile is written.
-- The governance HTTP bodies do not set `Strategy`, `PushdownFormat` or `MaxPushdownKeys` of a binding.
 - Metrics per tier are not exported; the audit records carry the tier and the denial code.
 - Upstream rows count against `MaxStagedRowsPerTable` before the semi-join, so a large API without a pushdown capability can exceed the budget.
 - A `NULL` or unconvertible key in the key source is dropped (counted in `droppedKeys`) and never authorizes a row.
