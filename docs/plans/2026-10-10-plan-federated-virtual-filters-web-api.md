@@ -889,3 +889,124 @@ end-to-end tests and the VirtualFilter, WebSql, CrossSource and RowFilterChannel
 `PreloadedRows`, `EvaluateVirtualFiltersAsync` and `"anonymous"` in `VirtualFilters/` have no production hits (tests
 mention the first and `PreloadedRows` only to assert their absence); no Virtual Filter type is written to `session.Items`.
 Line counts of touched files: all below 800 except the pre-existing `WebSqlEndpoints.cs` (1,020) and `GatewayOptions.cs`.
+
+---
+
+## Phase 5 Code Review
+
+**Role:** `csharp-code-reviewer` (AGENTS.md section 6, Phase 5). **Date:** 2026-10-10.
+**Scope:** every commit in `e7ee288..b187621` on `feat/vf-federation-hardening`: the Phase 1-3 plan documents, batch A
+(WI-1, WI-18, WI-2), batch B (WI-3, WI-4, WI-5, WI-19), WI-6 and batch C (WI-7..WI-15, WI-20, WI-17). It also covers the
+`e7ee288` code that the new code builds on (`DeclarativeHttpDataSourceExecutor`, `CrossSourcePlanner`,
+`FederatedStagingService`, `GovernedConnectorReader`, `WebSqlEndpoints`). Line numbers refer to `b187621`.
+
+### R.1 Verification performed by the reviewer
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror` | 0 warnings, 0 errors |
+| `dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj` | 4,296 total: 4,295 passed, 1 failed. The failure is `WormConfigurationAuditServiceTests.AuditConfigurationSnapshotAsync_MintsWormRecordOnStartup_AndSuppressesDuplicates`, a known, unrelated failure that is fixed on `fix/worm-config-audit-test`. |
+| Integration tests, filter `FederatedVirtualFilter\|RowFilterChannelParity\|WebSql\|CrossSource`, with `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal` | 66 total: 65 passed, 1 failed. The failure is `RowFilterChannelParityTests...(channel: "sql-endpoint")`, which is pre-existing and unrelated. All 35 `FederatedVirtualFilter*` integration cases pass. |
+| Grep guards (WI-17, C-10) | No production hits for `VirtualFilterFederationHandled`, `SetInMemoryTuples`, `VirtualFilterJoinSpec`, `PushdownUrlFormatter`, `SqlPointLookupExtractor`, `PreloadedRows`, `EvaluateVirtualFiltersAsync` or `CompositeKeys`. No Virtual Filter type is written to `session.Items`. The changed lines contain no TODO/FIXME and no German text. |
+| File-size budget (section 2.5) | All touched files are within 800 lines except `WebSqlEndpoints.cs` (1,020 lines; 1,006 before this track) and `GatewayOptions.cs` (pre-existing). `FederatedDuckDbExecutionService.cs` has 648 lines and the planner 252. |
+
+**Mutation testing of the key guards.** Each guard was removed or weakened in a detached copy of `b187621`, one
+mutation at a time. The filtered unit suites (684 tests) and the `FederatedVirtualFilter*` integration suite (35 tests)
+were then run against each mutant.
+
+| # | Mutation | Killed | Killing tests (excerpt) |
+|---|---|---|---|
+| M1 | Remove the `ResponseSizeLimitingHandler` registration on the `DeclarativeHttp` client | **No** (unit and integration) | none, see CR-03 |
+| M2 | Push the queried keys instead of queried ∩ authorized (SEC-21) | Yes | `VirtualFilterStrategyMatrixTests.Cell_...(hit)`, `E2E2_InListWithAnUnauthorizedKey_SendsOnlyTheAuthorizedKey`, `E2E3_PointLookupHit_...` |
+| M3 | Remove the SEC-19 check (no SID and an existing profile) | Yes | `ConsentBypass_CallerWithoutSid_AndAnActiveProfile_IsDeniedEnforcementUnavailable` |
+| M4 | Let `HttpDeclarative` connectors self-attest (`mayAttest = true`) | Yes | `ReadAsync_ConnectorInjectsEnforcementItem_IsIgnored`, `Stage_ConnectorSelfAttestsFiltering_RowFilterIsStillEnforced` |
+| M5 | Drop the component type check in `VirtualFilterKey.Equals` | No (equivalent mutant: `long.Equals(decimal)` is already false and both sides share the key types; the check is defence in depth) | - |
+| M6 | Accept doubles at or above 2^53 for integer keys (SEC-18) | Yes | `VirtualFilterKeyCanonicalizerTests.Integer_RejectsOtherValues(9007199254740992)` |
+| M7 | Drop the tenant predicate from the key query (WI-19) | Yes | `Get_TenantColumn_ReturnsOnlyTheCallersKeys`, `ValuesAndTenantAreNeverPartOfTheSqlText` |
+| M8 | Delete Tier 0 (empty key set) | Yes (unit only) | `Plan_EmptyKeySet_SkipsUpstreamForEveryStrategy`, strategy-matrix "empty" rows |
+| M9 | Remove the pushdown argument conflict check (AC-8.5) | Yes | `PushdownArgumentThatCollidesWithAGatewayArgument_IsDenied_ConnectorNeverCalled` |
+| M10 | Allow `/`, `\` and `..` in path-lookup values (SEC-15) | Yes (unit only) | `HttpKeyPushdownCapabilityTests.KeyValues_AreCheckedPerKind` |
+| M11 | Write `ex.Message` into the denial audit (SEC-11) | Yes | `GatewaySecurityException_AuditedAsQueryDeniedWithErrorCode(*)` |
+| M12 | Disable single-flight key loading | Yes | `Get_ConcurrentColdCalls_LoadOnce_FailureNotCached` |
+| M13 | Remove the residual text self-check | Yes | `WithoutEnforced_CombinedMutatedDirectly_ThrowsEnforcementIncomplete` |
+| M14 | Count a column with any qualifier for the protected table (M6) | Yes (unit only) | `ColumnOfAnotherTable_WithTheSameName_IsIgnored`, `NoPointLookup_FullFetch_OnlyAuthorizedRows` |
+
+### R.2 Overall assessment
+
+The core of the rebuild is sound and follows the binding principles of section 2.1:
+
+- **One enforcement point.** A typed semi-join (`VirtualFilterEnforcement`) is applied to the raw rows in
+  `GovernedConnectorReader.ReadAsync`, before projection and masking.
+- **Verifiable residual decision.** The residual check compares exact pair identities (including the snapshot
+  generation) and also verifies the row-filter text.
+- **No relaxation by the connector.** The enforcement is passed as a typed parameter, never through `session.Items`.
+  Self-attestation flags are ignored for `HttpDeclarative` tables.
+- **No decision collisions.** Decisions and plans are keyed by the source-qualified `TableIdentifier`, and a missing
+  decision denies.
+- **No query rewrite.** The user AST is not changed for Virtual Filters.
+- **Faithful key loading.** The complete structured definition runs in SQL, with bound values and a bound tenant
+  predicate. Overflow is detected by reading `MaxAuthorizedKeys + 1` rows, and keys are cached in a dedicated,
+  size-limited cache with single-flight loading.
+- **Bounded time.** The request timeout covers authorization, planning and key loading.
+- **Stable codes.** Denials carry stable codes into the audit.
+
+In the WebSQL cross-source channel, no path returns an HTTP table with an applied Virtual Filter without enforcement.
+There is **no Blocker**.
+
+The remaining issues fall into four groups:
+
+- (a) For path-lookup endpoints, the result and the status of a query depend on the tier, which violates principle 1
+  and NFR-2 (CR-01).
+- (b) Inner exception messages leak into logs, which violates C-8 (CR-02).
+- (c) One binding test criterion (ST-31) is not protected by any test (CR-03).
+- (d) Smaller audit, availability, performance and test-quality items.
+
+### R.3 Findings
+
+Severity levels: **Blocker** = data exposure or fail-open. **Major** = must be fixed before approval. **Minor** = fix in
+this track; may be batched. **Nit** = optional.
+
+| ID | Sev. | Location | Finding and failure scenario | Required fix |
+|---|---|---|---|---|
+| CR-01 | Major | `HttpKeyPushdownCapability.cs:192-195`, `VirtualFilterFederationPlanner.cs:172-199`, `DeclarativeHttpDataSourceExecutor.cs:326,437-470,491-510`, fixture `FederatedVirtualFilterWebApiFixture.cs:91-95` | **Path-lookup (`ParallelSingleRequests`) endpoints: the result depends on the tier.** This contradicts section 2.1 principle 1 ("only decide what is fetched, never what is returned"), NFR-2 and ST-26. There are three cases. **(1) Duplicate rows:** if the upstream ignores the key, the executor concatenates one full answer per request, so every authorized row appears once per pushed key. `COUNT(*)` and `SUM` are then wrong, while Tier 3 returns the correct answer. The E2E test only checks `Distinct()`, so this is accepted rather than tested. **(2) Missing key:** if one authorized key no longer exists upstream, `GET /customers/{key}` answers 404, `EnsureSuccessStatusCode` fails the whole query, and WebSQL answers 500. A Tier 1 miss, or the same query in Tier 3, answers 200 with 0 rows, which violates ST-26 ("identical HTTP status"). **(3) Broken Tier 3 request:** every Tier 3 fallback on such an endpoint sends the path template with the `{id}` placeholder unexpanded. This happens for `Adaptive` with more than `MaxPathLookupRequests` keys (default 10, so most real tables), with an unsafe key value, or with `PushdownEnabled = false`. Real APIs answer 404 or 400, so the query fails. The mock answers any path with all rows, which hides the problem. | Without touching the executor (principle 6), choose and implement one consistent v1 semantics and record it in the plan. **Option A:** an endpoint whose path template has a placeholder that the gateway cannot fill is not full-fetchable, so Tier 3 on it denies with a stable code. In path-lookup mode, the staged rows are additionally restricted to the pushed values and de-duplicated by `PrimaryKeyField`, which is declared unique, and a 404 for a pushed key is either deferred with a documented, tested denial in every tier or mapped to "no row" by a narrowly scoped handler. **Option B:** remove `PathLookup` from `HttpKeyPushdownCapability.Resolve` for v1, make Tier 3 on placeholder templates deny, and defer path lookups. Add end-to-end tests for the exact row multiset with `IgnoreFilters`, for a 404 on an authorized key, and for `Adaptive` with more than 10 keys, with the mock returning 404 for unknown or placeholder paths. |
+| CR-02 | Major | `WebSqlEndpoints.cs:530-541` | **The WebSQL denial mapping logs the full exception, which violates C-8 and SEC-11.** `logger.LogWarning(gatewayDenied, ...)` writes the exception chain to the log. For `VIRTUAL_FILTER_SOURCE_UNAVAILABLE` the inner exception is the key-source `DbException`, whose message may quote data values (SEC-11). ST-33 only captures the loggers of the services, so this is not detected. The mapping also differs from `GatewayExceptionHandler.Map`: `GatewayUnauthorizedException` becomes 403 instead of 401, and `RESPONSE_TOO_LARGE` becomes 403 instead of 400. This is despite the comment "same mapping as GatewayExceptionHandler". Finally, it grows a file that is already over the size budget. | Log only `ErrorCode` and the exception type name, without the exception object. Move the status mapping of `GatewayExceptionHandler` into one shared internal static mapper and use it from `WriteWebSqlErrorAsync`, so both channels agree and `WebSqlEndpoints.cs` does not grow further. Add a test in which a `GatewaySecurityException` with an inner exception message containing a sentinel value goes through `WriteWebSqlErrorAsync`, and assert that the captured log does not contain the sentinel and that the 401/400/403 statuses match the global handler. |
+| CR-03 | Major | `GatewaySqlEngineServiceExtensions.cs:46-51`; `FederatedVirtualFilterWebApiFixture.cs:214-215` | **ST-31 is not protected by any test (C-10).** Mutation M1, which removes the handler registration, fails no unit or integration test. The end-to-end fixture replaces `IHttpClientFactory` with `new HttpClient(Crm)`, so neither the size cap nor the SSRF handler is present in any end-to-end path. | Add a wiring test: resolve `IHttpClientFactory` from the production service registration, create the `DeclarativeHttp` client over a stub primary handler that returns an oversized body, and expect `ROW_LIMIT_EXCEEDED`. Alternatively, let the end-to-end fixture keep the named-client pipeline and only replace the primary handler (`ConfigurePrimaryHttpMessageHandler`), and add one oversized-response end-to-end case that expects 403 and a `WEBSQL_QUERY_DENIED` record with `ROW_LIMIT_EXCEEDED`. |
+| CR-04 | Minor | `VirtualFilterFederationPlanner.cs:105-124`, `FederatedDuckDbExecutionService.cs:537-562` | **Key-source reads are not audited when planning denies after keys were loaded (AC-9.1).** The `virtualFilterKeySource` records are only written by the start audit after a successful plan. If keys were loaded and the plan then denies (`VF_SCAN_NOT_PERMITTED`, `VF_PUSHDOWN_UNAVAILABLE`, `VF_PUSHDOWN_LIMIT_EXCEEDED`, or `VF_KEY_SET_TOO_LARGE` on a later pair), the key source was read but no `SOURCE_READ` record exists. Only the denial record is written. | Record the key-set audits of every completed load, also on the denial path. For example, the planner can collect them in a per-request accumulator that `RecordFailureAuditAsync` also writes. Add a test that triggers `VF_SCAN_NOT_PERMITTED` and asserts the key-source record is present. |
+| CR-05 | Minor | `FederatedStagingService.cs:201,225` | **The upstream `SOURCE_READ` record names the table without its domain.** It uses `ToQualifiedName()`, so `crm_api.public.customers` and `erp.public.customers` produce the same audit target (the SEC-1 ambiguity, now in the audit). The key-source records already use the full identifier. AC-9.1 also asks for a request count, which is not recorded: `pushdownKeyCount` is not the request count for path-lookup or paged reads. | Use `Identifier.ToString()` for `table` and `TargetTable`. Record `upstreamRequests`, or document in Phase 6 that the request count is derived from the tier. |
+| CR-06 | Minor | `VirtualFilterFederationPlanner.cs:147,159-167`; `VirtualFilterFederationOptions.cs:23-27` | **`PushdownEnabled = false` changes outcomes, not only what is fetched.** The option documentation says "enforcement is unaffected". However, with the switch off, `queried` is null, so `isPointLookup` is false, and every query on a `ShortCircuitOnly` binding (point lookups included) is denied with `VF_SCAN_NOT_PERMITTED`. The kill switch therefore turns 200s into 403s. | Determine point-lookup eligibility independently of the switch (it is a property of the query) and let the switch only gate the skip and the push. Alternatively, document this effect and add a test for it. Consider a clearer name, such as `UpstreamNarrowingEnabled`. |
+| CR-07 | Minor | `VirtualFilterKeySetCache.cs:357-377` | **Striped single-flight locks couple tenants.** A slow key source of tenant A holds one of the 32 stripes for up to `KeyQueryTimeoutSeconds`. Cold loads of unrelated filters, including those of other tenants, that hash to the same stripe wait behind it and can fail with `VIRTUAL_FILTER_SOURCE_UNAVAILABLE` once their request timeout expires. This is a noisy-neighbour availability risk (SEC-10 asked for single-flight per cache key). | Track in-flight loads per cache key, for example with a `ConcurrentDictionary<string, Lazy<Task<VirtualFilterKeySet>>>` whose entries are removed when the load completes, so that a failed load is still not cached. Add a test in which two keys on the same stripe load concurrently and the second load is not delayed by the first. |
+| CR-08 | Minor | `VirtualFilterEnforcement.cs:134,151-163`, `VirtualFilterKey.cs:200-221`, `VirtualFilterKeyCanonicalizer.cs:332-347` | **The per-row probe allocates on the hot path.** For each row and pair it allocates a closure (`_pairs.All(p => p.Authorizes(row))` captures `row`), a `new object?[]` value buffer and a `new object[]` canonical array, and boxes `long` values. Tier 3 with 50,000 rows and two pairs therefore makes about 300,000 short-lived allocations. The NFR-7 measurement that section 4.1 assigns to Phase 5 has not been done; there is no benchmark. | Use a `for` loop, reuse the value buffer within one `Apply` call, and allocate the canonical key only for the probe (or add a single-column fast path with `FrozenSet<long>` and `FrozenSet<string>`). Add a BenchmarkDotNet or stopwatch smoke test that measures Tier 3 enforcement of 50,000 rows against 10,000 keys, and record the result in the plan. |
+| CR-09 | Minor | `GatewaySqlEngineServiceExtensions.cs:46-51`; `ResponseSizeLimitingHandler.cs:113-114` | **The response cap affects every `DeclarativeHttp` client, configured by a WebSQL option.** It also applies to `DatasourceTestingService.cs:221` and `PluginHttpDataSourceExecutor.cs:81`, so a plugin response over 32 MB now fails with a `GatewaySecurityException`, and the limit is configured under `WebSql:CrossSource`. In addition, `LimitedStream.Length` returns the number of bytes read while `CanSeek` is false, which breaks the `Stream` contract to satisfy one executor call site. | Give the cap its own option (for example `DataSources:Http:MaxResponseBytes`, defaulting to the current value) and document its scope in Phase 6. Keep the `Length` override, but document it as executor-compatibility behaviour and add a test that pins it. |
+| CR-10 | Minor | `GovernedConnectorReader.cs:101-110,175-178`; `FederatedVirtualFilterFailClosedTests.cs:137-158` | **Other channels still read the upstream before denying (D-12).** OData and REST requests on a Virtual-Filter-protected HTTP table perform the full upstream read and only then fail with 403 in `EnsureInMemoryFilterIsEnforceable`. Unauthorized rows reach gateway memory, and egress happens for nothing. The D-12 tests do not assert the upstream request count. | When there is no enforcement, the decision carries a Virtual Filter predicate and the table cannot self-attest, call `EnsureInMemoryFilterIsEnforceable` before `ReadRawAsync`. Assert `fixture.Crm.Requests.ShouldBeEmpty()` in both D-12 tests. |
+| CR-11 | Minor | `FederatedVirtualFilterFailClosedTests.cs:146-158`; `docs/plans/00-master-plan-overview.md` | **The REST `LIMIT/OFFSET` parser bug is only recorded in the implementation log.** The REST dataset channel answers 500 instead of 403 on web-API tables. The bug is pre-existing and fails closed, but it is not tracked anywhere else. | Add a follow-up item to the master plan (outside this track). Keep the "no rows" assertion and add the upstream-calls assertion from CR-10. |
+| CR-12 | Nit | `FederatedVirtualFilterInterimTests.cs` | The class name describes the batch B interim state; the test now covers ST-22. | Rename the class or move the test into `FederatedVirtualFilterEnforcementTests`. |
+| CR-13 | Nit | `FederatedVirtualFilterPointLookupTests.cs:108` | `shortCrm.UpstreamCalls.ShouldBeLessThanOrEqualTo(1)` is weak: a regression that disables the short-circuit would still pass. | Pass the expected call count (0 or 1) per `InlineData` row. |
+| CR-14 | Nit | `MandatoryRowFilterResolver.cs:200-211` | `HasActiveProfilesAsync` counts profiles of any status (draft, pending, revoked). This errs on the fail-closed side, but the name does not match the behaviour. | Filter on `FilterApprovalStatus.Active` or rename the method; add a test either way. |
+| CR-15 | Nit | `VirtualFilterTablePlan.cs:71`; `CrossSourcePlanner.cs:86-87`; `HttpKeyPushdownCapability.cs:166,242` | `WithKeySets` mutates a plan after construction (`private set`). A blank line separates an XML doc comment from its method. The reserved parameter names duplicate the executor's private list, so the two can drift, and the list is allocated on every call. | Pass the key sets through the constructor. Remove the blank line. Share one reserved-names constant with the executor (exposing it as `internal static readonly` is a one-line, non-behavioural change). |
+| CR-16 | Nit (Phase 6) | `docs/features/f-gov-14-federated-virtual-filters.md` | The feature document still describes the deleted `SqlPointLookupExtractor`, `PushdownUrlFormatter`, `VirtualFilterShortCircuitEvaluator` and `CompositeKeys`. | Phase 6 must rewrite it before the feature is enabled. The rewrite must cover the WI-9 hash change, the CR-01 path-lookup semantics, the scope of the response cap (CR-09) and the key revocation latency (= TTL). |
+
+### R.4 Assessment of the reported deviations
+
+| Deviation | Assessment |
+|---|---|
+| WebSQL `GatewaySecurityException` → 403 mapping (WI-15) | **Accepted in substance.** Before this change, every stable denial code answered 500, so the fix is necessary. The implementation must be corrected as described in CR-02 (logging, consistency with the global handler). The 14 extra lines in the already oversized `WebSqlEndpoints.cs` (1,020 lines) are accepted only if CR-02 moves the mapping into a shared mapper. Extracting the error writer from `WebSqlEndpoints.cs` should be tracked as a follow-up. |
+| REST `LIMIT/OFFSET` cross-source parser bug (500 instead of 403) | **Accepted as out of scope.** The bug is pre-existing and fails closed (no rows). It must be tracked in the master plan, and the test must assert zero upstream calls (CR-10, CR-11). |
+| Duplicate rows in path-lookup mode when the upstream ignores the key | **Not accepted.** This is not a leak, but it makes the result depend on the tier, which violates principle 1 and AC-7.3 (no row multiplication). See CR-01. |
+| WI-8 tier semantics and new options | **Accepted:** point-lookup hit = `PointLookup`, scan pushdown = `Pushdown`, disjoint key sets = `EmptyKeySet` with reason `key_sets_disjoint`, and `PushdownOnly` combined with `DuckDbHashJoin` or a disabled switch denies. `MaxPushdownKeys`, `MaxPushdownUrlLength` and `MaxPathLookupRequests` have validated ranges. **Not accepted as is:** `PushdownEnabled = false` disabling the Tier 1 short-circuit. Disabling it is reasonable for a differential kill switch, but it also turns every `ShortCircuitOnly` query into a denial; see CR-06. |
+| WI-9 change of the binding canonical hash | **Accepted.** The feature is unreleased and old JSON still loads. Phase 6 must document the one-time drift report (CR-16). |
+| New `IMandatoryRowFilterResolver.HasActiveProfilesAsync` | **Accepted.** It is the minimal way to implement SEC-19. Adding a member breaks external implementers at compile time, which is preferable to a silent default implementation. A snapshot that cannot be loaded answers `true`, which is fail-closed. Naming and status filtering: CR-14. |
+| WI-20 response cap on every `DeclarativeHttp` client | **Accepted for security** (it bounds memory for all users of the client), but it needs its own option and documentation; see CR-09. The wiring is untested; see CR-03. |
+| Deletion of `SqlPointLookupExtractor` and `PushdownUrlFormatter` | **Accepted.** Both were superseded (SEC-16; M6 replaces the unqualified extractor). There are no remaining production references; only the feature document mentions them (CR-16). |
+
+### R.5 Verdict
+
+**CHANGES REQUESTED.**
+
+- **Must loop back to Phase 4 before approval:** CR-01, CR-02, CR-03.
+- **To be fixed in the same Phase 4 loop (batched, not blocking each other):** CR-04, CR-05, CR-06, CR-07, CR-08,
+  CR-09, CR-10, CR-11.
+- **Optional:** CR-12..CR-15.
+- **Phase 6:** CR-16.
+
+After the fixes, Phase 5 re-reviews only the changed areas. The re-review re-runs mutations M1 and M8 at integration
+level, plus a new mutation for the CR-01 path-lookup guard, and the full unit and integration suites.
