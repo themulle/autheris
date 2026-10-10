@@ -161,8 +161,9 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
         // Tier 1: a point lookup without any authorized queried key for some pair cannot return a row. The upstream
         // call is skipped and an empty relation is staged, so the user query still yields its true answer.
         var federation = Federation;
-        var queried = federation.PushdownEnabled ? QueriedKeys(statement, tables, table, federation.MaxPointLookupTuples) : null;
-        if (queried != null)
+        // Whether the query is a point lookup is a property of the query. The switch only gates what is skipped or pushed (CR-06).
+        var queried = QueriedKeys(statement, tables, table, federation.MaxPointLookupTuples);
+        if (queried != null && federation.PushdownEnabled)
         {
             for (int i = 0; i < queried.Length; i++)
             {

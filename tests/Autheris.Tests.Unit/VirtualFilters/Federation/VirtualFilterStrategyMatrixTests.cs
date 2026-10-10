@@ -372,6 +372,33 @@ public sealed class VirtualFilterStrategyMatrixTests
         ex.ErrorCode.ShouldBe("VF_PUSHDOWN_UNAVAILABLE");
     }
 
+    [Theory]
+    [InlineData(Scan, "VF_SCAN_NOT_PERMITTED")]
+    [InlineData(Hit, "VF_PUSHDOWN_UNAVAILABLE")]
+    [InlineData(Miss, "VF_PUSHDOWN_UNAVAILABLE")]
+    public async Task PushdownDisabledOption_ShortCircuitOnly_ReportsWhatIsActuallyMissing(string sql, string code)
+    {
+        // CR-06: whether a query is a point lookup is a property of the query, not of the switch. A scan keeps its code; a
+        // point lookup is denied because the switch forbids the narrowing it needs, not because it "is a scan".
+        var enabled = await Should.ThrowAsync<GatewaySecurityException>(() =>
+            PlanAsync(sql == Scan ? sql : Scan, Endpoint(), [Pair(VirtualFilterExecutionStrategy.ShortCircuitOnly)], Keys("1")));
+        enabled.ErrorCode.ShouldBe("VF_SCAN_NOT_PERMITTED");
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() =>
+            PlanAsync(sql, Endpoint(), [Pair(VirtualFilterExecutionStrategy.ShortCircuitOnly)], Keys("1"), new VirtualFilterFederationOptions { PushdownEnabled = false }));
+
+        ex.ErrorCode.ShouldBe(code);
+    }
+
+    [Fact]
+    public async Task PushdownDisabledOption_AdaptiveMiss_IsNotShortCircuited_ButStillAPointLookup()
+    {
+        var plan = await PlanAsync(Miss, Endpoint(), [Pair(VirtualFilterExecutionStrategy.Adaptive)], Keys("1"), new VirtualFilterFederationOptions { PushdownEnabled = false });
+
+        plan.SkipUpstream.ShouldBeFalse();
+        plan.Tier.ShouldBe(VirtualFilterTier.FullFetch);
+    }
+
     [Fact]
     public async Task MixedStrategies_MostRestrictiveWins()
     {

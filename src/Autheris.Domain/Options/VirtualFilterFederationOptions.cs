@@ -22,7 +22,11 @@ public sealed class VirtualFilterFederationOptions
 
     /// <summary>
     /// Allows the gateway to narrow what is fetched upstream (point-lookup short-circuit, key pushdown). When off, every
-    /// protected table is read completely (Tier 3) and filtered by the gateway; enforcement is unaffected.
+    /// protected table is read completely (Tier 3) and filtered by the gateway; enforcement is unaffected. What the
+    /// switch cannot do is read a table the bindings only allow to be narrowed: a <c>ShortCircuitOnly</c> or
+    /// <c>PushdownOnly</c> binding needs the narrowing and is denied (<c>VF_PUSHDOWN_UNAVAILABLE</c>) while it is off, and
+    /// an endpoint with a path placeholder (path lookup) is never read as a full scan
+    /// (<c>VF_PATH_TEMPLATE_UNFILLABLE</c>). It is a kill switch for the narrowing, not a way to get more rows.
     /// </summary>
     public bool PushdownEnabled { get; init; } = true;
 
