@@ -16,7 +16,39 @@ public sealed record VirtualFilterKeySet
         KeyTypes = keyTypes;
         Keys = keys;
         DroppedKeyCount = droppedKeyCount;
+        if (keyTypes.Count == 1)
+        {
+            // Single-column fast path: typed sets probed without boxing or allocating a key per row (CR-08).
+            switch (keyTypes[0])
+            {
+                case VirtualFilterKeyType.IntegerNumber: _integers = keys.Select(k => (long)k[0]).ToFrozenSet(); break;
+                case VirtualFilterKeyType.DecimalNumber: _decimals = keys.Select(k => (decimal)k[0]).ToFrozenSet(); break;
+                case VirtualFilterKeyType.Uuid: _uuids = keys.Select(k => (Guid)k[0]).ToFrozenSet(); break;
+                case VirtualFilterKeyType.Text: _texts = keys.Select(k => (string)k[0]).ToFrozenSet(StringComparer.Ordinal); break;
+            }
+        }
     }
+
+    private readonly FrozenSet<long>? _integers;
+    private readonly FrozenSet<decimal>? _decimals;
+    private readonly FrozenSet<Guid>? _uuids;
+    private readonly FrozenSet<string>? _texts;
+
+    /// <summary>
+    /// True for a one-column set: <paramref name="value"/> is the raw upstream value, which is canonicalized and probed
+    /// without allocating. False (not authorized) for a value that cannot be converted exactly or a set of another arity.
+    /// </summary>
+    internal bool ContainsRawSingle(object? value) => KeyTypes[0] switch
+    {
+        VirtualFilterKeyType.IntegerNumber => _integers != null && VirtualFilterKeyCanonicalizer.TryGetInteger(value, out var l) && _integers.Contains(l),
+        VirtualFilterKeyType.DecimalNumber => _decimals != null && VirtualFilterKeyCanonicalizer.TryGetDecimal(value, out var d) && _decimals.Contains(d),
+        VirtualFilterKeyType.Uuid => _uuids != null && VirtualFilterKeyCanonicalizer.TryGetUuid(value, out var g) && _uuids.Contains(g),
+        VirtualFilterKeyType.Text => _texts != null && VirtualFilterKeyCanonicalizer.TryGetText(value, out var t) && _texts.Contains(t),
+        _ => false
+    };
+
+    /// <summary>True when the key set has exactly one component (the fast path of <see cref="ContainsRawSingle"/> applies).</summary>
+    internal bool IsSingleColumn => KeyTypes.Count == 1;
 
     /// <summary>Canonical type of each key component, in key column order.</summary>
     public IReadOnlyList<VirtualFilterKeyType> KeyTypes { get; }

@@ -20,6 +20,12 @@ public static class BenchmarkRunnerApp
             return;
         }
 
+        if (args.Length > 0 && args[0].Equals("vfenf", StringComparison.OrdinalIgnoreCase))
+        {
+            VirtualFilterEnforcementBenchmark.Run();
+            return;
+        }
+
         if (args.Length > 0 && args[0].Equals("sla", StringComparison.OrdinalIgnoreCase))
         {
             await SlaValidationBenchmark.RunAllSlaChecksAsync();

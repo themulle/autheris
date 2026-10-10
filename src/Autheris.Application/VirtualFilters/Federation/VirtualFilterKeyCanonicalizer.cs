@@ -52,14 +52,22 @@ public static class VirtualFilterKeyCanonicalizer
     /// <summary>Converts <paramref name="value"/> to the canonical value of <paramref name="type"/>; false when not exact.</summary>
     public static bool TryCanonicalize(VirtualFilterKeyType type, object? value, out object canonical)
     {
-        object? result = type switch
+        object? result = null;
+        switch (type)
         {
-            VirtualFilterKeyType.IntegerNumber => ToInteger(value),
-            VirtualFilterKeyType.DecimalNumber => ToDecimal(value),
-            VirtualFilterKeyType.Uuid => ToUuid(value),
-            VirtualFilterKeyType.Text => ToText(value),
-            _ => null
-        };
+            case VirtualFilterKeyType.IntegerNumber:
+                result = TryGetInteger(value, out var integer) ? integer : null;
+                break;
+            case VirtualFilterKeyType.DecimalNumber:
+                result = TryGetDecimal(value, out var number) ? number : null;
+                break;
+            case VirtualFilterKeyType.Uuid:
+                result = TryGetUuid(value, out var uuid) ? uuid : null;
+                break;
+            case VirtualFilterKeyType.Text:
+                result = TryGetText(value, out var text) ? text : null;
+                break;
+        }
 
         canonical = result!;
         return result != null;
@@ -87,29 +95,44 @@ public static class VirtualFilterKeyCanonicalizer
         return text;
     }
 
-    private static object? ToInteger(object? value) => value switch
-    {
-        long l => l,
-        int i => (long)i,
-        short s => (long)s,
-        byte b => (long)b,
-        sbyte sb => (long)sb,
-        ushort us => (long)us,
-        uint ui => (long)ui,
-        ulong ul when ul <= long.MaxValue => (long)ul,
-        decimal m when decimal.Truncate(m) == m && m >= long.MinValue && m <= long.MaxValue => (long)m,
-        double d => IntegerFromDouble(d),
-        float f => IntegerFromDouble(f),
-        string s when long.TryParse(s, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var parsed) => parsed,
-        _ => null
-    };
+    // The typed variants below are the single implementation of each conversion; they do not box, so the hot per-row
+    // probe of the single-column enforcement path does not allocate (CR-08).
 
-    private static object? IntegerFromDouble(double d) =>
-        double.IsFinite(d) && Math.Floor(d) == d && Math.Abs(d) < MaxExactDouble ? (long)d : null;
-
-    private static object? ToDecimal(object? value)
+    internal static bool TryGetInteger(object? value, out long result)
     {
-        decimal? result = value switch
+        switch (value)
+        {
+            case long l: result = l; return true;
+            case int i: result = i; return true;
+            case short s: result = s; return true;
+            case byte b: result = b; return true;
+            case sbyte sb: result = sb; return true;
+            case ushort us: result = us; return true;
+            case uint ui: result = ui; return true;
+            case ulong ul when ul <= long.MaxValue: result = (long)ul; return true;
+            case decimal m when decimal.Truncate(m) == m && m >= long.MinValue && m <= long.MaxValue: result = (long)m; return true;
+            case double d: return IntegerFromDouble(d, out result);
+            case float f: return IntegerFromDouble(f, out result);
+            case string s when long.TryParse(s, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var parsed): result = parsed; return true;
+            default: result = 0; return false;
+        }
+    }
+
+    private static bool IntegerFromDouble(double d, out long result)
+    {
+        if (double.IsFinite(d) && Math.Floor(d) == d && Math.Abs(d) < MaxExactDouble)
+        {
+            result = (long)d;
+            return true;
+        }
+
+        result = 0;
+        return false;
+    }
+
+    internal static bool TryGetDecimal(object? value, out decimal result)
+    {
+        decimal? exact = value switch
         {
             decimal m => m,
             long l => l,
@@ -127,7 +150,8 @@ public static class VirtualFilterKeyCanonicalizer
         };
 
         // Dividing by 1.000...0 removes trailing zeros: 12.50 and 12.5 become the same canonical value.
-        return result is { } exact ? exact / 1.000000000000000000000000000000000m : null;
+        result = exact is { } number ? number / 1.000000000000000000000000000000000m : 0;
+        return exact != null;
     }
 
     private static decimal? DecimalFromDouble(double d)
@@ -150,24 +174,33 @@ public static class VirtualFilterKeyCanonicalizer
         return (double)converted == d ? converted : null;
     }
 
-    private static object? ToUuid(object? value) => value switch
+    internal static bool TryGetUuid(object? value, out Guid result)
     {
-        Guid g => g,
-        string s when Guid.TryParse(s, out var parsed) => parsed,
-        _ => null
-    };
+        switch (value)
+        {
+            case Guid g: result = g; return true;
+            case string s when Guid.TryParse(s, out var parsed): result = parsed; return true;
+            default: result = default; return false;
+        }
+    }
 
-    private static object? ToText(object? value) => value switch
+    internal static bool TryGetText(object? value, out string result)
     {
-        string s => s,
-        long l => l.ToString(CultureInfo.InvariantCulture),
-        int i => i.ToString(CultureInfo.InvariantCulture),
-        short s => s.ToString(CultureInfo.InvariantCulture),
-        byte b => b.ToString(CultureInfo.InvariantCulture),
-        sbyte sb => sb.ToString(CultureInfo.InvariantCulture),
-        ushort us => us.ToString(CultureInfo.InvariantCulture),
-        uint ui => ui.ToString(CultureInfo.InvariantCulture),
-        ulong ul => ul.ToString(CultureInfo.InvariantCulture),
-        _ => null
-    };
+        string? text = value switch
+        {
+            string s => s,
+            long l => l.ToString(CultureInfo.InvariantCulture),
+            int i => i.ToString(CultureInfo.InvariantCulture),
+            short s => s.ToString(CultureInfo.InvariantCulture),
+            byte b => b.ToString(CultureInfo.InvariantCulture),
+            sbyte sb => sb.ToString(CultureInfo.InvariantCulture),
+            ushort us => us.ToString(CultureInfo.InvariantCulture),
+            uint ui => ui.ToString(CultureInfo.InvariantCulture),
+            ulong ul => ul.ToString(CultureInfo.InvariantCulture),
+            _ => null
+        };
+
+        result = text!;
+        return text != null;
+    }
 }

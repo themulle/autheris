@@ -129,9 +129,34 @@ public sealed class VirtualFilterEnforcement
     {
         ArgumentNullException.ThrowIfNull(rows);
         var kept = new List<IReadOnlyDictionary<string, object?>>(rows.Count);
-        foreach (var row in rows)
+
+        // One value buffer per composite pair for the whole call (CR-08): the per-row probe allocates nothing for a
+        // one-column pair and one canonical key for a composite pair.
+        var buffers = new object?[]?[_pairs.Length];
+        for (int p = 0; p < buffers.Length; p++)
         {
-            if (row != null && _pairs.All(p => p.Authorizes(row)))
+            buffers[p] = _pairs[p].NewBuffer();
+        }
+
+        for (int r = 0; r < rows.Count; r++)
+        {
+            var row = rows[r];
+            if (row == null)
+            {
+                continue;
+            }
+
+            bool authorized = true;
+            for (int p = 0; p < _pairs.Length; p++)
+            {
+                if (!_pairs[p].Authorizes(row, buffers[p]))
+                {
+                    authorized = false;
+                    break;
+                }
+            }
+
+            if (authorized)
             {
                 kept.Add(row);
             }
@@ -148,18 +173,25 @@ public sealed class VirtualFilterEnforcement
     {
         public AppliedVirtualFilterBinding Pair { get; } = pair;
 
-        public bool Authorizes(IReadOnlyDictionary<string, object?> row)
+        /// <summary>The reusable raw value buffer of a composite pair (null for a one-column pair, which needs none).</summary>
+        public object?[]? NewBuffer() => columns.Length == 1 ? null : new object?[columns.Length];
+
+        public bool Authorizes(IReadOnlyDictionary<string, object?> row, object?[]? buffer)
         {
-            var values = new object?[columns.Length];
+            if (buffer == null)
+            {
+                return row.TryGetValue(columns[0], out var single) && keys.ContainsRawSingle(single);
+            }
+
             for (int i = 0; i < columns.Length; i++)
             {
-                if (!row.TryGetValue(columns[i], out values[i]))
+                if (!row.TryGetValue(columns[i], out buffer[i]))
                 {
                     return false;
                 }
             }
 
-            return VirtualFilterKey.TryCreate(types, values, out var key) && keys.Contains(key);
+            return VirtualFilterKey.TryCreate(types, buffer, out var key) && keys.Contains(key);
         }
     }
 }
