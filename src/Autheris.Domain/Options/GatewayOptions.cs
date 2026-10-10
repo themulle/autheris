@@ -53,6 +53,7 @@ public sealed class GatewayOptions
     [Required] public VirtualFilterOptions VirtualFilters { get; init; } = new();
     [Required] public LoggingOptions Logging { get; init; } = new();
     [Required] public ClassificationOptions Classification { get; init; } = new();
+    [Required] public TenantIsolationOptions TenantIsolation { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".
@@ -1794,3 +1795,14 @@ public sealed class LoggingOptions
 }
 
 
+
+/// <summary>Decision B-1: handling of tenant ids that differ only in case.</summary>
+public sealed class TenantIsolationOptions
+{
+    /// <summary>
+    /// Default <c>false</c>: colliding tenants are denied per request (403 <c>TENANT_ID_COLLISION</c> plus an audit entry) and the
+    /// start only logs a critical warning, so one bad tenant id does not take down the others. <c>true</c> refuses the start
+    /// outside Development (strict mode).
+    /// </summary>
+    public bool StrictCollisionStartup { get; init; }
+}

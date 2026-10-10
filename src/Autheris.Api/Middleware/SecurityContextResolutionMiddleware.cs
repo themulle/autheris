@@ -4,6 +4,14 @@ using System;
 using System.Security;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
+using Autheris.Application.Interfaces;
+using Autheris.Application.Security;
+using Autheris.Domain.Audit;
+using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 
@@ -13,6 +21,58 @@ using Microsoft.AspNetCore.Http;
 /// </summary>
 public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
 {
+    public const string TenantCollisionCode = "TENANT_ID_COLLISION";
+
+    private TenantCollisionGuard? _guard;
+
+    private TenantCollisionGuard? ResolveGuard(HttpContext context)
+    {
+        var existing = _guard;
+        if (existing != null) return existing;
+        var options = context.RequestServices?.GetService<IOptions<GatewayOptions>>()?.Value;
+        return options == null ? null : _guard = TenantCollisionGuard.FromOptions(options);
+    }
+
+    /// <summary>B-1: a tenant whose id collides case-insensitively with another configured tenant is denied (fail closed).</summary>
+    private async Task<bool> DenyCollidingTenantAsync(HttpContext context, SecurityPrincipalContext securityContext)
+    {
+        var guard = ResolveGuard(context);
+        if (guard is not { HasCollisions: true } || !guard.IsDenied(securityContext.TenantId.Value))
+        {
+            return false;
+        }
+
+        try
+        {
+            var audit = context.RequestServices?.GetService<IAuditLogRepository>();
+            if (audit != null)
+            {
+                await audit.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    TenantId = securityContext.TenantId,
+                    EventType = AuditEventTypes.TenantCollisionDenied,
+                    ActorSid = securityContext.UserSid,
+                    TargetTable = string.Empty,
+                    Decision = "DENY",
+                    TraceId = context.TraceIdentifier,
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { reason = "tenant id collides case-insensitively with another tenant id", path = context.Request.Path.Value })
+                }, context.RequestAborted).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            // The denial does not depend on the audit write; a failing audit sink must not turn the denial into an allow or a 500.
+            context.RequestServices?.GetService<ILoggerFactory>()?.CreateLogger<SecurityContextResolutionMiddleware>()
+                .LogError(ex, "Audit write for a tenant collision denial failed.");
+        }
+
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(
+            "{\"errors\":[{\"message\":\"The tenant id is ambiguous (differs from another tenant id only in case) and is denied until an operator resolves the collision.\",\"code\":\"" + TenantCollisionCode + "\"}]}").ConfigureAwait(false);
+        return true;
+    }
+
     public async Task InvokeAsync(HttpContext context)
     {
         SecurityPrincipalContext securityContext;
@@ -45,6 +105,11 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(
                 "{\"errors\":[{\"message\":\"Invalid tenant identifier.\",\"code\":\"INVALID_TENANT_ID\"}]}").ConfigureAwait(false);
+            return;
+        }
+
+        if (await DenyCollidingTenantAsync(context, securityContext).ConfigureAwait(false))
+        {
             return;
         }
 

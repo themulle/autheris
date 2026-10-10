@@ -615,15 +615,17 @@ public static class GatewayStartupValidator
     }
 
     /// <summary>
-    /// Decision B-1: tenant ids that collide case-insensitively are reported; outside Development the start is refused (all
-    /// requests of the colliding tenants are denied until an operator resolves the collision). Ids are never rewritten.
+    /// Decision B-1: tenant ids that collide case-insensitively are reported. By default the start only logs a critical warning:
+    /// the colliding tenants are denied per request (<c>SecurityContextResolutionMiddleware</c>, 403 <c>TENANT_ID_COLLISION</c>)
+    /// and every other tenant keeps working. <c>Gateway:TenantIsolation:StrictCollisionStartup</c> refuses the start outside
+    /// Development instead. Ids are never rewritten.
     /// </summary>
     public static void ValidateTenantCollisions(GatewayOptions options, IHostEnvironment environment, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(environment);
 
-        var collisions = TenantCollisionCheck.FindCollisions(ConfiguredTenantIds(options));
+        var collisions = TenantCollisionCheck.FindCollisions(TenantCollisionGuard.ConfiguredTenantIds(options));
         if (collisions.Count == 0)
         {
             return;
@@ -636,19 +638,15 @@ public static class GatewayStartupValidator
             return;
         }
 
-        throw new ValidationException(
-            $"Security violation (B-1): tenant ids that differ only in case are configured ({description}). The colliding tenants are denied; rename one of them.");
-    }
+        if (options.TenantIsolation.StrictCollisionStartup)
+        {
+            throw new ValidationException(
+                $"Security violation (B-1): tenant ids that differ only in case are configured ({description}). Strict mode refuses the start; rename one of them.");
+        }
 
-    private static IEnumerable<string?> ConfiguredTenantIds(GatewayOptions options)
-    {
-        var forwardAuth = options.Authentication.ForwardAuth;
-        yield return forwardAuth.DefaultTenantId;
-        foreach (var id in forwardAuth.AllowedTenantIds) yield return id;
-        foreach (var id in options.WebSql.TenantDataSourceAllowlist.Keys) yield return id;
-        yield return options.OpenMetadata.DefaultTenantId;
-        foreach (var id in options.OpenMetadata.ServiceDatabaseToTenantMap.Values) yield return id;
-        foreach (var id in options.Itsm.InstanceToTenantMap.Values) yield return id;
+        logger?.LogCritical(
+            "Security (B-1): tenant ids that differ only in case are configured ({Collisions}). Requests of these tenants are denied with 403 TENANT_ID_COLLISION until an operator renames one of them.",
+            description);
     }
 
     internal static bool IsSupportedGovernanceDbProvider(string? provider) =>

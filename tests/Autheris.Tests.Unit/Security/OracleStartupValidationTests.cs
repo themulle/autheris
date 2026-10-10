@@ -165,9 +165,26 @@ public sealed class OracleStartupValidationTests
     };
 
     [Fact]
-    public void CollidingTenants_FailClosed_OutsideDevelopment()
+    public void CollidingTenants_StrictMode_RefusesTheStart_OutsideDevelopment()
     {
-        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateTenantCollisions(CollidingTenants(), Env(Environments.Production)));
+        var options = new GatewayOptions
+        {
+            WebSql = CollidingTenants().WebSql,
+            TenantIsolation = new TenantIsolationOptions { StrictCollisionStartup = true }
+        };
+        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateTenantCollisions(options, Env(Environments.Production)));
+    }
+
+    [Fact]
+    public void CollidingTenants_Default_StartsAndLogsCritical_BecauseRequestsAreDeniedPerTenant()
+    {
+        var logger = Substitute.For<Microsoft.Extensions.Logging.ILogger>();
+        logger.IsEnabled(Arg.Any<Microsoft.Extensions.Logging.LogLevel>()).Returns(true);
+
+        Should.NotThrow(() => GatewayStartupValidator.ValidateTenantCollisions(CollidingTenants(), Env(Environments.Production), logger));
+
+        logger.ReceivedCalls().Count(c => c.GetMethodInfo().Name == "Log"
+            && (Microsoft.Extensions.Logging.LogLevel)c.GetArguments()[0]! == Microsoft.Extensions.Logging.LogLevel.Critical).ShouldBe(1);
     }
 
     [Fact]
