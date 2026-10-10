@@ -13,7 +13,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
 {
     // Bind expression templates are compile-time constants with exactly one placeholder (plan 16.4 item 2). T-SQL types the
     // parameter through the provider (SqlParameter.SqlDbType), so no wrapper is needed.
-    private static readonly FrozenDictionary<SqlParameterType, string> SqlServerBindTemplates = BuildIdentityTemplates();
+    private static readonly FrozenDictionary<SqlParameterType, string> IdentityBindTemplates = BuildIdentityTemplates();
 
     // Trino functions that the dialect generator rewrites (documentation of the rule; the generator performs the rewrite).
     private static readonly IReadOnlyDictionary<string, string> SqlServerRewrites = new Dictionary<string, string>
@@ -51,7 +51,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitGuaranteed: true,
         InDbHmac: true,
         TenantComparison: TenantComparisonStyle.Utf16BinaryCast,
-        BindExpressionTemplates: SqlServerBindTemplates,
+        BindExpressionTemplates: IdentityBindTemplates,
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.SqlServer, SqlServerRewrites),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "MSSQL-CAP");
@@ -79,7 +79,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitGuaranteed: true,
         InDbHmac: false,                                           // decision B-2: HMAC degrades to Redact
         TenantComparison: TenantComparisonStyle.EncodedBlob,
-        BindExpressionTemplates: SqlServerBindTemplates,
+        BindExpressionTemplates: IdentityBindTemplates,
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.DuckDb),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "DUCK-PREP");
@@ -107,7 +107,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitGuaranteed: true,
         InDbHmac: true,                                            // pgcrypto hmac(); a missing extension fails at execution
         TenantComparison: TenantComparisonStyle.TextSendBytea,
-        BindExpressionTemplates: SqlServerBindTemplates,
+        BindExpressionTemplates: IdentityBindTemplates,
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.PostgreSql),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "PG-PROTO");
@@ -135,7 +135,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitGuaranteed: true,
         InDbHmac: false,                                           // true only after a DBMS_CRYPTO grant probe (WP-F6)
         TenantComparison: TenantComparisonStyle.RawCast,
-        BindExpressionTemplates: SqlServerBindTemplates,
+        BindExpressionTemplates: IdentityBindTemplates,
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.Oracle, OracleRewrites),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "JOOQ");
@@ -163,7 +163,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitGuaranteed: true,
         InDbHmac: false,                                           // decision B-2: HMAC degrades to Redact
         TenantComparison: TenantComparisonStyle.CastBinary,
-        BindExpressionTemplates: SqlServerBindTemplates,
+        BindExpressionTemplates: IdentityBindTemplates,
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.Databricks, DatabricksRewrites),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "DBX-PARAM");
