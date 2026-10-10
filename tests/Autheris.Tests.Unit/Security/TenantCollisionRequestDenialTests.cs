@@ -28,11 +28,18 @@ public sealed class TenantCollisionRequestDenialTests
         }
     };
 
-    private static (DefaultHttpContext Context, IAuditLogRepository Audit) Request(string tenant)
+    private sealed class MutableMonitor(GatewayOptions initial) : IOptionsMonitor<GatewayOptions>
+    {
+        public GatewayOptions CurrentValue { get; set; } = initial;
+        public GatewayOptions Get(string? name) => CurrentValue;
+        public IDisposable? OnChange(Action<GatewayOptions, string?> listener) => null;
+    }
+
+    private static (DefaultHttpContext Context, IAuditLogRepository Audit) Request(string tenant, IOptionsMonitor<GatewayOptions>? monitor = null, bool registerOptions = true)
     {
         var audit = Substitute.For<IAuditLogRepository>();
         var services = new ServiceCollection();
-        services.AddSingleton(Options.Create(Colliding()));
+        if (registerOptions) services.AddSingleton(monitor ?? new MutableMonitor(Colliding()));
         services.AddSingleton(audit);
         var context = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
         context.Response.Body = new MemoryStream();
@@ -44,10 +51,10 @@ public sealed class TenantCollisionRequestDenialTests
         return (context, audit);
     }
 
-    private static async Task<(bool NextInvoked, string Body)> Run(DefaultHttpContext context)
+    private static async Task<(bool NextInvoked, string Body)> Run(DefaultHttpContext context, SecurityContextResolutionMiddleware? shared = null)
     {
         bool nextInvoked = false;
-        var middleware = new SecurityContextResolutionMiddleware(_ => { nextInvoked = true; return Task.CompletedTask; });
+        var middleware = shared ?? new SecurityContextResolutionMiddleware(_ => { nextInvoked = true; return Task.CompletedTask; });
         await middleware.InvokeAsync(context);
         context.Response.Body.Position = 0;
         return (nextInvoked, await new StreamReader(context.Response.Body).ReadToEndAsync());
@@ -93,6 +100,45 @@ public sealed class TenantCollisionRequestDenialTests
 
         nextInvoked.ShouldBeFalse();
         context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+    }
+
+    [Fact]
+    public async Task Reload_ThatAddsACollision_IsDenied_WithoutRestart()
+    {
+        var monitor = new MutableMonitor(new GatewayOptions());
+        bool nextInvoked = false;
+        var middleware = new SecurityContextResolutionMiddleware(_ => { nextInvoked = true; return Task.CompletedTask; });
+
+        var (first, _) = Request("acme", monitor);
+        await Run(first, middleware);
+        nextInvoked.ShouldBeTrue();
+        first.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
+
+        monitor.CurrentValue = Colliding(); // configuration reload introduces acme/ACME
+        nextInvoked = false;
+        var (second, audit) = Request("acme", monitor);
+        await Run(second, middleware);
+
+        nextInvoked.ShouldBeFalse();
+        second.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        await audit.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.TenantCollisionDenied),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task MissingOptions_FailClosed_With403_AndAnAuditEntry()
+    {
+        var (context, audit) = Request("beta", registerOptions: false);
+
+        var (nextInvoked, body) = await Run(context);
+
+        nextInvoked.ShouldBeFalse();
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        body.ShouldContain("TENANT_ID_COLLISION");
+        await audit.Received(1).RecordAuditEventAsync(
+            Arg.Is<AuditLogEntry>(e => e.Decision == "DENY"),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
