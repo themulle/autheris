@@ -1097,3 +1097,69 @@ the Tier 3 semi-join is far below the transfer cost of the rows; NFR-7 is met.
 - The source read audit `table` and `TargetTable` changed from `schema.table` to `domain.schema.table` for every source;
   consumers that match on the old form must be updated.
 - A paged read still counts staged bytes per table through `BytesRead`; the request count of paged reads is not recorded.
+
+### Re-review (loop 1)
+
+**Scope:** commits `f5ae323..55704fc`, which address CR-01..CR-15 (see "Implementation Log — review loop 1"), checked
+against R.3 and the binding principles in section 2.1. Line numbers refer to `55704fc`.
+
+**Verification by the reviewer:**
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror` | 0 warnings, 0 errors |
+| Unit tests (full) | 4,376 total, 4,375 passed, 1 failed. The failure is the known WORM test, fixed on `fix/worm-config-audit-test`. |
+| Integration tests (filter `FederatedVirtualFilter\|RowFilterChannelParity\|WebSql\|CrossSource`) | 77 total, 76 passed, 1 failed. The failure is the pre-existing `sql-endpoint` parity row. All 46 `FederatedVirtualFilter*` cases pass. |
+| File sizes | `WebSqlEndpoints.cs` shrank from 1,020 to 1,010 lines. `DeclarativeHttpDataSourceExecutor.cs` is at 798 lines after a 3-line change (`BytesRead`, shared reserved names); this departs from principle 6 but changes no behaviour of the executor's request logic and is accepted. `GatewayOptions.cs` grew by 17 lines (CR-19). |
+| TODO/FIXME or German text in the changed lines | none |
+
+**Mutation testing (detached copy of `55704fc`).** Each mutation was applied on its own and the filtered unit suite (839
+tests) was run; where marked, the `FederatedVirtualFilter*` integration suite (46 tests) was run as well. All mutants were
+killed. "Killed" means at least one suite failed.
+
+| # | Mutation | Unit | Integration |
+|---|---|---|---|
+| M1 | Remove the response size handler registration (earlier survivor) | killed (`DeclarativeHttpClientWiringTests` x2) | killed (`ST31_OversizedUpstreamResponse_*`) |
+| M2 | Push the queried keys instead of queried ∩ authorized | killed | killed |
+| M4 | Let HTTP connectors self-attest | killed | - |
+| M8 | Delete Tier 0 | killed | killed (`E2E7_EmptyKeySet_*`; this suite survived the mutant before) |
+| M10 | Allow `/`, `\` and `..` in path-lookup values | killed | survived (accepted, unit level suffices) |
+| N1 | Path lookup keeps every row, not only the rows of the requested key | killed | killed |
+| N2 | Path lookup treats every HTTP status as "key not present" | killed | killed |
+| N3 | Remove the `VF_PATH_TEMPLATE_UNFILLABLE` check | killed | killed |
+| N4 | Remove the CR-10 pre-read check in `GovernedConnectorReader` | killed | survived (the end-to-end OData/REST path goes through `GatewayExecutionService`, see N5) |
+| N5 | Remove the CR-10 pre-read check in `GatewayExecutionService` | survived | killed (`D12_ODataOnProtectedHttpTable_StillForbidden`) |
+| N6 | Never remove finished loads from the in-flight dictionary (leak) | killed (`FailedLoad_IsSeenByTheWaiters_NotCached_NextCallLoadsAgain`) | - |
+| N7 | Single-column text fast path authorizes every value | killed (35 tests) | - |
+| N7b | Single-column integer fast path authorizes every value | killed | killed |
+| N8 | Staging bypasses the path-lookup reader | killed | killed (path-lookup 404 and aggregate tests) |
+
+**Assessment of the fixes:**
+
+| ID | Result | Notes |
+|---|---|---|
+| CR-01 | **Resolved** | Three changes make the path-lookup result independent of the tier. (1) Any non-skipped read of a template with a placeholder the plan cannot fill is denied with `VF_PATH_TEMPLATE_UNFILLABLE` before any call; this check runs after the tier is chosen, so it covers every strategy, the kill switch and unsafe keys. (2) `PathLookupConnector` is a decorator, so the executor's own fan-out is never triggered. It sends one request per distinct key, keeps at most one row per key, and compares keys canonically. (3) Only a 404 means "key not present"; every other status fails the query. The tests compare `COUNT(*)` and `SUM` between this path and a Tier 3 read, and the mock is now path-aware. The v1 rule "404 = key not present" can turn a misconfigured base path into a silently empty result. This rule was decided by the orchestrator and the audit carries `upstreamKeysNotFound`; Phase 6 must document it. |
+| CR-02 | **Resolved** | `GatewayDenialStatusMapper` is the only mapping used by both channels. The WebSQL log entry carries the code and the exception type only. The parity test and the sentinel log test are meaningful. |
+| CR-03 | **Resolved** | The fixture replaces only the primary handler, so the SSRF and size-cap handlers run in the end-to-end tests. M1 is now killed at both levels. |
+| CR-04 | **Resolved** | Key-source reads are collected while they happen. They are audited exactly once: with the start record, or on the denial path when the start record was never written. |
+| CR-05 | **Resolved** | The source-read records now name the table as `domain.schema.table`. `upstreamRequests` is recorded for skipped reads, single requests and path lookups. **Paged reads:** omitting `upstreamRequests` for a paged read is acceptable for the audit (AC-9.1). It is an observability counter, not a security fact. The read itself, its tier, the rows received and the rows kept are all recorded, and the page count is bounded by `MaxPages`. Phase 6 must document that the field is absent for paged reads (CR-20). |
+| CR-06 | **Resolved** | Point-lookup eligibility no longer depends on the switch. The option documentation now says which bindings still deny while the switch is off. |
+| CR-07 | **Resolved** | Concurrent loads are now shared per cache key. The in-flight entry is removed in `finally` by key and value, so a load only ever removes its own entry and the dictionary holds no more entries than there are running loads (no leak; N6 is killed). The shared load is detached from the callers' cancellation and bounded by `KeyQueryTimeoutSeconds`, a failure is not cached, and an unobserved failure is swallowed explicitly. The test with one blocked key and 200 other keys covers the noisy-neighbour case. |
+| CR-08 | **Resolved** | The single-column probe uses typed `FrozenSet`s and allocates nothing per row; the composite probe reuses one buffer. The allocation guard test and the benchmark numbers in the log (50,000 rows against 10,000 keys in about 2-6 ms) meet NFR-7. `with { CacheHit = true }` copies the typed sets, because the record's copy constructor copies all fields. |
+| CR-09 | **Resolved**, with one remark (CR-17) | `DataSources:Http:MaxResponseBytes` has a range and a documented scope. `LimitedStream` follows the `Stream` contract again. |
+| CR-10 | **Resolved** | The reader and the executor channel both deny before the upstream read. Each guard is killed by at least one suite (N4 at unit level, N5 at integration level). Both D-12 tests now assert zero upstream requests. |
+| CR-11 | **Resolved** | The master plan has a follow-up row for the REST parser bug. |
+| CR-12..CR-15 | **Resolved** | The test class is renamed, the differential test asserts exact call counts, `HasActiveProfilesAsync` counts active profiles only, the key sets are passed through the plan constructor, and the reserved names are shared with the executor. |
+
+**New findings (all non-blocking):**
+
+| ID | Sev. | Location | Finding | Required fix |
+|---|---|---|---|---|
+| CR-17 | Minor | `ResponseSizeLimitingHandler.cs` (`BytesRead`), `DeclarativeHttpDataSourceExecutor.cs:176` | For a body stream that is neither seekable nor capped, `BytesRead` returns 0. A paged read without a declared `Content-Length` then counts no bytes against `MaxStagedBytes`. Before this change, that case failed. In production every `DeclarativeHttp` client has the cap handler, so the case cannot occur today, but the fallback errs on the fail-open side. | Throw (or deny) instead of returning 0 for an unknown stream type, and add a test for it. |
+| CR-18 | Nit | `PathLookupConnector.cs:107-150` | The concurrent per-key requests share one `session.Items` dictionary, which is not thread-safe. The executor never writes to it, but a registered third-party HTTP connector might. Also, when one request fails, the requests still in flight are not cancelled. | Give each request its own copy of `Items`, and cancel the sibling requests through a linked `CancellationTokenSource` on the first failure. |
+| CR-19 | Nit | `GatewayOptions.cs:987-1003` | `HttpDataSourceOptions` was added to the 1,810-line options file. Section 2.4 limits that file to one-line additions. | Move the class into its own file under `Domain/Options/`. |
+| CR-20 | Nit (Phase 6) | `FederatedStagingService.cs` (audit) | `upstreamRequests` is absent for paged reads. | Document this in the feature documentation, together with the "404 = key not present" rule from CR-01. |
+
+**Verdict (loop 1): APPROVED.** CR-01..CR-15 are resolved and verified by tests and mutation runs. No Blocker or Major
+finding remains. CR-17..CR-19 are non-blocking follow-ups for the next change in this area. CR-16 and CR-20 go to Phase 6
+(documentation), which may start now.
