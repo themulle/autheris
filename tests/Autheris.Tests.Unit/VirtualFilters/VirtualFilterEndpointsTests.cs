@@ -370,4 +370,196 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         error.ShouldBe("The requested virtual filter operation is invalid.");
         error.ShouldNotContain("internal database connection string or schema leak");
     }
+
+    // ---- Binding federation options: strategy, pushdown_format, max_pushdown_keys ----
+
+    private static object BindingProfile(object binding) => new
+    {
+        grantee = new { type = "user", sid = "S-1-5-21-LWE-DAVID" },
+        scope = "web_crm.*.*",
+        uncovered = "deny",
+        bindings = new[] { binding }
+    };
+
+    private async Task PutFilterAsync()
+    {
+        var put = Context(Tenant, DavidFilterBody(), "FilterAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("nicht_ausgelieferte_krane", put, _service), put)).ShouldBe(StatusCodes.Status200OK);
+    }
+
+    private async Task<(int Status, string Body)> PutBindingAsync(object binding, Action<IServiceCollection>? configure = null)
+    {
+        var context = Context(Tenant, BindingProfile(binding), "FilterAdmin");
+        var services = new ServiceCollection().AddLogging();
+        configure?.Invoke(services);
+        context.RequestServices = services.BuildServiceProvider();
+        var status = await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, _service), context);
+        context.Response.Body.Position = 0;
+        return (status, await new StreamReader(context.Response.Body).ReadToEndAsync());
+    }
+
+    private static Action<IServiceCollection> CatalogWith(string table, HttpBatchType batch) => services =>
+    {
+        var id = TableIdentifier.Parse(table);
+        var catalog = Substitute.For<ITableMetadataRepository>();
+        catalog.GetTableMetadataAsync(id, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table
+            {
+                Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName,
+                DataSourceType = DataSourceType.HttpPlugin, IsActive = true,
+                HttpEndpoint = new HttpEndpointDescriptor
+                {
+                    BaseUrl = "https://crm.local", PathTemplate = "/customers", BatchType = batch,
+                    BatchParamName = "ids", PrimaryKeyField = "id"
+                }
+            }
+        });
+        services.AddSingleton(catalog);
+    };
+
+    [Fact]
+    public async Task PutProfile_WithoutFederationFields_KeepsTheDefaults()
+    {
+        await PutFilterAsync();
+
+        (await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id" })).Status.ShouldBe(StatusCodes.Status200OK);
+
+        var binding = (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem().Bindings.ShouldHaveSingleItem();
+        binding.Strategy.ShouldBe(VirtualFilterExecutionStrategy.Adaptive);
+        binding.PushdownFormat.ShouldBeNull();
+        binding.MaxPushdownKeys.ShouldBe(100);
+    }
+
+    [Fact]
+    public async Task PutProfile_WithFederationFields_StoresAndReturnsThem()
+    {
+        await PutFilterAsync();
+
+        var (status, body) = await PutBindingAsync(
+            new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", strategy = "pushdown_only", pushdown_format = "comma_separated", max_pushdown_keys = 250 });
+
+        status.ShouldBe(StatusCodes.Status200OK);
+        var binding = (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem().Bindings.ShouldHaveSingleItem();
+        binding.Strategy.ShouldBe(VirtualFilterExecutionStrategy.PushdownOnly);
+        binding.PushdownFormat.ShouldBe(PushdownParameterFormat.CommaSeparated);
+        binding.MaxPushdownKeys.ShouldBe(250);
+        using var doc = JsonDocument.Parse(body);
+        var view = doc.RootElement.GetProperty("bindings")[0];
+        view.GetProperty("strategy").GetString().ShouldBe("pushdown_only");
+        view.GetProperty("pushdown_format").GetString().ShouldBe("comma_separated");
+        view.GetProperty("max_pushdown_keys").GetInt32().ShouldBe(250);
+    }
+
+    [Theory]
+    [InlineData("strategy", "turbo")]
+    [InlineData("pushdown_format", "carrier_pigeon")]
+    public async Task PutProfile_WithUnknownEnumValue_Returns400_AndStoresNothing(string field, string value)
+    {
+        await PutFilterAsync();
+        var binding = new Dictionary<string, object> { ["filter"] = "nicht_ausgelieferte_krane", ["target"] = "web_crm.*.*.id", [field] = value };
+
+        var (status, _) = await PutBindingAsync(binding);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(1001)]
+    public async Task PutProfile_WithMaxPushdownKeysOutsideTheHardCap_Returns400(int keys)
+    {
+        await PutFilterAsync();
+
+        var (status, _) = await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", max_pushdown_keys = keys });
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task PutProfile_WithMaxPushdownKeysAboveTheGatewayOption_Returns400()
+    {
+        await PutFilterAsync();
+        void Configure(IServiceCollection s) => s.AddSingleton(Options.Create(new VirtualFilterFederationOptions { MaxPushdownKeys = 50 }));
+
+        (await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", max_pushdown_keys = 51 }, Configure)).Status.ShouldBe(StatusCodes.Status400BadRequest);
+        (await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", max_pushdown_keys = 50 }, Configure)).Status.ShouldBe(StatusCodes.Status200OK);
+    }
+
+    [Theory]
+    [InlineData("repeated_param")]
+    [InlineData("odata_in")]
+    public async Task PutProfile_WithAFormatNoEndpointCanSatisfy_Returns400WithStableCode(string format)
+    {
+        await PutFilterAsync();
+
+        var (status, body) = await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", pushdown_format = format });
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        JsonDocument.Parse(body).RootElement.GetProperty("code").GetString().ShouldBe("VF_PUSHDOWN_FORMAT_UNSUPPORTED");
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("post_batch", HttpBatchType.QueryParameterList, StatusCodes.Status400BadRequest)]
+    [InlineData("comma_separated", HttpBatchType.JsonBodyArray, StatusCodes.Status400BadRequest)]
+    [InlineData("comma_separated", HttpBatchType.ParallelSingleRequests, StatusCodes.Status400BadRequest)]
+    [InlineData("comma_separated", HttpBatchType.QueryParameterList, StatusCodes.Status200OK)]
+    [InlineData("post_batch", HttpBatchType.JsonBodyArray, StatusCodes.Status200OK)]
+    public async Task PutProfile_FormatIsCheckedAgainstTheCapabilityOfAnExactTarget(string format, HttpBatchType batch, int expected)
+    {
+        await PutFilterAsync();
+
+        var (status, body) = await PutBindingAsync(
+            new { filter = "nicht_ausgelieferte_krane", target = "web_crm.public.customers", pushdown_format = format },
+            CatalogWith("web_crm.public.customers", batch));
+
+        status.ShouldBe(expected);
+        if (expected == StatusCodes.Status400BadRequest)
+        {
+            JsonDocument.Parse(body).RootElement.GetProperty("code").GetString().ShouldBe("VF_PUSHDOWN_FORMAT_UNSUPPORTED");
+        }
+    }
+
+    [Fact]
+    public async Task PutProfile_ChangingFederationFields_ChangesTheDefinitionHash()
+    {
+        await PutFilterAsync();
+        var first = await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id" });
+        var second = await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", strategy = "short_circuit_only" });
+        var third = await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", max_pushdown_keys = 7 });
+
+        string Hash(string body) => JsonDocument.Parse(body).RootElement.GetProperty("definition_hash").GetString()!;
+        new[] { Hash(first.Body), Hash(second.Body), Hash(third.Body) }.Distinct().Count().ShouldBe(3);
+    }
+
+    [Fact]
+    public void BindingCanonicalHash_CoversStrategyFormatAndMaxKeys()
+    {
+        var baseline = new FilterBinding { FilterName = "f", TargetPattern = "a.b.c" };
+
+        baseline.ComputeHash().ShouldNotBe((baseline with { Strategy = VirtualFilterExecutionStrategy.PushdownOnly }).ComputeHash());
+        baseline.ComputeHash().ShouldNotBe((baseline with { PushdownFormat = PushdownParameterFormat.PostBatch }).ComputeHash());
+        baseline.ComputeHash().ShouldNotBe((baseline with { MaxPushdownKeys = 99 }).ComputeHash());
+    }
+
+    [Fact]
+    public async Task Sync_WithAnInvalidFederationField_Returns400_AndStoresNothing()
+    {
+        var body = new
+        {
+            path = "governance/access",
+            commit = "c1",
+            filters = new Dictionary<string, object> { ["nicht_ausgelieferte_krane"] = DavidFilterBody() },
+            profiles = new Dictionary<string, object> { ["david"] = BindingProfile(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", strategy = "nope" }) }
+        };
+        var apply = Context(Tenant, body, "FilterSync");
+
+        (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(apply, _service), apply)).ShouldBe(StatusCodes.Status400BadRequest);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
 }

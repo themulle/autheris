@@ -148,7 +148,9 @@ public static class VirtualFilterEndpoints
                 return Forbidden();
             }
 
-            var saved = await service.SaveProfileAsync(body.ToModel(name, tenant.Value), actor, context.RequestAborted).ConfigureAwait(false);
+            var model = body.ToModel(name, tenant.Value);
+            await VirtualFilterBindingValidator.ValidateAsync([model], context).ConfigureAwait(false);
+            var saved = await service.SaveProfileAsync(model, actor, context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(ProfileView(saved));
         });
 
@@ -575,6 +577,10 @@ public static class VirtualFilterEndpoints
             var message = isDev ? ex.Message : "The requested virtual filter operation is invalid.";
             return Results.Json(new { error = message }, statusCode: StatusCodes.Status400BadRequest);
         }
+        catch (VirtualFilterBindingException ex)
+        {
+            return Results.Json(new { error = ex.Message, code = ex.Code }, statusCode: StatusCodes.Status400BadRequest);
+        }
         catch (Exception ex) when (ex is ArgumentException or JsonException or FormatException)
         {
             return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status400BadRequest);
@@ -612,11 +618,13 @@ public static class VirtualFilterEndpoints
             throw new ArgumentException("A sync needs the path and commit of the file repository.");
         }
 
+        var profiles = (body.Profiles ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList();
+        await VirtualFilterBindingValidator.ValidateAsync(profiles, context).ConfigureAwait(false);
         return new VirtualFilterSyncRequest(
             tenant.Value,
             new ManagedBy(body.Path, body.Commit),
             (body.Filters ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList(),
-            (body.Profiles ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList());
+            profiles);
     }
 
     private static IResult Forbidden() => Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -663,7 +671,10 @@ public static class VirtualFilterEndpoints
             target = b.TargetPattern,
             object_kinds = b.ObjectKinds.ToString(),
             time_column = b.TimeColumn,
-            map = b.ColumnMap
+            map = b.ColumnMap,
+            strategy = VirtualFilterBindingValidator.FormatEnum(b.Strategy),
+            pushdown_format = b.PushdownFormat is { } format ? VirtualFilterBindingValidator.FormatEnum(format) : null,
+            max_pushdown_keys = b.MaxPushdownKeys
         }),
         managed_by = p.ManagedBy,
         definition_hash = p.ComputeDefinitionHash(),
@@ -799,6 +810,9 @@ public static class VirtualFilterEndpoints
         [JsonPropertyName("object_kinds")] public List<string>? ObjectKinds { get; set; }
         [JsonPropertyName("time_column")] public string? TimeColumn { get; set; }
         [JsonPropertyName("map")] public Dictionary<string, string>? Map { get; set; }
+        [JsonPropertyName("strategy")] public string? Strategy { get; set; }
+        [JsonPropertyName("pushdown_format")] public string? PushdownFormat { get; set; }
+        [JsonPropertyName("max_pushdown_keys")] public int? MaxPushdownKeys { get; set; }
 
         public FilterBinding ToModel()
         {
@@ -819,7 +833,14 @@ public static class VirtualFilterEndpoints
                 TargetPattern = Target,
                 ObjectKinds = kinds,
                 TimeColumn = TimeColumn,
-                ColumnMap = Map
+                ColumnMap = Map,
+                Strategy = Strategy == null
+                    ? VirtualFilterExecutionStrategy.Adaptive
+                    : VirtualFilterBindingValidator.ParseEnum<VirtualFilterExecutionStrategy>(Strategy, "strategy"),
+                PushdownFormat = PushdownFormat == null
+                    ? null
+                    : VirtualFilterBindingValidator.ParseEnum<PushdownParameterFormat>(PushdownFormat, "pushdown_format"),
+                MaxPushdownKeys = MaxPushdownKeys ?? 100
             };
         }
     }

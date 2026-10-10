@@ -32,6 +32,20 @@ public readonly record struct HttpKeyPushdownCapability(HttpKeyPushdownKind Kind
     private const int MaxNameLength = 64;
     private const int MaxValueLength = 256;
 
+    /// <summary>
+    /// Whether an endpoint of this capability can send keys in the asserted <paramref name="format"/>. A path lookup, a
+    /// repeated parameter and an OData <c>in</c> list satisfy nothing in v1. Shared by the planner and the binding writer.
+    /// </summary>
+    public bool Satisfies(PushdownParameterFormat format) => Satisfies(Kind, format);
+
+    /// <summary>Whether any endpoint capability can satisfy <paramref name="format"/>.</summary>
+    public static bool CanEverSatisfy(PushdownParameterFormat format) =>
+        Satisfies(HttpKeyPushdownKind.QueryParameterList, format) || Satisfies(HttpKeyPushdownKind.JsonBodyArray, format);
+
+    internal static bool Satisfies(HttpKeyPushdownKind kind, PushdownParameterFormat format) =>
+        (kind == HttpKeyPushdownKind.QueryParameterList && format == PushdownParameterFormat.CommaSeparated) ||
+        (kind == HttpKeyPushdownKind.JsonBodyArray && format == PushdownParameterFormat.PostBatch);
+
     public static HttpKeyPushdownCapability None => new(HttpKeyPushdownKind.None, string.Empty, string.Empty);
 
     public static HttpKeyPushdownCapability Resolve(HttpEndpointDescriptor? descriptor)

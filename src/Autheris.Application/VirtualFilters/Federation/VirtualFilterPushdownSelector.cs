@@ -57,7 +57,7 @@ internal static class VirtualFilterPushdownSelector
             return new(PushdownStatus.Unavailable, "no_key_column");
         }
 
-        if (contributing.Any(p => p.Pair.Binding.PushdownFormat is { } format && !Satisfies(capability.Kind, format)))
+        if (contributing.Any(p => p.Pair.Binding.PushdownFormat is { } format && !capability.Satisfies(format)))
         {
             return new(PushdownStatus.Unavailable, "format_unsupported");
         }
@@ -106,10 +106,6 @@ internal static class VirtualFilterPushdownSelector
 
         return new(PushdownStatus.Pushable, "pushdown", capability.ParameterName, values, capability.Kind == HttpKeyPushdownKind.PathLookup ? capability.KeyField : null);
     }
-
-    private static bool Satisfies(HttpKeyPushdownKind kind, PushdownParameterFormat format) =>
-        (kind == HttpKeyPushdownKind.QueryParameterList && format == PushdownParameterFormat.CommaSeparated) ||
-        (kind == HttpKeyPushdownKind.JsonBodyArray && format == PushdownParameterFormat.PostBatch);
 
     private static int EstimateUrlLength(HttpEndpointDescriptor descriptor, string parameter, IReadOnlyList<string> values)
     {

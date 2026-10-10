@@ -52,6 +52,12 @@ public static class VirtualFilterErrorCodes
     /// </summary>
     public const string PathTemplateUnfillable = "VF_PATH_TEMPLATE_UNFILLABLE";
 
+    /// <summary>A binding asserts a pushdown format the target endpoint (or any endpoint) cannot satisfy; rejected when the profile is written (HTTP 400).</summary>
+    public const string PushdownFormatUnsupported = "VF_PUSHDOWN_FORMAT_UNSUPPORTED";
+
+    /// <summary>A binding's <c>max_pushdown_keys</c> is outside <c>1..1000</c> or above the gateway-wide <c>MaxPushdownKeys</c>; rejected when the profile is written (HTTP 400).</summary>
+    public const string PushdownKeyBudgetInvalid = "VF_PUSHDOWN_KEY_BUDGET_INVALID";
+
     private static readonly IReadOnlyList<string> CodesInDenyReasons = [PatternEvaluationFailed, BindingMisconfigured];
 
     /// <summary>The Virtual Filter error code a deny reason starts with (<c>CODE: ...</c>), if any.</summary>
