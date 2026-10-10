@@ -31,6 +31,15 @@ public static class VirtualFilterErrorCodes
     /// <summary>The key source could not be read (connection, query or timeout).</summary>
     public const string SourceUnavailable = "VIRTUAL_FILTER_SOURCE_UNAVAILABLE";
 
+    /// <summary>A protected HTTP table is queried but the gateway cannot enforce its Virtual Filters (no planner, no bindings).</summary>
+    public const string EnforcementUnavailable = "VF_ENFORCEMENT_UNAVAILABLE";
+
+    /// <summary>A <c>ShortCircuitOnly</c> binding forbids reading the table with a query that is not a point lookup.</summary>
+    public const string ScanNotPermitted = "VF_SCAN_NOT_PERMITTED";
+
+    /// <summary>A <c>PushdownOnly</c> binding needs a key pushdown the table or the gateway cannot provide.</summary>
+    public const string PushdownUnavailable = "VF_PUSHDOWN_UNAVAILABLE";
+
     private static readonly IReadOnlyList<string> CodesInDenyReasons = [PatternEvaluationFailed];
 
     /// <summary>The Virtual Filter error code a deny reason starts with (<c>CODE: ...</c>), if any.</summary>
