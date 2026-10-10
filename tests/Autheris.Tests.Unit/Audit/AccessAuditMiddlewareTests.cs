@@ -177,7 +177,7 @@ public sealed class AccessAuditMiddlewareTests
     [Theory]
     [InlineData(401, "DENY", "AUTH_FAILED")]
     [InlineData(403, "DENY", "AUTHZ_ENDPOINT_DENIED")]
-    [InlineData(404, "DENY", "ASYNC_JOB_SUBMITTED")]
+    [InlineData(404, "DENY", "AUTHZ_ENDPOINT_DENIED")]
     [InlineData(500, "ERROR", "QUERY_EXECUTION_ERROR")]
     public async Task InvokeAsync_DelegatedRoute_NotHandled_FinalizesFailureStatuses(int status, string decision, string eventType)
     {

@@ -124,7 +124,7 @@ public sealed class AccessAuditMiddleware
         }
         else if (isDelegated && statusCode >= StatusCodes.Status400BadRequest && statusCode < 500 && auditContext.Decision == "ALLOW")
         {
-            auditContext.Deny($"HTTP_{statusCode}");
+            auditContext.Deny($"HTTP_{statusCode}", AuditEventTypes.AuthzEndpointDenied);
         }
 
         var eventType = auditContext.EventType ?? policy?.EventType ?? (auditContext.Decision == "DENY" ? AuditEventTypes.AuthzEndpointDenied : AuditEventTypes.TableQuery);
