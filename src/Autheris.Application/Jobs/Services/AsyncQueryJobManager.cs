@@ -155,7 +155,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
         var fullScratchPath = Path.GetFullPath(_scratchDirectory);
         if (!fullResultPath.StartsWith(fullScratchPath, StringComparison.OrdinalIgnoreCase))
         {
-            throw new SecurityException("Unauthorized path traversal detected in job result retrieval.");
+            throw new Autheris.Domain.Exceptions.GatewaySecurityException("Unauthorized path traversal detected in job result retrieval.", "JOB_RESULT_PATH_FORBIDDEN");
         }
 
         if (!File.Exists(fullResultPath))
