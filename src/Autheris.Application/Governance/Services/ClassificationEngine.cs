@@ -20,17 +20,20 @@ public sealed class ClassificationEngine : IClassificationEngine
 {
     private readonly IOptionsMonitor<GatewayOptions> _gatewayOptions;
     private readonly IClassificationAiProvider? _aiProvider;
+    private readonly IEnumerable<IGovernanceWorkflowHook>? _hooks;
     private readonly ILogger<ClassificationEngine> _logger;
     private readonly ConcurrentDictionary<string, Regex> _regexCache = new(StringComparer.OrdinalIgnoreCase);
 
     public ClassificationEngine(
         IOptionsMonitor<GatewayOptions> gatewayOptions,
         ILogger<ClassificationEngine> logger,
-        IClassificationAiProvider? aiProvider = null)
+        IClassificationAiProvider? aiProvider = null,
+        IEnumerable<IGovernanceWorkflowHook>? hooks = null)
     {
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _aiProvider = aiProvider;
+        _hooks = hooks;
     }
 
     public async ValueTask<TableClassificationProposal> ClassifyTableAsync(
@@ -38,6 +41,14 @@ public sealed class ClassificationEngine : IClassificationEngine
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(context);
+
+        if (_hooks != null)
+        {
+            foreach (var hook in _hooks)
+            {
+                await hook.OnBeforeClassifyAsync(context, ct).ConfigureAwait(false);
+            }
+        }
 
         var options = _gatewayOptions.CurrentValue.Classification ?? new ClassificationOptions();
         var profile = options.Workflow.GetActiveProfile();
@@ -197,7 +208,7 @@ public sealed class ClassificationEngine : IClassificationEngine
                     defaultLevel.Rank,
                     DetectedPiiCategoryKey: null,
                     ProposedMaskingRule: "NONE",
-                    Confidence: 0.90,
+                    Confidence: 1.0,
                     IsDisputed: false,
                     Reasoning: "No PII pattern matched; assigned default sensitivity"));
             }

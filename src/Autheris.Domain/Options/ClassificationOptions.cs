@@ -31,9 +31,9 @@ public sealed class ClassificationOptions
 
     public static List<PiiCategoryDefinition> GetDefaultPiiCategories() => new()
     {
-        new("IBAN", "Internationale Bankkontonummer", "Bankverbindung nach ISO 13616 / SEPA.", 3, "IBAN_STANDARD_4_4", new[] { "^iban$", ".*_iban$", "^bank_account.*", "^kto_nr$" }),
+        new("IBAN", "Internationale Bankkontonummer", "Bankverbindung nach ISO 13616 / SEPA.", 3, "IBAN_STANDARD_4_4", new[] { ".*iban.*", "^bank_account.*", "^kto_nr$" }),
         new("CREDIT_CARD", "Kreditkartennummer (PAN)", "16-stellige Zahlungs- und Kreditkartennummern (PCI-DSS Scope).", 4, "CREDIT_CARD_LAST_4", new[] { ".*credit.*card.*", ".*pan.*", ".*cc_num.*" }),
-        new("EMAIL", "E-Mail-Adresse", "Personenbezogene geschäftliche oder private Mailadresse.", 2, "EMAIL_DOMAIN_RETAIN", new[] { "^email$", ".*_email$", "^mail$", ".*_mail$" }),
+        new("EMAIL", "E-Mail-Adresse", "Personenbezogene geschäftliche oder private Mailadresse.", 2, "EMAIL_DOMAIN_RETAIN", new[] { ".*email.*", ".*mail.*" }),
         new("PHONE_NUMBER", "Telefon- / Mobilnummer", "Festnetz- oder Mobiltelefonnummer nach E.164.", 2, "PHONE_RETAIN_COUNTRY_CODE", new[] { ".*phone.*", ".*telefon.*", ".*mobil.*", ".*fax.*" }),
         new("IP_ADDRESS", "IP-Adresse (IPv4 / IPv6)", "Netzwerkadresse (nach DSGVO personenbezogenes Datum).", 2, "IP_ANONYMIZE_SUBNET", new[] { "^ip$", ".*_ip$", "^ip_address$", "^client_ip$" }),
         new("BIRTH_DATE", "Geburtsdatum", "Geburtsdatum einer natürlichen Person.", 3, "DATE_TRUNCATE_TO_YEAR", new[] { ".*birth.*", ".*dob.*", ".*geburtsdatum.*" }),

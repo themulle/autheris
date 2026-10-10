@@ -38,6 +38,7 @@ public sealed class WormConfigurationAuditService : IWormConfigurationAuditServi
     {
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _currentConfigHash = ComputeCanonicalHash(_gatewayOptions.CurrentValue.Classification ?? new ClassificationOptions());
     }
 
     public string? CurrentConfigHash => _currentConfigHash;
