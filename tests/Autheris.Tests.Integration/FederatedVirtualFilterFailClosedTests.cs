@@ -156,4 +156,23 @@ public sealed class FederatedVirtualFilterFailClosedTests(FederatedVirtualFilter
         response.IsSuccessStatusCode.ShouldBeFalse();
         (await response.Content.ReadAsStringAsync()).ShouldNotContain("Customer ");
     }
+
+    [Fact]
+    public async Task ST31_OversizedUpstreamResponse_IsRejected_Forbidden_RowLimitExceededAudit()
+    {
+        // CR-03: the real size-limiting handler of the "DeclarativeHttp" client runs in front of the mock upstream.
+        await fixture.UseBindingsAsync(Binding(Tables.Huge));
+        var started = DateTimeOffset.UtcNow;
+
+        var (status, body) = await fixture.SqlAsync(Query(Tables.Huge));
+
+        using (body)
+        {
+            status.ShouldBe(HttpStatusCode.Forbidden, body.RootElement.ToString());
+        }
+
+        var denied = (await fixture.AuditSinceAsync(started)).Single(e => e.EventType == AuditEventTypes.WebSqlQueryDenied);
+        using var details = JsonDocument.Parse(denied.DetailsJson);
+        details.RootElement.GetProperty("reasonCode").GetString().ShouldBe("ROW_LIMIT_EXCEEDED");
+    }
 }

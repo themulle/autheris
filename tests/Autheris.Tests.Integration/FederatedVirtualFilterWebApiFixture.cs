@@ -21,7 +21,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
-using NSubstitute;
 using Table = Autheris.Domain.Model.Table;
 using Xunit;
 
@@ -117,6 +116,10 @@ public sealed class CountingCrmApiHandler : HttpMessageHandler
                 ? All().Where(c => c.Id == id).Select(c => Row(c.Id, c.Name, c.Tenant))
                 : All().Select(c => Row(c.Id, c.Name, c.Tenant));
         }
+        else if (path == "/customers_huge")
+        {
+            rows = [Row(101L, new string('x', (int)FederatedVirtualFilterWebApiFixture.HugeResponseCapBytes * 2), "T1")];
+        }
         else if (path == "/customers_paged")
         {
             int page = int.Parse(query["page"] ?? "1");
@@ -188,9 +191,15 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
         public const string Mixed = "customers_mixed";
         public const string ODataFormat = "customers_odata";
 
+        /// <summary>An endpoint whose answer is larger than the response cap.</summary>
+        public const string Huge = "customers_huge";
+
         /// <summary>A table with a consent row filter (<c>tenant_code = 'T1'</c>) and no Virtual Filter.</summary>
         public const string Filtered = "customers_filtered";
     }
+
+    /// <summary>Response cap of the test gateway (<c>MaxStagedBytesPerTable</c>); <c>/customers_huge</c> answers above it.</summary>
+    public const long HugeResponseCapBytes = 1024 * 1024;
 
     public CountingCrmApiHandler Crm { get; } = new();
 
@@ -229,12 +238,16 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
             b.UseSetting("Gateway:WebSql:AllowedDataSources:0", "crm_api");
             b.UseSetting("Gateway:WebSql:CrossSource:Enabled", "true");
 
+            // CR-03: a small per-table cap (a response above it must fail the query), see /customers_huge.
+            b.UseSetting("Gateway:WebSql:CrossSource:MaxStagedBytesPerTable", HugeResponseCapBytes.ToString());
+
             b.ConfigureServices(services =>
             {
-                var client = new HttpClient(Crm);
-                var factory = Substitute.For<IHttpClientFactory>();
-                factory.CreateClient(Arg.Any<string>()).Returns(client);
-                services.AddSingleton(factory);
+                // Only the network handler is replaced: the production pipeline of the "DeclarativeHttp" client (SSRF protection,
+                // response size cap) still runs in front of the mock, so the end-to-end paths cover it (ST-31).
+                services.AddHttpClient(Autheris.Application.Services.DeclarativeHttpDataSourceExecutor.HttpClientName)
+                    .ConfigurePrimaryHttpMessageHandler(() => Crm)
+                    .SetHandlerLifetime(Timeout.InfiniteTimeSpan);
             });
         });
 
@@ -518,5 +531,6 @@ INSERT INTO orders VALUES (1, 101), (2, 102), (3, 103), (4, 105), (5, 999);";
         yield return (Tables.Mixed, Endpoint("/customers_mixed", HttpBatchType.None));
         yield return (Tables.Filtered, Endpoint("/customers_none", HttpBatchType.None));
         yield return (Tables.ODataFormat, Endpoint("/customers_odata", HttpBatchType.QueryParameterList));
+        yield return (Tables.Huge, Endpoint("/customers_huge", HttpBatchType.None));
     }
 }
