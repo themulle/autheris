@@ -1,4 +1,4 @@
-# Grobkonzept & Plan: Datenobjekt-Klassifizierung & KI-Vorklassifizierung (OpenJEV-Style)
+# Grobkonzept & Plan: Datenobjekt-Klassifizierung & Governance (mit optionaler KI-Vorklassifizierung)
 
 **Dokument-ID:** `PLAN-GOV-KI-VORKLASSIFIZIERUNG-13`  
 **Stand:** 10.10.2026 · **Zweig:** `feat/ast-target-dialect-generator`  
@@ -14,13 +14,13 @@ Dieses Konzept definiert den End-to-End-Lebenszyklus zur Registrierung, Zuweisun
 1. **Import ohne Vorbedingungen & ohne Vorab-Owner:**  
    Beim Import oder der automatischen Erkennung (SQL-Datenbanken, Lakehouses, dbt, OpenAPI) muss noch **kein Dateneigentümer feststehen**. Das System blockiert den Import nicht, sondern registriert Objekte sicher als `data_owner: null` im Status `UNCLASSIFIED` / `PENDING_OWNER_ASSIGNMENT` (Fail-Closed Schutz).
 2. **Owner-Zuweisung durch den Data Governance Expert (Lead Data Steward):**  
-   Der **Data Governance Expert** weist den fachlich zuständigen **Data Owner** zu – wahlweise hierarchisch pro Datenbank, pro Schema oder granular pro Tabelle. Optional schlägt die KI basierend auf Namensmustern und Metadaten einen passenden Owner vor.
+   Der **Data Governance Expert** weist den fachlich zuständigen **Data Owner** zu – wahlweise hierarchisch pro Datenbank, pro Schema oder granular pro Tabelle. Alternativ greifen automatische Tag-Übernahmen (dbt, DataHub) oder deterministische Regex-Mappings.
 3. **Frei konfigurierbare Schutzstufen & Maskings (inkl. Zwischenstufen):**  
-   Schutzklassen, Ränge, Zwischenstufen (z. B. `INTERNAL_AUDIT_ONLY`, `CONFIDENTIAL_FINANCE`) sowie Maskierungsregeln (`PARTIAL_MASK` mit individuellen Parametern, `GEO_JITTER`, `REGEX_REPLACE`) sind vollständig deklarativ in der Konfiguration definiert.
-4. **Optionale KI-Vorklassifizierung (OpenJEV-Style):**  
-   Ein robuster Klassifizierungsdienst (angelehnt an [`OpenJevClient`](file:///root/autheris/src/Autheris.Extensions/Lineage/OpenJevClient.cs)) analysiert Spaltennamen, Typen und Schema-Metadaten. Der Prompt und das JSON-Schema werden **dynamisch aus den konfigurierten Schutzstufen und Maskings generiert**.
-5. **Konfidenz & Strittigkeits-Erkennung (`is_disputed`):**  
-   Die KI weist jedem Feld einen Konfidenzwert ($0.0 - 1.0$) zu und markiert **strittige Fälle (`is_disputed = true`)** explizit, damit Fachexperten Zweifelsfälle sofort erkennen.
+   Schutzklassen sind reine benutzerdefinierte Labels mit Rang-Nummerierung (z. B. Stufe 1 bis 4 oder TISAX/ISO-Labels). Maskierungsregeln sind vollständig deklarativ parametrisiert.
+4. **100 % Autark ohne KI (Zero-AI fähig) – KI ist rein optional:**  
+   Autheris geht **niemals davon aus**, dass eine KI vorhanden ist oder genutzt werden darf (z. B. in Banken, hochregulierten Air-Gapped-Umgebungen oder ohne GPU-Hardware). Das gesamte System ist **vollständig ohne KI lauffähig** – Klassifizierungen erfolgen in diesem Fall rein deterministisch (über Regex-Namensmuster, Metadaten-Tags aus dbt/DataHub oder manuelle Fachexperten-Eingaben).
+5. **Optionale KI-Vorklassifizierung (Nur bei expliziter Aktivierung):**  
+   Wird KI durch den Administrator aktiviert (`Mode = "HumanInTheLoop"`), analysiert ein lokaler Klassifizierungsdienst (OpenJEV-Style) Spaltennamen und Metadaten und erzeugt unverbindliche Vorschläge mit Konfidenzwerten und Strittigkeitsmarkierung (`is_disputed = true`). Ob eine KI Vorschläge macht oder gar zur Teil-Freigabe genutzt wird, ist rein benutzer- und anwendungsfallspezifisch konfigurierbar.
 6. **Vollständig konfigurierbarer Freigabe-Workflow (Optionales 4-Augen-Prinzip):**  
    Unternehmen steuern deklarativ, ob und wann ein 4-Augen-Prinzip (Dual-Sign-Off) erforderlich ist:
    - **1-stufig (Data Owner Only):** Der Fachbereichsverantwortliche gibt die Einstufung direkt frei – sofort aktiv (ideal für agile Data-Mesh-Teams).
@@ -135,6 +135,19 @@ Da sich Enterprise-Workflows zwischen agilen Data-Mesh-Teams und regulierten Fin
               "RequireStepUpAuthThresholdRank": 999,   // Keine MFA erzwungen
               "RequireFourEyesOnDowngrades": false
             }
+          },
+          "TRADITIONAL_NO_AI_ENTERPRISE": {
+            "OwnerResolution": { "Strategy": "MetadataFirstThenCatalogCascade" },
+            "PreClassification": {
+              "Mode": "Disabled"                       // 100% autark: 0 KI, 0 LLMs, 100% deterministisch
+            },
+            "ApprovalPipeline": {
+              "EnableFourEyes": true,
+              "Mode": "ConditionalDualStage",
+              "FourEyesThresholdRank": 3,
+              "RequireStepUpAuthThresholdRank": 4,
+              "RequireFourEyesOnDowngrades": true
+            }
           }
         }
       }
@@ -158,11 +171,13 @@ Das System passt den Prüfaufwand dynamisch an das tatsächliche Risiko der Date
 | **`STRICTLY_CONFIDENTIAL`** | 50 | 2-stufig (Data Owner $\rightarrow$ DPO/Compliance) | ✅ **Aktiv** | 🔐 **Ja (MFA/FIDO2/TOTP Pflicht)** |
 
 #### Unterstützte Flexibilitäts-Dimensionen:
-1. **Kompletter Verzicht auf das 4-Augen-Prinzip (`EnableFourEyes: false`):**  
+1. **100 % Autark ohne KI (`PreClassification.Mode: "Disabled"`):**  
+   Unternehmen, die keine KI einsetzen dürfen (Bankgeheimnis, Air-Gap ohne GPU, Betriebsrat-Vorgaben) oder wollen, betreiben Autheris vollständig deterministisch: Spalten werden über die konfigurierten `namePatterns` (Regex-Heuristik) und Quell-Tags (dbt/DataHub) zugeordnet, die Freigabe erfolgt ausschließlich durch Menschen. Das System hat **keine** Laufzeitabhängigkeit zu LLMs oder AI-Diensten.
+2. **Kompletter Verzicht auf das 4-Augen-Prinzip (`EnableFourEyes: false`):**  
    Für unregulierte Umgebungen, interne Entwicklungsplattformen oder agile Data Meshes. Weder beim Import, noch bei der Klassifizierung, noch bei späteren Datenzugriffen (Consents) wird eine 2. Genehmigung erzwungen.
-2. **Zero-Touch AI Ingestion für unkritische Daten (`ZeroTouchAutoApprovePublicAndLowRisk: true`):**  
-   Stuft die KI eine Tabelle mit $\ge 95\%$ Konfidenz als `PUBLIC` oder `INTERNAL` ein und liegt kein strittiges Feld (`is_disputed == false`) vor, wird die Tabelle **vollautomatisch ohne jeden menschlichen Klick aktiviert**. Der Data Owner erhält lediglich eine informative Benachrichtigung ("Audit / FYI"). Dies eliminiert Genehmigungs-Fatigue bei Tausenden unkritischen Referenztabellen (z. B. PLZ, ISO-Ländercodes).
-3. **Zwei-Faktor-Authentifizierung (Step-Up MFA) bei hochsensiblen Daten:**  
+3. **Optionale Zero-Touch AI Ingestion für unkritische Daten (`ZeroTouchAutoApprovePublicAndLowRisk: true`):**  
+   *Nur wenn KI explizit aktiviert und gewünscht ist:* Stuft die KI eine Tabelle mit $\ge 95\%$ Konfidenz als `PUBLIC` oder `INTERNAL` ein und liegt kein strittiges Feld (`is_disputed == false`) vor, wird die Tabelle **vollautomatisch ohne jeden menschlichen Klick aktiviert**. Der Data Owner erhält lediglich eine informative Benachrichtigung ("Audit / FYI"). Dies eliminiert Genehmigungs-Fatigue bei Tausenden unkritischen Referenztabellen (z. B. PLZ, ISO-Ländercodes).
+4. **Zwei-Faktor-Authentifizierung (Step-Up MFA) bei hochsensiblen Daten:**  
    Erreicht eine Tabelle oder Spalte die Schutzstufe `RESTRICTED` oder `STRICTLY_CONFIDENTIAL` (`RequireStepUpAuthThresholdRank: 40`), kann die Freigabe oder Änderung nicht durch einfache Klicks erfolgen. Der Benutzer muss sich via **WebAuthn / FIDO2-Sicherheitsschlüssel, TOTP oder OIDC Step-Up (`acr_values: mfa`)** authentifizieren. Dies schützt hochsensible Datenbestände vor Session-Hijacking und unbefugten Freigaben an ungesperrten Terminals.
 
 ---
@@ -465,10 +480,17 @@ Jede Maskierungsregel kann individuell mit Algorithmus und Parametern definiert 
 
 ---
 
-## 6. Dynamische KI-Vorklassifizierung (OpenJEV-Style)
+## 6. Optionale KI-Vorklassifizierung (OpenJEV-Style) & Deterministischer Fallback
 
-### 6.1 Konfigurierbare KI-Engine & Dynamisches Schema
-Der `ClassificationAiClient` generiert den Systemprompt und das JSON-Schema zur Laufzeit dynamisch aus den registrierten Schutzstufen und Maskierungsregeln. Timeout-Guard (max. 150-200 ms) und Injection-Filter schützen vor Latenzen und Manipulation.
+### 6.0 Deterministischer Fallback & Heuristik (Betrieb ohne KI)
+Ist die KI deaktiviert (`Mode = "Disabled"`) oder der AI-Service temporär nicht verfügbar, läuft Autheris **zu 100 % autark und unterbrechungsfrei** weiter:
+1. **Regex-Heuristik:** Spaltennamen werden gegen die `namePatterns` der konfigurierten `PiiCategories` gematcht (z. B. Match auf `^iban$` $\rightarrow$ `Kategorie: IBAN`, `Masking: IBAN_STANDARD_4_4`, `Schutzstufe: 3`).
+2. **Metadaten-Extraktion:** Werden Metadaten-Tags aus dbt (`meta: { pii: true, sensitivity: "L3" }`) oder DataHub mitgeliefert, übernimmt Autheris diese direkt.
+3. **Manuelle Erfassung:** Nicht automatisch erkannte Spalten verbleiben im Status `PENDING_REVIEW` und werden durch den Data Owner manuell im Cockpit eingestuft.
+4. **Keine AI-Abhängigkeit:** Der gesamte Core von Autheris benötigt weder Python, noch Cloud-APIs, noch CUDA/GPU-Treiber.
+
+### 6.1 Konfigurierbare KI-Engine & Dynamisches Schema (Nur wenn aktiviert)
+Wird die KI explizit aktiviert, generiert der `ClassificationAiClient` den Systemprompt und das JSON-Schema zur Laufzeit dynamisch aus den registrierten Schutzstufen und Maskierungsregeln. Timeout-Guard (max. 150-200 ms) und Injection-Filter schützen vor Latenzen und Manipulation.
 
 ### 6.2 Strittigkeits-Erkennung (`is_disputed = true`)
 - **Konfidenz $\ge 90\%$ (Eindeutig):** `is_disputed = false` (Grün).
