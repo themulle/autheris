@@ -153,7 +153,7 @@ public class DmlCoverageTests
                      "DELETE FROM orders WHERE id = 1",
                      "UPDATE orders SET status = 'x' WHERE id = 1",
                      "INSERT INTO orders (id, tenantid) VALUES (1, 'acme')",
-                     "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN DELETE"
+                     "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'"
                  })
         {
             using var _ = CompilerTestSeams.Use(new CompilerTestSeams { FaultyEmitter = text => text + ";" + (text.EndsWith(';') ? "" : " SELECT 1") });
@@ -271,7 +271,7 @@ public class DmlCoverageTests
         new object[] { TargetSqlDialect.DuckDb, StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge },
         new object[] { TargetSqlDialect.PostgreSql, StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge },
         new object[] { TargetSqlDialect.Databricks, StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge },
-        new object[] { TargetSqlDialect.Oracle, StatementPermissions.ReadOnly }
+        new object[] { TargetSqlDialect.Oracle, StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge }
     };
 
     [Theory]

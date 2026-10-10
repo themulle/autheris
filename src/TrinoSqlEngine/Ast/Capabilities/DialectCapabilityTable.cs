@@ -146,7 +146,9 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         BindExpressionTemplates: IdentityBindTemplates,
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.Oracle, OracleRewrites),
         AllowedTableFunctions: FrozenSet<string>.Empty,
-        LimitSource: "JOOQ");
+        LimitSource: "JOOQ",
+        DmlStatements: AllDml,
+        MergeShape: MergeClauseShape.OracleSingleClause);
 
     private static readonly DialectCapabilities Databricks = new(
         Dialect: TargetSqlDialect.Databricks,

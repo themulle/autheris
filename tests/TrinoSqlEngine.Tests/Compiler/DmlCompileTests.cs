@@ -16,7 +16,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// </summary>
 public class DmlCompileTests
 {
-    public static readonly TargetSqlDialect[] Dialects = { TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.PostgreSql, TargetSqlDialect.Databricks };
+    public static readonly TargetSqlDialect[] Dialects = { TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.PostgreSql, TargetSqlDialect.Databricks, TargetSqlDialect.Oracle };
 
     public static IEnumerable<object[]> DialectData() => Dialects.Select(d => new object[] { d });
 
@@ -50,6 +50,21 @@ public class DmlCompileTests
     private static InMemoryTableCatalog CatalogFor(TargetSqlDialect dialect)
     {
         if (dialect == TargetSqlDialect.SqlServer) return Catalog();
+        if (dialect == TargetSqlDialect.Oracle)
+        {
+            return new InMemoryTableCatalog(new[]
+            {
+                new TableCatalogEntry(Orders, System.Collections.Immutable.ImmutableArray.Create(
+                    new CatalogColumn("Id", "NUMBER(10)"), new CatalogColumn("TenantId", "VARCHAR2(64)"), new CatalogColumn("Region", "VARCHAR2(20)"),
+                    new CatalogColumn("Status", "VARCHAR2(20)"), new CatalogColumn("Amount", "NUMBER(18,2)"), new CatalogColumn("Email", "VARCHAR2(200)")),
+                    "TenantId", 1),
+                new TableCatalogEntry(Entitlements, System.Collections.Immutable.ImmutableArray.Create(
+                    new CatalogColumn("Id", "NUMBER(10)"), new CatalogColumn("TenantId", "VARCHAR2(64)"), new CatalogColumn("OrderId", "NUMBER(10)")),
+                    "TenantId", 1),
+                new TableCatalogEntry(Lookup, System.Collections.Immutable.ImmutableArray.Create(new CatalogColumn("Code", "VARCHAR2(10)")), null, 1)
+            }, "dbo");
+        }
+
         return new InMemoryTableCatalog(new[]
         {
             new TableCatalogEntry(Orders, System.Collections.Immutable.ImmutableArray.Create(
@@ -476,16 +491,22 @@ public class DmlCompileTests
 
     // ---- MERGE ----
 
-    private const string MergeUpdateDelete =
+    /// <summary>Oracle has neither a stand-alone MERGE DELETE nor repeated clause kinds (see <see cref="MergeClauseShape"/>).</summary>
+    private static string MergeUpdateDelete(TargetSqlDialect dialect) =>
         "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
-        "WHEN MATCHED AND s.id > 1 THEN UPDATE SET status = 'merged' WHEN MATCHED THEN DELETE";
+        (dialect == TargetSqlDialect.Oracle
+            ? "WHEN MATCHED AND s.id > 1 THEN UPDATE SET status = 'merged'"
+            : "WHEN MATCHED AND s.id > 1 THEN UPDATE SET status = 'merged' WHEN MATCHED THEN DELETE");
+
+    /// <summary>A MERGE clause that every dialect can express (used by tests whose subject is not the DELETE clause).</summary>
+    private const string Matched = "WHEN MATCHED THEN UPDATE SET status = 'x'";
 
     [Theory]
     [MemberData(nameof(DialectData))]
     public void Merge_TargetPredicatesGoIntoOn_AndTheSourceIsSecured(TargetSqlDialect dialect)
     {
         RegionPolicy();
-        var c = Compile(dialect, MergeUpdateDelete);
+        var c = Compile(dialect, MergeUpdateDelete(dialect));
         Assert.Equal(SqlStatementClass.Merge, c.StatementClass);
         Assert.Equal(1, Tenants(c));
         Assert.Contains(new SecurityPredicateId("dbo.Orders", 0), c.AppliedPredicates);
@@ -500,9 +521,41 @@ public class DmlCompileTests
     }
 
     [Fact]
+    public void OracleMerge_DeleteClause_AndRepeatedClauseKinds_AreRejectedFailClosed_WithATypedError()
+    {
+        var ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(TargetSqlDialect.Oracle,
+            "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN DELETE"));
+        Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+        ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(TargetSqlDialect.Oracle,
+            "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
+            "WHEN MATCHED AND s.id = 1 THEN UPDATE SET status = 'a' WHEN MATCHED AND s.id = 2 THEN UPDATE SET status = 'b'"));
+        Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+        ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(TargetSqlDialect.Oracle,
+            "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
+            "WHEN NOT MATCHED AND s.id = 1 THEN INSERT (id, tenantid) VALUES (s.id, 'acme') WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (s.id, 'acme')"));
+        Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+    }
+
+    [Fact]
+    public void OracleMerge_ClauseConditionsAreWhere_TheOnIsParenthesized_AndAliasesHaveNoAs()
+    {
+        var c = Compile(TargetSqlDialect.Oracle,
+            "MERGE INTO orders t USING entitlements s ON t.id = s.orderid " +
+            "WHEN MATCHED AND s.id > 1 THEN UPDATE SET status = 'm' WHEN NOT MATCHED AND s.id > 2 THEN INSERT (id, tenantid) VALUES (s.id, 'acme')");
+        Assert.Matches(@"^MERGE INTO ""dbo""\.""Orders"" \S+ USING \(", c.Sql);
+        Assert.DoesNotContain(" AS \"t\"", c.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(" ON (", c.Sql);
+        Assert.DoesNotContain("WHEN MATCHED AND", c.Sql);
+        Assert.DoesNotContain("WHEN NOT MATCHED AND", c.Sql);
+        Assert.Matches(@"THEN UPDATE SET .* WHERE ", c.Sql);
+        Assert.Matches(@"THEN INSERT .* VALUES .* WHERE ", c.Sql);
+        Assert.DoesNotContain(";", c.Sql);
+    }
+
+    [Fact]
     public void Merge_SqlServer_EndsWithExactlyOneSemicolon_AtTheFinalPosition()
     {
-        var c = Compile(TargetSqlDialect.SqlServer, MergeUpdateDelete);
+        var c = Compile(TargetSqlDialect.SqlServer, MergeUpdateDelete(TargetSqlDialect.SqlServer));
         Assert.EndsWith(";", c.Sql);
         Assert.Equal(1, c.Sql.Count(ch => ch == ';'));
     }
@@ -556,8 +609,8 @@ public class DmlCompileTests
     public void Merge_MaskedColumnInOnWhenOrAssignment_IsRejected(TargetSqlDialect dialect)
     {
         MaskEmail();
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.email = 'x' WHEN MATCHED THEN DELETE");
-        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED AND t.email = 'x' THEN DELETE");
+        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.email = 'x' WHEN MATCHED THEN UPDATE SET status = 'x'");
+        RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED AND t.email = 'x' THEN UPDATE SET status = 'x'");
         RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = t.email");
         RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = email");
         RejectedSecurity(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid WHEN NOT MATCHED AND t.email IS NULL THEN INSERT (id, tenantid) VALUES (s.id, 'acme')");
@@ -568,9 +621,9 @@ public class DmlCompileTests
     [MemberData(nameof(DialectData))]
     public void Merge_TriviallyTrueOrColumnFreeOn_IsRejected_AsUnfilteredDml(TargetSqlDialect dialect)
     {
-        Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "MERGE INTO orders t USING entitlements s ON 1 = 1 WHEN MATCHED THEN DELETE"));
-        Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "MERGE INTO orders t USING entitlements s ON true WHEN MATCHED THEN DELETE"));
-        Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid OR 1 = 1 WHEN MATCHED THEN DELETE"));
+        Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "MERGE INTO orders t USING entitlements s ON 1 = 1 WHEN MATCHED THEN UPDATE SET status = 'x'"));
+        Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "MERGE INTO orders t USING entitlements s ON true WHEN MATCHED THEN UPDATE SET status = 'x'"));
+        Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "MERGE INTO orders t USING entitlements s ON t.id = s.orderid OR 1 = 1 WHEN MATCHED THEN UPDATE SET status = 'x'"));
     }
 
     [Theory]
@@ -588,7 +641,7 @@ public class DmlCompileTests
                 null, null), null, null));
         _rowFilters.NoPolicy.Remove(Orders);
         _rowFilters.Predicates[Orders] = PolicyPredicate.Create(correlated, new Dictionary<string, PolicyValue>());
-        RejectedSecurity(dialect, MergeUpdateDelete);
+        RejectedSecurity(dialect, MergeUpdateDelete(dialect));
     }
 
     [Theory]
@@ -616,7 +669,7 @@ public class DmlCompileTests
     [MemberData(nameof(DialectData))]
     public void Merge_TargetWithoutAlias_UsesTheTableNameAsTheQualifier(TargetSqlDialect dialect)
     {
-        var c = Compile(dialect, "MERGE INTO orders USING entitlements s ON orders.id = s.orderid WHEN MATCHED THEN DELETE");
+        var c = Compile(dialect, "MERGE INTO orders USING entitlements s ON orders.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
         Assert.Equal(SqlStatementClass.Merge, c.StatementClass);
         Assert.Equal(1, Tenants(c));
     }
@@ -625,8 +678,8 @@ public class DmlCompileTests
     [MemberData(nameof(DialectData))]
     public void Merge_UnknownTarget_AndTableBranch_AreRejected(TargetSqlDialect dialect)
     {
-        RejectedSecurity(dialect, "MERGE INTO mystery t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN DELETE");
-        Rejected(dialect, "MERGE INTO orders@main t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN DELETE");
+        RejectedSecurity(dialect, "MERGE INTO mystery t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
+        Rejected(dialect, "MERGE INTO orders@main t USING entitlements s ON t.id = s.orderid WHEN MATCHED THEN UPDATE SET status = 'x'");
     }
 
     // ---- invariants of the plan cache and the verifier ----

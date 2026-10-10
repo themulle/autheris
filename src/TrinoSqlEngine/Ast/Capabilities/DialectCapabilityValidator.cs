@@ -18,6 +18,9 @@ public static class DialectCapabilityValidator
             {
                 case LateralTableSource when !capabilities.SupportsLateral:
                     throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "LATERAL");
+                case MergeStatement merge when capabilities.MergeShape == MergeClauseShape.OracleSingleClause:
+                    ValidateSingleClauseMerge(merge);
+                    break;
                 case InListExpression inList when capabilities.MaxInListItems is { } max && inList.Items.Count > max:
                     throw new SqlLimitExceededException(SqlLimitKind.InListItems, capabilities.Dialect, inList.Items.Count, max);
                 case SqlIdentifier id:
@@ -34,5 +37,29 @@ public static class DialectCapabilityValidator
 
             return true;
         });
+    }
+
+    private static void ValidateSingleClauseMerge(MergeStatement merge)
+    {
+        int updates = 0, inserts = 0;
+        foreach (var clause in merge.Clauses)
+        {
+            switch (clause)
+            {
+                case MergeDeleteClause:
+                    throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "MERGE WHEN MATCHED THEN DELETE");
+                case MergeUpdateClause:
+                    updates++;
+                    break;
+                case MergeInsertClause:
+                    inserts++;
+                    break;
+            }
+        }
+
+        if (updates > 1 || inserts > 1)
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "MERGE with repeated WHEN clause kinds");
+        }
     }
 }

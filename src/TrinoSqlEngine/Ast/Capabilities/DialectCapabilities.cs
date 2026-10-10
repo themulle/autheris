@@ -121,10 +121,23 @@ public sealed record DialectCapabilities(
     DialectFunctionMap Functions,
     IReadOnlySet<string> AllowedTableFunctions,
     string LimitSource,
-    StatementPermissions DmlStatements = StatementPermissions.ReadOnly)
+    StatementPermissions DmlStatements = StatementPermissions.ReadOnly,
+    MergeClauseShape MergeShape = MergeClauseShape.Ansi)
 {
     /// <summary>Version of the capability data. Part of the compile cache key (SEC-ADG-01).</summary>
     public const string TableVersion = "cap-3";
+}
+
+/// <summary>
+/// How the dialect expresses MERGE. <c>Ansi</c> (SQL Server, PostgreSQL, DuckDB, Databricks): any number of WHEN MATCHED [AND c] UPDATE or
+/// DELETE and WHEN NOT MATCHED [AND c] INSERT clauses. <c>OracleSingleClause</c>: at most one UPDATE and one INSERT clause, the condition is a
+/// WHERE of the clause, and there is no stand-alone DELETE (Oracle deletes only rows it updated, with different semantics), so a
+/// MERGE with a DELETE clause or with repeated clause kinds is rejected fail closed.
+/// </summary>
+public enum MergeClauseShape
+{
+    Ansi,
+    OracleSingleClause
 }
 
 public interface IDialectCapabilityProvider

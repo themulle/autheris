@@ -1,6 +1,7 @@
 namespace TrinoSqlEngine.Ast.Generators;
 
 using System;
+using System.Linq;
 using TrinoSqlEngine;
 using System.Collections.Frozen;
 using TrinoSqlEngine.Ast.Buffer;
@@ -23,6 +24,55 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
     protected override bool BindLiterals => true;
 
     protected override string? FromlessSource => "DUAL";
+
+    /// <summary>
+    /// Oracle MERGE: the ON condition is parenthesized, a clause condition is the WHERE of the clause (there is no WHEN ... AND),
+    /// and at most one UPDATE and one INSERT clause exist. A stand-alone DELETE clause cannot be expressed with the same semantics
+    /// (Oracle deletes only rows it just updated), so the capability validator rejects it before emission; this generator refuses it
+    /// again as a second line (fail closed).
+    /// </summary>
+    protected override void GenerateMerge(MergeStatement merge, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        if (merge.Clauses.Any(c => c is MergeDeleteClause) ||
+            merge.Clauses.Count(c => c is MergeUpdateClause) > 1 || merge.Clauses.Count(c => c is MergeInsertClause) > 1)
+        {
+            throw UnsupportedConstruct("MERGE with a DELETE clause or repeated WHEN clause kinds", TargetDialect);
+        }
+
+        builder.Append("MERGE INTO ");
+        GenerateTableSource(merge.Target, ref builder, context);
+        builder.Append(" USING ");
+        GenerateTableSource(merge.Source, ref builder, context);
+        builder.Append(" ON (");
+        GenerateMergePredicate(merge.On, ref builder, context);
+        builder.Append(')');
+        foreach (var clause in merge.Clauses)
+        {
+            builder.Append(' ');
+            switch (clause)
+            {
+                case MergeUpdateClause update:
+                    builder.Append("WHEN MATCHED THEN UPDATE SET ");
+                    GenerateAssignments(update.Assignments, ref builder, context);
+                    GenerateOracleClauseWhere(update.Condition, ref builder, context);
+                    break;
+                case MergeInsertClause insert:
+                    builder.Append("WHEN NOT MATCHED THEN INSERT ");
+                    GenerateMergeInsertBody(insert, ref builder, context);
+                    GenerateOracleClauseWhere(insert.Condition, ref builder, context);
+                    break;
+                default:
+                    throw UnsupportedConstruct($"MERGE clause {clause.GetType().Name}", TargetDialect);
+            }
+        }
+    }
+
+    private void GenerateOracleClauseWhere(Expression? condition, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        if (condition is null) return;
+        builder.Append(" WHERE ");
+        GenerateMergePredicate(condition, ref builder, context);
+    }
 
     /// <summary>Trino <c>strpos(s, t)</c> is Oracle <c>INSTR(s, t)</c> (same argument order); other functions pass through.</summary>
     protected override void GenerateFunctionCall(FunctionCallExpression fn, ref ValueStringBuilder builder, SqlEmitterContext context)
