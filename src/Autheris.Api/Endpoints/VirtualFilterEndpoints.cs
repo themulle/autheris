@@ -827,7 +827,7 @@ public static class VirtualFilterEndpoints
                 };
             }
 
-            return new FilterBinding
+            var binding = new FilterBinding
             {
                 FilterName = Filter,
                 TargetPattern = Target,
@@ -840,8 +840,10 @@ public static class VirtualFilterEndpoints
                 PushdownFormat = PushdownFormat == null
                     ? null
                     : VirtualFilterBindingValidator.ParseEnum<PushdownParameterFormat>(PushdownFormat, "pushdown_format"),
-                MaxPushdownKeys = MaxPushdownKeys ?? 100
             };
+
+            // An omitted field keeps the model's own default; only an explicit value is a request.
+            return MaxPushdownKeys is { } keys ? binding with { MaxPushdownKeys = keys } : binding;
         }
     }
 

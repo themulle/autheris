@@ -69,7 +69,7 @@ internal static class VirtualFilterBindingValidator
         {
             foreach (var binding in profile.Bindings)
             {
-                if (binding.MaxPushdownKeys < 1 || binding.MaxPushdownKeys > FilterBinding.HardMaxPushdownKeys || binding.MaxPushdownKeys > gatewayLimit)
+                if (binding.MaxPushdownKeys < 1 || binding.MaxPushdownKeys > FilterBinding.HardMaxPushdownKeys || ExceedsGatewayLimit(binding, gatewayLimit))
                 {
                     throw new VirtualFilterBindingException(
                         VirtualFilterErrorCodes.PushdownKeyBudgetInvalid,
@@ -83,6 +83,14 @@ internal static class VirtualFilterBindingValidator
             }
         }
     }
+
+    /// <summary>
+    /// The gateway-wide limit is a request limit: a binding that does not set <c>max_pushdown_keys</c> carries the model
+    /// default and is capped by the planner at query time, so it must not fail at write time. Only a value other than the
+    /// default is treated as an explicit request.
+    /// </summary>
+    private static bool ExceedsGatewayLimit(FilterBinding binding, int gatewayLimit) =>
+        binding.MaxPushdownKeys != FilterBinding.DefaultMaxPushdownKeys && binding.MaxPushdownKeys > gatewayLimit;
 
     private static async Task ValidateFormatAsync(FilterBinding binding, PushdownParameterFormat format, ITableMetadataRepository? catalog, CancellationToken ct)
     {

@@ -309,7 +309,10 @@ public sealed record FilterBinding
     public const int HardMaxPushdownKeys = 1_000;
 
     /// <summary>Maximum number of keys pushed down to the upstream; more is read completely or denied (1..<see cref="HardMaxPushdownKeys"/>).</summary>
-    public int MaxPushdownKeys { get; init; } = 100;
+    public int MaxPushdownKeys { get; init; } = DefaultMaxPushdownKeys;
+
+    /// <summary>Value of <see cref="MaxPushdownKeys"/> when a binding does not set it.</summary>
+    public const int DefaultMaxPushdownKeys = 100;
 
     public void Validate()
     {

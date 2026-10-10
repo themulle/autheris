@@ -495,6 +495,57 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         (await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", max_pushdown_keys = 50 }, Configure)).Status.ShouldBe(StatusCodes.Status200OK);
     }
 
+    private static void GatewayLimit(IServiceCollection s, int limit) => s.AddOptions<GatewayOptions>().Bind(
+        Microsoft.Extensions.Configuration.MemoryConfigurationBuilderExtensions.AddInMemoryCollection(
+            new Microsoft.Extensions.Configuration.ConfigurationBuilder(),
+            new Dictionary<string, string?> { ["Gateway:VirtualFilters:Federation:MaxPushdownKeys"] = limit.ToString() })
+            .Build().GetSection(GatewayOptions.SectionName));
+
+    [Fact]
+    public async Task PutProfile_OmittedMaxPushdownKeys_IsNotCheckedAgainstALowGatewayLimit()
+    {
+        await PutFilterAsync();
+        void Configure(IServiceCollection s) => GatewayLimit(s, 50);
+
+        var (status, _) = await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id" }, Configure);
+
+        status.ShouldBe(StatusCodes.Status200OK);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem().Bindings.ShouldHaveSingleItem()
+            .MaxPushdownKeys.ShouldBe(FilterBinding.DefaultMaxPushdownKeys);
+    }
+
+    [Fact]
+    public async Task PutProfile_ExplicitMaxPushdownKeysAboveALowGatewayLimit_Returns400()
+    {
+        await PutFilterAsync();
+        void Configure(IServiceCollection s) => GatewayLimit(s, 50);
+
+        var (status, body) = await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", max_pushdown_keys = 51 }, Configure);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        JsonDocument.Parse(body).RootElement.GetProperty("code").GetString().ShouldBe("VF_PUSHDOWN_KEY_BUDGET_INVALID");
+    }
+
+    [Fact]
+    public async Task Sync_OmittedMaxPushdownKeys_IsNotCheckedAgainstALowGatewayLimit()
+    {
+        void Configure(IServiceCollection s) => GatewayLimit(s, 50);
+        var body = new
+        {
+            path = "governance/access",
+            commit = "c1",
+            filters = new Dictionary<string, object> { ["nicht_ausgelieferte_krane"] = DavidFilterBody() },
+            profiles = new Dictionary<string, object> { ["david"] = BindingProfile(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id" }) }
+        };
+        var context = Context(Tenant, body, "FilterSync");
+        var services = new ServiceCollection().AddLogging();
+        Configure(services);
+        context.RequestServices = services.BuildServiceProvider();
+
+        (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(context, _service), context)).ShouldBe(StatusCodes.Status200OK);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
+    }
+
     [Theory]
     [InlineData("repeated_param")]
     [InlineData("odata_in")]
