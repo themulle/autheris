@@ -43,7 +43,12 @@ public sealed class SparkProxyFixture : IAsyncLifetime, IDisposable
         try
         {
             ImagePresent = await ImageExistsAsync();
-            if (!ImagePresent) return;
+            if (!ImagePresent)
+            {
+                StartupError = "The pinned Spark proxy image is not available locally.";
+                return;
+            }
+
             string runner = Path.Combine(AppContext.BaseDirectory, "Spark");
             if (!File.Exists(Path.Combine(runner, "runner.py")))
             {
@@ -288,14 +293,28 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
 
     private static List<int> Ids(List<JsonNode?[]> rows) => rows.Select(r => r[0]!.GetValue<int>()).OrderBy(x => x).ToList();
 
-    [Fact]
+    private void RequireSpark()
+    {
+        // CR-ADG-11: the image presence is decided at discovery (skip with a reason, failure on CI). A present image whose proxy does
+        // not start is a failure, never a silent pass.
+        if (!_spark.IsAvailable)
+        {
+            throw new InvalidOperationException("The Spark proxy did not start: " + _spark.StartupError);
+        }
+    }
+
+    private void RequireCollation()
+    {
+        if (_spark.CollationAvailable) return;
+        const string reason = "This Spark build has no collation support (STRING COLLATE UTF8_LCASE); the collation tests cannot run.";
+        throw SparkAvailability.IsCi ? new InvalidOperationException(reason) : new SparkSkipException(reason);
+    }
+
+    [SparkFact]
     public void SparkProxy_Starts_WheneverTheImageIsPresent()
     {
-        // Without the image the suite returns early (no Docker); with it, a failing proxy must be visible.
-        if (_spark.ImagePresent)
-        {
-            _spark.IsAvailable.ShouldBeTrue(_spark.StartupError);
-        }
+        _spark.ImagePresent.ShouldBeTrue("The Spark proxy image is not available (CI requires it).");
+        _spark.IsAvailable.ShouldBeTrue(_spark.StartupError);
     }
 
     [Theory]
@@ -310,19 +329,20 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
         await Task.CompletedTask;
     }
 
-    [Fact]
+    [SparkFact]
     public async Task Tenant_SeesOnlyItsOwnRows()
     {
-        if (!_spark.IsAvailable) return;
+        RequireSpark();
         Ids(await RunAsync("SELECT id FROM orders", "acme")).ShouldBe(new List<int> { 1, 2, 6 });
         Ids(await RunAsync("SELECT id FROM orders", "other")).ShouldBe(new List<int> { 5 });
         Ids(await RunAsync("SELECT id FROM orders", "ACME")).ShouldBe(new List<int> { 3, 4 });
     }
 
-    [Fact]
+    [SparkFact]
     public async Task TenantCaseCollision_IsIsolated_OnAnLcaseCollatedColumn()
     {
-        if (!_spark.IsAvailable || !_spark.CollationAvailable) return;
+        RequireSpark();
+        RequireCollation();
         var plain = await _spark.SendAsync(new JsonObject { ["op"] = "query", ["sql"] = "SELECT count(*) FROM default.orders_ci WHERE tenantid = 'acme'" });
         plain!["rows"]![0]![0]!.GetValue<long>().ShouldBe(2);   // the collation makes a plain equality case-insensitive
 
@@ -333,17 +353,17 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
     [Fact]
     public async Task ConsentFilter_And_DenyAll()
     {
-        if (!_spark.IsAvailable) return;
+        RequireSpark();
         _policies.Predicates[Orders] = RegionPolicy("EU");
         Ids(await RunAsync("SELECT id FROM orders", "acme")).ShouldBe(new List<int> { 1, 6 });
         _policies.Predicates[Orders] = PolicyPredicate.DenyAll;
         (await RunAsync("SELECT id FROM orders WHERE 1 = 1 OR status = 'open'", "acme")).ShouldBeEmpty();
     }
 
-    [Fact]
+    [SparkFact]
     public async Task PolicySubquery_ForeignTenantRowsNeverDecideVisibility()
     {
-        if (!_spark.IsAvailable) return;
+        RequireSpark();
         var correlated = new ExistsExpression(new SelectStatement(null,
             new QuerySpecification(false,
                 new SelectItem[] { new ColumnSelectItem(Col("id", "e"), null) },
@@ -354,10 +374,10 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
         Ids(await RunAsync("SELECT id FROM orders", "acme")).ShouldBe(new List<int> { 1, 6 });
     }
 
-    [Fact]
+    [SparkFact]
     public async Task CteNamedLikeTheTable_UnionJoinSubquery_AreSecured()
     {
-        if (!_spark.IsAvailable) return;
+        RequireSpark();
         Ids(await RunAsync("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders", "other")).ShouldBe(new List<int> { 5 });
         var rows = await RunAsync(
             "WITH o AS (SELECT id, status FROM orders) SELECT o.id FROM o JOIN orders p ON p.id = o.id WHERE o.id IN (SELECT id FROM orders) " +
@@ -365,7 +385,7 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
         rows.Select(r => r[0]!.GetValue<int>()).ShouldAllBe(id => id == 1 || id == 2 || id == 6);
     }
 
-    [Theory]
+    [SparkTheory]
     [InlineData("SELECT status, count(*) AS n, sum(amount) AS total FROM orders GROUP BY status ORDER BY status")]
     [InlineData("SELECT id FROM orders WHERE status = 'open' AND amount > 10.5 ORDER BY id OFFSET 1 LIMIT 5")]
     [InlineData("SELECT id, sum(amount) OVER (PARTITION BY status ORDER BY amount ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS rn FROM orders")]
@@ -387,21 +407,21 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
     [InlineData("SELECT approx_distinct(region) AS d, arbitrary(status) AS a FROM orders")]
     public async Task UserQueryShapes_CompileAndExecute(string sql)
     {
-        if (!_spark.IsAvailable) return;
+        RequireSpark();
         (await RunAsync(sql, "acme")).ShouldNotBeNull();
     }
 
-    [Fact]
+    [SparkFact]
     public async Task ClientNamedParameter_And_PlanCacheRebinding()
     {
-        if (!_spark.IsAvailable) return;
+        RequireSpark();
         Ids(await RunAsync("SELECT id FROM orders WHERE status = __param_st", "acme", new Dictionary<string, object?> { ["st"] = "closed" })).ShouldBe(new List<int> { 6 });
         Ids(await RunAsync("SELECT id FROM orders", "acme")).ShouldBe(new List<int> { 1, 2, 6 });
         Ids(await RunAsync("SELECT id FROM orders", "other")).ShouldBe(new List<int> { 5 });
         _engine.CompileCache.Stats.Hits.ShouldBeGreaterThanOrEqualTo(1);
     }
 
-    [Theory]
+    [SparkTheory]
     [InlineData("'; DROP TABLE default.orders; --")]
     [InlineData("acme' OR '1'='1")]
     [InlineData("${spark.sql.shuffle.partitions}")]
@@ -409,16 +429,16 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
     [InlineData("`; DROP TABLE default.orders; --")]
     public async Task HostileValues_AreJustValues_VariableSubstitutionNeverApplies(string hostile)
     {
-        if (!_spark.IsAvailable) return;
+        RequireSpark();
         (await RunAsync("SELECT id FROM orders", hostile)).ShouldBeEmpty();
         Ids(await RunAsync("SELECT id FROM orders", "acme")).ShouldBe(new List<int> { 1, 2, 6 });
         (await RunAsync("SELECT id FROM orders WHERE status = __param_s", "acme", new Dictionary<string, object?> { ["s"] = hostile })).ShouldBeEmpty();
     }
 
-    [Fact]
+    [SparkFact]
     public async Task VariableSubstitutionInInput_IsRejectedByTheTokenGuard()
     {
-        if (!_spark.IsAvailable) return;
+        RequireSpark();
         await Should.ThrowAsync<Exception>(() => RunAsync("SELECT id FROM orders WHERE status = '${x}'", "acme"));
     }
 
@@ -426,10 +446,10 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
 
     private static PolicyParameterExpression MaskParam(string name, SqlParameterType type) => new(name, type, ParameterOrigin.Mask);
 
-    [Fact]
+    [SparkFact]
     public async Task Redact_Partial_GeoJitter_Nullify_AndHmacDegradation()
     {
-        if (!_spark.IsAvailable) return;
+        RequireSpark();
         _policies.Masks[(Orders, "email")] = new MaskSpec(MaskKind.Redact,
             new MaskArguments(Constant: MaskParam("__mask_email", SqlParameterType.String)),
             new Dictionary<string, PolicyValue> { ["__mask_email"] = new("[REDACTED]", SqlParameterType.String) }.ToFrozenDictionary());
@@ -473,10 +493,10 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
 
     // ---- items marked (verify) in the plan, resolved against the Spark proxy ----
 
-    [Fact]
+    [SparkFact]
     public async Task Verify_OffsetLimit_TimestampNtz_AndLateral_OnSpark()
     {
-        if (!_spark.IsAvailable) return;
+        RequireSpark();
         var offset = await _spark.SendAsync(new JsonObject { ["op"] = "query", ["sql"] = "SELECT id FROM default.orders ORDER BY id LIMIT 2 OFFSET 1" });
         offset!["ok"]!.GetValue<bool>().ShouldBeTrue();                              // OFFSET is supported
         var ntz = await _spark.SendAsync(new JsonObject { ["op"] = "query", ["sql"] = "SELECT CAST('2024-01-15 10:00:00' AS TIMESTAMP_NTZ) AS t" });
