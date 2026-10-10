@@ -521,8 +521,18 @@ public sealed class BasicAuthSessionOptions
 
     public bool Enabled { get; init; } = false;
 
-    /// <summary>Environments in which the session cookie may be enabled. "Production" is never accepted.</summary>
-    public List<string> AllowedEnvironments { get; init; } = ["Development"];
+    /// <summary>
+    /// Environments in which the session cookie may be enabled. "Production" is never accepted. When not configured,
+    /// only Development is allowed; a configured list replaces that default entirely. Nullable on purpose: the
+    /// configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON
+    /// array counts as "not configured"; to disable the session everywhere, set <see cref="Enabled"/> to false.
+    /// </summary>
+    public List<string>? AllowedEnvironments { get; init; }
+
+    private static readonly string[] DefaultAllowedEnvironments = ["Development"];
+
+    /// <summary>Configured <see cref="AllowedEnvironments"/> or the default list (Development).</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedEnvironments() => AllowedEnvironments ?? (IReadOnlyList<string>)DefaultAllowedEnvironments;
 
     /// <summary>Cookie name; must use the <c>__Host-</c> prefix (Secure, Path=/, no Domain).</summary>
     public string CookieName { get; init; } = "__Host-Autheris.Session";
