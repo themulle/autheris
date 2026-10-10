@@ -698,6 +698,36 @@ public class DmlCompileTests
 
     [Theory]
     [MemberData(nameof(DialectData))]
+    public void DmlGuardOptions_ArePartOfTheCacheKey_AStrictRequestIsNeverServedARelaxedCompile(TargetSqlDialect dialect)
+    {
+        var relaxed = DmlGuardOptions.Strict with { RejectUnfilteredDml = false };
+        Assert.Equal(SqlStatementClass.Update, Compile(dialect, "UPDATE orders SET status = 'x'", dml: relaxed).StatementClass);
+        Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "UPDATE orders SET status = 'x'"));
+        Assert.Equal(0, _engine.CompileCache.Stats.Hits);
+    }
+
+    [Theory]
+    [MemberData(nameof(DialectData))]
+    public void Dml_IsNeverRowLimited_ByEnforcedMaxRows(TargetSqlDialect dialect)
+    {
+        // The enforced row limit is for the root SELECT of a read; truncating the source of a write would change which rows are written.
+        var request = Request(dialect) with { EnforcedMaxRows = 10 };
+        foreach (var sql in new[]
+                 {
+                     "INSERT INTO orders (id, tenantid) SELECT id, 'acme' FROM entitlements",
+                     "UPDATE orders SET status = (SELECT max(id) FROM entitlements) WHERE id IN (SELECT orderid FROM entitlements)",
+                     "DELETE FROM orders WHERE id IN (SELECT orderid FROM entitlements)"
+                 })
+        {
+            var c = _engine.Compile(sql.AsMemory(), request, CancellationToken.None);
+            Assert.DoesNotContain("FETCH", c.Sql);
+            Assert.DoesNotContain("LIMIT", c.Sql);
+            Assert.DoesNotContain("ROWNUM", c.Sql);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(DialectData))]
     public void ErrorMessages_NeverEchoTheTenantValue(TargetSqlDialect dialect)
     {
         var ex = Assert.ThrowsAny<SecurityException>(() => Compile(dialect, "INSERT INTO orders (id, tenantid) VALUES (1, 'victim-tenant')", "caller-tenant"));
