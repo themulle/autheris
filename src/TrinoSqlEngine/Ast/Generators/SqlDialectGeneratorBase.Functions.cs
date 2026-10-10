@@ -44,7 +44,19 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     /// Wunsch 4: CAST target type in the dialect's spelling. The default keeps the (validated) Trino spelling, which is valid
     /// for SQLite, DuckDB, Snowflake and ANSI.
     /// </summary>
-    protected virtual string FormatTypeName(TrinoType type) => type.Normalized;
+    protected virtual string FormatTypeName(TrinoType type) => StandardTypeName(type);
+
+    /// <summary>
+    /// CR-ADG-25: closed CAST target type set shared by the dialects without their own type map (PostgreSQL, DuckDB, SQLite, ANSI,
+    /// Snowflake). Anything else (<c>regclass</c>, <c>regrole</c>, <c>xml</c>, <c>json</c>, <c>oid</c>, ...) fails closed.
+    /// </summary>
+    protected string StandardTypeName(TrinoType type) => type.Name switch
+    {
+        "boolean" or "tinyint" or "smallint" or "integer" or "int" or "bigint" or "real" or "double" or "double precision"
+            or "decimal" or "numeric" or "varchar" or "char" or "text" or "varbinary" or "date" when !type.WithTimeZone => type.Normalized,
+        "time" or "timestamp" => type.Normalized,
+        _ => throw UnsupportedConstruct($"CAST(… AS {type.Normalized})", TargetDialect)
+    };
 
     protected static TrinoSqlEngine.Ast.Builder.AstBuildException UnsupportedConstruct(string construct, TargetSqlDialect dialect) =>
         new($"SQL construct {construct} is not supported for {dialect}.");

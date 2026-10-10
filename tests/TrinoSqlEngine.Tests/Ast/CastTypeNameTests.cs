@@ -69,6 +69,43 @@ public sealed class CastTypeNameTests
         Assert.Throws<AstBuildException>(() => Cast(type, dialect));
     }
 
+    /// <summary>CR-ADG-25: a closed CAST type set; catalog-probing and structured types fail closed on every dialect.</summary>
+    [Theory]
+    [MemberData(nameof(UnlistedTypeCases))]
+    public void Cast_ToUnlistedType_IsRejected_PerDialect(string type, TargetSqlDialect dialect)
+    {
+        Assert.Throws<AstBuildException>(() => Cast(type, dialect));
+        Assert.Throws<AstBuildException>(() => Cast(type, dialect, "TRY_CAST"));
+    }
+
+    public static TheoryData<string, TargetSqlDialect> UnlistedTypeCases()
+    {
+        var data = new TheoryData<string, TargetSqlDialect>();
+        foreach (var dialect in new[] { TargetSqlDialect.PostgreSql, TargetSqlDialect.DuckDb })
+        {
+            foreach (var type in new[] { "regclass", "regrole", "regproc", "regtype", "regnamespace", "xml", "json", "jsonb", "xmltype", "oid" })
+            {
+                data.Add(type, dialect);
+            }
+        }
+
+        return data;
+    }
+
+    [Theory]
+    [InlineData("integer")]
+    [InlineData("bigint")]
+    [InlineData("varchar(20)")]
+    [InlineData("decimal(10, 2)")]
+    [InlineData("date")]
+    [InlineData("timestamp with time zone")]
+    [InlineData("boolean")]
+    public void Cast_ToListedType_StillWorks_OnPostgreSqlAndDuckDb(string type)
+    {
+        Assert.Contains("CAST(", Cast(type, TargetSqlDialect.PostgreSql));
+        Assert.Contains("CAST(", Cast(type, TargetSqlDialect.DuckDb));
+    }
+
     [Theory]
     [InlineData(TargetSqlDialect.SqlServer)]
     [InlineData(TargetSqlDialect.DuckDb)]

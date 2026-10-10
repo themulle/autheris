@@ -314,6 +314,18 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
         (await RunAsync(sql, "acme")).ShouldNotBeNull();
     }
 
+    [Theory]
+    [InlineData("SELECT CAST(__param_t AS regclass) FROM orders")]
+    [InlineData("SELECT CAST(__param_t AS regrole) FROM orders")]
+    [InlineData("SELECT __param_t::regclass FROM orders")]
+    [InlineData("SELECT CAST(status AS xml) FROM orders")]
+    public async Task CastToCatalogProbingType_IsRejected_BeforeExecution(string sql)
+    {
+        // CR-ADG-25: the compiler refuses it; nothing reaches the database.
+        Should.Throw<Exception>(() => _engine.Compile(sql.AsMemory(), Request("acme"), CancellationToken.None));
+        await Task.CompletedTask;
+    }
+
     [Fact]
     public async Task ClientNamedParameter_IsBoundPositionally()
     {

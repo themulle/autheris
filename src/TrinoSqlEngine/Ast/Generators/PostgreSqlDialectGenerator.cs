@@ -25,7 +25,7 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
         "double" => "double precision",
         "tinyint" => "smallint",
         "varbinary" => "bytea",
-        _ => type.Normalized
+        _ => StandardTypeName(type)
     };
     public override int MaxParameterBudget => 65535;
 
