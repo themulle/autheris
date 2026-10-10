@@ -173,7 +173,10 @@ public sealed class AstCompilerDuckDbExecutionTests : IDisposable
     [Fact]
     public void CteNamedLikeTheTable_UnionJoinSubquery_AreSecured()
     {
-        Ids(Run("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders", "other")).ShouldBe(new List<int> { 5 });
+        // CR-ADG-32: a CTE that references its own name without WITH RECURSIVE is rejected (fail-closed).
+        Should.Throw<System.Security.SecurityException>(() => Run("WITH orders AS (SELECT id FROM orders) SELECT id FROM orders", "other"));
+        // A CTE named like the table is still secured when it does not reference itself.
+        Ids(Run("WITH orders AS (SELECT id FROM entitlements) SELECT id FROM orders", "other")).ShouldNotBeNull();
         var rows = Run(
             "WITH o AS (SELECT id, status FROM orders) SELECT o.id FROM o JOIN orders p ON p.id = o.id WHERE o.id IN (SELECT id FROM orders) " +
             "UNION ALL SELECT id FROM orders WHERE id = (SELECT max(id) FROM orders)", "acme");
