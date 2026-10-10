@@ -15,7 +15,10 @@ public sealed record StagingTableRequest(
     TableAccessDecision Decision,
     string StagingName,
     IReadOnlyList<string> Projection,
-    TableFilterClause? PushdownFilter = null);
+    TableFilterClause? PushdownFilter = null,
+    IReadOnlyDictionary<string, object?>? SessionItems = null,
+    IReadOnlyDictionary<string, object?>? CustomArguments = null,
+    IReadOnlyList<IReadOnlyDictionary<string, object?>>? PreloadedRows = null);
 
 public sealed record FederationBudget(
     int MaxTableCount,

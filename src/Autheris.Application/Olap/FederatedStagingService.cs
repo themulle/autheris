@@ -110,6 +110,20 @@ public sealed class FederatedStagingService : IFederatedStagingService
 
         foreach (var req in tables)
         {
+            if (req.PreloadedRows != null)
+            {
+                var preloaded = req.PreloadedRows.ToList();
+                totalStagedRows += preloaded.Count;
+                totalStagedBytes += GovernedConnectorReader.EstimateBytes(preloaded);
+                stagedSources.Add(new OlapTableSource(
+                    Table: req.Metadata.Identifier,
+                    GovernedRows: preloaded,
+                    Metadata: req.Metadata,
+                    StagingTableName: req.StagingName,
+                    MaskedColumns: new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
+                continue;
+            }
+
             var connector = ResolveConnector(req.Metadata);
             if (connector == null)
             {
@@ -117,15 +131,32 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 throw new GatewaySecurityException($"No active connector available for table '{req.Metadata.Identifier}'.", "CONNECTOR_UNAVAILABLE");
             }
 
+            var sessionArgs = new Dictionary<string, object?> { ["limit"] = budget.MaxStagedRowsPerTable + 1 };
+            if (req.CustomArguments != null)
+            {
+                foreach (var (k, v) in req.CustomArguments)
+                {
+                    sessionArgs[k] = v;
+                }
+            }
+
             var session = new ConnectorSessionContext(
                 Principal: user,
                 Tenant: tenantId,
                 AccessDecision: req.Decision,
                 ProjectedColumns: req.Projection.Count > 0 ? req.Projection : req.Metadata.Columns.Select(c => c.ColumnName).ToList(),
-                Arguments: new Dictionary<string, object?> { ["limit"] = budget.MaxStagedRowsPerTable + 1 },
+                Arguments: sessionArgs,
                 PushdownFilterSql: req.Decision.CombinedRowFilterSql,
                 Limit: budget.MaxStagedRowsPerTable + 1,
                 Offset: 0);
+
+            if (req.SessionItems != null)
+            {
+                foreach (var (k, v) in req.SessionItems)
+                {
+                    session.Items[k] = v;
+                }
+            }
 
             if (req.PushdownFilter != null && req.Metadata.Table.DataSourceType == DataSourceType.Sql)
             {

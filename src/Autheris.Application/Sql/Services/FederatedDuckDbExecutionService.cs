@@ -18,6 +18,8 @@ using Autheris.Application.Olap;
 using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.VirtualFilters;
+using Autheris.Application.VirtualFilters.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -59,6 +61,9 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
+    private readonly Autheris.Application.VirtualFilters.Services.IVirtualFilterShortCircuitEvaluator? _shortCircuitEvaluator;
+    private readonly Autheris.Application.VirtualFilters.Services.IVirtualFilterKeyProvider? _keyProvider;
+    private readonly Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider? _snapshotProvider;
     private readonly ILogger<FederatedDuckDbExecutionService>? _logger;
 
     public FederatedDuckDbExecutionService(
@@ -79,6 +84,9 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+        Autheris.Application.VirtualFilters.Services.IVirtualFilterShortCircuitEvaluator? shortCircuitEvaluator = null,
+        Autheris.Application.VirtualFilters.Services.IVirtualFilterKeyProvider? keyProvider = null,
+        Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider? snapshotProvider = null,
         ILogger<FederatedDuckDbExecutionService>? logger = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -98,6 +106,9 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         _contractManager = contractManager;
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache;
+        _shortCircuitEvaluator = shortCircuitEvaluator;
+        _keyProvider = keyProvider;
+        _snapshotProvider = snapshotProvider;
         _logger = logger;
     }
 
@@ -211,7 +222,11 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
 
         var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, ct).ConfigureAwait(false);
-        var plan = _planner.Plan(rawSql, metadata, routing.Tables, decisions, crossSourceOptions);
+
+        var (_, _, vfJoins, targetArgs) = await EvaluateVirtualFiltersAsync(
+            rawSql, metadata, routing.Tables, user, tenantId, ct).ConfigureAwait(false);
+
+        var plan = _planner.Plan(rawSql, metadata, routing.Tables, decisions, crossSourceOptions, vfJoins, targetArgs);
 
         return plan.GeneratedDuckDbSql;
     }
@@ -279,8 +294,18 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             // Phase A: Authorize ALL tables before any read (INV-1, INV-2)
             var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, ct).ConfigureAwait(false);
 
+            // Virtual filter 3-tier evaluation
+            var (shortCircuited, emptyResult, vfJoins, targetArgs) = await EvaluateVirtualFiltersAsync(
+                request.Sql, metadata, routing.Tables, user, tenantId, ct).ConfigureAwait(false);
+
+            if (shortCircuited && emptyResult != null)
+            {
+                await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, ct).ConfigureAwait(false);
+                return (emptyResult, new CrossSourcePlan("-- Short-circuited by Virtual Filter Guard (0 rows)", [], []));
+            }
+
             // Plan execution
-            var plan = _planner.Plan(request.Sql, metadata, routing.Tables, decisions, crossSourceOptions);
+            var plan = _planner.Plan(request.Sql, metadata, routing.Tables, decisions, crossSourceOptions, vfJoins, targetArgs);
 
             // Start Audit (fail-closed, INV-17)
             await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, ct).ConfigureAwait(false);
@@ -501,5 +526,121 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
 
         return table;
+    }
+
+    private async Task<(bool ShortCircuited, OlapQueryResult? EmptyResult, List<VirtualFilterJoinSpec> VfJoins, Dictionary<string, IReadOnlyDictionary<string, object?>> TargetArgs)>
+        EvaluateVirtualFiltersAsync(
+            string sql,
+            SqlQueryMetadata metadata,
+            IReadOnlyList<ResolvedSourceTable> tables,
+            ClaimsPrincipal user,
+            TenantId tenantId,
+            CancellationToken ct)
+    {
+        var vfJoins = new List<VirtualFilterJoinSpec>();
+        var targetArgs = new Dictionary<string, IReadOnlyDictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
+
+        var (tree, _) = _sqlEngine.Parse(sql.AsMemory(), AnalysisTokenOptions, ct);
+        var builder = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder();
+        var parsedAst = builder.BuildStatement(tree);
+        var pointLookups = SqlPointLookupExtractor.ExtractPointLookups(parsedAst);
+
+        foreach (var resolved in tables)
+        {
+            if (resolved.Metadata.Table.DataSourceType != DataSourceType.HttpDeclarative)
+            {
+                continue;
+            }
+
+            if (_shortCircuitEvaluator != null)
+            {
+                var scResult = await _shortCircuitEvaluator.EvaluateAsync(
+                    resolved.ResolvedIdentifier,
+                    resolved.Metadata,
+                    pointLookups,
+                    user,
+                    tenantId,
+                    ct).ConfigureAwait(false);
+
+                if (scResult.IsHandled && !scResult.IsAllowed)
+                {
+                    // Short circuit miss: 0 rows, 0 HTTP calls
+                    var emptyCols = metadata.ProjectedColumns.Where(p => p != "*").ToList();
+                    if (emptyCols.Count == 0)
+                    {
+                        emptyCols = resolved.Metadata.Columns.Select(c => c.ColumnName).ToList();
+                    }
+                    var empty = new OlapQueryResult(emptyCols, Array.Empty<IReadOnlyList<object?>>(), 0, TimeSpan.Zero);
+                    return (true, empty, vfJoins, targetArgs);
+                }
+
+                var filter = scResult.MatchedFilter;
+                var binding = scResult.MatchedBinding;
+
+                if (filter == null && _snapshotProvider != null)
+                {
+                    var snapshot = await _snapshotProvider.GetAsync(ct).ConfigureAwait(false);
+                    var profile = snapshot.Profiles.FirstOrDefault(p => p.TenantId == tenantId && p.Status == FilterApprovalStatus.Active &&
+                        p.Bindings.Any(b => b.MatchesTarget(resolved.ResolvedIdentifier)));
+                    binding = profile?.Bindings.FirstOrDefault(b => b.MatchesTarget(resolved.ResolvedIdentifier));
+                    if (binding != null)
+                    {
+                        filter = snapshot.Filters.FirstOrDefault(f => f.TenantId == tenantId && string.Equals(f.Name, binding.FilterName, StringComparison.Ordinal));
+                    }
+                }
+
+                if (filter != null && binding != null && _keyProvider != null)
+                {
+                    var targetKeyCols = VirtualFilterColumns.RequiredTargetColumns(filter, binding);
+                    bool isSingleKey = targetKeyCols.Count == 1 && (binding.CompositeKeys.Count <= 1);
+                    bool canPushdown = (binding.Strategy is VirtualFilterExecutionStrategy.Adaptive or VirtualFilterExecutionStrategy.PushdownOnly) && isSingleKey;
+
+                    if (canPushdown)
+                    {
+                        var filterKeyCol = filter.KeyColumns.FirstOrDefault() ?? targetKeyCols[0];
+                        var allowedKeys = await _keyProvider.GetAllowedKeysAsync(filter, user, tenantId, filterKeyCol, ct).ConfigureAwait(false);
+                        if (allowedKeys.Count <= binding.MaxPushdownKeys)
+                        {
+                            var customArgs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                            var targetKeyCol = targetKeyCols[0];
+                            var desc = resolved.Metadata.HttpEndpoint;
+                            var batchParam = desc?.BatchParamName ?? targetKeyCol;
+
+                            if (binding.PushdownFormat == PushdownParameterFormat.PostBatch)
+                            {
+                                customArgs[batchParam] = Autheris.Application.VirtualFilters.Services.PushdownUrlFormatter.FormatJsonBatchBody(batchParam, allowedKeys.ToList());
+                            }
+                            else if (binding.PushdownFormat == PushdownParameterFormat.CommaSeparated)
+                            {
+                                customArgs[batchParam] = string.Join(",", allowedKeys);
+                                customArgs["ids"] = allowedKeys.ToList();
+                            }
+                            else
+                            {
+                                customArgs[batchParam] = allowedKeys.ToList();
+                            }
+
+                            targetArgs[resolved.Metadata.Identifier.ToQualifiedName()] = customArgs;
+                        }
+                        else
+                        {
+                            canPushdown = false;
+                        }
+                    }
+
+                    if (!canPushdown)
+                    {
+                        var allowedTuples = await _keyProvider.GetAllowedKeyTuplesAsync(filter, user, tenantId, filter.KeyColumns, ct).ConfigureAwait(false);
+                        vfJoins.Add(new VirtualFilterJoinSpec(
+                            TargetTableQualifiedName: resolved.Metadata.Identifier.ToQualifiedName(),
+                            Filter: filter,
+                            Binding: binding,
+                            AllowedKeyTuples: allowedTuples));
+                    }
+                }
+            }
+        }
+
+        return (false, null, vfJoins, targetArgs);
     }
 }

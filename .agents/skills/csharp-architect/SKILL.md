@@ -1,110 +1,96 @@
 ---
 name: csharp-architect
 description: >-
-  System- und Komponenten-Design für moderne C#/.NET-Lösungen.
-  Nutze diesen Skill bei der Projekt- und Solution-Strukturierung, dem Entwurf pragmatischer
-  APIs und Domänenmodelle ohne Overengineering sowie der Definition architektonischer
-  Leitplanken (Dependency Injection Scopes, I/O-Pfad-Konsistenz).
+  System and component design for C#/.NET 10 solutions. Guides clean layering, anti-overengineering,
+  rich domain models, DI lifetime scoping, async I/O consistency, and implementation planning.
 ---
 
 # C# & .NET Solution Architect
 
-Dieser Skill leitet Architekturentscheidungen in C#/.NET-Systemen an. Er fokussiert auf pragmatisches, wartbares Systemdesign, Durchsetzen moderner Standards und das **aktive Verhindern von Overengineering**.
+Guides pragmatic, maintainable, and high-performance system architecture in C#/.NET 10 while strictly preventing overengineering.
 
 ---
 
-## 1. Architektur-Prinzipien & Anti-Overengineering
+## 1. Principles & Anti-Overengineering
 
-### Leitlinien
-- **Pragmatismus vor Dogmatismus**: Architekturen dienen der Geschäftslogik und Wartbarkeit, nicht theoretischer Reinheit.
-- **YAGNI & KISS**: Keine Abstraktionsebene ohne mindestens zwei konkrete Implementierungen oder zwingende Testbarkeitsanforderungen einführen.
-- **Keine Fake-Repositories über ORMs**: Wenn EF Core oder moderne SQL-Data-Access-Layer im Einsatz sind, keine generischen Repositories (`IRepository<T>`) aufsetzen. EF Core ist bereits ein Unit-of-Work/Repository-Muster.
-- **Pragmatische Schichten**: Clean Architecture mit Augenmaß (Domain -> Application -> Infrastructure -> Api) oder Vertical Slice Architecture. Bei kleinen/mittleren Modulen sind Vertical Slices oder flache Schichten oft überlegener als tiefe Schichten mit DTO-Mapping auf 4 Ebenen.
-
-### Häufige Anti-Patterns (Vermeiden!)
-- ❌ Generische Repositories mit Methoden wie `IEnumerable<T> GetAll()` oder `IQueryable<T> Query()`.
-- ❌ Übermäßige Mapping-Schichten (Entity -> DomainModel -> ApplicationDto -> ApiResponseDto), wenn das Modell stabil und unverändert durchgereicht wird.
-- ❌ Unnötige Microservices für Systeme mit niedrigem bis mittlerem Lastprofil.
-- ❌ Komplexe Event-Sourcing- oder CQRS-Frameworks (z. B. MediatR für triviale CRUD-Endpunkte ohne Pipeline-Verhalten).
+- **Pragmatism over Dogmatism:** Architecture serves business goals and maintainability, not theoretical purism.
+- **YAGNI & KISS:** No abstraction without $\ge 2$ concrete implementations or strict testability needs.
+- **No Fake Repositories over ORMs:** Do not wrap EF Core or modern data access in generic `IRepository<T>` (EF Core already implements Unit of Work/Repository).
+- **Layering with Discretion:** Clean Architecture (`Domain` $\to$ `Application` $\to$ `Infrastructure` $\to$ `Api`) or Vertical Slices. Avoid 4-layer DTO re-mapping when models pass through unchanged.
+- **Anti-Patterns to Avoid:**
+  - Generic repositories exposing `IEnumerable<T> GetAll()` or `IQueryable<T> Query()`.
+  - Excessive DTO mapping cascades (`Entity` $\to$ `DomainModel` $\to$ `AppDto` $\to$ `ApiDto`).
+  - Premature microservices for low-to-medium throughput systems.
+  - MediatR/CQRS cascades for trivial CRUD endpoints without pipeline behaviors.
 
 ---
 
-## 2. Projekt- & Solution-Strukturierung
+## 2. Solution Structure Patterns
 
-### Clean Architecture mit Augenmaß
+### Clean Architecture
 ```
 Solution.sln
 ├── src/
-│   ├── MyApp.Domain/           # Entities, Value Objects, Enums, Interfaces für Domänenlogik (Zero External Dependencies)
-│   ├── MyApp.Application/      # Use Cases, DTOs, Geschäftslogik-Services, Interfaces für Infrastruktur
-│   ├── MyApp.Infrastructure/   # DB-Zugriffe (EF Core/ADO.NET), Externe APIs, Caching, Event-Bus
-│   └── MyApp.Api/              # ASP.NET Core Host, Controller / Minimal APIs, Middleware, Program.cs
+│   ├── App.Domain/          # Pure entities, value objects, domain logic (zero external dependencies)
+│   ├── App.Application/     # Use cases, interfaces, orchestrators, validators
+│   ├── App.Infrastructure/  # DB access (EF Core/ADO), external APIs, caching, file storage
+│   └── App.Api/             # ASP.NET Core host, Minimal APIs/Controllers, middleware, Program.cs
 └── tests/
-    ├── MyApp.Tests.Unit/
-    └── MyApp.Tests.Integration/
+    ├── App.Tests.Unit/
+    └── App.Tests.Integration/
 ```
 
-### Vertical Slice Architecture (Alternative für Feature-Driven Services)
+### Vertical Slice Architecture (Feature-Driven Alternative)
 ```
-src/MyApp.Api/
-├── Features/
-│   ├── Invoices/
-│   │   ├── CreateInvoice.cs       # Endpoint, Request/Response DTOs, Handler in einer Datei / Feature-Ordner
-│   │   ├── GetInvoiceById.cs
-│   │   └── Invoice.cs             # Feature-spezifische Entity oder Domänenlogik
+src/App.Api/Features/<FeatureName>/
+├── Create<Entity>.cs        # Endpoint, Request/Response DTOs, Handler in one file
+├── Get<Entity>ById.cs
+└── <Entity>.cs              # Feature-specific entity or domain rules
 ```
 
 ---
 
-## 3. Pragmatisches API- & Domänenmodell-Design
+## 3. Domain & API Design
 
-- **Value Objects mit C# Records**:
+- **Value Objects via Records:**
   ```csharp
   public readonly record struct OrderId(Guid Value);
   public readonly record struct Money(decimal Amount, string Currency);
   ```
-- **Rich Domain Model vs. Anemic**: Invarianten direkt im Aggregat / in der Entität absichern; keine unkontrollierten öffentlichen Setter:
+- **Rich Domain Model:** Guard invariants inside aggregates; private setters:
   ```csharp
-  public class Order
-  {
+  public class Order {
       public OrderId Id { get; private init; }
       public OrderStatus Status { get; private set; }
-      
-      public void MarkAsShipped()
-      {
-          if (Status != OrderStatus.Paid)
-              throw new DomainException("Only paid orders can be shipped.");
+      public void MarkAsShipped() {
+          if (Status != OrderStatus.Paid) throw new DomainException("Only paid orders can ship.");
           Status = OrderStatus.Shipped;
       }
   }
   ```
-- **Result Pattern für erwartete Fehler**: Für Validierungs- und fachliche Fehler Result-Typen (`Result<T>`, `ErrorOr<T>`) bevorzugen, Exceptions für unvorhergesehene Systemfehler reservieren.
+- **Result Pattern:** Use `Result<T>` / `ErrorOr<T>` for anticipated business/validation errors; reserve exceptions for unexpected failures.
 
 ---
 
-## 4. Architektur-Leitplanken
+## 4. Architectural Guardrails
 
-### Dependency Injection (DI) Lifetimes
-- **Singleton**: Zustandslose Utilities, Caches, EventBusses, Options-Monitore, Single-Instance Engines.
-- **Scoped**: DbContext, Unit of Work, Current-User-Context, Request-bezogene Services.
-  *Vorsicht:* Niemals Scoped-Services in Singletons injizieren (Scoped Captive Dependency). Im Host `ValidateScopes = true` aktivieren!
-- **Transient**: Leichte, zustandslose Komponenten, die bei jedem Aufruf frisch instanziiert werden sollen.
+### Dependency Injection Lifetimes
+- **Singleton:** Stateless utilities, caches, event buses, options monitors, single-instance engines.
+- **Scoped:** DbContext, Unit of Work, current user context, request services.
+  - *Rule:* Never inject Scoped into Singleton (Captive Dependency). Enable `ValidateScopes = true` in host.
+- **Transient:** Lightweight, stateless components created per call.
 
-### I/O-Pfad-Konsistenz & Asynchronität
-- **Async All the Way**: Niemals `.Result`, `.Wait()` oder `GetAwaiter().GetResult()` auf I/O-Tasks aufrufen.
-- **CancellationTokens**: Durchgängig von der Controller-/Minimal-API-Ebene bis zur Datenbank-/HTTP-Abfrage durchreichen:
-  ```csharp
-  public async Task<InvoiceDto> GetInvoiceAsync(InvoiceId id, CancellationToken ct = default);
-  ```
-- **HttpClient**: Immer via `IHttpClientFactory` oder typisierte Clients registrieren, niemals manuell instanziieren (`new HttpClient()`).
+### I/O & Concurrency
+- **Async All The Way:** Never call `.Result`, `.Wait()`, or `.GetAwaiter().GetResult()`.
+- **CancellationToken:** Propagate `CancellationToken ct` from entry point to database/HTTP drivers.
+- **HttpClient:** Register via `IHttpClientFactory` or typed clients; never use `new HttpClient()`.
 
 ---
 
-## 5. Review- & Verifikations-Checkliste
+## 5. Review Checklist
 
-Bei der Bewertung von Architekturentscheidungen prüfen:
-1. [ ] Ist die Schichtenabhängigkeit unidirektional (Domain kennt weder Infrastructure noch Web)?
-2. [ ] Gibt es künstliche Abstraktionen (z. B. Interfaces mit nur einer trivialen Implementierung ohne Testbedarf)?
-3. [ ] Sind DI-Lifetimes sauber definiert (keine Scoped-Leaks in Singletons)?
-4. [ ] Sind CancellationTokens durchgehend vorhanden?
-5. [ ] Werden moderne C# 12/13/14-Features pragmatisch eingesetzt?
+1. [ ] Unidirectional dependencies (Domain has zero references to Infrastructure/Web)?
+2. [ ] No redundant abstractions (single-implementation interfaces without test need)?
+3. [ ] DI lifetimes correct (no captive dependencies)?
+4. [ ] CancellationTokens propagated through all async boundaries?
+5. [ ] Modern C# 13 idioms used cleanly?

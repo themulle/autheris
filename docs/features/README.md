@@ -4,6 +4,12 @@ Overview of all production-ready, Generally Available (GA) enterprise features i
 
 Every feature document includes an architectural overview, explanation of business value, concrete usage examples, and configuration specifications.
 
+> [!NOTE]
+> **Documentation Standard for AI Agents & Contributors:**
+> - All individual feature documentation **must be placed here in `docs/features/`** using the naming scheme `f-<category>-<number>-<slug>.md`.
+> - Always register new feature documents in the index table below.
+> - Feature documents must describe the **working state, architecture, and usage** (pure documentation). Do not include transient development progress, WIP notes, or task checklists (those belong in [`doc/plan/`](file:///root/autheris/doc/plan/)). See [`AGENTS.md`](file:///root/autheris/AGENTS.md).
+
 | Feature ID | Title | Documentation |
 | :--- | :--- | :--- |
 | **F-AI-02** | Semantic MCP Compiler & Schema Grounding | [f-ai-02-semantic-mcp-compiler.md](f-ai-02-semantic-mcp-compiler.md) |
@@ -53,6 +59,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-GOV-11** | Declarative Access Profiles & Person-Based Plaintext Exceptions (R-52) | [f-gov-11-declarative-access-profiles.md](f-gov-11-declarative-access-profiles.md) |
 | **F-GOV-12** | Multi-Engine Governance Database Storage (MSSQL, PostgreSQL, SQLite) | [f-gov-12-multi-engine-governance-storage.md](f-gov-12-multi-engine-governance-storage.md) |
 | **F-GOV-13** | Enterprise Data Classification, PII Tagging & Sensitivity Governance Engine | [f-gov-13-data-classification-and-pii-governance.md](f-gov-13-data-classification-and-pii-governance.md) |
+| **F-GOV-14** | Federated Virtual Filters on Web-APIs via DuckDB & Adaptive Pushdown | [f-gov-14-federated-virtual-filters.md](f-gov-14-federated-virtual-filters.md) |
 | **F-INT-01** | Spotify Backstage Software Catalog Integration | [f-int-01-backstage-software-catalog.md](f-int-01-backstage-software-catalog.md) |
 | **F-MASK-02** | Extended Column Masking Engine (GEO_JITTER, PARTIAL_MASK, TOKENIZATION) | [f-mask-02-extended-masking-engine.md](f-mask-02-extended-masking-engine.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |

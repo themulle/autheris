@@ -11,6 +11,12 @@ public class GatewaySecurityException : Exception
     {
         ErrorCode = errorCode;
     }
+
+    public GatewaySecurityException(string message, string errorCode, Exception? innerException)
+        : base(message, innerException)
+    {
+        ErrorCode = errorCode;
+    }
 }
 
 public sealed class GatewayUnauthorizedException : GatewaySecurityException

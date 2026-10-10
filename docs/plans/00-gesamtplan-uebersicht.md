@@ -1,6 +1,12 @@
 # Gesamtübersicht der Architektur- & Implementierungspläne
 
-**Stand:** 09.10.2026 · **Zweig:** `feat/ast-target-dialect-generator`  
+> [!IMPORTANT]
+> **English Documentation Standard & Canonical Origin Plan:**
+> In accordance with project policy, all plans and documentation are maintained in English.
+> Please refer to the canonical master plan: 👉 **[`00-master-plan-overview.md`](file:///root/autheris/doc/plan/00-master-plan-overview.md)**.
+> All AI agents must register, refine, and update their plans on `00-master-plan-overview.md`.
+
+**Stand:** 10.10.2026 · **Zweig:** `feat/ast-target-dialect-generator`  
 **Rolle:** C# & .NET Solution Architect  
 **Ziel:** Strukturierte Übersicht und Ausführungsgraph des aktiven Backlogs in `docs/plans/`. Abgeschlossene Pläne (1–7, SQL-AST Härtung sowie Tracks A, B, C) wurden nach erfolgreicher Implementierung und Verifikation bereinigt.
 

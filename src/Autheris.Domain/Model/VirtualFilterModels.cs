@@ -260,6 +260,22 @@ public sealed record VirtualFilter
     }
 }
 
+public enum VirtualFilterExecutionStrategy
+{
+    Adaptive = 0,
+    ShortCircuitOnly = 1,
+    DuckDbHashJoin = 2,
+    PushdownOnly = 3
+}
+
+public enum PushdownParameterFormat
+{
+    CommaSeparated = 0,
+    RepeatedParam = 1,
+    ODataIn = 2,
+    PostBatch = 3
+}
+
 /// <summary>
 /// One filter of an <see cref="VirtualFilterAccessProfile"/>: applies the virtual filter to the objects matched by
 /// <see cref="TargetPattern"/> (or the profile's scope). A binding only restricts: it is combined with AND with the
@@ -269,7 +285,7 @@ public sealed record FilterBinding
 {
     public string FilterName { get; init; } = string.Empty;
 
-    /// <summary>Pattern <c>source.schema.object[.column]</c>; null means the profile's scope.</summary>
+    /// <summary>Pattern <c>source.schema.object[.column]</c> or regex; null means the profile's scope.</summary>
     public string? TargetPattern { get; init; }
 
     public FilterObjectKinds ObjectKinds { get; init; } = FilterObjectKinds.Relation | FilterObjectKinds.ProcedureResult;
@@ -280,17 +296,52 @@ public sealed record FilterBinding
     /// <summary>Key column name of the filter → column name of the protected object (default: same name).</summary>
     public IReadOnlyDictionary<string, string>? ColumnMap { get; init; }
 
+    /// <summary>Execution strategy for federated/web-api virtual filters.</summary>
+    public VirtualFilterExecutionStrategy Strategy { get; init; } = VirtualFilterExecutionStrategy.Adaptive;
+
+    /// <summary>Parameter format when pushing down allowed keys to external web-apis.</summary>
+    public PushdownParameterFormat PushdownFormat { get; init; } = PushdownParameterFormat.CommaSeparated;
+
+    /// <summary>Maximum number of keys pushed down in URL parameters before switching to DuckDB join.</summary>
+    public int MaxPushdownKeys { get; init; } = 100;
+
+    /// <summary>Composite key column names for multi-column joins.</summary>
+    public IReadOnlyList<string> CompositeKeys { get; init; } = [];
+
     public void Validate()
     {
         VirtualFilterNames.ValidateFilterName(FilterName, nameof(FilterName));
-        if (TargetPattern != null && !ObjectPattern.TryParse(TargetPattern, out _, out var patternError))
+        if (TargetPattern != null)
         {
-            throw new ArgumentException($"Invalid target pattern of '{FilterName}': {patternError}", nameof(TargetPattern));
+            if (!ObjectPattern.TryParse(TargetPattern, out _, out var patternError))
+            {
+                if (TargetPattern.StartsWith('^') || TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var regexStr = TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase) ? TargetPattern[6..] : TargetPattern;
+                    try
+                    {
+                        _ = new Regex(regexStr, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new ArgumentException($"Invalid target regex pattern of '{FilterName}': {ex.Message}", nameof(TargetPattern));
+                    }
+                }
+                else
+                {
+                    throw new ArgumentException($"Invalid target pattern of '{FilterName}': {patternError}", nameof(TargetPattern));
+                }
+            }
         }
 
         if (ObjectKinds == FilterObjectKinds.None)
         {
             throw new ArgumentException($"The binding of '{FilterName}' needs at least one object kind.", nameof(ObjectKinds));
+        }
+
+        if (MaxPushdownKeys <= 0)
+        {
+            throw new ArgumentException($"MaxPushdownKeys must be greater than zero for '{FilterName}'.", nameof(MaxPushdownKeys));
         }
 
         if (TimeColumn != null) VirtualFilterNames.ValidateIdentifier(TimeColumn, nameof(TimeColumn));
@@ -299,6 +350,41 @@ public sealed record FilterBinding
             VirtualFilterNames.ValidateIdentifier(key, nameof(ColumnMap));
             VirtualFilterNames.ValidateIdentifier(target, nameof(ColumnMap));
         }
+
+        foreach (var compositeKey in CompositeKeys)
+        {
+            VirtualFilterNames.ValidateIdentifier(compositeKey, nameof(CompositeKeys));
+        }
+    }
+
+    public bool MatchesTarget(TableIdentifier table)
+    {
+        if (string.IsNullOrWhiteSpace(TargetPattern))
+        {
+            return false;
+        }
+
+        if (!TargetPattern.StartsWith('^') &&
+            !TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase) &&
+            ObjectPattern.TryParse(TargetPattern, out var pattern, out _))
+        {
+            return pattern!.MatchesObject(table);
+        }
+
+        var regexStr = TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase) ? TargetPattern[6..] : TargetPattern;
+        try
+        {
+            return Regex.IsMatch(table.ToQualifiedName(), regexStr, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50))
+                || Regex.IsMatch(table.ToString(), regexStr, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     internal void AppendCanonical(StringBuilder sb) =>
@@ -306,6 +392,10 @@ public sealed record FilterBinding
           .Append(" target=").Append(TargetPattern)
           .Append(" kinds=").Append((int)ObjectKinds)
           .Append(" time=").Append(TimeColumn)
+          .Append(" strat=").Append((int)Strategy)
+          .Append(" push=").Append((int)PushdownFormat)
+          .Append(" maxk=").Append(MaxPushdownKeys)
+          .Append(" comp=").AppendJoin(',', CompositeKeys.OrderBy(c => c, StringComparer.Ordinal))
           .Append(" map=").AppendJoin(',', (ColumnMap ?? new Dictionary<string, string>())
               .OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value))
           .Append('\n');

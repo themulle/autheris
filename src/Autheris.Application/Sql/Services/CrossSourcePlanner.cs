@@ -21,6 +21,12 @@ public sealed record CrossSourcePlan(
     IReadOnlyList<StagingTableRequest> StagingRequests,
     IReadOnlyList<string> StagingNames);
 
+public sealed record VirtualFilterJoinSpec(
+    string TargetTableQualifiedName,
+    VirtualFilter Filter,
+    FilterBinding Binding,
+    IReadOnlyList<IReadOnlyDictionary<string, object?>> AllowedKeyTuples);
+
 public interface ICrossSourcePlanner
 {
     CrossSourcePlan Plan(
@@ -28,7 +34,9 @@ public interface ICrossSourcePlanner
         SqlQueryMetadata metadata,
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<string, TableAccessDecision> decisions,
-        CrossSourceOptions options);
+        CrossSourceOptions options,
+        IReadOnlyList<VirtualFilterJoinSpec>? virtualFilterJoins = null,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>>? targetCustomArguments = null);
 }
 
 public sealed class CrossSourcePlanner : ICrossSourcePlanner
@@ -45,7 +53,17 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         SqlQueryMetadata metadata,
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<string, TableAccessDecision> decisions,
-        CrossSourceOptions options)
+        CrossSourceOptions options) =>
+        Plan(rawSql, metadata, tables, decisions, options, null, null);
+
+    public CrossSourcePlan Plan(
+        string rawSql,
+        SqlQueryMetadata metadata,
+        IReadOnlyList<ResolvedSourceTable> tables,
+        IReadOnlyDictionary<string, TableAccessDecision> decisions,
+        CrossSourceOptions options,
+        IReadOnlyList<VirtualFilterJoinSpec>? virtualFilterJoins = null,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, object?>>? targetCustomArguments = null)
     {
         ArgumentNullException.ThrowIfNull(rawSql);
         ArgumentNullException.ThrowIfNull(metadata);
@@ -156,12 +174,28 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 }
             }
 
+            var qualName = t.Metadata.Identifier.ToQualifiedName();
+            var sessionItems = new Dictionary<string, object?>();
+            if (t.Metadata.Table.DataSourceType == DataSourceType.HttpDeclarative || dec.AppliedVirtualFilters is { Count: > 0 })
+            {
+                sessionItems[Autheris.Application.Connectors.GovernedConnectorReader.VirtualFilterFederationHandledKey] = true;
+            }
+
+            IReadOnlyDictionary<string, object?>? customArgs = null;
+            if (targetCustomArguments != null && targetCustomArguments.TryGetValue(qualName, out var ca))
+            {
+                customArgs = ca;
+            }
+
             stagingRequests.Add(new StagingTableRequest(
                 t.Target,
                 t.Metadata,
                 dec,
                 stagingName,
-                projected.ToList()));
+                projected.ToList(),
+                PushdownFilter: null,
+                SessionItems: sessionItems.Count > 0 ? sessionItems : null,
+                CustomArguments: customArgs));
         }
 
         // 5. AST rewrite to target s0, s1, etc.
@@ -171,6 +205,75 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
         var rewriter = new FederationAstRewriter(targetToStaging, targetToAlias, tables);
         var rewrittenAst = (SqlStatement)rewriter.Visit(ast);
+
+        if (virtualFilterJoins != null && virtualFilterJoins.Count > 0)
+        {
+            foreach (var vf in virtualFilterJoins)
+            {
+                string vfStagingName = $"s{stagingRequests.Count}";
+                stagingNames.Add(vfStagingName);
+
+                var keyCols = vf.Filter.KeyColumns.Select(VirtualFilterNames.ColumnOf).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                var vfColumns = keyCols.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList();
+                var vfMeta = new TableMetadata
+                {
+                    Identifier = new TableIdentifier(vf.Filter.Source, "virtual_filter", vf.Filter.Name),
+                    Table = new Table { DataSourceType = DataSourceType.Sql, IsActive = true },
+                    Columns = vfColumns
+                };
+
+                var vfTarget = new TableAccessTarget(vf.Filter.Source, "virtual_filter", vf.Filter.Name, null, $"{vf.Filter.Source}.virtual_filter.{vf.Filter.Name}");
+                var vfDecision = TableAccessDecision.Allowed(vfMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+
+                stagingRequests.Add(new StagingTableRequest(
+                    Reference: vfTarget,
+                    Metadata: vfMeta,
+                    Decision: vfDecision,
+                    StagingName: vfStagingName,
+                    Projection: keyCols,
+                    PreloadedRows: vf.AllowedKeyTuples));
+
+                string targetStaging = targetToStaging.TryGetValue(vf.TargetTableQualifiedName, out var ts) ? ts : "s0";
+                string effectiveTarget = targetToAlias.TryGetValue(vf.TargetTableQualifiedName, out var ta) ? ta : targetStaging;
+
+                var pairConditions = new List<Expression>();
+                foreach (var keyCol in vf.Filter.KeyColumns)
+                {
+                    var filterKey = VirtualFilterNames.ColumnOf(keyCol);
+                    var targetCol = vf.Binding.ColumnMap != null && vf.Binding.ColumnMap.TryGetValue(filterKey, out var mapped)
+                        ? mapped
+                        : filterKey;
+
+                    pairConditions.Add(new BinaryExpression(
+                        new ColumnReference(new SqlQualifiedName([new SqlIdentifier(effectiveTarget, false), new SqlIdentifier(targetCol, false)])),
+                        BinaryOperator.Equal,
+                        new ColumnReference(new SqlQualifiedName([new SqlIdentifier(vfStagingName, false), new SqlIdentifier(filterKey, false)]))));
+                }
+
+                Expression? overallCondition = null;
+                foreach (var pair in pairConditions)
+                {
+                    overallCondition = overallCondition == null
+                        ? pair
+                        : new BinaryExpression(overallCondition, BinaryOperator.And, pair);
+                }
+
+                if (rewrittenAst is SelectStatement selectStatement && selectStatement.Body is QuerySpecification querySpec && querySpec.From != null && overallCondition != null)
+                {
+                    rewrittenAst = selectStatement with
+                    {
+                        Body = querySpec with
+                        {
+                            From = new JoinedTableSource(
+                                querySpec.From,
+                                JoinType.Inner,
+                                new NamedTableSource(new SqlQualifiedName([new SqlIdentifier(vfStagingName, false)]), null),
+                                new OnJoinCondition(overallCondition))
+                        }
+                    };
+                }
+            }
+        }
 
         var generator = SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.DuckDb);
         var duckSql = generator.GenerateSql(rewrittenAst);

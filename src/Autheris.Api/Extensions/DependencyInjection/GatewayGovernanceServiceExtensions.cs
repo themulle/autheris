@@ -91,6 +91,8 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<IVirtualFilterPredicateBuilder, StructuredFilterSqlBuilder>();
         services.AddSingleton<MandatoryRowFilterResolver>();
         services.AddSingleton<IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<MandatoryRowFilterResolver>());
+        services.AddSingleton<Autheris.Application.VirtualFilters.Services.IVirtualFilterKeyProvider, Autheris.Application.VirtualFilters.Services.DefaultVirtualFilterKeyProvider>();
+        services.AddSingleton<Autheris.Application.VirtualFilters.Services.IVirtualFilterShortCircuitEvaluator, Autheris.Application.VirtualFilters.Services.VirtualFilterShortCircuitEvaluator>();
         services.AddSingleton<IConsentCacheService, ConsentCacheService>();
 
         services.AddSingleton<IRlsFilterGenerator, RlsFilterGenerator>();

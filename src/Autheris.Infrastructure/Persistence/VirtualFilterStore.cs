@@ -24,7 +24,9 @@ internal static class VirtualFilterStore
         FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
         FilterDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null);
     private sealed record BindingDto(
-        string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap);
+        string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap,
+        VirtualFilterExecutionStrategy? Strategy = null, PushdownParameterFormat? PushdownFormat = null,
+        int? MaxPushdownKeys = null, List<string>? CompositeKeys = null);
     private sealed record ProfileDto(
         GranteeType GranteeType, string? GranteeSid, string? RoleName, string Scope, UncoveredPolicy? Uncovered, List<BindingDto> Bindings,
         FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
@@ -203,7 +205,16 @@ internal static class VirtualFilterStore
         profile.RoleName,
         profile.Scope,
         profile.Uncovered,
-        profile.Bindings.Select(b => new BindingDto(b.FilterName, b.TargetPattern, b.ObjectKinds, b.TimeColumn, b.ColumnMap?.ToDictionary(p => p.Key, p => p.Value))).ToList(),
+        profile.Bindings.Select(b => new BindingDto(
+            b.FilterName,
+            b.TargetPattern,
+            b.ObjectKinds,
+            b.TimeColumn,
+            b.ColumnMap?.ToDictionary(p => p.Key, p => p.Value),
+            b.Strategy,
+            b.PushdownFormat,
+            b.MaxPushdownKeys,
+            b.CompositeKeys.Count > 0 ? b.CompositeKeys.ToList() : null)).ToList(),
         profile.Status,
         profile.CreatedBy?.Value,
         profile.ApprovedBy?.Value,
@@ -256,7 +267,11 @@ internal static class VirtualFilterStore
             TargetPattern = b.Target,
             ObjectKinds = b.ObjectKinds,
             TimeColumn = b.TimeColumn,
-            ColumnMap = b.ColumnMap
+            ColumnMap = b.ColumnMap,
+            Strategy = b.Strategy ?? VirtualFilterExecutionStrategy.Adaptive,
+            PushdownFormat = b.PushdownFormat ?? PushdownParameterFormat.CommaSeparated,
+            MaxPushdownKeys = b.MaxPushdownKeys ?? 100,
+            CompositeKeys = b.CompositeKeys ?? []
         }).ToList(),
         Status = dto.Status ?? FilterApprovalStatus.Active,
         CreatedBy = string.IsNullOrWhiteSpace(dto.CreatedBy) ? (Sid?)null : new Sid(dto.CreatedBy!),

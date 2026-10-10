@@ -358,20 +358,28 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             return (false, $"object kind {query.ObjectKind} not bound", []);
         }
 
-        if (!string.Equals(table.Domain, filter.Source, StringComparison.OrdinalIgnoreCase))
+        bool isCrossSource = !string.Equals(table.Domain, filter.Source, StringComparison.OrdinalIgnoreCase);
+        if (isCrossSource)
         {
-            return (false, $"object is not in the filter's data source '{filter.Source}'", []);
+            if (query.Metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative ||
+                binding.TargetPattern == null ||
+                !binding.MatchesTarget(table))
+            {
+                return (false, $"object is not in the filter's data source '{filter.Source}'", []);
+            }
         }
-
-        var pattern = Pattern(binding.TargetPattern ?? profile.Scope);
-        if (!pattern.MatchesObject(table))
+        else
         {
-            return (false, "pattern does not match the object", []);
-        }
+            var pattern = Pattern(binding.TargetPattern ?? profile.Scope);
+            if (!pattern.MatchesObject(table))
+            {
+                return (false, "pattern does not match the object", []);
+            }
 
-        if (pattern.HasColumnSegment && !query.Metadata.Columns.Any(c => pattern.MatchesColumn(c.ColumnName)))
-        {
-            return (false, "pattern matches no column of the object", []);
+            if (pattern.HasColumnSegment && !query.Metadata.Columns.Any(c => pattern.MatchesColumn(c.ColumnName)))
+            {
+                return (false, "pattern matches no column of the object", []);
+            }
         }
 
         var missing = VirtualFilterColumns.RequiredTargetColumns(filter, binding).Where(c => !query.Metadata.HasColumn(c)).ToList();
