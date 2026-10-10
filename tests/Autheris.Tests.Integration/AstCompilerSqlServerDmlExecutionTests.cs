@@ -358,12 +358,35 @@ public sealed class AstCompilerSqlServerDmlExecutionTests : IClassFixture<AstCom
     }
 
     [Fact]
-    public async Task Insert_DuplicateKeyOfAnotherTenant_FailsAsAnSqlError_WithoutBeingExecutedAsAnOverwrite()
+    public async Task Insert_DuplicateKeyOfAnotherTenant_IsADmlConstraintViolation_WithoutKeyValueOrConstraintName()
     {
         if (!Available()) return;
         // R-12: the key of tenant other's row is visible only as a constraint violation; the existing row is never changed.
         var before = await SnapshotAsync();
-        await Should.ThrowAsync<SqlException>(() => ExecAsync($"INSERT INTO {Q("Orders")} (id, tenantid, region, status, amount) VALUES (5, 'acme', 'EU', 'x', 1)", "acme"));
+        var raw = await Should.ThrowAsync<SqlException>(() => ExecAsync($"INSERT INTO {Q("Orders")} (id, tenantid, region, status, amount) VALUES (5, 'acme', 'EU', 'x', 1)", "acme"));
+        raw.Message.ShouldContain("5");   // the driver text does carry the key value ...
+        var mapped = DmlErrorSanitizer.TryMap(TargetSqlDialect.SqlServer, raw);
+        mapped.ShouldNotBeNull();       // ... and the typed error does not
+        mapped.Kind.ShouldBe(DmlConstraintKind.Unique);
+        mapped.InnerException.ShouldBeNull();
+        mapped.ToString().ShouldNotContain(_schema);
+        mapped.ToString().ShouldNotContain("PK__");
+        mapped.ToString().ShouldNotContain("Orders");
+        mapped.Message.ShouldBe("The statement violated a data constraint.");
+        (await SnapshotAsync()).ShouldBe(before);
+    }
+
+    [Fact]
+    public async Task Merge_InsertOfAnotherTenantsKey_IsADmlConstraintViolation_AndChangesNothing()
+    {
+        if (!Available()) return;
+        // as tenant other: entitlement 2 points at order 2 (tenant acme). The target RLS hides it, so the row is "not matched"
+        // and the INSERT clause collides with the primary key; the existing row is never touched.
+        var before = await SnapshotAsync();
+        var raw = await Should.ThrowAsync<SqlException>(() => ExecAsync(
+            $"MERGE INTO {Q("Orders")} t USING {Q("Entitlements")} s ON t.id = s.orderid " +
+            "WHEN NOT MATCHED THEN INSERT (id, tenantid, region, status, amount) VALUES (s.orderid, 'other', 'EU', 'x', 1)", "other"));
+        DmlErrorSanitizer.TryMap(TargetSqlDialect.SqlServer, raw)!.Kind.ShouldBe(DmlConstraintKind.Unique);
         (await SnapshotAsync()).ShouldBe(before);
     }
 
@@ -451,6 +474,22 @@ public sealed class AstCompilerSqlServerDmlExecutionTests : IClassFixture<AstCom
         await Should.ThrowAsync<Exception>(() => ExecAsync($"DELETE FROM {Q("Orders")} WHERE id = 1 RETURNING *", "acme"));
         await Should.ThrowAsync<Exception>(() => ExecAsync($"DELETE FROM {Q("Orders")} OUTPUT deleted.* WHERE id = 1", "acme"));
         await Should.ThrowAsync<Exception>(() => ExecAsync($"UPDATE {Q("Orders")} SET status = 'x' OUTPUT inserted.* WHERE id = 1", "acme"));
+        (await SnapshotAsync()).ShouldBe(before);
+    }
+
+    [Theory]
+    [InlineData("acme'; DELETE FROM dbo.Orders; --")]
+    [InlineData("acme\0")]
+    [InlineData("acme ")]
+    [InlineData("%")]
+    [InlineData("' OR 1=1 --")]
+    public async Task HostileTenantValues_AreBound_NeverInterpreted_AndMatchNoRow(string tenant)
+    {
+        if (!Available()) return;
+        var before = await SnapshotAsync();
+        (await ExecAsync($"UPDATE {Q("Orders")} SET status = 'x' WHERE id > 0", tenant)).ShouldBe(0);
+        (await ExecAsync($"DELETE FROM {Q("Orders")} WHERE id > 0", tenant)).ShouldBe(0);
+        (await ExecAsync($"MERGE INTO {Q("Orders")} t USING {Q("Entitlements")} s ON t.id = s.orderid WHEN MATCHED THEN DELETE", tenant)).ShouldBe(0);
         (await SnapshotAsync()).ShouldBe(before);
     }
 
