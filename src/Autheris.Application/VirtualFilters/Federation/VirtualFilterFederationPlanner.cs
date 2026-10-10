@@ -9,6 +9,8 @@ using Autheris.Application.Sql.Services;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
@@ -18,20 +20,25 @@ using TrinoSqlEngine.Ast.Nodes;
 /// comparable, structured filter without validity window) before any key is loaded.</item>
 /// <item>All key sets are loaded (bounded by the caller's cancellation token, also when the provider ignores it);
 /// every failure is a stable code, a provider failure is <c>VIRTUAL_FILTER_SOURCE_UNAVAILABLE</c> without its message.</item>
-/// <item>An empty key set is Tier 0 (skip the upstream call); otherwise the strategies decide: <c>ShortCircuitOnly</c>
-/// denies a query that is not a point lookup, <c>PushdownOnly</c> denies (pushdown is not available yet),
-/// everything else reads the table completely (Tier 3).</item>
+/// <item>An empty key set is Tier 0 and a point lookup without any authorized queried key is Tier 1 (both skip the
+/// upstream call); otherwise the strategies decide: <c>ShortCircuitOnly</c> denies a query that is not a point lookup,
+/// a point lookup hit or <c>PushdownOnly</c> denies (pushdown is not available yet), everything else reads the table
+/// completely (Tier 3).</item>
 /// </list>
 /// Every plan carries the enforcement, so what is returned never depends on the tier.
 /// </summary>
 public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPlanner
 {
     private readonly IVirtualFilterKeySetProvider _keySets;
+    private readonly IOptions<GatewayOptions>? _options;
 
-    public VirtualFilterFederationPlanner(IVirtualFilterKeySetProvider keySets)
+    public VirtualFilterFederationPlanner(IVirtualFilterKeySetProvider keySets, IOptions<GatewayOptions>? options = null)
     {
         _keySets = keySets ?? throw new ArgumentNullException(nameof(keySets));
+        _options = options;
     }
+
+    private VirtualFilterFederationOptions Federation => _options?.Value.VirtualFilters?.Federation ?? new VirtualFilterFederationOptions();
 
     /// <summary>
     /// True when the table is an HTTP table whose decision carries a Virtual Filter (predicate, names or pairs); the
@@ -82,13 +89,14 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
             }
 
             var keyTypes = new VirtualFilterKeyType[pairs.Count][];
+            var columnsPerPair = new string[pairs.Count][];
             for (int i = 0; i < pairs.Count; i++)
             {
-                var columns = VirtualFilterEnforcement.TargetColumns(table.Metadata, pairs[i]);
-                keyTypes[i] = VirtualFilterEnforcement.KeyTypes(table.Metadata, columns);
+                columnsPerPair[i] = VirtualFilterEnforcement.TargetColumns(table.Metadata, pairs[i]);
+                keyTypes[i] = VirtualFilterEnforcement.KeyTypes(table.Metadata, columnsPerPair[i]);
             }
 
-            prepared.Add(new PreparedTable(table.Metadata, pairs, keyTypes));
+            prepared.Add(new PreparedTable(table.Metadata, pairs, keyTypes, columnsPerPair));
         }
 
         // 2. Load all key sets; the caller's token bounds the whole step (SEC-12).
@@ -102,14 +110,15 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
                 loaded.Add((table.Pairs[i], keys));
             }
 
-            plans[table.Metadata.Identifier] = Decide(statement, table, loaded);
+            plans[table.Metadata.Identifier] = Decide(statement, tables, table, loaded);
         }
 
         return plans;
     }
 
-    private static VirtualFilterTablePlan Decide(
+    private VirtualFilterTablePlan Decide(
         SqlStatement? statement,
+        IReadOnlyList<ResolvedSourceTable> tables,
         PreparedTable table,
         IReadOnlyList<(AppliedVirtualFilterBinding Pair, VirtualFilterKeySet Keys)> loaded)
     {
@@ -121,17 +130,32 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
             return new VirtualFilterTablePlan(enforcement, VirtualFilterTier.EmptyKeySet, skipUpstream: true, "empty_key_set");
         }
 
-        // No point lookup is recognized yet (WI-7), so every query is a scan; pushdown (WI-8) does not exist yet.
-        _ = statement;
+        // Tier 1: a point lookup whose queried keys are all unauthorized for some pair cannot return a row. The upstream
+        // call is skipped and an empty relation is staged, so the user query still yields its true (empty-side) answer.
+        var federation = Federation;
+        var queried = federation.PushdownEnabled ? QueriedKeys(statement, tables, table, federation.MaxPointLookupTuples) : null;
+        if (queried != null)
+        {
+            for (int i = 0; i < queried.Length; i++)
+            {
+                if (queried[i] is { } keys && !keys.Any(loaded[i].Keys.Contains))
+                {
+                    return new VirtualFilterTablePlan(enforcement, VirtualFilterTier.PointLookup, skipUpstream: true, "point_lookup_miss");
+                }
+            }
+        }
+
+        bool isPointLookup = queried != null && queried.All(q => q != null);
         var strategies = table.Pairs.Select(p => p.Binding.Strategy).ToHashSet();
-        if (strategies.Contains(VirtualFilterExecutionStrategy.ShortCircuitOnly))
+        if (strategies.Contains(VirtualFilterExecutionStrategy.ShortCircuitOnly) && !isPointLookup)
         {
             throw new GatewaySecurityException(
                 $"The Virtual Filter bindings of '{table.Metadata.Identifier}' permit point lookups only; the query is a scan.",
                 VirtualFilterErrorCodes.ScanNotPermitted);
         }
 
-        if (strategies.Contains(VirtualFilterExecutionStrategy.PushdownOnly))
+        if (strategies.Contains(VirtualFilterExecutionStrategy.ShortCircuitOnly) ||
+            strategies.Contains(VirtualFilterExecutionStrategy.PushdownOnly))
         {
             throw new GatewaySecurityException(
                 $"The Virtual Filter bindings of '{table.Metadata.Identifier}' require a key pushdown, which is not available.",
@@ -139,6 +163,25 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
         }
 
         return new VirtualFilterTablePlan(enforcement, VirtualFilterTier.FullFetch, skipUpstream: false, "full_fetch");
+    }
+
+    /// <summary>Per pair: the queried key tuples of the point lookup, or null when the pair is not decided by the query.</summary>
+    private static VirtualFilterKey[]?[]? QueriedKeys(
+        SqlStatement? statement, IReadOnlyList<ResolvedSourceTable> tables, PreparedTable table, int maxTuples)
+    {
+        var lookup = VirtualFilterPointLookupExtractor.Extract(statement, tables, table.Metadata.Identifier);
+        if (lookup == null || lookup.Count == 0)
+        {
+            return null;
+        }
+
+        var result = new VirtualFilterKey[]?[table.Pairs.Count];
+        for (int i = 0; i < result.Length; i++)
+        {
+            result[i] = VirtualFilterPointLookupKeys.TryBuild(lookup, table.Columns[i], table.KeyTypes[i], maxTuples);
+        }
+
+        return result;
     }
 
     private async Task<VirtualFilterKeySet> LoadAsync(
@@ -166,5 +209,6 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
     private sealed record PreparedTable(
         TableMetadata Metadata,
         IReadOnlyList<AppliedVirtualFilterBinding> Pairs,
-        VirtualFilterKeyType[][] KeyTypes);
+        VirtualFilterKeyType[][] KeyTypes,
+        string[][] Columns);
 }

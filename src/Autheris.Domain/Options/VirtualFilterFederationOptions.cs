@@ -20,12 +20,22 @@ public sealed class VirtualFilterFederationOptions
     /// <summary>Size limit (bytes) of the dedicated key set cache (separate from the shared memory cache).</summary>
     [Range(1L * 1024 * 1024, 4L * 1024 * 1024 * 1024)] public long KeyCacheSizeLimitBytes { get; init; } = 64L * 1024 * 1024;
 
+    /// <summary>
+    /// Allows the gateway to narrow what is fetched upstream (point-lookup short-circuit, key pushdown). When off, every
+    /// protected table is read completely (Tier 3) and filtered by the gateway; enforcement is unaffected.
+    /// </summary>
+    public bool PushdownEnabled { get; init; } = true;
+
+    /// <summary>Largest number of key tuples a point lookup may expand to (IN lists of composite keys); more is a scan.</summary>
+    [Range(1, 10_000)] public int MaxPointLookupTuples { get; init; } = 1_000;
+
     /// <summary>Throws when a value is out of range (fail closed at startup instead of at query time).</summary>
     public void Validate()
     {
         Check(KeyCacheTtlSeconds, 1, 300, nameof(KeyCacheTtlSeconds));
         Check(MaxAuthorizedKeys, 1, 1_000_000, nameof(MaxAuthorizedKeys));
         Check(KeyQueryTimeoutSeconds, 1, 300, nameof(KeyQueryTimeoutSeconds));
+        Check(MaxPointLookupTuples, 1, 10_000, nameof(MaxPointLookupTuples));
         Check(KeyCacheSizeLimitBytes, 1L * 1024 * 1024, 4L * 1024 * 1024 * 1024, nameof(KeyCacheSizeLimitBytes));
     }
 

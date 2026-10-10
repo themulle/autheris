@@ -84,11 +84,10 @@ internal static class FederatedServiceHarness
         public required IAuditLogRepository Audit { get; init; }
         public required FakeKeySetProvider KeySetProvider { get; init; }
 
-        public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> RunAsync(string sql)
-        {
-            var result = await Service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql, Transport: "WebSql"), User(AliceSid), Tenant);
-            return result.Rows;
-        }
+        public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> RunAsync(string sql) => (await RunFullAsync(sql)).Rows;
+
+        public Task<GovernedSqlResult> RunFullAsync(string sql) =>
+            Service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql, Transport: "WebSql"), User(AliceSid), Tenant);
     }
 
     internal static Pipeline Build(
@@ -98,7 +97,8 @@ internal static class FederatedServiceHarness
         FakeKeySetProvider? keySets = null,
         bool withPlanner = true,
         int? timeoutSeconds = null,
-        int? maxStagedRowsPerTable = null)
+        int? maxStagedRowsPerTable = null,
+        VirtualFilterFederationOptions? federation = null)
     {
         var repository = Substitute.For<ITableMetadataRepository>();
         foreach (var (table, _) in tables)
@@ -115,7 +115,8 @@ internal static class FederatedServiceHarness
                 AllowedDataSources = tables.Select(t => t.Table.Identifier.Domain).Distinct().ToList(),
                 CrossSource = new CrossSourceOptions { Enabled = true, AllowedTransports = ["WebSql"], TimeoutSeconds = timeoutSeconds ?? 0, MaxStagedRowsPerTable = maxStagedRowsPerTable ?? 0 }
             },
-            DuckDbOlap = new DuckDbOlapOptions { Enabled = true, MaxMemory = "256MB", MaxTempDirectorySize = "0B" }
+            DuckDbOlap = new DuckDbOlapOptions { Enabled = true, MaxMemory = "256MB", MaxTempDirectorySize = "0B" },
+            VirtualFilters = new VirtualFilterOptions { Federation = federation ?? new VirtualFilterFederationOptions() }
         };
 
         var resolver = new MandatoryRowFilterResolver(
@@ -136,7 +137,7 @@ internal static class FederatedServiceHarness
             consentResolution: new ConsentResolutionService(),
             consentRepository: consents,
             mandatoryFilters: resolver,
-            vfPlanner: withPlanner ? new VirtualFilterFederationPlanner(keySetProvider) : null);
+            vfPlanner: withPlanner ? new VirtualFilterFederationPlanner(keySetProvider, Options.Create(options)) : null);
 
         return new Pipeline { Service = service, Audit = audit, KeySetProvider = keySetProvider };
     }
