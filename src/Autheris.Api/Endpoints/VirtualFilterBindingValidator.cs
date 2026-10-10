@@ -2,7 +2,6 @@ namespace Autheris.Api.Endpoints;
 
 using System;
 using System.Collections.Generic;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
@@ -27,37 +26,61 @@ internal sealed class VirtualFilterBindingException(string code, string message)
 /// </summary>
 internal static class VirtualFilterBindingValidator
 {
-    /// <summary>Parses a snake_case enum value (<c>pushdown_only</c>); anything else, including numbers, is rejected.</summary>
+    private static readonly IReadOnlyDictionary<VirtualFilterExecutionStrategy, string> StrategyNames = new Dictionary<VirtualFilterExecutionStrategy, string>
+    {
+        [VirtualFilterExecutionStrategy.Adaptive] = "adaptive",
+        [VirtualFilterExecutionStrategy.ShortCircuitOnly] = "short_circuit_only",
+        [VirtualFilterExecutionStrategy.DuckDbHashJoin] = "duckdb_hash_join",
+        [VirtualFilterExecutionStrategy.PushdownOnly] = "pushdown_only"
+    };
+
+    private static readonly IReadOnlyDictionary<PushdownParameterFormat, string> FormatNames = new Dictionary<PushdownParameterFormat, string>
+    {
+        [PushdownParameterFormat.CommaSeparated] = "comma_separated",
+        [PushdownParameterFormat.RepeatedParam] = "repeated_param",
+        [PushdownParameterFormat.ODataIn] = "odata_in",
+        [PushdownParameterFormat.PostBatch] = "post_batch"
+    };
+
+    private static readonly IReadOnlyDictionary<UncoveredPolicy, string> UncoveredNames = new Dictionary<UncoveredPolicy, string>
+    {
+        [UncoveredPolicy.Deny] = "deny",
+        [UncoveredPolicy.Skip] = "skip"
+    };
+
+    private static IReadOnlyDictionary<T, string> NamesOf<T>() where T : struct, Enum =>
+        (IReadOnlyDictionary<T, string>?)(typeof(T) switch
+        {
+            var t when t == typeof(VirtualFilterExecutionStrategy) => (object)StrategyNames,
+            var t when t == typeof(PushdownParameterFormat) => FormatNames,
+            var t when t == typeof(UncoveredPolicy) => UncoveredNames,
+            _ => null
+        }) ?? throw new NotSupportedException($"{typeof(T).Name} has no binding name map.");
+
+    /// <summary>
+    /// Parses a binding enum from its documented snake_case name (<c>pushdown_only</c>). Only the exact name is accepted:
+    /// no other case, no stripped underscores, no numbers. Anything else is <see cref="VirtualFilterErrorCodes.BindingInvalid"/>.
+    /// </summary>
     public static T ParseEnum<T>(string value, string field) where T : struct, Enum
     {
-        foreach (var candidate in Enum.GetValues<T>())
+        foreach (var (candidate, name) in NamesOf<T>())
         {
-            if (string.Equals(FormatEnum(candidate).Replace("_", string.Empty, StringComparison.Ordinal), value.Replace("_", string.Empty, StringComparison.Ordinal), StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(name, value, StringComparison.Ordinal))
             {
                 return candidate;
             }
         }
 
-        var allowed = string.Join(", ", Array.ConvertAll(Enum.GetValues<T>(), FormatEnum));
-        throw new ArgumentException($"Unknown {field} '{value}' ({allowed}).");
+        throw new VirtualFilterBindingException(
+            VirtualFilterErrorCodes.BindingInvalid,
+            $"Unknown {field} '{value}' ({string.Join(", ", NamesOf<T>().Values)}).");
     }
 
-    public static string FormatEnum<T>(T value) where T : struct, Enum
-    {
-        var name = value.ToString();
-        var sb = new StringBuilder(name.Length + 4);
-        for (int i = 0; i < name.Length; i++)
-        {
-            if (i > 0 && char.IsUpper(name[i]) && !char.IsUpper(name[i - 1]))
-            {
-                sb.Append('_');
-            }
-
-            sb.Append(char.ToLowerInvariant(name[i]));
-        }
-
-        return sb.ToString();
-    }
+    /// <summary>The documented snake_case name of a binding enum value (the inverse of <see cref="ParseEnum{T}"/>).</summary>
+    public static string FormatEnum<T>(T value) where T : struct, Enum =>
+        NamesOf<T>().TryGetValue(value, out var name)
+            ? name
+            : throw new InvalidOperationException($"{typeof(T).Name}.{value} has no binding name.");
 
     public static async Task ValidateAsync(IEnumerable<VirtualFilterAccessProfile> profiles, HttpContext context)
     {

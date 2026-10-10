@@ -351,7 +351,7 @@ public static class VirtualFilterEndpoints
             profile = p.Profile,
             scope = p.Scope,
             in_scope = p.InScope,
-            uncovered = p.Uncovered?.ToString().ToLowerInvariant(),
+            uncovered = p.Uncovered is { } uncovered ? VirtualFilterBindingValidator.FormatEnum(uncovered) : null,
             bindings = p.Bindings.Select(b => new
             {
                 filter = b.Filter,
@@ -664,7 +664,7 @@ public static class VirtualFilterEndpoints
         name = p.Name,
         grantee = new { type = p.GranteeType.ToString().ToLowerInvariant(), sid = p.GranteeSid?.Value, role = p.RoleName },
         scope = p.Scope,
-        uncovered = p.Uncovered?.ToString().ToLowerInvariant(),
+        uncovered = p.Uncovered is { } uncovered ? VirtualFilterBindingValidator.FormatEnum(uncovered) : null,
         bindings = p.Bindings.Select(b => new
         {
             filter = b.FilterName,
@@ -875,13 +875,7 @@ public static class VirtualFilterEndpoints
                 GranteeSid = string.IsNullOrWhiteSpace(grantee.Sid) ? (Sid?)null : new Sid(grantee.Sid),
                 RoleName = grantee.Role,
                 Scope = Scope,
-                Uncovered = Uncovered?.ToLowerInvariant() switch
-                {
-                    null => null,
-                    "deny" => UncoveredPolicy.Deny,
-                    "skip" => UncoveredPolicy.Skip,
-                    _ => throw new ArgumentException($"Unknown uncovered '{Uncovered}' (deny, skip).")
-                },
+                Uncovered = Uncovered == null ? null : VirtualFilterBindingValidator.ParseEnum<UncoveredPolicy>(Uncovered, "uncovered"),
                 Bindings = (Bindings ?? []).Select(b => b.ToModel()).ToList()
             };
         }

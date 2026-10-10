@@ -455,15 +455,45 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     [Theory]
     [InlineData("strategy", "turbo")]
     [InlineData("pushdown_format", "carrier_pigeon")]
-    public async Task PutProfile_WithUnknownEnumValue_Returns400_AndStoresNothing(string field, string value)
+    [InlineData("strategy", "DuckDbHashJoin")]
+    [InlineData("strategy", "duckdbhashjoin")]
+    [InlineData("strategy", "ADAPTIVE")]
+    [InlineData("strategy", "duck_db_hash_join")]
+    [InlineData("pushdown_format", "CommaSeparated")]
+    [InlineData("pushdown_format", "commaseparated")]
+    [InlineData("pushdown_format", "0")]
+    public async Task PutProfile_WithUnknownOrLenientEnumValue_Returns400WithStableCode_AndStoresNothing(string field, string value)
     {
         await PutFilterAsync();
         var binding = new Dictionary<string, object> { ["filter"] = "nicht_ausgelieferte_krane", ["target"] = "web_crm.*.*.id", [field] = value };
 
-        var (status, _) = await PutBindingAsync(binding);
+        var (status, body) = await PutBindingAsync(binding);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        JsonDocument.Parse(body).RootElement.GetProperty("code").GetString().ShouldBe("VF_BINDING_INVALID");
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task PutProfile_NumericEnumValue_Returns400()
+    {
+        await PutFilterAsync();
+
+        var (status, body) = await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", strategy = 2 });
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
         (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task PutProfile_EchoesTheDocumentedStrategyName_AndAcceptsItBack()
+    {
+        await PutFilterAsync();
+
+        var (status, body) = await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", strategy = "duckdb_hash_join" });
+
+        status.ShouldBe(StatusCodes.Status200OK);
+        JsonDocument.Parse(body).RootElement.GetProperty("bindings")[0].GetProperty("strategy").GetString().ShouldBe("duckdb_hash_join");
     }
 
     [Theory]

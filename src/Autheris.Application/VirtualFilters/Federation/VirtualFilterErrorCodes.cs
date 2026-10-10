@@ -52,6 +52,9 @@ public static class VirtualFilterErrorCodes
     /// </summary>
     public const string PathTemplateUnfillable = "VF_PATH_TEMPLATE_UNFILLABLE";
 
+    /// <summary>A binding field has a value outside its documented set (unknown strategy, pushdown format or uncovered policy); rejected when the profile is written (HTTP 400).</summary>
+    public const string BindingInvalid = "VF_BINDING_INVALID";
+
     /// <summary>A binding asserts a pushdown format the target endpoint (or any endpoint) cannot satisfy; rejected when the profile is written (HTTP 400).</summary>
     public const string PushdownFormatUnsupported = "VF_PUSHDOWN_FORMAT_UNSUPPORTED";
 
