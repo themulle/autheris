@@ -164,12 +164,34 @@ public class CompileApiTests
         Assert.Equal(SqlCompileNotSupportedReason.StatementClass, ex.Reason);
     }
 
-    [Fact]
-    public void DmlPermissions_AreRejected_NotHonored()
+    private sealed class FixedCapabilities(DialectCapabilities capabilities) : IDialectCapabilityProvider
     {
+        public DialectCapabilities Get(TargetSqlDialect dialect) => capabilities;
+    }
+
+    [Theory]
+    [InlineData("INSERT INTO orders (id, tenantid) VALUES (1, 'acme')")]
+    [InlineData("UPDATE orders SET status = 'x' WHERE id = 1")]
+    [InlineData("DELETE FROM orders WHERE id = 1")]
+    [InlineData("MERGE INTO orders t USING orders s ON t.id = s.id WHEN MATCHED THEN DELETE")]
+    public void DmlPermission_IsRejected_WhenTheCapabilityEntryDoesNotListTheClass(string sql)
+    {
+        // A request may only ask for what the dialect supports: the capability entry decides (fail closed, typed).
+        var readOnlyDialect = DialectCapabilityTable.Default.Get(TargetSqlDialect.SqlServer) with { DmlStatements = StatementPermissions.ReadOnly };
+        var compiler = new GovernedSqlCompiler(_engine, new FixedCapabilities(readOnlyDialect), new CompiledSqlTemplateCache());
         var req = Request(configure: r => r with { Statements = StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge });
-        var ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile("SELECT id FROM orders", req));
+        var ex = Assert.Throws<SqlCompileNotSupportedException>(() => compiler.Compile(sql.AsMemory(), req, CancellationToken.None));
         Assert.Equal(SqlCompileNotSupportedReason.StatementClass, ex.Reason);
+    }
+
+    [Fact]
+    public void MergePermission_IsRejected_WhenTheDialectDoesNotSupportMerge()
+    {
+        var noMerge = DialectCapabilityTable.Default.Get(TargetSqlDialect.SqlServer) with { SupportsMerge = false };
+        var compiler = new GovernedSqlCompiler(_engine, new FixedCapabilities(noMerge), new CompiledSqlTemplateCache());
+        var req = Request(configure: r => r with { Statements = StatementPermissions.Merge });
+        Assert.Throws<SqlCompileNotSupportedException>(() =>
+            compiler.Compile("MERGE INTO orders t USING orders s ON t.id = s.id WHEN MATCHED THEN DELETE".AsMemory(), req, CancellationToken.None));
     }
 
     [Theory]

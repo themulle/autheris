@@ -146,7 +146,8 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
             if (stmt is not SqlBaseParser.StatementDefaultContext &&
                 stmt is not SqlBaseParser.DeleteContext &&
                 stmt is not SqlBaseParser.UpdateContext &&
-                stmt is not SqlBaseParser.InsertIntoContext)
+                stmt is not SqlBaseParser.InsertIntoContext &&
+                stmt is not SqlBaseParser.MergeContext)
             {
                 throw new SecurityException($"Unsupported or unsafe statement type: {stmt.GetType().Name}");
             }
@@ -639,14 +640,71 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitDelete(SqlBaseParser.DeleteContext context)
     {
         using var _ = EnterScope();
+        RejectBranch(context.branch);
         var target = new NamedTableSource(ToSqlQualifiedName(context.qualifiedName()), null);
         Expression? where = context.booleanExpression() != null ? (Expression)Visit(context.booleanExpression()) : null;
         return new DeleteStatement(target, where);
     }
 
+    /// <summary>The table branch suffix (<c>t@branch</c>) has no governed meaning: it is rejected, never silently dropped.</summary>
+    private static void RejectBranch(SqlBaseParser.IdentifierContext? branch)
+    {
+        if (branch != null)
+        {
+            throw Unsupported("a table branch (table@branch)");
+        }
+    }
+
+    public override SqlNode VisitMerge(SqlBaseParser.MergeContext context)
+    {
+        using var _ = EnterScope();
+        RejectBranch(context.branch);
+        var alias = context.alias != null ? ToSqlIdentifier(context.alias) : null;
+        var target = new NamedTableSource(ToSqlQualifiedName(context.qualifiedName()), alias);
+        var source = (TableSource)Visit(context.relation());
+        var on = (Expression)Visit(context.expression());
+        var clauses = new List<MergeClause>();
+        foreach (var mergeCase in context.mergeCase())
+        {
+            clauses.Add((MergeClause)Visit(mergeCase));
+        }
+
+        return new MergeStatement(target, source, on, clauses);
+    }
+
+    public override SqlNode VisitMergeUpdate(SqlBaseParser.MergeUpdateContext context)
+    {
+        using var _ = EnterScope();
+        var condition = context.condition != null ? (Expression)Visit(context.condition) : null;
+        var assignments = new List<UpdateAssignment>();
+        for (int i = 0; i < context._targets.Count; i++)
+        {
+            assignments.Add(new UpdateAssignment(ToSqlIdentifier(context._targets[i]), (Expression)Visit(context._values[i])));
+        }
+
+        return new MergeUpdateClause(condition, assignments);
+    }
+
+    public override SqlNode VisitMergeDelete(SqlBaseParser.MergeDeleteContext context)
+    {
+        using var _ = EnterScope();
+        var condition = context.condition != null ? (Expression)Visit(context.condition) : null;
+        return new MergeDeleteClause(condition);
+    }
+
+    public override SqlNode VisitMergeInsert(SqlBaseParser.MergeInsertContext context)
+    {
+        using var _ = EnterScope();
+        var condition = context.condition != null ? (Expression)Visit(context.condition) : null;
+        IReadOnlyList<SqlIdentifier>? columns = context._targets.Count > 0 ? context._targets.Select(ToSqlIdentifier).ToList() : null;
+        var values = context._values.Select(v => (Expression)Visit(v)).ToList();
+        return new MergeInsertClause(condition, columns, values);
+    }
+
     public override SqlNode VisitUpdate(SqlBaseParser.UpdateContext context)
     {
         using var _ = EnterScope();
+        RejectBranch(context.branch);
         var target = new NamedTableSource(ToSqlQualifiedName(context.qualifiedName()), null);
         var assignments = new List<UpdateAssignment>();
         foreach (var ua in context.updateAssignment())
@@ -662,6 +720,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitInsertInto(SqlBaseParser.InsertIntoContext context)
     {
         using var _ = EnterScope();
+        RejectBranch(context.branch);
         var target = new NamedTableSource(ToSqlQualifiedName(context.qualifiedName()), null);
         IReadOnlyList<SqlIdentifier>? cols = null;
         if (context.columnAliases()?.identifier() != null)
@@ -670,6 +729,12 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         }
 
         var rootSelect = (SelectStatement)Visit(context.rootQuery());
+        if (rootSelect.With != null || rootSelect.OrderBy != null || rootSelect.Pagination != null)
+        {
+            // Dropping WITH, ORDER BY or LIMIT of the source would silently change which rows are written.
+            throw Unsupported("WITH, ORDER BY or LIMIT on an INSERT source");
+        }
+
         return new InsertStatement(target, cols, rootSelect.Body);
     }
 

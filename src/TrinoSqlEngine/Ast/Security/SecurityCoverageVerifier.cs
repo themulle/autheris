@@ -30,6 +30,8 @@ public sealed class SecurityCoverageException : SecurityException
 /// <param name="PolicySubqueryPredicates">Predicates required when the table is referenced inside a policy subquery (tenant only).</param>
 /// <param name="MaskedColumns">Canonical names of columns that must be projected as <see cref="MaskExpression"/> (never raw).</param>
 /// <param name="CatalogColumns">Canonical names of the cataloged columns; a secured derived table may project only these (CR-ADG-06). Null: any named column.</param>
+/// <param name="TenantColumn">Canonical tenant column (DML writes must carry the bound tenant there), or null.</param>
+/// <param name="PolicyColumns">Lower-case names of the columns the applicable row-policy predicate references (SEC-ADG-06); an assignment to one of them is rejected.</param>
 public sealed record TableCoverageRequirement(
     string Identity,
     string Schema,
@@ -38,7 +40,9 @@ public sealed record TableCoverageRequirement(
     ImmutableArray<SecurityPredicateId> PolicySubqueryPredicates,
     ImmutableHashSet<string>? MaskedColumns = null,
     string? Catalog = null,
-    ImmutableHashSet<string>? CatalogColumns = null);
+    ImmutableHashSet<string>? CatalogColumns = null,
+    string? TenantColumn = null,
+    ImmutableHashSet<string>? PolicyColumns = null);
 
 /// <summary>
 /// Production post-condition of the compiler (runs on every compile). It walks the final AST and proves that every physical
@@ -47,19 +51,25 @@ public sealed record TableCoverageRequirement(
 /// table, and that policy subqueries carry the tenant predicate and do not nest. It works on resolved names and node
 /// structure, never on text. It does not trust the injector: requirements come from <paramref name="requirementOf"/>.
 /// </summary>
-public sealed class SecurityCoverageVerifier
+public sealed partial class SecurityCoverageVerifier
 {
     private readonly Func<SqlQualifiedName, TableCoverageRequirement?> _requirementOf;
     private readonly TargetSqlDialect _dialect;
     private readonly int _maxSecuredTableReferences;
     private readonly int _maxAstDepth;
+    private readonly DmlGuardOptions _dml;
+    private readonly string? _tenantParameterName;
 
     public SecurityCoverageVerifier(
         Func<SqlQualifiedName, TableCoverageRequirement?> requirementOf,
         TargetSqlDialect dialect = TargetSqlDialect.SqlServer,
         int maxSecuredTableReferences = 256,
-        int maxAstDepth = 512)
+        int maxAstDepth = 512,
+        DmlGuardOptions? dml = null,
+        string? tenantParameterName = null)
     {
+        _dml = dml ?? DmlGuardOptions.Strict;
+        _tenantParameterName = tenantParameterName;
         _requirementOf = requirementOf ?? throw new ArgumentNullException(nameof(requirementOf));
         _dialect = dialect;
         _maxSecuredTableReferences = maxSecuredTableReferences;
@@ -74,12 +84,26 @@ public sealed class SecurityCoverageVerifier
         var walker = new Walker(this, cancellationToken);
         try
         {
-            if (statement is not SelectStatement select)
+            switch (statement)
             {
-                throw new SecurityCoverageException("Only SELECT statements can be verified on the governed compiler path.");
+                case SelectStatement select:
+                    walker.Select(select, ImmutableHashSet<string>.Empty, policyScope: false);
+                    break;
+                case InsertStatement insert:
+                    walker.Insert(insert);
+                    break;
+                case UpdateStatement update:
+                    walker.Update(update);
+                    break;
+                case DeleteStatement delete:
+                    walker.Delete(delete);
+                    break;
+                case MergeStatement merge:
+                    walker.Merge(merge);
+                    break;
+                default:
+                    throw new SecurityCoverageException($"Statement '{statement.GetType().Name}' cannot be verified on the governed compiler path.");
             }
-
-            walker.Select(select, ImmutableHashSet<string>.Empty, policyScope: false);
         }
         catch (InsufficientExecutionStackException)
         {
@@ -89,8 +113,10 @@ public sealed class SecurityCoverageVerifier
         return walker.Applied.ToImmutableArray();
     }
 
-    private sealed class Walker(SecurityCoverageVerifier owner, CancellationToken ct)
+    private sealed partial class Walker(SecurityCoverageVerifier owner, CancellationToken ct)
     {
+        private SecurityCoverageVerifier Owner => owner;
+
         private int _ticks;
         private int _depth;
         private int _insidePredicate;
@@ -242,17 +268,7 @@ public sealed class SecurityCoverageVerifier
             var requirement = owner._requirementOf(table.Name)
                 ?? throw new SecurityCoverageException("A table reference could not be resolved against the catalog.");
 
-            // INV-11: the emitted name is the schema-qualified canonical catalog name, always delimited, never user spelling.
-            var parts = table.Name.Parts;
-            int expectedParts = requirement.Catalog is null ? 2 : 3;
-            int offset = expectedParts - 2;
-            if (parts.Count != expectedParts || parts.Any(p => !p.IsQuoted) ||
-                (requirement.Catalog is not null && !string.Equals(parts[0].Value, requirement.Catalog, StringComparison.Ordinal)) ||
-                !string.Equals(parts[offset].Value, requirement.Schema, StringComparison.Ordinal) ||
-                !string.Equals(parts[offset + 1].Value, requirement.Table, StringComparison.Ordinal))
-            {
-                throw new SecurityCoverageException("A physical table is not emitted as its schema-qualified canonical name.");
-            }
+            VerifyCanonicalName(table.Name, requirement);
 
             VerifyShape(requirement, spec, enclosing, policyScope);
 
@@ -277,6 +293,21 @@ public sealed class SecurityCoverageVerifier
             if (++_securedReferences > owner._maxSecuredTableReferences)
             {
                 throw new SqlLimitExceededException(SqlLimitKind.SecuredTableReferences, owner._dialect, _securedReferences, owner._maxSecuredTableReferences);
+            }
+        }
+
+        /// <summary>INV-11: the emitted name is the schema-qualified canonical catalog name, always delimited, never user spelling.</summary>
+        private static void VerifyCanonicalName(SqlQualifiedName name, TableCoverageRequirement requirement)
+        {
+            var parts = name.Parts;
+            int expectedParts = requirement.Catalog is null ? 2 : 3;
+            int offset = expectedParts - 2;
+            if (parts.Count != expectedParts || parts.Any(p => !p.IsQuoted) ||
+                (requirement.Catalog is not null && !string.Equals(parts[0].Value, requirement.Catalog, StringComparison.Ordinal)) ||
+                !string.Equals(parts[offset].Value, requirement.Schema, StringComparison.Ordinal) ||
+                !string.Equals(parts[offset + 1].Value, requirement.Table, StringComparison.Ordinal))
+            {
+                throw new SecurityCoverageException("A physical table is not emitted as its schema-qualified canonical name.");
             }
         }
 

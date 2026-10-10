@@ -89,3 +89,25 @@ public sealed record InsertStatement(
     NamedTableSource TargetTable,
     IReadOnlyList<SqlIdentifier>? Columns,
     QueryBody Source) : SqlStatement;
+
+/// <summary>
+/// MERGE (grammar: SqlBase.g4 #merge / mergeCase). The grammar has no <c>WHEN NOT MATCHED BY SOURCE</c> and no <c>BY TARGET</c>
+/// form, and the clause types below are closed (SEC-ADG-08 a): a new clause type needs a security review.
+/// </summary>
+public sealed record MergeStatement(
+    NamedTableSource Target,
+    TableSource Source,
+    Expression On,
+    IReadOnlyList<MergeClause> Clauses) : SqlStatement;
+
+/// <summary>One WHEN clause of a MERGE. The set of subtypes is closed.</summary>
+public abstract record MergeClause(Expression? Condition) : SqlNode;
+
+/// <summary>WHEN MATCHED [AND condition] THEN UPDATE SET column = value, ...</summary>
+public sealed record MergeUpdateClause(Expression? Condition, IReadOnlyList<UpdateAssignment> Assignments) : MergeClause(Condition);
+
+/// <summary>WHEN MATCHED [AND condition] THEN DELETE</summary>
+public sealed record MergeDeleteClause(Expression? Condition) : MergeClause(Condition);
+
+/// <summary>WHEN NOT MATCHED [AND condition] THEN INSERT [(columns)] VALUES (values)</summary>
+public sealed record MergeInsertClause(Expression? Condition, IReadOnlyList<SqlIdentifier>? Columns, IReadOnlyList<Expression> Values) : MergeClause(Condition);

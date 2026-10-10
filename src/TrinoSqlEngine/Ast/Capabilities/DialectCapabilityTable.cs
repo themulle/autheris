@@ -28,6 +28,11 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         ["strpos"] = "INSTR", ["approx_distinct"] = "APPROX_COUNT_DISTINCT", ["arbitrary"] = "ANY_VALUE"
     };
 
+    // INSERT, UPDATE, DELETE and MERGE, compiled with the typed DML security of WP-A7. A dialect lists a class only when its
+    // generator and its execution evidence exist; the default (ReadOnly) rejects DML fail closed.
+    private const StatementPermissions AllDml =
+        StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge;
+
     private static readonly DialectCapabilities SqlServer = new(
         Dialect: TargetSqlDialect.SqlServer,
         Tier: DialectSupportTier.Production,
@@ -54,7 +59,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         BindExpressionTemplates: IdentityBindTemplates,
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.SqlServer, SqlServerRewrites),
         AllowedTableFunctions: FrozenSet<string>.Empty,
-        LimitSource: "MSSQL-CAP");
+        LimitSource: "MSSQL-CAP",
+        DmlStatements: AllDml);
 
     private static readonly DialectCapabilities DuckDb = new(
         Dialect: TargetSqlDialect.DuckDb,

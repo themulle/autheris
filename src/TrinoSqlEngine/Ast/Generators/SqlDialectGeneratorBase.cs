@@ -1,6 +1,7 @@
 namespace TrinoSqlEngine.Ast.Generators;
 
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Runtime.CompilerServices;
@@ -59,20 +60,22 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
 
         var parameters = context.Parameters;
-        EmittedSqlInvariantChecker.Check(sql, TargetDialect, parameters, context.Ranges, structuralOnly: !BindLiterals);
+        var statementClass = statement switch
+        {
+            SelectStatement => SqlStatementClass.Select,
+            InsertStatement => SqlStatementClass.Insert,
+            UpdateStatement => SqlStatementClass.Update,
+            DeleteStatement => SqlStatementClass.Delete,
+            MergeStatement => SqlStatementClass.Merge,
+            _ => throw new NotSupportedException($"Unsupported statement type: {statement.GetType().Name}")
+        };
+        EmittedSqlInvariantChecker.Check(sql, TargetDialect, parameters, context.Ranges, structuralOnly: !BindLiterals, statementClass);
 
         return new CompiledSql(
             sql,
             parameters,
             TargetDialect,
-            statement switch
-            {
-                SelectStatement => SqlStatementClass.Select,
-                InsertStatement => SqlStatementClass.Insert,
-                UpdateStatement => SqlStatementClass.Update,
-                DeleteStatement => SqlStatementClass.Delete,
-                _ => throw new NotSupportedException($"Unsupported statement type: {statement.GetType().Name}")
-            },
+            statementClass,
             ImmutableArray<SecurityPredicateId>.Empty,
             CompilerInfo.Version);
     }
@@ -166,6 +169,9 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 break;
             case DeleteStatement delete:
                 GenerateDelete(delete, ref builder, context);
+                break;
+            case MergeStatement merge:
+                GenerateMerge(merge, ref builder, context);
                 break;
             default:
                 throw new NotSupportedException($"Unsupported statement type: {statement.GetType().Name}");
@@ -523,4 +529,100 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
     }
 
+    /// <summary>
+    /// ANSI/PostgreSQL-style MERGE (SQL Server, PostgreSQL 15+, DuckDB, Databricks). The WHEN clause set is closed: only matched
+    /// UPDATE or DELETE and not-matched INSERT can be emitted, never <c>BY SOURCE</c> (SEC-ADG-08 a). Oracle overrides it.
+    /// </summary>
+    protected virtual void GenerateMerge(MergeStatement merge, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        builder.Append("MERGE INTO ");
+        GenerateTableSource(merge.Target, ref builder, context);
+        builder.Append(" USING ");
+        GenerateTableSource(merge.Source, ref builder, context);
+        builder.Append(" ON ");
+        GenerateMergePredicate(merge.On, ref builder, context);
+        foreach (var clause in merge.Clauses)
+        {
+            builder.Append(' ');
+            GenerateMergeClause(clause, ref builder, context);
+        }
+    }
+
+    protected void GenerateMergePredicate(Expression predicate, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        context.InPredicateContext = true;
+        GenerateExpression(predicate, ref builder, context);
+        context.InPredicateContext = false;
+    }
+
+    protected virtual void GenerateMergeClause(MergeClause clause, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        switch (clause)
+        {
+            case MergeUpdateClause update:
+                builder.Append("WHEN MATCHED");
+                GenerateMergeCondition(update.Condition, ref builder, context);
+                builder.Append(" THEN UPDATE SET ");
+                GenerateAssignments(update.Assignments, ref builder, context);
+                break;
+            case MergeDeleteClause delete:
+                builder.Append("WHEN MATCHED");
+                GenerateMergeCondition(delete.Condition, ref builder, context);
+                builder.Append(" THEN DELETE");
+                break;
+            case MergeInsertClause insert:
+                builder.Append("WHEN NOT MATCHED");
+                GenerateMergeCondition(insert.Condition, ref builder, context);
+                builder.Append(" THEN INSERT ");
+                GenerateMergeInsertBody(insert, ref builder, context);
+                break;
+            default:
+                throw new NotSupportedException($"Unsupported MERGE clause: {clause.GetType().Name}");
+        }
+    }
+
+    protected void GenerateMergeCondition(Expression? condition, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        if (condition is null) return;
+        builder.Append(" AND ");
+        GenerateMergePredicate(condition, ref builder, context);
+    }
+
+    protected void GenerateMergeInsertBody(MergeInsertClause insert, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        if (insert.Columns is null || insert.Columns.Count == 0)
+        {
+            // The column order of the target is not part of the compiler's knowledge: a positional INSERT is never emitted.
+            throw UnsupportedConstruct("MERGE INSERT without a column list", TargetDialect);
+        }
+
+        builder.Append('(');
+        for (int i = 0; i < insert.Columns.Count; i++)
+        {
+            if (i > 0) builder.Append(", ");
+            FormatIdentifier(ref builder, insert.Columns[i], context);
+        }
+
+        builder.Append(") VALUES (");
+        for (int i = 0; i < insert.Values.Count; i++)
+        {
+            if (i > 0) builder.Append(", ");
+            GenerateExpression(insert.Values[i], ref builder, context);
+        }
+
+        builder.Append(')');
+    }
+
+    protected void GenerateAssignments(IReadOnlyList<UpdateAssignment> assignments, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        for (int i = 0; i < assignments.Count; i++)
+        {
+            if (i > 0) builder.Append(", ");
+            var a = assignments[i];
+            FormatIdentifier(ref builder, a.Column, context);
+            builder.Append(" = ");
+            GenerateExpression(a.Value, ref builder, context);
+        }
+    }
 }

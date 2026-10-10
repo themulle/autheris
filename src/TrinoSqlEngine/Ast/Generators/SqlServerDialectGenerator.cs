@@ -23,6 +23,18 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
     protected override bool SupportsTryCast => true;
     protected override bool SupportsJoinUsing => false;
 
+    /// <summary>
+    /// T-SQL requires a terminating semicolon after MERGE. It is appended exactly once, as the last character, and registered with
+    /// the emitted-text checker, which allows a semicolon nowhere else (SEC-ADG-08 c).
+    /// </summary>
+    protected override void GenerateMerge(MergeStatement merge, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        base.GenerateMerge(merge, ref builder, context);
+        int start = builder.Length;
+        builder.Append(';');
+        context.RegisterStatementTerminator(start);
+    }
+
     /// <summary>Wunsch 4: IS [NOT] DISTINCT FROM needs SQL Server 2022; INTERSECT compares NULLs as equal on every version.</summary>
     protected override void FormatIsDistinctFrom(ref ValueStringBuilder builder, IsDistinctFromExpression dist, SqlEmitterContext context)
     {

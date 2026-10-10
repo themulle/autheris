@@ -12,6 +12,10 @@ public interface ISqlAstVisitor<out TResult>
     TResult VisitInsertStatement(InsertStatement node);
     TResult VisitUpdateStatement(UpdateStatement node);
     TResult VisitDeleteStatement(DeleteStatement node);
+    TResult VisitMergeStatement(MergeStatement node);
+    TResult VisitMergeUpdateClause(MergeUpdateClause node);
+    TResult VisitMergeDeleteClause(MergeDeleteClause node);
+    TResult VisitMergeInsertClause(MergeInsertClause node);
     TResult VisitQuerySpecification(QuerySpecification node);
     TResult VisitSetOperationQuery(SetOperationQuery node);
     TResult VisitValuesQueryBody(ValuesQueryBody node);

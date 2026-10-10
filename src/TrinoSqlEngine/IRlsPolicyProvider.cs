@@ -326,6 +326,12 @@ public sealed class RlsOptions
     public bool RejectWholeRowReferencesInDml { get; set; } = true;
 
     /// <summary>
+    /// SEC-ADG-06 (typed compiler path): when true (default), UPDATE and MERGE ... UPDATE reject an assignment to any column that
+    /// an applicable row-policy predicate references, so a write cannot move a row across a policy boundary.
+    /// </summary>
+    public bool RejectPolicyColumnAssignment { get; set; } = true;
+
+    /// <summary>
     /// SQ-03: Table names that have masked columns. Used by <see cref="RejectWholeRowReferencesInDml"/> to reject unauthorized whole-row references.
     /// </summary>
     public HashSet<string> TablesWithMaskedColumns { get; set; } = new(StringComparer.OrdinalIgnoreCase);

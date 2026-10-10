@@ -46,6 +46,9 @@ public sealed class TypedPolicyContext
     public TenantBinding Tenant { get; }
     public DialectCapabilities Capabilities { get; }
 
+    /// <summary>DML guard switches of the request (the verifier proves what they require).</summary>
+    public DmlGuardOptions Dml { get; init; } = DmlGuardOptions.Strict;
+
     /// <summary>Values to bind, by parameter name (tenant, policy and mask parameters of every applied table).</summary>
     public IReadOnlyDictionary<string, PolicyValue> PolicyValues => _values;
 
@@ -162,7 +165,7 @@ public sealed class TypedPolicyContext
     /// tenant predicate (when it has a tenant column) and its policy predicate (when the provider says one applies).
     /// </summary>
     public SecurityCoverageVerifier CreateVerifier(TargetSqlDialect dialect = TargetSqlDialect.SqlServer, int maxSecuredTableReferences = 256) =>
-        new(name => RequirementOf(name), dialect, maxSecuredTableReferences);
+        new(name => RequirementOf(name), dialect, maxSecuredTableReferences, dml: Dml, tenantParameterName: Tenant.ParameterName);
 
     private TableCoverageRequirement? RequirementOf(SqlQualifiedName name)
     {
@@ -175,6 +178,10 @@ public sealed class TypedPolicyContext
         var root = RowFilters.ShouldApplyPolicy(id) ? tenant.Add(new SecurityPredicateId(id.ToString(), 1)) : tenant;
         var masked = entry.Columns.Where(c => Masks.HasMask(id, c.Name)).Select(c => c.Name).ToImmutableHashSet(StringComparer.Ordinal);
         var columns = entry.Columns.Select(c => c.Name).ToImmutableHashSet(StringComparer.Ordinal);
-        return new TableCoverageRequirement(id.ToString(), id.Schema, id.Table, root, tenant, masked, id.Catalog, columns);
+        var policyColumns = RowFilters.ShouldApplyPolicy(id)
+            ? RowFilters.GetPredicate(id).ReferencedColumns
+            : ImmutableHashSet<string>.Empty;
+        return new TableCoverageRequirement(id.ToString(), id.Schema, id.Table, root, tenant, masked, id.Catalog, columns,
+            entry.TenantColumn, policyColumns);
     }
 }

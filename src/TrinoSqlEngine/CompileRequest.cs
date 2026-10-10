@@ -6,13 +6,16 @@ using System.Collections.Generic;
 using System.Security;
 using TrinoSqlEngine.Governance;
 
-/// <summary>Statement classes a request allows. DML is not yet supported by the compiler and is rejected (fail closed).</summary>
+/// <summary>
+/// Statement classes a request allows in addition to SELECT. A class is compiled only when the request allows it <b>and</b> the
+/// dialect capability entry lists it (<see cref="Ast.Capabilities.DialectCapabilities.DmlStatements"/>); otherwise it is rejected (fail closed).
+/// </summary>
 [Flags]
 public enum StatementPermissions { ReadOnly = 0, Insert = 1, Update = 2, Delete = 4, Merge = 8 }
 
 public enum GovernedSubqueryStrategy { Correlated = 0 }
 
-/// <summary>DML guard switches (plan 4.1). Carried for the DML work package; the SELECT compiler rejects DML.</summary>
+/// <summary>DML guard switches (plan 4.1), enforced by the typed security visitor and proved by the coverage verifier. <see cref="Strict"/> is the default.</summary>
 public sealed record DmlGuardOptions(
     bool EnforceWithCheckOption,
     bool RequireTenantColumnInInsert,
@@ -21,9 +24,10 @@ public sealed record DmlGuardOptions(
     bool RejectMaskedColumnsInDml,
     bool RejectMaskedColumnsInPredicates,
     bool RejectConsentFilteredInsert,
-    bool RejectWholeRowReferencesInDml)
+    bool RejectWholeRowReferencesInDml,
+    bool RejectPolicyColumnAssignment = true)
 {
-    public static DmlGuardOptions Strict { get; } = new(true, true, true, true, true, true, true, true);
+    public static DmlGuardOptions Strict { get; } = new(true, true, true, true, true, true, true, true, true);
 }
 
 /// <summary>Typed governance input of a compile (replaces string providers and the mutable options bag).</summary>

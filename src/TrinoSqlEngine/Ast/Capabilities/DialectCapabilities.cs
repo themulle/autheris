@@ -90,7 +90,10 @@ public sealed record DialectFunctionMap(FrozenDictionary<string, FunctionRewrite
     }
 }
 
-/// <summary>Per-dialect limits and feature flags. Data, not code (plan section 4.5 and 5).</summary>
+/// <summary>
+/// Per-dialect limits and feature flags. Data, not code (plan section 4.5 and 5). <c>DmlStatements</c> lists the DML classes the
+/// governed compiler may emit for the dialect (WP-A7); a class that is not listed is rejected fail closed.
+/// </summary>
 public sealed record DialectCapabilities(
     TargetSqlDialect Dialect,
     DialectSupportTier Tier,
@@ -117,10 +120,11 @@ public sealed record DialectCapabilities(
     FrozenDictionary<SqlParameterType, string> BindExpressionTemplates,
     DialectFunctionMap Functions,
     IReadOnlySet<string> AllowedTableFunctions,
-    string LimitSource)
+    string LimitSource,
+    StatementPermissions DmlStatements = StatementPermissions.ReadOnly)
 {
     /// <summary>Version of the capability data. Part of the compile cache key (SEC-ADG-01).</summary>
-    public const string TableVersion = "cap-2";
+    public const string TableVersion = "cap-3";
 }
 
 public interface IDialectCapabilityProvider

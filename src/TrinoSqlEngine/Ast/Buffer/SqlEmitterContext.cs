@@ -90,6 +90,13 @@ public sealed class SqlEmitterContext
     public void RegisterConstantFragment(int start, int length) =>
         _ranges?.Add(new EmittedRange(start, length, EmittedRangeKind.ConstantFragment));
 
+    /// <summary>
+    /// Registers the single statement terminator at <paramref name="start"/>. Only the SQL Server <c>MERGE</c> generator uses it,
+    /// at the last position of the statement (SEC-ADG-08 c); the emitted-text checker rejects it anywhere else.
+    /// </summary>
+    public void RegisterStatementTerminator(int start) =>
+        _ranges?.Add(new EmittedRange(start, 1, EmittedRangeKind.StatementTerminator));
+
     /// <summary>Binds a value (deduplicated by type, origin and value) and returns its marker.</summary>
     public string BindValue(object? value, SqlParameterType type, ParameterOrigin origin) =>
         Bind($"{(int)type}|{(int)origin}|{ValueKey(value)}", value, type, origin, null);

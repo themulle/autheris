@@ -12,7 +12,10 @@ public enum EmittedRangeKind
     Numeric,
 
     /// <summary>Constant text of a reviewed generator template (for example the HASHBYTES algorithm literal). Fully skipped.</summary>
-    ConstantFragment
+    ConstantFragment,
+
+    /// <summary>The single statement-terminating semicolon that SQL Server requires after MERGE (SEC-ADG-08 c).</summary>
+    StatementTerminator
 }
 
 /// <summary>A region of the emitted text the emitter registered as structural (see plan 3.4).</summary>
@@ -44,7 +47,8 @@ public static class EmittedSqlInvariantChecker
         TargetSqlDialect dialect,
         ImmutableArray<BoundParameter> parameters,
         IReadOnlyList<EmittedRange> ranges,
-        bool structuralOnly = false)
+        bool structuralOnly = false,
+        SqlStatementClass statementClass = SqlStatementClass.Select)
     {
         ArgumentNullException.ThrowIfNull(sql);
         ArgumentNullException.ThrowIfNull(ranges);
@@ -61,13 +65,14 @@ public static class EmittedSqlInvariantChecker
 
         var sorted = new EmittedRange[ranges.Count];
         for (int r = 0; r < sorted.Length; r++) sorted[r] = ranges[r];
+        VerifyTerminator(sql, dialect, statementClass, sorted);
         Array.Sort(sorted, static (a, b) => a.Start.CompareTo(b.Start));
 
         var markersInText = new HashSet<string>(StringComparer.Ordinal);
         int i = 0;
         while (i < sql.Length)
         {
-            if (TryFindRange(sorted, i, out var range) && range.Kind == EmittedRangeKind.ConstantFragment && range.Start == i)
+            if (TryFindRange(sorted, i, out var range) && range.Kind is EmittedRangeKind.ConstantFragment or EmittedRangeKind.StatementTerminator && range.Start == i)
             {
                 i = range.Start + range.Length;
                 continue;
@@ -143,6 +148,25 @@ public static class EmittedSqlInvariantChecker
             if (!declared.Contains(marker))
             {
                 throw new EmittedSqlInvariantViolationException("marker-without-parameter", 0);
+            }
+        }
+    }
+
+    /// <summary>
+    /// SEC-ADG-08 c: a semicolon is allowed only as the registered final character of a SQL Server MERGE (T-SQL requires it).
+    /// Every other registration is rejected, so the rule cannot be widened by a generator bug.
+    /// </summary>
+    private static void VerifyTerminator(string sql, TargetSqlDialect dialect, SqlStatementClass statementClass, EmittedRange[] ranges)
+    {
+        int count = 0;
+        foreach (var range in ranges)
+        {
+            if (range.Kind != EmittedRangeKind.StatementTerminator) continue;
+            count++;
+            if (dialect != TargetSqlDialect.SqlServer || statementClass != SqlStatementClass.Merge || count > 1 ||
+                range.Length != 1 || range.Start != sql.Length - 1 || sql[range.Start] != ';')
+            {
+                throw new EmittedSqlInvariantViolationException("unregistered-terminator", range.Start);
             }
         }
     }

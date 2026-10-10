@@ -34,6 +34,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitDeleteStatement(DeleteStatement node)
     {
+        if (_typed != null) return SecureDeleteTyped(node);
+
         // SQL-7: the enforced row limit applies to the root SELECT of a read. A DML statement has none; a SELECT inside its
         // WHERE (or the source of INSERT ... SELECT) must not be truncated, that would change which rows are written.
         _rootLimitHandled = true;
@@ -74,6 +76,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitUpdateStatement(UpdateStatement node)
     {
+        if (_typed != null) return SecureUpdateTyped(node);
+
         // SQL-7: the enforced row limit applies to the root SELECT of a read. A DML statement has none; a SELECT inside its
         // WHERE (or the source of INSERT ... SELECT) must not be truncated, that would change which rows are written.
         _rootLimitHandled = true;
@@ -152,6 +156,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitInsertStatement(InsertStatement node)
     {
+        if (_typed != null) return SecureInsertTyped(node);
+
         // SQL-7: the enforced row limit applies to the root SELECT of a read. A DML statement has none; a SELECT inside its
         // WHERE (or the source of INSERT ... SELECT) must not be truncated, that would change which rows are written.
         _rootLimitHandled = true;

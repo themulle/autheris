@@ -24,6 +24,8 @@ using TrinoSqlEngine.Governance;
 internal sealed class GovernedSqlCompiler
 {
     private const int MinimumInputForExpansion = 64;
+    private const StatementPermissions AllDml =
+        StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge;
     private static readonly IReadOnlyDictionary<string, object?> ClientNoValues = new Dictionary<string, object?>();
 
     private readonly FastSqlEngine _engine;
@@ -104,8 +106,9 @@ internal sealed class GovernedSqlCompiler
             throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Dialect, request.TargetDialect.ToString());
         }
 
-        if (request.Statements != StatementPermissions.ReadOnly)
+        if ((request.Statements & ~AllDml) != 0)
         {
+            // An unknown permission bit is never interpreted (fail closed).
             throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, request.Statements.ToString());
         }
 
@@ -115,7 +118,7 @@ internal sealed class GovernedSqlCompiler
         string rawSql = sql.ToString();
         string keyMaterial = CompileCacheKey.Material(request, rawSql, caps);
         var policy = request.Policy;
-        var typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps);
+        var typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = policy.Dml };
 
         var template = _cache.Find(keyMaterial);
         if (template is not null && TryRehydrate(template, typed))
@@ -128,20 +131,21 @@ internal sealed class GovernedSqlCompiler
         if (template is not null)
         {
             // A rehydration attempt may have added values; start clean. A plain miss reuses the context (CR-ADG-12).
-            typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps);
+            typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = policy.Dml };
         }
 
         // 3. token guards + parse
         Pass("parse");
         var (tree, _) = _engine.Parse(sql, request.TokenGuards, token);
-        EnsureQueryStatement(tree);
+        var statementClass = ClassifyStatement(tree);
+        EnsureStatementAllowed(statementClass, request, caps);
         CheckBudget(request, clock, token);
 
         // 4. build + validate the user tree
         Pass("build");
         var builderOptions = new AstBuilderOptions
         {
-            EnforceReadOnlyQueries = true,
+            EnforceReadOnlyQueries = statementClass == SqlStatementClass.Select,
             EnforceFunctionPolicy = true,
             AllowedFunctions = EffectiveFunctions(request, caps),
             AllowedTableFunctions = request.AllowedTableFunctions,
@@ -237,22 +241,40 @@ internal sealed class GovernedSqlCompiler
         return true;
     }
 
-    private static void EnsureQueryStatement(SqlBaseParser.SingleStatementContext tree)
+    private static SqlStatementClass ClassifyStatement(SqlBaseParser.SingleStatementContext tree) => tree.statement() switch
     {
-        switch (tree.statement())
+        SqlBaseParser.StatementDefaultContext => SqlStatementClass.Select,
+        SqlBaseParser.InsertIntoContext => SqlStatementClass.Insert,
+        SqlBaseParser.UpdateContext => SqlStatementClass.Update,
+        SqlBaseParser.DeleteContext => SqlStatementClass.Delete,
+        SqlBaseParser.MergeContext => SqlStatementClass.Merge,
+        _ => throw new SecurityException("Only read queries and the permitted DML statements are accepted by the governed SQL compiler.")
+    };
+
+    /// <summary>
+    /// A DML class compiles only when the request permits it and the dialect's capability entry lists it (fail closed, typed).
+    /// </summary>
+    private static void EnsureStatementAllowed(SqlStatementClass statementClass, CompileRequest request, DialectCapabilities caps)
+    {
+        var required = statementClass switch
         {
-            case SqlBaseParser.StatementDefaultContext:
-                return;
-            case SqlBaseParser.InsertIntoContext:
-                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, "Insert");
-            case SqlBaseParser.UpdateContext:
-                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, "Update");
-            case SqlBaseParser.DeleteContext:
-                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, "Delete");
-            case SqlBaseParser.MergeContext:
-                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, "Merge");
-            default:
-                throw new SecurityException("Only read queries are permitted by the governed SQL compiler.");
+            SqlStatementClass.Select => StatementPermissions.ReadOnly,
+            SqlStatementClass.Insert => StatementPermissions.Insert,
+            SqlStatementClass.Update => StatementPermissions.Update,
+            SqlStatementClass.Delete => StatementPermissions.Delete,
+            SqlStatementClass.Merge => StatementPermissions.Merge,
+            _ => throw new SecurityException("Unknown statement class.")
+        };
+
+        if (required == StatementPermissions.ReadOnly)
+        {
+            return;
+        }
+
+        if (!request.Statements.HasFlag(required) || !caps.DmlStatements.HasFlag(required) ||
+            (statementClass == SqlStatementClass.Merge && !caps.SupportsMerge))
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, statementClass.ToString());
         }
     }
 
@@ -272,7 +294,15 @@ internal sealed class GovernedSqlCompiler
             TablesWithMaskedColumns = new HashSet<string>(request.Policy.TablesWithMaskedColumns, StringComparer.OrdinalIgnoreCase),
             TablesWithConsentRowFilter = new HashSet<string>(request.Policy.TablesWithConsentRowFilter, StringComparer.OrdinalIgnoreCase),
             RejectMaskedColumnsInPredicates = true,
-            RejectMaskedColumnsInDml = true
+            // DML guards of the request (DmlGuardOptions.Strict by default); the coverage verifier proves what they require.
+            EnforceWithCheckOption = request.Policy.Dml.EnforceWithCheckOption,
+            RequireTenantColumnInInsert = request.Policy.Dml.RequireTenantColumnInInsert,
+            DisallowTenantColumnModificationInUpdate = request.Policy.Dml.DisallowTenantColumnModificationInUpdate,
+            RejectUnfilteredDml = request.Policy.Dml.RejectUnfilteredDml,
+            RejectMaskedColumnsInDml = request.Policy.Dml.RejectMaskedColumnsInDml,
+            RejectConsentFilteredInsert = request.Policy.Dml.RejectConsentFilteredInsert,
+            RejectWholeRowReferencesInDml = request.Policy.Dml.RejectWholeRowReferencesInDml,
+            RejectPolicyColumnAssignment = request.Policy.Dml.RejectPolicyColumnAssignment
         };
     }
 
