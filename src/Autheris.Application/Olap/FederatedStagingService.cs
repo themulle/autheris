@@ -87,7 +87,8 @@ public sealed class FederatedStagingService : IFederatedStagingService
                 req.Metadata.HttpEndpoint != null)
             {
                 var desc = req.Metadata.HttpEndpoint;
-                if (!desc.CompleteResponse)
+                var isPaged = desc.Pagination != null && desc.Pagination.Strategy != HttpPaginationStrategy.None;
+                if (!desc.CompleteResponse && !isPaged)
                 {
                     _logger.LogWarning("Federated staging rejected HTTP table {Table}: CompleteResponse is false.", req.Metadata.Identifier);
                     throw new GatewaySecurityException($"HTTP table '{req.Metadata.Identifier}' does not declare CompleteResponse=true and cannot be federated.", "INCOMPLETE_HTTP_RESPONSE");
@@ -148,7 +149,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     rowPolicy,
                     ct).ConfigureAwait(false);
             }
-            catch (ConnectorRowLimitExceededException ex)
+            catch (Autheris.Application.Connectors.ConnectorRowLimitExceededException ex)
             {
                 _logger.LogWarning("Table {Table} exceeded staging limit of {Limit} rows.", ex.Table, ex.MaxRows);
                 throw new GatewaySecurityException($"Table '{ex.Table}' exceeds maximum allowed staging rows ({ex.MaxRows}).", "ROW_LIMIT_EXCEEDED");

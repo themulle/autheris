@@ -7,12 +7,12 @@
 [![OData](https://img.shields.io/badge/Protocol-OData%20v4-0078D4)](#)
 [![AuthZ](https://img.shields.io/badge/AuthZ-Casbin%20ABAC-009688)](#)
 [![CI Build & Test](https://img.shields.io/badge/CI-Passing-brightgreen?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/Tests-5%2C000%2B%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
+[![Tests](https://img.shields.io/badge/Tests-5%2C600%2B%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
 [![Security Review](https://img.shields.io/badge/Security%20Review-2026--10--02%20Remediated-brightgreen)](security-review-2026-10-02.md)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/themulle/autheris/pkgs/container/autheris)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20Onion-blue)](docs/architecture/arc42.md)
 [![Diagram](https://img.shields.io/badge/Diagram-Architecture%20%26%20Capabilities-informational)](#-architecture--capabilities-overview-at-a-glance)
-[![Features](https://img.shields.io/badge/Features-52%2B%20Enterprise%20Catalog-blueviolet)](docs/features/README.md)
+[![Features](https://img.shields.io/badge/Features-57%2B%20Enterprise%20Catalog-blueviolet)](docs/features/README.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1%20%2F%20Commercial-blue)](#-license)
 
 Autheris is a high-performance, secure, centralized enterprise GraphQL gateway built with **.NET 10** and **Hot Chocolate 16.6.7**. It provides unified GraphQL access to heterogeneous enterprise databases (**Microsoft SQL Server / MSSQL, SQLite, PostgreSQL, Databricks, Oracle**), modern **Apache Iceberg Lakehouses**, REST APIs, and federated **Hot Chocolate Fusion Subgraphs** while enforcing a strict **Zero-Trust Data-Owner-Consent** governance model.
@@ -20,11 +20,11 @@ Autheris is a high-performance, secure, centralized enterprise GraphQL gateway b
 Instead of traditional coarse-grained role-based access control (RBAC), access to tables, rows, and columns requires explicitly granted, time-bounded, and auditable consents governed directly by data owners.
 
 > 📚 **Product & Architecture Documentation**:
-> - [📋 Complete Enterprise Feature Catalog (docs/features/README.md)](docs/features/README.md) — Comprehensive inventory and deep-dive documentation for all 52+ enterprise features.
+> - [📋 Complete Enterprise Feature Catalog (docs/features/README.md)](docs/features/README.md) — Comprehensive inventory and deep-dive documentation for all 57+ enterprise features.
 > - [🏛️ Architecture Documentation (arc42.md)](docs/architecture/arc42.md) — System context, building blocks, runtime view, and quality goals.
 > - [🔒 Threat Model & Security Whitepaper](docs/threat-model/threat-model.md) — STRIDE analysis, attack surface, mitigation matrices, and cryptographic guarantees.
 > - [⚙️ Configuration Guide](docs/configuration-guide.md) — Comprehensive reference of all `appsettings.json` sections and environment variables.
-> - [🛠️ Endpoints & Testing Guide](docs/endpoints-and-testing.md) — Complete inventory of 100+ mapped API endpoints and testing strategy.
+> - [🛠️ Endpoints & Testing Guide](docs/endpoints-and-testing.md) — Complete inventory of 135+ mapped API endpoints and testing strategy.
 
 ---
 
@@ -49,7 +49,7 @@ Autheris is a **Zero-Trust Enterprise Data Access Gateway** that securely expose
 
 ## 🌟 Complete Enterprise Feature Inventory
 
-Autheris encompasses **52+ production-ready enterprise features**, documented in [`docs/features/`](docs/features/README.md). These capabilities are structured across 7 strategic pillars:
+Autheris encompasses **57+ production-ready enterprise features**, documented in [`docs/features/`](docs/features/README.md). These capabilities are structured across 7 strategic pillars:
 
 ### Pillar 1: Multi-Protocol Data Access & Execution Engines
 
@@ -100,6 +100,14 @@ Autheris encompasses **52+ production-ready enterprise features**, documented in
 - **Declarative REST Data Source Engine & Isolated C# Plugins (`P9`, [`F-ARCH-10`](docs/features/f-arch-10-connector-spi.md))**:
   - Integration of external REST APIs with URL templates, header pushdown (`X-Tenant-Id`, `X-User-Sid`), adaptive batching strategies, and built-in SSRF protection.
   - Standardized Connector SPI and isolated `AssemblyLoadContext` sandboxes for DLL/NuGet extensions without dependency conflicts.
+- **Governed REST Data API & System Virtual Tables ([`F-DATA-06`](docs/features/f-data-06-governed-rest-data-api.md), `P11`)**:
+  - High-throughput REST querying (`GET /api/v1/data/{domain}/{table}`) with full protocol symmetry to WebSQL and GraphQL.
+  - Built-in pagination (`$top`, `$skip`), projection (`$select`), and OData-compliant AST filtering (`$filter`).
+  - System Virtual Tables (`governance.system.consents`, `governance.system.audit`, `governance.system.costs`) for unified metadata and FinOps telemetry introspection.
+- **Catalog Discovery & Zero-Leakage Swagger 2.0 Ingestion ([`F-API-08`](docs/features/f-api-08-catalog-discovery-swagger-ingestion.md), `P12`)**:
+  - Automated onboarding of OpenAPI 3.x and legacy Swagger 2.0 specs (`POST /api/v1/catalog/ingest-swagger`) with zero plaintext credential leakage into audit or logs.
+  - Granular declarative permission grants per person (`POST /api/v1/catalog/grants`) and human-to-SID principal resolution (`POST /api/v1/catalog/principals/resolve`).
+  - Inactive-by-default schema registration (SEC M-30) and lifecycle activation endpoints (`PATCH /api/v1/catalog/tables/{domain}/{table}/state`).
 - **Hot Chocolate Fusion Subgraph Router (`P7`)**:
   - Composes distributed microservice subgraphs into a unified supergraph schema with Zero-Trust token forwarding and in-memory result masking.
 
@@ -146,6 +154,9 @@ Autheris encompasses **52+ production-ready enterprise features**, documented in
   - Central, type-safe `GatewayRole` enum with role inheritance hierarchy (`ClusterAdmin`, `GovernanceAdmin`, `DataOwner`, `DataConsumer`, `Auditor`, `PrivacyAdmin`, `FinOpsAdmin`, `SecurityAdmin`, `DbtAdmin`, `IngestionService`, `LLMAgent`).
   - `ClaimsNormalizationMiddleware` deterministically normalizes AD SIDs, OIDC claims, and certificates into canonical claims upon boundary entry.
   - `IGatewayRoleEvaluator` serves as the Single Source of Truth for all authorization decisions (including tenant-qualified roles `TenantId:Role`).
+- **RFC 6238 TOTP Two-Factor Authentication Engine ([`F-AUTH-03`](docs/features/f-auth-03-rfc6238-totp-2fa-stepup.md), `P13`)**:
+  - RFC 6238 compliant Time-Based One-Time Password engine supporting Microsoft Authenticator, Google Authenticator, and 1Password via standard `otpauth://` QR-code URIs.
+  - Generates short-lived cryptographic step-up tokens (`confirmationToken`) for privileged mutations, administrative operations, and HitL access approvals with replay protection.
 - **GDPR Art. 9 & Art. 15 Compliance**:
   - Automated protection for special category data (GDPR Art. 9: health, genetics, biometrics, religious beliefs): Automatically elevated to `HIGH` sensitivity, mandatory Dual Authorization, and `REDACT` masking (`[REDACTED-GDPR-ART9]`).
   - GDPR Art. 15 Disclosure Report (`gdprDataDisclosureReport`): Generates legally compliant disclosure reports covering all recipients, columns, masking rules, and purposes over a rolling 365-day retention window.
@@ -156,6 +167,13 @@ Autheris encompasses **52+ production-ready enterprise features**, documented in
 
 - **Enterprise MCP Server Gateway ([`ADR-014`](docs/adr/ADR-014-enterprise-model-context-protocol-and-ai-data-guardrails.md))**:
   - Streamable HTTP endpoint `/mcp` on the official MCP C# SDK (current protocol revisions, stateless, OAuth protected resource metadata for Entra ID / AD FS) and a standard I/O runner (`McpStdioRunner`) for AI agents (Claude, Cursor, LangChain).
+- **Official Hybrid MCP Gateway ([`F-AI-12`](docs/features/f-ai-12-hybrid-mcp-gateway.md), `P14`)**:
+  - Full suite of hybrid query tools (`query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`, `get_data_lineage`, `describe_api`, `invoke_api`).
+  - Native MCP Resources (`autheris://catalog/tables`, `autheris://catalog/schema/{domain}/{table}`, `autheris://governance/effective-permissions`).
+  - Standardized agent prompts (`explore_dataset`, `audit_access_compliance`).
+- **Admin MCP Tools & Two-Phase Access Planning (HitL) ([`F-AI-13`](docs/features/f-ai-13-admin-mcp-tools-two-phase-hitl.md), `P15`)**:
+  - Safe natural-language administrative operations via chat: `admin_plan_access`, `admin_apply_access`, `admin_register_datasource`, `admin_set_dataset_state`, `admin_resolve_principal`.
+  - Enforced two-phase confirmation: Dry-run permission diff calculation -> RFC 6238 TOTP 2FA step-up validation -> execution.
 - **MCP Dataset Tools ([`F-AI-11`](docs/features/f-ai-11-mcp-dataset-tools.md))**:
   - `list_datasets` (with `offset`/`limit` pagination) and `describe_dataset` let agents discover every dataset they may use; `query_graphql` queries datasets through GraphQL (the preferred path) with AST complexity budgets and parameter guards.
   - Built-in `query_data_catalog` allows agents to inspect data catalog metadata, classifications, and data stewards.

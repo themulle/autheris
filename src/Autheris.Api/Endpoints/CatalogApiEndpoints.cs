@@ -104,6 +104,21 @@ public static class CatalogApiEndpoints
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
+        // R-55: POST /api/v1/catalog/datasources/{id}/test
+        group.MapPost("/datasources/{id}/test", async (
+            string id,
+            DatasourceTestRequest? request,
+            IDatasourceTestingService testingService,
+            HttpContext httpContext,
+            CancellationToken ct) =>
+        {
+            var effectiveRequest = request ?? new DatasourceTestRequest();
+            var result = await testingService.TestDatasourceAsync(id, effectiveRequest, httpContext.User, ct);
+            return Results.Ok(result);
+        })
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .WithAudit(AuditLevel.Full, AuditEventTypes.DatasourceTested);
+
         return app;
     }
 

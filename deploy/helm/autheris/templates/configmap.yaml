@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "autheris.fullname" . }}
+  labels:
+    {{- include "autheris.labels" . | nindent 4 }}
+data:
+  Gateway__GovernanceDb__Provider: {{ .Values.gateway.governanceDb.provider | quote }}
+  Gateway__DrainDelaySeconds: {{ .Values.gateway.drainDelaySeconds | quote }}
+  Gateway__ShutdownTimeoutSeconds: {{ .Values.gateway.shutdownTimeoutSeconds | quote }}
+  Gateway__Authentication__ForwardAuth__RequireTrustedProxy: "true"

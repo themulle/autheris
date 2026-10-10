@@ -1,0 +1,16 @@
+apiVersion: v2
+name: autheris
+description: Enterprise GraphQL Gateway with Data-Owner Consent, Zero-Trust Governance and High Availability
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - graphql
+  - gateway
+  - security
+  - zero-trust
+  - high-availability
+  - enterprise
+maintainers:
+  - name: Autheris Core Platform Team
+    email: platform@autheris.io

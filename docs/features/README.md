@@ -60,3 +60,9 @@ Every feature document includes an architectural overview, explanation of busine
 | **P8** | WORM Audit Logging & Consent Sealing | [p08-worm-audit-sealing.md](p08-worm-audit-sealing.md) |
 | **P9** | Native C# Ingress/Egress Pipeline & Dual-Mode Extensibility | [p09-native-csharp-pipeline.md](p09-native-csharp-pipeline.md) |
 | **P10** | Enterprise Governance Mutations & 4-Eyes SoD | [p10-governance-mutations-sod.md](p10-governance-mutations-sod.md) |
+| **P11 / F-DATA-06** | Governed REST Data API & System Virtual Tables (`governance.system.*`) | [f-data-06-governed-rest-data-api.md](f-data-06-governed-rest-data-api.md) |
+| **P12 / F-API-08** | Catalog Discovery & Zero-Leakage Swagger 2.0 / OpenAPI Ingestion | [f-api-08-catalog-discovery-swagger-ingestion.md](f-api-08-catalog-discovery-swagger-ingestion.md) |
+| **P13 / F-AUTH-03** | RFC 6238 TOTP Two-Factor Authentication & HitL Step-Up Engine | [f-auth-03-rfc6238-totp-2fa-stepup.md](f-auth-03-rfc6238-totp-2fa-stepup.md) |
+| **P14 / F-AI-12** | Official Hybrid MCP Gateway (Query Tools, Native Resources & Prompts) | [f-ai-12-hybrid-mcp-gateway.md](f-ai-12-hybrid-mcp-gateway.md) |
+| **P15 / F-AI-13** | Admin MCP Tools & Two-Phase Access Planning (HitL) | [f-ai-13-admin-mcp-tools-two-phase-hitl.md](f-ai-13-admin-mcp-tools-two-phase-hitl.md) |
+

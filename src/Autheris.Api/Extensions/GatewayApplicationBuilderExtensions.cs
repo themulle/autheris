@@ -460,6 +460,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapProcedureEndpoints(gatewayOptions);
         app.MapDevPortalEndpoints(gatewayOptions);
         app.MapDevEndpoints(gatewayOptions); // F-AUTH-DX: Development only (no routes elsewhere)
+        app.MapPlan9Endpoints();
 
         if (gatewayOptions.SqlEndpoints.Enabled)
         {

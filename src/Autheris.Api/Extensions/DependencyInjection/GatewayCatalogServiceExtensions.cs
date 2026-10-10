@@ -11,6 +11,7 @@ public static class GatewayCatalogServiceExtensions
     {
         services.TryAddScoped<ICatalogDiscoveryService, CatalogDiscoveryService>();
         services.TryAddScoped<IPrincipalResolverService, PrincipalResolverService>();
+        services.TryAddScoped<IDatasourceTestingService, DatasourceTestingService>();
         return services;
     }
 }

@@ -149,16 +149,26 @@ classDiagram
 ```
 
 ### 5.1 Autheris.Domain
-Contains domain models (`Table`, `Consent`, `AuditLogEntry`, `PolicyEpoch`), value objects (`Sid`, `TableIdentifier`, `ColumnAccessLevel`), and pure domain services (`ConsentResolutionService`, `ColumnMaskingProvider`).
+Contains domain models (`Table`, `Consent`, `AuditLogEntry`, `PolicyEpoch`, `DatasourceAuthDto`, `PrincipalResolutionItem`, `AccessPlanTicket`), value objects (`Sid`, `TableIdentifier`, `ColumnAccessLevel`), and pure domain services (`ConsentResolutionService`, `ColumnMaskingProvider`).
 
 ### 5.2 Autheris.Application
-Defines repository and cache contracts (`IGovernanceRepository`, `IConsentCacheService`, `ISqlFilterProvider`, `IEventBus`, `ITrafficDrainController`).
+- Core orchestration and access planning: `IGatewayExecutionService`, `IGovernanceRepository`, `IConsentCacheService`, `ISqlFilterProvider`, `IEventBus`, `ITrafficDrainController`.
+- **Catalog & Ingestion:** `CatalogDiscoveryService`, `OpenApiIngestionService`, `DatasourceOnboardingService`, `IKeyVaultSecretProvider`.
+- **Governed REST Data API:** `GovernedDataQueryService`, `VirtualSystemTablesHostedService` (protocol symmetry across REST, WebSQL, GraphQL, OData).
+- **Two-Factor Authentication & HitL:** `TotpVerificationService` (RFC 6238 TOTP with replay cache), `HitLStepUpService`.
+- **Model Context Protocol (MCP):** `GatewayMcpServer`, `HybridMcpTools` (query tools, native resources `autheris://*`, prompts), `AdminMcpTools` (`admin_plan_access`, `admin_apply_access` with two-phase confirmation), and `AccessPlanningService`.
 
-### 5.3 Autheris.Infrastructure
-Implements persistence using ADO.NET (`SqliteGovernanceRepository`), in-memory and Redis caching (`ConsentCacheService`), pub/sub event channels (`InProcessChannelEventBus`), and policy epoch validation (`EpochValidationService`).
+### 5.3 Autheris.Core & TrinoSqlEngine
+Implements high-performance multi-target SQL AST compiler pipeline:
+- `SqlAstBuilder`: ANTLR4-based parser with FAIL-LOUD validation on advanced SQL constructs (`TABLESAMPLE`, `PIVOT`, `MATCH_RECOGNIZE`).
+- `AstSecurityVisitor`: Deep tree injection of RLS predicates and column masking rules.
+- `ISqlDialectGenerator`: Native dialect emitters (T-SQL, PostgreSQL, SQLite, DuckDB, Oracle, Snowflake).
 
-### 5.4 Autheris.GraphQL & WebHost
-Configures Hot Chocolate schema, dynamic query resolvers, mutations, rate-limiting middlewares, error sanitization, and traffic drain lifecycle.
+### 5.4 Autheris.Infrastructure
+Implements persistence using ADO.NET (`SqliteGovernanceRepository`, `SqlServerGovernanceRepository`, `PostgreSqlGovernanceRepository`), in-memory and Redis caching (`ConsentCacheService`), pub/sub event channels (`InProcessChannelEventBus`), policy epoch validation (`EpochValidationService`), and secret storage (`KeyVaultSecretProvider`).
+
+### 5.5 Autheris.GraphQL, Autheris.Api & WebHost
+Configures Hot Chocolate schema, dynamic query resolvers, mutations, REST Data API (`/api/v1/data/*`), Catalog endpoints (`/api/v1/catalog/*`), TOTP endpoints (`/api/v1/auth/2fa/*`), MCP server (`/mcp`), rate-limiting middlewares, error sanitization, and traffic drain lifecycle.
 
 ---
 

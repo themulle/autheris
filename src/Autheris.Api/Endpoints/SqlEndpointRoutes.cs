@@ -37,7 +37,7 @@ public static class SqlEndpointRoutes
              .RequireAuthorization()
              .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        group.MapPost("/", HandleRegisterEndpoint)
+        group.MapPost("/", (RegisterSqlEndpointRequest? request, ISqlEndpointRegistry registry, HttpContext context) => HandleRegisterEndpoint(request, registry, context))
              .WithName("RegisterSqlEndpoint")
              .RequireAuthorization()
              .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);

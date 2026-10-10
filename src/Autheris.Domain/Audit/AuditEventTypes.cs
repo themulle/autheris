@@ -48,4 +48,11 @@ public static class AuditEventTypes
     public const string ConsentDenied = "CONSENT_DENIED";
     public const string ConsentRevoked = "CONSENT_REVOKED";
     public const string BreakGlassActivated = "BREAK_GLASS_ACTIVATED";
+
+    // Plan 9: Datasources & Async Jobs
+    public const string DatasourceTested = "DATASOURCE_TESTED";
+    public const string AsyncJobSubmitted = "ASYNC_JOB_SUBMITTED";
+    public const string AsyncJobCompleted = "ASYNC_JOB_COMPLETED";
+    public const string AsyncJobDownloaded = "ASYNC_JOB_DOWNLOADED";
+    public const string AsyncJobCancelled = "ASYNC_JOB_CANCELLED";
 }

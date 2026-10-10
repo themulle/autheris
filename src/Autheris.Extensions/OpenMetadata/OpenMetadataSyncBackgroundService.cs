@@ -12,15 +12,18 @@ public sealed class OpenMetadataSyncBackgroundService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<OpenMetadataSyncBackgroundService> _logger;
+    private readonly Autheris.Application.State.IDistributedClusterStateProvider? _clusterState;
 
     public OpenMetadataSyncBackgroundService(
         IServiceScopeFactory scopeFactory,
         IOptions<GatewayOptions> options,
-        ILogger<OpenMetadataSyncBackgroundService> logger)
+        ILogger<OpenMetadataSyncBackgroundService> logger,
+        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null)
     {
         _scopeFactory = scopeFactory;
         _options = options;
         _logger = logger;
+        _clusterState = clusterState;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -34,31 +37,43 @@ public sealed class OpenMetadataSyncBackgroundService : BackgroundService
 
         _logger.LogInformation("OpenMetadata background sync service started. Sync interval: {Interval} minutes.", omOptions.SyncIntervalMinutes);
 
+        var leaseDuration = TimeSpan.FromMinutes(Math.Max(5, omOptions.SyncIntervalMinutes));
+
         // Initial sync on startup
-        try
-        {
-            await using var scope = _scopeFactory.CreateAsyncScope();
-            var syncService = scope.ServiceProvider.GetRequiredService<IOpenMetadataSyncService>();
-            await syncService.SyncPermissionsAsync(dryRun: false, stoppingToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex, "Initial OpenMetadata sync failed on startup.");
-        }
+        await ExecuteSyncWithLockAsync(leaseDuration, stoppingToken).ConfigureAwait(false);
 
         using var timer = new PeriodicTimer(TimeSpan.FromMinutes(Math.Max(1, omOptions.SyncIntervalMinutes)));
 
         while (!stoppingToken.IsCancellationRequested && await timer.WaitForNextTickAsync(stoppingToken))
         {
+            await ExecuteSyncWithLockAsync(leaseDuration, stoppingToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task ExecuteSyncWithLockAsync(TimeSpan leaseDuration, CancellationToken stoppingToken)
+    {
+        IAsyncDisposable? syncLock = null;
+        if (_clusterState != null)
+        {
+            syncLock = await _clusterState.TryAcquireLockAsync("catalog:openmetadata:sync", leaseDuration, stoppingToken).ConfigureAwait(false);
+            if (syncLock == null)
+            {
+                _logger.LogDebug("OpenMetadata sync lock held by another cluster replica; skipping sync cycle.");
+                return;
+            }
+        }
+
+        await using (syncLock)
+        {
             try
             {
                 await using var scope = _scopeFactory.CreateAsyncScope();
                 var syncService = scope.ServiceProvider.GetRequiredService<IOpenMetadataSyncService>();
-                await syncService.SyncPermissionsAsync(dryRun: false, stoppingToken);
+                await syncService.SyncPermissionsAsync(dryRun: false, stoppingToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex, "Periodic OpenMetadata sync failed.");
+                _logger.LogError(ex, "OpenMetadata sync failed.");
             }
         }
     }

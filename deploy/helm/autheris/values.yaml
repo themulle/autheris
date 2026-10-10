@@ -1,0 +1,119 @@
+# Default values for Autheris Enterprise GraphQL Gateway.
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/themulle/autheris
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/path: "/metrics"
+  prometheus.io/port: "5000"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 5000
+  targetPort: 5000
+
+ingress:
+  enabled: true
+  className: "traefik"
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+  hosts:
+    - host: gateway.corp.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: gateway-corp-tls
+      hosts:
+        - gateway.corp.local
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 2048Mi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+topologySpreadConstraints:
+  enabled: true
+  maxSkew: 1
+  topologyKey: topology.kubernetes.io/zone
+  whenUnsatisfiable: DoNotSchedule
+
+gateway:
+  drainDelaySeconds: 5
+  shutdownTimeoutSeconds: 30
+  aspnetcoreEnvironment: "Production"
+  
+  # Governance Database Configuration
+  governanceDb:
+    provider: "PostgreSql"
+    existingSecret: "autheris-db-secrets"
+    connectionStringSecretKey: "connectionString"
+  
+  # Redis HA / Cluster State
+  redis:
+    enabled: true
+    instanceName: "Autheris:"
+    existingSecret: "autheris-redis-secrets"
+    configurationSecretKey: "configuration"
+  
+  # Security & Masking
+  security:
+    hmacSecretExistingSecret: "autheris-security-secrets"
+    hmacSecretKey: "hmacKey"
+    trustedNetworks:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+      - "192.168.0.0/16"
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: "15s"
+    scrapeTimeout: "10s"
+  prometheusRule:
+    enabled: true
+
+terminationGracePeriodSeconds: 60

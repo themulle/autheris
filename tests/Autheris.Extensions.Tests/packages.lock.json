@@ -505,6 +505,11 @@
           "System.CodeDom": "6.0.0"
         }
       },
+      "System.Numerics.Tensors": {
+        "type": "Transitive",
+        "resolved": "10.0.12",
+        "contentHash": "17brFrnQHV/XMMazXNqFq4GkvzWy8yzDPo5Gb8TT8zJtMFbUqDycOCyPCp9F+eMc4L75kcCKRZqaeBHMwLCL9Q=="
+      },
       "xunit.abstractions": {
         "type": "Transitive",
         "resolved": "2.0.3",
@@ -575,6 +580,7 @@
           "Microsoft.Extensions.Options": "[10.0.12, )",
           "Parquet.Net": "[6.1.0, )",
           "System.IO.Hashing": "[10.0.12, )",
+          "System.Numerics.Tensors": "[10.0.12, )",
           "YamlDotNet": "[18.1.0, )",
           "prometheus-net": "[8.2.1, )"
         }
