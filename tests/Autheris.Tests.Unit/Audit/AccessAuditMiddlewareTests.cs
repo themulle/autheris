@@ -167,4 +167,94 @@ public sealed class AccessAuditMiddlewareTests
         recorded.Decision.ShouldBe("DENY");
         recorded.EventType.ShouldBe(expectedEventType);
     }
+
+    private static void SetDelegatedEndpoint(DefaultHttpContext context) =>
+        context.SetEndpoint(new Endpoint(
+            _ => Task.CompletedTask,
+            new EndpointMetadataCollection(new AuditPolicy(AuditLevel.Delegated, AuditEventTypes.AsyncJobSubmitted)),
+            "delegated-test"));
+
+    [Theory]
+    [InlineData(401, "DENY", "AUTH_FAILED")]
+    [InlineData(403, "DENY", "AUTHZ_ENDPOINT_DENIED")]
+    [InlineData(404, "DENY", "ASYNC_JOB_SUBMITTED")]
+    [InlineData(500, "ERROR", "QUERY_EXECUTION_ERROR")]
+    public async Task InvokeAsync_DelegatedRoute_NotHandled_FinalizesFailureStatuses(int status, string decision, string eventType)
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/jobs/query";
+        SetDelegatedEndpoint(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = status; return Task.CompletedTask; });
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        recorded.ShouldNotBeNull();
+        recorded.Decision.ShouldBe(decision);
+        recorded.EventType.ShouldBe(eventType);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DelegatedRoute_Unauthorized_FeedsAuthFailureAggregator()
+    {
+        var aggregator = Substitute.For<IAuthFailureAggregator>();
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/jobs/query";
+        SetDelegatedEndpoint(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = 401; return Task.CompletedTask; }, aggregator);
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        await aggregator.Received(1).RecordFailureAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DelegatedRoute_ExceptionBeforeDomainAudit_RecordsErrorAndRethrows()
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/jobs/query";
+        SetDelegatedEndpoint(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(_ => throw new InvalidOperationException("boom"));
+        await Should.ThrowAsync<InvalidOperationException>(() => middleware.InvokeAsync(context, _auditRepo, auditContext));
+
+        recorded.ShouldNotBeNull();
+        recorded.Decision.ShouldBe("ERROR");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DelegatedRoute_SuccessWithoutDomainAudit_RecordsNothing()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/jobs/query";
+        SetDelegatedEndpoint(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = 202; return Task.CompletedTask; });
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        await _auditRepo.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DelegatedRoute_Handled_DoesNotDoubleRecordOnFailureStatus()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/jobs/query";
+        SetDelegatedEndpoint(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { auditContext.MarkHandled(); c.Response.StatusCode = 500; return Task.CompletedTask; });
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        await _auditRepo.DidNotReceive().RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>());
+    }
 }
