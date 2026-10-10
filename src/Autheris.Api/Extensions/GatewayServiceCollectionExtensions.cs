@@ -198,7 +198,7 @@ public static class GatewayServiceCollectionExtensions
                 options.KnownProxies.Add(System.Net.IPAddress.Loopback);
                 options.KnownProxies.Add(System.Net.IPAddress.IPv6Loopback);
 
-                foreach (var netStr in gatewayOptions.ReverseProxy.KnownNetworks)
+                foreach (var netStr in gatewayOptions.ReverseProxy.GetEffectiveKnownNetworks())
                 {
                     if (System.Net.IPNetwork.TryParse(netStr, out var network))
                     {

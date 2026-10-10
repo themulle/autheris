@@ -387,7 +387,20 @@ public sealed class PluginsOptions
 public sealed class ReverseProxyOptions
 {
     public bool Enabled { get; init; } = true;
-    public List<string> KnownNetworks { get; init; } = ["127.0.0.1/32", "::1/128"];
+
+    /// <summary>
+    /// Networks whose X-Forwarded-* headers are trusted. When not configured, only loopback (127.0.0.1/32, ::1/128) is
+    /// trusted. A configured list replaces the default entirely. Nullable on purpose: the configuration binder appends
+    /// to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON array counts as "not
+    /// configured"; to trust no forwarded headers at all, set <see cref="Enabled"/> to false.
+    /// </summary>
+    public List<string>? KnownNetworks { get; init; }
+
+    private static readonly string[] DefaultKnownNetworks = ["127.0.0.1/32", "::1/128"];
+
+    /// <summary>Configured <see cref="KnownNetworks"/> or the loopback default.</summary>
+    public IReadOnlyList<string> GetEffectiveKnownNetworks() => KnownNetworks ?? (IReadOnlyList<string>)DefaultKnownNetworks;
+
     public List<string> KnownProxies { get; init; } = [];
 }
 

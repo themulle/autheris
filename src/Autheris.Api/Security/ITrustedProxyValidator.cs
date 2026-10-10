@@ -40,7 +40,7 @@ public sealed class TrustedProxyValidator(IOptions<GatewayOptions> gatewayOption
         var rp = options.ReverseProxy;
 
         List<IPNetwork> networks = [];
-        foreach (var net in fwd.TrustedNetworks.Concat(rp.KnownNetworks))
+        foreach (var net in fwd.TrustedNetworks.Concat(rp.GetEffectiveKnownNetworks()))
         {
             if (IPNetwork.TryParse(net, out var network))
             {
