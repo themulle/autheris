@@ -79,7 +79,8 @@ public sealed class FederatedVirtualFilterPushdownTests(FederatedVirtualFilterWe
     [InlineData(PushdownParameterFormat.ODataIn)]
     public async Task E2E3_RepeatedParamOrODataBinding_AdaptiveFallsBackToFullFetch_OnlyAuthorizedRows(PushdownParameterFormat format)
     {
-        await fixture.UseBindingsAsync(Binding(Tables.ODataFormat, format: format));
+        // The write path rejects these formats; the planner must still fail safe on a profile that is already stored.
+        await fixture.UseStoredBindingsAsync(Binding(Tables.ODataFormat, format: format));
 
         var ids = await fixture.ColumnAsync(Query(Tables.ODataFormat));
 
