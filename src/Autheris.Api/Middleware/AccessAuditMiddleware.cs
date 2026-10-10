@@ -202,9 +202,12 @@ public sealed class AccessAuditMiddleware
             var tidClaim = context.User.FindFirst("tid")?.Value
                 ?? context.User.FindFirst("tenant_id")?.Value;
 
-            if (!string.IsNullOrWhiteSpace(tidClaim))
+            // API-7: an invalid tenant claim must never fail the audit finalizer (that surfaced as a 500). The request is
+            // rejected with 403 by the security-context middleware; the audit entry keeps the default tenant and never
+            // records the raw, attacker-controlled claim value.
+            if (TenantId.TryParse(tidClaim, out var parsedTenant))
             {
-                auditContext.TenantId = new TenantId(tidClaim);
+                auditContext.TenantId = parsedTenant;
             }
         }
     }
