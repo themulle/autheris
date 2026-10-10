@@ -63,6 +63,26 @@ public sealed record DialectFunctionMap(FrozenDictionary<string, FunctionRewrite
 {
     public static DialectFunctionMap Empty { get; } = new(FrozenDictionary<string, FunctionRewriteRule>.Empty);
 
+    /// <summary>
+    /// Builds the map of <paramref name="dialect"/> from the reviewed allowlist (CR-ADG-02): identity rules, except where the
+    /// dialect generator rewrites the function (the template then names the target form).
+    /// </summary>
+    public static DialectFunctionMap ForDialect(TargetSqlDialect dialect, IReadOnlyDictionary<string, string>? rewrites = null)
+    {
+        var rules = new Dictionary<string, FunctionRewriteRule>(StringComparer.Ordinal);
+        foreach (var name in SqlFunctionAllowlists.CompilerNames(dialect))
+        {
+            string lower = name.ToLowerInvariant();
+            string template = rewrites is not null && rewrites.TryGetValue(lower, out var target) ? target : name.ToUpperInvariant();
+            rules[lower] = new FunctionRewriteRule(lower, ImmutableArray<string>.Empty, template);
+        }
+
+        return new DialectFunctionMap(rules.ToFrozenDictionary(StringComparer.Ordinal));
+    }
+
+    /// <summary>The Trino function names that have a rule; the compiler's default allowlist (null AllowedFunctions).</summary>
+    public IReadOnlySet<string> Names { get; } = Rules.Keys.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
     public bool TryGetRule(string trinoName, out FunctionRewriteRule? rule)
     {
         ArgumentNullException.ThrowIfNull(trinoName);
@@ -100,7 +120,7 @@ public sealed record DialectCapabilities(
     string LimitSource)
 {
     /// <summary>Version of the capability data. Part of the compile cache key (SEC-ADG-01).</summary>
-    public const string TableVersion = "cap-1";
+    public const string TableVersion = "cap-2";
 }
 
 public interface IDialectCapabilityProvider

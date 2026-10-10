@@ -297,6 +297,18 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
         }
     }
 
+    [Theory]
+    [InlineData("SELECT reflect('java.lang.System', 'getProperty', 'java.version') FROM orders")]
+    [InlineData("SELECT java_method('java.lang.System', 'getProperty', 'java.version') FROM orders")]
+    [InlineData("SELECT secret('scope', 'key') FROM orders")]
+    public async Task Reflect_JavaMethod_Secret_AreRejected_BeforeReachingSpark(string sql)
+    {
+        // CR-ADG-02: the review executed reflect(...) on the Spark proxy (it returned the JVM version). The compiler now rejects
+        // every function without a rule, so nothing is sent to Spark. Runs without the proxy: the failure is at compile time.
+        Should.Throw<System.Security.SecurityException>(() => _engine.Compile(sql.AsMemory(), Request("acme"), CancellationToken.None));
+        await Task.CompletedTask;
+    }
+
     [Fact]
     public async Task Tenant_SeesOnlyItsOwnRows()
     {

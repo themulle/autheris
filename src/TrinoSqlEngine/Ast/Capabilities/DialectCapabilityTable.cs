@@ -15,6 +15,19 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
     // parameter through the provider (SqlParameter.SqlDbType), so no wrapper is needed.
     private static readonly FrozenDictionary<SqlParameterType, string> SqlServerBindTemplates = BuildIdentityTemplates();
 
+    // Trino functions that the dialect generator rewrites (documentation of the rule; the generator performs the rewrite).
+    private static readonly IReadOnlyDictionary<string, string> SqlServerRewrites = new Dictionary<string, string>
+    {
+        ["length"] = "LEN", ["char_length"] = "LEN", ["character_length"] = "LEN", ["ceil"] = "CEILING", ["strpos"] = "CHARINDEX"
+    };
+
+    private static readonly IReadOnlyDictionary<string, string> OracleRewrites = new Dictionary<string, string> { ["strpos"] = "INSTR" };
+
+    private static readonly IReadOnlyDictionary<string, string> DatabricksRewrites = new Dictionary<string, string>
+    {
+        ["strpos"] = "INSTR", ["approx_distinct"] = "APPROX_COUNT_DISTINCT", ["arbitrary"] = "ANY_VALUE"
+    };
+
     private static readonly DialectCapabilities SqlServer = new(
         Dialect: TargetSqlDialect.SqlServer,
         Tier: DialectSupportTier.Production,
@@ -39,7 +52,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         InDbHmac: true,
         TenantComparison: TenantComparisonStyle.Utf16BinaryCast,
         BindExpressionTemplates: SqlServerBindTemplates,
-        Functions: DialectFunctionMap.Empty,
+        Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.SqlServer, SqlServerRewrites),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "MSSQL-CAP");
 
@@ -67,7 +80,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         InDbHmac: false,                                           // decision B-2: HMAC degrades to Redact
         TenantComparison: TenantComparisonStyle.EncodedBlob,
         BindExpressionTemplates: SqlServerBindTemplates,
-        Functions: DialectFunctionMap.Empty,
+        Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.DuckDb),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "DUCK-PREP");
 
@@ -95,7 +108,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         InDbHmac: true,                                            // pgcrypto hmac(); a missing extension fails at execution
         TenantComparison: TenantComparisonStyle.TextSendBytea,
         BindExpressionTemplates: SqlServerBindTemplates,
-        Functions: DialectFunctionMap.Empty,
+        Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.PostgreSql),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "PG-PROTO");
 
@@ -123,7 +136,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         InDbHmac: false,                                           // true only after a DBMS_CRYPTO grant probe (WP-F6)
         TenantComparison: TenantComparisonStyle.RawCast,
         BindExpressionTemplates: SqlServerBindTemplates,
-        Functions: DialectFunctionMap.Empty,
+        Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.Oracle, OracleRewrites),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "JOOQ");
 
@@ -151,7 +164,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         InDbHmac: false,                                           // decision B-2: HMAC degrades to Redact
         TenantComparison: TenantComparisonStyle.CastBinary,
         BindExpressionTemplates: SqlServerBindTemplates,
-        Functions: DialectFunctionMap.Empty,
+        Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.Databricks, DatabricksRewrites),
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "DBX-PARAM");
 

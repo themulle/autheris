@@ -129,7 +129,7 @@ internal sealed class GovernedSqlCompiler
         {
             EnforceReadOnlyQueries = true,
             EnforceFunctionPolicy = true,
-            AllowedFunctions = request.AllowedFunctions,
+            AllowedFunctions = EffectiveFunctions(request, caps),
             AllowedTableFunctions = request.AllowedTableFunctions,
             TranslateTrinoDateFunctions = request.TranslateTrinoDateFunctions,
             RejectTimeTravelQueries = true
@@ -171,6 +171,27 @@ internal sealed class GovernedSqlCompiler
         // 11. only verified output is cached, value-free
         _cache.Add(CompiledSqlTemplate.From(keyMaterial, compiled, typed.Dependencies));
         return compiled;
+    }
+
+    /// <summary>
+    /// CR-ADG-02 / INV-1 / plan 3.6: the allowlist is the dialect's function map. A caller list can only narrow it; a function
+    /// without a rule is rejected, never passed through. <c>null</c> means "the dialect map", not "everything not denied".
+    /// </summary>
+    private static IReadOnlySet<string> EffectiveFunctions(CompileRequest request, DialectCapabilities caps)
+    {
+        var map = caps.Functions.Names;
+        if (request.AllowedFunctions is null)
+        {
+            return map;
+        }
+
+        var narrowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in request.AllowedFunctions)
+        {
+            if (map.Contains(name)) narrowed.Add(name);
+        }
+
+        return narrowed;
     }
 
     private static bool TryRehydrate(CompiledSqlTemplate template, TypedPolicyContext typed)
