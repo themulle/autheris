@@ -71,6 +71,39 @@ public sealed class CatalogApiEndpointsTests
     }
 
     [Fact]
+    public async Task SearchCatalogDetailed_ReturnsMatchingHits()
+    {
+        var expected = new List<CatalogSearchHit>
+        {
+            new(
+                TableIdentifier: new TableIdentifier("crm", "dbo", "customers"),
+                DisplayName: "crm.customers",
+                Description: "Customer table",
+                Domain: "crm",
+                Sensitivity: "Confidential",
+                CombinedScore: 0.88,
+                Bm25Score: 0.88,
+                VectorScore: 0.88,
+                MatchedTerms: ["customers"],
+                RelevantColumns: ["id", "name"],
+                RelatedJoinPaths: [],
+                SuggestedGraphQlField: "crm_customers")
+        };
+
+        _discoveryService.SearchCatalogDetailedAsync(
+            Arg.Is<CatalogSearchQuery>(q => q.QueryText == "customers" && q.DomainFilter == "crm"),
+            Arg.Any<RequestContext>(),
+            Arg.Any<CancellationToken>())
+            .Returns(expected);
+
+        var query = new CatalogSearchQuery("customers", "crm", 10, CatalogSearchMode.Hybrid);
+        var result = await _discoveryService.SearchCatalogDetailedAsync(query, new RequestContext(new TenantId("tenant-a"), new Sid("user:admin")));
+        result.Count.ShouldBe(1);
+        result[0].TableIdentifier.TableName.ShouldBe("customers");
+        result[0].CombinedScore.ShouldBe(0.88, 0.001);
+    }
+
+    [Fact]
     public async Task ResolvePrincipals_ReturnsResolvedList()
     {
         var httpContext = CreateContext();

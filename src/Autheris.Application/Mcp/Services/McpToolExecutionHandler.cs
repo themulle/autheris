@@ -132,9 +132,38 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         {
             var query = root.TryGetProperty("query", out var qProp) ? qProp.GetString() ?? "" : "";
             var domain = root.TryGetProperty("domain", out var dProp) ? dProp.GetString() : null;
+            var limit = root.TryGetProperty("limit", out var lProp) && lProp.TryGetInt32(out var l) ? l : 5;
+            var modeStr = root.TryGetProperty("mode", out var mProp) ? mProp.GetString() : "hybrid";
 
-            var results = await _catalogDiscoveryService.SearchCatalogAsync(query, domain, requestContext, ct).ConfigureAwait(false);
-            return JsonSerializer.Serialize(results, JsonOpts);
+            var mode = modeStr?.ToLowerInvariant() switch
+            {
+                "semantic" => CatalogSearchMode.SemanticVector,
+                "keyword" => CatalogSearchMode.KeywordBm25,
+                _ => CatalogSearchMode.Hybrid
+            };
+
+            var searchQuery = new CatalogSearchQuery(query, domain, limit, mode, ExpandRelations: true);
+            var results = await _catalogDiscoveryService.SearchCatalogDetailedAsync(searchQuery, requestContext, ct).ConfigureAwait(false);
+
+            return JsonSerializer.Serialize(new
+            {
+                total_hits = results.Count,
+                query,
+                datasets = results.Select(h => new
+                {
+                    table = $"{h.TableIdentifier.Domain}.{h.TableIdentifier.TableName}",
+                    domain = h.Domain,
+                    description = h.Description,
+                    relevance_score = Math.Round(h.CombinedScore, 4),
+                    matched_terms = h.MatchedTerms,
+                    matched_columns = h.RelevantColumns,
+                    join_relations = h.RelatedJoinPaths.Select(r => new
+                    {
+                        target_table = $"{r.ToTable.Domain}.{r.ToTable.TableName}",
+                        join_condition = $"{h.TableIdentifier.TableName}.{r.FromColumn} = {r.ToTable.TableName}.{r.ToColumn}"
+                    })
+                })
+            }, JsonOpts);
         }
 
         if (string.Equals(tool.Name, McpDatasetTools.GetMyPermissions, StringComparison.OrdinalIgnoreCase))

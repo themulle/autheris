@@ -13,6 +13,7 @@ using Autheris.Application.Policy;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Interfaces;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
@@ -25,8 +26,9 @@ public sealed class CatalogDiscoveryServiceTests
     private readonly IAuditLogRepository _auditLogRepository = Substitute.For<IAuditLogRepository>();
     private readonly IKeyVaultSecretProvider _secretProvider = Substitute.For<IKeyVaultSecretProvider>();
     private readonly IOpenApiIngestionService _openApiIngestionService = Substitute.For<IOpenApiIngestionService>();
+    private readonly ICatalogSearchEngine _searchEngine = Substitute.For<ICatalogSearchEngine>();
 
-    private CatalogDiscoveryService CreateService()
+    private CatalogDiscoveryService CreateService(ICatalogSearchEngine? searchEngine = null)
     {
         return new CatalogDiscoveryService(
             _metadataRepository,
@@ -34,6 +36,7 @@ public sealed class CatalogDiscoveryServiceTests
             _rebacEvaluator,
             _secretProvider,
             _openApiIngestionService,
+            searchEngine ?? _searchEngine,
             NullLogger<CatalogDiscoveryService>.Instance);
     }
 
@@ -265,5 +268,147 @@ public sealed class CatalogDiscoveryServiceTests
         capturedAudit.ShouldNotBeNull();
         capturedAudit!.DetailsJson.ShouldNotContain(rawSecret);
         capturedAudit.DetailsJson.ShouldContain("CraneTelemetry");
+    }
+
+    [Fact]
+    public async Task SearchCatalogAsync_WhenSearchEngineReady_ReturnsHybridHitsMappedToSummaries()
+    {
+        // Arrange
+        var service = CreateService();
+        var tenant = new TenantId("tenant-a");
+        var userSid = new Sid("user:alice");
+        var context = new RequestContext(tenant, userSid);
+
+        var tableId = new TableIdentifier("crm", "dbo", "customers");
+        var table = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { SchemaName = "dbo", TableName = "customers", DataSourceType = DataSourceType.HttpDeclarative, IsActive = true },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+        };
+
+        _metadataRepository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+        _rebacEvaluator.IsEnabled.Returns(false); // all permitted
+
+        _searchEngine.IsIndexReady.Returns(true);
+        var hit = new CatalogSearchHit(
+            TableIdentifier: tableId,
+            DisplayName: "crm.customers",
+            Description: "Customer accounts",
+            Domain: "crm",
+            Sensitivity: "NORMAL",
+            CombinedScore: 0.92,
+            Bm25Score: 0.90,
+            VectorScore: 0.94,
+            MatchedTerms: ["cust"],
+            RelevantColumns: ["id"],
+            RelatedJoinPaths: [],
+            SuggestedGraphQlField: "crm_customers");
+
+        _searchEngine.Search(
+            Arg.Is<CatalogSearchQuery>(q => q.QueryText == "cust" && q.DomainFilter == "crm"),
+            Arg.Any<Func<TableIdentifier, bool>>())
+            .Returns([hit]);
+
+        // Act
+        var results = await service.SearchCatalogAsync("cust", "crm", context);
+
+        // Assert
+        results.ShouldNotBeNull();
+        results.Count.ShouldBe(1);
+        results[0].Table.ShouldBe("customers");
+        results[0].Domain.ShouldBe("crm");
+        results[0].Description.ShouldBe("Customer accounts");
+    }
+
+    [Fact]
+    public async Task SearchCatalogDetailedAsync_WhenSearchEngineReady_ReturnsHitsWithJoinPathsAndRelevance()
+    {
+        // Arrange
+        var service = CreateService();
+        var tenant = new TenantId("tenant-a");
+        var userSid = new Sid("user:alice");
+        var context = new RequestContext(tenant, userSid);
+
+        var tableId = new TableIdentifier("sales", "dbo", "orders");
+        var table = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.HttpDeclarative, IsActive = true },
+            Columns = [new TableColumn { ColumnName = "order_id", DataType = "int" }]
+        };
+
+        _metadataRepository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+        _rebacEvaluator.IsEnabled.Returns(false);
+
+        _searchEngine.IsIndexReady.Returns(true);
+        var hit = new CatalogSearchHit(
+            TableIdentifier: tableId,
+            DisplayName: "sales.orders",
+            Description: "Customer orders",
+            Domain: "sales",
+            Sensitivity: "CONFIDENTIAL",
+            CombinedScore: 0.85,
+            Bm25Score: 0.80,
+            VectorScore: 0.90,
+            MatchedTerms: ["orders"],
+            RelevantColumns: ["order_id"],
+            RelatedJoinPaths: [
+                new TableRelationship(
+                    FromTable: tableId,
+                    FromColumn: "customer_id",
+                    ToTable: new TableIdentifier("sales", "dbo", "customers"),
+                    ToColumn: "id",
+                    Type: TableRelationshipType.ForeignKey)
+            ],
+            SuggestedGraphQlField: "sales_orders");
+
+        var query = new CatalogSearchQuery("orders", "sales", 10, CatalogSearchMode.Hybrid);
+        _searchEngine.Search(query, Arg.Any<Func<TableIdentifier, bool>>())
+            .Returns([hit]);
+
+        // Act
+        var results = await service.SearchCatalogDetailedAsync(query, context);
+
+        // Assert
+        results.ShouldNotBeNull();
+        results.Count.ShouldBe(1);
+        results[0].TableIdentifier.TableName.ShouldBe("orders");
+        results[0].RelatedJoinPaths.Count.ShouldBe(1);
+        results[0].RelatedJoinPaths[0].ToTable.TableName.ShouldBe("customers");
+    }
+
+    [Fact]
+    public async Task SearchCatalogDetailedAsync_WhenSearchEngineNotReady_FallsBackToSimplePermittedFiltering()
+    {
+        // Arrange
+        var service = CreateService();
+        var tenant = new TenantId("tenant-a");
+        var userSid = new Sid("user:alice");
+        var context = new RequestContext(tenant, userSid);
+
+        var tableId = new TableIdentifier("crm", "dbo", "leads");
+        var table = new TableMetadata
+        {
+            Identifier = tableId,
+            Table = new Table { SchemaName = "dbo", TableName = "leads", DataSourceType = DataSourceType.HttpDeclarative, IsActive = true, Description = "Prospective leads" },
+            Columns = [new TableColumn { ColumnName = "lead_id", DataType = "int" }]
+        };
+
+        _metadataRepository.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([table]);
+        _rebacEvaluator.IsEnabled.Returns(false);
+
+        _searchEngine.IsIndexReady.Returns(false); // search engine not ready yet
+
+        var query = new CatalogSearchQuery("leads", "crm", 10, CatalogSearchMode.Hybrid);
+
+        // Act
+        var results = await service.SearchCatalogDetailedAsync(query, context);
+
+        // Assert - fallback returns filtered result
+        results.ShouldNotBeNull();
+        results.Count.ShouldBe(1);
+        results[0].TableIdentifier.TableName.ShouldBe("leads");
+        results[0].Description.ShouldBe("Prospective leads");
     }
 }

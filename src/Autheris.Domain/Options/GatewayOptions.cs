@@ -1340,6 +1340,7 @@ public sealed class HitLStepUpOptions
     public bool AutoCreateItsmTicket { get; init; } = true;
     public ItsmSystemType PreferredItsmSystem { get; init; } = ItsmSystemType.ServiceNow;
     public bool RequireTotp2Fa { get; init; } = false;
+    public bool FailClosedOnClusterPartition { get; init; } = false;
 }
 
 /// <summary>

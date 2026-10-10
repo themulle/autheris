@@ -15,6 +15,7 @@ using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
@@ -25,6 +26,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly IRebacEvaluator? _rebacEvaluator;
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly IOpenApiIngestionService? _openApiIngestionService;
+    private readonly ICatalogSearchEngine? _searchEngine;
     private readonly ILogger<CatalogDiscoveryService> _logger;
 
     public CatalogDiscoveryService(
@@ -33,6 +35,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         IRebacEvaluator? rebacEvaluator = null,
         IKeyVaultSecretProvider? secretProvider = null,
         IOpenApiIngestionService? openApiIngestionService = null,
+        ICatalogSearchEngine? searchEngine = null,
         ILogger<CatalogDiscoveryService>? logger = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -40,6 +43,7 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         _rebacEvaluator = rebacEvaluator;
         _secretProvider = secretProvider;
         _openApiIngestionService = openApiIngestionService;
+        _searchEngine = searchEngine;
         _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<CatalogDiscoveryService>.Instance;
     }
 
@@ -171,12 +175,82 @@ public sealed class CatalogDiscoveryService : ICatalogDiscoveryService
         var permitted = await ListDatasetsAsync(context, ct).ConfigureAwait(false);
         var q = query?.Trim();
 
+        if (string.IsNullOrWhiteSpace(q))
+        {
+            return permitted
+                .Where(d => string.IsNullOrWhiteSpace(domain) || string.Equals(d.Domain, domain, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        var permittedSet = new HashSet<TableIdentifier>(
+            permitted.Select(d => new TableIdentifier(d.Domain, d.Schema ?? "public", d.Table)));
+
+        if (_searchEngine?.IsIndexReady == true)
+        {
+            var hits = _searchEngine.Search(
+                new CatalogSearchQuery(q, domain, Limit: 25, Mode: CatalogSearchMode.Hybrid),
+                tableId => permittedSet.Contains(tableId));
+
+            return hits.Select(h => new CatalogDatasetSummary(
+                DatasetId: h.TableIdentifier.ToString(),
+                Domain: h.Domain ?? h.TableIdentifier.Domain,
+                Schema: h.TableIdentifier.Schema,
+                Table: h.TableIdentifier.TableName,
+                SourceType: "Catalog",
+                Sensitivity: h.Sensitivity ?? "NORMAL",
+                Description: h.Description,
+                IsActive: true
+            )).ToList();
+        }
+
         return permitted
             .Where(d => string.IsNullOrWhiteSpace(domain) || string.Equals(d.Domain, domain, StringComparison.OrdinalIgnoreCase))
+            .Where(d => d.Table.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        d.Domain.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        (d.Description != null && d.Description.Contains(q, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<CatalogSearchHit>> SearchCatalogDetailedAsync(
+        CatalogSearchQuery query, 
+        RequestContext context, 
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(context);
+        ct.ThrowIfCancellationRequested();
+
+        var permitted = await ListDatasetsAsync(context, ct).ConfigureAwait(false);
+        var permittedSet = new HashSet<TableIdentifier>(
+            permitted.Select(d => new TableIdentifier(d.Domain, d.Schema ?? "public", d.Table)));
+
+        if (_searchEngine?.IsIndexReady == true)
+        {
+            return _searchEngine.Search(query, tableId => permittedSet.Contains(tableId));
+        }
+
+        var q = query.QueryText?.Trim();
+        return permitted
+            .Where(d => string.IsNullOrWhiteSpace(query.DomainFilter) || string.Equals(d.Domain, query.DomainFilter, StringComparison.OrdinalIgnoreCase))
             .Where(d => string.IsNullOrWhiteSpace(q) ||
                         d.Table.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                         d.Domain.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                         (d.Description != null && d.Description.Contains(q, StringComparison.OrdinalIgnoreCase)))
+            .Take(query.Limit)
+            .Select(d => new CatalogSearchHit(
+                TableIdentifier: new TableIdentifier(d.Domain, d.Schema ?? "public", d.Table),
+                DisplayName: $"{d.Domain}.{d.Table}",
+                Description: d.Description,
+                Domain: d.Domain,
+                Sensitivity: d.Sensitivity,
+                CombinedScore: 1.0,
+                Bm25Score: 1.0,
+                VectorScore: null,
+                MatchedTerms: string.IsNullOrWhiteSpace(q) ? [] : [q],
+                RelevantColumns: [],
+                RelatedJoinPaths: [],
+                SuggestedGraphQlField: $"{d.Domain}_{d.Table}"
+            ))
             .ToList();
     }
 

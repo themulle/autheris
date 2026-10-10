@@ -66,6 +66,9 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
             // Relationen registrieren via Meta oder Konvention (z.B. customer_id -> customers)
             foreach (var col in t.Columns)
             {
+                if (t.PrimaryKeyColumns.Contains(col.ColumnName, StringComparer.OrdinalIgnoreCase))
+                    continue;
+
                 string? targetTable = null;
                 string? targetCol = null;
 
@@ -83,7 +86,11 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine
                     targetCol = col.ColumnName;
                 }
 
-                if (!string.IsNullOrWhiteSpace(targetTable))
+                if (string.IsNullOrWhiteSpace(targetTable) || 
+                    string.Equals(targetTable, t.Identifier.TableName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
                 {
                     var refTable = new TableIdentifier(t.Identifier.Domain, t.Identifier.Schema, targetTable);
                     var rel = new TableRelationship(

@@ -199,14 +199,16 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: SearchCatalog,
-            Description: "Searches the data catalog for datasets by keyword, domain or column names.",
+            Description: "Performs hybrid semantic vector and keyword search across thousands of tables in the catalog. Input natural language inquiries (e.g. 'monthly revenue by customer', 'unpaid invoices') or exact table codes. Returns ranked candidate tables, relevance score, matching columns, and explicit join relations.",
             InputJsonSchema: """
             {
               "type": "object",
               "required": ["query"],
               "properties": {
-                "query": { "type": "string", "description": "Search query text." },
-                "domain": { "type": "string", "description": "Optional business domain filter." }
+                "query": { "type": "string", "description": "Search query text (natural language intention, keywords, or exact table codes)." },
+                "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales', 'finance', 'core')." },
+                "limit": { "type": "integer", "description": "Maximum number of candidate tables to return (default: 5, max: 20)." },
+                "mode": { "type": "string", "enum": ["hybrid", "semantic", "keyword"], "description": "Search mode: 'hybrid' (default), 'semantic', or 'keyword'." }
               }
             }
             """,

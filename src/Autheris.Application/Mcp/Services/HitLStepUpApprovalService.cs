@@ -221,6 +221,10 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
             {
                 var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
                 _logger.LogWarning(ex, "Failed to register HitL ticket '{ApprovalId}' in cluster state.", safeApprovalIdForLog);
+                if (_options.Value.HitLStepUp.FailClosedOnClusterPartition)
+                {
+                    throw new InvalidOperationException($"Failed to register HitL ticket '{safeApprovalIdForLog}' in cluster state (fail-closed policy active).", ex);
+                }
             }
         }
 

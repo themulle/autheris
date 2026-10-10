@@ -74,13 +74,28 @@ public static class CatalogApiEndpoints
         group.MapGet("/search", async (
             string? q,
             string? domain,
+            int? limit,
+            string? mode,
             ICatalogDiscoveryService discoveryService,
             HttpContext httpContext,
             CancellationToken ct) =>
         {
             var context = CreateRequestContext(httpContext);
-            var results = await discoveryService.SearchCatalogAsync(q ?? string.Empty, domain, context, ct);
-            return Results.Ok(results);
+            var searchMode = mode?.ToLowerInvariant() switch
+            {
+                "semantic" => CatalogSearchMode.SemanticVector,
+                "keyword" => CatalogSearchMode.KeywordBm25,
+                _ => CatalogSearchMode.Hybrid
+            };
+
+            var query = new CatalogSearchQuery(
+                QueryText: q ?? string.Empty,
+                DomainFilter: domain,
+                Limit: Math.Clamp(limit ?? 10, 1, 50),
+                Mode: searchMode);
+
+            var hits = await discoveryService.SearchCatalogDetailedAsync(query, context, ct);
+            return Results.Ok(hits);
         })
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);

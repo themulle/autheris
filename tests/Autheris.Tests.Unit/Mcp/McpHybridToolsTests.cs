@@ -143,14 +143,49 @@ public sealed class McpHybridToolsTests
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.SearchCatalog);
         var session = CreateSessionContext("user:carol", "tenant-1");
 
-        _catalogDiscoveryService.SearchCatalogAsync("orders", "sales", Arg.Any<RequestContext>(), Arg.Any<CancellationToken>())
-            .Returns([new CatalogDatasetSummary("sales.public.orders", "sales", "public", "orders", "Sql", "Internal", "Orders table", true)]);
+        var ordersTableId = new TableIdentifier("sales", "public", "orders");
+        var customersTableId = new TableIdentifier("sales", "public", "customers");
+        var hit = new CatalogSearchHit(
+            TableIdentifier: ordersTableId,
+            DisplayName: "sales.orders",
+            Description: "Orders table",
+            Domain: "sales",
+            Sensitivity: "Internal",
+            CombinedScore: 0.95,
+            Bm25Score: 0.95,
+            VectorScore: 0.95,
+            MatchedTerms: ["orders"],
+            RelevantColumns: ["id", "customer_id"],
+            RelatedJoinPaths: [
+                new TableRelationship(
+                    FromTable: ordersTableId,
+                    FromColumn: "customer_id",
+                    ToTable: customersTableId,
+                    ToColumn: "id",
+                    Type: TableRelationshipType.ForeignKey)
+            ],
+            SuggestedGraphQlField: "sales_orders");
 
-        var args = JsonSerializer.Serialize(new { query = "orders", domain = "sales" });
+        _catalogDiscoveryService.SearchCatalogDetailedAsync(
+            Arg.Is<CatalogSearchQuery>(q => q.QueryText == "orders" && q.DomainFilter == "sales"),
+            Arg.Any<RequestContext>(),
+            Arg.Any<CancellationToken>())
+            .Returns([hit]);
+
+        var args = JsonSerializer.Serialize(new { query = "orders", domain = "sales", limit = 5, mode = "hybrid" });
         var resultJson = await handler.ExecuteToolAsync(tool, args, session);
 
-        resultJson.ShouldContain("sales.public.orders");
-        await _catalogDiscoveryService.Received(1).SearchCatalogAsync("orders", "sales", Arg.Any<RequestContext>(), Arg.Any<CancellationToken>());
+        resultJson.ShouldContain("sales.orders");
+        resultJson.ShouldContain("relevance_score");
+        resultJson.ShouldContain("0.95");
+        resultJson.ShouldContain("join_relations");
+        resultJson.ShouldContain("sales.customers");
+        resultJson.ShouldContain("orders.customer_id = customers.id");
+
+        await _catalogDiscoveryService.Received(1).SearchCatalogDetailedAsync(
+            Arg.Is<CatalogSearchQuery>(q => q.QueryText == "orders" && q.DomainFilter == "sales"),
+            Arg.Any<RequestContext>(),
+            Arg.Any<CancellationToken>());
     }
 
     [Fact]
