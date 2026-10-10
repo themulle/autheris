@@ -1010,3 +1010,90 @@ this track; may be batched. **Nit** = optional.
 
 After the fixes, Phase 5 re-reviews only the changed areas. The re-review re-runs mutations M1 and M8 at integration
 level, plus a new mutation for the CR-01 path-lookup guard, and the full unit and integration suites.
+
+---
+
+## Implementation Log — review loop 1
+
+**Role:** `csharp-tdd-developer` (Phase 4 loop-back after the Phase 5 review). **Date:** 2026-10-10.
+**Branch:** `feat/vf-federation-hardening`, commits `f5ae323..HEAD` after `dbb2462`. CR-16 is Phase 6 and was not touched.
+Every finding was fixed test first (red, then green); mutation results are listed below.
+
+### Path-lookup semantics decided for v1 (CR-01)
+
+The orchestrator chose the following semantics; they replace the table row of ST-32 for `Adaptive` ("exactly 1 upstream
+request (Tier 3 full fetch)") on path-template endpoints.
+
+| Case | v1 behaviour |
+|---|---|
+| Tier 3 (full read) of an endpoint whose path template still has a placeholder the gateway cannot fill | Denied with `VF_PATH_TEMPLATE_UNFILLABLE` (HTTP 403), no upstream call. This covers `DuckDbHashJoin`, `PushdownEnabled = false`, an unsafe key value, a second placeholder, and `Adaptive` over `MaxPathLookupRequests`. `PushdownOnly` keeps `VF_PUSHDOWN_UNAVAILABLE` / `VF_PUSHDOWN_LIMIT_EXCEEDED`. Tier 0 and a Tier 1 miss skip the upstream and are not denied. |
+| Path lookup | One request per authorized key (throttled by `MaxConcurrentRequests`). Each answer is restricted to the rows whose key equals the requested key (canonical comparison), and the union is de-duplicated by that key (the key is the declared `PrimaryKeyField`). The result equals the Tier 3 / semi-join result even for an upstream that ignores the key. |
+| Upstream 404 for one key | "Key not present": no row for that key, the query continues, `upstreamKeysNotFound` is in the source read audit. Every other failure (also 400, 401, 403, 5xx and a failure without a status) still fails the query. |
+
+Implementation: the planner puts a `VirtualFilterPathLookup` into the plan (`PathLookup`); `FederatedStagingService` reads
+through `PathLookupConnector`, a decorator of the connector record source, so the executor is untouched (principle 6) and
+its own fan-out is never triggered (the key list is not passed as a batch argument). The mock upstream of the end-to-end
+fixture is path-aware: an unexpanded `{id}` or a malformed key is 404, and `MissingIds` / `FailingIds` simulate gone and
+failing keys.
+
+### Status per finding
+
+| ID | Status | Commit | Tests |
+|---|---|---|---|
+| CR-01 | Fixed | `f5ae323` | `PathLookupConnectorTests`; `VirtualFilterStrategyMatrixTests` (`PathLookup_*`, `AnyPlaceholderThePlanCannotFill_IsDenied`); `FederatedVirtualFilterPushdownTests` (unit, `PathLookup_*`); `FederatedVirtualFilterPathLookupTests` (E2E: COUNT/SUM equal to Tier 3 with an upstream that ignores the key, 404, 500, over-budget `Adaptive`, `DuckDbHashJoin`, mock guard); the weak `Distinct()` assertion of `E2E3_UpstreamIgnoresParameters_OnlyAuthorizedRows` is now exact |
+| CR-02 | Fixed | `305c2fe` | `WebSqlGatewayDenialMappingTests`: capturing logger with the full exception chain contains neither the sentinel nor the inner message nor its type; status parity (401, 400, 403) between `WriteWebSqlErrorAsync` and `GatewayExceptionHandler`. Shared `GatewayDenialStatusMapper`; `WebSqlEndpoints.cs` shrank by 10 lines (1,010) |
+| CR-03 | Fixed | `6869928` | `DeclarativeHttpClientWiringTests` (production registration, only the primary handler is a stub: oversized body with and without declared length, SSRF), `ST31_OversizedUpstreamResponse_IsRejected_Forbidden_RowLimitExceededAudit` (E2E, the fixture now only replaces the primary handler) |
+| CR-04 | Fixed | `09fedbc` | `PlanDenialAfterKeysWereLoaded_StillAuditsTheKeySourceRead`, `PushdownLimitDenial_AuditsTheKeySourceReadExactlyOnce`, `SuccessfulQuery_WritesEachKeySourceRecordOnce` |
+| CR-05 | Fixed | `14c76b6` | `UpstreamRead_NamesTheTableWithItsDomain_*`, `UpstreamRead_RecordsTheNumberOfUpstreamRequests` (`upstreamRequests`: 0 skipped, one per key for a path lookup, 1 for a single request; paged reads are not counted) |
+| CR-06 | Fixed (point-lookup eligibility independent of the switch) | `528596d` | `PushdownDisabledOption_*`; the option documentation states that `ShortCircuitOnly` / `PushdownOnly` bindings and path-template endpoints are still denied while the switch is off |
+| CR-07 | Fixed | `bcb21d3` | `VirtualFilterKeySetCacheTests` (200 other keys complete while one load is blocked; single-flight per key; failure seen by waiters and not cached; a cancelling waiter does not cancel the shared load) |
+| CR-08 | Fixed, benchmark added | `d1aae33` | `VirtualFilterEnforcementPerformanceTests` (allocation guard), `VirtualFilterEnforcementBenchmark` (see below) |
+| CR-09 | Fixed | `781aa42` | New option `DataSources:Http:MaxResponseBytes` (default 32 MiB, range 1 MiB..1 GiB), documented scope; `LimitedStream.Length` / `Position` throw `NotSupportedException`; the paged executor uses `ResponseSizeLimitingHandler.BytesRead`; `DeclarativeHttpPagedResponseTests`, handler contract tests |
+| CR-10 | Fixed | `db0b5b1` | `ReadAsync_NoEnforcement_VirtualFilterOnAnHttpTable_ThrowsBeforeTheUpstreamIsRead`; both D-12 end-to-end tests assert zero upstream requests (the OData test was red before). The check also runs in the executor branch of `GatewayExecutionService` |
+| CR-11 | Done | `f178ac6` | Follow-up row in `docs/plans/00-master-plan-overview.md` (fix on `fix/rest-dataset-limit-offset`); the REST D-12 test keeps "no rows" and now asserts zero upstream requests |
+| CR-12..CR-15 | Fixed | `14d6a0c` | `FederatedVirtualFilterNoPlannerTests` (renamed); exact call counts in the point-lookup differential test (the outer-join ON-clause case is correctly 1); `HasActiveProfiles_CountsOnlyActiveProfilesOfTheTenant` (decision: filter on `Active`, as the resolver does); key set audits through the plan constructor, blank line removed, reserved names shared with the executor (`EveryNameTheExecutorReserves_*`) |
+| CR-16 | Not in scope | - | Phase 6 |
+
+### Benchmark (NFR-7, CR-08)
+
+Tier 3 enforcement of 50,000 upstream rows against 10,000 authorized keys (half of the rows authorized), BenchmarkDotNet
+0.15.8 `ShortRun` job in process, .NET 10, Release (`dotnet run -c Release --project benchmarks/Autheris.Benchmarks -- vfenf`).
+The timings of a short run are indicative (wide error); the allocation column is exact.
+
+| Case | Before (`b187621`) mean / allocated | After mean / allocated |
+|---|---|---|
+| Integer key (single column) | 4.96 ms / 8.77 MB | 2.12 ms / 390.8 KB |
+| Text key (single column) | 4.70 ms / 7.63 MB | 2.55 ms / 390.8 KB |
+| Composite key (2 text columns) | 6.82 ms / 8.39 MB | 6.06 ms / 2.29 MB |
+
+390.8 KB is the preallocated result list (50,000 references); the single-column probe itself allocates 0 bytes per row
+(unit guard: at most 16 B/row; measured 176 / 152 / 168 B/row before, 0 / 0 / 40 B/row after for integer, text and
+composite). The composite path still allocates its canonical key (one array per probe). At about 2 to 6 ms for 50,000 rows
+the Tier 3 semi-join is far below the transfer cost of the rows; NFR-7 is met.
+
+### Mutation results (re-review input)
+
+| Mutation | Result |
+|---|---|
+| M1: remove the `ResponseSizeLimitingHandler` registration | Killed by `DeclarativeHttpClientWiringTests` (2 tests) and `ST31_OversizedUpstreamResponse_*` (the staging cap answers 400 `RESPONSE_TOO_LARGE` instead of the expected 403 `ROW_LIMIT_EXCEEDED`) |
+| M8: delete Tier 0 | Now also killed at integration level (`E2E7_EmptyKeySet_*` for an endpoint without pushdown capability; before, the selector's disjoint rule hid it) |
+| CR-01 guard: stage a path-lookup plan through the old batch argument instead of the lookup reader | Killed by 5 end-to-end tests (`UpstreamIgnoresTheKey_*`, 404 tests, `E2E3_UpstreamIgnoresParameters_OnlyAuthorizedRows(customers_path)`) |
+
+### Verification
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror` | 0 warnings, 0 errors |
+| `dotnet test tests/Autheris.Tests.Unit/Autheris.Tests.Unit.csproj` | 4,376 total: 4,375 passed, 1 failed (`WormConfigurationAuditServiceTests...`, known and fixed on `fix/worm-config-audit-test`). One run also showed `Wave2MarketFeaturesTests.ResourceGroupManager_QueueFull_RejectsImmediately` failing under load; it passes alone and on rerun (timing, unrelated) |
+| Integration, filter `FederatedVirtualFilter\|RowFilterChannelParity\|WebSql\|CrossSource` with `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal` | 77 total: 76 passed, 1 failed (`RowFilterChannelParityTests...(channel: "sql-endpoint")`, pre-existing, fixed on another branch). All 46 `FederatedVirtualFilter*` cases (was 35) pass |
+
+### Hand-over to Phase 6 (CR-16) and to the re-review
+
+- The feature document must describe: the v1 path-lookup semantics above (`VF_PATH_TEMPLATE_UNFILLABLE`, per-key
+  restriction, 404 as "key not present", `upstreamRequests` and `upstreamKeysNotFound` in the audit), the new option
+  `DataSources:Http:MaxResponseBytes` and its scope (every user of the `DeclarativeHttp` client, plugin HTTP sources
+  included; the staging budget `WebSql:CrossSource:MaxStagedBytesPerTable` is separate), what `PushdownEnabled = false`
+  does and does not change, the key revocation latency (= TTL) and the audit `TargetTable` change (now source-qualified).
+- The source read audit `table` and `TargetTable` changed from `schema.table` to `domain.schema.table` for every source;
+  consumers that match on the old form must be updated.
+- A paged read still counts staged bytes per table through `BytesRead`; the request count of paged reads is not recorded.
