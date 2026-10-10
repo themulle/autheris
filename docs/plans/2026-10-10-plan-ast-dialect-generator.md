@@ -1787,3 +1787,80 @@ Exact tenant comparison: `CAST(col AS BINARY) = CAST(t AS BINARY)` only. The Spa
 Evidence: golden-SQL style generator tests, and execution on the Spark proxy (`apache/spark:4.0.0-python3`, pinned by digest, ANSI mode and variable substitution on, driven by `tests/Autheris.Tests.Integration/Spark/runner.py` over stdin because the Docker daemon cannot see bind mounts): RLS visibility, collation collision on a `UTF8_LCASE` column, policy subquery, shapes, hostile values including `${...}`, masks. Resolved `(verify)` items: `OFFSET` and `TIMESTAMP_NTZ` work on Spark; `LATERAL` is only probed informationally and stays rejected until Databricks SQL is probed (G9).
 
 Not done on this branch (follow-ups): the REST connector (C3, not needed for SELECT compilation; the binder produces named typed parameters that map 1:1 to the Statement Execution API), the live secret-gated job (G9/C5; the provisional bind budget stays), the 300-fixture conformance matrix (about 60 generator cases exist), Delta DML (belongs to `feat/ast-dml`). OSS Spark is not Databricks SQL (risk R-7).
+
+## 20. Implementation Log — DQL review loop 1
+
+Track `PLAN-AST-DIALECT-GEN-16`, Phase 4 loop-back after the Phase 5 review (§19). Integration branch `feat/ast-dql` = `feat/ast-oracle-select` + review commit `bed21ac` + merge of `feat/ast-databricks-select` (`92cbf9c`, `--no-ff`, no rebase). The five additive conflicts (plan §18 table and sections, `DialectCapabilities.cs`, `DialectCapabilityTable.cs`, `ICompiledSqlBinder.cs`, `TenantPredicateFactory.cs`) were resolved by keeping both sides (`RawCast` and `CastBinary`, both capability entries, both binders, both tenant-comparison cases). The merged tree built with 0 warnings and passed all suites before the first fix. Every finding was fixed test-first on `feat/ast-dql` (the stacked branches stay frozen). Evidence: see 20.4.
+
+### 20.1 Status per finding
+
+| ID | Status | Commit subject | Notes |
+|---|---|---|---|
+| CR-ADG-01 | Fixed | emit CTE references from the CTE definition identifier | The typed path emits the CTE definition as the delimited scope key and rewrites every reference to the same identifier (the user spelling survives as the alias, so qualified columns keep binding). The verifier requires delimited definitions and compares references ordinally. `QuotedCteVsUnquotedPhysical_CaseVariants_AlwaysSecured` on all five dialects; Oracle Free reproduction and a case-sensitive SQL Server database through the real gateway path (red before, green after). |
+| CR-ADG-02 | Fixed | reject functions without a rule, per dialect allowlist | `DialectFunctionMap.ForDialect` is built from the legacy WebSQL allowlist plus the Trino functions the compiler rewrites; `AllowedFunctions = null` means the dialect map, a caller list can only narrow it. The default denylist gains `reflect`, `java_method`, `secret`, `IS_ROLEMEMBER`, `DATABASE_PRINCIPAL_ID`, `DBURITYPE`, `XMLTYPE` and related probes. Tests per dialect and a Spark-proxy test that `reflect` is rejected before Spark. Capability table version `cap-2`. |
+| CR-ADG-03 | Fixed | Databricks is Experimental until the first green G9 run | `Databricks_NotProduction_UntilG9Flag`; compile needs `AllowExperimentalDialect` (tests only). |
+| CR-ADG-04 | Fixed | prove the pipeline calls the verifier and checker via a Debug-only seam | `CompilerTestSeams` (type and call sites compiled out of Release). `FailedVerification_NeverInsertsACacheEntry`, faulty injector and emitter on every dialect, structural tenant predicate assertions. Verified by mutation: skip-verifier (10 tests fail), skip-text-checker (15), cache-insert-unverified (23), DATALENGTH joined with `OR` (3) and DATALENGTH compared with itself (1) are all killed by `TrinoSqlEngine.Tests`. |
+| CR-ADG-05 | Fixed | key bound-literal deduplication by CLR type and round-trip value | `"O"` for date and time types, CLR type in the key. |
+| CR-ADG-06 | Fixed | prove the shape of the secured derived table | Single body of its SELECT, no DISTINCT/GROUP BY/HAVING, WHERE of security predicates only, projections exactly cataloged columns or masks under their own name; masked columns in WHERE, GROUP BY and ORDER BY are rejected. |
+| CR-ADG-07 | Fixed | enforce BindByName in the connection factory | `BindByNameOracleConnection`/`Command` wrapper; setting `BindByName = false` throws; every execute asserts. Architecture tests forbid the driver outside `Infrastructure.Persistence` and a raw `OracleCommand` outside the wrapper. |
+| CR-ADG-08 | Fixed with deviations | startup validation, quoted admin accounts, B-1 collision check, image digest | See 20.2 for the tier decision and the logged deviations. |
+| CR-ADG-09 | Fixed for tenant and policy binds | bind tenant and policy values with the catalog type of the compared column | SQL Server `varchar` columns get a `varchar` bind (plan check: no `CONVERT_IMPLICIT`), Oracle follows the column (NUMBER vs VARCHAR2). **User literals still follow the literal type: tracked X1 precondition (20.3).** |
+| CR-ADG-10 | Fixed | plain sargable tenant equality on UTF8_BINARY columns | `CatalogColumn.Collation`; unknown or other collations keep the binary comparison. Verified on the Spark proxy. No catalog loader fills `Collation` yet (C3/G9). |
+| CR-ADG-11 | Fixed | never silently green; skip with a reason or fail on CI | `SparkFact`/`SparkTheory`; the image is probed at discovery; `CI=true` makes absence a failure; a present image that does not start fails. |
+| CR-ADG-12 | Fixed | hash outside the cache lock, memoize reflection and fingerprints | Plus `CompilePathBenchmark` (cache hit and miss, NFR-2 regression limits) in the benchmark runner (`dotnet run -c Release -- compile`). The capability validator walk and the per-miss `HashSet`s are unchanged (miss path only). |
+| CR-ADG-13 | Fixed | split files over 800 lines | `SqlDialectGeneratorBase` 1,521 to 526 (+485, +546 partials), `AstSecurityVisitor` 1,448 to 222 (+215, +450, +381, +275), `SqlDataSourceExecutor` 929 to 658 (+194, +112), `FastSqlEngine` 862 to 745. No member changed. |
+| CR-ADG-14 | Fixed | bound the compile budget knobs | `CompileLimits.Normalize`: non-positive or infinite timeout and non-positive factor rejected, clamped to 30 s and 256. |
+| CR-ADG-15 | Fixed | force the Databricks token guard | Applied inside `Normalize`; a caller passing `None` still cannot compile `${...}`. |
+| CR-ADG-16 | Fixed | keep the user's quoting for the implicit alias of a policy-subquery table | |
+| CR-ADG-17 | Fixed | the Unity Catalog part takes part in table resolution | Three-part names select the catalog; one- and two-part names are ambiguous across catalogs. |
+| CR-ADG-18 | Partly fixed, one item blocked | Oracle policy parser rule and Oracle legacy masks | Implemented: `CASE`/`COALESCE`/`NOT` over a string parameter rejected for Oracle (`PolicyParseContext.TargetDialect`); legacy email/IBAN masks rendered for Oracle. **Blocked: `trustedSigners` for `Oracle.*` in `NuGet.config`.** The package carries only the nuget.org repository signature (no Oracle author signature) and `signatureValidationMode=require` changes restore for every package and could not be validated offline. The driver license (Oracle Free Use Terms) stays a release gate. |
+| CR-ADG-19 | Fixed | (with CR-ADG-04) | `Compile_CancelledInsideEveryPass_NoCacheEntry_NoPartialSql` cancels from inside each of the eight passes through the seam. |
+| CR-ADG-20 | Partly fixed | scan IL for AllowExperimentalDialect setters | The string search is replaced by an IL scan (Mono.Cecil) with a positive control, in `Autheris.Tests.Architecture`. `NoRewriterDescendsIntoSecurityPredicate` stays in `TrinoSqlEngine.Tests` (it needs internal types). |
+| CR-ADG-21 | Fixed | rename `SqlServerBindTemplates` | |
+| CR-ADG-22 | Fixed | (with CR-ADG-13) | Members moved above the `RewriteRls` comment, readonly `_compiler`. |
+| CR-ADG-23 | Fixed | (with CR-ADG-13) | `TableUsage`, `RecordTable`, `Tables`, `AppliedPredicates` and the mask fingerprints removed; `EnforceCatalogProjection` kept and documented. |
+| CR-ADG-24 | Fixed | schema-qualify UTL_RAW | `"SYS"."UTL_RAW"."CAST_TO_RAW"`. |
+
+### 20.2 Tier decision and deviations
+
+| Dialect | Tier | Reason |
+|---|---|---|
+| SQL Server, PostgreSQL, DuckDB | Production | unchanged |
+| Oracle | **Production** (compiler tier) | The condition of the loop-back holds: CR-ADG-01 (Oracle Free reproduction green), CR-ADG-07 and CR-ADG-08 (a, b, d) are green. WP-F5 (CI image, evidence gate wiring) is still open; the tier stays "Production (compiler)" in the sense of §16.9 until F5 and the Oracle driver license review (release gate). |
+| Databricks | **Experimental** | CR-ADG-03: no green G9 run and no C3 connector yet. |
+
+Logged deviations (review items that are deliberately not implemented as specified):
+
+- CR-ADG-08 (a): the Key Vault password path adds `DataSourceConnectionOptions.PasswordKeyVaultRef`; the factory resolves it through `IKeyVaultSecretProvider` and refuses a plaintext password outside Development.
+- CR-ADG-08 (B-1): the "fail-close the colliding tenants" rule is implemented as a **startup refusal outside Development** (`TenantCollisionCheck`, `GatewayStartupValidator.ValidateTenantCollisions`), because the gateway has no tenant registry to quarantine individual tenants at request time. `TenantCollisionCheck.DeniedTenants` returns the set a request-time guard would deny; wiring it belongs to the tenant registry work (Stream D).
+- CR-ADG-08 (c): `CURRENT_SCHEMA` stays unpinned. Acceptable now: every emitted physical name is schema-qualified (INV-11) and CTE references no longer reach the database unqualified (CR-ADG-01).
+- CR-ADG-08 (e): the Oracle client identifier is cleared at the start of the next rental (the constant PL/SQL block), not in a `finally` on return. The state never reaches a statement of another rental; recorded as a deviation.
+- CR-ADG-10: the collation comes from `CatalogColumn.Collation`; until a catalog loader (C3/G9) fills it every Databricks tenant column keeps the binary comparison (fail safe).
+- CR-ADG-12: the NFR-2 gate is a Stopwatch benchmark in the existing runner (the runner does not use BenchmarkDotNet); thresholds are regression limits, not targets. It was not run in this loop.
+
+### 20.3 X1 preconditions added or confirmed
+
+1. SEC-ADG-16 item 2 for **user literals**: bind types follow the literal type; comparing a literal with a column of another type (for example a numeric literal against `VARCHAR2` on Oracle) still has the `ORA-01722` side channel and, on SQL Server, `nvarchar` against `varchar` still forces implicit conversions. Tenant and policy binds are done (CR-ADG-09).
+2. A catalog loader must fill `CatalogColumn.Collation` (CR-ADG-10) and the Unity Catalog part (CR-ADG-17) for Databricks.
+3. The request-time tenant collision guard (20.2).
+4. `trustedSigners` or signature mode for `Oracle.*` (CR-ADG-18) and the Oracle driver license review (release gate).
+5. Databricks stays Experimental until the live G9 job (and C3) are green.
+
+### 20.4 Evidence
+
+Observed on `feat/ast-dql` after the last fix commit (`TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal`, Docker on WSL):
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror` | 0 warnings, 0 errors |
+| `tests/TrinoSqlEngine.Tests` | 2,074 / 2,074 passed (1,888 at the merge) |
+| `tests/Autheris.Tests.Unit` | 4,012 / 4,013 passed; the failure is the known `WormConfigurationAuditServiceTests.AuditConfigurationSnapshotAsync_MintsWormRecordOnStartup_AndSuppressesDuplicates` (fixed on `fix/worm-config-audit-test`) |
+| `tests/Autheris.Tests.Architecture` | 18 / 18 passed |
+| SQL Server container class `AstCompilerSqlServerExecutionTests` | 40 / 40 passed |
+| PostgreSQL container class `AstCompilerPostgreSqlExecutionTests` | 45 / 45 passed |
+| Oracle Free container class `AstCompilerOracleExecutionTests` (image pinned by digest) | 41 / 41 passed |
+| Spark proxy class `AstCompilerDatabricksSparkExecutionTests` | 39 / 39 passed (none skipped) |
+| DuckDB in process `AstCompilerDuckDbExecutionTests` | 41 / 41 passed |
+| All `AstCompiler*` integration tests in one run | 168 / 168 passed (the five container classes plus the three provider smoke tests) |
+
+Baseline at the merge (before the first fix): `TrinoSqlEngine.Tests` 1,888 / 1,888 and the integration run 153 / 153.
