@@ -356,6 +356,22 @@ public sealed class AstCompilerOracleExecutionTests : IClassFixture<AstCompilerO
     }
 
     [Fact]
+    public async Task RecursiveCte_ExecutesAndOnlyReadsTheTenantsRows()
+    {
+        // CR-ADG-29: the CTE name resolves to itself; the anchor reads the secured table.
+        var rows = await RunAsync(
+            "WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, n + 1 FROM chain WHERE n < 3) SELECT id, n FROM chain",
+            "acme");
+        rows.ShouldNotBeEmpty();
+        rows.Select(r => Convert.ToInt32(r[0])).ShouldAllBe(id => id == 1 || id == 2 || id == 6);
+        rows.Max(r => Convert.ToInt32(r[1])).ShouldBe(3);
+        (rows.Count % 3).ShouldBe(0);
+        await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(
+            "WITH RECURSIVE orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT id, n + 1 FROM orders WHERE n < 3) SELECT id FROM orders",
+            "acme"));
+    }
+
+    [Fact]
     public async Task ConsentFilter_DenyAll_AndPolicySubquery()
     {
         _policies.Predicates[Orders] = RegionPolicy("EU");

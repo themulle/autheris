@@ -119,9 +119,18 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             var ctes = new List<CommonTableExpression>();
             foreach (var cte in node.With.Ctes)
             {
-                // Visit CTE body BEFORE adding CTE name to current scope (Exit-timing, SEC-CTE & SEC C-02)
-                var cteQuery = (SelectStatement)WithScope(SecurityScope.CteBody, () => Visit(cte.Query));
                 string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(cte.Name);
+                EnsureCteNameIsUnambiguous(cteKey);
+                if (node.With.IsRecursive)
+                {
+                    // CR-ADG-29: a recursive CTE sees its own name in its body (self-reference); the base tables of the anchor
+                    // and recursive members are still secured. A name that is also a catalog table is ambiguous and rejected.
+                    EnsureRecursiveCteIsNotACatalogTable(cte.Name, cteKey);
+                    _cteScopeStack.Peek().Add(cteKey);
+                }
+
+                // Non-recursive: visit the CTE body BEFORE adding the name to the scope (Exit-timing, SEC-CTE & SEC C-02)
+                var cteQuery = (SelectStatement)WithScope(SecurityScope.CteBody, () => Visit(cte.Query));
                 _cteScopeStack.Peek().Add(cteKey);
 
                 // CR-ADG-01 / INV-11: on the typed path the definition is emitted as the delimited scope key, so the gateway's

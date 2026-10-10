@@ -171,6 +171,33 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         }
     }
 
+    /// <summary>
+    /// CR-ADG-29: two visible CTE names that differ only in case bind to the same object on case-insensitive engines, so the
+    /// gateway's scope decision and the database's name binding could diverge. Such scopes are rejected.
+    /// </summary>
+    private void EnsureCteNameIsUnambiguous(string cteKey)
+    {
+        foreach (string visible in _cteScopeStack.Peek())
+        {
+            if (!string.Equals(visible, cteKey, StringComparison.Ordinal) &&
+                string.Equals(visible, cteKey, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SecurityException("CTE names that differ only in case are ambiguous and are not permitted.");
+            }
+        }
+    }
+
+    private void EnsureRecursiveCteIsNotACatalogTable(SqlIdentifier name, string cteKey)
+    {
+        bool isTable = _typed != null
+            ? _typed.Catalog.Resolve(new SqlQualifiedName(new[] { new SqlIdentifier(name.Value, name.IsQuoted) })) != null
+            : _options.PolicyProvider.ShouldApplyPolicy(cteKey);
+        if (isTable)
+        {
+            throw new SecurityException("A recursive CTE must not have the name of a catalog table; the reference would be ambiguous.");
+        }
+    }
+
     private bool IsCte(SqlQualifiedName name)
     {
         if (!name.IsSimple) return false;

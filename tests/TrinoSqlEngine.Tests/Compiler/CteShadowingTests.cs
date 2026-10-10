@@ -83,4 +83,52 @@ public class CteShadowingTests
         var c = Compile("WITH orders AS (SELECT 1 AS id) SELECT orders.id FROM orders", dialect);
         Assert.Matches(@"(?i)FROM\s+\S+\s+(AS\s+)?\S+", c.Sql);   // an explicit alias carries the user spelling
     }
+
+    private const string RecursiveChain =
+        "WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n + 1 FROM chain c WHERE c.n < 3) SELECT id, n FROM chain";
+
+    /// <summary>CR-ADG-29: a recursive CTE resolves its own name, and the physical tables of both members stay secured.</summary>
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void RecursiveCte_SelfReferenceResolvesToTheCte_AndBaseTablesAreSecured(TargetSqlDialect dialect)
+    {
+        var c = Compile(RecursiveChain, dialect);
+        Assert.Contains(c.Parameters, p => p.Origin == ParameterOrigin.Tenant);
+        Assert.Contains(new SecurityPredicateId("dbo.Orders", 0), c.AppliedPredicates);
+        // Both the definition and the self-reference use the same delimited identifier.
+        Assert.True(Regex.Count(c.Sql, @"[""`\[]chain[""`\]]") >= 3, c.Sql);   // definition, self-reference, outer reference
+        Assert.Equal(1, Regex.Count(c.Sql, @"(?i)dbo\W+orders\W"));
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void RecursiveCte_JoiningAnotherCatalogTable_SecuresIt(TargetSqlDialect dialect)
+    {
+        var c = Compile(
+            "WITH RECURSIVE chain (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT c.id, c.n + 1 FROM chain c JOIN orders o ON o.id = c.id WHERE c.n < 3) SELECT id FROM chain",
+            dialect);
+        Assert.Equal(2, Regex.Count(c.Sql, @"(?i)dbo\W+orders\W"));   // both members read the secured physical table
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void RecursiveCte_NamedLikeACatalogTable_IsRejected(TargetSqlDialect dialect)
+    {
+        Assert.Throws<System.Security.SecurityException>(() => Compile(
+            "WITH RECURSIVE orders (id, n) AS (SELECT id, 1 FROM orders UNION ALL SELECT o.id, o.n + 1 FROM orders o WHERE o.n < 3) SELECT id FROM orders",
+            dialect));
+        Assert.Throws<System.Security.SecurityException>(() => Compile(
+            "WITH RECURSIVE \"Orders\" (id, n) AS (SELECT 1, 1 UNION ALL SELECT o.id, o.n + 1 FROM \"Orders\" o WHERE o.n < 3) SELECT id FROM \"Orders\"",
+            dialect));
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void NestedCteNamesDifferingOnlyInCase_AreRejected(TargetSqlDialect dialect)
+    {
+        Assert.Throws<System.Security.SecurityException>(() => Compile(
+            "WITH \"Chain\" AS (SELECT 1 AS id) SELECT id FROM (WITH \"chain\" AS (SELECT 2 AS id) SELECT id FROM \"chain\") t", dialect));
+        Assert.Throws<System.Security.SecurityException>(() => Compile(
+            "WITH \"Chain\" AS (SELECT 1 AS id), \"chain\" AS (SELECT 2 AS id) SELECT id FROM \"chain\"", dialect));
+    }
 }
