@@ -241,6 +241,35 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
         }
     }
 
+    /// <summary>
+    /// Trino function names with a different T-SQL name or argument order. Everything else passes through unchanged, so the
+    /// database rejects what it does not know. Backend semantics are kept (LEN ignores trailing spaces: a semantic note).
+    /// </summary>
+    protected override void GenerateFunctionCall(FunctionCallExpression fn, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        if (fn.Name.Parts.Count == 1 && !fn.Name.Parts[0].IsQuoted && fn.Window == null && fn.Filter == null)
+        {
+            switch (fn.Name.Parts[0].Value.ToLowerInvariant())
+            {
+                case "length" or "char_length" or "character_length" when fn.Arguments.Count == 1:
+                    base.GenerateFunctionCall(fn with { Name = new SqlQualifiedName("LEN") }, ref builder, context);
+                    return;
+                case "ceil" when fn.Arguments.Count == 1:
+                    base.GenerateFunctionCall(fn with { Name = new SqlQualifiedName("CEILING") }, ref builder, context);
+                    return;
+                case "strpos" when fn.Arguments.Count == 2:
+                    base.GenerateFunctionCall(fn with
+                    {
+                        Name = new SqlQualifiedName("CHARINDEX"),
+                        Arguments = new[] { fn.Arguments[1], fn.Arguments[0] }
+                    }, ref builder, context);
+                    return;
+            }
+        }
+
+        base.GenerateFunctionCall(fn, ref builder, context);
+    }
+
     // ---- typed column masks (WP-A6) ----
 
     private static readonly System.Text.RegularExpressions.Regex NativeTypeRegex = new(

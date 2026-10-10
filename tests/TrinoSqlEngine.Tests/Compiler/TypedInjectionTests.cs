@@ -111,6 +111,17 @@ public class TypedInjectionTests
         });
     }
 
+    [Fact]
+    public void TenantPredicate_ComparesLengthsToo_BinaryPaddingCannotCollide()
+    {
+        // SQL Server pads the shorter varbinary operand with zero bytes: 'acme' and 'acme' + NUL would otherwise be equal.
+        var secured = Secure("SELECT id FROM orders", NewContext());
+        var tenant = Predicates(secured).First(p => p.Id.Ordinal == 0);
+        var calls = new List<FunctionCallExpression>();
+        Collect(tenant.Predicate, calls);
+        Assert.Equal(2, calls.Count(c => c.Name.SimpleName.Equals("DATALENGTH", StringComparison.OrdinalIgnoreCase)));
+    }
+
     private static void Collect<T>(object? node, List<T> into) where T : class
     {
         if (node is null || node is string) return;

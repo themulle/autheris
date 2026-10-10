@@ -26,14 +26,23 @@ public static class TenantPredicateFactory
             case TenantComparisonStyle.Utf16BinaryCast:
             {
                 // col = @t AND CAST(CAST(col AS nvarchar(max)) AS varbinary(max)) = CAST(CAST(@t AS nvarchar(max)) AS varbinary(max))
+                //   AND DATALENGTH(CAST(col AS nvarchar(max))) = DATALENGTH(CAST(@t AS nvarchar(max)))
                 // The plain equality keeps the index seek; the binary conjunct makes the comparison exact.
                 static Expression Binary(Expression operand) =>
                     new CastExpression(new CastExpression(operand, "varchar"), "varbinary");
 
+                // SQL Server compares varbinary operands as if the shorter one were padded with zero bytes, so 'acme' and
+                // 'acme' + NUL would be equal. The DATALENGTH conjunct closes that gap (tenant equality is exact, INV-15).
+                static Expression Length(Expression operand) =>
+                    new FunctionCallExpression(new SqlQualifiedName("DATALENGTH"), new[] { (Expression)new CastExpression(operand, "varchar") });
+
                 return new BinaryExpression(
-                    new BinaryExpression(Column(), BinaryOperator.Equal, Param()),
+                    new BinaryExpression(
+                        new BinaryExpression(Column(), BinaryOperator.Equal, Param()),
+                        BinaryOperator.And,
+                        new BinaryExpression(Binary(Column()), BinaryOperator.Equal, Binary(Param()))),
                     BinaryOperator.And,
-                    new BinaryExpression(Binary(Column()), BinaryOperator.Equal, Binary(Param())));
+                    new BinaryExpression(Length(Column()), BinaryOperator.Equal, Length(Param())));
             }
             default:
                 throw new NotSupportedException($"No binary-exact tenant comparison is defined for {capabilities.Dialect}.");

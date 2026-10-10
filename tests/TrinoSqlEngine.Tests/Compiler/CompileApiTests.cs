@@ -534,6 +534,7 @@ public class CompileApiTests
     {
         var c = Compile("SELECT id FROM orders");
         Assert.Contains("CAST(CAST([TenantId] AS nvarchar(max)) AS varbinary(max))", c.Sql);
+        Assert.Contains("DATALENGTH(CAST([TenantId] AS nvarchar(max)))", c.Sql);
     }
 
     private static int CountOf(string s, string needle)
