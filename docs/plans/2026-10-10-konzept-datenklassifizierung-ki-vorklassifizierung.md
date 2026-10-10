@@ -21,10 +21,12 @@ Dieses Konzept definiert den End-to-End-Lebenszyklus zur Registrierung, Zuweisun
    Ein robuster Klassifizierungsdienst (angelehnt an [`OpenJevClient`](file:///root/autheris/src/Autheris.Extensions/Lineage/OpenJevClient.cs)) analysiert Spaltennamen, Typen und Schema-Metadaten. Der Prompt und das JSON-Schema werden **dynamisch aus den konfigurierten Schutzstufen und Maskings generiert**.
 5. **Konfidenz & Strittigkeits-Erkennung (`is_disputed`):**  
    Die KI weist jedem Feld einen Konfidenzwert ($0.0 - 1.0$) zu und markiert **strittige Fälle (`is_disputed = true`)** explizit, damit Fachexperten Zweifelsfälle sofort erkennen.
-6. **Zweistufiger Freigabe-Workflow (Dual-Sign-Off mit Feld-Kommentaren):**  
-   Die finale Aktivierung erfordert ein 4-Augen-Prinzip (Segregation of Duties):
-   - **Schritt 1 (Data Owner):** Fachliche Bestätigung aus Sicht des Fachbereichs.
-   - **Schritt 2 (Data Governance Expert / Reviewer):** Regulatorische & rechtliche Compliance-Freigabe (DSGVO, Compliance, Security).
+6. **Vollständig konfigurierbarer Freigabe-Workflow (Optionales 4-Augen-Prinzip):**  
+   Unternehmen steuern deklarativ, ob und wann ein 4-Augen-Prinzip (Dual-Sign-Off) erforderlich ist:
+   - **1-stufig (Data Owner Only):** Der Fachbereichsverantwortliche gibt die Einstufung direkt frei – sofort aktiv (ideal für agile Data-Mesh-Teams).
+   - **1-stufig (Compliance Only):** Ein zentraler Data Governance Expert / DPO entscheidet allein.
+   - **Bedarfsgesteuertes 4-Augen-Prinzip (Conditional):** 1-stufig für Standard-Daten (`INTERNAL`), automatisches 4-Augen-Prinzip erst ab konfigurierbarem Schwellwert (z. B. `CONFIDENTIAL`) oder bei strittigen Feldern (`is_disputed = true`).
+   - **Striktes 2-stufiges 4-Augen-Prinzip (Dual-Sign-Off):** Data Owner $\rightarrow$ Governance Reviewer mit Segregation of Duties.
    - Beide Rollen können **pro Feld / Option individuelle Kommentare** und Korrekturen erfassen.
 
 ---
@@ -72,14 +74,17 @@ sequenceDiagram
     end
     DO->>Engine: submitDataOwnerReview(tableId, columnApprovals[], comments)
     Note right of DO: Hinterlegt Kommentare je Feld:<br/>"IBAN bestätigt. Feld 'cust_type' korrigiert auf NON_SENSITIVE."
-    Engine->>Audit: Protokolliert DATA_OWNER_APPROVED
-    Engine-->>Engine: Status: PENDING_GOVERNANCE_REVIEWER
-
-    Note over DGE2, Engine: Phase 4: Regulatorische Prüfung (SoD / 4-Augen-Prinzip)
-    DGE2->>Engine: submitGovernanceReview(tableId, columnApprovals[], comments)
-    Note right of DGE2: Prüft vor allem strittige Felder (is_disputed)<br/>und erteilt finale Governance-Freigabe.
-    Engine->>Audit: Protokolliert GOVERNANCE_EXPERT_APPROVED (WORM-gesiegelt)
-    Engine-->>Engine: Status: CLASSIFIED (Aktiviert & freigegeben)
+    alt Konfiguration: 1-Stufige Freigabe (FourEyes = false)
+        Engine-->>Engine: Status: CLASSIFIED (Sofort aktiviert & freigegeben)
+        Engine->>Audit: Protokolliert CLASSIFICATION_ACTIVATED
+    else Konfiguration: 2-Stufiges 4-Augen-Prinzip (FourEyes = true oder Rang erreicht)
+        Engine-->>Engine: Status: PENDING_GOVERNANCE_REVIEWER
+        Note over DGE2, Engine: Phase 4: Regulatorische Prüfung (SoD / 4-Augen-Prinzip)
+        DGE2->>Engine: submitGovernanceReview(tableId, columnApprovals[], comments)
+        Note right of DGE2: Prüft vor allem strittige Felder (is_disputed)<br/>und erteilt finale Governance-Freigabe.
+        Engine->>Audit: Protokolliert GOVERNANCE_EXPERT_APPROVED (WORM-gesiegelt)
+        Engine-->>Engine: Status: CLASSIFIED (Aktiviert & freigegeben)
+    end
 ```
 
 ---
@@ -112,16 +117,21 @@ Da sich Enterprise-Workflows zwischen agilen Data-Mesh-Teams und regulierten Fin
               "RequireManualReviewIfDisputed": true
             },
             "ApprovalPipeline": {
-              "Mode": "ConditionalDualStage",
-              "FourEyesThresholdRank": 35,
-              "RequireSecondStageOnDisputed": true,
-              "AllowOwnerSelfApprovalIfRankBelow": null
+              "EnableFourEyes": true,                  // Hauptschalter: true = 4-Augen aktiv | false = 1-stufig
+              "Mode": "ConditionalDualStage",          // "SingleStageDataOwnerOnly" | "SingleStageComplianceOnly" | "DualStageStrict" | "ConditionalDualStage"
+              "FourEyesThresholdRank": 35,             // Bei Conditional: 4-Augen greift erst ab Rang 35 (z.B. CONFIDENTIAL_FINANCE)
+              "RequireSecondStageOnDisputed": true,    // 4-Augen auch bei strittigen KI-Feldern (is_disputed) erzwingen
+              "RequireFourEyesOnDowngrades": true      // Bei Lockerung / PII-Entfernung 4-Augen erzwingen
             }
           },
           "LIGHTWEIGHT_DATA_MESH": {
             "OwnerResolution": { "Strategy": "MetadataMandatoryOrReject" },
             "PreClassification": { "Mode": "AutoApproveUnambiguous" },
-            "ApprovalPipeline": { "Mode": "SingleStageDataOwnerOnly" }
+            "ApprovalPipeline": {
+              "EnableFourEyes": false,                 // Deaktiviert: 1-stufiger Prozess
+              "Mode": "SingleStageDataOwnerOnly",
+              "RequireFourEyesOnDowngrades": false
+            }
           }
         }
       }
@@ -139,11 +149,16 @@ Da sich Enterprise-Workflows zwischen agilen Data-Mesh-Teams und regulierten Fin
    - `Disabled`: Rein manueller Prozess ohne LLM-Inferenz.
    - `HumanInTheLoop`: KI generiert Vorschläge mit Konfidenz und Strittigkeitsmarkierung (`is_disputed`), Mensch bestätigt.
    - `AutoApproveUnambiguous`: Eindeutige Felder mit hoher Konfidenz ($\ge 95\%$) und niedriger Schutzstufe (`rank < 20`) werden direkt freigegeben; nur kritische/strittige Spalten gehen in den Review.
-3. **Freigabe-Stufen:**
-   - `SingleStageDataOwnerOnly`: Fachbereichs-Owner entscheidet autonom (dezentrales Data Mesh).
-   - `SingleStageComplianceOnly`: Zentrales DPO-/Compliance-Team entscheidet.
-   - `DualStageStrict`: Stets Data Owner $\rightarrow$ Data Governance Reviewer (klassisches 4-Augen-Prinzip).
-   - `ConditionalDualStage`: Standarddaten (PUBLIC/INTERNAL) erfordern nur 1 Stufe; ab `CONFIDENTIAL_FINANCE` (`rank >= 35`) oder bei Strittigkeit greift automatisch Stufe 2.
+3. **Freigabe-Stufen & 4-Augen-Optionen (`ApprovalPipeline`):**
+   - **`EnableFourEyes: false` (1-stufig – 4-Augen komplett abgeschaltet):**  
+     Eine einzige Freigabe genügt – die Tabelle und alle Maskings sind sofort clusterweit aktiv.
+     - `SingleStageDataOwnerOnly`: Der fachliche Data Owner gibt frei (autonomes Data Mesh).
+     - `SingleStageComplianceOnly`: Das zentrale DPO-/Governance-Team gibt frei.
+   - **`EnableFourEyes: true` (2-stufig – 4-Augen aktiviert):**  
+     - `DualStageStrict`: Strikter Konzernstandard – jede Tabelle durchläuft zwingend Data Owner $\rightarrow$ Compliance Reviewer.
+     - `ConditionalDualStage`: Risikobasiertes 4-Augen-Prinzip: Unkritische Daten (`PUBLIC`, `INTERNAL`) werden 1-stufig aktiviert; erst ab `FourEyesThresholdRank` (z. B. $\ge 35$ wie `CONFIDENTIAL_FINANCE`) oder bei `is_disputed = true` greift automatisch die 2. Stufe.
+   - **`RequireFourEyesOnDowngrades` (true/false):**  
+     Steuert, ob nachträgliche Schutzstufen-Lockerungen eine 2. Gegenzeichnung verlangen oder ob der Owner das alleine darf.
 
 ---
 
@@ -336,7 +351,9 @@ flowchart TD
 ### 8.1 Schutzmechanismen bei Änderungen:
 1. **Asymmetrisches Sicherheits-Design (Upgrade vs. Downgrade):**
    - **Upgrades (Verschärfung):** Können im Sinne von *Privacy by Default* sofort durch den zuständigen Data Owner oder Data Governance Expert aktiviert werden, damit keine sensiblen Daten ungeschützt abfließen.
-   - **Downgrades (Lockerung):** Stellen ein gravierendes Compliance- und Datenabfluss-Risiko dar. Sie erfordern **zwingend die Gegenzeichnung des Data Governance Experts / DPOs (4-Augen-Prinzip)** mit Angabe einer triftigen Begründung (`justification`) und Feld-Kommentaren.
+   - **Downgrades (Lockerung):** Über die Option `RequireFourEyesOnDowngrades` steuerbar:
+     - Wenn `true` (Enterprise Default): Erfordert zwingend die Gegenzeichnung des Data Governance Experts / DPOs (4-Augen-Prinzip) mit Angabe einer triftigen Begründung (`justification`) und Feld-Kommentaren.
+     - Wenn `false` (Agiles Data Mesh): Der Data Owner kann Lockerungen mit Begründung direkt selbst aktivieren.
 2. **Versionierung & Vorher/Nachher-Diff im WORM-Drive:**
    - Jede Änderung inkrementiert die `classification_version` des Objekts.
    - Der historische Zustand bleibt unberührt im WORM-Speicher erhalten. Auditoren können lückenlos nachvollziehen: Wer hat wann welches Feld von `PII_DIRECT` auf `NON_SENSITIVE` herabgestuft und welche Begründung lag vor.
@@ -456,6 +473,6 @@ Dieses Modell stellt sicher, dass:
 1. Der **Import niemals blockiert** wird, wenn noch kein Owner bekannt ist.
 2. Der **Data Governance Expert** den Owner flexibel pro Datenbank, Schema oder Einzelobjekt zuweist.
 3. Die **KI als Assistenzsystem** (OpenJEV-Style) Schutzstufen und Maskings vorschlägt und strittige Fälle markiert.
-4. Der **fachliche Data Owner** und der **Data Governance Expert** in einem revisionssicheren 4-Augen-Prozess mit Feld-Kommentaren die finale Freigabe erteilen.
-5. **Nachträgliche Änderungen jederzeit möglich sind** – mit schnellen Upgrades und strengem 4-Augen-Schutz bei Downgrades.
+4. Der **Freigabeprozess vollständig konfigurierbar ist** – wahlweise 1-stufig (autonom durch den Data Owner) oder als revisionssicheres 2-stufiges 4-Augen-Prinzip (Fachbereich + DPO/Compliance) mit Feld-Kommentaren.
+5. **Nachträgliche Änderungen jederzeit möglich sind** – mit schnellen Upgrades und konfigurierbarem 4-Augen-Schutz (`RequireFourEyesOnDowngrades`) bei Downgrades.
 6. **Jeder Vorgang, jede Änderung und jede Freigabe unveränderbar auf einem WORM-Drive versiegelt** wird.
