@@ -81,7 +81,8 @@ public sealed class SqlVirtualFilterKeySetProvider : IVirtualFilterKeySetProvide
             cacheKey,
             TimeSpan.FromSeconds(federation.KeyCacheTtlSeconds),
             loadCt => LoadAsync(filter, keyTypes, tenant, federation, loadCt),
-            ct).ConfigureAwait(false);
+            ct,
+            TimeSpan.FromSeconds(federation.KeyQueryTimeoutSeconds)).ConfigureAwait(false);
 
         if (set.Count > federation.MaxAuthorizedKeys)
         {
