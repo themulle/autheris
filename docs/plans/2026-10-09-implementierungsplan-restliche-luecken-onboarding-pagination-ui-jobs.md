@@ -984,14 +984,14 @@ gantt
 
 ## 9. Definition of Done (DoD) & Security Verification Gates
 
-- [ ] Sämtliche Unit-, Integrations- und Security-Tests für AP-9.1 bis AP-9.4 implementiert und 100% grün.
-- [ ] **AppSec Verification:**
-  - [ ] SSRF-Schutz blockiert Loopback- und Cloud-Metadaten-IPs nachweislich per Test.
-  - [ ] NextLink-Paginierung weist externe Hosts ab (`SecurityException`).
-  - [ ] Anti-CSRF- und Strict-CSP-Header sind im DevPortal aktiv (`nonce`, `no-store`).
-  - [ ] Async Jobs erzwingen strikte Tenant- und Benutzerisolation (Zero-IDOR, `404 Not Found`).
-  - [ ] Dynamische Datenmaskierung (DDM) wird vor dem Zwischenspeichern angewendet.
-- [ ] 0 Compiler-Warnungen (`TreatWarningsAsErrors=true`).
-- [ ] Alle neuen Quellcode-Dateien halten das Limit von $\le 800$ Zeilen strikt ein.
-- [ ] Keine Klartext-Secrets in Logs, Antworten oder Fehlermeldungen (`SecretScrubber`).
-- [ ] Gesamtübersicht in `docs/plans/00-gesamtplan-uebersicht.md` aktualisiert.
+- [x] Sämtliche Unit-, Integrations- und Security-Tests für AP-9.1 bis AP-9.4 implementiert und 100% grün.
+- [x] **AppSec Verification:**
+  - [x] SSRF-Schutz blockiert Loopback- und Cloud-Metadaten-IPs nachweislich per Test.
+  - [x] NextLink-Paginierung weist externe Hosts ab (`SecurityException`).
+  - [x] Anti-CSRF- und Strict-CSP-Header sind im DevPortal aktiv (`nonce`, `no-store`).
+  - [x] Async Jobs erzwingen strikte Tenant- und Benutzerisolation (Zero-IDOR, `404 Not Found`).
+  - [x] Dynamische Datenmaskierung (DDM) wird vor dem Zwischenspeichern angewendet.
+- [x] 0 Compiler-Warnungen (`TreatWarningsAsErrors=true`).
+- [x] Alle neuen Quellcode-Dateien halten das Limit von $\le 800$ Zeilen strikt ein.
+- [x] Keine Klartext-Secrets in Logs, Antworten oder Fehlermeldungen (`SecretScrubber`).
+- [x] Gesamtübersicht in `docs/plans/00-gesamtplan-uebersicht.md` aktualisiert.
