@@ -9,6 +9,7 @@ public static class GovernedSqlErrorCodes
     public const string DataError = "SQL_DATA_ERROR";
     public const string ProviderError = "SQL_PROVIDER_ERROR";
     public const string CheckOptionViolation = "DML_CHECK_OPTION_VIOLATION";
+    public const string CheckedExecutionRequired = "DML_CHECKED_EXECUTION_REQUIRED";
 
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
@@ -16,6 +17,7 @@ public static class GovernedSqlErrorCodes
         ConstraintViolation => "The statement violated a data constraint.",
         DataError => "The statement contained a value that could not be stored or converted.",
         CheckOptionViolation => "The statement wrote a row that the row policy does not permit.",
+        CheckedExecutionRequired => "The statement must run through the checked DML executor.",
         _ => "The statement could not be executed."
     };
 }
@@ -46,6 +48,19 @@ public sealed class DmlCheckOptionViolationException : GovernedSqlException
 {
     public DmlCheckOptionViolationException(TargetSqlDialect dialect)
         : base(GovernedSqlErrorCodes.CheckOptionViolation, dialect)
+    {
+    }
+}
+
+/// <summary>
+/// CR-ADG-43: a statement with a row-count check (<see cref="CompiledSql.RequiresRowCountCheck"/>) was bound outside the checked
+/// execution path. Running it unchecked would write rows the policy does not permit, so it is refused. Use
+/// <see cref="CheckedDmlExecutor"/>.
+/// </summary>
+public sealed class CheckedExecutionRequiredException : GovernedSqlException
+{
+    public CheckedExecutionRequiredException(TargetSqlDialect dialect)
+        : base(GovernedSqlErrorCodes.CheckedExecutionRequired, dialect)
     {
     }
 }

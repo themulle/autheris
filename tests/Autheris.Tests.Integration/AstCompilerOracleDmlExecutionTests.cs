@@ -109,7 +109,7 @@ public sealed class AstCompilerOracleDmlExecutionTests : AstCompilerDmlContract,
     }
 
     protected override async Task<int> ExecuteInTransactionAsync(CompiledSql compiled) =>
-        await RunCheckedAsync(await OpenAsync(), true, cmd => _binder.Bind(cmd, compiled, new Dictionary<string, object?>()), compiled);
+        await RunCheckedAsync(await OpenAsync(), true, _binder, compiled);
 
     protected override async Task<List<object?[]>> QueryAsync(string sql)
     {

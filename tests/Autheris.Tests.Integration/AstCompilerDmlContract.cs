@@ -64,29 +64,16 @@ public abstract class AstCompilerDmlContract
     /// </summary>
     protected abstract Task<int> ExecuteInTransactionAsync(CompiledSql compiled);
 
-    /// <summary>The shared transaction harness for the ADO.NET dialects.</summary>
-    protected static async Task<int> RunCheckedAsync(DbConnection connection, bool ownsConnection, Action<DbCommand> bind, CompiledSql compiled,
+    /// <summary>
+    /// The shared transaction harness for the ADO.NET dialects: the engine's checked executor (CR-ADG-43), the only path that may
+    /// run a statement with a row-count check.
+    /// </summary>
+    protected static async Task<int> RunCheckedAsync(DbConnection connection, bool ownsConnection, DbCommandCompiledSqlBinder binder, CompiledSql compiled,
         System.Data.IsolationLevel isolation = System.Data.IsolationLevel.ReadCommitted)
     {
         try
         {
-            if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync();
-            await using var tx = await connection.BeginTransactionAsync(isolation);
-            try
-            {
-                await using var cmd = connection.CreateCommand();
-                cmd.Transaction = tx;
-                bind(cmd);
-                int affected = await cmd.ExecuteNonQueryAsync();
-                DmlCheckOption.Enforce(compiled, affected);
-                await tx.CommitAsync();
-                return affected;
-            }
-            catch
-            {
-                await tx.RollbackAsync();
-                throw;
-            }
+            return await new CheckedDmlExecutor(binder).ExecuteAsync(connection, compiled, new Dictionary<string, object?>(), isolation);
         }
         finally
         {
@@ -446,6 +433,20 @@ public abstract class AstCompilerDmlContract
         var ex = await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'US', 'new', 1)", "acme"));
         ex.Code.ShouldBe("DML_CHECK_OPTION_VIOLATION");
         ex.ToString().ShouldNotContain("US");
+        (await SnapshotAsync()).ShouldBe(before);
+    }
+
+    [Fact]
+    public async Task Insert_CheckOptionStatement_CannotBeBoundOrRunOutsideTheCheckedExecutor()
+    {
+        if (!Available() || !ReportsInsertCount) return;
+        RegionEuPolicy();
+        var before = await SnapshotAsync();
+        var compiled = Engine.Compile($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'US', 'new', 1)".AsMemory(), Request("acme"), CancellationToken.None);
+        compiled.RequiresRowCountCheck.ShouldBeTrue();
+        // the plain path (bind + execute) would silently filter the violating row out and report success: it fails closed instead
+        var ex = await Should.ThrowAsync<CheckedExecutionRequiredException>(() => ExecuteAsync(compiled));
+        ex.Code.ShouldBe("DML_CHECKED_EXECUTION_REQUIRED");
         (await SnapshotAsync()).ShouldBe(before);
     }
 

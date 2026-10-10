@@ -123,4 +123,63 @@ public sealed class CompilerSeamArchitectureTests
 
         violations.ShouldBeEmpty("DML guards are fixed (CR-ADG-38); production code must use DmlGuardOptions.Strict only: " + string.Join(", ", violations));
     }
+
+    // CR-ADG-43: a statement with a row-count check runs only through CheckedDmlExecutor. The binders refuse it, and the one internal
+    // entry that binds it (BindForCheckedExecution) may be called only by that executor. No production assembly may add a binder
+    // that is not derived from DbCommandCompiledSqlBinder (it would not carry the refusal).
+    private static List<string> CallersOfCheckedBinding(string assemblyPath)
+    {
+        var callers = new List<string>();
+        using var module = ModuleDefinition.ReadModule(assemblyPath);
+        foreach (var type in module.GetTypes())
+        {
+            string top = (type.DeclaringType ?? type).FullName;   // the async state machine is a nested type of its owner
+            foreach (var method in type.Methods.Where(m => m.HasBody))
+            {
+                foreach (var instruction in method.Body.Instructions)
+                {
+                    if (instruction.OpCode.Code is not (Code.Call or Code.Callvirt) || instruction.Operand is not MethodReference called) continue;
+                    if (called.Name == "BindForCheckedExecution" && called.DeclaringType.FullName == "TrinoSqlEngine.Ast.Emit.DbCommandCompiledSqlBinder")
+                    {
+                        callers.Add(top);
+                    }
+                }
+            }
+        }
+
+        return callers.Distinct().ToList();
+    }
+
+    [Fact]
+    public void OnlyTheCheckedDmlExecutor_BindsAStatementWithARowCountCheck()
+    {
+        var callers = new List<string>();
+        foreach (var assembly in ProductionAssemblies)
+        {
+            callers.AddRange(CallersOfCheckedBinding(assembly.Location));
+        }
+
+        // positive control: the scanner does see the one legitimate caller
+        callers.ShouldBe(new[] { "TrinoSqlEngine.Ast.Emit.CheckedDmlExecutor" });
+    }
+
+    [Fact]
+    public void EveryProductionBinder_DerivesFromTheRefusingBaseClass()
+    {
+        var violations = new List<string>();
+        foreach (var assembly in ProductionAssemblies)
+        {
+            using var module = ModuleDefinition.ReadModule(assembly.Location);
+            foreach (var type in module.GetTypes().Where(t => !t.IsInterface && !t.IsAbstract))
+            {
+                bool implementsBinder = type.Interfaces.Any(i => i.InterfaceType.FullName == "TrinoSqlEngine.Ast.Emit.ICompiledSqlBinder");
+                var baseTypes = new List<string>();
+                for (var b = type.BaseType; b is not null; b = b.Resolve()?.BaseType) baseTypes.Add(b.FullName);
+                bool derives = baseTypes.Contains("TrinoSqlEngine.Ast.Emit.DbCommandCompiledSqlBinder");
+                if ((implementsBinder || derives) && !derives) violations.Add(type.FullName);
+            }
+        }
+
+        violations.ShouldBeEmpty("A binder must derive from DbCommandCompiledSqlBinder (CR-ADG-43): " + string.Join(", ", violations));
+    }
 }

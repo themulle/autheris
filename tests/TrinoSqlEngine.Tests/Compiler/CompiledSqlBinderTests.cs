@@ -109,4 +109,111 @@ public class CompiledSqlBinderTests
         _binder.Bind(cmd, compiled, new Dictionary<string, object?>());
         Assert.Equal(new[] { "@p0", "@p1" }, cmd.Parameters.Cast<SqliteParameter>().Select(p => p.ParameterName));
     }
+
+    // ---- CR-ADG-43: a statement with a row-count check runs only through the checked executor ----
+
+    private static CompiledSql Checked(string sql, int expected, params BoundParameter[] ps) =>
+        new(sql, ps.ToImmutableArray(), TargetSqlDialect.SqlServer, SqlStatementClass.Insert,
+            ImmutableArray<TrinoSqlEngine.Ast.Nodes.SecurityPredicateId>.Empty, "test", expected);
+
+    public static IEnumerable<object[]> AllBinders() => new[]
+    {
+        new object[] { TargetSqlDialect.SqlServer }, new object[] { TargetSqlDialect.DuckDb }, new object[] { TargetSqlDialect.PostgreSql },
+        new object[] { TargetSqlDialect.Oracle }, new object[] { TargetSqlDialect.Databricks }
+    };
+
+    private static DbCommandCompiledSqlBinder BinderOf(TargetSqlDialect dialect) => dialect switch
+    {
+        TargetSqlDialect.SqlServer => new SqlServerCompiledSqlBinder(),
+        TargetSqlDialect.DuckDb => new DuckDbCompiledSqlBinder(),
+        TargetSqlDialect.PostgreSql => new PostgreSqlCompiledSqlBinder(),
+        TargetSqlDialect.Oracle => new OracleCompiledSqlBinder(),
+        _ => new DatabricksCompiledSqlBinder()
+    };
+
+    [Theory]
+    [MemberData(nameof(AllBinders))]
+    public void Bind_OfAStatementWithARowCountCheck_IsRefused_WithATypedError_AndTouchesNothing(TargetSqlDialect dialect)
+    {
+        var compiled = Checked("INSERT INTO t SELECT 1", 1) with { Dialect = dialect };
+        using var cmd = new SqliteCommand();
+        var ex = Assert.Throws<CheckedExecutionRequiredException>(() => BinderOf(dialect).Bind(cmd, compiled, new Dictionary<string, object?>()));
+        Assert.Equal(GovernedSqlErrorCodes.CheckedExecutionRequired, ex.Code);
+        Assert.Equal("DML_CHECKED_EXECUTION_REQUIRED", ex.Code);
+        Assert.Equal(dialect, ex.Dialect);
+        Assert.Null(ex.InnerException);
+        Assert.Equal(string.Empty, cmd.CommandText);   // nothing reached the command
+        Assert.Empty(cmd.Parameters);
+    }
+
+    [Fact]
+    public void Bind_OfAStatementWithoutARowCountCheck_IsUnchanged()
+    {
+        using var cmd = new SqliteCommand();
+        _binder.Bind(cmd, Compiled("DELETE FROM t"), new Dictionary<string, object?>());
+        Assert.Equal("DELETE FROM t", cmd.CommandText);
+    }
+
+    private static async Task<SqliteConnection> OpenTableAsync()
+    {
+        var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var create = connection.CreateCommand();
+        create.CommandText = "CREATE TABLE t (a INTEGER)";
+        await create.ExecuteNonQueryAsync();
+        return connection;
+    }
+
+    private static async Task<long> CountAsync(SqliteConnection connection)
+    {
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM t";
+        return (long)(await cmd.ExecuteScalarAsync())!;
+    }
+
+    [Fact]
+    public async Task CheckedExecutor_CommitsWhenTheAffectedCountMatches()
+    {
+        await using var connection = await OpenTableAsync();
+        var compiled = Checked("INSERT INTO t (a) SELECT 1 WHERE @p0 = 1", 1, Param(0, 1, SqlParameterType.Int32, ParameterOrigin.QueryLiteral));
+        int affected = await new CheckedDmlExecutor(_binder).ExecuteAsync(connection, compiled, new Dictionary<string, object?>());
+        Assert.Equal(1, affected);
+        Assert.Equal(1, await CountAsync(connection));
+    }
+
+    [Fact]
+    public async Task CheckedExecutor_RollsBackAndThrowsTheTypedError_WhenTheCountDiffers()
+    {
+        await using var connection = await OpenTableAsync();
+        // two rows are written but only one is expected: the transaction is rolled back, nothing stays
+        var compiled = Checked("INSERT INTO t (a) SELECT 1 UNION ALL SELECT 2", 1);
+        await Assert.ThrowsAsync<DmlCheckOptionViolationException>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, compiled, new Dictionary<string, object?>()));
+        Assert.Equal(0, await CountAsync(connection));
+
+        // the policy filtered a row out: zero rows written, one expected
+        var filtered = Checked("INSERT INTO t (a) SELECT 1 WHERE @p0 = 2", 1, Param(0, 1, SqlParameterType.Int32, ParameterOrigin.QueryLiteral));
+        await Assert.ThrowsAsync<DmlCheckOptionViolationException>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, filtered, new Dictionary<string, object?>()));
+        Assert.Equal(0, await CountAsync(connection));
+    }
+
+    [Fact]
+    public async Task CheckedExecutor_RollsBackOnAnExecutionError_AndRunsStatementsWithoutACheckToo()
+    {
+        await using var connection = await OpenTableAsync();
+        var broken = Checked("INSERT INTO nope (a) SELECT 1", 1);
+        await Assert.ThrowsAnyAsync<Exception>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, broken, new Dictionary<string, object?>()));
+        Assert.Equal(0, await CountAsync(connection));
+
+        int affected = await new CheckedDmlExecutor(_binder).ExecuteAsync(connection, Compiled("INSERT INTO t (a) SELECT 5"), new Dictionary<string, object?>());
+        Assert.Equal(1, affected);
+    }
+
+    [Fact]
+    public async Task CheckedExecutor_RefusesACompiledStatementOfAnotherDialect()
+    {
+        await using var connection = await OpenTableAsync();
+        var compiled = Checked("INSERT INTO t (a) SELECT 1", 1) with { Dialect = TargetSqlDialect.PostgreSql };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, compiled, new Dictionary<string, object?>()));
+        Assert.Equal(0, await CountAsync(connection));
+    }
 }

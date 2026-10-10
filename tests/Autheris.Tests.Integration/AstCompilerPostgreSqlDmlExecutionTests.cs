@@ -84,7 +84,7 @@ public sealed class AstCompilerPostgreSqlDmlExecutionTests : AstCompilerDmlContr
     }
 
     protected override Task<int> ExecuteInTransactionAsync(CompiledSql compiled) =>
-        RunCheckedAsync(new NpgsqlConnection(_fx.ConnectionString), true, cmd => _binder.Bind(cmd, compiled, new Dictionary<string, object?>()), compiled);
+        RunCheckedAsync(new NpgsqlConnection(_fx.ConnectionString), true, _binder, compiled);
 
     protected override async Task<List<object?[]>> QueryAsync(string sql)
     {

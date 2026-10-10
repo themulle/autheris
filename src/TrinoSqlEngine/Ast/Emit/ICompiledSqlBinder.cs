@@ -14,7 +14,10 @@ public interface ICompiledSqlBinder
 
     /// <summary>
     /// Sets <see cref="DbCommand.CommandText"/> from <see cref="CompiledSql.Sql"/> (the only text that may reach the
-    /// command) and adds one typed parameter per <see cref="BoundParameter"/>, by name (INV-13).
+    /// command) and adds one typed parameter per <see cref="BoundParameter"/>, by name (INV-13). CR-ADG-43: a statement with
+    /// <see cref="CompiledSql.RequiresRowCountCheck"/> is refused with <see cref="CheckedExecutionRequiredException"/>; it runs
+    /// only through <see cref="CheckedDmlExecutor"/> (transaction, row-count comparison, rollback), so an unchecked execution
+    /// cannot happen by construction. Every implementation must refuse such a statement.
     /// </summary>
     void Bind(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues);
 }
@@ -84,6 +87,22 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
     }
 
     public void Bind(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues)
+    {
+        ArgumentNullException.ThrowIfNull(compiled);
+        if (compiled.RequiresRowCountCheck)
+        {
+            // CR-ADG-43: fail closed by construction; the checked path is the only way to bind (and so to run) this statement.
+            throw new CheckedExecutionRequiredException(compiled.Dialect);
+        }
+
+        BindCore(command, compiled, clientParameterValues);
+    }
+
+    /// <summary>The binding of <see cref="CheckedDmlExecutor"/>, the only caller that may bind a statement with a row-count check.</summary>
+    internal void BindForCheckedExecution(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues) =>
+        BindCore(command, compiled, clientParameterValues);
+
+    private void BindCore(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues)
     {
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(compiled);
