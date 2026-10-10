@@ -547,6 +547,24 @@ public abstract class AstCompilerDmlContract
     }
 
     [Fact]
+    public async Task Insert_ThousandRows_AreWritten_OrFailWithTheTypedBindLimit()
+    {
+        if (!Available() || !ReportsInsertCount) return;
+        RegionEuPolicy();
+        string rows = string.Join(", ", Enumerable.Range(100, 1000).Select(i => $"({i}, 'acme', 'EU', 'n', 1)"));
+        try
+        {
+            (await ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES {rows}", "acme")).ShouldBe(1000);
+            (await OrdersAsync()).Count(r => r.Id >= 100).ShouldBe(1000);
+        }
+        catch (SqlLimitExceededException ex)
+        {
+            ex.Kind.ShouldBe(SqlLimitKind.BindParameters);   // never an AST depth error: the row set is a balanced tree
+            (await OrdersAsync()).Count(r => r.Id >= 100).ShouldBe(0);
+        }
+    }
+
+    [Fact]
     public async Task Insert_IntoAPolicyTable_SelectSourceOrMissingPolicyColumn_IsRejectedBeforeExecution()
     {
         if (!Available()) return;

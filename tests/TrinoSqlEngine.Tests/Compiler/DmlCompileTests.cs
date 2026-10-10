@@ -370,6 +370,27 @@ public class DmlCompileTests
         Assert.True(Compile(dialect, "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')").RequiresRowCountCheck);
     }
 
+    // CR-ADG-44: the row set is a balanced tree; 1,000 rows do not reach the AST depth limit
+    [Theory]
+    [MemberData(nameof(CheckDialectData))]
+    public void Insert_CheckOption_ThousandRows_StayWithinTheLimits(TargetSqlDialect dialect)
+    {
+        RegionPolicy();
+        string values = string.Join(", ", Enumerable.Range(1, 1000).Select(i => $"({i}, 'acme', 'EU')"));
+        var request = Request(dialect);
+        try
+        {
+            var c = _engine.Compile($"INSERT INTO orders (id, tenantid, region) VALUES {values}".AsMemory(), request, CancellationToken.None);
+            Assert.Equal(1000, c.ExpectedAffectedRows);
+            Assert.Equal(999, CountOf(c.Sql, "UNION ALL"));
+        }
+        catch (SqlLimitExceededException ex) when (dialect == TargetSqlDialect.SqlServer)
+        {
+            // SQL Server (2,100 parameters) cannot bind 2,000 values plus the policy and tenant binds of this shape: the typed limit error, never an AST depth error
+            Assert.Equal(SqlLimitKind.BindParameters, ex.Kind);
+        }
+    }
+
     [Theory]
     [MemberData(nameof(DialectData))]
     public void Insert_IntoATableWithoutARowPolicy_NeedsNoRowCountCheck(TargetSqlDialect dialect)
