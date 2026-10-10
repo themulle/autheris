@@ -46,6 +46,9 @@ public abstract class AstCompilerDmlContract
 
     protected abstract string Quote(string identifier);
 
+    /// <summary>How a test reads a column back (a provider may need a cast, for example PostgreSQL citext).</summary>
+    protected virtual string ReadExpr(string logical) => Quote(Canon(logical));
+
     /// <summary>A reference to the logical table in a statement the test sends to the database directly.</summary>
     protected abstract string RawTable(string logical);
 
@@ -149,12 +152,12 @@ public abstract class AstCompilerDmlContract
     }
 
     protected async Task<List<(int Id, string Tenant, string Status)>> OrdersAsync() =>
-        (await QueryAsync($"SELECT {Quote(Canon("Id"))}, {Quote(Canon("TenantId"))}, {Quote(Canon("Status"))} FROM {RawTable("Orders")} ORDER BY {Quote(Canon("Id"))}"))
+        (await QueryAsync($"SELECT {ReadExpr("Id")}, {ReadExpr("TenantId")}, {ReadExpr("Status")} FROM {RawTable("Orders")} ORDER BY {Quote(Canon("Id"))}"))
         .Select(r => (Convert.ToInt32(r[0], CultureInfo.InvariantCulture), (string)r[1]!, (string)r[2]!)).ToList();
 
     protected async Task<string> SnapshotAsync()
     {
-        var columns = string.Join(", ", new[] { "Id", "TenantId", "Region", "Status", "Amount", "Email" }.Select(c => Quote(Canon(c))));
+        var columns = string.Join(", ", new[] { "Id", "TenantId", "Region", "Status", "Amount", "Email" }.Select(ReadExpr));
         return string.Join("|", (await QueryAsync($"SELECT {columns} FROM {RawTable("Orders")} ORDER BY {Quote(Canon("Id"))}"))
             .Select(r => string.Join(",", r.Select(v => v is IFormattable f ? f.ToString(null, CultureInfo.InvariantCulture) : v?.ToString()))));
     }

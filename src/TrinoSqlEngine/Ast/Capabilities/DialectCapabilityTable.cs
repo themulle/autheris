@@ -117,7 +117,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         BindExpressionTemplates: IdentityBindTemplates,
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.PostgreSql),
         AllowedTableFunctions: FrozenSet<string>.Empty,
-        LimitSource: "PG-PROTO");
+        LimitSource: "PG-PROTO",
+        DmlStatements: AllDml);
 
     private static readonly DialectCapabilities Oracle = new(
         Dialect: TargetSqlDialect.Oracle,

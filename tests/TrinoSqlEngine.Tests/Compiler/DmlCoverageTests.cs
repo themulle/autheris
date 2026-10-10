@@ -268,7 +268,7 @@ public class DmlCoverageTests
     {
         new object[] { TargetSqlDialect.SqlServer, StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge },
         new object[] { TargetSqlDialect.DuckDb, StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge },
-        new object[] { TargetSqlDialect.PostgreSql, StatementPermissions.ReadOnly },
+        new object[] { TargetSqlDialect.PostgreSql, StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge },
         new object[] { TargetSqlDialect.Databricks, StatementPermissions.ReadOnly },
         new object[] { TargetSqlDialect.Oracle, StatementPermissions.ReadOnly }
     };

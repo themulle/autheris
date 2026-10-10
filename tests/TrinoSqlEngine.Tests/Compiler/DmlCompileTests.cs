@@ -16,7 +16,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// </summary>
 public class DmlCompileTests
 {
-    public static readonly TargetSqlDialect[] Dialects = { TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb };
+    public static readonly TargetSqlDialect[] Dialects = { TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.PostgreSql };
 
     public static IEnumerable<object[]> DialectData() => Dialects.Select(d => new object[] { d });
 
