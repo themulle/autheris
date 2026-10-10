@@ -20,6 +20,12 @@ public static class BenchmarkRunnerApp
             return;
         }
 
+        if (args.Length > 0 && args[0].Equals("compile", StringComparison.OrdinalIgnoreCase))
+        {
+            CompilePathBenchmark.Run();
+            return;
+        }
+
         if (args.Length > 0 && args[0].Equals("sla", StringComparison.OrdinalIgnoreCase))
         {
             await SlaValidationBenchmark.RunAllSlaChecksAsync();
@@ -41,6 +47,9 @@ public static class BenchmarkRunnerApp
 
         // 4. End-to-End Concurrent WebHost Load & Latency Benchmark
         await RunGatewayLoadBenchmarkAsync();
+
+        // 4b. Governed AST compile path (cache hit and miss)
+        CompilePathBenchmark.Run();
 
         // 5. Explicit SLA Checks (Casbin, Lineage, Complexity)
         await SlaValidationBenchmark.RunAllSlaChecksAsync();

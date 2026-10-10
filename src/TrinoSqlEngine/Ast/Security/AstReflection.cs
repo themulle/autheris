@@ -104,6 +104,19 @@ internal static class AstReflection
         }
     }
 
+    private static readonly ConditionalWeakTable<object, string> FingerprintMemo = new();
+
+    /// <summary>
+    /// Fingerprint of an immutable record instance, memoized per instance (CR-ADG-12): a cache hit re-validates every table
+    /// dependency, and re-serializing an unchanged catalog entry or mask specification by reflection on each hit is wasted work.
+    /// Only instances that are never mutated may be passed (catalog entries, mask arguments).
+    /// </summary>
+    public static string FingerprintMemoized(object immutableRoot)
+    {
+        ArgumentNullException.ThrowIfNull(immutableRoot);
+        return FingerprintMemo.GetValue(immutableRoot, static root => Fingerprint(root));
+    }
+
     public static string Fingerprint(object root)
     {
         var sb = new StringBuilder(256);

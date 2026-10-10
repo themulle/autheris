@@ -24,6 +24,7 @@ using TrinoSqlEngine.Governance;
 internal sealed class GovernedSqlCompiler
 {
     private const int MinimumInputForExpansion = 64;
+    private static readonly IReadOnlyDictionary<string, object?> ClientNoValues = new Dictionary<string, object?>();
 
     private readonly FastSqlEngine _engine;
     private readonly IDialectCapabilityProvider _capabilities;
@@ -126,7 +127,11 @@ internal sealed class GovernedSqlCompiler
         }
 
         _cache.CountMiss();
-        typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps);
+        if (template is not null)
+        {
+            // A rehydration attempt may have added values; start clean. A plain miss reuses the context (CR-ADG-12).
+            typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps);
+        }
 
         // 3. token guards + parse
         Pass("parse");
@@ -180,7 +185,7 @@ internal sealed class GovernedSqlCompiler
         // 9. emit (+ bind limit and emitted-text checker inside)
         Pass("emit");
         var generator = SqlDialectGeneratorFactory.GetGenerator(request.TargetDialect);
-        var compiled = generator.Generate(secured, new ParameterSource(typed.PolicyValues.ToFrozenDictionary(StringComparer.Ordinal), new Dictionary<string, object?>()), token)
+        var compiled = generator.Generate(secured, new ParameterSource(typed.PolicyValues, ClientNoValues), token)
             with { AppliedPredicates = applied };
 
         // 10. output budget

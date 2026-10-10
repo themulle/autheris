@@ -140,12 +140,12 @@ public sealed class TypedPolicyContext
             .Select(c =>
             {
                 var spec = GetMaskSpec(id, c.Name);
-                return $"{c.Name}:{spec.Kind}:{AstReflection.Fingerprint(spec.Arguments)}";
+                return $"{c.Name}:{spec.Kind}:{AstReflection.FingerprintMemoized(spec.Arguments)}";
             })
             .ToList();
         return AstReflection.Fingerprint(new object[]
         {
-            AstReflection.Fingerprint(entry), applies, predicate, masks.Count == 0 ? "-" : AstReflection.Fingerprint(masks)
+            AstReflection.FingerprintMemoized(entry), applies, predicate, masks.Count == 0 ? "-" : AstReflection.Fingerprint(masks)
         });
     }
 

@@ -110,9 +110,10 @@ public sealed class CompiledSqlTemplateCache
 
     public CompiledSqlTemplate? Find(string keyMaterial)
     {
+        string hash = HashOf(keyMaterial);   // outside the lock: the hash covers the whole key material (CR-ADG-12)
         lock (_gate)
         {
-            if (_entries.TryGetValue(HashOf(keyMaterial), out var t) && string.Equals(t.KeyMaterial, keyMaterial, StringComparison.Ordinal))
+            if (_entries.TryGetValue(hash, out var t) && string.Equals(t.KeyMaterial, keyMaterial, StringComparison.Ordinal))
             {
                 return t;
             }
@@ -133,9 +134,9 @@ public sealed class CompiledSqlTemplateCache
 
     public void Add(CompiledSqlTemplate template)
     {
+        string key = HashOf(template.KeyMaterial);
         lock (_gate)
         {
-            string key = HashOf(template.KeyMaterial);
             if (!_entries.ContainsKey(key)) _order.Enqueue(key);
             _entries[key] = template;
             while (_entries.Count > _maxEntries && _order.Count > 0)
@@ -161,6 +162,9 @@ public sealed class CompiledSqlTemplateCache
 /// </summary>
 public static class CompileCacheKey
 {
+    // CR-ADG-12: reflection and sorting once per type, not on every compile.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, PropertyInfo[]> OrderedProperties = new();
+
     private static readonly HashSet<string> ValidatedPerTable = new(StringComparer.Ordinal)
     {
         nameof(GovernancePolicy.RowFilters), nameof(GovernancePolicy.Masks), nameof(GovernancePolicy.Catalog)
@@ -216,9 +220,12 @@ public static class CompileCacheKey
         }
 
         sb.Append(type.Name).Append('(');
-        foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance).OrderBy(p => p.Name, StringComparer.Ordinal))
+        foreach (var property in OrderedProperties.GetOrAdd(type, static t =>
+                     t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                         .Where(p => p.GetIndexParameters().Length == 0)
+                         .OrderBy(p => p.Name, StringComparer.Ordinal)
+                         .ToArray()))
         {
-            if (property.GetIndexParameters().Length > 0) continue;
             if (value is GovernancePolicy && ValidatedPerTable.Contains(property.Name)) continue;
             sb.Append(property.Name).Append('=');
             Write(sb, property.GetValue(value), false);

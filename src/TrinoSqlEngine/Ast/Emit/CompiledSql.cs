@@ -42,7 +42,7 @@ public sealed record CompiledSql(
 
 /// <summary>Supplies gateway-bound values for <see cref="PolicyParameterExpression"/> nodes; query literals come from the AST.</summary>
 public sealed record ParameterSource(
-    FrozenDictionary<string, PolicyValue> PolicyValues,
+    IReadOnlyDictionary<string, PolicyValue> PolicyValues,
     IReadOnlyDictionary<string, object?> ClientNamedValues)
 {
     public static ParameterSource Empty { get; } = new(
