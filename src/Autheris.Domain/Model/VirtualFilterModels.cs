@@ -305,11 +305,11 @@ public sealed record FilterBinding
     /// </summary>
     public PushdownParameterFormat? PushdownFormat { get; init; }
 
-    /// <summary>Maximum number of keys pushed down in URL parameters before switching to DuckDB join.</summary>
-    public int MaxPushdownKeys { get; init; } = 100;
+    /// <summary>Upper bound of <see cref="MaxPushdownKeys"/>; the gateway-wide limit applies on top.</summary>
+    public const int HardMaxPushdownKeys = 1_000;
 
-    /// <summary>Composite key column names for multi-column joins.</summary>
-    public IReadOnlyList<string> CompositeKeys { get; init; } = [];
+    /// <summary>Maximum number of keys pushed down to the upstream; more is read completely or denied (1..<see cref="HardMaxPushdownKeys"/>).</summary>
+    public int MaxPushdownKeys { get; init; } = 100;
 
     public void Validate()
     {
@@ -338,9 +338,9 @@ public sealed record FilterBinding
             throw new ArgumentException($"The binding of '{FilterName}' needs at least one object kind.", nameof(ObjectKinds));
         }
 
-        if (MaxPushdownKeys <= 0)
+        if (MaxPushdownKeys is < 1 or > HardMaxPushdownKeys)
         {
-            throw new ArgumentException($"MaxPushdownKeys must be greater than zero for '{FilterName}'.", nameof(MaxPushdownKeys));
+            throw new ArgumentException($"MaxPushdownKeys must be between 1 and {HardMaxPushdownKeys} for '{FilterName}'.", nameof(MaxPushdownKeys));
         }
 
         if (TimeColumn != null) VirtualFilterNames.ValidateIdentifier(TimeColumn, nameof(TimeColumn));
@@ -348,11 +348,6 @@ public sealed record FilterBinding
         {
             VirtualFilterNames.ValidateIdentifier(key, nameof(ColumnMap));
             VirtualFilterNames.ValidateIdentifier(target, nameof(ColumnMap));
-        }
-
-        foreach (var compositeKey in CompositeKeys)
-        {
-            VirtualFilterNames.ValidateIdentifier(compositeKey, nameof(CompositeKeys));
         }
     }
 
@@ -389,7 +384,6 @@ public sealed record FilterBinding
           .Append(" strat=").Append((int)Strategy)
           .Append(" push=").Append(PushdownFormat is { } format ? ((int)format).ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty)
           .Append(" maxk=").Append(MaxPushdownKeys)
-          .Append(" comp=").AppendJoin(',', CompositeKeys.OrderBy(c => c, StringComparer.Ordinal))
           .Append(" map=").AppendJoin(',', (ColumnMap ?? new Dictionary<string, string>())
               .OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => p.Key + "=" + p.Value))
           .Append('\n');

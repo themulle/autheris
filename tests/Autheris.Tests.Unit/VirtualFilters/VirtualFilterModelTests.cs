@@ -168,4 +168,38 @@ public sealed class VirtualFilterModelTests
         (binding with { PushdownFormat = PushdownParameterFormat.PostBatch }).ComputeHash()
             .ShouldNotBe((binding with { PushdownFormat = PushdownParameterFormat.CommaSeparated }).ComputeHash());
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(1_001)]
+    public void Validate_MaxPushdownKeysOutOfRange_Rejected(int max)
+    {
+        Should.Throw<ArgumentException>(() => new FilterBinding { FilterName = "f", MaxPushdownKeys = max }.Validate());
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(FilterBinding.HardMaxPushdownKeys)]
+    public void Validate_MaxPushdownKeysInRange_Accepted(int max)
+    {
+        Should.NotThrow(() => new FilterBinding { FilterName = "f", MaxPushdownKeys = max }.Validate());
+    }
+
+    [Fact]
+    public void DefinitionHash_ChangesWithStrategyAndMaxKeys()
+    {
+        var binding = new FilterBinding { FilterName = "f" };
+
+        (binding with { Strategy = VirtualFilterExecutionStrategy.PushdownOnly }).ComputeHash().ShouldNotBe(binding.ComputeHash());
+        (binding with { MaxPushdownKeys = 7 }).ComputeHash().ShouldNotBe(binding.ComputeHash());
+        (binding with { PushdownFormat = PushdownParameterFormat.PostBatch }).ComputeHash().ShouldNotBe(binding.ComputeHash());
+    }
+
+    [Fact]
+    public void Binding_KeysComeOnlyFromTheFilter_NoCompositeKeyProperty()
+    {
+        // D-9: the key columns are the filter's; a second, unvalidated list on the binding must not exist.
+        typeof(FilterBinding).GetProperty("CompositeKeys").ShouldBeNull();
+    }
 }
