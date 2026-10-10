@@ -28,6 +28,22 @@ public class CompileLimitsTests
     private CompiledSql Compile(CompileRequest request, string sql = "SELECT id FROM orders") =>
         _engine.Compile(sql.AsMemory(), request, CancellationToken.None);
 
+    // CR-ADG-41: a template compiled under a higher engine limit is never served after the limit is lowered.
+    [Fact]
+    public void ALoweredMaxQueryLength_IsNeverBypassedByAWarmCacheEntry()
+    {
+        string sql = "SELECT id FROM orders WHERE status = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'";
+        Compile(Request(), sql);
+        Compile(Request(), sql);
+        Assert.Equal(1, _engine.CompileCache.Stats.Hits);
+
+        _engine.MaxQueryLength = sql.Length - 1;
+        Assert.Throws<ArgumentOutOfRangeException>(() => Compile(Request(), sql));
+        Assert.Equal(1, _engine.CompileCache.Stats.Hits);   // no further hit
+
+        _engine.MaxQueryLength = 65_536;
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

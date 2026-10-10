@@ -122,7 +122,7 @@ internal sealed class GovernedSqlCompiler
 
         // 2. cache: a hit still validates every table dependency and rebinds the current values (INV-12)
         string rawSql = sql.ToString();
-        string keyMaterial = CompileCacheKey.Material(request, rawSql, caps);
+        string keyMaterial = CompileCacheKey.Material(request, rawSql, caps, _engine.MaxQueryLength);
         var policy = request.Policy;
         var typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = policy.Dml };
 

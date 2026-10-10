@@ -170,7 +170,7 @@ public static class CompileCacheKey
         nameof(GovernancePolicy.RowFilters), nameof(GovernancePolicy.Masks), nameof(GovernancePolicy.Catalog)
     };
 
-    public static string Material(CompileRequest request, string rawSql, DialectCapabilities capabilities)
+    public static string Material(CompileRequest request, string rawSql, DialectCapabilities capabilities, int engineMaxQueryLength = 0)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(rawSql);
@@ -179,6 +179,8 @@ public static class CompileCacheKey
         var sb = new StringBuilder(512);
         sb.Append("v=").Append(CompilerInfo.Version).Append(";cap=").Append(DialectCapabilities.TableVersion).Append(';');
         Write(sb, request, skipValue: false);
+        // CR-ADG-41: the engine's input limit is checked while parsing, which a cache hit skips; it is part of the key instead.
+        sb.Append(";maxq=").Append(engineMaxQueryLength.ToString(CultureInfo.InvariantCulture));
         sb.Append(";sql=").Append(rawSql.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(rawSql);
         return sb.ToString();
     }
