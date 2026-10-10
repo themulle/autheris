@@ -84,7 +84,112 @@ sequenceDiagram
 
 ---
 
-## 4. Hierarchische Owner-Zuweisung (DB -> Schema -> Tabelle)
+### 3.1 Deklarative Workflow-Definition & Individualisierung (`ClassificationWorkflowPolicy`)
+
+Da sich Enterprise-Workflows zwischen agilen Data-Mesh-Teams und regulierten Finanzinstituten stark unterscheiden, ist der Lebenszyklus **vollständig deklarativ konfigurierbar** (State-Machine-Pipeline via `GatewayOptions.Classification.Workflow`):
+
+```json
+{
+  "Gateway": {
+    "Classification": {
+      "Workflow": {
+        "DefaultWorkflowProfile": "ENTERPRISE_HYBRID",
+        "Profiles": {
+          "ENTERPRISE_HYBRID": {
+            "OwnerResolution": {
+              "Strategy": "MetadataFirstThenCatalogCascade",
+              "ExtractFromMetadataTags": ["owner", "data_owner", "dbt_meta_owner"],
+              "RuleBasedMappings": [
+                { "schemaPattern": "^fin_.*", "assignOwnerSid": "finance-stewards@corp.local" },
+                { "schemaPattern": "^hr_.*", "assignOwnerSid": "hr-operations@corp.local" }
+              ],
+              "FallbackBehavior": "AssignToDataGovernanceExpert"
+            },
+            "PreClassification": {
+              "Mode": "HumanInTheLoop",
+              "AutoApproveConfidenceThreshold": 0.95,
+              "AutoApproveMaxSensitivityRank": 20,
+              "RequireManualReviewIfDisputed": true
+            },
+            "ApprovalPipeline": {
+              "Mode": "ConditionalDualStage",
+              "FourEyesThresholdRank": 35,
+              "RequireSecondStageOnDisputed": true,
+              "AllowOwnerSelfApprovalIfRankBelow": null
+            }
+          },
+          "LIGHTWEIGHT_DATA_MESH": {
+            "OwnerResolution": { "Strategy": "MetadataMandatoryOrReject" },
+            "PreClassification": { "Mode": "AutoApproveUnambiguous" },
+            "ApprovalPipeline": { "Mode": "SingleStageDataOwnerOnly" }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+#### Unterstützte Workflow-Varianten:
+1. **Owner-Resolution:**
+   - `MetadataFirst`: Übernimmt bestehende Owner-Tags aus dbt-Manifesten, DataHub, Backstage oder Tabellenkommentaren direkt beim Import.
+   - `RuleBased`: Regex-Routing nach Schema- oder Tabellennamen auf hinterlegte Gruppen/SIDs.
+   - `ManualSteward`: Lead Steward weist manuell zu (unterstützt durch KI-Vorschlag).
+2. **KI-Vorqualifizierung:**
+   - `Disabled`: Rein manueller Prozess ohne LLM-Inferenz.
+   - `HumanInTheLoop`: KI generiert Vorschläge mit Konfidenz und Strittigkeitsmarkierung (`is_disputed`), Mensch bestätigt.
+   - `AutoApproveUnambiguous`: Eindeutige Felder mit hoher Konfidenz ($\ge 95\%$) und niedriger Schutzstufe (`rank < 20`) werden direkt freigegeben; nur kritische/strittige Spalten gehen in den Review.
+3. **Freigabe-Stufen:**
+   - `SingleStageDataOwnerOnly`: Fachbereichs-Owner entscheidet autonom (dezentrales Data Mesh).
+   - `SingleStageComplianceOnly`: Zentrales DPO-/Compliance-Team entscheidet.
+   - `DualStageStrict`: Stets Data Owner $\rightarrow$ Data Governance Reviewer (klassisches 4-Augen-Prinzip).
+   - `ConditionalDualStage`: Standarddaten (PUBLIC/INTERNAL) erfordern nur 1 Stufe; ab `CONFIDENTIAL_FINANCE` (`rank >= 35`) oder bei Strittigkeit greift automatisch Stufe 2.
+
+---
+
+### 3.2 Messaging API & Notification Dispatcher (`IGovernanceNotificationDispatcher`)
+
+Um Data Owner und Governance Reviewer proaktiv in ihren gewohnten Tools abzuholen, verfügt Autheris über ein entkoppeltes Notification-Subsystem (`IGovernanceNotificationDispatcher`).
+
+```mermaid
+flowchart TD
+    EVENT["Workflow-Event<br/>(OwnerAssigned, ProposalReady, ReviewRequired, Approved)"] --> ROUTER["GovernanceNotificationRouter"]
+    ROUTER --> RESOLVE["Empfänger-Auflösung<br/>(Owner-SID / Mail / Webhook-Channel)"]
+    
+    RESOLVE --> TEAMS["Microsoft Teams Channel<br/>(Adaptive Card mit 'Review im Portal' Button)"]
+    RESOLVE --> SLACK["Slack Channel<br/>(BlockKit Nachricht mit Action Buttons)"]
+    RESOLVE --> MAIL["E-Mail Channel (SMTP)<br/>(HTML-Template mit Übersicht & Link)"]
+    RESOLVE --> WEBHOOK["CloudEvent / Webhook Dispatcher<br/>(ServiceNow / Jira / EventGrid / Kafka)"]
+```
+
+#### Core Abstraktionen:
+```csharp
+public interface IGovernanceNotificationDispatcher
+{
+    ValueTask DispatchNotificationAsync(
+        GovernanceWorkflowNotification notification,
+        CancellationToken ct = default);
+}
+
+public sealed record GovernanceWorkflowNotification(
+    Guid NotificationId,
+    string EventType, // e.g. "OWNER_REVIEW_REQUIRED", "COMPLIANCE_SIGN_OFF_REQUIRED", "AUTO_CLASSIFICATION_COMPLETED"
+    string TableIdentifier,
+    string TargetUserSid,
+    string TargetUserEmail,
+    int TotalColumns,
+    int DisputedColumnsCount,
+    string HighestProposedSensitivity,
+    string PortalReviewUrl,
+    DateTimeOffset TimestampUtc);
+```
+
+#### Unterstützte Benachrichtigungskanäle:
+* **Microsoft Teams & Slack:** Interaktive Karten (Adaptive Cards / BlockKit) mit direkter Anzeige von strittigen Spalten und Deep Link in das Autheris Governance Portal.
+* **E-Mail (SMTP / SendGrid):** Benachrichtigung mit aggregierter Zusammenfassung und 1-Click-Link zum Freigabe-Cockpit.
+* **CloudEvents v1.0 Webhook (F-EVT-01 & ITSM):** Standardisiertes Event zur automatischen Ticketerstellung in ServiceNow oder Jira Service Desk.
+
+---
 
 Damit der Data Governance Expert nicht hunderte Tabellen einzeln zuweisen muss, unterstützt Autheris eine dreistufige Vererbungskaskade:
 
@@ -327,6 +432,7 @@ flowchart LR
     AP2 --> AP3["AP-3: OpenJEV Classifier<br/>• Prompt/Schema Generierung<br/>• Confidence & is_disputed"]
     AP3 --> AP4["AP-4: Dual-Sign-Off & Änderungen<br/>• Data Owner + Governance Reviewer<br/>• Downgrade-Schutz & Kommentare"]
     AP4 --> AP5["AP-5: WORM-Sealing<br/>• Unveränderbare Archivierung<br/>• Audit-Chain & Time-Travel"]
+    AP4 --> AP6["AP-6: Workflow-Engine & Messaging<br/>• Deklarative Pipelines & Profile<br/>• Teams / Slack / Mail / CloudEvents"]
 ```
 
 1. **AP-1: Unklassifizierter Import & Hierarchische Owner-Zuweisung:**  
@@ -339,6 +445,8 @@ flowchart LR
    2-Stufen-Freigabe mit SoD-Prüfung, Feld-Kommentaren und obligatorischem 4-Augen-Prozess bei Klassifizierungs-Downgrades.
 5. **AP-5: WORM-Drive-Archivierung & Revisionssicherheit:**  
    Lückenloser Export aller Klassifizierungszustände und Änderungen auf das WORM-Laufwerk (`IAuditWormExportService` / `ChainAnchorWormDirectory`).
+6. **AP-6: Deklarative Workflow-Engine & Messaging-Notification-Dispatcher:**  
+   Konfigurierbare State-Machine-Profile (`MetadataFirst`, `HumanInTheLoop`, `ConditionalDualStage`) sowie Multi-Channel-Benachrichtigungen via Microsoft Teams, Slack, SMTP-Mail und CloudEvents v1.0.
 
 ---
 
