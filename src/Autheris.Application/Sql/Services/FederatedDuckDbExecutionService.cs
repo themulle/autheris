@@ -245,7 +245,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         // Transport Gate (Section 3.5)
         var allowedTransports = crossSourceOptions.AllowedTransports ?? ["WebSql", "Trino"];
-        if (!string.IsNullOrWhiteSpace(request.Transport) &&
+        // Fail-closed: a request without a transport is rejected, never exempted from the gate.
+        if (string.IsNullOrWhiteSpace(request.Transport) ||
             !allowedTransports.Any(t => string.Equals(t, request.Transport, StringComparison.OrdinalIgnoreCase)))
         {
             throw new WebSqlPolicyException("Cross-catalog queries across multiple data sources are not supported in WebSQL.");

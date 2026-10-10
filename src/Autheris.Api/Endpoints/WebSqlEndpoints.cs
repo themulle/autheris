@@ -212,7 +212,7 @@ public static class WebSqlEndpoints
             dataSource = trinoCatalogHeader.ToString().Trim();
         }
 
-        var governedRequest = new GovernedSqlQueryRequest(sql, parameters, dataSource, Transport: isTrinoRoute ? "Trino" : "WebSql");
+        var governedRequest = new GovernedSqlQueryRequest(sql, parameters, dataSource, Transport: isTrinoRoute ? SqlTransports.Trino : SqlTransports.WebSql);
 
         if (isTrinoRoute || trinoWaitTimeout != null)
         {

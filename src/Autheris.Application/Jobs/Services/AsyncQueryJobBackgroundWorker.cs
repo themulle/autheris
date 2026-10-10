@@ -91,7 +91,8 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             var maxRows = Math.Max(1, item.Request.MaxRows);
             var queryRequest = new GovernedSqlQueryRequest(
                 Sql: item.Request.Query,
-                RowLimit: new SqlRowLimit(maxRows, maxRows));
+                RowLimit: new SqlRowLimit(maxRows, maxRows),
+                Transport: SqlTransports.AsyncJob);
 
             var tenantId = new TenantId(item.Job.TenantId);
             var result = await sqlExec.ExecuteQueryBufferedAsync(

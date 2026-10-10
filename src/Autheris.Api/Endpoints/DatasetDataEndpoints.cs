@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Application.Data.Interfaces;
+using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -178,7 +179,8 @@ public static class DatasetDataEndpoints
             FilterExpression: filter,
             OrderBy: orderBy,
             Limit: limit,
-            Offset: offset);
+            Offset: offset,
+            Transport: SqlTransports.Rest);
 
         try
         {

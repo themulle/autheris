@@ -74,13 +74,18 @@ public abstract class RestDatasetHttpTableTestBase : IClassFixture<WebApplicatio
         }
     }
 
-    protected RestDatasetHttpTableTestBase(WebApplicationFactory<Program> factory, bool crossSourceEnabled)
+    protected RestDatasetHttpTableTestBase(WebApplicationFactory<Program> factory, bool crossSourceEnabled, bool restTransportAllowed = true)
     {
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
             builder.UseSetting("Gateway:Rebac:Enabled", "false");
             builder.UseSetting("Gateway:WebSql:CrossSource:Enabled", crossSourceEnabled ? "true" : "false");
+            if (crossSourceEnabled && restTransportAllowed)
+            {
+                // REST federation is an explicit opt-in: "Rest" is not part of the default AllowedTransports.
+                builder.UseSetting("Gateway:WebSql:CrossSource:AllowedTransports:0", "Rest");
+            }
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.ConfigureServices(services =>
@@ -167,6 +172,25 @@ public abstract class RestDatasetHttpTableTestBase : IClassFixture<WebApplicatio
         };
         return await repo.UpsertTableMetadataAsync(meta);
     }
+
+    /// <summary>Seeds the table and a minimal ALLOW consent (id column only) for <paramref name="userSid"/>.</summary>
+    protected async Task SeedTableWithConsentAsync(Sid userSid)
+    {
+        var saved = await SeedTableAsync();
+        using var scope = Factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        await repo.CreateConsentAsync(new Consent
+        {
+            TableId = saved.Table.Id,
+            TableIdentifier = TableId,
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = userSid,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(30),
+            ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
+        });
+    }
 }
 
 public sealed class RestDatasetHttpTableIntegrationTests : RestDatasetHttpTableTestBase
@@ -240,6 +264,21 @@ public sealed class RestDatasetHttpTableIntegrationTests : RestDatasetHttpTableT
         doc2.RootElement.GetProperty("hasMore").GetBoolean().ShouldBeFalse();
         body2.ShouldContain("Gamma GmbH");
     }
+
+    [Theory]
+    [InlineData(9000, 999, HttpStatusCode.OK)]                 // offset + limit = 9999 (window 10000, the cap)
+    [InlineData(9000, 1000, HttpStatusCode.BadRequest)]        // offset + limit = 10000 (window 10001 > cap)
+    public async Task RestDataset_PaginationWindowBoundary(int offset, int limit, HttpStatusCode expected)
+    {
+        var userSid = new Sid($"S-1-5-21-REST-WINDOW-{offset}-{limit}");
+        var client = CreateClient(userSid);
+        await SeedTableWithConsentAsync(userSid);
+
+        var response = await client.GetAsync($"/api/v1/data/crm/public/customers?select=id&limit={limit}&offset={offset}");
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(expected, body);
+    }
 }
 
 /// <summary>
@@ -280,5 +319,33 @@ public sealed class RestDatasetHttpTableCrossSourceDisabledIntegrationTests : Re
         var body = await response.Content.ReadAsStringAsync();
 
         response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, body);
+    }
+}
+
+/// <summary>
+/// Cross-source federation is enabled but REST is not listed in CrossSource.AllowedTransports: REST federation is an explicit
+/// opt-in, so the read is a generic 403 that discloses neither the federation policy nor the table.
+/// </summary>
+public sealed class RestDatasetHttpTableRestNotOptedInIntegrationTests : RestDatasetHttpTableTestBase
+{
+    public RestDatasetHttpTableRestNotOptedInIntegrationTests(WebApplicationFactory<Program> factory)
+        : base(factory, crossSourceEnabled: true, restTransportAllowed: false)
+    {
+    }
+
+    [Fact]
+    public async Task RestDataset_OnHttpTable_WhenRestNotInAllowedTransports_Returns403WithGenericBody()
+    {
+        var userSid = new Sid("S-1-5-21-REST-NOT-OPTED-IN");
+        var client = CreateClient(userSid);
+        await SeedTableWithConsentAsync(userSid);
+
+        var response = await client.GetAsync("/api/v1/data/crm/public/customers?limit=1&offset=0");
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, body);
+        body.ShouldNotContain("Cross-catalog", Case.Insensitive);
+        body.ShouldNotContain("customers", Case.Insensitive);
+        body.ShouldNotContain("AllowedTransports", Case.Insensitive);
     }
 }

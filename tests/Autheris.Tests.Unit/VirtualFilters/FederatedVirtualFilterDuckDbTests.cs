@@ -155,7 +155,7 @@ public sealed class FederatedVirtualFilterDuckDbTests
             sqlEngine: Engine,
             shortCircuitEvaluator: shortCircuitEvaluator);
 
-        var request = new GovernedSqlQueryRequest(sql);
+        var request = new GovernedSqlQueryRequest(sql, Transport: "WebSql");
         var result = await service.ExecuteQueryBufferedAsync(request, user, tenantId);
 
         // Staging service must never be called!
