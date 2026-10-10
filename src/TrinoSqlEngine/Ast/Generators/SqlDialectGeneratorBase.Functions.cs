@@ -47,6 +47,22 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     protected virtual string FormatTypeName(TrinoType type) => StandardTypeName(type);
 
     /// <summary>
+    /// CR-ADG-42: the native catalog type of a check-option cast. It must resolve through the closed per-dialect map and be
+    /// spelled exactly as the map spells it, so the emitted text is never request text; anything else fails closed.
+    /// </summary>
+    private string NativeTypeName(CastExpression cast)
+    {
+        if (cast.IsTryCast ||
+            !TrinoSqlEngine.Ast.Security.CatalogTypeMap.TryResolve(TargetDialect, cast.TargetType, out string native, out _) ||
+            !string.Equals(native, cast.TargetType, StringComparison.Ordinal))
+        {
+            throw UnsupportedConstruct("CAST to a native column type", TargetDialect);
+        }
+
+        return TrinoSqlEngine.Ast.SqlSafeTokens.EnsureTypeName(native);
+    }
+
+    /// <summary>
     /// CR-ADG-25: closed CAST target type set shared by the dialects without their own type map (PostgreSQL, DuckDB, SQLite, ANSI,
     /// Snowflake). Anything else (<c>regclass</c>, <c>regrole</c>, <c>xml</c>, <c>json</c>, <c>oid</c>, ...) fails closed.
     /// </summary>

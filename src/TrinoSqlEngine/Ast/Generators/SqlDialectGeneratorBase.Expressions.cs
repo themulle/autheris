@@ -188,7 +188,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 builder.Append(cast.IsTryCast ? "TRY_CAST(" : "CAST(");
                 GenerateExpression(cast.Operand, ref builder, context);
                 builder.Append(" AS ");
-                AppendStructural(ref builder, context, FormatTypeName(ParseTypeName(cast.TargetType)));
+                AppendStructural(ref builder, context, cast.IsNativeType ? NativeTypeName(cast) : FormatTypeName(ParseTypeName(cast.TargetType)));
                 builder.Append(')');
                 break;
             case RowValueExpression row:

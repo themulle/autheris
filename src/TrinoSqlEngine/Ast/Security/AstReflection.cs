@@ -24,6 +24,35 @@ internal static class AstReflection
         Array.FindAll(t.GetProperties(BindingFlags.Public | BindingFlags.Instance), static p =>
             p.GetIndexParameters().Length == 0 && p.GetMethod != null));
 
+    /// <summary>Structural equality of two AST values (records, lists, primitives); list elements are compared in order.</summary>
+    public static bool StructurallyEqual(object? a, object? b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a is null || b is null || a.GetType() != b.GetType()) return false;
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        var type = a.GetType();
+        if (type.IsPrimitive || type.IsEnum || a is string || a is decimal) return a.Equals(b);
+        if (a is IEnumerable left)
+        {
+            var right = ((IEnumerable)b).GetEnumerator();
+            foreach (var item in left)
+            {
+                if (!right.MoveNext() || !StructurallyEqual(item, right.Current)) return false;
+            }
+
+            return !right.MoveNext();
+        }
+
+        var properties = PropertiesOf(type);
+        if (properties.Length == 0) return a.Equals(b);
+        foreach (var property in properties)
+        {
+            if (!StructurallyEqual(property.GetValue(a), property.GetValue(b))) return false;
+        }
+
+        return true;
+    }
+
     public static List<T> Collect<T>(object? root) where T : class
     {
         var result = new List<T>();

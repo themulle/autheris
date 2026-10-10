@@ -121,7 +121,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         var source = (QueryBody)WithScope(SecurityScope.DmlSource, () => Visit(forced));
         if (checkOption)
         {
-            source = WrapInCheckOption(entry, columns, (ValuesQueryBody)source);
+            source = WrapInCheckOption(entry, columns, tenantIndex, (ValuesQueryBody)source);
         }
 
         return new InsertStatement(new NamedTableSource(entry.Identity.ToQualifiedName(), null), columns.Columns, source);
@@ -156,7 +156,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         return true;
     }
 
-    private QueryBody WrapInCheckOption(TableCatalogEntry entry, InsertColumns columns, ValuesQueryBody values)
+    private QueryBody WrapInCheckOption(TableCatalogEntry entry, InsertColumns columns, int tenantIndex, ValuesQueryBody values)
     {
         var typed = _typed!;
         var tid = entry.Identity;
@@ -168,22 +168,51 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             throw new SecurityException("An INSERT into a table with a row-level policy must supply every column the policy references.");
         }
 
+        // CR-ADG-42: the policy must see what the database stores, so every row value (but the bound tenant, which the database
+        // refuses to truncate) is cast to the catalog type of its column. An unknown or unsupported type is a typed rejection.
+        var dialect = typed.Capabilities.Dialect;
+        var nativeTypes = new string?[columns.Columns.Count];
+        var textColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < columns.Columns.Count; i++)
+        {
+            if (i == tenantIndex) continue;
+            var column = ResolveColumn(entry, columns.Columns[i]);
+            if (!CatalogTypeMap.TryResolve(dialect, column.DataType, out string native, out bool isText))
+            {
+                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct,
+                    "INSERT check option needs a known catalog column type of a supported kind for every written column");
+            }
+
+            nativeTypes[i] = native;
+            if (isText) textColumns.Add(column.Name);
+        }
+
         var expression = BuildPolicyExpression(entry);
         var alias = InsertCheckAlias;
+        try
+        {
+            expression = InsertCheckPolicy.Rewrite(Qualify(expression, alias), alias, textColumns.Contains, typed.Capabilities);
+        }
+        catch (InsertCheckPolicy.UnsupportedStringPredicateException)
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct,
+                "INSERT check option on a string column supports only equality and IN (byte-exact)");
+        }
 
         QueryBody RowSelect(RowValueExpression row) => new QuerySpecification(
             false,
-            row.Elements.Select((e, i) => (SelectItem)new ColumnSelectItem(e, columns.Columns[i])).ToList(),
+            row.Elements.Select((e, i) => (SelectItem)new ColumnSelectItem(
+                nativeTypes[i] is { } native ? new CastExpression(e, native, IsTryCast: false, IsNativeType: true) : e, columns.Columns[i])).ToList(),
             null, null, null, null);
 
-        QueryBody inner = RowSelect(values.Rows[0]);
-        for (int i = 1; i < values.Rows.Count; i++)
-        {
-            inner = new SetOperationQuery(inner, SetOperator.Union, Distinct: false, RowSelect(values.Rows[i]));
-        }
+        // CR-ADG-44: a balanced tree, so the AST depth grows with log2(rows) and not with the row count (UNION ALL is associative).
+        QueryBody Build(int lo, int hi) => hi - lo == 1
+            ? RowSelect(values.Rows[lo])
+            : new SetOperationQuery(Build(lo, lo + (hi - lo) / 2), SetOperator.Union, Distinct: false, Build(lo + (hi - lo) / 2, hi));
 
+        var inner = Build(0, values.Rows.Count);
         var derived = new SubqueryTableSource(new SelectStatement(null, inner, null, null), alias);
-        var check = new SecurityPredicateExpression(Qualify(expression, alias), new SecurityPredicateId(tid.ToString(), 1), SecurityScope.InsertCheck);
+        var check = new SecurityPredicateExpression(expression, new SecurityPredicateId(tid.ToString(), 1), SecurityScope.InsertCheck);
         var projections = columns.Columns
             .Select(c => (SelectItem)new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[] { alias, c })), null))
             .ToList();

@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Collections.Frozen;
 using System.Security;
 using TrinoSqlEngine.Ast.Capabilities;
@@ -23,6 +24,7 @@ public class DmlCompileTests
     private readonly FastSqlEngine _engine = new();
     private readonly DictPolicyProvider _rowFilters = new();
     private readonly DictMaskProvider _masks = new();
+    private InMemoryTableCatalog? _catalogOverride;
 
     public DmlCompileTests()
     {
@@ -47,7 +49,7 @@ public class DmlCompileTests
         _masks.Masks[(Orders, "email")] = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
 
     /// <summary>The fixture catalog with column types the dialect's generator knows (masks cast to the catalog type).</summary>
-    private static InMemoryTableCatalog CatalogFor(TargetSqlDialect dialect)
+    internal static InMemoryTableCatalog CatalogFor(TargetSqlDialect dialect)
     {
         if (dialect == TargetSqlDialect.SqlServer) return Catalog();
         if (dialect == TargetSqlDialect.Oracle)
@@ -92,7 +94,7 @@ public class DmlCompileTests
         {
             RowFilters = _rowFilters,
             Masks = _masks,
-            Catalog = CatalogFor(dialect),
+            Catalog = _catalogOverride ?? CatalogFor(dialect),
             Tenant = new TenantBinding("__autheris_tenant", tenant, SqlParameterType.String),
             Dml = dml ?? DmlGuardOptions.Strict
         }
@@ -226,6 +228,146 @@ public class DmlCompileTests
         Assert.True(three.RequiresRowCountCheck);
         Assert.Equal(3, three.ExpectedAffectedRows);
         Assert.Equal(2, CountOf(three.Sql, "UNION ALL"));
+    }
+
+    // ---- CR-ADG-42: the check runs on the stored value (cast to the catalog type) and compares strings byte-exact ----
+
+    private static ColumnReference OrdersColumn(string name) => new(new SqlQualifiedName(new[] { new SqlIdentifier(name, true) }));
+
+    private static PolicyParameterExpression PolicyParam(string name, SqlParameterType type = SqlParameterType.String) => new(name, type);
+
+    private void Policy(Expression expression, params (string Name, object Value, SqlParameterType Type)[] values)
+    {
+        _rowFilters.NoPolicy.Remove(Orders);
+        _rowFilters.Predicates[Orders] = PolicyPredicate.Create(expression,
+            values.ToDictionary(v => v.Name, v => new PolicyValue(v.Value, v.Type)));
+    }
+
+    private void AmountBelowPolicy() =>
+        Policy(new BinaryExpression(OrdersColumn("Amount"), BinaryOperator.LessThan, PolicyParam("__pol_amount", SqlParameterType.Decimal)),
+            ("__pol_amount", 100m, SqlParameterType.Decimal));
+
+    private void WithOrdersColumnType(TargetSqlDialect dialect, string column, string type)
+    {
+        var entry = CatalogFor(dialect).Resolve(new SqlQualifiedName(new[] { new SqlIdentifier("dbo"), new SqlIdentifier("Orders") }))!;
+        _catalogOverride = new InMemoryTableCatalog(new[]
+        {
+            entry with { Columns = entry.Columns.Select(c => string.Equals(c.Name, column, StringComparison.OrdinalIgnoreCase) ? c with { DataType = type } : c).ToImmutableArray() }
+        }, "dbo");
+    }
+
+    private static string ByteExactMarker(TargetSqlDialect dialect) => dialect switch
+    {
+        TargetSqlDialect.SqlServer => "DATALENGTH",
+        TargetSqlDialect.PostgreSql => "TEXTSEND",
+        TargetSqlDialect.Oracle => "CAST_TO_RAW",
+        _ => "ENCODE("
+    };
+
+    public static IEnumerable<object[]> CheckDialectData() => Dialects.Where(d => d != TargetSqlDialect.Databricks).Select(d => new object[] { d });
+
+    [Theory]
+    [MemberData(nameof(CheckDialectData))]
+    public void Insert_CheckOption_CastsEveryWrittenValueToItsCatalogType_ButTheBoundTenant(TargetSqlDialect dialect)
+    {
+        AmountBelowPolicy();
+        var c = Compile(dialect, "INSERT INTO orders (id, tenantid, region, amount) VALUES (1, 'acme', 'EU', 99.999)");
+        string[] expected = dialect switch
+        {
+            TargetSqlDialect.SqlServer => new[] { "CAST(", "AS int)", "AS nvarchar(20))", "AS decimal(18,2))" },
+            TargetSqlDialect.Oracle => new[] { "CAST(", "AS NUMBER(10))", "AS VARCHAR2(20))", "AS NUMBER(18,2))" },
+            TargetSqlDialect.PostgreSql => new[] { "CAST(", "AS integer)", "AS varchar)", "AS decimal(18,2))" },
+            _ => new[] { "CAST(", "AS integer)", "AS varchar)", "AS decimal(18,2))" }
+        };
+        foreach (var part in expected) Assert.Contains(part, c.Sql);
+        // the policy is evaluated over the derived table (the cast values), and so is the projection that is inserted
+        Assert.Contains("autheris_ins", c.Sql);
+        Assert.True(c.RequiresRowCountCheck);
+        // a numeric policy needs no byte-exact string comparison
+        Assert.DoesNotContain(ByteExactMarker(dialect), c.Sql.ToUpperInvariant());
+    }
+
+    [Theory]
+    [MemberData(nameof(CheckDialectData))]
+    public void Insert_CheckOption_WithAnUnknownOrUnsupportedCatalogType_IsRejectedWithATypedError(TargetSqlDialect dialect)
+    {
+        RegionPolicy();
+        foreach (string type in new[] { "geography", "xml", "", "   ", "varchar(abc)", "citext", "nvarchar(20); DROP TABLE x" })
+        {
+            WithOrdersColumnType(dialect, "Region", type);
+            var ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(dialect, "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')"));
+            Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+            Assert.DoesNotContain("DROP", ex.Message);
+        }
+
+        // a column the policy does not reference needs a known type, too: the stored row is what the check proves
+        _catalogOverride = null;
+        WithOrdersColumnType(dialect, "Status", "geography");
+        Assert.Throws<SqlCompileNotSupportedException>(() => Compile(dialect, "INSERT INTO orders (id, tenantid, region, status) VALUES (1, 'acme', 'EU', 's')"));
+    }
+
+    [Theory]
+    [MemberData(nameof(CheckDialectData))]
+    public void Insert_CheckOption_StringEquality_IsByteExact(TargetSqlDialect dialect)
+    {
+        RegionPolicy();
+        var c = Compile(dialect, "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'eu')");
+        Assert.True(c.Sql.ToUpperInvariant().Contains(ByteExactMarker(dialect), StringComparison.Ordinal), c.Sql);
+    }
+
+    [Theory]
+    [MemberData(nameof(CheckDialectData))]
+    public void Insert_CheckOption_StringIn_IsByteExactPerValue_AndMixesWithOtherColumns(TargetSqlDialect dialect)
+    {
+        Policy(new BinaryExpression(
+                new InListExpression(OrdersColumn("Region"), new Expression[] { PolicyParam("__pol_a"), PolicyParam("__pol_b") }, false),
+                BinaryOperator.And,
+                new BinaryExpression(OrdersColumn("Amount"), BinaryOperator.LessThan, PolicyParam("__pol_amount", SqlParameterType.Decimal))),
+            ("__pol_a", "EU", SqlParameterType.String), ("__pol_b", "US", SqlParameterType.String), ("__pol_amount", 100m, SqlParameterType.Decimal));
+        var c = Compile(dialect, "INSERT INTO orders (id, tenantid, region, amount) VALUES (1, 'acme', 'EU', 5)");
+        Assert.True(CountOf(c.Sql.ToUpperInvariant(), ByteExactMarker(dialect)) >= 2);
+    }
+
+    public static IEnumerable<object[]> StringShapes()
+    {
+        foreach (var dialect in Dialects.Where(d => d != TargetSqlDialect.Databricks))
+        {
+            foreach (string shape in new[] { "less", "notequal", "like", "not", "notin", "function", "between", "columns" })
+            {
+                yield return new object[] { dialect, shape };
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(StringShapes))]
+    public void Insert_CheckOption_StringPredicateOtherThanEqualityOrIn_IsRejectedWithATypedError(TargetSqlDialect dialect, string shape)
+    {
+        var region = OrdersColumn("Region");
+        var p = PolicyParam("__pol_region");
+        Expression expression = shape switch
+        {
+            "less" => new BinaryExpression(region, BinaryOperator.LessThan, p),
+            "notequal" => new BinaryExpression(region, BinaryOperator.NotEqual, p),
+            "like" => new LikeExpression(region, p),
+            "not" => new UnaryExpression(UnaryOperator.Not, new ParenthesizedExpression(new BinaryExpression(region, BinaryOperator.Equal, p))),
+            "notin" => new InListExpression(region, new Expression[] { p }, true),
+            "function" => new BinaryExpression(new FunctionCallExpression(new SqlQualifiedName("lower"), new Expression[] { region }), BinaryOperator.Equal, p),
+            "between" => new BetweenExpression(region, p, p, false),
+            _ => new BinaryExpression(region, BinaryOperator.Equal, OrdersColumn("Status"))
+        };
+        Policy(expression, ("__pol_region", "EU", SqlParameterType.String));
+        var ex = Assert.Throws<SqlCompileNotSupportedException>(() => Compile(dialect, "INSERT INTO orders (id, tenantid, region, status) VALUES (1, 'acme', 'EU', 's')"));
+        Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+        Assert.DoesNotContain("EU", ex.Message);
+    }
+
+    [Theory]
+    [MemberData(nameof(CheckDialectData))]
+    public void Insert_CheckOption_NullTestOnAStringColumn_IsAllowed(TargetSqlDialect dialect)
+    {
+        Policy(new UnaryExpression(UnaryOperator.IsNotNull, OrdersColumn("Region")));
+        Assert.True(Compile(dialect, "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')").RequiresRowCountCheck);
     }
 
     [Theory]

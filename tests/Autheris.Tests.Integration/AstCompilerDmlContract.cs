@@ -461,6 +461,91 @@ public abstract class AstCompilerDmlContract
         (await ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 1)", "acme")).ShouldBe(1);   // key 10 is still free
     }
 
+    // ---- CR-ADG-42: the check runs on the stored value (cast to the column type), strings are compared byte-exact ----
+
+    private ColumnReference PolicyColumn(string logical) => new(new SqlQualifiedName(new[] { new SqlIdentifier(Canon(logical), true) }));
+
+    protected void AmountBelowPolicy() => Policy.Predicates[OrdersId] = PolicyPredicate.Create(
+        new BinaryExpression(PolicyColumn("Amount"), BinaryOperator.LessThan, new PolicyParameterExpression("__pol_amount", SqlParameterType.Decimal)),
+        new Dictionary<string, PolicyValue> { ["__pol_amount"] = new(100m, SqlParameterType.Decimal) });
+
+    protected void DueAfterPolicy() => Policy.Predicates[OrdersId] = PolicyPredicate.Create(
+        new BinaryExpression(PolicyColumn("Due"), BinaryOperator.GreaterThan, new PolicyParameterExpression("__pol_due", SqlParameterType.Date)),
+        new Dictionary<string, PolicyValue> { ["__pol_due"] = new(new DateTime(2026, 1, 1), SqlParameterType.Date) });
+
+    [Fact]
+    public async Task Insert_DecimalRoundingAcrossThePolicyBoundary_IsRolledBack_AndTheRoundedInRangeValueIsWritten()
+    {
+        if (!Available() || !ReportsInsertCount) return;
+        AmountBelowPolicy();
+        var before = await SnapshotAsync();
+        // 99.999 passes "Amount < 100" as a bound value but the column (scale 2) stores 100.00: the check sees the stored value
+        var ex = await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 99.999)", "acme"));
+        ex.Code.ShouldBe("DML_CHECK_OPTION_VIOLATION");
+        (await SnapshotAsync()).ShouldBe(before);
+
+        (await ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 99.99)", "acme")).ShouldBe(1);
+        var stored = await QueryAsync($"SELECT {ReadExpr("Amount")} FROM {RawTable("Orders")} WHERE {Quote(Canon("Id"))} = 10");
+        Convert.ToDecimal(stored.Single()[0], CultureInfo.InvariantCulture).ShouldBe(99.99m);
+        // a rounding that stays inside the policy (99.994 -> 99.99) is accepted: the stored value satisfies it
+        (await ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (11, 'acme', 'EU', 'new', 99.994)", "acme")).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Insert_DateTruncationAcrossThePolicyBoundary_IsRolledBack_AndAnInRangeDateIsWritten()
+    {
+        if (!Available() || !ReportsInsertCount) return;
+        DueAfterPolicy();
+        const string columns = "(id, tenantid, region, status, amount, due)";
+        var before = await SnapshotAsync();
+        // 2026-01-01 00:00:00.5 is "after 2026-01-01" as a timestamp, but the date column stores 2026-01-01
+        await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync(
+            $"INSERT INTO {O} {columns} VALUES (10, 'acme', 'EU', 'new', 1, TIMESTAMP '2026-01-01 00:00:00.500')", "acme"));
+        (await SnapshotAsync()).ShouldBe(before);
+
+        (await ExecCheckedAsync($"INSERT INTO {O} {columns} VALUES (10, 'acme', 'EU', 'new', 1, TIMESTAMP '2026-01-02 10:30:00')", "acme")).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Insert_ValueLongerThanTheColumn_NeverMatchesThePolicyByItsTruncatedPrefix()
+    {
+        if (!Available() || !ReportsInsertCount) return;
+        RegionEuPolicy();
+        var before = await SnapshotAsync();
+        // 'EU' plus 30 characters: the dialects that truncate (SQL Server, PostgreSQL varchar) see the value they store; the others
+        // fail on the length. Either way nothing is written and the policy value is not matched by a prefix.
+        await Should.ThrowAsync<Exception>(() => ExecCheckedAsync(
+            $"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EUxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 'new', 1)", "acme"));
+        (await SnapshotAsync()).ShouldBe(before);
+    }
+
+    [Fact]
+    public async Task Insert_CaseVariantOfThePolicyValue_IsRejected_OnACaseSensitiveColumn()
+    {
+        if (!Available() || !ReportsInsertCount) return;
+        RegionEuPolicy();   // Region = 'EU'; the Region column is case-sensitive on every engine here (SQL Server: an explicit _CS_ collation)
+        var before = await SnapshotAsync();
+        // a case-insensitive check would accept 'eu' and the case-sensitive column would store it, a value a reader with Region = 'eu' sees
+        var ex = await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'eu', 'new', 1)", "acme"));
+        ex.Code.ShouldBe("DML_CHECK_OPTION_VIOLATION");
+        (await SnapshotAsync()).ShouldBe(before);
+        (await ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 1)", "acme")).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Insert_StringInPolicy_AcceptsEachListedValue_AndRejectsTheRest()
+    {
+        if (!Available() || !ReportsInsertCount) return;
+        Policy.Predicates[OrdersId] = PolicyPredicate.Create(
+            new InListExpression(PolicyColumn("Region"), new Expression[] { new PolicyParameterExpression("__pol_a", SqlParameterType.String), new PolicyParameterExpression("__pol_b", SqlParameterType.String) }, false),
+            new Dictionary<string, PolicyValue> { ["__pol_a"] = new("EU", SqlParameterType.String), ["__pol_b"] = new("US", SqlParameterType.String) });
+        (await ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 1), (11, 'acme', 'US', 'new', 2)", "acme")).ShouldBe(2);
+        var before = await SnapshotAsync();
+        await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (12, 'acme', 'eu', 'new', 1)", "acme"));
+        await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (12, 'acme', 'APAC', 'new', 1)", "acme"));
+        (await SnapshotAsync()).ShouldBe(before);
+    }
+
     [Fact]
     public async Task Insert_IntoAPolicyTable_SelectSourceOrMissingPolicyColumn_IsRejectedBeforeExecution()
     {

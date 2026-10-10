@@ -42,7 +42,8 @@ public sealed record TableCoverageRequirement(
     string? Catalog = null,
     ImmutableHashSet<string>? CatalogColumns = null,
     string? TenantColumn = null,
-    ImmutableHashSet<string>? PolicyColumns = null);
+    ImmutableHashSet<string>? PolicyColumns = null,
+    ImmutableDictionary<string, string>? ColumnTypes = null);
 
 /// <summary>
 /// Production post-condition of the compiler (runs on every compile). It walks the final AST and proves that every physical
@@ -59,6 +60,7 @@ public sealed partial class SecurityCoverageVerifier
     private readonly int _maxAstDepth;
     private readonly DmlGuardOptions _dml;
     private readonly string? _tenantParameterName;
+    private readonly DialectCapabilities? _capabilities;
 
     public SecurityCoverageVerifier(
         Func<SqlQualifiedName, TableCoverageRequirement?> requirementOf,
@@ -66,8 +68,10 @@ public sealed partial class SecurityCoverageVerifier
         int maxSecuredTableReferences = 256,
         int maxAstDepth = 512,
         DmlGuardOptions? dml = null,
-        string? tenantParameterName = null)
+        string? tenantParameterName = null,
+        DialectCapabilities? capabilities = null)
     {
+        _capabilities = capabilities;
         _dml = dml ?? DmlGuardOptions.Strict;
         _tenantParameterName = tenantParameterName;
         _requirementOf = requirementOf ?? throw new ArgumentNullException(nameof(requirementOf));

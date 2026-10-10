@@ -49,7 +49,8 @@ public sealed class AstCompilerPostgreSqlDmlExecutionTests : AstCompilerDmlContr
                 region text NOT NULL,
                 status text NOT NULL,
                 amount numeric(18,2) NOT NULL,
-                email text);
+                email text,
+                due date);
             CREATE TABLE {_schema}.entitlements (id integer PRIMARY KEY, tenantid public.citext NOT NULL, orderid integer NOT NULL);
             """;
         await cmd.ExecuteNonQueryAsync();
@@ -66,7 +67,7 @@ public sealed class AstCompilerPostgreSqlDmlExecutionTests : AstCompilerDmlContr
     {
         new TableCatalogEntry(OrdersId, ImmutableArray.Create(
             new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "citext"), new CatalogColumn("region", "text"),
-            new CatalogColumn("status", "text"), new CatalogColumn("amount", "numeric(18,2)"), new CatalogColumn("email", "text")),
+            new CatalogColumn("status", "text"), new CatalogColumn("amount", "numeric(18,2)"), new CatalogColumn("email", "text"), new CatalogColumn("due", "date")),
             "tenantid", 1),
         new TableCatalogEntry(EntitlementsId, ImmutableArray.Create(
             new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "citext"), new CatalogColumn("orderid", "integer")),

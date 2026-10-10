@@ -165,7 +165,22 @@ public sealed class TypedPolicyContext
     /// tenant predicate (when it has a tenant column) and its policy predicate (when the provider says one applies).
     /// </summary>
     public SecurityCoverageVerifier CreateVerifier(TargetSqlDialect dialect = TargetSqlDialect.SqlServer, int maxSecuredTableReferences = 256) =>
-        new(name => RequirementOf(name), dialect, maxSecuredTableReferences, dml: Dml, tenantParameterName: Tenant.ParameterName);
+        new(name => RequirementOf(name), dialect, maxSecuredTableReferences, dml: Dml, tenantParameterName: Tenant.ParameterName, capabilities: Capabilities);
+
+    /// <summary>Catalog type by canonical column name; an ambiguous (duplicate) name has no type, so a check that needs it fails closed.</summary>
+    private static ImmutableDictionary<string, string> ColumnTypesOf(TableCatalogEntry entry)
+    {
+        var types = ImmutableDictionary.CreateBuilder<string, string>(StringComparer.Ordinal);
+        var duplicates = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var column in entry.Columns)
+        {
+            if (types.ContainsKey(column.Name)) duplicates.Add(column.Name);
+            else if (column.DataType is not null) types[column.Name] = column.DataType;
+        }
+
+        foreach (var name in duplicates) types.Remove(name);
+        return types.ToImmutable();
+    }
 
     private TableCoverageRequirement? RequirementOf(SqlQualifiedName name)
     {
@@ -182,6 +197,7 @@ public sealed class TypedPolicyContext
             ? RowFilters.GetPredicate(id).ReferencedColumns
             : ImmutableHashSet<string>.Empty;
         return new TableCoverageRequirement(id.ToString(), id.Schema, id.Table, root, tenant, masked, id.Catalog, columns,
-            entry.TenantColumn, policyColumns);
+            entry.TenantColumn, policyColumns,
+            ColumnTypesOf(entry));
     }
 }

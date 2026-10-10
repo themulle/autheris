@@ -234,7 +234,7 @@ public sealed partial class SecurityCoverageVerifier
             if (policyIds.Count > 0)
             {
                 // CR-ADG-35: a table with a row policy accepts only the check-option shape, with the policy over the inserted values.
-                VerifyCheckOptionSource(insert.Source, insert.Columns!, tenantIndex, policyIds);
+                VerifyCheckOptionSource(insert.Source, insert.Columns!, tenantIndex, policyIds, requirement);
                 foreach (var id in policyIds)
                 {
                     if (!Applied.Contains(id)) Applied.Add(id);
@@ -253,7 +253,7 @@ public sealed partial class SecurityCoverageVerifier
         /// <c>SELECT v.c1, ... FROM (SELECT row UNION ALL SELECT row ...) v WHERE &lt;policy over v&gt;</c>: the policy is a top-level conjunct
         /// with the check scope, every row carries the bound tenant, the projection is exactly the listed columns of the derived table.
         /// </summary>
-        private void VerifyCheckOptionSource(QueryBody source, IReadOnlyList<SqlIdentifier> columns, int tenantIndex, List<SecurityPredicateId> policyIds)
+        private void VerifyCheckOptionSource(QueryBody source, IReadOnlyList<SqlIdentifier> columns, int tenantIndex, List<SecurityPredicateId> policyIds, TableCoverageRequirement requirement)
         {
             if (source is not QuerySpecification { Distinct: false, GroupBy: null, Having: null, From: SubqueryTableSource derived } spec ||
                 !string.Equals(derived.Alias.Value, Visitors.AstSecurityVisitor.InsertCheckAlias.Value, StringComparison.Ordinal) ||
@@ -282,23 +282,65 @@ public sealed partial class SecurityCoverageVerifier
             ConjunctNodes(spec.Where, present);
             foreach (var id in policyIds)
             {
-                if (!present.Any(p => p.Id == id && p.Scope == SecurityScope.InsertCheck))
+                var check = present.FirstOrDefault(p => p.Id == id && p.Scope == SecurityScope.InsertCheck)
+                    ?? throw new SecurityCoverageException("An INSERT into a table with a row policy is missing its check predicate.");
+                VerifyCheckStringComparisons(check.Predicate, derived.Alias, columns, tenantIndex, requirement);
+            }
+
+            // CR-ADG-42: every row value except the bound tenant is cast to the catalog type of its column.
+            var nativeTypes = new string?[columns.Count];
+            for (int i = 0; i < columns.Count; i++)
+            {
+                if (i == tenantIndex) continue;
+                if (requirement.ColumnTypes is null || !requirement.ColumnTypes.TryGetValue(columns[i].Value, out string? catalogType) ||
+                    !CatalogTypeMap.TryResolve(Owner._dialect, catalogType, out string native, out _))
                 {
-                    throw new SecurityCoverageException("An INSERT into a table with a row policy is missing its check predicate.");
+                    throw new SecurityCoverageException("An INSERT check-option column has no known catalog type to cast to.");
+                }
+
+                nativeTypes[i] = native;
+            }
+
+            VerifyCheckOptionRows(inner.Body, columns.Count, tenantIndex, nativeTypes);
+        }
+
+        /// <summary>
+        /// CR-ADG-42: a string column of the inserted values is compared only with the byte-exact equality of the dialect (the
+        /// verifier rebuilds the expected comparison through the factory and compares structure). Range, LIKE, negation and
+        /// functions over a string column have no accepted shape.
+        /// </summary>
+        private void VerifyCheckStringComparisons(Expression predicate, SqlIdentifier alias, IReadOnlyList<SqlIdentifier> columns, int tenantIndex, TableCoverageRequirement requirement)
+        {
+            var textColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < columns.Count; i++)
+            {
+                if (i == tenantIndex) continue;
+                if (requirement.ColumnTypes is not null && requirement.ColumnTypes.TryGetValue(columns[i].Value, out string? type) &&
+                    CatalogTypeMap.TryResolve(Owner._dialect, type, out _, out bool isText) && isText)
+                {
+                    textColumns.Add(columns[i].Value);
                 }
             }
 
-            VerifyCheckOptionRows(inner.Body, columns.Count, tenantIndex);
+            var capabilities = Owner._capabilities ?? DialectCapabilityTable.Default.Get(Owner._dialect);
+            try
+            {
+                InsertCheckPolicy.Validate(predicate, alias, textColumns.Contains, capabilities);
+            }
+            catch (InsertCheckPolicy.UnsupportedStringPredicateException)
+            {
+                throw new SecurityCoverageException("An INSERT check compares a string column otherwise than byte-exact.");
+            }
         }
 
-        private void VerifyCheckOptionRows(QueryBody body, int columnCount, int tenantIndex)
+        private void VerifyCheckOptionRows(QueryBody body, int columnCount, int tenantIndex, string?[] nativeTypes)
         {
             RuntimeHelpers.EnsureSufficientExecutionStack();
             switch (body)
             {
                 case SetOperationQuery { Operator: SetOperator.Union, Distinct: false } setOp:
-                    VerifyCheckOptionRows(setOp.Left, columnCount, tenantIndex);
-                    VerifyCheckOptionRows(setOp.Right, columnCount, tenantIndex);
+                    VerifyCheckOptionRows(setOp.Left, columnCount, tenantIndex, nativeTypes);
+                    VerifyCheckOptionRows(setOp.Right, columnCount, tenantIndex, nativeTypes);
                     break;
                 case QuerySpecification { Distinct: false, From: null, Where: null, GroupBy: null, Having: null } row:
                     if (row.Projections.Count != columnCount || row.Projections.Any(p => p is not ColumnSelectItem))
@@ -309,6 +351,16 @@ public sealed partial class SecurityCoverageVerifier
                     if (tenantIndex >= 0 && !IsTenantParameter(((ColumnSelectItem)row.Projections[tenantIndex]).Expression))
                     {
                         throw new SecurityCoverageException("An INSERT row does not carry the bound tenant.");
+                    }
+
+                    for (int i = 0; i < columnCount; i++)
+                    {
+                        if (i == tenantIndex) continue;
+                        if (((ColumnSelectItem)row.Projections[i]).Expression is not CastExpression { IsNativeType: true, IsTryCast: false } cast ||
+                            !string.Equals(cast.TargetType, nativeTypes[i], StringComparison.Ordinal))
+                        {
+                            throw new SecurityCoverageException("An INSERT check-option value is not cast to the catalog type of its column.");
+                        }
                     }
 
                     break;

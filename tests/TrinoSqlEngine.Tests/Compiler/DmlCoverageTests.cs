@@ -42,7 +42,7 @@ public class DmlCoverageTests
         {
             RowFilters = _rowFilters,
             Masks = _masks,
-            Catalog = Catalog(),
+            Catalog = DmlCompileTests.CatalogFor(dialect),
             Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String),
             Dml = dml ?? DmlGuardOptions.Strict
         }
@@ -171,6 +171,93 @@ public class DmlCoverageTests
             var union = (SetOperationQuery)derived.Subquery.Body;
             return i with { Source = spec with { From = derived with { Subquery = derived.Subquery with { Body = union with { Distinct = true } } } } };
         });
+    }
+
+    // CR-ADG-42: the verifier proves, independently of the injector, the casts to the catalog types and the byte-exact string comparison.
+    private void EuPolicy()
+    {
+        _rowFilters.NoPolicy.Remove(Orders);
+        _rowFilters.Predicates[Orders] = PolicyPredicate.Create(
+            new BinaryExpression(Col("Region"), BinaryOperator.Equal, new PolicyParameterExpression("__pol_region", SqlParameterType.String)),
+            new Dictionary<string, PolicyValue> { ["__pol_region"] = new("EU", SqlParameterType.String) });
+    }
+
+    private const string CheckSql = "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU'), (2, 'acme', 'EU')";
+
+    private static (InsertStatement Insert, QuerySpecification Spec, SubqueryTableSource Derived, SetOperationQuery Union) Parts(SqlStatement s)
+    {
+        var insert = (InsertStatement)s;
+        var spec = (QuerySpecification)insert.Source;
+        var derived = (SubqueryTableSource)spec.From!;
+        return (insert, spec, derived, (SetOperationQuery)derived.Subquery.Body);
+    }
+
+    private static SqlStatement WithRow(SqlStatement s, Func<QuerySpecification, QuerySpecification> mutateRow)
+    {
+        var (insert, spec, derived, union) = Parts(s);
+        var body = union with { Left = mutateRow((QuerySpecification)union.Left) };
+        return insert with { Source = spec with { From = derived with { Subquery = derived.Subquery with { Body = body } } } };
+    }
+
+    private static QuerySpecification WithProjection(QuerySpecification row, int index, Expression expression)
+    {
+        var projections = row.Projections.ToList();
+        projections[index] = new ColumnSelectItem(expression, ((ColumnSelectItem)projections[index]).Alias);
+        return row with { Projections = projections };
+    }
+
+    private static SqlStatement WithCheck(SqlStatement s, Func<Expression, Expression> mutatePredicate)
+    {
+        var (insert, spec, _, _) = Parts(s);
+        var check = (SecurityPredicateExpression)spec.Where!;
+        return insert with { Source = spec with { Where = check with { Predicate = mutatePredicate(check.Predicate) } } };
+    }
+
+    private static ColumnReference Derived(string column) =>
+        new(new SqlQualifiedName(new[] { new SqlIdentifier("autheris_ins", true), new SqlIdentifier(column, true) }));
+
+    public static IEnumerable<object[]> CheckDialects() => Dialects().Where(d => (TargetSqlDialect)d[0] != TargetSqlDialect.Databricks);
+
+    [Theory]
+    [MemberData(nameof(CheckDialects))]
+    public void Insert_CheckOption_WithAValueNotCastToTheCatalogType_IsRejectedByTheVerifier(TargetSqlDialect dialect)
+    {
+        EuPolicy();
+        // the cast removed from a row value (the database would coerce it after the check)
+        Mutant(dialect, CheckSql, s => WithRow(s, row => WithProjection(row, 2, ((CastExpression)((ColumnSelectItem)row.Projections[2]).Expression).Operand)));
+        // the cast removed from a non-policy column
+        Mutant(dialect, CheckSql, s => WithRow(s, row => WithProjection(row, 0, ((CastExpression)((ColumnSelectItem)row.Projections[0]).Expression).Operand)));
+        // a cast to a different type (that of the id column) on the policy column
+        Mutant(dialect, CheckSql, s => WithRow(s, row => WithProjection(row, 2,
+            ((CastExpression)((ColumnSelectItem)row.Projections[2]).Expression) with { TargetType = ((CastExpression)((ColumnSelectItem)row.Projections[0]).Expression).TargetType })));
+        // a cast spelled as a Trino type instead of the native catalog type
+        Mutant(dialect, CheckSql, s => WithRow(s, row => WithProjection(row, 2,
+            ((CastExpression)((ColumnSelectItem)row.Projections[2]).Expression) with { IsNativeType = false })));
+        // a TRY_CAST would turn a failing conversion into NULL
+        Mutant(dialect, CheckSql, s => WithRow(s, row => WithProjection(row, 2,
+            ((CastExpression)((ColumnSelectItem)row.Projections[2]).Expression) with { IsTryCast = true })));
+    }
+
+    [Theory]
+    [MemberData(nameof(CheckDialects))]
+    public void Insert_CheckOption_WithAStringComparedOtherwiseThanByteExact_IsRejectedByTheVerifier(TargetSqlDialect dialect)
+    {
+        EuPolicy();
+        var param = new PolicyParameterExpression("__pol_region", SqlParameterType.String);
+        // the plain (collation dependent) equality
+        Mutant(dialect, CheckSql, s => WithCheck(s, _ => new BinaryExpression(Derived("Region"), BinaryOperator.Equal, param)));
+        // the byte-exact comparison with its last conjunct dropped (the leftmost part of the factory output)
+        Mutant(dialect, CheckSql, s => WithCheck(s, p => ((BinaryExpression)((ParenthesizedExpression)p).Expression).Left is { } left && left is BinaryExpression ? ((BinaryExpression)((ParenthesizedExpression)p).Expression).Left : p));
+        // a range and a LIKE over the string column
+        Mutant(dialect, CheckSql, s => WithCheck(s, _ => new BinaryExpression(Derived("Region"), BinaryOperator.LessThan, param)));
+        Mutant(dialect, CheckSql, s => WithCheck(s, _ => new LikeExpression(Derived("Region"), param)));
+        // a function over the string column
+        Mutant(dialect, CheckSql, s => WithCheck(s, _ => new BinaryExpression(
+            new FunctionCallExpression(new SqlQualifiedName("lower"), new Expression[] { Derived("Region") }), BinaryOperator.Equal, param)));
+        // the byte-exact comparison under a NOT (byte-exact inequality is wider than the collation's)
+        Mutant(dialect, CheckSql, s => WithCheck(s, p => new UnaryExpression(UnaryOperator.Not, new ParenthesizedExpression(p))));
+        // the byte-exact comparison against a different value than the policy's (an extra operand swapped for the column)
+        Mutant(dialect, CheckSql, s => WithCheck(s, p => new BinaryExpression(p, BinaryOperator.And, new BinaryExpression(Derived("Region"), BinaryOperator.GreaterThan, param))));
     }
 
     [Theory]

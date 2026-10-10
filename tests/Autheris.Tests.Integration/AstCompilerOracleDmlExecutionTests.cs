@@ -62,7 +62,7 @@ public sealed class AstCompilerOracleDmlExecutionTests : AstCompilerDmlContract,
         await using var conn = await OpenAsync();
         foreach (var ddl in new[]
         {
-            $"CREATE TABLE {RawTable("Orders")} (ID NUMBER(10) PRIMARY KEY, TENANTID VARCHAR2(64) NOT NULL, REGION VARCHAR2(20) NOT NULL, STATUS VARCHAR2(20) NOT NULL, AMOUNT NUMBER(18,2) NOT NULL, EMAIL VARCHAR2(200))",
+            $"CREATE TABLE {RawTable("Orders")} (ID NUMBER(10) PRIMARY KEY, TENANTID VARCHAR2(64) NOT NULL, REGION VARCHAR2(20) NOT NULL, STATUS VARCHAR2(20) NOT NULL, AMOUNT NUMBER(18,2) NOT NULL, EMAIL VARCHAR2(200), DUE DATE)",
             $"CREATE TABLE {RawTable("Entitlements")} (ID NUMBER(10) PRIMARY KEY, TENANTID VARCHAR2(64) NOT NULL, ORDERID NUMBER(10) NOT NULL)"
         })
         {
@@ -89,7 +89,7 @@ public sealed class AstCompilerOracleDmlExecutionTests : AstCompilerDmlContract,
     {
         new TableCatalogEntry(OrdersId, ImmutableArray.Create(
             new CatalogColumn("ID", "NUMBER(10)"), new CatalogColumn("TENANTID", "VARCHAR2(64)"), new CatalogColumn("REGION", "VARCHAR2(20)"),
-            new CatalogColumn("STATUS", "VARCHAR2(20)"), new CatalogColumn("AMOUNT", "NUMBER(18,2)"), new CatalogColumn("EMAIL", "VARCHAR2(200)")),
+            new CatalogColumn("STATUS", "VARCHAR2(20)"), new CatalogColumn("AMOUNT", "NUMBER(18,2)"), new CatalogColumn("EMAIL", "VARCHAR2(200)"), new CatalogColumn("DUE", "DATE")),
             "TENANTID", 1),
         new TableCatalogEntry(EntitlementsId, ImmutableArray.Create(
             new CatalogColumn("ID", "NUMBER(10)"), new CatalogColumn("TENANTID", "VARCHAR2(64)"), new CatalogColumn("ORDERID", "NUMBER(10)")),

@@ -18,8 +18,23 @@ public static class TenantPredicateFactory
         ArgumentException.ThrowIfNullOrEmpty(tenantColumn);
         ArgumentException.ThrowIfNullOrEmpty(parameterName);
 
-        Expression Column() => new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier(tenantColumn, true) }));
-        Expression Param() => new PolicyParameterExpression(parameterName, parameterType, ParameterOrigin.Tenant, ColumnType: columnType);
+        Expression column = new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier(tenantColumn, true) }));
+        Expression param = new PolicyParameterExpression(parameterName, parameterType, ParameterOrigin.Tenant, ColumnType: columnType);
+        return ExactEquals(capabilities, column, param, columnCollation);
+    }
+
+    /// <summary>
+    /// The dialect's byte-exact equality of two string operands: <c>column = value</c> plus the binary comparison (decision B-1).
+    /// CR-ADG-42 reuses it for the string equality of an INSERT check, so the check is never looser than any collation. The operands
+    /// are used as given (an annotated policy parameter keeps its column type).
+    /// </summary>
+    public static Expression ExactEquals(DialectCapabilities capabilities, Expression column, Expression value, string? columnCollation = null)
+    {
+        ArgumentNullException.ThrowIfNull(capabilities);
+        ArgumentNullException.ThrowIfNull(column);
+        ArgumentNullException.ThrowIfNull(value);
+        Expression Column() => column;
+        Expression Param() => value;
 
         switch (capabilities.TenantComparison)
         {

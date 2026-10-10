@@ -56,10 +56,11 @@ public sealed class AstCompilerSqlServerDmlExecutionTests : AstCompilerDmlContra
             CREATE TABLE [{_schema}].Orders (
                 Id int NOT NULL PRIMARY KEY,
                 TenantId nvarchar(64) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
-                Region nvarchar(20) NOT NULL,
+                Region nvarchar(20) COLLATE SQL_Latin1_General_CP1_CS_AS NOT NULL,
                 Status nvarchar(20) NOT NULL,
                 Amount decimal(18,2) NOT NULL,
-                Email nvarchar(200) NULL);
+                Email nvarchar(200) NULL,
+                Due date NULL);
             CREATE TABLE [{_schema}].Entitlements (
                 Id int NOT NULL PRIMARY KEY,
                 TenantId nvarchar(64) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
@@ -79,7 +80,7 @@ public sealed class AstCompilerSqlServerDmlExecutionTests : AstCompilerDmlContra
     {
         new TableCatalogEntry(OrdersId, ImmutableArray.Create(
             new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", "nvarchar(64)"), new CatalogColumn("Region", "nvarchar(20)"),
-            new CatalogColumn("Status", "nvarchar(20)"), new CatalogColumn("Amount", "decimal(18,2)"), new CatalogColumn("Email", "nvarchar(200)")),
+            new CatalogColumn("Status", "nvarchar(20)"), new CatalogColumn("Amount", "decimal(18,2)"), new CatalogColumn("Email", "nvarchar(200)"), new CatalogColumn("Due", "date")),
             "TenantId", 1),
         new TableCatalogEntry(EntitlementsId, ImmutableArray.Create(
             new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", "nvarchar(64)"), new CatalogColumn("OrderId", "int")),

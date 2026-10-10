@@ -41,7 +41,8 @@ public sealed class AstCompilerDuckDbDmlExecutionTests : AstCompilerDmlContract,
                 "Region" VARCHAR NOT NULL,
                 "Status" VARCHAR NOT NULL,
                 "Amount" DECIMAL(18,2) NOT NULL,
-                "Email" VARCHAR);
+                "Email" VARCHAR,
+                "Due" DATE);
             CREATE TABLE "Entitlements" ("Id" INTEGER PRIMARY KEY, "TenantId" VARCHAR COLLATE NOCASE NOT NULL, "OrderId" INTEGER NOT NULL);
             """);
         foreach (var seed in SeedStatements()) await ExecRaw(seed);
@@ -63,7 +64,7 @@ public sealed class AstCompilerDuckDbDmlExecutionTests : AstCompilerDmlContract,
     {
         new TableCatalogEntry(OrdersId, ImmutableArray.Create(
             new CatalogColumn("Id", "INTEGER"), new CatalogColumn("TenantId", "VARCHAR"), new CatalogColumn("Region", "VARCHAR"),
-            new CatalogColumn("Status", "VARCHAR"), new CatalogColumn("Amount", "DECIMAL(18,2)"), new CatalogColumn("Email", "VARCHAR")),
+            new CatalogColumn("Status", "VARCHAR"), new CatalogColumn("Amount", "DECIMAL(18,2)"), new CatalogColumn("Email", "VARCHAR"), new CatalogColumn("Due", "DATE")),
             "TenantId", 1),
         new TableCatalogEntry(EntitlementsId, ImmutableArray.Create(
             new CatalogColumn("Id", "INTEGER"), new CatalogColumn("TenantId", "VARCHAR"), new CatalogColumn("OrderId", "INTEGER")),

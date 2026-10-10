@@ -260,10 +260,16 @@ public enum DateUnit
 /// <summary>Wunsch 4: <c>INTERVAL '<Value>' <Field></c> with a single unsigned field.</summary>
 public sealed record IntervalLiteralExpression(string Value, string Field) : Expression;
 
+/// <param name="IsNativeType">
+/// CR-ADG-42: <paramref name="TargetType"/> is a provider-native catalog column type (for example <c>nvarchar(20)</c> or
+/// <c>NUMBER(18,2)</c>), emitted as is after it resolved through <c>CatalogTypeMap</c> for the dialect, instead of a Trino type
+/// that the dialect maps. Only the governed INSERT check option creates such a cast; the AST builder never does.
+/// </param>
 public sealed record CastExpression(
     Expression Operand,
     string TargetType,
-    bool IsTryCast = false) : Expression;
+    bool IsTryCast = false,
+    bool IsNativeType = false) : Expression;
 
 public sealed record RowValueExpression(
     IReadOnlyList<Expression> Elements) : Expression;
