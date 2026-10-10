@@ -78,13 +78,16 @@ public sealed class FederatedVirtualFilterTierTests(FederatedVirtualFilterWebApi
         fixture.Crm.Requests.Select(r => r.Path).ShouldBe(["/api/v1/customers/102"]);
     }
 
-    [Fact]
-    public async Task E2E7_EmptyKeySet_ZeroRows_ZeroUpstreamRequests()
+    [Theory]
+    [InlineData(Tables.QueryParameterList)]
+    [InlineData(Tables.None)]   // no pushdown capability: only Tier 0 keeps the upstream untouched (mutation M8)
+    [InlineData(Tables.Path)]
+    public async Task E2E7_EmptyKeySet_ZeroRows_ZeroUpstreamRequests(string table)
     {
         // The filter selects is_active = 2: no authorization row matches, so the key set is empty (Tier 0).
-        await fixture.UseBindingsAsync(Binding(Tables.QueryParameterList, filter: "vf_clients_none"));
+        await fixture.UseBindingsAsync(Binding(table, filter: "vf_clients_none"));
 
-        var (status, body) = await fixture.SqlAsync(Query(Tables.QueryParameterList));
+        var (status, body) = await fixture.SqlAsync(Query(table));
 
         using (body)
         {
