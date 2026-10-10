@@ -36,6 +36,8 @@
 
   <ItemGroup>
     <None Include="Spark\runner.py" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
+    <None Include="Spark\Dockerfile" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
+    <None Include="Spark\fetch-delta.py" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
     <None Update="xunit.runner.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

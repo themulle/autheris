@@ -25,7 +25,7 @@ using Xunit;
 /// tenant comparison. It does NOT prove Unity Catalog, Photon, runtime-specific functions or the Statement Execution API
 /// (risk R-7); only the secret-gated live job (G9) can. Tests return early when Docker or the image is unavailable.
 /// </summary>
-public sealed class SparkProxyFixture : IAsyncLifetime, IDisposable
+public class SparkProxyFixture : IAsyncLifetime, IDisposable
 {
     // Pinned by digest (SEC-ADG-24). Update together with the digest recorded in docs/plans (implementation log).
     public const string Image = "apache/spark:4.0.0-python3@sha256:9e2f63442ba1a672ea70d780d56da28f42ce515d0be18840569a3054cc6d2314";
@@ -33,10 +33,43 @@ public sealed class SparkProxyFixture : IAsyncLifetime, IDisposable
     private Process? _process;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public bool IsAvailable { get; private set; }
+    public bool IsAvailable { get; protected set; }
     public bool CollationAvailable { get; private set; }
     public bool ImagePresent { get; private set; }
-    public string StartupError { get; private set; } = string.Empty;
+    public string StartupError { get; protected set; } = string.Empty;
+
+    /// <summary>Prepares and returns the image to run (the pinned image itself, or an image derived from it).</summary>
+    protected virtual Task<string> PrepareImageAsync() => Task.FromResult(Image);
+
+    /// <summary>Extra <c>docker run</c> arguments (environment) placed before the image name.</summary>
+    protected virtual IEnumerable<string> ExtraRunArguments => Array.Empty<string>();
+
+    /// <summary>Creates the fixture tables; the Delta proxy creates its tables per test instead.</summary>
+    protected virtual async Task SeedAsync()
+    {
+        await Ddl("""
+            CREATE TABLE default.orders (
+                id INT, tenantid STRING, region STRING, status STRING, amount DECIMAL(18,2), email STRING) USING parquet
+            """);
+        // Spark 4 collations: a case-insensitive tenant column. Without them the collision test returns early.
+        var collated = await SendAsync(new JsonObject { ["op"] = "ddl", ["sql"] = "CREATE TABLE default.orders_ci (id INT, tenantid STRING COLLATE UTF8_LCASE) USING parquet" });
+        CollationAvailable = collated?["ok"]?.GetValue<bool>() == true;
+        await Ddl("CREATE TABLE default.entitlements (id INT, tenantid STRING, orderid INT) USING parquet");
+        await Ddl("""
+            INSERT INTO default.orders VALUES
+                (1, 'acme',  'EU', 'open',   10.50, 'alice.smith@acme.example'),
+                (2, 'acme',  'US', 'open',   20.00, 'bob.jones@acme.example'),
+                (3, 'ACME',  'EU', 'open',   30.00, 'upper.case@ACME.example'),
+                (4, 'ACME',  'US', 'closed', 40.00, 'upper.us@ACME.example'),
+                (5, 'other', 'EU', 'open',   50.00, 'carol@other.example'),
+                (6, 'acme',  'EU', 'closed', 60.00, NULL)
+            """);
+        await Ddl("INSERT INTO default.entitlements VALUES (1, 'acme', 1), (2, 'other', 2), (3, 'acme', 6), (4, 'ACME', 3)");
+        if (CollationAvailable)
+        {
+            await Ddl("INSERT INTO default.orders_ci VALUES (1, 'acme'), (2, 'ACME'), (3, 'other')");
+        }
+    }
 
     public async Task InitializeAsync()
     {
@@ -64,7 +97,11 @@ public sealed class SparkProxyFixture : IAsyncLifetime, IDisposable
                 UseShellExecute = false
             };
             // The Docker daemon may not share the test file system (bind mounts), so the runner is passed as the -c argument.
-            foreach (var arg in new[] { "run", "-i", "--rm", "--user", "root", Image, "python3", "-c", await File.ReadAllTextAsync(Path.Combine(runner, "runner.py")) })
+            string image = await PrepareImageAsync();
+            var arguments = new List<string> { "run", "-i", "--rm", "--user", "root" };
+            arguments.AddRange(ExtraRunArguments);
+            arguments.AddRange(new[] { image, "python3", "-c", await File.ReadAllTextAsync(Path.Combine(runner, "runner.py")) });
+            foreach (var arg in arguments)
             {
                 info.ArgumentList.Add(arg);
             }
@@ -84,28 +121,7 @@ public sealed class SparkProxyFixture : IAsyncLifetime, IDisposable
                 return;
             }
 
-            await Ddl("""
-                CREATE TABLE default.orders (
-                    id INT, tenantid STRING, region STRING, status STRING, amount DECIMAL(18,2), email STRING) USING parquet
-                """);
-            // Spark 4 collations: a case-insensitive tenant column. Without them the collision test returns early.
-            var collated = await SendAsync(new JsonObject { ["op"] = "ddl", ["sql"] = "CREATE TABLE default.orders_ci (id INT, tenantid STRING COLLATE UTF8_LCASE) USING parquet" });
-            CollationAvailable = collated?["ok"]?.GetValue<bool>() == true;
-            await Ddl("CREATE TABLE default.entitlements (id INT, tenantid STRING, orderid INT) USING parquet");
-            await Ddl("""
-                INSERT INTO default.orders VALUES
-                    (1, 'acme',  'EU', 'open',   10.50, 'alice.smith@acme.example'),
-                    (2, 'acme',  'US', 'open',   20.00, 'bob.jones@acme.example'),
-                    (3, 'ACME',  'EU', 'open',   30.00, 'upper.case@ACME.example'),
-                    (4, 'ACME',  'US', 'closed', 40.00, 'upper.us@ACME.example'),
-                    (5, 'other', 'EU', 'open',   50.00, 'carol@other.example'),
-                    (6, 'acme',  'EU', 'closed', 60.00, NULL)
-                """);
-            await Ddl("INSERT INTO default.entitlements VALUES (1, 'acme', 1), (2, 'other', 2), (3, 'acme', 6), (4, 'ACME', 3)");
-            if (CollationAvailable)
-            {
-                await Ddl("INSERT INTO default.orders_ci VALUES (1, 'acme'), (2, 'ACME'), (3, 'other')");
-            }
+            await SeedAsync();
         }
         catch (Exception ex)
         {
@@ -131,7 +147,7 @@ public sealed class SparkProxyFixture : IAsyncLifetime, IDisposable
         }
     }
 
-    private async Task Ddl(string sql)
+    protected async Task Ddl(string sql)
     {
         var response = await SendAsync(new JsonObject { ["op"] = "ddl", ["sql"] = sql });
         if (response?["ok"]?.GetValue<bool>() != true)
@@ -237,7 +253,7 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
         }
     };
 
-    private static JsonArray Parameters(CompiledSql compiled, IReadOnlyDictionary<string, object?> client)
+    internal static JsonArray Parameters(CompiledSql compiled, IReadOnlyDictionary<string, object?> client)
     {
         var array = new JsonArray();
         foreach (var p in compiled.Parameters)

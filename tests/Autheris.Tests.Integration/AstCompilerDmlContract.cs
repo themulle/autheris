@@ -68,6 +68,12 @@ public abstract class AstCompilerDmlContract
 
     protected virtual bool HasUniqueKey => true;
 
+    /// <summary>False where the engine refuses a subquery in the WHERE of UPDATE or DELETE (open-source Delta: DELTA_UNSUPPORTED_SUBQUERY).</summary>
+    protected virtual bool SupportsSubqueryInDmlWhere => true;
+
+    /// <summary>False where the engine returns no row count for INSERT (Delta returns an empty result).</summary>
+    protected virtual bool ReportsInsertCount => true;
+
     // ---- data ----
 
     protected static readonly (int Id, string Tenant, string Region, string Status, decimal Amount, string? Email)[] OrderRows =
@@ -149,6 +155,13 @@ public abstract class AstCompilerDmlContract
     {
         var compiled = Engine.Compile(sql.AsMemory(), Request(tenant), CancellationToken.None);
         return await ExecuteAsync(compiled);
+    }
+
+    /// <summary>Runs an INSERT and checks the reported row count where the engine reports one.</summary>
+    protected async Task InsertedAsync(string sql, string tenant, int expected)
+    {
+        int affected = await ExecAsync(sql, tenant);
+        if (ReportsInsertCount) affected.ShouldBe(expected);
     }
 
     protected async Task<List<(int Id, string Tenant, string Status)>> OrdersAsync() =>
@@ -241,6 +254,15 @@ public abstract class AstCompilerDmlContract
     public async Task Update_SubqueryInWhere_NeverSeesTheOtherTenantsRows()
     {
         if (!Available()) return;
+        if (!SupportsSubqueryInDmlWhere)
+        {
+            // the engine refuses the statement: the backend error is the fail-closed outcome and nothing is written
+            var before = await SnapshotAsync();
+            await RejectedAsync(() => ExecAsync($"UPDATE {O} SET status = 'viaSub' WHERE id IN (SELECT orderid FROM {E})", "acme"));
+            (await SnapshotAsync()).ShouldBe(before);
+            return;
+        }
+
         // entitlement 2 (tenant other) points at order 2 (tenant acme): acme must not be able to use it
         (await ExecAsync($"UPDATE {O} SET status = 'viaSub' WHERE id IN (SELECT orderid FROM {E})", "acme")).ShouldBe(2);   // orders 1 and 6
         (await OrdersAsync()).Where(r => r.Status == "viaSub").Select(r => r.Id).ShouldBe(new[] { 1, 6 });
@@ -264,7 +286,15 @@ public abstract class AstCompilerDmlContract
     {
         if (!Available()) return;
         RegionEuPolicy();
-        (await ExecAsync($"DELETE FROM {O} WHERE id IN (SELECT orderid FROM {E})", "acme")).ShouldBe(2);   // 1 and 6, both EU
+        if (SupportsSubqueryInDmlWhere)
+        {
+            (await ExecAsync($"DELETE FROM {O} WHERE id IN (SELECT orderid FROM {E})", "acme")).ShouldBe(2);   // 1 and 6, both EU
+        }
+        else
+        {
+            (await ExecAsync($"DELETE FROM {O} WHERE id > 5", "acme")).ShouldBe(1);   // only order 6 is EU and acme's and above 5
+        }
+
         var before = await SnapshotAsync();
         await Should.ThrowAsync<UnfilteredDmlException>(() => ExecAsync($"DELETE FROM {O}", "acme"));
         await Should.ThrowAsync<UnfilteredDmlException>(() => ExecAsync($"DELETE FROM {O} WHERE 1 = 1", "acme"));
@@ -287,13 +317,13 @@ public abstract class AstCompilerDmlContract
     public async Task Insert_AlwaysWritesTheCallersTenant_Exactly()
     {
         if (!Available()) return;
-        (await ExecAsync($"INSERT INTO {O} (id, tenantid, region, status, amount) VALUES (10, 'acme', 'EU', 'new', 1.5), (11, 'acme', 'US', 'new', 2.5)", "acme")).ShouldBe(2);
+        await InsertedAsync($"INSERT INTO {O} (id, tenantid, region, status, amount) VALUES (10, 'acme', 'EU', 'new', 1.5), (11, 'acme', 'US', 'new', 2.5)", "acme", 2);
         var rows = await OrdersAsync();
         rows.Single(r => r.Id == 10).Tenant.ShouldBe("acme");
         rows.Single(r => r.Id == 11).Tenant.ShouldBe("acme");
 
         // the case variant is a different tenant: ACME can write ACME, and cannot write 'acme'
-        (await ExecAsync($"INSERT INTO {O} (id, tenantid, region, status, amount) VALUES (12, 'ACME', 'EU', 'new', 1.5)", "ACME")).ShouldBe(1);
+        await InsertedAsync($"INSERT INTO {O} (id, tenantid, region, status, amount) VALUES (12, 'ACME', 'EU', 'new', 1.5)", "ACME", 1);
         (await OrdersAsync()).Single(r => r.Id == 12).Tenant.ShouldBe("ACME");
         await SecurityRejectedAsync(() => ExecAsync($"INSERT INTO {O} (id, tenantid, region, status, amount) VALUES (13, 'acme', 'EU', 'new', 1.5)", "ACME"));
     }
@@ -314,8 +344,8 @@ public abstract class AstCompilerDmlContract
     public async Task InsertSelect_CopiesOnlyTheCallersSourceRows_AsTheCallersTenant()
     {
         if (!Available()) return;
-        (await ExecAsync(
-            $"INSERT INTO {O} (id, tenantid, region, status, amount) SELECT id + 100, 'acme', 'EU', 'copied', 1 FROM {E}", "acme")).ShouldBe(2);   // entitlements 1 and 3
+        await InsertedAsync(
+            $"INSERT INTO {O} (id, tenantid, region, status, amount) SELECT id + 100, 'acme', 'EU', 'copied', 1 FROM {E}", "acme", 2);   // entitlements 1 and 3
         var rows = await OrdersAsync();
         rows.Where(r => r.Status == "copied").Select(r => (r.Id, r.Tenant)).ShouldBe(new[] { (101, "acme"), (103, "acme") });
     }
@@ -336,8 +366,8 @@ public abstract class AstCompilerDmlContract
         if (!Available()) return;
         MaskEmail();
         // reading a masked column as the source of a written (unmasked) column yields the mask, never the clear text
-        (await ExecAsync(
-            $"INSERT INTO {O} (id, tenantid, region, status, amount) SELECT id + 300, 'acme', 'EU', email, 1 FROM {O} WHERE id = 1", "acme")).ShouldBe(1);
+        await InsertedAsync(
+            $"INSERT INTO {O} (id, tenantid, region, status, amount) SELECT id + 300, 'acme', 'EU', email, 1 FROM {O} WHERE id = 1", "acme", 1);
         (await OrdersAsync()).Single(r => r.Id == 301).Status.ShouldBe("[REDACTED]");
         await SecurityRejectedAsync(() => ExecAsync($"INSERT INTO {O} (id, tenantid, region, status, amount, email) VALUES (400, 'acme', 'EU', 'x', 1, 'w@x.y')", "acme"));
     }

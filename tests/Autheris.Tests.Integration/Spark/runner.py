@@ -25,14 +25,21 @@ for archive in glob.glob(os.path.join(spark_home, "python", "lib", "py4j-*.zip")
 
 from pyspark.sql import SparkSession  # noqa: E402
 
-spark = (SparkSession.builder.master("local[2]")
-         .appName("autheris-ast-gate")
-         .config("spark.sql.ansi.enabled", "true")
-         .config("spark.sql.variable.substitute", "true")
-         .config("spark.sql.shuffle.partitions", "2")
-         .config("spark.ui.enabled", "false")
-         .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse")
-         .getOrCreate())
+builder = (SparkSession.builder.master("local[2]")
+           .appName("autheris-ast-gate")
+           .config("spark.sql.ansi.enabled", "true")
+           .config("spark.sql.variable.substitute", "true")
+           .config("spark.sql.shuffle.partitions", "2")
+           .config("spark.ui.enabled", "false")
+           .config("spark.sql.warehouse.dir", "/tmp/spark-warehouse"))
+if os.environ.get("AUTHERIS_SPARK_DELTA") == "1":
+    # WP-A7: UPDATE, DELETE and MERGE need Delta (the jars are baked into the derived image, see Dockerfile).
+    builder = (builder.config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+               .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+               # open-source Delta rejects collated string columns; Databricks Delta supports them, so the proxy opts out of the check
+               # to exercise the case-insensitive tenant column (B-1).
+               .config("spark.databricks.delta.schema.typeCheck.enabled", "false"))
+spark = builder.getOrCreate()
 spark.sparkContext.setLogLevel("ERROR")
 
 

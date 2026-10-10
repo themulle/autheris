@@ -35,6 +35,7 @@ public class DmlCoverageTests
     private CompiledSql Compile(TargetSqlDialect dialect, string sql, DmlGuardOptions? dml = null) => _engine.Compile(sql.AsMemory(), new CompileRequest
     {
         TargetDialect = dialect,
+        AllowExperimentalDialect = true,
         TokenGuards = SqlTokenSecurityOptions.Strict,
         Statements = StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge,
         Policy = new GovernancePolicy
@@ -269,7 +270,7 @@ public class DmlCoverageTests
         new object[] { TargetSqlDialect.SqlServer, StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge },
         new object[] { TargetSqlDialect.DuckDb, StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge },
         new object[] { TargetSqlDialect.PostgreSql, StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge },
-        new object[] { TargetSqlDialect.Databricks, StatementPermissions.ReadOnly },
+        new object[] { TargetSqlDialect.Databricks, StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete | StatementPermissions.Merge },
         new object[] { TargetSqlDialect.Oracle, StatementPermissions.ReadOnly }
     };
 

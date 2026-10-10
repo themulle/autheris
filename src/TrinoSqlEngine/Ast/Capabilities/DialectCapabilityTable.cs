@@ -174,7 +174,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         BindExpressionTemplates: IdentityBindTemplates,
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.Databricks, DatabricksRewrites),
         AllowedTableFunctions: FrozenSet<string>.Empty,
-        LimitSource: "DBX-PARAM");
+        LimitSource: "DBX-PARAM",
+        DmlStatements: AllDml);
 
     // Declared after the static capability entries: static initializers run in textual order.
     public static DialectCapabilityTable Default { get; } = new();

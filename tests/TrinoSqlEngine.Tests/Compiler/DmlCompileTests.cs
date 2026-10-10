@@ -16,7 +16,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// </summary>
 public class DmlCompileTests
 {
-    public static readonly TargetSqlDialect[] Dialects = { TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.PostgreSql };
+    public static readonly TargetSqlDialect[] Dialects = { TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.PostgreSql, TargetSqlDialect.Databricks };
 
     public static IEnumerable<object[]> DialectData() => Dialects.Select(d => new object[] { d });
 
@@ -70,6 +70,7 @@ public class DmlCompileTests
         DmlGuardOptions? dml = null) => new()
     {
         TargetDialect = dialect,
+        AllowExperimentalDialect = true,   // Databricks stays Experimental until the first green G9 run (CR-ADG-03)
         TokenGuards = SqlTokenSecurityOptions.Strict,
         Statements = statements,
         Policy = new GovernancePolicy
@@ -399,7 +400,7 @@ public class DmlCompileTests
         var c = Compile(dialect, "UPDATE orders SET status = (SELECT max(id) FROM entitlements) WHERE id IN (SELECT orderid FROM entitlements WHERE id > 3)");
         Assert.Equal(1, Tenants(c));
         Assert.Contains(new SecurityPredicateId("dbo.Entitlements", 0), c.AppliedPredicates);
-        Assert.True(CountOf(c.Sql, "[Entitlements]", "\"Entitlements\"") >= 2);
+        Assert.True(CountOf(c.Sql, "[Entitlements]", "\"Entitlements\"", "`Entitlements`") >= 2);
     }
 
     [Theory]
@@ -608,7 +609,7 @@ public class DmlCompileTests
         Assert.Contains(new SecurityPredicateId("dbo.Entitlements", 0), c.AppliedPredicates);
         var joined = Compile(dialect,
             "MERGE INTO orders t USING orders s ON t.id = s.id WHEN MATCHED AND s.status = 'a' THEN UPDATE SET status = 'b'");
-        Assert.True(CountOf(joined.Sql, "[Orders]", "\"Orders\"") >= 2);   // target and source are both the physical table
+        Assert.True(CountOf(joined.Sql, "[Orders]", "\"Orders\"", "`Orders`") >= 2);   // target and source are both the physical table
     }
 
     [Theory]
