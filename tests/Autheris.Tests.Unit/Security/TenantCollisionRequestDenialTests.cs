@@ -151,4 +151,18 @@ public sealed class TenantCollisionRequestDenialTests
         guard.IsDenied("beta").ShouldBeFalse();
         guard.IsDenied("").ShouldBeFalse();
     }
+
+    // CR-ADG-40: the cached (options, guard) pair is one immutable reference, never a value tuple that a reader can see half-written.
+    [Fact]
+    public void TheCachedOptionsAndGuard_AreOneImmutableReference_SoThePairCannotTear()
+    {
+        var field = typeof(SecurityContextResolutionMiddleware).GetField("_cached", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        field.ShouldNotBeNull();
+        field!.FieldType.IsValueType.ShouldBeFalse();
+        field.GetRequiredCustomModifiers().ShouldContain(typeof(System.Runtime.CompilerServices.IsVolatile));
+        foreach (var inner in field.FieldType.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic))
+        {
+            inner.IsInitOnly.ShouldBeTrue(inner.Name);
+        }
+    }
 }

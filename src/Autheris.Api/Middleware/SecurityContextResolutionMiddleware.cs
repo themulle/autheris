@@ -24,7 +24,10 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
     public const string TenantCollisionCode = "TENANT_ID_COLLISION";
 
     // Cached per options instance: a configuration reload yields a new instance, which rebuilds the guard.
-    private (GatewayOptions Options, TenantCollisionGuard Guard)? _cached;
+    // CR-ADG-40: one immutable reference, so a reader can never pair new options with an old guard (a value tuple is copied non-atomically).
+    private sealed record GuardCacheEntry(GatewayOptions Options, TenantCollisionGuard Guard);
+
+    private volatile GuardCacheEntry? _cached;
 
     private TenantCollisionGuard? ResolveGuard(HttpContext context)
     {
@@ -40,11 +43,11 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
 
         if (options == null) return null;
         var cached = _cached;
-        if (cached is { } c && ReferenceEquals(c.Options, options)) return c.Guard;
+        if (cached is not null && ReferenceEquals(cached.Options, options)) return cached.Guard;
         try
         {
             var guard = TenantCollisionGuard.FromOptions(options);
-            _cached = (options, guard);
+            _cached = new GuardCacheEntry(options, guard);
             return guard;
         }
         catch (Exception)
