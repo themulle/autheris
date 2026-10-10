@@ -1448,7 +1448,19 @@ public sealed class WebSqlOptions
 public sealed class CrossSourceOptions
 {
     public bool Enabled { get; init; } = false;
-    public List<string> AllowedTransports { get; init; } = ["WebSql", "Trino"];
+    /// <summary>
+    /// Transport opt-in for federated (cross-source) queries. Valid names are the constants of <c>SqlTransports</c>:
+    /// WebSql, Trino, Rest, Mcp, ArrowExport, FlightSql, SqlEndpoints and AsyncJob. When not configured, only WebSql and
+    /// Trino are allowed; every other channel (including AsyncJob) is rejected on federated queries unless listed here.
+    /// An explicitly empty list allows no transport (fail-closed).
+    /// Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed.
+    /// </summary>
+    public List<string>? AllowedTransports { get; init; }
+
+    private static readonly string[] DefaultAllowedTransports = ["WebSql", "Trino"];
+
+    /// <summary>Configured <see cref="AllowedTransports"/> or the default list (WebSql, Trino).</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedTransports() => AllowedTransports ?? (IReadOnlyList<string>)DefaultAllowedTransports;
     public int MaxTableCount { get; init; } = 5;
     public int MaxStagedRowsPerTable { get; init; } = 50000;
     public int MaxTotalStagedRows { get; init; } = 200000;

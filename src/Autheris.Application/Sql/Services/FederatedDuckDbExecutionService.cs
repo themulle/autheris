@@ -244,7 +244,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
 
         // Transport Gate (Section 3.5)
-        var allowedTransports = crossSourceOptions.AllowedTransports ?? ["WebSql", "Trino"];
+        var allowedTransports = crossSourceOptions.GetEffectiveAllowedTransports();
         // Fail-closed: a request without a transport is rejected, never exempted from the gate.
         if (string.IsNullOrWhiteSpace(request.Transport) ||
             !allowedTransports.Any(t => string.Equals(t, request.Transport, StringComparison.OrdinalIgnoreCase)))
