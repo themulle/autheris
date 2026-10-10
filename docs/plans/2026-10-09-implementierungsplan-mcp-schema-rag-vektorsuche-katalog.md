@@ -1246,3 +1246,15 @@ public class CatalogSearchBenchmark
 | **Tampering / Injection** | Prompt-Injection in Tabellenkommentaren | Mittel | **Metadata Pre-Sanitization:** Sonderzeichen und LLM-Kontrollstrukturen (`Ignore previous instructions`) werden vor der Indexierung neutralisiert. |
 | **Secret Leakage** | Passwörter in Tabellen-Beschreibungen | Hoch | **SecretScrubber Integration:** Vor der Vektorisierung durchlaufen alle Texte den `SecretScrubber.Redact()`, um versehentlich exponierte DB-Credentials unschädlich zu machen. |
 | **SSRF** | Manipulation der `OllamaBaseUrl` | Hoch | **EgressUrlPolicy:** Sollte Ollama als externer Provider genutzt werden, validiert `EgressUrlPolicy` den Host gegen Loopback-Bypässe und Cloud-Metadatenserver (`169.254.169.254`). |
+
+---
+
+## 8. Definition of Done (DoD)
+
+- [x] **AP-10.1 (Domain Models & Options):** `CatalogSearchModels.cs`, `CatalogSearchOptions.cs` in `Autheris.Domain` implementiert.
+- [x] **AP-10.2 (Smart Tokenizer & Okapi BM25):** `SmartSchemaTokenizer.cs`, `Bm25SearchIndex.cs` mit Robertson-Spärck-Jones IDF in `Autheris.Application/Catalog/Search`.
+- [x] **AP-10.3 (Embeddings & SIMD Cosine Search):** `LocalDeterministicEmbeddingGenerator.cs`, `VectorSearchIndex.cs` mit L2-Normierung und SIMD `TensorPrimitives.DotProduct`.
+- [x] **AP-10.4 (Snapshot, RRF & Relation Graph):** `CatalogSearchEngine.cs`, `CatalogSearchSnapshot.cs`, `CatalogSearchWarmupService.cs` mit atomarem Snapshot-Austausch und FK-Graph-Expansion.
+- [x] **AP-10.5 (MCP & REST API Integration):** `search_catalog` MCP-Tool Definition & Execution Handler, `SearchCatalogDetailedAsync` mit ReBAC-Filterung (Zero Enumeration Oracle), `GET /api/v1/catalog/search` REST-Endpunkt.
+- [x] **Verifikation:** 100 % Unit- und Architecture-Tests grün (3.872 Tests ohne Fehler, 0 Compiler-Warnungen).
+
