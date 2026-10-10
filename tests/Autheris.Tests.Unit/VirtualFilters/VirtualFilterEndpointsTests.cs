@@ -484,7 +484,12 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
     public async Task PutProfile_WithMaxPushdownKeysAboveTheGatewayOption_Returns400()
     {
         await PutFilterAsync();
-        void Configure(IServiceCollection s) => s.AddSingleton(Options.Create(new VirtualFilterFederationOptions { MaxPushdownKeys = 50 }));
+        // Real DI: the limit comes from Gateway:VirtualFilters:Federation:MaxPushdownKeys, the key the planner reads.
+        void Configure(IServiceCollection s) => s.AddOptions<GatewayOptions>().Bind(
+            Microsoft.Extensions.Configuration.MemoryConfigurationBuilderExtensions.AddInMemoryCollection(
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder(),
+                new Dictionary<string, string?> { ["Gateway:VirtualFilters:Federation:MaxPushdownKeys"] = "50" })
+                .Build().GetSection(GatewayOptions.SectionName));
 
         (await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", max_pushdown_keys = 51 }, Configure)).Status.ShouldBe(StatusCodes.Status400BadRequest);
         (await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", max_pushdown_keys = 50 }, Configure)).Status.ShouldBe(StatusCodes.Status200OK);

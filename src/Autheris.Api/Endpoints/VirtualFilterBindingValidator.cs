@@ -62,7 +62,7 @@ internal static class VirtualFilterBindingValidator
     public static async Task ValidateAsync(IEnumerable<VirtualFilterAccessProfile> profiles, HttpContext context)
     {
         var services = context.RequestServices;
-        int gatewayLimit = (services.GetService<IOptions<VirtualFilterFederationOptions>>()?.Value ?? new VirtualFilterFederationOptions()).MaxPushdownKeys;
+        int gatewayLimit = (services.GetService<IOptions<GatewayOptions>>()?.Value.VirtualFilters?.Federation ?? new VirtualFilterFederationOptions()).MaxPushdownKeys;
         var catalog = services.GetService<ITableMetadataRepository>();
 
         foreach (var profile in profiles)
