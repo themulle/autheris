@@ -567,6 +567,36 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         JsonDocument.Parse(body).RootElement.GetProperty("code").GetString().ShouldBe("VF_PUSHDOWN_KEY_BUDGET_INVALID");
     }
 
+    [Fact]
+    public async Task PutProfile_ExplicitMaxPushdownKeysEqualToTheDefault_IsCheckedAgainstALowGatewayLimit()
+    {
+        await PutFilterAsync();
+        void Configure(IServiceCollection s) => GatewayLimit(s, 50);
+
+        var (status, body) = await PutBindingAsync(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", max_pushdown_keys = 100 }, Configure);
+
+        status.ShouldBe(StatusCodes.Status400BadRequest);
+        JsonDocument.Parse(body).RootElement.GetProperty("code").GetString().ShouldBe("VF_PUSHDOWN_KEY_BUDGET_INVALID");
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Sync_ExplicitMaxPushdownKeysEqualToTheDefault_IsCheckedAgainstALowGatewayLimit()
+    {
+        void Configure(IServiceCollection s) => GatewayLimit(s, 50);
+        var body = new
+        {
+            path = "governance/access",
+            commit = "c1",
+            filters = new Dictionary<string, object> { ["nicht_ausgelieferte_krane"] = DavidFilterBody() },
+            profiles = new Dictionary<string, object> { ["david"] = BindingProfile(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id", max_pushdown_keys = 100 }) }
+        };
+        var context = Context(Tenant, body, "FilterSync");
+
+        (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(context, ServiceWith(Configure)), context)).ShouldBe(StatusCodes.Status400BadRequest);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
     [Theory]
     [InlineData("deny", UncoveredPolicy.Deny)]
     [InlineData("Deny", UncoveredPolicy.Deny)]

@@ -149,7 +149,7 @@ public static class VirtualFilterEndpoints
             }
 
             var model = body.ToModel(name, tenant.Value);
-            var saved = await service.SaveProfileAsync(model, actor, context.RequestAborted).ConfigureAwait(false);
+            var saved = await service.SaveProfileAsync(model, actor, body.ExplicitKeyBudgets(model), context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(ProfileView(saved));
         });
 
@@ -622,7 +622,21 @@ public static class VirtualFilterEndpoints
             tenant.Value,
             new ManagedBy(body.Path, body.Commit),
             (body.Filters ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList(),
-            profiles);
+            profiles)
+        {
+            ExplicitKeyBudgets = ExplicitKeyBudgets((body.Profiles ?? []).Select(p => p.Value), profiles)
+        };
+    }
+
+    private static HashSet<FilterBinding> ExplicitKeyBudgets(IEnumerable<ProfileBody> bodies, IEnumerable<VirtualFilterAccessProfile> models)
+    {
+        var set = new HashSet<FilterBinding>(ReferenceEqualityComparer.Instance);
+        foreach (var (body, model) in bodies.Zip(models))
+        {
+            set.UnionWith(body.ExplicitKeyBudgets(model));
+        }
+
+        return set;
     }
 
     private static IResult Forbidden() => Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -852,6 +866,21 @@ public static class VirtualFilterEndpoints
         [JsonPropertyName("scope")] public string Scope { get; set; } = string.Empty;
         [JsonPropertyName("uncovered")] public string? Uncovered { get; set; }
         [JsonPropertyName("bindings")] public List<BindingBody>? Bindings { get; set; }
+
+        /// <summary>The bindings of <paramref name="model"/> (built by <see cref="ToModel"/>) whose body stated <c>max_pushdown_keys</c>.</summary>
+        public HashSet<FilterBinding> ExplicitKeyBudgets(VirtualFilterAccessProfile model)
+        {
+            var set = new HashSet<FilterBinding>(ReferenceEqualityComparer.Instance);
+            foreach (var (body, binding) in (Bindings ?? []).Zip(model.Bindings))
+            {
+                if (body.MaxPushdownKeys.HasValue)
+                {
+                    set.Add(binding);
+                }
+            }
+
+            return set;
+        }
 
         public VirtualFilterAccessProfile ToModel(string name, TenantId tenant)
         {

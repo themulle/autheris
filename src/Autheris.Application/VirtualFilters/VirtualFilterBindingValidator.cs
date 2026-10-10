@@ -84,7 +84,12 @@ public static class VirtualFilterBindingValidator
     /// <param name="profiles">Profiles about to be written (API, file repository sync, dbt import).</param>
     /// <param name="federation">The gateway-wide <c>Gateway:VirtualFilters:Federation</c> options.</param>
     /// <param name="catalog">Catalog used to check an exact target's endpoint capability; null skips that check.</param>
-    public static async Task ValidateAsync(IEnumerable<VirtualFilterAccessProfile> profiles, VirtualFilterFederationOptions federation, ITableMetadataRepository? catalog, CancellationToken ct)
+    /// <param name="explicitKeyBudgets">
+    /// Bindings (by reference) whose <c>max_pushdown_keys</c> the caller stated explicitly; they are always checked against
+    /// the gateway limit, all others never. Null means the caller cannot tell (file sync, dbt import): only a value other
+    /// than the model default is then treated as explicit.
+    /// </param>
+    public static async Task ValidateAsync(IEnumerable<VirtualFilterAccessProfile> profiles, VirtualFilterFederationOptions federation, ITableMetadataRepository? catalog, IReadOnlySet<FilterBinding>? explicitKeyBudgets, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(profiles);
         ArgumentNullException.ThrowIfNull(federation);
@@ -94,7 +99,7 @@ public static class VirtualFilterBindingValidator
         {
             foreach (var binding in profile.Bindings)
             {
-                if (binding.MaxPushdownKeys < 1 || binding.MaxPushdownKeys > FilterBinding.HardMaxPushdownKeys || ExceedsGatewayLimit(binding, gatewayLimit))
+                if (binding.MaxPushdownKeys < 1 || binding.MaxPushdownKeys > FilterBinding.HardMaxPushdownKeys || ExceedsGatewayLimit(binding, gatewayLimit, explicitKeyBudgets))
                 {
                     throw new VirtualFilterBindingException(
                         VirtualFilterErrorCodes.PushdownKeyBudgetInvalid,
@@ -111,11 +116,14 @@ public static class VirtualFilterBindingValidator
 
     /// <summary>
     /// The gateway-wide limit is a request limit: a binding that does not set <c>max_pushdown_keys</c> carries the model
-    /// default and is capped by the planner at query time, so it must not fail at write time. Only a value other than the
-    /// default is treated as an explicit request.
+    /// default and is capped by the planner at query time, so it must not fail at write time. A caller that knows which
+    /// bindings stated a value says so; otherwise only a value other than the default is treated as an explicit request.
     /// </summary>
-    private static bool ExceedsGatewayLimit(FilterBinding binding, int gatewayLimit) =>
-        binding.MaxPushdownKeys != FilterBinding.DefaultMaxPushdownKeys && binding.MaxPushdownKeys > gatewayLimit;
+    private static bool ExceedsGatewayLimit(FilterBinding binding, int gatewayLimit, IReadOnlySet<FilterBinding>? explicitKeyBudgets)
+    {
+        bool isExplicit = explicitKeyBudgets?.Contains(binding) ?? binding.MaxPushdownKeys != FilterBinding.DefaultMaxPushdownKeys;
+        return isExplicit && binding.MaxPushdownKeys > gatewayLimit;
+    }
 
     private static async Task ValidateFormatAsync(FilterBinding binding, PushdownParameterFormat format, ITableMetadataRepository? catalog, CancellationToken ct)
     {
