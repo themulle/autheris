@@ -142,7 +142,7 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
 
     private static readonly DialectCapabilities Databricks = new(
         Dialect: TargetSqlDialect.Databricks,
-        Tier: DialectSupportTier.Production,
+        Tier: DialectSupportTier.Experimental,
         MaxBindParameters: 1000,                                   // provisional fail-closed budget until the live probe (WP-C5)
         MaxInListItems: null,
         MaxIdentifierLength: 255,

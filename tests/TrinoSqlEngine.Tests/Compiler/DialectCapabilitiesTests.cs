@@ -2,6 +2,7 @@ using System.Security;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Governance;
 using Xunit;
 
 namespace TrinoSqlEngine.Tests.Compiler;
@@ -63,6 +64,34 @@ public class DialectCapabilitiesTests
     {
         var caps = Provider.Get(TargetSqlDialect.SqlServer);
         Assert.True(caps.Tier != DialectSupportTier.Production || caps.LimitGuaranteed);
+    }
+
+    [Fact]
+    public void Databricks_NotProduction_UntilG9Flag()
+    {
+        // OQ-2 / plan 16.4 item 5: Databricks stays off the production list until the first green G9 run (live Databricks SQL).
+        Assert.Equal(DialectSupportTier.Experimental, Provider.Get(TargetSqlDialect.Databricks).Tier);
+    }
+
+    [Fact]
+    public void Databricks_Compile_IsRejected_WithoutTheExperimentalFlag()
+    {
+        var engine = new FastSqlEngine();
+        var request = new CompileRequest
+        {
+            TargetDialect = TargetSqlDialect.Databricks,
+            TokenGuards = SqlTokenSecurityOptions.Strict,
+            Policy = new GovernancePolicy
+            {
+                RowFilters = new DictPolicyProvider(),
+                Masks = new DictMaskProvider(),
+                Catalog = PolicyFixtures.Catalog(),
+                Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
+            }
+        };
+        var ex = Assert.Throws<SqlCompileNotSupportedException>(() => engine.Compile("SELECT id FROM orders".AsMemory(), request, CancellationToken.None));
+        Assert.Equal(SqlCompileNotSupportedReason.Dialect, ex.Reason);
+        Assert.NotEmpty(engine.Compile("SELECT id FROM orders".AsMemory(), request with { AllowExperimentalDialect = true }, CancellationToken.None).Sql);
     }
 
     [Fact]

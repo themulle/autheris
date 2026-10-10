@@ -222,6 +222,7 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
     {
         TargetDialect = TargetSqlDialect.Databricks,
         TokenGuards = SqlTokenSecurityOptions.Strict,
+        AllowExperimentalDialect = true,   // CR-ADG-03: Databricks is Experimental until the first green G9 run
         Policy = new GovernancePolicy
         {
             RowFilters = _policies,
