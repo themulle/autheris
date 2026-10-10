@@ -313,24 +313,20 @@ public sealed record FilterBinding
         VirtualFilterNames.ValidateFilterName(FilterName, nameof(FilterName));
         if (TargetPattern != null)
         {
-            if (!ObjectPattern.TryParse(TargetPattern, out _, out var patternError))
+            if (TargetPatternMatcher.IsRegex(TargetPattern))
             {
-                if (TargetPattern.StartsWith('^') || TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase))
+                try
                 {
-                    var regexStr = TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase) ? TargetPattern[6..] : TargetPattern;
-                    try
-                    {
-                        _ = new Regex(regexStr, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
-                    }
-                    catch (Exception ex)
-                    {
-                        throw new ArgumentException($"Invalid target regex pattern of '{FilterName}': {ex.Message}", nameof(TargetPattern));
-                    }
+                    TargetPatternMatcher.Validate(TargetPattern);
                 }
-                else
+                catch (ArgumentException ex)
                 {
-                    throw new ArgumentException($"Invalid target pattern of '{FilterName}': {patternError}", nameof(TargetPattern));
+                    throw new ArgumentException($"Invalid target regex pattern of '{FilterName}': {ex.Message}", nameof(TargetPattern), ex);
                 }
+            }
+            else if (!ObjectPattern.TryParse(TargetPattern, out _, out var patternError))
+            {
+                throw new ArgumentException($"Invalid target pattern of '{FilterName}': {patternError}", nameof(TargetPattern));
             }
         }
 
@@ -357,6 +353,11 @@ public sealed record FilterBinding
         }
     }
 
+    /// <summary>
+    /// Whether the binding's target pattern matches <paramref name="table"/>: a glob <see cref="ObjectPattern"/>, or a
+    /// regex (<see cref="TargetPatternMatcher"/>, full match on <c>domain.schema.table</c>). No error is swallowed: an
+    /// invalid stored pattern or a regex timeout propagates so the caller denies (F-GOV-14 SEC-7/SEC-8).
+    /// </summary>
     public bool MatchesTarget(TableIdentifier table)
     {
         if (string.IsNullOrWhiteSpace(TargetPattern))
@@ -364,27 +365,9 @@ public sealed record FilterBinding
             return false;
         }
 
-        if (!TargetPattern.StartsWith('^') &&
-            !TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase) &&
-            ObjectPattern.TryParse(TargetPattern, out var pattern, out _))
-        {
-            return pattern!.MatchesObject(table);
-        }
-
-        var regexStr = TargetPattern.StartsWith("regex:", StringComparison.OrdinalIgnoreCase) ? TargetPattern[6..] : TargetPattern;
-        try
-        {
-            return Regex.IsMatch(table.ToQualifiedName(), regexStr, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50))
-                || Regex.IsMatch(table.ToString(), regexStr, RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(50));
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return false;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
+        return TargetPatternMatcher.IsRegex(TargetPattern)
+            ? TargetPatternMatcher.IsMatch(TargetPattern, table)
+            : ObjectPattern.Parse(TargetPattern).MatchesObject(table);
     }
 
     internal void AppendCanonical(StringBuilder sb) =>

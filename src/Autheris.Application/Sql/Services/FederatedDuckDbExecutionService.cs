@@ -19,6 +19,7 @@ using Autheris.Application.Policy;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.VirtualFilters;
+using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Application.VirtualFilters.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -406,6 +407,15 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             if (!decision.IsAllowed)
             {
                 _logger?.LogWarning("WebSQL access to table {Table} denied: {Reasons}", resolved.Target.FullName, string.Join("; ", decision.DeniedReasons));
+                foreach (var reason in decision.DeniedReasons)
+                {
+                    if (VirtualFilterErrorCodes.TryGetCode(reason, out var code))
+                    {
+                        // F-GOV-14: a Virtual Filter evaluation failure keeps its stable code (HTTP 403, audit reasonCode).
+                        throw new GatewaySecurityException($"WebSQL access denied to table '{resolved.Target.FullName}'.", code);
+                    }
+                }
+
                 throw new WebSqlPolicyException($"WebSQL access denied to table '{resolved.Target.FullName}'.");
             }
 
@@ -488,14 +498,14 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         {
             var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
             var userSid = ResolveUserSid(user);
-            bool isDenied = ex is WebSqlPolicyException or SecurityException;
+            bool isDenied = ex is WebSqlPolicyException or SecurityException or GatewaySecurityException;
             var eventType = isDenied ? AuditEventTypes.WebSqlQueryDenied : AuditEventTypes.QueryExecutionError;
 
             var detailsJson = JsonSerializer.Serialize(new
             {
                 originalSql = redactedOriginalSql,
                 originalSqlHash,
-                reasonCode = isDenied ? "POLICY_VIOLATION" : ex.GetType().Name,
+                reasonCode = ex is GatewaySecurityException gse ? gse.ErrorCode : isDenied ? "POLICY_VIOLATION" : ex.GetType().Name,
                 error = ex.Message
             });
 

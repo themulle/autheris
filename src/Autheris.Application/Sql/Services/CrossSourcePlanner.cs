@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Olap;
+using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -73,7 +74,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
 
         throw new GatewaySecurityException(
             $"No access decision exists for table '{DecisionKey(table)}'; the cross-source query is denied.",
-            "VF_ENFORCEMENT_INCOMPLETE");
+            VirtualFilterErrorCodes.EnforcementIncomplete);
     }
 
     public CrossSourcePlan Plan(
@@ -290,7 +291,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 {
                     throw new GatewaySecurityException(
                         $"The Virtual Filter '{vf.Filter.Name}' targets a table that is not part of the query; the query is denied.",
-                        "VF_ENFORCEMENT_INCOMPLETE");
+                        VirtualFilterErrorCodes.EnforcementIncomplete);
                 }
 
                 string effectiveTarget = identifierToAlias.TryGetValue(vf.TargetTable, out var ta) ? ta : targetStaging;

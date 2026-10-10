@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Policy;
+using Autheris.Application.VirtualFilters.Federation;
 
 /// <summary>One caller and one object for the virtual filter resolution.</summary>
 public sealed record MandatoryFilterQuery(
@@ -169,6 +170,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         if (Interlocked.Exchange(ref _memoGeneration, snapshot.Generation) != snapshot.Generation)
         {
             _memo.Clear();
+            TargetPatternMatcher.ClearCache();
         }
 
         var key = new VirtualFilterMemoKey(snapshot.Generation, query);
@@ -338,6 +340,12 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             var predicate = parts.Count == 1 ? parts[0] : string.Join(" AND ", parts.Select(p => $"({p})"));
             return new MandatoryFilterOutcome(false, null, predicate, effective.Select(a => a.Filter.Name).Distinct(StringComparer.Ordinal).ToList());
         }
+        catch (TargetPatternEvaluationException ex)
+        {
+            // SEC-7/SEC-8 (F-GOV-14): a pattern that cannot be evaluated never means "binding does not apply".
+            return MandatoryFilterOutcome.Deny(
+                $"{VirtualFilterErrorCodes.PatternEvaluationFailed}: the target pattern of the filter '{currentFilter}' could not be evaluated for '{table.ToString()}' ({ex.InnerException?.GetType().Name}).");
+        }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException or RegexMatchTimeoutException)
         {
             return MandatoryFilterOutcome.Deny($"Virtual filters: the filter '{currentFilter}' could not be evaluated for '{table.ToString()}' ({ex.Message}).");
@@ -363,9 +371,17 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         {
             if (query.Metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative ||
                 binding.TargetPattern == null ||
-                !binding.MatchesTarget(table))
+                !MatchesTarget(binding, table))
             {
                 return (false, $"object is not in the filter's data source '{filter.Source}'", []);
+            }
+        }
+        else if (TargetPatternMatcher.IsRegex(binding.TargetPattern))
+        {
+            // A regex pattern means the same in both branches: full match on domain.schema.table.
+            if (!MatchesTarget(binding, table))
+            {
+                return (false, "pattern does not match the object", []);
             }
         }
         else
@@ -387,4 +403,20 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
     }
 
     private ObjectPattern Pattern(string text) => _patterns.GetOrAdd(text, ObjectPattern.Parse);
+
+    private static bool MatchesTarget(FilterBinding binding, TableIdentifier table)
+    {
+        try
+        {
+            return binding.MatchesTarget(table);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or RegexMatchTimeoutException)
+        {
+            throw new TargetPatternEvaluationException(ex);
+        }
+    }
+
+    /// <summary>Carries a target pattern failure to the resolver boundary, where it becomes a deny with its code.</summary>
+    private sealed class TargetPatternEvaluationException(Exception inner)
+        : Exception("The target pattern could not be evaluated.", inner);
 }
