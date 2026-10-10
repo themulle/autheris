@@ -212,6 +212,45 @@ public sealed record DocSearchResult(
 
 ---
 
+---
+
+### AP-12.6: Architektonische Leitplanken & AppSec-Sicherheits-Guardrails (Review-Ergänzungen)
+
+Basierend auf dem gemeinsamen Review des **Solution Architects** und des **Security Experts** müssen bei der Implementierung folgende verbindliche Leitplanken eingehalten werden:
+
+#### 1. Architektonische Leitplanken (C# & .NET Architect)
+- **DI-Scopes & Captive Dependency Schutz:**  
+  `IDocSearchEngine` und der Snapshot-Halter werden als **`Singleton`** in der DI registriert. Aufrufer- und Request-spezifische Services (z. B. `IHttpContextAccessor`, ClaimsPrincipal) dürfen **nicht** in den Singleton injiziert werden, um Memory Leaks und Race Conditions zu vermeiden.
+- **Lock-Free Concurrency via Double-Buffered Snapshot:**  
+  Analog zu `CatalogSearchEngine` muss die Such-Engine bei Änderungen (z. B. via Inotify oder CLI-Reload) einen neuen unveränderlichen Snapshot instanziieren und mittels atomarem `Interlocked.Exchange(ref _currentSnapshot, newSnapshot)` austauschen. Laufende Leseabfragen werden niemals blockiert (Zero Lock Contention).
+- **Zero-LOH Allokationskontrolle:**  
+  Beim Chunking großer Markdown-Dateien dürfen keine temporären Strings oder Arrays $> 85.000$ Bytes erzeugt werden. String-Zerlegungen nutzen `ReadOnlySpan<char>` / `ReadOnlyMemory<char>` und `ArrayPool<byte>` für binäre I/O-Buffer.
+- **I/O-Pfad-Konsistenz:**  
+  Alle Datei- und Parser-Zugriffe müssen durchgängig asynchron sein (`File.ReadAllTextAsync`, `StreamReader.ReadLineAsync`) mit explizitem `CancellationToken` und `ConfigureAwait(false)`.
+
+#### 2. AppSec-Sicherheits-Guardrails (Security Expert)
+- **SEC-DOC-01: Sandboxing & Path-Traversal-Schutz:**  
+  Beim Zugriff auf Dokumente über MCP-Resources (`mcp://docs/{appId}/{path}`) oder Tool-Parameter (`get_doc_section`) muss der Pfad kanonisiert und strikt gegen die Allowlist der konfigurierten Basisverzeichnisse validiert werden:
+  ```csharp
+  var fullPath = Path.GetFullPath(Path.Combine(baseDir, relativePath));
+  if (!fullPath.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
+  {
+      throw new SecurityException("Access denied: Path traversal detected.");
+  }
+  // Symlink-Schutz: Auflösen und prüfen, dass das Ziel innerhalb der Sandbox liegt
+  if (File.ResolveLinkTarget(fullPath, returnFinalTarget: true) is FileInfo target &&
+      !target.FullName.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
+  {
+      throw new SecurityException("Access denied: Symlink points outside sandbox.");
+  }
+  ```
+- **SEC-DOC-02: Identifikator-Sanitization:**  
+  Parameter wie `appId`, `category` und `docId` müssen strikt alphanumerisch plus Bindestrich/Unterstrich sein (`^[a-zA-Z0-9_\-\.]+$`). Pfadtrennzeichen (`/`, `\`, `..`) werden sofort mit `ArgumentException` abgewiesen.
+- **SEC-DOC-03: Zero-Egress Air-Gap Invariante:**  
+  Es darf weder beim Start noch bei Suchanfragen Netzwerkverkehr ins Internet fließen. Dies wird durch einen automatisierten Integrationstest abgesichert.
+
+---
+
 ## 4. Definition of Done (DoD)
 
 | Kriterium | Beschreibung | Verifikationsmethode |
@@ -222,6 +261,8 @@ public sealed record DocSearchResult(
 | **DoD-4** | Token-Budget Guardrail: Suchtreffer überschreiten niemals 200 Tokens pro Chunk. | Automated Assertion in MCP Test |
 | **DoD-5** | Notfall-Runbooks (z. B. Break-Glass Consent Revocation) werden bei Suche nach Fehlercode exakt gefunden. | Szenario-Test mit Fehlerfall |
 | **DoD-6** | Universelle Einbindung weiterer Services über `doc_sources.json` erfolgreich erprobt. | Integrationstest mit Dummy-Service |
+| **DoD-7** | Path-Traversal- und Symlink-Ausbruchsversuche werden nachweislich mit `SecurityException` geblockt. | Security Unit Test in `DocSandboxSecurityTests.cs` |
+| **DoD-8** | Lock-Free Snapshot-Austausch während paralleler Lesezugriffe verursacht 0 Exceptions und 0 Deadlocks. | Concurrency Stress Test mit 50 parallelen Threads |
 
 ---
 
