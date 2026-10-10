@@ -76,6 +76,8 @@ internal sealed class PolicySubqueryTenantRewriter : SqlAstRewriter
                 GroupBy: null,
                 Having: null),
             null, null);
-        return new SubqueryTableSource(inner, node.Alias ?? new SqlIdentifier(node.Name.SimpleName, true));
+        // CR-ADG-16: an unquoted user name stays unquoted (as in SecureTyped), so the dialect folds the alias and the policy's own
+        // references the same way (Oracle upper-cases unquoted names; a delimited lower-case alias would never match ORA-00904).
+        return new SubqueryTableSource(inner, node.Alias ?? new SqlIdentifier(node.Name.SimpleName, IsQuoted: node.Name.Parts[^1].IsQuoted));
     }
 }
