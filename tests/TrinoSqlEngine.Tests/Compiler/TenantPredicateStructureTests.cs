@@ -126,4 +126,46 @@ public class TenantPredicateStructureTests
         var only = Assert.Single(conjuncts);
         Assert.Equal("cast(@ as varbinary)", Shape(only.Left));
     }
+
+    [Theory]
+    [InlineData("UTF8_BINARY")]
+    [InlineData("utf8_binary")]
+    public void Databricks_Utf8BinaryColumn_UsesOnlyThePlainEquality(string collation)
+    {
+        var predicate = TenantPredicateFactory.Build(DialectCapabilityTable.Default.Get(TargetSqlDialect.Databricks), Column, Parameter, SqlParameterType.String, null, collation);
+        var conjuncts = new List<BinaryExpression>();
+        Conjuncts(predicate, conjuncts);
+
+        var only = Assert.Single(conjuncts);
+        Assert.Equal("@", Shape(only.Left));     // col = :t, exact and sargable on UTF8_BINARY
+        Assert.Equal("@", Shape(only.Right));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("UTF8_LCASE")]
+    [InlineData("UNICODE_CI")]
+    [InlineData("UTF8_BINARY_LIKE")]
+    public void Databricks_UnknownOrCollatedColumn_KeepsTheBinaryComparison(string? collation)
+    {
+        var predicate = TenantPredicateFactory.Build(DialectCapabilityTable.Default.Get(TargetSqlDialect.Databricks), Column, Parameter, SqlParameterType.String, null, collation);
+        var conjuncts = new List<BinaryExpression>();
+        Conjuncts(predicate, conjuncts);
+
+        var only = Assert.Single(conjuncts);
+        Assert.Equal("cast(@ as varbinary)", Shape(only.Left));
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    [InlineData(TargetSqlDialect.DuckDb)]
+    [InlineData(TargetSqlDialect.Oracle)]
+    public void OtherDialects_IgnoreTheCollation_AndAlwaysCompareBinaryExact(TargetSqlDialect dialect)
+    {
+        var withBinary = TenantPredicateFactory.Build(DialectCapabilityTable.Default.Get(dialect), Column, Parameter, SqlParameterType.String, null, "UTF8_BINARY");
+        var without = TenantPredicateFactory.Build(DialectCapabilityTable.Default.Get(dialect), Column, Parameter, SqlParameterType.String);
+        Assert.Equal(AstReflection.Fingerprint(without), AstReflection.Fingerprint(withBinary));
+    }
 }

@@ -197,13 +197,13 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
     private static InMemoryTableCatalog Catalog() => new(new[]
     {
         new TableCatalogEntry(Orders, ImmutableArray.Create(
-            new CatalogColumn("id", "INT"), new CatalogColumn("tenantid", "STRING"), new CatalogColumn("region", "STRING"),
+            new CatalogColumn("id", "INT"), new CatalogColumn("tenantid", "STRING", "UTF8_BINARY"), new CatalogColumn("region", "STRING"),
             new CatalogColumn("status", "STRING"), new CatalogColumn("amount", "DECIMAL(18,2)"), new CatalogColumn("email", "STRING")),
             "tenantid", 1),
         new TableCatalogEntry(Entitlements, ImmutableArray.Create(
-            new CatalogColumn("id", "INT"), new CatalogColumn("tenantid", "STRING"), new CatalogColumn("orderid", "INT")),
+            new CatalogColumn("id", "INT"), new CatalogColumn("tenantid", "STRING", "UTF8_BINARY"), new CatalogColumn("orderid", "INT")),
             "tenantid", 1),
-        new TableCatalogEntry(OrdersCi, ImmutableArray.Create(new CatalogColumn("id", "INT"), new CatalogColumn("tenantid", "STRING")), "tenantid", 1)
+        new TableCatalogEntry(OrdersCi, ImmutableArray.Create(new CatalogColumn("id", "INT"), new CatalogColumn("tenantid", "STRING", "UTF8_LCASE")), "tenantid", 1)
     }, "default");
 
     private sealed class Policies : IPolicyPredicateProvider, IColumnMaskProvider
@@ -350,7 +350,29 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
         Ids(await RunAsync("SELECT id FROM orders_ci", "ACME")).ShouldBe(new List<int> { 2 });
     }
 
-    [Fact]
+    [SparkFact]
+    public async Task Utf8BinaryTenantColumn_UsesThePlainSargableComparison_AndStaysExact()
+    {
+        RequireSpark();
+        // CR-ADG-10: on a UTF8_BINARY column "tenantid = :t" is exact and sargable; no binary cast is needed.
+        var compiled = _engine.Compile("SELECT id FROM orders".AsMemory(), Request("acme"), CancellationToken.None);
+        compiled.Sql.ShouldNotContain("BINARY");
+        compiled.Sql.ShouldContain("`tenantid` = :p1");
+        Ids(await RunAsync("SELECT id FROM orders", "acme")).ShouldBe(new List<int> { 1, 2, 6 });
+        Ids(await RunAsync("SELECT id FROM orders", "ACME")).ShouldBe(new List<int> { 3, 4 });
+    }
+
+    [SparkFact]
+    public async Task CollatedTenantColumn_KeepsTheBinaryComparison()
+    {
+        RequireSpark();
+        RequireCollation();
+        var compiled = _engine.Compile("SELECT id FROM orders_ci".AsMemory(), Request("acme"), CancellationToken.None);
+        compiled.Sql.ShouldContain("BINARY");
+        Ids(await RunAsync("SELECT id FROM orders_ci", "acme")).ShouldBe(new List<int> { 1 });
+    }
+
+    [SparkFact]
     public async Task ConsentFilter_And_DenyAll()
     {
         RequireSpark();

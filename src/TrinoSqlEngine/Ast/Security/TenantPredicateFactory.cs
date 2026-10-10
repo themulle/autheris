@@ -78,6 +78,13 @@ public static class TenantPredicateFactory
             }
             case TenantComparisonStyle.CastBinary:
             {
+                // CR-ADG-10: on a column whose catalog collation is UTF8_BINARY the plain equality is already byte-exact and sargable
+                // (data skipping, partition pruning). Any other or unknown collation keeps the binary comparison.
+                if (string.Equals(columnCollation, "UTF8_BINARY", StringComparison.OrdinalIgnoreCase))
+                {
+                    return new BinaryExpression(Column(), BinaryOperator.Equal, Param());
+                }
+
                 // Only the binary comparison. A plain "col = t" conjunct must NOT be added for the index/data-skipping benefit:
                 // on a UTF8_LCASE column Spark's constant propagation turns "col = 'acme' AND CAST(col AS BINARY) = CAST('acme' AS BINARY)"
                 // into a tautology (found by the Spark proxy test), which would make the comparison case-insensitive again.

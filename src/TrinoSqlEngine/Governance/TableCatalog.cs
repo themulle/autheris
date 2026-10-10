@@ -20,8 +20,9 @@ public readonly record struct TableIdentity(string Schema, string Table, string?
 }
 
 /// <param name="Name">Canonical column name (exact case).</param>
-/// <param name="DataType">Catalog data type, for example <c>nvarchar(64)</c> or <c>int</c>.</param>
-public sealed record CatalogColumn(string Name, string DataType);
+/// <param name="DataType">Catalog data type (provider native), for example <c>nvarchar(64)</c> or <c>int</c>.</param>
+/// <param name="Collation">Column collation when the catalog knows it (for example <c>UTF8_BINARY</c> on Databricks); null when unknown, which is treated as "not binary" (fail safe).</param>
+public sealed record CatalogColumn(string Name, string DataType, string? Collation = null);
 
 /// <param name="Identity">Canonical schema-qualified table identity.</param>
 /// <param name="Columns">The columns the gateway exposes. A secured table projects exactly these columns.</param>
