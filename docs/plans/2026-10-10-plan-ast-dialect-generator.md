@@ -2,8 +2,8 @@
 
 **Document ID:** `PLAN-AST-DIALECT-GEN-16` (implementation plan, Phase 2 of the 6-phase lifecycle)
 **Date:** 2026-10-10
-**Status:** IN PROGRESS - Phase 2 delivered, awaiting Phase 3 security review
-**Author:** Solution Architect (`csharp-architect`)
+**Status:** IN PROGRESS - Phase 3 security review delivered (§16); next: Phase 4 TDD implementation
+**Author:** Solution Architect (`csharp-architect`); Phase 3 review (§16) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
 **Supersedes:** [2026-10-06-implementation-plan-ast-dialect-generator.md](2026-10-06-implementation-plan-ast-dialect-generator.md) (German draft, kept for history only)
@@ -45,6 +45,7 @@ Scope additions over the PRD (stakeholder decisions, §1):
 | SD-5 | **Snowflake is experimental.** It has a generator only, is clearly marked and is not in the production capability list. | Answers Q-3. Matches PRD §6.3 for Snowflake. |
 | SD-6 | **ADR-017 is amended** to reflect SD-1..SD-7 (exact text in §13). | Answers Q-6. |
 | SD-7 | **Databricks is a fully supported production dialect**, not experimental. It gets a generator (backtick quoting, `:name` markers, `LIMIT`/`OFFSET`, Unity Catalog three-part names, function and type mapping), a capability entry, DML on Delta (`UPDATE`, `DELETE`, `MERGE`), a Spark/Delta CI proxy, golden tests and an optional live SQL Warehouse job. | New scope beyond the PRD. Adds stream C (§11). |
+| SD-8 | **Oracle is a supported production dialect with a runtime driver** (decided during Phase 3). | Resolves OQ-1. Adds Stream F (§16.6). |
 
 PRD content that stays binding: invariants INV-1..INV-7 (§8.1), the anti-pattern rulings AP-1, AP-3, AP-4, AP-6, AP-7, AP-9 and AP-10 (plus the new AP-11 from §3.6: no Trino-style domain compaction of security predicates), the NFR-2/NFR-3 performance budgets, the NFR-4 limit sourcing, NFR-6 observability (minus shadow metrics), NFR-7 compatibility and NFR-8 language.
 
@@ -531,7 +532,7 @@ Values marked **(verify)** are not confirmed by vendor documentation and must be
 | PostgreSQL | Production | 65,535 | none (bounded by bind limit) | 63 bytes | `$n` | `LIMIT/OFFSET`, `FETCH ... WITH TIES` | Bind: Int16 count in the Bind message [PG-PROTO]. Identifier: `NAMEDATALEN-1`, silently truncated, so the gateway **rejects** names longer than 63 bytes [PG-LEX]. |
 | SQL Server | Production | 2,100 | none (bounded by bind limit) | 128 chars | `@pN` | `TOP` / `OFFSET ... FETCH` (synthetic `ORDER BY (SELECT NULL)`) | 2,100 parameters per RPC [MSSQL-CAP]. No `NULLS FIRST/LAST` syntax (emulated with `CASE`, already built). |
 | SQLite | Production | 32,766 | none | unbounded | `?NNN` | `LIMIT/OFFSET` | `SQLITE_MAX_VARIABLE_NUMBER` default 32,766 since 3.32.0 [SQLITE-LIM]. The value is checked at startup with `sqlite3_limit(SQLITE_LIMIT_VARIABLE_NUMBER, -1)` against the bundled engine; the effective limit is the minimum of table and runtime **(verify, WP-A1 test)**. |
-| Oracle | Production (compiler) | 32,767 **(verify)** | **1,000** | 128 bytes (12.2+) | `:pN` | `OFFSET ... FETCH` | IN-list: ORA-01795 [ORA-01795]. The bind limit is not in the Oracle logical-limits reference [ORA-LIM]. 32,767 follows jOOQ [JOOQ]; a binary-search probe against the Oracle Free container confirms it. Identifier: 128 bytes since 12.2 [ORA-NAMES]. The gateway does not split IN-lists (Q-4: reject). |
+| Oracle | Production (compiler); `Production` after WP-F5 (SD-8, §16.6) | 32,767 **(verify)** | **1,000** | 128 bytes (12.2+) | `:pN` | `OFFSET ... FETCH` | IN-list: ORA-01795 [ORA-01795]. The bind limit is not in the Oracle logical-limits reference [ORA-LIM]. 32,767 follows jOOQ [JOOQ]; a binary-search probe against the Oracle Free container confirms it. Identifier: 128 bytes since 12.2 [ORA-NAMES]. The gateway does not split IN-lists (Q-4: reject). |
 | DuckDB | Production | 65,535 **(verify)** | none | unbounded | `$n` | `LIMIT/OFFSET` | No published limit [DUCK-PREP]. The conservative value is checked by an in-process probe. |
 | Databricks | Production | 1,000 **(verify, provisional)** | none known | 255 chars | `:pN` (named) | `LIMIT/OFFSET` | Named markers need DBR 12.1+, unnamed `?` DBR 13.3+, and the two styles cannot be mixed [DBX-PARAM]. No documented parameter count limit for the Statement Execution API [DBX-SEA]. 1,000 is a provisional fail-closed budget; the live warehouse probe (WP-C5) raises it to the measured value minus 10%. Unity Catalog object names have at most 255 characters and are stored lower-case [DBX-UC]. |
 | Snowflake | **Experimental** | 1,000 **(unverified)** | 16,384 **(unverified)** | 255 chars | `:N` | `LIMIT/OFFSET` | No execution target (SD-5). Never selectable in production (`DialectSupportTier.Experimental`). |
@@ -707,6 +708,7 @@ Databricks executes one statement per Statement Execution API call and has no mu
 | **G7 Security regression** | Ported suites from `SecurityRemediationTests`, `SecurityReview20261002SqTests`, `Sql1BracketLexerDifferentialTests`, `DmlLimitAndAliasSql78Tests`, `AstSecurityDmlPrecedenceTests`, `TrinoParserComplianceTests`, `SecurityReviewRemediationCoverageTests`, `CorrelatedRowFilterAliasTests` and `AuditArchitectureHardeningAu01To19Tests`. Every legacy SEC/SQ/SQL/SR15 ID keeps at least one test asserting the **same or a stricter** outcome on the AST path. A traceability test checks the ID list against `SecurityRegressionCatalog.cs`. Stryker.NET mutation testing runs nightly on `Ast/Visitors/AstSecurityVisitor.cs`, `Ast/Visitors/AstSimplificationVisitor.cs`, `Ast/Security/*` and `Ast/Emit/*`. | 100% ID traceability; Stryker mutation score at least 85% (break threshold) |
 | **G8 Performance** | BenchmarkDotNet `SqlCompilerBenchmarks` over a 200-query corpus (0.5 KB, 4 KB and 64 KB buckets) with `[MemoryDiagnoser]`; legacy and AST are measured in the **same job**. | AST/legacy at most 1.5x (P95, P99); allocated bytes at most 1.25x; 0 LOH (Gen2/LOH counters) up to 64 KB; absolute P99 under 2 ms up to 4 KB. After cutover, compared with `benchmarks/baselines/sql-compiler-legacy.json` (frozen in the cutover PR); fail on more than 10% allocation regression. Time is compared by ratio on the same runner to avoid noise from shared CI hardware. |
 | **G9 Live Databricks** (optional, secret-gated) | Same G6 suites against a Databricks SQL Warehouse in a per-run schema of a dedicated catalog, dropped afterwards. Runs nightly, on demand, and on a PR labeled `sql-cutover`. Skipped (not failed) when the `DATABRICKS_HOST` secret is absent. | Green before Databricks is listed as `Production` in the cutover PR (OQ-2) |
+| **G10 Consumer parity** (added in Phase 3, §16.5 M-9) | For every §7.3 consumer, the legacy string producer and the IR renderer are evaluated on the same fixture (SQLite, PostgreSQL, SQL Server and the in-memory evaluators). | 0 `looser` |
 
 ### 9.4 Databricks evidence model
 
@@ -742,7 +744,7 @@ sql-compiler-gate-nightly:
 
 A path filter is deliberately **not** used: the gate runs on every PR, because policy producers live outside `src/TrinoSqlEngine`.
 
-**Cutover precondition:** G1-G8 are green on the cutover PR head; the nightly profile (G3/G5 extended and Stryker) is green on the cutover PR's base commit; G9 is green if Databricks is to be listed as Production (OQ-2); there is a Phase 3 sign-off and a Phase 5 approval.
+**Cutover precondition (superseded by §16.5, Phase 3):** G1-G8 are green on the cutover PR head; the nightly profile (G3/G5 extended and Stryker) is green on the cutover PR's base commit; G9 is green if Databricks is to be listed as Production (OQ-2); there is a Phase 3 sign-off and a Phase 5 approval.
 
 ---
 
@@ -832,6 +834,8 @@ flowchart LR
     X1["X1 CUTOVER (single squash commit)"] --> X2["X2 Post-cutover hardening"]
     X1 --> X3["X3 CrossSourcePlanner (after PLAN-15)"]
 ```
+
+**Phase 3 addition:** Stream F (Oracle runtime, WP-F1..F6) and its dependencies are defined in §16.6.
 
 **Parallel streams after A2 lands:** A (A3..A8), B (B1..B6), C (C1, C4), D (D4 immediately; D1/D2 after A5/A6), E (E1 after A8). The file sets are disjoint except where §11.7 says otherwise.
 
@@ -1105,6 +1109,7 @@ flowchart LR
 
 ### 12.2 Rollback
 
+- **Phase 3 amendment (§16.2 SEC-ADG-02):** the revert set is `{X1, D3, D2, D1}`, rehearsed as one combined revert in the cutover PR.
 - **Mechanism:** `git revert <cutover-sha>` of the single squash commit WP-X1, followed by a normal release. This restores legacy, the engine switch and the string policy path in one step. There is **no runtime flag** (SD-1).
 - **Revertability:** every package before X1 is additive and keeps legacy working. Packages after X1 (X2, X3) must not depend on deleted legacy code in a way that blocks the revert. Rule: no package after X1 may modify a file that X1 deleted. CI enforces this with an architecture test listing the deleted paths.
 - **Rehearsal:** in the cutover PR, CI checks out `HEAD~1` and runs G1. The PR description contains the exact revert command and the expected build.
@@ -1183,7 +1188,7 @@ Please review and extend this plan with security test criteria. Specific decisio
 
 | ID | Question | Default assumed in this plan |
 |---|---|---|
-| OQ-1 | **Oracle runtime.** The gateway has no Oracle driver (`SqlDialectMapper.IsExecutable` excludes Oracle, F-10). Does "production dialect" for Oracle include adding an ODP.NET runtime path to WebSQL in this track? | No. Oracle is production-grade at compiler level with container evidence; runtime wiring is a follow-up. |
+| OQ-1 | **Resolved by SD-8 (Phase 3): the Oracle runtime is in scope, Stream F (§16.6).** Original question: **Oracle runtime.** The gateway has no Oracle driver (`SqlDialectMapper.IsExecutable` excludes Oracle, F-10). Does "production dialect" for Oracle include adding an ODP.NET runtime path to WebSQL in this track? | No. Oracle is production-grade at compiler level with container evidence; runtime wiring is a follow-up. |
 | OQ-2 | **Databricks production status versus evidence.** SD-7 says "fully supported production", but real Databricks evidence needs a live warehouse (no Testcontainer). Who provides the workspace, warehouse and service principal for G9? Is a green G9 mandatory before Databricks is listed as Production? | Mandatory. Without G9, Databricks ships compiler- and connector-complete, but it is held from the Production list (configuration rejects it) until the first green G9 run. **This partly conflicts with SD-7 and needs a decision.** |
 | OQ-3 | **Policy predicate syntax migration.** Admin-authored row-filter predicates must be canonical Trino syntax; existing target-dialect predicates are denied (fail closed) until rewritten. Acceptable? | Yes, with a lint tool and a migration note. |
 | OQ-4 | **Non-AST string consumers (§7.3).** GraphQL tree compiler, lakehouse, streaming, procedures and data query service keep consuming `CombinedRowFilterSql`, rendered from typed IR. Moving them onto typed IR is a follow-up track. Agreed? | Yes, follow-up track. |
@@ -1195,7 +1200,363 @@ Please review and extend this plan with security test criteria. Specific decisio
 
 ---
 
-## 16. Changelog
+## 16. Phase 3 Security Review (`csharp-security-expert`)
 
+**Reviewer:** Security Expert (`csharp-security-expert`), Phase 3 of the 6-phase lifecycle
+**Reviewed baseline:** this plan at commit `818ab14`, the PRD, the STRIDE threat model (`docs/threat-model/threat-model.md`), ADR-017, and the code at `818ab14`: `src/TrinoSqlEngine/**` (`FastSqlEngine.cs` token guards and limits, `RlsListener.cs`, `Ast/**`), `GovernedSqlRewriter.cs`, `CompiledSqlQueryPlanCache.cs`, `SqlFilterCompiler.cs`, `SqlDataSourceExecutor.cs`, `AdvancedRlsFilterGenerator.cs`, `SqlDataMaskingProvider.cs`, `DbSessionContextInitializer.cs`, `SqlConnectionFactory.cs`, `TenantId.cs`, and the existing SEC/SQ/SQL/RR/SR15 test suites (77 distinct IDs referenced under `tests/`).
+**Verdict:** **Approved with mandatory changes.** The architecture (simplifier before injection, opaque security nodes, production coverage verifier, bind-everything, typed policy IR) is sound and stricter than legacy. The plan as written in §1-§15 is **not** yet sufficient for a big-bang deletion of legacy. It becomes sufficient once the findings below rated Critical and High are implemented, and the gate additions in §16.5 are in place. Everything in this section is binding for Phase 4. Where this section conflicts with §1-§15, this section wins.
+
+### 16.1 Stakeholder decisions applied in this review
+
+| ID | Decision (binding) | Effect on the plan |
+|---|---|---|
+| SD-1..SD-7 | As in §1. | Unchanged. |
+| SD-8 (new) | **Oracle is a supported production dialect with a runtime driver.** | Resolves OQ-1 against the Phase 2 default. Adds Stream F (§16.6): ODP.NET driver in Infrastructure, connection factory, session initialization, binder, `SqlDataSourceExecutor` marker fix, and G6 execution on the real gateway path. Oracle is listed as `Production` only after WP-F5 is green. |
+| OQ-2 | Databricks is required in production. Who provides the live workspace is still open. | The plan's rule stays: Databricks is **held** from the production list (configuration rejects it) until the first green G9 run. |
+| OQ-3 | Confirmed: admin row filters must be written in Trino syntax. Others are denied until rewritten. | Fail closed. `tools/PolicyPredicateLint` is mandatory before the X1 deploy (SEC-ADG-26). |
+| OQ-4 | Confirmed: §7.3 consumers migrate later and keep using text rendered from the typed IR. | The residual risk is assessed in §16.7. Gate G10 is added (SEC-ADG-02). |
+| OQ-5 | Confirmed: backend null-ordering and division semantics are not rewritten. | Security-relevant semantic differences (collation, NLS, empty string, LIKE escape) are **not** covered by OQ-5. They are handled by SEC-ADG-04, -17 and -18. |
+| OQ-6 | Confirmed: every value is a bind parameter; structural integers and keywords are inline. | The §3.4 allow-list is approved. `EmittedSqlInvariantChecker` runs in production (§16.8, item 2). |
+
+### 16.2 Findings
+
+Severity follows the repository convention. **Critical** means a cross-tenant read or write, or an RLS bypass, that is reachable by an authenticated caller. **High** means a cross-tenant information flow under realistic configuration, a process-level DoS, or a gate gap that would let a Critical defect reach `main`. **Medium** means defense-in-depth gaps, side channels with low bandwidth, or fail-closed availability regressions. **Low** means hardening.
+
+| ID | Sev. | Component | Finding | Required mitigation | Owner WP |
+|---|---|---|---|---|---|
+| SEC-ADG-01 | **Critical** | `CompiledSqlQueryPlanCache`, `GovernedSqlRewriter` Stage 5, `CompileRequest` | After bind-everything, `CompiledSql.Parameters` carries tenant, policy and mask values (including the HKDF-derived per-tenant HMAC key). §7.2 caches `CompiledSql` and relies on the policy hash to "cover" those values. Today the policy hash is a hand-picked list of inputs (`ComputePolicyHash`, XxHash3 64-bit), the policy values live in `internalParameters` and are rebuilt on every request. Three consequences: (a) a principal of the same tenant whose consent filter has the same shape but different values (for example `region = :p` with EU versus US) would be served another principal's bound values; (b) `StatementPermissions` and other `CompileRequest` fields that are not in the hand-picked list let a cached compile skip a check that happens inside `Compile`; (c) a 64-bit non-cryptographic hash over admin- or consent-influenced input is not a safe identity for a security decision (the cache compares raw SQL text on hit, but it does not compare the policy). | 1. The cache stores a **value-free `CompiledSqlTemplate`**: SQL text plus slot descriptors (`Marker`, `Ordinal`, `Type`, `Origin`, policy parameter name). `Tenant`, `Policy` and `Mask` values are **rebound from the current request's `ParameterSource` on every hit**. Only `QueryLiteral` values (fully determined by the raw SQL, which is compared on hit) may be stored. 2. The cache key is derived from a **canonical serialization of the entire `CompileRequest`** (all properties, including `StatementPermissions`, token guards, function allow-lists, `EnforcedMaxRows`, `TranslateTrinoDateFunctions`, `SubqueryStrategy`), plus the policy **shape** fingerprint (predicate AST shape, parameter names and types, mask kinds), `CompilerVersion`, the capability-table version and the data source. 3. The policy fingerprint is SHA-256. The full fingerprint string is stored in the entry and compared with ordinal equality on hit. A 64-bit hash may remain the bucket key only. 4. The overloads of `TryGetCompiledSql` that pass an empty `rawSql` (and so skip the raw-text compare) are deleted on the governed path. 5. Only outputs that passed the coverage verifier and the emitted-text checker are inserted. A cancelled or failed compile never inserts. | WP-A8 (key), WP-X1 (cache value type), WP-B5 (tests) |
+| SEC-ADG-02 | **Critical** | WP-D1/D2 renderers, §7.3 consumers, rollback | WP-D1 and WP-D2 change how `CombinedRowFilterSql`, `RowFilterParameters` and the mask strings are **produced** for every consumer, including GraphQL (`TreeSqlCompiler`, `SqlDataSourceExecutor`), lakehouse, streaming, procedures and `GatewayExecutionService.FilterRows`. The gate (G4-G7) only exercises the WebSQL compiler. The D1 acceptance criterion "existing suites stay green" is not a differential. In addition, D1-D3 land as separate PRs **before** X1, so `git revert` of X1 does not revert a D1 rendering defect. | 1. New gate **G10 Consumer parity** (§16.5): for every §7.3 consumer, the legacy string producer and the IR renderer run on the same fixture. Classification is the same as G4, and the threshold is 0 `looser`. 2. The renderer output is always fully parenthesized, uses a reserved parameter namespace per dialect (`@__ap_`, `:__ap_`, `$__ap_` as applicable), and consumers fail closed on duplicate parameter names. `SqlSecurityValidator.ValidateRowFilter` keeps running on the rendered text. 3. `CombinedRowFilterSql` becomes a read-only projection of the typed `IRowPolicy`. A decision that carries only a string and no typed policy is denied on the compiler path (no drift by construction). 4. Rollback (§12.2) is amended: the **revert set** is `{X1, D3, D2, D1}` in that order. The cutover PR rehearses the combined revert (build plus G1 plus G7). | WP-D1, WP-D2, WP-B5, WP-E2, WP-X1 |
+| SEC-ADG-03 | **Critical** | Oracle binding (new runtime), `SqlDataSourceExecutor.cs:304-332` | ODP.NET binds **by position** by default (`OracleCommand.BindByName = false`). The emitter reuses markers (§3.4 dedup) and the binder orders parameters by ordinal, so positional binding would bind a value to the wrong slot. A tenant or policy value bound to a user slot (or the reverse) is an RLS bypass. The GraphQL/data-source path makes this concrete: verified at `SqlDataSourceExecutor.cs:304-312` and `:327-332`, it emits `@gql_offset`/`@gql_limit` for Oracle (Oracle needs `:` markers), adds the limit parameter **before** the offset parameter while the text uses offset first, and uses `@` markers for the tenant (`@p_tenant_N`, line 209), arguments (`@pN`), row-filter and `$filter` parameters. Today this is unreachable because `SqlConnectionFactory` throws for Oracle. It becomes reachable the moment an Oracle driver is registered. | 1. `OracleCompiledSqlBinder` sets `BindByName = true` and asserts it right before execution. Any `OracleCommand` that reaches `ExecuteReader`/`ExecuteNonQuery` with `BindByName = false` throws (decorator in the connection factory). 2. Every marker in `SqlDataSourceExecutor`, `SqlDataMaskingProvider` (HMAC key markers `@{paramBase}`) and the IR renderer comes from a dialect-aware `FormatParameterMarker(dialect, name)`. A grep-based architecture test forbids string literals that start with `@` followed by an identifier in these files. 3. **Ordering rule:** WP-F4 (the marker fix) merges **before or together with** WP-F1 (the driver registration). Until WP-F4 is merged, `SqlDataSourceExecutor` rejects Oracle explicitly. | WP-F1, WP-F3, WP-F4 |
+| SEC-ADG-04 | **High** | Tenant predicate, all dialects; `TenantId` | `TenantId` allows mixed case (`^[a-zA-Z0-9_-]{1,64}\z`), so `Acme` and `acme` are different tenants. The tenant predicate `tenant_col = :t` is evaluated with the column's collation: SQL Server's default `*_CI_AS` collations, Oracle with `NLS_COMP=LINGUISTIC` and a `*_CI` `NLS_SORT`, Databricks columns with `UTF8_LCASE` collation and PostgreSQL non-deterministic ICU collations all compare case-insensitively. The result is a cross-tenant read and write. This is pre-existing for SQL Server, and Oracle and Databricks widen it. OQ-5 (backend semantics) does not cover it, because it is an isolation property and not a result-shape property. | 1. A per-dialect **`TenantPredicateTemplate`** in the capability table compares the tenant **binary-exact**: SQL Server `t.[tenant] = @t AND CAST(t.[tenant] AS varbinary(256)) = CAST(@t AS varbinary(256))` (the first conjunct keeps the index seek); Oracle relies on session `NLS_COMP=BINARY` (WP-F2) **and** emits `NLSSORT`-free equality; Databricks `tenant COLLATE UTF8_BINARY = :t` **(verify on proxy and G9; if the proxy lacks collation support, reject columns whose catalog collation is not `UTF8_BINARY`)**; PostgreSQL `tenant = $1 COLLATE "C"`; SQLite `= ?1` (default `BINARY` collation; reject a `NOCASE` tenant column at catalog load). 2. Startup and catalog reload read the tenant column's collation per data source and **fail closed** (table denied) when the binary template is not applicable. 3. The same binary rule applies to `ParameterOrigin.Policy` equality predicates whose column is flagged `IsolationKey` in the catalog. 4. G6 test `TenantCaseCollision_IsIsolated` on every engine with tenants `acme` and `ACME`, run with a deliberately case-insensitive column or session collation. 5. Stakeholder decision B-1 (§16.10). | WP-A1 (template), WP-D1, WP-F2, WP-C1, WP-B5 |
+| SEC-ADG-05 | **High** | Compiler pipeline (DoS) | The AST passes (builder, validator, simplifier, security visitor, coverage verifier, generators, checker) are recursive. Parse-tree depth may reach 3,000 (`MaxParseTreeDepth`), because left-recursive `a OR b OR ...` chains are not limited by `MaxNestingDepth` (parentheses only). No AST pass calls `RuntimeHelpers.EnsureSufficientExecutionStack` or observes the cancellation token (0 `ThrowIfCancellationRequested` calls under `Ast/`). A `StackOverflowException` cannot be caught: it terminates the process for every tenant. `ParseTimeout` (5 s) covers the parse only. The output size is unbounded: N secured table references times the predicate size, plus masks. | 1. Every recursive visitor, the verifier, the generators and the checker call `RuntimeHelpers.EnsureSufficientExecutionStack()` on entry. `InsufficientExecutionStackException` becomes `SqlLimitExceededException(Kind = NestingDepth)`. 2. The whole `Compile` runs under one **compile budget** (`CompileTimeout`, default 2 s, linked with the request token). Each pass checks the token every 256 nodes. 3. New limits in `SqlLimitKind`: `AstDepth` (default 512, measured on the built AST), `SecuredTableReferences` (default 256), `EmittedSqlLength` (default 1 MiB) and `PolicyExpansionFactor` (emitted length divided by input length, default 64). 4. The policy-subquery recursion depth is 1 (SEC-ADG-11). 5. The emitter dedup dictionary uses the default randomized string comparer (no unseeded custom hash). | WP-A2, WP-A4, WP-A8 |
+| SEC-ADG-06 | **High** | DML check option (§6.2, INV-10) | The check option is enforced for the **tenant column only**. `UPDATE` and `MERGE ... UPDATE` may still assign any column referenced by a consent row filter (for example `UPDATE t SET region = 'US' WHERE id = 7` under a filter `region = 'EU'`). This moves rows out of the caller's visible set, or into the visible set of another principal of the same tenant, which is the purpose of `WITH CHECK OPTION`. `INSERT` is safe only because SQ-07 rejects consent-filtered tables. | 1. `PolicyPredicate` exposes `ReferencedColumns`. `UPDATE`, `MERGE ... UPDATE` and `MERGE ... INSERT` reject any assignment to a column that is referenced by an applicable policy predicate of the target table (`DmlGuardOptions.RejectPolicyColumnAssignment`, part of `Strict`). 2. Correlated row filters on a DML or `MERGE` target are rejected, as legacy already does for `UPDATE`/`DELETE`. 3. INV-10 is reworded (§16.3). | WP-A7 |
+| SEC-ADG-07 | **High** | Emitter, name resolution | The gateway resolves names with its own rules (`FoldIdentifierForScope`, CTE scope stack, case-insensitive catalog lookup). The database resolves the **emitted** text with different rules: PostgreSQL folds unquoted names to lower case, Oracle to upper case (the Oracle generator upper-cases unquoted names), SQL Server depends on collation, unqualified names go through `search_path`, the Oracle `CURRENT_SCHEMA` plus public synonyms, or the SQL Server default schema, and CTE names shadow unqualified physical names. If the gateway considers a reference to be a CTE while the database binds it to a physical table, that table is read without RLS. | New invariant **INV-11 Resolution equivalence** (§16.3): every physical table is emitted **schema-qualified with the catalog's canonical stored name** (exact case, always delimited), never from user spelling; every CTE reference is emitted from the resolved CTE symbol, identical to its definition; recursive CTE self-references are resolved as CTE only inside `WITH RECURSIVE`; an unresolved name is never emitted. The coverage verifier works on resolved symbols, not on text. Session initialization pins `search_path = pg_catalog, <schema>` (PostgreSQL) and `CURRENT_SCHEMA` (Oracle) as a second layer. A DML target is never a CTE: `IsCte(TargetTable)` on the DML path throws instead of skipping RLS (`AstSecurityVisitor.cs:306`, `:377`). | WP-A4, WP-A7, WP-F2 |
+| SEC-ADG-08 | **High** | `MERGE` (WP-A7, §6.2) | (a) Target RLS in `ON` is safe only as long as `WHEN NOT MATCHED BY SOURCE` cannot be expressed. With target RLS in `ON`, every other-tenant row is "not matched by source", so `... BY SOURCE THEN DELETE` would delete all other tenants' rows. The grammar does not have it today, but nothing pins that. (b) `WHEN [NOT] MATCHED AND <cond>` and `ON` may reference masked columns, which gives an affected-row-count side channel. (c) SQL Server **requires** a terminating `;` after `MERGE`, which conflicts with the checker's `;` rule. Weakening the checker globally would be a regression. (d) Unique-key violations from `MERGE ... INSERT` and `INSERT` (R-12) return driver texts that contain the duplicate key value (SQL Server 2627/2601 "The duplicate key value is (...)", PostgreSQL "Key (id)=(42) already exists"). | (a) The architecture test `MergeClauseTypes_AreClosed` pins the `MergeClause` subtypes, and the grammar test `Grammar_HasNoNotMatchedBySource` fails if `SqlBase.g4` gains `BY SOURCE`/`BY TARGET`. Generators never emit `BY SOURCE`. (b) Masked columns and whole-row references are rejected in `ON`, in every `WHEN` condition and in `MERGE` assignment right-hand sides. (c) The SQL Server generator appends exactly one `;` as the **last** character of a `MERGE` and registers it as a structural position. The checker allows a `;` only at a registered final position for `SqlStatementClass.Merge` on SQL Server. (d) R-12 is **accepted** (parity with `INSERT`), on condition that constraint-violation errors are mapped to a typed `DmlConstraintViolationException` with no driver text, no key value and no constraint name in the response. DBA guidance (Phase 6): unique keys of multi-tenant tables should include the tenant column. | WP-A7, WP-A2 |
+| SEC-ADG-09 | **High** | Databricks REST connector (WP-C3), CI secrets (WP-C5) | The REST client builds URLs from server-returned data (`statement_id`, `next_chunk_internal_link`, `external_links`) and holds a bearer token. A crafted `statement_id` (`../../`) or an absolute chunk link can send the token to another API path or host. Other points: redirects, unbounded response buffers, `Authorization` header logging by `IHttpClientFactory` logging at Trace level, long-lived PATs, and G9 running "on a PR labeled `sql-cutover`" with workspace secrets available to PR code. | 1. `statement_id` must match `^[0-9a-fA-F-]{36}$` (or the documented id format **(verify)**) and is path-encoded. Chunk links are followed only if they are **relative** and start with `/api/2.0/sql/statements/{same id}/result/chunks/`. `disposition` is always `INLINE`, and a response that contains `external_links` is rejected. 2. `AllowAutoRedirect = false`, HTTPS only, TLS 1.2 or later, no custom certificate validation callback, `MaxResponseContentBufferSize` equal to `ByteLimit` plus overhead, and `SsrfProtectionHandler` with the exact host from configuration (no wildcard). The DNS result is checked against private ranges unless the host is on an explicit private-link allow-list. 3. The OAuth token endpoint is derived from the host (`https://{host}/oidc/v1/token`) and is not configurable. Tokens are cached per `(host, clientId)` in memory only and are never logged or put into exception messages. `RedactLoggedHeaders("Authorization")` is set on the typed client. 4. `Auth.Mode = Pat` is allowed **only in Development** (`GatewayStartupValidator`). 5. G9 runs only from a protected GitHub Environment with required reviewers, never for fork PRs, using a dedicated service principal that is restricted to a sandbox catalog with no access to production data. The `sql-cutover` label alone does not release secrets. 6. Cancellation and timeout send `POST .../cancel`. `on_wait_timeout = CANCEL`, and `wait_timeout` is clamped to 5-50 s. | WP-C3, WP-C5 |
+| SEC-ADG-10 | **Medium** | Databricks generator (WP-C1) | Spark and Databricks may perform `${...}` variable substitution on statement text before parsing (`spark.sql.variable.substitute`). User-controlled column aliases are emitted as backtick identifiers. An alias such as `` `${...}` `` could change the statement after the gateway checked it. | The Databricks generator rejects `$`, `{` and `}` in **any** emitted identifier (`SqlLimitKind`-style typed rejection). A new token guard `RejectVariableSubstitutionSequences` (`${` anywhere in a token) is on for the Databricks profile. The Spark proxy runs with `spark.sql.variable.substitute=true` so that the test covers the worst case. | WP-C1, WP-C4 |
+| SEC-ADG-11 | **High** | `SqlFilterCompiler.Compile` (`:349-370`), correlated row-filter subqueries, policy parser | Tables referenced **inside** policy subqueries (virtual filters, correlated consent filters, Casbin correlated subqueries) are compiled with `PolicyProvider = new DefaultRlsPolicyProvider(predicate: _ => false)`, so they get **no tenant predicate**. An `EXISTS (SELECT 1 FROM entitlements e WHERE e.fk = autheris_target.id ...)` over a multi-tenant `entitlements` table lets tenant B's rows decide which of tenant A's rows are visible. That is a cross-tenant information flow. | New `SecurityScope.PolicySubquery`. Every physical table inside a policy subquery receives the **tenant predicate** (bound tenant parameter, binary template from SEC-ADG-04). It does not receive consent filters, to prevent recursion. The policy-subquery depth is limited to 1, and nested policy subqueries are rejected. The coverage verifier checks `PolicySubquery` scopes. Policy subqueries may reference catalog tables only (as §3.5 requires). | WP-A5, WP-D3 |
+| SEC-ADG-12 | **High** | `AdvancedRlsFilterGenerator` (`BuildCrossSourceSetFilter`, `BuildCorrelatedSubquery`), `CasbinEnforcementService.cs:937`, `RowFilterSqlBuilder.cs:218-223,359` | These producers render consent values **inline** through `DatabaseDialect.FormatSafeLiteral`. §7.2 names `RowFilterSqlBuilder` but not these producers. If they stay string-based, INV-5 ("no trusted raw fragments") and the bind-everything decision are false on the compiler path. | WP-D1 includes `AdvancedRlsFilterGenerator`, `RlsFilterGenerator` and the Casbin correlated subquery: each builds `PolicyPredicate` directly, with one `PolicyParameterExpression` per value. The OR-chunked IN lists are replaced by one IN list subject to the dialect limits (or by array binding, B-3). The architecture test `NoInlineLiteralRendering_OnGovernedPath` forbids `FormatSafeLiteral`/`EscapeSqlLiteral` in every type reachable from `GovernedSqlRewriter`, `SqlFilterCompiler` and the IR renderer. | WP-D1 |
+| SEC-ADG-13 | **High** | CI gate §9 (big-bang justification) | The gate is not sufficient to justify deleting legacy. The gaps are: (a) G4 classifies by multiset hash, which does not show the **direction** of a mask difference (a clear value where legacy masked shows up as "different", and `equivalent-result` is not defined); (b) the visibility oracle checks tenant-B markers only, not consent filters within a tenant; (c) the security mutants are only a proposal in §14, and Stryker runs nightly on the base commit, so a PR can remove a check without failing; (d) the gate runs on the PR head, not on the merge result; (e) there is no flake policy, so a retried security test can turn green; (f) `accepted-differences.json` has no schema that makes `ast-looser` impossible to accept; (g) there is no proof that every governed entry point (WebSQL, SQL endpoints, MCP dataset tools, virtual filters, GraphQL row filters) actually goes through `Compile` and the binder; (h) cache poisoning, the consumers (SEC-ADG-02) and Oracle on the real gateway path are not covered. | §16.5 lists the minimum additions. They are binding preconditions for WP-X1. | WP-B3, WP-B4, WP-B5, WP-E2, WP-E3, WP-X1 |
+| SEC-ADG-14 | **High** | `DbSessionContextInitializer`, `SqlConnectionFactory`, Oracle session | (a) `DbSessionContextInitializer.ResolveDialect` falls back to **SQLite** for an unknown provider, and `InitializeSessionAsync` silently returns `null` (no session context, no transaction) for every dialect other than PostgreSQL and SQL Server. These are fail-open defaults for Oracle and Databricks. (b) An Oracle session has no pinned comparison or format semantics (`NLS_COMP`, `NLS_SORT`, `NLS_DATE_FORMAT`, `NLS_NUMERIC_CHARACTERS`, `TIME_ZONE`). ODP.NET connection pooling keeps `ALTER SESSION` and `DBMS_SESSION` state across rentals, so one tenant's session state can be reused for another. | 1. `ResolveDialect` throws for unknown providers. `InitializeSessionAsync` has an explicit branch per production dialect and throws `NotSupportedException` for any other. Databricks has an explicit "no session state" branch that is covered by a test. 2. WP-F2 defines Oracle session initialization (§16.6) and runs it on **every pool rental**, not only for new physical connections, with a reset in `finally`. 3. A startup probe reads `NLS_SESSION_PARAMETERS` and fails startup if the pinned values do not hold. | WP-F2, WP-D4 |
+| SEC-ADG-15 | **Medium** | HMAC masks (`SqlDataMaskingProvider`, `MaskExpression`) | The per-tenant HKDF-derived HMAC key is a **bound parameter**. Parameter values are visible in database-side diagnostics: Databricks query history (visible to warehouse users with `CAN VIEW`), PostgreSQL `log_parameter_max_length`/`auto_explain`, SQL Server Extended Events and Query Store parameter capture. With the key, a reader can test guessed clear values against the pseudonyms. Oracle has no HMAC without an `EXECUTE` grant on `DBMS_CRYPTO`, and today it falls through to the SQLite UDF `gateway_hmac_sha256` (a runtime error, fail closed but broken). Databricks has no built-in keyed HMAC. | 1. A capability flag `InDbHmac` in the capability table: PostgreSQL (pgcrypto), SQL Server and SQLite (UDF) are `true`; Oracle is `true` only if a startup probe confirms `EXECUTE ON DBMS_CRYPTO` (then `DBMS_CRYPTO.MAC`), otherwise `false`; Databricks and DuckDB are `false`. 2. If `InDbHmac = false`, an HMAC rule degrades to `Redact` (fail closed), with an operator-visible startup warning. Gateway-side HMAC is **rejected** for WebSQL, because user SQL can aggregate, sort or deduplicate the raw value before the gateway sees it. 3. Phase 6 operator guidance: disable parameter-value capture on governed data sources, or set `DataMasking:PreventInDbHmacKeyExposure = true`. Stakeholder decision B-2. | WP-A6, WP-D2, WP-F6 |
+| SEC-ADG-16 | **Medium** | All dialects (side channel, pre-existing) | User predicates of the outer query may be evaluated **before** the RLS predicate of the secured derived table, because optimizers push predicates down and flatten subqueries (PostgreSQL derived tables are not `security_barrier`). An error-raising expression (division by zero, a failing cast, Oracle `ORA-01722` from an implicit conversion) therefore reveals whether some row, possibly of another tenant, satisfies a condition. The bandwidth is one bit per query. | 1. Backend errors on the governed path map to typed, generic error codes. Driver message text, SQLSTATE detail, key values and object names are never returned to the caller (consistent with Threat 4.3). The full error is logged server-side, redacted. 2. A bind type is derived from the **catalog column type** of the compared column, not only from the literal type, so the binder never forces an implicit conversion of the column (this removes the `ORA-01722` class). 3. A capability `OptimizerFence` (PostgreSQL `OFFSET 0` in the secured subquery) is measured in G8 and is **off** by default. 4. Documented as a residual risk (§16.7). | WP-A3, WP-X1, WP-B5 |
+| SEC-ADG-17 | **Medium** | Oracle semantics | In Oracle the empty string is `NULL`. A bound `''` tenant or policy value turns `col = :p` into `UNKNOWN`, which is stricter, but `NOT (col = :p)`, `CASE ... ELSE` and `COALESCE` forms in admin predicates can become looser. | The Oracle binder rejects an empty `String` value with `ParameterOrigin.Tenant` or `ParameterOrigin.Policy` (fail closed). The policy parser for an Oracle data source rejects `CASE`/`COALESCE`/`NOT` over a policy parameter whose value can be empty. For user literals, `''` is a `semantic-note` in the conformance matrix. | WP-F3, WP-A5 |
+| SEC-ADG-18 | **Medium** | `LIKE` in policy predicates | `LIKE` semantics differ per dialect: SQL Server treats `[...]` as a character class, PostgreSQL and Databricks use `\` as the default escape, Oracle and Trino have no default escape. A policy value containing `[`, `\`, `%` or `_` can therefore match more rows on one dialect than on another. | For `LIKE` with a `ParameterOrigin.Policy` pattern, the emitter always emits an explicit `ESCAPE` from a constant template (`ESCAPE '\'`, registered like a `BindExpressionTemplate`), and the binder escapes `%`, `_`, `\` and, for SQL Server, `[` in the bound value unless the policy marks the value as an intentional pattern. Conformance fixtures cover each dialect. | WP-A3, WP-A5 |
+| SEC-ADG-19 | **Medium** | Binder, client parameters (F-5) | Client named parameters (`@p1`, `:p1`, `@__autheris_tenant`, `@gql_limit`, `@__gql_x`) can collide with internal marker names. With legacy, `RestoreClientParameters` uses a regular expression over the secured SQL. A collision binds a client value to an internal slot or the reverse. | Internal markers are never derived from client names. Client named parameters become `ParameterReference(ClientNamed)` and get generated markers like any other value. Client names that start with a reserved prefix (`p` followed by digits, `__`, `gql_`, `autheris`) are rejected at parse time. New invariant INV-13 (§16.3). | WP-A2, WP-X1 |
+| SEC-ADG-20 | **Medium** | `IPolicyExpressionParser` cache | The proposed parse-cache key `(SHA-256 of text, table identity, catalog version)` does not include the function allow-list, the parser/compiler version or the declared parameter types. A changed allow-list would keep serving a parse result that the new allow-list rejects. | Key = SHA-256 over `(policy text, table identity, catalog version, allowed-function-set hash, parameter name/type set, CompilerVersion)`. The cache is bounded (count and size) and has a per-tenant share so one tenant cannot evict the others. A parse failure is cached as a **negative** entry with a short TTL so that a broken predicate cannot be used to load the parser. | WP-A5 |
+| SEC-ADG-21 | **Medium** | `CrossSourcePlanner` (PLAN-15), `GenerateInlineForInternalPlan` | Until WP-X3, the federated DuckDB plan is generated with inline literals from the user's AST, and the staging data comes from Web APIs (untrusted). | 1. The transitional method runs the `EmittedSqlInvariantChecker` in a DuckDB "inline literal" mode (literals allowed, escaped by DuckDB rules, no `--`, `/*`, `;`, `$$`), and the hostile corpus is executed through it in G6. 2. The DuckDB connection used for staging applies the lock-down already used by `DuckDbOlapEngine` (`enable_external_access = false`, `lock_configuration = true`, `autoinstall_known_extensions = false`, `autoload_known_extensions = false`). 3. WP-X3 deletes the method. Its due date is tracked in the master plan. | WP-A2 (transitional), WP-X3 |
+| SEC-ADG-22 | **Medium** | Table functions, passthrough | The Trino `TABLE(system.query(query => '...'))` passthrough and backend table functions (DuckDB `read_csv`/`read_parquet`, SQL Server `OPENROWSET`/`OPENQUERY`, Oracle `TABLE(...)`, PostgreSQL `dblink`) bypass RLS by design. | `AllowedTableFunctions` is **empty by default** for every dialect. The builder rejects `system.query` and every table function that is not on the allow-list, and the coverage verifier treats a table function source as a violation unless it is allow-listed **and** declared side-effect-free and table-free in the capability table. | WP-A4, WP-A8 |
+| SEC-ADG-23 | **Medium** | Audit, telemetry, exceptions (INV-8') | §8.1 puts the compiler version, dialect and bind count into the audit record. There is no tamper-evident link to the statement that actually executed, and exception messages (`SqlLimitExceededException`, `PolicyParseException`, `PolicyConflictException`) could echo policy text or values. | 1. The audit record gets `sql.compiled_digest = HMAC-SHA256(auditKey, CompilerVersion || Dialect || CompiledSql.Sql || parameter shape)`, where the parameter shape is `(ordinal, type, origin)` only. It never contains values or value hashes (a hash of a low-entropy value such as a tenant or an SSN can be brute-forced). The record is part of the existing HMAC chain. 2. Compiled SQL text is stored only when `Audit:StoreCompiledSql = true` (default `false`); it contains no values by construction. 3. Typed exceptions carry kinds, counts and identifiers only, never values or policy text. A test scans the messages of every typed rejection for the hostile-corpus markers. 4. Spans and counters keep the NFR-6 rule (no literals, no tenant values). | WP-A8, WP-X1 |
+| SEC-ADG-24 | **Medium** | Supply chain | New or changed dependencies: `Oracle.ManagedDataAccess.Core` in Infrastructure (production, license "Oracle Free Use Terms and Conditions", not OSI); the Spark 4.0 + `delta-spark` container (Maven jars fetched at runtime if `--packages` is used); the Oracle Free container image; FsCheck.Xunit, Stryker.NET and BenchmarkDotNet tools. Databricks uses `HttpClient` only, with **no** new client package (approved). | 1. The Oracle driver uses the newest patched 23.x release at implementation time, not automatically the 23.7.0 pinned in the integration tests. The test and production versions are aligned. The NuGet author signature (Oracle) and the repository signature are verified (`trustedSigners` in `NuGet.config`), and `packageSourceMapping` maps `Oracle.*` to nuget.org. `packages.lock.json` is committed and restore uses `--locked-mode`. `dotnet list package --vulnerable --include-transitive` is a CI gate. The SBOM is updated. The license needs legal review before release. 2. Container images are pinned by digest. Delta jars are baked into a CI-built image with SHA-256-verified downloads (no runtime `--packages`). Python dependencies use `pip install --require-hashes`. 3. Tool versions are pinned in `.config/dotnet-tools.json`. 4. Trivy (already in CI) scans the Spark image. | WP-F1, WP-C4, WP-E2 |
+| SEC-ADG-25 | **Medium** | `TableAccessDecision` layering (R-11) | Confirmed: an opaque `IRowPolicy` in Domain, implemented in Application, is acceptable. The risk is drift between a string and a typed policy on the same decision. | `IRowPolicy` has no public factory from text. `CombinedRowFilterSql` and `MandatoryRowPredicateSql` are computed from `IRowPolicy` (read-only). `WithMandatoryPredicate` and `Restrict` accept typed input only. Architecture test: Domain does not reference `TrinoSqlEngine`, and no setter for `CombinedRowFilterSql` exists. | WP-D1 |
+| SEC-ADG-26 | **Medium** | Policy migration (OQ-3), availability | After X1, every admin predicate that is not in Trino syntax denies its table. That is fail closed, but a deny at scale is an outage. | `tools/PolicyPredicateLint` is a **blocking pre-deploy step** of the X1 release. It runs against the production policy store export and must report 0 unparsable predicates, or each one has a signed-off exception. `GatewayStartupValidator` lists every denied table at startup. | WP-D1, WP-X1 |
+| SEC-ADG-27 | **Low** | Bind and IN-list limits (Q-4, AP-11) | Large consent value lists that are inline today hit the SQL Server bind limit (2,100) or the Oracle IN-list limit (1,000) once they are bound, and are denied. This is fail closed (security-neutral) but an availability regression. | Default: reject (as planned). Option for stakeholder decision B-3: one **array-bound** parameter per list through a constant `BindExpressionTemplate` (PostgreSQL `= ANY($n)`, SQL Server `IN (SELECT value FROM OPENJSON(@pN))` with a typed `WITH` schema, DuckDB list parameter, Oracle a SQL collection type). Never compaction (AP-11). | WP-A1 (if B-3 = array) |
+| SEC-ADG-28 | **Low** | Obsolete key (§7.1), §14 item 9 | — | Confirmed: **fail fast** at startup on `WebSql:SqlRewriterEngine`. Warn-and-ignore would let operators believe in a kill switch that does not exist. | WP-X1 |
+| SEC-ADG-29 | **Low** | Token guards (§14 item 7) | — | Confirmed: every `SqlTokenSecurityOptions` guard stays (AP-3). Databricks profile: `RejectComments`, `RejectBackslashInStrings`, `RejectEscapedStringLiterals`, `RejectDollarQuoting`, `RejectNonAsciiIdentifiers`, `RejectDotsInQuotedIdentifiers`, `RejectTimeTravelQueries` and the new `RejectVariableSubstitutionSequences` are all `true`. Oracle profile: like PostgreSQL, but with `RejectDollarQuoting = true`. The Oracle alternative quoting (`q'[...]'`, `nq'...'`) cannot be emitted, because no literal is emitted and identifiers are always delimited. The hostile corpus contains it to prove that. | WP-A8, WP-C1, WP-F3 |
+
+### 16.3 Hardened invariants
+
+INV-1..INV-7 stay as in §8.1, with the hardening below. INV-8 is replaced by INV-8' (§8.1). **INV-9 (shadow isolation) is retired** because SD-1 removed the shadow mode, and its number is not reused.
+
+| ID | Invariant (hardened wording) | STRIDE |
+|---|---|---|
+| INV-1 | Fail closed on unknown rules, nodes, functions, table functions, dialects, capabilities, **providers and session initializers** (no `_ =>` default to a dialect anywhere on the governed path, including `DbSessionContextInitializer.ResolveDialect`). | T, E |
+| INV-2 | Complete coverage in every scope of §4.3 **plus `PolicySubquery` and `MergeOn`**. The predicate sits in the `WHERE` of the secured derived table, never in a join `ON` or an outer `WHERE` (outer-join null extension cannot reveal filtered rows). | I, E |
+| INV-3 | Predicate preservation (unchanged). | T, I |
+| INV-4 | Values bound, identifiers delimited and **resolved to catalog canonical names**. Bind types follow the catalog column type for comparisons (SEC-ADG-16). | T, I |
+| INV-5 | No raw fragments: no `TrustedSqlExpression`, no `FormatSafeLiteral` on the governed path (SEC-ADG-12). | T |
+| INV-6 | No source comments or whitespace in the output. The checker runs in production. A `;` is allowed only at the registered final position of a SQL Server `MERGE`. | T |
+| INV-7 | Bounded resources: query length, nesting depth, parse-tree depth, **AST depth, execution-stack guard, compile time budget, secured table references, emitted length, expansion factor**, bind count, IN-list size and identifier length, each with a typed `SqlLimitKind`. | D |
+| INV-8' | Compiler transparency, plus the HMAC-chained `sql.compiled_digest` (SEC-ADG-23). | R |
+| INV-10 | DML check option: no write can create, modify or delete a row outside the caller's tenant, **or move a row across any applicable row-policy boundary** (no assignment to policy-referenced columns). Masked columns are not writable and not usable in DML or `MERGE` predicates. | T, E |
+| INV-11 (new) | **Resolution equivalence:** the database binds every emitted name to the same object that the gateway secured (schema-qualified canonical physical names, symbol-based CTE references, pinned `search_path` and `CURRENT_SCHEMA`). | E, I |
+| INV-12 (new) | **Cache integrity:** a cached compile is reachable only by a request with an identical canonical `CompileRequest` and policy shape (SHA-256, full compare). Cached entries contain no tenant, policy or mask values. Only verified outputs are cached. | I, E |
+| INV-13 (new) | **Binding integrity:** every marker in the text maps 1:1 to exactly one `BoundParameter` of the expected origin and type, binding is by name where the provider supports it (Oracle `BindByName = true`), and client names can never alias internal markers. | T, E |
+| INV-14 (new) | **Session integrity:** every setting that changes comparison, escaping or name-resolution semantics (PostgreSQL `standard_conforming_strings` and `search_path`; Oracle NLS and `CURRENT_SCHEMA`; SQL Server isolation level; DuckDB lock-down) is pinned on **every connection rental** and verified at startup. Pooled state never crosses tenants. | T, I |
+| INV-15 (new) | **Tenant equality is binary-exact** on every dialect, regardless of column collation or session settings (SEC-ADG-04). | I, E |
+| INV-16 (new) | **Non-disclosure:** bound values never appear in logs, spans, metrics, audit records, cache keys or exception messages. Backend errors reach the caller only as typed generic codes. | I |
+| INV-17 (new) | **Consumer parity:** text rendered from the typed IR for a §7.3 consumer is never looser than the legacy text for the same decision (G10). | I |
+
+**STRIDE summary for this track**
+
+| STRIDE | Threats in this track | Findings and invariants |
+|---|---|---|
+| Spoofing | Databricks token theft through a crafted host, link or redirect; PAT misuse | SEC-ADG-09 |
+| Tampering | Injection through identifiers, markers, variable substitution and inline literals; misbinding; DML across a policy boundary; `MERGE BY SOURCE` | SEC-ADG-03, -06, -08, -10, -12, -19, -21; INV-4, -5, -6, -10, -13 |
+| Repudiation | No proof of which statement executed | SEC-ADG-23; INV-8' |
+| Information disclosure | Cache cross-principal reuse; collation and NLS tenant collisions; policy subqueries without the tenant predicate; consumer rendering drift; error side channels; HMAC key in DB logs; LIKE and empty-string semantics | SEC-ADG-01, -02, -04, -11, -15, -16, -17, -18; INV-2, -12, -15, -16, -17 |
+| Denial of service | Stack overflow, compile time, output growth, cache eviction, parse cache load, large IN lists | SEC-ADG-05, -20, -27; INV-7 |
+| Elevation of privilege | Name-resolution differential, table-function passthrough, permission check skipped through the cache, fail-open session defaults | SEC-ADG-01, -07, -14, -22; INV-1, -11, -14 |
+
+### 16.4 Answers to the Phase 2 hand-off (§14)
+
+1. **INV-3 design:** approved. Add `SecurityScope.PolicySubquery` and `SecurityScope.MergeOn`. `VALUES` sources contain no table and need no scope, but the verifier must recognize them explicitly (not by omission). Lateral and recursive CTE bodies are covered by the existing scopes as long as INV-11 holds (a recursive self-reference is a CTE only inside `WITH RECURSIVE`). Table functions are rejected (SEC-ADG-22).
+2. **Literal allow-list and checker:** approved. The checker runs **in production** on every compile. `BindExpressionTemplates` are compile-time constants in code (never configuration), contain exactly one placeholder, use format literals from a closed reviewed set, and every change needs a CODEOWNERS security approval. The template table is a G2 fixture.
+3. **Policy IR boundary:** canonical Trino syntax confirmed (OQ-3). Correlated `EXISTS`/`IN` subqueries are allowed only against catalog tables and receive the tenant predicate (SEC-ADG-11). Non-deterministic and session-dependent functions (`random`, `now`, `current_user`, `uuid`) and window functions are rejected in row policies. A predicate has at most 256 nodes. The cache key follows SEC-ADG-20. `IRowPolicy` layering is confirmed under SEC-ADG-25.
+4. **DML/MERGE:** replacing the verified tenant literal with the bound tenant parameter is approved. Target RLS in `ON` is approved with the SEC-ADG-08 conditions. R-12 is accepted with error sanitization. `MERGE ... INSERT` on consent-filtered tables is rejected (yes), and assignments to policy-referenced columns are rejected (SEC-ADG-06).
+5. **Databricks:** see SEC-ADG-09, -10 and -15. The provisional bind budget of 1,000 is approved. Databricks stays off the production list until the first green G9 (binding).
+6. **Gate thresholds:** see §16.5. `accepted-differences.json` is signed by the security CODEOWNERS group (at least one reviewer who is not the PR author). The Stryker break threshold of 85% stays for the nightly run, and the named security mutants become a deterministic PR gate.
+7. **Token guards:** see SEC-ADG-29.
+8. **Audit:** see SEC-ADG-23. Parameter values are never logged.
+9. **Removed key:** fail fast (SEC-ADG-28).
+10. **Rollback:** the git-revert model is acceptable **only** with the SEC-ADG-02 revert set `{X1, D3, D2, D1}`, a rehearsed combined revert (build plus G1 plus G7 on the reverted tree), and a runbook (Phase 6) that names the revert triggers: any confirmed cross-tenant row, any `SecurityCoverageException` or `EmittedSqlInvariantViolation` rate above zero that is not explained by a hostile input, or a P99 compile latency above twice the budget. It also names the on-call owner and a time-to-revert target of 4 hours.
+
+### 16.5 CI gate: sufficiency for the big-bang cutover
+
+**Assessment:** G1-G9 as defined in §9.3 are **not sufficient** to justify deleting legacy without an observation window (SEC-ADG-13). The following additions are the **minimum**. With them, the gate gives evidence against regressions compared with legacy (G4, G10), and absolute evidence for isolation (G5-c', G6) that does not depend on legacy being correct.
+
+| # | Addition | Gate | Threshold |
+|---|---|---|---|
+| M-1 | **Directional classification.** G4 compares per cell, not only by multiset hash. Classes: `ast-looser-rows` (a row that legacy did not return), `ast-looser-mask` (a clear value of a masked column where legacy returned a masked value), `ast-looser-write` (DML changed a row that legacy did not), `ast-accepts` (legacy rejects, AST accepts and returns or writes anything that the independent oracle of M-2 flags). `equivalent-result` is defined as "equal after typed normalization (numeric scale, timestamp precision, trailing-space-insensitive only for `CHAR`)". Nothing else counts as equivalent. | G4 | 0 in every `ast-looser-*` class |
+| M-2 | **Independent policy oracle.** A C# reference evaluator applies the fixture's tenant, consent and mask policies to the fixture rows in memory. Every result row and cell of every engine (AST path) is checked against it: no row outside the policy, no clear masked value. This does not depend on legacy. | G5-c', G6 | 0 violations |
+| M-3 | **Security mutant suite.** A deterministic, named mutant set (operators in test code, toggled by an internal test hook that is compiled out of Release builds) runs on **every PR**. Each mutant must be killed by at least one gate test. The minimum set is the eight from §14 item 6 plus: drop `PolicySubquery` tenant predicate; skip the coverage verifier; disable `BindByName`; drop the binary tenant template; allow a policy-column assignment in `UPDATE`; accept `WHEN NOT MATCHED BY SOURCE`; omit the policy values from the cache rebind; resolve a CTE case-insensitively against a quoted physical name; accept `${` in a Databricks identifier; skip the execution-stack guard. | G7 | 100% killed |
+| M-4 | **Merge-result gating.** The gate runs on the merge-queue commit (or the `pull_request` merge ref), so the result of the merge is tested and not only the PR head. | G1-G10 | Required check |
+| M-5 | **Flake policy.** Security-tagged tests (`Category=Security`) are never retried. A flaky security test fails the gate and can only be quarantined with a security CODEOWNERS approval and a linked issue. | all | 0 retries |
+| M-6 | **`accepted-differences.json` schema.** The JSON schema allows only `ast-stricter` and `ast-error` with a justification, an issue link and a reviewer. An `ast-looser-*` entry fails schema validation. | G4 | Schema-valid |
+| M-7 | **Entry-point coverage.** An architecture test proves that every governed entry point (WebSQL, SQL endpoints, MCP dataset tools, virtual filters, GraphQL table queries through the IR renderer) reaches `ISqlEngine.Compile` or `IPolicyPredicateRenderer`, and that no `DbCommand.CommandText` on these paths is assigned from anything other than `CompiledSql.Sql` or a renderer result. An end-to-end test per entry point and per production dialect runs through the real DI container. | G1, G6 | All green |
+| M-8 | **Cache poisoning suite.** Two principals of the same tenant with different consent values, a writer followed by a reader with the same SQL, a tenant `acme` followed by `ACME`, a capability or compiler version change, and a cancelled compile. Each must result in a miss or a correct rebind, never a hit that serves the other request's values or decisions. | G6 | All green |
+| M-9 | **G10 Consumer parity** (SEC-ADG-02): the legacy string producer and the IR renderer for every §7.3 consumer, on SQLite, PostgreSQL and SQL Server, plus the in-memory evaluators (`FilterRows`, `StreamingRowFilterAstEvaluator`) on the same fixture. | G10 (new) | 0 `looser` |
+| M-10 | **Oracle on the real gateway path** (Stream F): G6 suites run through `SqlConnectionFactory`, `DbSessionContextInitializer` and the binder, including a hostile session (NLS set to linguistic and case-insensitive at the database level before the gateway connects) and pool reuse across tenants. | G6 | All green |
+| M-11 | **Combined revert rehearsal** (SEC-ADG-02): `git revert` of `{X1, D3, D2, D1}` on a scratch branch builds and passes G1 and G7. | X1 PR | Green |
+| M-12 | **Stryker on the cutover PR head**, not only on the base commit, for the files listed in G7. | G7 | At least 85% |
+
+**Updated cutover precondition (replaces the paragraph after the §9.5 workflow):** G1-G10 are green on the merge-queue commit of the cutover PR; M-3, M-8 and M-11 are green; the nightly profile and Stryker (M-12) are green on the cutover PR head; G9 is green if Databricks is to be listed as Production; WP-F5 is green if Oracle is to be listed as Production; `tools/PolicyPredicateLint` reports 0 unparsable production predicates (SEC-ADG-26); there is a Phase 3 sign-off on the final `accepted-differences.json` and a Phase 5 approval.
+
+### 16.6 Oracle runtime: Stream F (SD-8)
+
+Phase 2 did not plan the Oracle runtime (OQ-1 default "no"). SD-8 reverses that. Stream F has these work packages. They run in parallel with Stream C and depend on A2 (binder contract) and A1 (capabilities).
+
+**Verified current state:** `SqlConnectionFactory.cs:31-38` has no Oracle driver ("Oracle and Databricks are dialects without a driver here"). Only `tests/Autheris.Tests.Integration` references `Oracle.ManagedDataAccess.Core` 23.7.0 and `Testcontainers.Oracle` 4.15.0. `OracleIntegrationTests` builds `OracleCommand` directly from `GenerateGovernedSql` output (`OracleIntegrationTests.cs:153-171`), so it bypasses the factory, the session initializer and any binder. `DbSessionContextInitializer` has no Oracle branch. `SqlDataSourceExecutor.cs:304-332` emits `@gql_offset`/`@gql_limit` for Oracle (SEC-ADG-03).
+
+**WP-F1 Oracle driver and connection factory** (files `src/Autheris.Infrastructure/Autheris.Infrastructure.csproj`, `SqlConnectionFactory.cs`, `GatewayStartupValidator.cs` (Oracle section), `NuGet.config`)
+
+- Tests first:
+  - `ConnectionFactory_Oracle_ReturnsOracleConnection`.
+  - `OracleConnectionString_RejectsPrivilegedLogin` (`DBA Privilege=SYSDBA|SYSOPER|SYSASM`, `User Id=/` OS authentication, `Proxy User Id` without configuration).
+  - `OracleConnectionString_RequiresTcpsOutsideDevelopment`.
+  - `OracleConnectionString_SecretsOnlyFromKeyVault` (plaintext password outside Development fails startup).
+  - `OracleCommand_BindByNameFalse_Throws` (decorator, SEC-ADG-03).
+  - Supply chain: `Oracle.*` source mapping and signature verification, a locked restore, no vulnerable transitive packages (SEC-ADG-24).
+- Acceptance: Oracle connections open only through the factory. **Merges with or after WP-F4.**
+
+**WP-F2 Oracle session initialization** (files `DbSessionContextInitializer.cs`, `SqlConnectionFactory.cs`)
+
+- One anonymous PL/SQL block runs on **every** pool rental, with bound values only:
+  - `ALTER SESSION SET NLS_COMP = 'BINARY'`, `NLS_SORT = 'BINARY'`, `NLS_LANGUAGE = 'AMERICAN'`, `NLS_TERRITORY = 'AMERICA'`, `NLS_NUMERIC_CHARACTERS = '.,'`, `NLS_DATE_FORMAT = 'YYYY-MM-DD'`, `NLS_TIMESTAMP_FORMAT = 'YYYY-MM-DD"T"HH24:MI:SS.FF6'`, `NLS_TIMESTAMP_TZ_FORMAT = 'YYYY-MM-DD"T"HH24:MI:SS.FF6TZH:TZM'`, `TIME_ZONE = '+00:00'`, `CURRENT_SCHEMA = <configured schema>` (validated identifier).
+  - `DBMS_SESSION.SET_IDENTIFIER(:corr)` with an opaque correlation id (never the tenant id in clear), and `DBMS_APPLICATION_INFO.SET_MODULE('autheris', NULL)`.
+  - The connection is returned to the pool only after `DBMS_SESSION.CLEAR_IDENTIFIER` in `finally`. If clearing fails, the connection is disposed and removed from the pool (`OracleConnection.ClearPool` for that connection).
+- Explicit Oracle branch in `InitializeSessionAsync`. DML runs in an explicit transaction. `ResolveDialect` and the unknown-dialect default throw (SEC-ADG-14).
+- Tests first:
+  - `OracleSession_NlsPinned_OnEveryRental` (pool size 1, two rentals, `NLS_SESSION_PARAMETERS` asserted each time).
+  - `OracleSession_IdentifierCleared_OnReturn`.
+  - `OracleSession_HostileDatabaseDefaults_AreOverridden` (container with `NLS_COMP=LINGUISTIC`, `NLS_SORT=BINARY_CI` set by a logon trigger).
+  - `UnknownProvider_Throws`.
+  - `StartupProbe_FailsWhenNlsNotPinned`.
+
+**WP-F3 Oracle binder and executor wiring** (files `Autheris.Infrastructure/Persistence/OracleCompiledSqlBinder.cs` (new), `SqlDialectMapper.cs` (`IsExecutable` adds Oracle), `ChunkedQueryExecutor.cs`, `DatabaseParameterBudgetProvider.cs`)
+
+- `:pN` markers; `BindByName = true` asserted; `OracleDbType` mapping from `SqlParameterType` and the catalog column type (SEC-ADG-16); an empty string is rejected for `Tenant`/`Policy` origins (SEC-ADG-17); bind variable names stay within 30 bytes.
+- Tests first:
+  - `OracleBinder_ReusedMarker_BindsSameValue`.
+  - `OracleBinder_OutOfOrderMarkers_BindByName`.
+  - `OracleBinder_EmptyTenantOrPolicyString_Throws`.
+  - `OracleBinder_TypesFollowCatalogColumn`.
+  - `OracleInList1001_Rejected`.
+  - `OracleBindLimitProbe` (G6, replaces the **(verify)** 32,767).
+
+**WP-F4 `SqlDataSourceExecutor` and masking marker fix** (files `SqlDataSourceExecutor.cs` (pagination, tenant, argument, `$filter` and row-filter markers; parameter order), `SqlDataMaskingProvider.cs` (HMAC key markers), `Autheris.Domain/Common/DatabaseDialect.cs` (`FormatParameterMarker`))
+
+- Tests first:
+  - `SqlDataSourceExecutor_Oracle_UsesColonMarkers` (verified bug at lines 306-332).
+  - `SqlDataSourceExecutor_Oracle_OffsetAndLimitBoundToCorrectSlots` (offset 0 and limit 5 must return rows 1-5, not zero rows).
+  - `SqlDataSourceExecutor_Oracle_CountQueryParameters`.
+  - `NoHardcodedAtMarkers_OnGovernedPaths` (architecture test).
+  - Oracle mask rendering never falls back to `gateway_hmac_sha256` (SEC-ADG-15).
+- Acceptance: the GraphQL/data-source path executes on Oracle Free with the G6 visibility and mask oracles green.
+
+**WP-F5 G6 Oracle on the real gateway path** (files `tests/Autheris.Tests.SqlCompilerGate/Execution/Oracle/**`, `tests/Autheris.Tests.Integration/OracleIntegrationTests.cs`)
+
+- The existing `OracleIntegrationTests` are migrated to resolve `ISqlConnectionFactory`, `IDbSessionContextInitializer` and `ICompiledSqlBinder` from the real DI container. Direct `new OracleCommand(...)` usage in tests is limited to fixture setup (architecture test).
+- The G6 suites (visibility, masks, DML check option, `MERGE`, limits, hostile corpus including `q'[...]'`, the empty-string cases and `TenantCaseCollision_IsIsolated`) run on Oracle Free 23ai (image pinned by digest).
+- Acceptance: green. This is the precondition for listing Oracle as `Production` in the capability table.
+
+**WP-F6 Oracle masks** (files `Ast/Generators/OracleDialectGenerator.cs` (mask emission), capability table `InDbHmac`)
+
+- `DBMS_CRYPTO.MAC(..., DBMS_CRYPTO.HMAC_SH256, :key)` when the startup probe confirms the grant; otherwise HMAC rules degrade to `Redact` with a startup warning (SEC-ADG-15). Partial and redact masks follow the existing Oracle rendering.
+- Tests first: `OracleHmac_WithGrant_MatchesReferenceHmac`, `OracleHmac_WithoutGrant_Redacts`.
+
+**Dependency additions to §11.1:** `A1 --> F3`, `A2 --> F3`, `F4 --> F1` (F1 merges with or after F4), `F1 --> F2 --> F5`, `F3 --> F5`, `A6 --> F6`, and `F5 --> X1` (only if Oracle is to be Production at cutover; otherwise Oracle stays `Production (compiler)` and is not executable until F5 is green). **File conflicts:** `SqlDataSourceExecutor.cs` is also edited by D2 and D4 (order: D4, F4, D2). `SqlConnectionFactory.cs` and `GatewayStartupValidator.cs` are also edited by C3 (different sections; F1 and C3 must not run in parallel without a coordinated rebase).
+
+### 16.7 Residual risk: text rendered from typed IR for out-of-scope consumers (OQ-4)
+
+The §7.3 consumers (GraphQL `TreeSqlCompiler` and `SqlDataSourceExecutor`, lakehouse executors, `StreamRlsPolicyEnforcer`, procedures, `GatewayExecutionService.FilterRows`, `DuckDbOlapEndpoints`, `FederatedStagingService`, consent caches) keep consuming text after X1. Rendering from one typed source removes **drift between producers**. It does not remove these risks:
+
+| Risk | Rating after mitigation | Mitigation in this track | Closed by |
+|---|---|---|---|
+| A renderer defect (precedence, parameter naming, dialect markers) widens the filter for every consumer at once | Low (G10 and M-3) | SEC-ADG-02: full parenthesization, reserved namespace, duplicate-name fail closed, G10 0 `looser`, revert set includes D1-D3 | Follow-up track |
+| A consumer interprets the text differently from the database (the in-memory `FilterRows` and streaming evaluators use their own type coercion, see threat model E-5/E-6; the lakehouse executors evaluate tenant predicates themselves) | Medium | G10 includes the in-memory evaluators. Consumers that cannot evaluate a construct must reject the table (fail closed), never skip the predicate. | Follow-up track: typed IR evaluation per consumer |
+| A consumer concatenates the rendered text with its own text and its own parameters (`SqlDataSourceExecutor` adds tenant, arguments, `$filter`, limit and offset) | Low | Reserved namespace plus the M-7 architecture test for duplicates. SEC-ADG-03 fixes the Oracle markers. | — |
+| Correlated filters depend on the consumer's alias (`autheris_target`) | Low | The renderer takes the alias as a typed argument. A consumer that does not declare it fails closed (existing `RowFilterAliases.ReferencesTarget` check). | — |
+| Masks rendered as text for GraphQL (`SqlDataSourceExecutor` mask call sites) | Low | WP-D2 renders from `MaskSpec`. The `InDbHmac` capability applies (SEC-ADG-15). | — |
+
+**Accepted residual risks for this track (owner: stakeholder, revisit in the follow-up track):** the error-based side channel (SEC-ADG-16, one bit per query, pre-existing); the unique-key existence side channel (R-12, sanitized); the gap between the Spark proxy and Databricks SQL (R-7, Databricks held until G9); the consumer-interpretation differential (above, Medium until the follow-up track).
+
+### 16.8 Security test criteria per work package (tests first, Phase 4)
+
+These lists add to the "Tests first" lists in §11. A work package is not done until its list is green. Test names are binding where the finding requires them; others may be renamed with the same intent.
+
+**WP-A1 Capability table**
+- `CapabilityTable_TenantPredicateTemplate_IsBinaryExact_PerDialect` (SEC-ADG-04).
+- `CapabilityTable_InDbHmac_PerDialect` (SEC-ADG-15).
+- `CapabilityTable_AllowedTableFunctions_EmptyByDefault` (SEC-ADG-22).
+- `BindExpressionTemplates_AreCompileTimeConstants_OnePlaceholder_ClosedFormatSet`.
+- `UnknownDialect_Throws`; `Snowflake_NotProduction`; `Databricks_NotProduction_UntilG9Flag`; `Oracle_NotExecutable_UntilF5Flag`.
+
+**WP-A2 Emit, binder, checker**
+- `Checker_RejectsQuoteCommentSemicolonDollarQuote_OutsideDelimitedIdentifiers` per dialect, including Oracle `q'`/`nq'` and Databricks `${`.
+- `Checker_AllowsSemicolon_OnlyAtRegisteredFinalPosition_SqlServerMerge` (SEC-ADG-08).
+- `Binder_EveryMarkerMapsToExactlyOneParameter` (INV-13), as an FsCheck property over generated ASTs.
+- `Binder_ClientNamedParameter_NeverAliasesInternalMarker` with the names `@p1`, `:p1`, `$1`, `?1`, `@__autheris_tenant`, `@gql_limit` and `@__gql_x` (SEC-ADG-19).
+- `ClientParameterName_ReservedPrefix_Rejected`.
+- `AllVisitors_GuardExecutionStack` (reflection plus a 3,000-deep `OR` chain: typed rejection, no crash) (SEC-ADG-05).
+- `GenerateInlineForInternalPlan_HostileCorpus_NoInjection` and `GenerateInlineForInternalPlan_SingleCaller` (SEC-ADG-21).
+
+**WP-A3 Literal parameterization**
+- `BindType_FollowsCatalogColumnType_ForComparisons` (SEC-ADG-16).
+- `PolicyLike_EmitsExplicitEscape_AndEscapesValue_PerDialect` (SEC-ADG-18).
+- `NoLiteralTokensInOutput` (G5-d) over the hostile corpus.
+
+**WP-A4 Pass order, opaque node, verifier**
+- `CoverageVerifier_Throws_WhenPredicateInJoinOnInsteadOfDerivedWhere` (INV-2).
+- `CoverageVerifier_PolicySubqueryWithoutTenantPredicate_Throws` (SEC-ADG-11).
+- `CoverageVerifier_TableFunctionSource_Throws` (SEC-ADG-22).
+- `Emitter_PhysicalTables_AreSchemaQualifiedCanonical` and `Emitter_CteReference_EqualsCteDefinitionSymbol` (INV-11).
+- `QuotedCteVsUnquotedPhysical_CaseVariants_AlwaysSecured` on PostgreSQL, Oracle and SQL Server (SEC-ADG-07).
+- `RecursiveCteSelfReference_OnlyInsideWithRecursive`.
+- `DmlTarget_IsCteName_Throws` (SEC-ADG-07).
+- `SystemQueryPassthrough_Rejected`.
+
+**WP-A5 Policy IR and parser**
+- `PolicyParser_RejectsNondeterministicAndSessionFunctions`, `PolicyParser_RejectsWindowFunctions`, `PolicyParser_MaxNodes256`.
+- `PolicyParser_CorrelatedSubquery_GetsTenantPredicate_Depth1` and `PolicyParser_NestedPolicySubquery_Rejected` (SEC-ADG-11).
+- `PolicyParseCache_KeyIncludesFunctionAllowListAndCompilerVersion` and `PolicyParseCache_NegativeEntryShortTtl` (SEC-ADG-20).
+- `PolicyPredicate_ExposesReferencedColumns` (SEC-ADG-06).
+- `HostilePolicyValues_AreBound_AllDialects` (INV-5), including `''` on Oracle (SEC-ADG-17).
+
+**WP-A6 Masks**
+- `MaskedColumn_NeverInClear_InWhereOrderGroupWindowJoinAggregate` (masked value only, or rejection; SQLite execution).
+- `Hmac_DegradesToRedact_WhenInDbHmacFalse` (SEC-ADG-15).
+- `HmacKey_NeverInLogsSpansAuditOrExceptions` (INV-16).
+
+**WP-A7 DML and MERGE**
+- `Update_AssignPolicyReferencedColumn_Rejected`, `MergeUpdate_AssignPolicyReferencedColumn_Rejected` and `MergeInsert_ConsentFilteredTable_Rejected` (SEC-ADG-06).
+- `Merge_CorrelatedTargetRowFilter_Rejected`.
+- `Merge_MaskedColumnInOnOrWhen_Rejected` and `Merge_MaskedColumnInAssignmentRhs_Rejected` (SEC-ADG-08).
+- `Grammar_HasNoNotMatchedBySource` and `MergeClauseTypes_AreClosed` (architecture).
+- `Merge_OtherTenantRowWithSameKey_IsNeverMatched_AndNeverDeleted` (execution on every `SupportsMerge` engine).
+- `DmlConstraintViolation_ErrorHasNoKeyValueOrConstraintName` (R-12).
+- `UpdateFrom_And_Returning_AreParseRejected` (the grammar has neither; this pins it).
+- `InsertSelect_SourceMasked_InsertsMaskedValueOnly`.
+
+**WP-A8 Compile API**
+- `CompileRequest_EveryPropertyChangesCacheKey` (reflection over `CompileRequest` and `GovernancePolicy`, SEC-ADG-01).
+- `CompiledSqlTemplate_HasNoTenantPolicyOrMaskValues` (SEC-ADG-01).
+- `Compile_CancelledInEveryPass_NoCacheEntry_NoPartialSql`.
+- `Compile_TimeBudget_TypedRejection`.
+- `Compile_EmittedLengthAndExpansionFactorLimits`.
+- `TypedRejections_MessagesContainNoHostileCorpusMarkers` (SEC-ADG-23).
+- `AuditRecord_HasCompiledDigest_NoValues`.
+
+**WP-B3 Differential corpus**
+- `Classifier_DetectsLooserMask` (a mutant that unmasks the wildcard expansion is classified `ast-looser-mask`).
+- `Classifier_DetectsLooserWrite`.
+- `AcceptedDifferences_SchemaRejectsLooser` (M-1, M-6).
+
+**WP-B4 Property and fuzz**
+- The independent policy oracle (M-2) as the G5-c' oracle.
+- Generators include tenants that differ only by case, `''` values, LIKE metacharacters, `${`, quoted CTE names that shadow physical names, 3,000-deep chains and 256 or more table references.
+
+**WP-B5 Execution**
+- The M-7 end-to-end tests per entry point and dialect.
+- The M-8 cache-poisoning suite.
+- `TenantCaseCollision_IsIsolated` on every engine (SEC-ADG-04).
+- `ErrorSideChannel_ResponsesAreGeneric` (SEC-ADG-16).
+- G10 consumer parity (M-9).
+
+**WP-B6 Security suite port**
+- `SecurityRegressionCatalog` does **not** exist yet (no file under `tests/` references it). B6 creates it, seeded by a script that extracts every `SEC-`, `SQ-`, `SQL-`, `RR-` and `SR15-` ID from `tests/**/*.cs` (77 distinct IDs at `818ab14`). New Phase 3 IDs `SEC-ADG-01..29` are added to the catalog with their test names.
+
+**WP-C1 Databricks generator**
+- `Databricks_IdentifierWithDollarOrBrace_Rejected` and `Databricks_TokenGuard_VariableSubstitution` (SEC-ADG-10).
+- `Databricks_TenantPredicate_UsesBinaryCollation` (verify on the proxy).
+- `Databricks_NeverEmitsStringLiteral` over the hostile corpus.
+
+**WP-C3 Databricks REST connector**
+- `StatementId_Invalid_Rejected`, `ChunkLink_Absolute_Rejected`, `ChunkLink_OtherStatement_Rejected`, `ExternalLinks_Rejected` and `Redirect_NotFollowed` (SEC-ADG-09).
+- `ResponseBuffer_Bounded`, `TokenEndpoint_DerivedFromHost`, `AuthorizationHeader_Redacted_InLogs` and `Pat_RejectedOutsideDevelopment`.
+- `Cancellation_SendsCancel`.
+- `DatabricksSession_ExplicitNoSessionStateBranch` (SEC-ADG-14).
+
+**WP-C4 Spark proxy**
+- The proxy runs with `spark.sql.variable.substitute=true` and the image is pinned by digest (SEC-ADG-10, -24).
+
+**WP-C5 Live job**
+- `LiveJob_RunsOnlyInProtectedEnvironment` (a workflow lint in CI that asserts `environment:` with required reviewers and no `pull_request_target` from forks) (SEC-ADG-09).
+
+**WP-D1 Typed row filters**
+- `AdvancedRlsFilterGenerator_ProducesTypedPredicate_NoInlineLiterals` and `NoInlineLiteralRendering_OnGovernedPath` (architecture) (SEC-ADG-12).
+- `Renderer_FullyParenthesized_ReservedNamespace_PerDialectMarkers` and `Consumer_DuplicateParameterName_FailsClosed` (SEC-ADG-02).
+- `CombinedRowFilterSql_IsDerivedFromIRowPolicy_NoSetter` and `StringOnlyDecision_DeniedOnCompilerPath` (SEC-ADG-25).
+- `PolicyPredicateLint_ReportsUnparsable` (SEC-ADG-26).
+
+**WP-D2 Typed masks**
+- `RenderedMask_UsesDialectMarkers`.
+- `Hmac_InDbHmacFalse_Redacts`.
+
+**WP-D3 SqlFilterCompiler**
+- `VirtualFilterSubqueryTables_GetTenantPredicate` (SEC-ADG-11; this replaces `predicate: _ => false`).
+
+**WP-D4 Fail-closed fixes**
+- `DbSessionContextInitializer_UnknownProvider_Throws` and `DbSessionContextInitializer_UnknownDialect_Throws` (SEC-ADG-14).
+- `NoDialectDefaultFallback_InSrc` (grep-based architecture test for `_ => DatabaseDialect.` and `_ => TargetSqlDialect.` on governed paths).
+
+**WP-E2/E3 CI**
+- The workflow implements M-3, M-4, M-5 and M-12.
+- `dotnet list package --vulnerable --include-transitive` gate.
+- The Trivy scan of the Spark image (SEC-ADG-24).
+
+**WP-F1..F6 Oracle:** see §16.6.
+
+**WP-X1 Cutover**
+- The M-11 combined revert rehearsal.
+- `StartupFails_WhenSqlRewriterEngineConfigured` (SEC-ADG-28).
+- The M-8 suite against the `CompiledSqlTemplate` cache.
+- `PlanCache_NoEmptyRawSqlOverloadOnGovernedPath`.
+
+### 16.9 Changes to the work packages and gate (summary)
+
+- §9.3: **G10 Consumer parity** (M-9) is added as a gate row; amend G4 (M-1, M-6), G5 (oracle M-2), G6 (M-7, M-8, M-10) and G7 (M-3, M-12). The cutover precondition is replaced by the one in §16.5.
+- §11: add **Stream F** (WP-F1..F6). WP-D1 gains `AdvancedRlsFilterGenerator`, `RlsFilterGenerator` and the Casbin correlated subquery (SEC-ADG-12). WP-D3 gains the policy-subquery tenant predicate (SEC-ADG-11). WP-D4 gains the session-initializer fail-closed fixes (SEC-ADG-14). WP-A2 and WP-A8 gain the stack, budget and output limits (SEC-ADG-05) and the template cache (SEC-ADG-01).
+- §12.2: the revert set is `{X1, D3, D2, D1}` (SEC-ADG-02). The runbook triggers are in §16.4 item 10.
+- §5: Oracle is `Production (compiler)` until WP-F5 is green, then `Production`.
+- §15: OQ-1 is resolved by SD-8. OQ-2 stays as decided (Databricks held until G9, provider of the workspace still open).
+
+### 16.10 Decisions needed from the stakeholder
+
+| ID | Decision | Blocks | Security recommendation |
+|---|---|---|---|
+| B-1 | **Tenant id case.** Either canonicalize tenant ids (for example lower case) and reject case-insensitive duplicates in the tenant registry, or keep mixed case and rely only on the binary tenant template (SEC-ADG-04). | WP-A1, WP-D1 (template design), WP-B5 | Do both: the binary template is mandatory regardless, and registry uniqueness is defense in depth. |
+| B-2 | **HMAC on Databricks and on Oracle without a `DBMS_CRYPTO` grant:** degrade to `Redact` (recommended) or require the DBA grant (Oracle only). | WP-A6, WP-F6, WP-C1 | Redact by default; Oracle uses HMAC when the grant probe succeeds. |
+| B-3 | **Large consent IN lists over the bind or IN-list limit:** deny (current plan) or array binding (SEC-ADG-27). | WP-A1, WP-D1 | Security-neutral. Array binding avoids an availability regression; deny is simpler. |
+| B-4 | **Databricks live workspace provider** (OQ-2, still open). | G9, Databricks production listing | Unchanged: held until the first green G9. |
+| B-5 | **Oracle production prerequisites** from the DBA side: TCPS, a non-privileged runtime account, schema-qualified catalog entries and, optionally, the `DBMS_CRYPTO` grant. | WP-F5 | Required before Oracle is listed as `Production`. |
+
+**Phase 3 sign-off:** granted for Phase 4 to start on Streams A-F, subject to the mandatory mitigations above. The final sign-off for WP-X1 is given on the cutover PR, against the §16.5 precondition and the final `accepted-differences.json`.
+
+---
+
+## 17. Changelog
+
+- 2026-10-10: Added §16 "Phase 3 Security Review" (`csharp-security-expert`): findings SEC-ADG-01..29, hardened invariants (INV-9 retired; INV-11..INV-17 added), STRIDE mapping, answers to the §14 hand-off, minimum CI gate additions M-1..M-12 and new gate G10, Stream F for the Oracle runtime (SD-8), security test criteria per work package, residual-risk assessment for the §7.3 string consumers, and stakeholder decisions B-1..B-5. Status set to Phase 3 delivered; next milestone Phase 4 TDD implementation.
 - 2026-10-10: Added §3.6 "Reference design: Trino's own JDBC pushdown generator" (per user input): adopted `PreparedQuery`/`QueryParameter`, bind-expression templates, the declarative function-rewrite DSL and capability flags; rejected domain compaction (AP-11).
 - 2026-10-10: Initial English implementation plan (Phase 2). Supersedes the German 2026-10-06 plan. Incorporates stakeholder decisions SD-1..SD-7 (single path, pre-merge evidence gate, bind-everything, typed policy IR, DML and `MERGE` in the first cut, Snowflake experimental, ADR-017 amendment, Databricks production dialect). Defines architecture, interfaces, capability table, removal list, consumer migration, gate G1-G9, work packages in streams A-E plus the cutover, risks, rollback and the Phase 3 hand-off.
