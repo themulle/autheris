@@ -64,6 +64,24 @@ Ad-hoc SQL queries are parsed using an ANTLR4 parser, checked against AST securi
 - **Zero-Trust Multi-Tenancy**: Statement continuation via statement ID validates that calling user and tenant match the query creator (fail-closed).
 - **Protection Against Cross-Catalog Queries**: Queries spanning multiple different catalogs/data sources are rejected to enforce isolation boundaries.
 
+### Federated Query Transport Opt-In (`WebSql:CrossSource:AllowedTransports`)
+
+Federated queries that span several data sources are only available when `Gateway:WebSql:CrossSource:Enabled` is true, and only for transports that are explicitly listed in `Gateway:WebSql:CrossSource:AllowedTransports`. Valid names are the constants of `SqlTransports`: `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints` and `AsyncJob`. When nothing is configured, only `WebSql` and `Trino` are allowed. Every other channel is rejected on federated queries (generic "not supported" response) unless its name is listed. WebSQL itself is part of the default list; other channels that run federated queries (`Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints`, `AsyncJob`) must be opted in. An explicitly empty list allows no transport at all (fail-closed). A configured list replaces the default; it is not merged with it.
+
+```json
+{
+  "Gateway": {
+    "WebSql": {
+      "CrossSource": {
+        "Enabled": true,
+        "AllowedTransports": [ "WebSql", "Trino", "Rest" ]
+      }
+    }
+  }
+}
+```
+
+
 ---
 
 ## 4. Usage Examples
