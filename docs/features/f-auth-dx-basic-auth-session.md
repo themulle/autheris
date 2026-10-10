@@ -31,7 +31,7 @@ One login with user name and password is enough for every surface of the gateway
 | Option | Meaning |
 |---|---|
 | `Session.Enabled` | Enables the cookie. Without `BasicAuth.Enabled` this is a startup error. |
-| `Session.AllowedEnvironments` | Environments in which the cookie is allowed. `Production` is never allowed, not even through this list. Default (when not configured): `Development`. A configured list replaces the default entirely. |
+| `Session.AllowedEnvironments` | Environments in which the cookie is allowed. `Production` is never allowed, not even through this list. Default (when not configured): `Development`. A configured list replaces the default entirely; an empty array (`[]`) aborts startup, so disable the session with `Session.Enabled=false` instead. |
 | `Session.CookieName` | Must start with `__Host-`. |
 | `Session.SlidingExpirationMinutes` | Expiry after inactivity. |
 | `Session.AbsoluteExpirationMinutes` | Maximum lifetime regardless of activity. |
