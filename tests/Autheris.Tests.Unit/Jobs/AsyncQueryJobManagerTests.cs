@@ -12,6 +12,7 @@ using Autheris.Application.Jobs.Interfaces;
 using Autheris.Application.Jobs.Services;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.DependencyInjection;
@@ -245,5 +246,48 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
         using var reader = new StreamReader(stream);
         var content = await reader.ReadToEndAsync();
         content.ShouldContain("a***@example.com");
+    }
+
+    [Fact]
+    public async Task GetJob_ForeignOwnerOrTenant_RecordsDenyAuditWithoutLeakingOwner()
+    {
+        var recorded = new List<AuditLogEntry>();
+        _auditLogRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(recorded.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), CreateUser("alice", "tenant-a"), new TenantId("tenant-a"));
+        recorded.Clear();
+
+        var result = await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-a"), "mallory");
+
+        result.ShouldBeNull();
+        var deny = recorded.ShouldHaveSingleItem();
+        deny.Decision.ShouldBe("DENY");
+        deny.EventType.ShouldBe("ASYNC_JOB_ACCESS_DENIED");
+        deny.TargetTable.ShouldBe($"job:{descriptor.JobId}");
+        deny.ActorSid.Value.ShouldBe("mallory");
+        deny.TenantId.Value.ShouldBe("tenant-a");
+        deny.DetailsJson.ShouldNotContain("alice");
+
+        recorded.Clear();
+        (await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-b"), "alice")).ShouldBeNull();
+        var crossTenant = recorded.ShouldHaveSingleItem();
+        crossTenant.TenantId.Value.ShouldBe("tenant-b");
+        crossTenant.DetailsJson.ShouldNotContain("tenant-a");
+    }
+
+    [Fact]
+    public async Task GetJobResultStream_WhenAllowAuditFails_ThrowsAndReturnsNoStream()
+    {
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), CreateUser("alice", "tenant-a"), new TenantId("tenant-a"));
+        var resultFile = Path.Combine(manager.ScratchDirectory, descriptor.JobId + ".json");
+        await File.WriteAllTextAsync(resultFile, "[]");
+        manager.UpdateJob(descriptor with { State = AsyncJobState.Completed, ResultFilePath = resultFile });
+
+        _auditLogRepo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("audit store down")));
+
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            manager.GetJobResultStreamAsync(descriptor.JobId, new TenantId("tenant-a"), "alice"));
     }
 }

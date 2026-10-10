@@ -56,6 +56,7 @@ public static class AuditEventTypes
     public const string AsyncJobDownloaded = "ASYNC_JOB_DOWNLOADED";
     public const string AsyncJobCancelled = "ASYNC_JOB_CANCELLED";
     public const string AsyncJobStatusRead = "ASYNC_JOB_STATUS_READ";
+    public const string AsyncJobAccessDenied = "ASYNC_JOB_ACCESS_DENIED";
 
     // Governance classification, access plans and DevPortal step-up consoles
     public const string ClassificationProposed = "CLASSIFICATION_PROPOSED";

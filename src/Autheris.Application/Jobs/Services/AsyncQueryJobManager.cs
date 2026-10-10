@@ -102,20 +102,33 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
         }
         _activeCts[jobId] = cts;
 
-        await RecordAuditAsync(
-            descriptor,
-            user,
-            AuditEventTypes.AsyncJobSubmitted,
-            "ALLOW",
-            "Job enqueued for background execution.",
-            ct).ConfigureAwait(false);
+        try
+        {
+            await RecordAuditAsync(
+                descriptor,
+                user,
+                AuditEventTypes.AsyncJobSubmitted,
+                "ALLOW",
+                "Job enqueued for background execution.",
+                ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Fail-closed: no audit record, no job.
+            _jobs.TryRemove(jobId, out _);
+            if (_activeCts.TryRemove(jobId, out var failedCts))
+            {
+                failedCts.Dispose();
+            }
+            throw;
+        }
 
         await _channel.Writer.WriteAsync(new AsyncJobExecutionItem(descriptor, request, user, cts), ct).ConfigureAwait(false);
 
         return descriptor;
     }
 
-    public Task<AsyncJobDescriptor?> GetJobAsync(
+    public async Task<AsyncJobDescriptor?> GetJobAsync(
         string jobId,
         TenantId tenantId,
         string userSid,
@@ -125,7 +138,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
 
         if (!_jobs.TryGetValue(jobId, out var job))
         {
-            return Task.FromResult<AsyncJobDescriptor?>(null);
+            return null;
         }
 
         // Zero-IDOR isolation: return 404 (null) if tenant or user do not match
@@ -133,10 +146,11 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
             !string.Equals(job.SubmittedByUserId, userSid, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning("Zero-IDOR access violation blocked for job {JobId}. Tenant mismatch or user mismatch.", jobId);
-            return Task.FromResult<AsyncJobDescriptor?>(null);
+            await RecordAccessDeniedAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            return null;
         }
 
-        return Task.FromResult<AsyncJobDescriptor?>(job);
+        return job;
     }
 
     public async Task<Stream?> GetJobResultStreamAsync(
@@ -294,6 +308,39 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to record audit event for job {JobId}", job.JobId);
+            if (string.Equals(decision, "ALLOW", StringComparison.Ordinal))
+            {
+                // Fail-closed: an ALLOW outcome (e.g. a result download) must never happen without its audit record.
+                throw;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Records a DENY event for a Zero-IDOR mismatch. Attributed to the requesting tenant/actor only;
+    /// the foreign owner and tenant of the job are never written. Best effort: the denial itself is already enforced.
+    /// </summary>
+    private async Task RecordAccessDeniedAsync(string jobId, TenantId requesterTenant, string requesterSid, CancellationToken ct)
+    {
+        try
+        {
+            var entry = new AuditLogEntry
+            {
+                Id = Guid.NewGuid(),
+                TenantId = requesterTenant,
+                OccurredAt = DateTimeOffset.UtcNow,
+                EventType = AuditEventTypes.AsyncJobAccessDenied,
+                ActorSid = new Sid(string.IsNullOrWhiteSpace(requesterSid) ? "anonymous" : requesterSid),
+                TargetTable = $"job:{jobId}",
+                Decision = "DENY",
+                DetailsJson = JsonSerializer.Serialize(new { JobId = jobId, Message = "Job not accessible for the requesting principal." })
+            };
+
+            await _auditLogRepository.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Failed to record access-denied audit event for job {JobId}", jobId);
         }
     }
 }
