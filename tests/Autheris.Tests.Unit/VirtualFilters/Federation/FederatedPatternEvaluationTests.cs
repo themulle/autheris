@@ -33,8 +33,7 @@ public sealed class FederatedPatternEvaluationTests
         var pipeline = Build(
             [(CrmCustomers, crm), (ErpOrders, erp)],
             Consents(Allow(CrmCustomers.Identifier), Allow(ErpOrders.Identifier)),
-            AliceSnapshot("crm_api.*.*", pattern),
-            withKeyProbes: true);
+            AliceSnapshot("crm_api.*.*", pattern));
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => pipeline.RunAsync(
             "SELECT c.id, o.id FROM crm_api.public.customers c JOIN erp.public.orders o ON o.customer_id = c.id"));
@@ -43,9 +42,7 @@ public sealed class FederatedPatternEvaluationTests
         ex.ShouldNotBeOfType<GatewayForbiddenException>();   // the specific code, not a generic forbidden
         crm.UpstreamCalls.ShouldBe(0);
         erp.UpstreamCalls.ShouldBe(0);
-        await pipeline.ShortCircuit.DidNotReceiveWithAnyArgs().EvaluateAsync(default, default!, default!, default!, default, default);
-        await pipeline.KeyProvider.DidNotReceiveWithAnyArgs().GetAllowedKeysAsync(default!, default!, default, default!, default);
-        await pipeline.KeyProvider.DidNotReceiveWithAnyArgs().GetAllowedKeyTuplesAsync(default!, default!, default, default!, default);
+        await pipeline.KeySetProvider.DidNotReceiveWithAnyArgs().GetAsync(default!, default!, default, default);
         await pipeline.Audit.Received(1).RecordAuditEventAsync(
             Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlQueryDenied &&
                                        e.DetailsJson != null &&

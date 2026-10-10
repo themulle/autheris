@@ -1,0 +1,39 @@
+using System.ComponentModel.DataAnnotations;
+
+namespace Autheris.Domain.Options;
+
+/// <summary>
+/// F-GOV-14: Virtual Filters on Web-API tables in WebSQL cross-source queries (<c>VirtualFilters:Federation</c>).
+/// Authorized key sets are loaded from the filter's SQL key source, bounded and cached per tenant and definition.
+/// </summary>
+public sealed class VirtualFilterFederationOptions
+{
+    /// <summary>Lifetime (seconds) of a cached authorized key set; 1..300.</summary>
+    [Range(1, 300)] public int KeyCacheTtlSeconds { get; init; } = 30;
+
+    /// <summary>Largest authorized key set; one more key denies with <c>VF_KEY_SET_TOO_LARGE</c> (never truncated).</summary>
+    [Range(1, 1_000_000)] public int MaxAuthorizedKeys { get; init; } = 50_000;
+
+    /// <summary>Command timeout (seconds) of the key query; 1..300.</summary>
+    [Range(1, 300)] public int KeyQueryTimeoutSeconds { get; init; } = 10;
+
+    /// <summary>Size limit (bytes) of the dedicated key set cache (separate from the shared memory cache).</summary>
+    [Range(1L * 1024 * 1024, 4L * 1024 * 1024 * 1024)] public long KeyCacheSizeLimitBytes { get; init; } = 64L * 1024 * 1024;
+
+    /// <summary>Throws when a value is out of range (fail closed at startup instead of at query time).</summary>
+    public void Validate()
+    {
+        Check(KeyCacheTtlSeconds, 1, 300, nameof(KeyCacheTtlSeconds));
+        Check(MaxAuthorizedKeys, 1, 1_000_000, nameof(MaxAuthorizedKeys));
+        Check(KeyQueryTimeoutSeconds, 1, 300, nameof(KeyQueryTimeoutSeconds));
+        Check(KeyCacheSizeLimitBytes, 1L * 1024 * 1024, 4L * 1024 * 1024 * 1024, nameof(KeyCacheSizeLimitBytes));
+    }
+
+    private static void Check(long value, long min, long max, string name)
+    {
+        if (value < min || value > max)
+        {
+            throw new ArgumentOutOfRangeException(name, value, $"VirtualFilters:Federation:{name} must be between {min} and {max}.");
+        }
+    }
+}

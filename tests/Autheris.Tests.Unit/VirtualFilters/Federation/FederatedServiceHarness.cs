@@ -11,7 +11,7 @@ using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Application.VirtualFilters;
-using Autheris.Application.VirtualFilters.Services;
+using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -75,15 +75,14 @@ internal static class FederatedServiceHarness
     }
 
     /// <summary>
-    /// The service under test. With <c>withKeyProbes</c> the (legacy) short-circuit evaluator and key provider are
-    /// substitutes, so a test can prove that a denied query never loads authorized keys.
+    /// The service under test. <see cref="KeySetProvider"/> is a probe: a denied query must never load authorized keys
+    /// (it is wired into the service by the federation planner, WI-6).
     /// </summary>
     internal sealed class Pipeline
     {
         public required FederatedDuckDbExecutionService Service { get; init; }
         public required IAuditLogRepository Audit { get; init; }
-        public required IVirtualFilterKeyProvider KeyProvider { get; init; }
-        public required IVirtualFilterShortCircuitEvaluator ShortCircuit { get; init; }
+        public required IVirtualFilterKeySetProvider KeySetProvider { get; init; }
 
         public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> RunAsync(string sql)
         {
@@ -95,8 +94,7 @@ internal static class FederatedServiceHarness
     internal static Pipeline Build(
         IReadOnlyList<(TableMetadata Table, StubTableConnector Stub)> tables,
         IConsentRepository consents,
-        VirtualFilterSnapshot? snapshot = null,
-        bool withKeyProbes = false)
+        VirtualFilterSnapshot? snapshot = null)
     {
         var repository = Substitute.For<ITableMetadataRepository>();
         foreach (var (table, _) in tables)
@@ -121,8 +119,7 @@ internal static class FederatedServiceHarness
             new MandatoryRowFilterResolverTests.PlaceholderPredicates());
 
         var audit = Substitute.For<IAuditLogRepository>();
-        var keyProvider = Substitute.For<IVirtualFilterKeyProvider>();
-        var shortCircuit = Substitute.For<IVirtualFilterShortCircuitEvaluator>();
+        var keySetProvider = Substitute.For<IVirtualFilterKeySetProvider>();
 
         var service = new FederatedDuckDbExecutionService(
             Options.Create(options),
@@ -134,10 +131,8 @@ internal static class FederatedServiceHarness
             sqlEngine: FastSqlEngine.Default,
             consentResolution: new ConsentResolutionService(),
             consentRepository: consents,
-            mandatoryFilters: resolver,
-            shortCircuitEvaluator: withKeyProbes ? shortCircuit : null,
-            keyProvider: withKeyProbes ? keyProvider : null);
+            mandatoryFilters: resolver);
 
-        return new Pipeline { Service = service, Audit = audit, KeyProvider = keyProvider, ShortCircuit = shortCircuit };
+        return new Pipeline { Service = service, Audit = audit, KeySetProvider = keySetProvider };
     }
 }

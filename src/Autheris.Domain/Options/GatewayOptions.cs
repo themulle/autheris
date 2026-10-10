@@ -1747,6 +1747,9 @@ public sealed class VirtualFilterOptions
     /// </summary>
     public bool RequireApproval { get; init; } = false;
 
+    /// <summary>F-GOV-14: Virtual Filters on Web-API tables in WebSQL cross-source queries.</summary>
+    public VirtualFilterFederationOptions Federation { get; init; } = new();
+
     /// <summary>
     /// SR15-11: Optional allowlist of table names or qualified identifiers allowed in virtual filter subqueries.
     /// When non-empty, any table referenced in a virtual filter subquery must be present in this list.
