@@ -69,7 +69,7 @@ public static class TenantPredicateFactory
             case TenantComparisonStyle.RawCast:
             {
                 static Expression Raw(Expression operand) =>
-                    new FunctionCallExpression(new SqlQualifiedName("UTL_RAW", "CAST_TO_RAW"), new[] { (Expression)new CastExpression(operand, "varchar") });
+                    new FunctionCallExpression(new SqlQualifiedName("SYS", "UTL_RAW", "CAST_TO_RAW"), new[] { (Expression)new CastExpression(operand, "varchar") });
 
                 return new BinaryExpression(
                     new BinaryExpression(Column(), BinaryOperator.Equal, Param()),

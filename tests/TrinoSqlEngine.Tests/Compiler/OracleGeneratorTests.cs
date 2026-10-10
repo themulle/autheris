@@ -160,7 +160,7 @@ public class OracleGeneratorTests
             .Generate(stmt, new ParameterSource(new Dictionary<string, PolicyValue> { ["__t"] = new("acme", SqlParameterType.String) }.ToFrozenDictionary(), new Dictionary<string, object?>()), CancellationToken.None);
 
         Assert.Contains("\"TENANT_ID\" = :p1", c.Sql);
-        Assert.Contains("\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"TENANT_ID\" AS VARCHAR2(4000))) = \"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000)))", c.Sql);
+        Assert.Contains("\"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(\"TENANT_ID\" AS VARCHAR2(4000))) = \"SYS\".\"UTL_RAW\".\"CAST_TO_RAW\"(CAST(:p1 AS VARCHAR2(4000)))", c.Sql);   // CR-ADG-24: schema-qualified, never resolved through the current schema
         Assert.Single(c.Parameters);
     }
 
