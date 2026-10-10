@@ -311,6 +311,25 @@ Kombiniert Pre-Authentication IP-Limiting mit Token-Bucket-Verbrauch pro Windows
 | `TokensPerSecond` | `int` | `1 .. 10000` | `50` | Nachfüllrate des Token-Buckets pro Sekunde. |
 | `MaxCostPerMinute` | `int` | `100 .. 1000000` | `10000` | Maximales GraphQL-Komplexitätsbudget pro Minute pro Benutzer. |
 
+#### `RateLimiting.ClientTiers` (GraphQL Pre-Execution Cost & Quota Defense)
+
+Steuert die [`CostAndQuotaMiddleware`](file:///root/autheris/src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs) ([`F-PERF-13`](features/f-perf-13-cost-and-quota-rate-limiting.md)) zur dynamischen Zuordnung von Aufrufern zu Kontingent-Stufen (`Free`, `Standard`, `Enterprise`, `Internal`) vor der GraphQL-Ausführung.
+
+| Eigenschaft | Typ | Standard | Beschreibung |
+| :--- | :--- | :--- | :--- |
+| `RoleTierMappings` | `Dictionary<string, string>` | `{}` | Mappt Benutzerrollen (Claims) auf Tiers (z. B. `"FinanceAdmins": "Enterprise"`). |
+| `ApiKeys` | `Dictionary<string, string>` | `{}` | Mappt registrierte API-Keys (`X-API-Key`) auf Tiers. |
+| `TierLimits` | `Dictionary<string, ClientTierLimitOverride>` | Standardwerte je Tier | Ermöglicht das Überschreiben der Standard-Grenzwerte pro Tier. |
+
+##### `ClientTierLimitOverride` Parameter
+| Eigenschaft | Typ | Standard (Standard / Enterprise) | Beschreibung |
+| :--- | :--- | :--- | :--- |
+| `MaxCostPerQuery` | `int?` | `250` / `1000` | Maximal erlaubte statische AST-Kostenpunkte pro Einzelabfrage (Fail-Fast bei Überschreitung mit `QUERY_COST_QUOTA_EXCEEDED`). |
+| `MaxComplexityDepth` | `int?` | `10` / `20` | Maximale Verschachtelungstiefe der GraphQL-Selektion. |
+| `MaxTokensCapacity` | `int?` | `1000` / `10000` | Maximale Kapazität des verteilten Token-Buckets. |
+| `TokenRefillRatePerSecond` | `double?` | `20.0` / `200.0` | Nachfüllrate von Kostenpunkten pro Sekunde. |
+| `ExposeCostExtensions` | `bool?` | `true` | Schaltet die Rückgabe von `extensions.cost` in der GraphQL-Antwort frei. |
+
 ```json
 "RateLimiting": {
   "PreAuthIpRateLimit": {
@@ -322,6 +341,22 @@ Kombiniert Pre-Authentication IP-Limiting mit Token-Bucket-Verbrauch pro Windows
     "TokenBucketCapacity": 500,
     "TokensPerSecond": 50,
     "MaxCostPerMinute": 10000
+  },
+  "ClientTiers": {
+    "RoleTierMappings": {
+      "FinanceSuperUser": "Enterprise",
+      "AnalyticsService": "Standard"
+    },
+    "ApiKeys": {
+      "ak_live_partner_abc123": "Enterprise"
+    },
+    "TierLimits": {
+      "Standard": {
+        "MaxCostPerQuery": 300,
+        "MaxTokensCapacity": 2000,
+        "TokenRefillRatePerSecond": 30.0
+      }
+    }
   }
 }
 ```

@@ -50,6 +50,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-PERF-10** | Split-Engine & Zero-LOH Streaming Result Pipelining (not implemented) | [f-perf-10-streaming-pipelining.md](f-perf-10-streaming-pipelining.md) |
 | **F-PERF-11** | Multi-Tenant Isolated Query Plan Cache & Kestrel Tuning | [f-perf-11-query-plan-cache.md](f-perf-11-query-plan-cache.md) |
 | **F-PERF-12** | Incremental Delivery via @defer & @stream | [f-perf-12-incremental-delivery.md](f-perf-12-incremental-delivery.md) |
+| **F-PERF-13** | GraphQL Cost & Client-Tier Quota Rate Limiting (CostAndQuotaMiddleware) | [f-perf-13-cost-and-quota-rate-limiting.md](f-perf-13-cost-and-quota-rate-limiting.md) |
 | **F-SEC-04** | Relationship-Based Access Control (ReBAC via OpenFGA / Zanzibar) | [f-sec-04-rebac-openfga.md](f-sec-04-rebac-openfga.md) |
 | **F-SQL-01** | Declarative SQL-to-API Engine & Auto-OpenAPI | [f-sql-01-declarative-sql-endpoints.md](f-sql-01-declarative-sql-endpoints.md) |
 | **F-SQL-02** | Governed Stored Procedures & Multi-DB TVFs | [f-sql-02-governed-stored-procedures.md](f-sql-02-governed-stored-procedures.md) |
