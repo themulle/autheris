@@ -71,6 +71,12 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         return true;
     }
 
+    private static (int Status, string Title, int? RetryAfter) Denial(GatewaySecurityException denial)
+    {
+        var (status, title) = GatewayDenialStatusMapper.Map(denial);
+        return (status, title, null);
+    }
+
     private static (int Status, string Title, int? RetryAfter) Map(Exception exception) => exception switch
     {
         GatewayInvalidQueryException e => (StatusCodes.Status400BadRequest, e.Message, null),
@@ -82,9 +88,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         Antlr4.Runtime.RecognitionException => (StatusCodes.Status400BadRequest, "Invalid SQL syntax.", null),
         Exception e when e.InnerException is Antlr4.Runtime.Misc.ParseCanceledException or Antlr4.Runtime.RecognitionException =>
             (StatusCodes.Status400BadRequest, "Invalid SQL syntax.", null),
-        GatewayUnauthorizedException => (StatusCodes.Status401Unauthorized, "Authentication required.", null),
-        GatewaySecurityException { ErrorCode: "RESPONSE_TOO_LARGE" } => (StatusCodes.Status400BadRequest, "The response exceeds the size limit.", null),
-        GatewaySecurityException => (StatusCodes.Status403Forbidden, "Access denied.", null),
+        GatewaySecurityException denial => Denial(denial),
         _ => DataAccessErrorClassifier.Classify(exception) switch
         {
             DataAccessErrorKind.Timeout => (StatusCodes.Status504GatewayTimeout, "The request exceeded the execution time limit.", null),
