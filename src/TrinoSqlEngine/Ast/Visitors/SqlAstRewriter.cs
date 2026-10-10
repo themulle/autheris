@@ -3,6 +3,8 @@ namespace TrinoSqlEngine.Ast.Visitors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
@@ -11,9 +13,24 @@ using TrinoSqlEngine.Ast.Nodes;
 /// </summary>
 public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 {
+    private int _visits;
+
+    /// <summary>
+    /// Cooperative cancellation (compile budget, SEC-ADG-05): observed every 256 visited nodes. Defaults to none.
+    /// </summary>
+    public CancellationToken CancellationToken { get; set; }
+
     public virtual SqlNode Visit(SqlNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
+
+        // SEC-ADG-05: a StackOverflowException cannot be caught and would end the process for every tenant. Deep trees raise
+        // InsufficientExecutionStackException here, which the compiler maps to a typed limit error.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if ((++_visits & 255) == 0)
+        {
+            CancellationToken.ThrowIfCancellationRequested();
+        }
 
         return node switch
         {
@@ -38,6 +55,8 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             ColumnReference cr => VisitColumnReference(cr),
             ParameterReference p => VisitParameterReference(p),
             PolicyParameterExpression policyParameter => policyParameter,
+            // INV-3: injected security predicates are opaque; a rewriter never descends into them.
+            SecurityPredicateExpression securityPredicate => securityPredicate,
             LiteralExpression lit => VisitLiteralExpression(lit),
             BinaryExpression b => VisitBinaryExpression(b),
             UnaryExpression un => VisitUnaryExpression(un),

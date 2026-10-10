@@ -507,6 +507,12 @@ public abstract class SqlDialectGeneratorBase : ISqlDialectGenerator
         context.Tick();
         switch (expression)
         {
+            case SecurityPredicateExpression securityPredicate:
+                // Always parenthesized: the injected predicate must never combine with neighbouring operators by precedence.
+                builder.Append('(');
+                GenerateExpression(securityPredicate.Predicate, ref builder, context);
+                builder.Append(')');
+                break;
             case PolicyParameterExpression policyParameter:
                 if (!context.IsBound)
                 {
