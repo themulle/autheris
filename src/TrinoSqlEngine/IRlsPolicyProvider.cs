@@ -354,6 +354,7 @@ public enum TargetSqlDialect
     Sqlite,
     DuckDb,
     Snowflake,
-    Oracle
+    Oracle,
+    Databricks
 }
 

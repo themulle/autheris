@@ -35,6 +35,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="Spark\runner.py" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
     <None Update="xunit.runner.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

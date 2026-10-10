@@ -308,7 +308,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         typed.RecordTable(new TableUsage(tid, applies, fingerprint,
             maskFingerprints.Count == 0 ? "-" : AstReflection.Fingerprint(maskFingerprints)));
 
-        var canonical = new SqlQualifiedName(new[] { new SqlIdentifier(tid.Schema, true), new SqlIdentifier(tid.Table, true) });
+        var canonical = tid.ToQualifiedName();
         var innerAlias = referencesTarget ? new SqlIdentifier(RowFilterAliases.Target) : null;
         var inner = new SelectStatement(null,
             new QuerySpecification(false, projections, new NamedTableSource(canonical, innerAlias), where, null, null),

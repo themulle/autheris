@@ -76,6 +76,15 @@ public static class TenantPredicateFactory
                     BinaryOperator.And,
                     new BinaryExpression(Raw(Column()), BinaryOperator.Equal, Raw(Param())));
             }
+            case TenantComparisonStyle.CastBinary:
+            {
+                // Only the binary comparison. A plain "col = t" conjunct must NOT be added for the index/data-skipping benefit:
+                // on a UTF8_LCASE column Spark's constant propagation turns "col = 'acme' AND CAST(col AS BINARY) = CAST('acme' AS BINARY)"
+                // into a tautology (found by the Spark proxy test), which would make the comparison case-insensitive again.
+                static Expression Raw(Expression operand) => new CastExpression(operand, "varbinary");
+
+                return new BinaryExpression(Raw(Column()), BinaryOperator.Equal, Raw(Param()));
+            }
             default:
                 throw new NotSupportedException($"No binary-exact tenant comparison is defined for {capabilities.Dialect}.");
         }

@@ -46,7 +46,14 @@ public enum TenantComparisonStyle
     /// RAW comparison is byte-exact whatever <c>NLS_COMP</c>, <c>NLS_SORT</c> or the column collation (for example
     /// <c>BINARY_CI</c>) say. The binder rejects an empty tenant string because Oracle treats it as NULL.
     /// </summary>
-    RawCast
+    RawCast,
+
+    /// <summary>
+    /// Databricks: <c>CAST(col AS BINARY) = CAST(t AS BINARY)</c>. Casting STRING to BINARY yields the UTF-8 bytes, whose comparison
+    /// is exact regardless of any column collation (for example <c>UTF8_LCASE</c>). There is deliberately no plain <c>col = t</c>
+    /// conjunct: Spark's constant propagation would turn the pair into a tautology on collated columns.
+    /// </summary>
+    CastBinary
 }
 
 /// <summary>Declarative Trino-function to dialect rule. No matching rule means the function is rejected (INV-1).</summary>

@@ -51,10 +51,7 @@ internal sealed class PolicySubqueryTenantRewriter : SqlAstRewriter
         var entry = _typed.Catalog.Resolve(node.Name)
             ?? throw new SecurityException("A policy subquery references a table that is not in the catalog.");
         _typed.RecordDependency(node.Name, entry);
-        var canonical = new SqlQualifiedName(new[]
-        {
-            new SqlIdentifier(entry.Identity.Schema, true), new SqlIdentifier(entry.Identity.Table, true)
-        });
+        var canonical = entry.Identity.ToQualifiedName();
 
         var tenant = _typed.BuildTenantPredicate(entry);
         if (tenant is null)

@@ -1594,7 +1594,7 @@ Priority order and stacked branches (each branch is based on the head of the pre
 | 1 | `feat/ast-mssql-select` | Core (A1-A6, A8 for SELECT) plus SQL Server | see 18.2 |
 | 2 | `feat/ast-duckdb-select` | DuckDB SELECT | see 18.3 |
 | 3 | `feat/ast-postgres-select` | PostgreSQL SELECT | see 18.4 |
-| 4 | `feat/ast-databricks-select` | Databricks SELECT | planned |
+| 4 | `feat/ast-databricks-select` | Databricks SELECT | see 18.5 |
 | 5 | `feat/ast-oracle-select` | Oracle SELECT, based on the PostgreSQL head plus `feat/ast-failclosed-fixes` (WP-D4), WP-F1..F4 | see 18.6 |
 | later | `feat/ast-dml` | A7 (DML, MERGE) for all dialects | deferred; not started in this work |
 
@@ -1777,3 +1777,13 @@ Recommendation:
 3. Land the fixes for CR-ADG-01..11 on `feat/ast-dql` only (one commit per finding, TDD), not on the stacked branches. The stacked branches are frozen as review references.
 4. `feat/ast-dml` (WP-A7) starts from `feat/ast-dql` after the Blockers are closed, and X1 later merges from there.
 5. Phase 5 re-review covers the delta `feat/ast-dql` versus the merge commit of step 1.
+
+### 18.5 Branch `feat/ast-databricks-select` (on top of `feat/ast-postgres-select`)
+
+Scope: `TargetSqlDialect.Databricks` (appended), capability entry (provisional 1,000 bind budget, 255-character identifiers, `:pN` markers, `InDbHmac = false` so HMAC degrades to Redact, `SupportsLateral = false`), `DatabricksDialectGenerator` (backtick identifiers with doubling, `$ { }` in any identifier rejected (SEC-ADG-10), Unity Catalog three-part names through `TableIdentity.Catalog`, string literals never emitted (the generator throws if one reaches it), structural `LIMIT/OFFSET`, `WITH TIES`, TIME literals, arrays and subscripts rejected, type mapping, `timestampadd`, `DATE_TRUNC` with a reviewed unit fragment, `INSTR`/`APPROX_COUNT_DISTINCT`/`ANY_VALUE` mapping), typed masks, token guard `RejectVariableSubstitutionSequences` (part of `Strict`, on for Databricks targets), `DatabricksCompiledSqlBinder` (names `p1..pN`).
+
+Exact tenant comparison: `CAST(col AS BINARY) = CAST(t AS BINARY)` only. The Spark proxy showed that a plain `col = t` conjunct on a `UTF8_LCASE` column lets Spark propagate the constant into the binary conjunct and makes the comparison case-insensitive again, so the plain conjunct is omitted for Databricks (no data skipping on the tenant column; documented trade-off).
+
+Evidence: golden-SQL style generator tests, and execution on the Spark proxy (`apache/spark:4.0.0-python3`, pinned by digest, ANSI mode and variable substitution on, driven by `tests/Autheris.Tests.Integration/Spark/runner.py` over stdin because the Docker daemon cannot see bind mounts): RLS visibility, collation collision on a `UTF8_LCASE` column, policy subquery, shapes, hostile values including `${...}`, masks. Resolved `(verify)` items: `OFFSET` and `TIMESTAMP_NTZ` work on Spark; `LATERAL` is only probed informationally and stays rejected until Databricks SQL is probed (G9).
+
+Not done on this branch (follow-ups): the REST connector (C3, not needed for SELECT compilation; the binder produces named typed parameters that map 1:1 to the Statement Execution API), the live secret-gated job (G9/C5; the provisional bind budget stays), the 300-fixture conformance matrix (about 60 generator cases exist), Delta DML (belongs to `feat/ast-dml`). OSS Spark is not Databricks SQL (risk R-7).
