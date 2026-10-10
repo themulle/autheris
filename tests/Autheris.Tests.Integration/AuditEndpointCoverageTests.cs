@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autheris.Domain.Audit;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,6 +27,30 @@ public class AuditEndpointCoverageTests : IClassFixture<WebApplicationFactory<Pr
         "/ui/swagger",
         "/odata/v4/$swagger",
         "/swagger"
+    };
+
+    /// <summary>
+    /// FR-03: every route with AuditLevel.Delegated skips the central success audit and relies on its own domain audit.
+    /// Each such route must be reviewed and listed here with a justification; a new Delegated route fails CI until then.
+    /// Key format: "METHOD pattern" (HTTP methods sorted, joined by ',', or "ANY").
+    /// </summary>
+    private static readonly Dictionary<string, string> ApprovedDelegatedRoutes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["POST /api/v1/jobs/query"] =
+            "AsyncQueryJobManager.SubmitJobAsync writes the ASYNC_JOB_SUBMITTED ALLOW record fail-closed before enqueueing; " +
+            "denials, failures and exceptions are finalized by AccessAuditMiddleware.",
+        ["GET /api/v1/jobs/{jobId}/result"] =
+            "AsyncQueryJobManager.GetJobResultStreamAsync writes ASYNC_JOB_DOWNLOADED fail-closed before returning a stream; " +
+            "IDOR attempts record ASYNC_JOB_ACCESS_DENIED; other failures are finalized by AccessAuditMiddleware.",
+        ["DELETE /api/v1/jobs/{jobId}"] =
+            "AsyncQueryJobManager.CancelJobAsync writes ASYNC_JOB_CANCELLED; IDOR attempts record ASYNC_JOB_ACCESS_DENIED; " +
+            "other failures are finalized by AccessAuditMiddleware.",
+        ["POST /api/admin/tokens/revoke"] =
+            "TokenRevocationEndpoints writes the TOKEN_REVOKED record itself after revocation; " +
+            "403/401/errors are finalized by AccessAuditMiddleware.",
+        ["ANY /graphql/{**slug}"] =
+            "GraphQL data access is audited per query by the governed SQL executor (table-level TABLE_QUERY records); " +
+            "HTTP-level denials (401/403/429/5xx) and exceptions are finalized by AccessAuditMiddleware.",
     };
 
     public AuditEndpointCoverageTests(WebApplicationFactory<Program> factory)
@@ -95,5 +120,29 @@ public class AuditEndpointCoverageTests : IClassFixture<WebApplicationFactory<Pr
 
         disallowedExemptions.ShouldBeEmpty(
             $"Found unapproved AuditExemptions outside the allowlist:\n{string.Join("\n", disallowedExemptions)}");
+    }
+
+    private static string RouteKey(RouteEndpoint ep)
+    {
+        var methods = ep.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods;
+        var method = methods is { Count: > 0 } ? string.Join(',', methods.OrderBy(m => m, StringComparer.Ordinal)) : "ANY";
+        return $"{method} {ep.RoutePattern.RawText ?? "/"}";
+    }
+
+    [Fact]
+    public void DelegatedAuditRoutes_MustBeExplicitlyReviewedAndJustified()
+    {
+        var delegated = GetRouteEndpoints()
+            .Where(ep => ep.Metadata.GetMetadata<AuditPolicy>()?.Level == AuditLevel.Delegated)
+            .Select(RouteKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var unreviewed = delegated
+            .Where(k => !ApprovedDelegatedRoutes.TryGetValue(k, out var why) || string.IsNullOrWhiteSpace(why))
+            .ToList();
+
+        unreviewed.ShouldBeEmpty(
+            $"FR-03 Violation: Delegated audit routes without an approved justification (add to {nameof(ApprovedDelegatedRoutes)} after review):\n{string.Join("\n", unreviewed)}");
     }
 }
