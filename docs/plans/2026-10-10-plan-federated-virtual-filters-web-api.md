@@ -745,3 +745,65 @@ Verification: `dotnet build Autheris.sln` 0 warnings, 0 errors; unit tests 3945 
 PLAN-GOV-KI-13). Integration (filter `Federat|WebSql|CrossSource|VirtualFilter|RowFilterChannelParity`): 61 passed,
 3 failed; the 3 failures (`*ChannelParityTests` channel `sql-endpoint`, "Declarative SQL endpoint 'air1_ids' is not
 registered") fail identically on the baseline `fb5f3f5` and are unrelated.
+
+### Implementation Log — batch B
+
+**Phase 4, batch B** (`csharp-tdd-developer`, 2026-10-10): WI-3, WI-4, WI-5 together with WI-19.
+
+| WI | Status | Commit | Tests (ST) |
+|---|---|---|---|
+| WI-3 | Done | `add7654` | `TableAccessDecisionVirtualFilterTests` (ST-11), `MandatoryRowFilterResolverAppliedBindingsTests` (ST-10, decision part), `TableAccessPolicyMandatoryFilterTests.Restrict_AfterVirtualFilter_ResidualKeepsAbacFilter` |
+| WI-4 | Done | `e57d875` | `VirtualFilterKeyCanonicalizerTests`, `VirtualFilterEnforcementTests` (ST-12), `GovernedConnectorReaderVirtualFilterTests` (ST-13, ST-38, C-6) |
+| WI-5 + WI-19 | Done | `bddc0f7` | `StructuredFilterKeyQueryBuilderTests` (ST-15 query text), `SqlVirtualFilterKeySetProviderTests` (ST-14..ST-18, ST-20, ST-21), `VirtualFilterKeySetProviderWiringTests` (ST-19), `FederatedVirtualFilterInterimTests` |
+
+Deviations and refinements (all in the fail-closed direction):
+
+- WI-3: the row filters added after the Virtual Filter predicate are kept as a list
+  (`RowFiltersAfterVirtualFilters`) instead of one string, because the byte-identical combined text of two successive
+  ABAC additions cannot be reproduced from a single composed string. Pair identity is
+  `AppliedVirtualFilterBindingKey(TenantId, Filter.Id, ComputeDefinitionHash(), Binding.ComputeHash(), SnapshotGeneration)`
+  (SEC-20; `FilterBinding.ComputeHash()` is public now). `WithoutEnforcedVirtualFilters` requires the enforced pairs to
+  be **exactly** the applied pairs (an extra pair also denies), and a decision that carries a predicate without pairs
+  denies. `WithMandatoryPredicate` twice throws. The streaming ABAC merge (`StreamRlsPolicyEnforcer`) also uses
+  `WithAdditionalRowFilter` (same text). `MandatoryFilterOutcome.AppliedBindings` is an init property (positional
+  constructor unchanged).
+- WI-4 / C-6 / SEC-14: the enforcement is passed as `GovernedRowPolicy.VirtualFilterEnforcement`; the coverage check
+  (`WithoutEnforcedVirtualFilters`) and a table-identity check run **before** the connector is called, so an
+  incomplete enforcement causes no upstream request. `VirtualFilterKeySet` was introduced with WI-4 (the enforcement
+  needs it). SEC-18 is applied strictly: an integer key accepts a `double` only if integral and `|d| < 2^53` (the plan
+  said `<=`; 2^53 itself is exactly the collision value of `9007199254740993.0`). Text keys accept only strings and
+  integral numbers; decimals are normalized (trailing zeros removed). `VirtualFilterKeyType` members are
+  `IntegerNumber`, `DecimalNumber`, `Uuid`, `Text` (analyzer rule CA1720). The planner-only factory
+  `VirtualFilterEnforcement.Create` is `internal`.
+- WI-5 / C-4: single-flight loading uses 32 striped `SemaphoreSlim`s in `VirtualFilterKeySetCache` (bounded, no
+  per-key lock leak); each waiter uses its own cancellation token; failures are not cached. The cache has its own
+  `SizeLimit` (`KeyCacheSizeLimitBytes`, default 64 MB) and every entry its estimated size. The cache key contains the
+  filter id, so a filter object with a new id is a cache miss (stable ids come from the snapshot). A cached set larger
+  than the current `MaxAuthorizedKeys` also denies. Condition values are bound as `long` (integral numeric literal),
+  `decimal` (other numeric literal) or text, mirroring the SQL-channel literal rendering. The provider re-validates the
+  filter definition (SEC-23), requires `filter.TenantId == caller tenant`, all FROM/JOIN tables to be SQL tables of
+  one data source whose connection dialect equals the catalog dialect, and maps every non-security exception
+  (including catalog and connection errors and cancellation) to `VIRTUAL_FILTER_SOURCE_UNAVAILABLE`; logs carry the
+  filter name and exception type only (SEC-11). The key session is initialized with the tenant only (no SID).
+- WI-5 interim wiring: deleting `IVirtualFilterKeyProvider` also removed its only consumer, the legacy
+  `VirtualFilterShortCircuitEvaluator` (+ tests) and `FederatedDuckDbExecutionService.EvaluateVirtualFiltersAsync`
+  with its three optional constructor dependencies (planned for WI-6, pulled forward to keep the build green).
+  Until WI-6 wires `IVirtualFilterFederationPlanner`, every WebSQL cross-source query over an HTTP table with an
+  applied Virtual Filter is denied (403) by the governed read path, including point lookups that previously returned
+  a silent empty result (`FederatedVirtualFilterInterimTests`). `IVirtualFilterKeySetProvider` is registered in DI but
+  not yet consumed. `CrossSourcePlanner`'s `VirtualFilterJoinSpec`/pushdown-argument parameters, `SqlPointLookupExtractor`
+  and `PushdownUrlFormatter` remain unused in production until WI-6..WI-8 delete them.
+
+Existing tests changed: `FederatedServiceHarness` (probe is now `IVirtualFilterKeySetProvider`, `withKeyProbes`
+removed), `FederatedPatternEvaluationTests` (asserts the key set provider is not called),
+`FederatedVirtualFilterDuckDbTests` (short-circuit-miss test removed with the evaluator); deleted
+`VirtualFilterKeyProviderTests`, `VirtualFilterShortCircuitEvaluatorTests`. `StructuredFilterSqlTests` unchanged and
+green after the `StructuredFilterSqlParts` extraction.
+
+Open points for later batches: ST-10 "key provider called only for Alice's filter" (needs the WI-6 planner); the
+timeout CTS around key loading (C-5/SEC-12, WI-6); upstream egress still happens before the 403 of the interim state
+(the connector is read, then the in-memory filter denies) until WI-6 denies or enforces up front.
+
+Verification: `dotnet build Autheris.sln` 0 warnings, 0 errors; unit tests 4066 passed, 1 failed (the pre-existing
+`WormConfigurationAuditServiceTests` failure). Integration (same filter as batch A): 61 passed, 3 failed (the same
+pre-existing `sql-endpoint` channel parity rows).
