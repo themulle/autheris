@@ -1175,3 +1175,27 @@ Fixes for the non-blocking findings CR-17..CR-19 of the re-review (loop 1), each
 | CR-19 | `HttpDataSourceOptions` moved from `GatewayOptions.cs` to `Domain/Options/HttpDataSourceOptions.cs` (same namespace, no behaviour change). | none (pure move; build and existing options tests) |
 
 **Verification:** `dotnet build Autheris.sln -warnaserror`: 0 warnings, 0 errors. Unit suite: 4,378 total, 4,377 passed, 1 failed (the known WORM test). Integration filter `FederatedVirtualFilter|WebSql|CrossSource|RowFilterChannelParity`: 77 total, 76 passed, 1 failed (the pre-existing `sql-endpoint` parity row).
+
+## Phase 6 Documentation
+
+**Role:** `documentation-expert` (Phase 6). **Date:** 2026-10-10. **Branch:** `feat/vf-federation-hardening`.
+
+| Item | Result |
+|---|---|
+| Feature reference | `docs/features/f-gov-14-federated-virtual-filters.md` rewritten from the code (the previous text described the deleted INNER-JOIN design). Structure per `AGENTS.md` section 5: summary, architecture and tiers, hash semi-join, key set cache, path-lookup semantics, configuration with every option, default and range, strategy matrix, denial codes and HTTP status, audit fields, logging, benchmark, limitations. |
+| Catalog | `docs/features/README.md` entry of F-GOV-14 retitled. |
+| Master plan | `PLAN-FEDERATED-VF-DUCKDB-15` row set to COMPLETED & VERIFIED; next milestone: merge `feat/vf-federation-hardening`; link to the feature document. |
+| CR-16 | Done (feature document). |
+| CR-20 | Done: `upstreamRequests` is documented as absent for paged reads; "404 = key not present" and `upstreamKeysNotFound` are documented. |
+| Hand-over items of review loop 1 | Documented: `VF_PATH_TEMPLATE_UNFILLABLE`, per-key restriction and de-duplication, `DataSources:Http:MaxResponseBytes` and its global scope (plugin HTTP sources included, separate from `MaxStagedBytesPerTable`), what `PushdownEnabled = false` does and does not change, revocation latency equal to `KeyCacheTtlSeconds`, the `domain.schema.table` audit target. |
+
+**Differences between this plan and the code (the document follows the code):**
+
+- Section 4.1 lists the SQL Server key source (WI-16) as deferred. The code supports SQL Server, PostgreSQL and SQLite key sources; the feature document states this.
+- Section 2.3 M7 and the PRD describe a Tier 2 path lookup limit of 10 requests as a fixed budget; it is the option `MaxPathLookupRequests` (default 10, range 1..100). The option `KeyCacheSizeLimitBytes` (default 64 MiB) exists in the code and is not part of section 2.4.
+- Section 2.3 M7 says path lookups run as a Tier 3 full fetch for `Adaptive`; the decided v1 semantics (review loop 1, CR-01) deny it with `VF_PATH_TEMPLATE_UNFILLABLE`. The document follows the decision.
+- The default per-binding `MaxPushdownKeys` is 100 (hard limit 1,000), the gateway default is 1,000; the PRD AC-1.1 names only the hard limit.
+- The governance HTTP bodies for bindings (`VirtualFilterEndpoints`) do not carry `Strategy`, `PushdownFormat` or `MaxPushdownKeys`; they are persisted by `VirtualFilterStore` and default to `Adaptive`, `null` and `100` when written through the HTTP API. Documented as a limitation.
+- The transport gate on this branch permits a request without a named transport and allows `WebSql` and `Trino` by default. The stricter gate of commit `d6a1f4e` (missing transport rejected, REST/MCP federation opt-in) is not on this branch; the document describes this branch.
+
+**Verification state at documentation time:** the only failing integration test in the track's filter is the pre-existing `RowFilterChannelParityTests(sql-endpoint)`; it is unrelated to this track and fixed on branch `fix/sql-endpoint-parity`. The one failing unit test (`WormConfigurationAuditServiceTests...`) is fixed on `fix/worm-config-audit-test`.
