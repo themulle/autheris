@@ -2,7 +2,7 @@
 
 **Document ID:** `PLAN-AST-DIALECT-GEN-16` (implementation plan, Phase 2 of the 6-phase lifecycle)
 **Date:** 2026-10-10
-**Status:** IN PROGRESS - Phase 5 re-review loop 1 delivered (§19.8, changes requested: CR-ADG-25); `feat/ast-dml` may branch from `feat/ast-dql`
+**Status:** IN PROGRESS - Phase 4 loop-back 2 (§21): CR-ADG-25..29 and the B-1 request-time denial fixed on `feat/ast-dql`, awaiting Phase 5 re-review loop 2; `feat/ast-dml` may branch from `feat/ast-dql`
 **Author:** Solution Architect (`csharp-architect`); Phase 3 review (§16) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
@@ -1942,3 +1942,45 @@ Observed on `feat/ast-dql` after the last fix commit (`TESTCONTAINERS_HOST_OVERR
 | All `AstCompiler*` integration tests in one run | 168 / 168 passed (the five container classes plus the three provider smoke tests) |
 
 Baseline at the merge (before the first fix): `TrinoSqlEngine.Tests` 1,888 / 1,888 and the integration run 153 / 153.
+
+## 21. Implementation Log — DQL review loop 2
+
+Phase 4 loop-back for the re-review §19.8 (findings CR-ADG-25..29) and the B-1 deviation of CR-ADG-08. One commit per finding on `feat/ast-dql`, each test-first.
+
+### 21.1 Status per finding
+
+| ID | Commit | Resolution |
+|---|---|---|
+| CR-ADG-25 | `b0c5bc7` | `SqlDialectGeneratorBase.StandardTypeName` is a closed CAST type set (`boolean`, `tinyint`, `smallint`, `integer`/`int`, `bigint`, `real`, `double`/`double precision`, `decimal`/`numeric`, `varchar`, `char`, `text`, `varbinary`, `date`, `time`, `timestamp` with optional time zone). It is the default of `FormatTypeName` (DuckDB, SQLite, Snowflake, ANSI) and the fallback of PostgreSQL (`double`, `tinyint`, `varbinary` keep their PostgreSQL spelling). `regclass`, `regrole`, `regproc`, `regtype`, `regnamespace`, `xml`, `json`, `jsonb`, `xmltype`, `oid` fail closed with `AstBuildException` on PostgreSQL and DuckDB (`Cast_ToUnlistedType_IsRejected_PerDialect`, `CAST` and `TRY_CAST`). `json` stays rejected: the plan allows no structured types. `text` is allowed because the generator itself emits `CAST(col AS text)` in the tenant predicate. PostgreSQL container test `CastToCatalogProbingType_IsRejected_BeforeExecution` (`CAST($1 AS regclass)`, `regrole`, `::regclass`, `xml`) shows the compiler refuses before any statement reaches the database. |
+| CR-ADG-26 | `420dde3` | Fail-closed option: `SqlAstBuilder.VisitFunctionCall` rejects any function name with a delimited part (`"lower"(x)`, `"pg_catalog".lower(x)`) with `SecurityException`, on every dialect. Tests on PostgreSQL, Oracle, SQL Server, DuckDB and Databricks. The former test `QuotedFunctionName_StaysQuoted` was replaced by `QuotedFunctionName_IsRejected` (the behavior it pinned is the finding). |
+| CR-ADG-27 | `e9600fa` | The constant `1` of the `COUNT(*) FILTER` emulation is emitted through `AppendStructural`, so the emitted-text checker accepts it. Unit tests (SQL Server, Oracle) and execution tests on SQL Server and Oracle Free. |
+| CR-ADG-28 | `2d40603` | `BindByNameOracleTransaction` wraps the driver transaction; `Connection` is the gateway wrapper, so `transaction.Connection.CreateCommand()` binds by name. A command accepts only the wrapper transaction (`SecurityException` otherwise). Unit tests with a fake inner transaction; architecture test `RawOracleTransaction_IsOnlyUsedByTheWrapper`. |
+| CR-ADG-29 | `6ecf3d4` | For `WITH RECURSIVE` the CTE name is in scope for its own body, so the self-reference resolves to the CTE while the base tables of the anchor and recursive members are secured (execution tests on PostgreSQL, SQL Server, Oracle Free). A recursive CTE named like a catalog table is rejected (`SecurityException`; typed path: catalog resolution, legacy path: policy provider). CTE names that differ only in case within the visible scope (nested or sibling) are rejected, so binding never depends on the engine's case folding. Non-recursive shadowing of a physical table is unchanged (secure body, CR-ADG-01). |
+| CR-ADG-08 (B-1) | `8b0320d` | See 21.2. |
+
+### 21.2 B-1 decision: request-time denial
+
+Investigation: `TenantCollisionCheck` is fed by `GatewayStartupValidator.ConfiguredTenantIds` (default and allowed forward-auth tenants, the WebSql data source allowlist, the OpenMetadata and ITSM tenant maps), that is, from configuration only. At request time the tenant comes from the token claim (`ClaimsPrincipalExtensions.GetTenantId`, resolved in `SecurityContextFactory` inside `SecurityContextResolutionMiddleware`). The configured set is reliable and static at request time too, so the guard is implementable: `TenantCollisionGuard` (Application) holds every spelling of every colliding group and matches case-insensitively.
+
+Implemented: `SecurityContextResolutionMiddleware` returns 403 with the stable code `TENANT_ID_COLLISION` for a resolved tenant in the denied set, writes an audit entry (`TENANT_COLLISION_DENIED`, decision `DENY`; an audit sink failure does not turn the denial into an allow) and never reaches the next middleware. Startup only logs a critical warning; `Gateway:TenantIsolation:StrictCollisionStartup=true` keeps the former refusal outside Development as an opt-in strict mode. Development still only warns.
+
+Limit (recorded): two colliding tenant ids that exist only in the identity provider and nowhere in configuration are not detected, by this guard or by the former startup refusal. A further spelling of a configured colliding group is denied (case-insensitive match).
+
+The existing test `CollidingTenants_FailClosed_OutsideDevelopment` now sets the strict option (`CollidingTenants_StrictMode_RefusesTheStart_OutsideDevelopment`); new tests cover the default start with a critical log, the 403, the stable code, the audit entry, an unaffected second tenant and a failing audit sink. This closes item 3 of §20.3 (request-time guard) for configured tenants.
+
+### 21.3 Evidence
+
+Observed on `feat/ast-dql` after the last fix commit (`CI=true`, `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal`):
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror -m:2` | 0 warnings, 0 errors |
+| `tests/TrinoSqlEngine.Tests` | 2,131 / 2,131 passed (2,074 before) |
+| `tests/Autheris.Tests.Unit` | 4,021 / 4,022 passed (only the known `WormConfigurationAuditServiceTests` failure) |
+| `tests/Autheris.Tests.Architecture` | 19 / 19 passed (18 before) |
+| `AstCompilerSqlServerExecutionTests` | 42 / 42 |
+| `AstCompilerPostgreSqlExecutionTests` | 50 / 50 |
+| `AstCompilerOracleExecutionTests` | 43 / 43 |
+| `AstCompilerDatabricksSparkExecutionTests` | 39 / 39 |
+| All `AstCompiler*` integration tests in one run | 177 / 177 (the four container classes plus the three provider smoke tests) |
+| `AstCompilerDuckDbExecutionTests` (in process, in the unit project) | 41 / 41 |
