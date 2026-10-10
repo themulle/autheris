@@ -67,6 +67,17 @@ public class FunctionAllowlistTests
         Assert.ThrowsAny<SecurityException>(() => Compile($"SELECT id FROM orders WHERE status = {call}", TargetSqlDialect.Databricks));
     }
 
+    /// <summary>CR-ADG-27: the COUNT(*) FILTER emulation emits a structural constant, so the emitted-text checker accepts it.</summary>
+    [Theory]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.Oracle)]
+    public void CountStarFilter_EmulatedWithCase_Compiles(TargetSqlDialect dialect)
+    {
+        var c = Compile("SELECT count(*) FILTER (WHERE status = 'open') FROM orders", dialect);
+        Assert.Contains("CASE WHEN", c.Sql);
+        Assert.Contains("THEN 1 END", c.Sql);
+    }
+
     /// <summary>CR-ADG-26: a delimited function name would bypass the built-in on PostgreSQL and Oracle; fail closed.</summary>
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "\"lower\"(email)")]

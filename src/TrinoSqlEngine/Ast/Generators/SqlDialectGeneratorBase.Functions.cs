@@ -233,7 +233,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             builder.Append("CASE WHEN ");
             GeneratePredicate(fn.Filter!, ref builder, context);
             builder.Append(" THEN ");
-            if (fn.IsStar) builder.Append('1');
+            if (fn.IsStar) AppendStructural(ref builder, context, "1");
             else GenerateExpression(fn.Arguments[0], ref builder, context);
             builder.Append(" END");
         }

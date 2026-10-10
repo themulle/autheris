@@ -347,6 +347,15 @@ public sealed class AstCompilerOracleExecutionTests : IClassFixture<AstCompilerO
     }
 
     [Fact]
+    public async Task CountStarFilter_IsEmulatedAndExecutes_WithinTheTenant()
+    {
+        // CR-ADG-27: COUNT(*) FILTER is emulated with CASE WHEN ... THEN 1 END.
+        var rows = await RunAsync("SELECT count(*) FILTER (WHERE id > 0) AS hit, count(*) FILTER (WHERE id > 1000) AS miss FROM orders", "other");
+        Convert.ToInt32(rows[0][0]).ShouldBe(1);
+        Convert.ToInt32(rows[0][1]).ShouldBe(0);
+    }
+
+    [Fact]
     public async Task ConsentFilter_DenyAll_AndPolicySubquery()
     {
         _policies.Predicates[Orders] = RegionPolicy("EU");

@@ -371,6 +371,16 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
         Ids(await RunAsync("SELECT id FROM \"DBO\".\"ORDERS\"", "other")).ShouldBe(new List<int> { 5 });
     }
 
+    [Fact]
+    public async Task CountStarFilter_IsEmulatedAndExecutes_WithinTheTenant()
+    {
+        if (!_db.IsAvailable) return;
+        // CR-ADG-27: COUNT(*) FILTER is emulated with CASE WHEN ... THEN 1 END.
+        var rows = await RunAsync("SELECT count(*) FILTER (WHERE id > 0) AS hit, count(*) FILTER (WHERE id > 1000) AS miss FROM orders", "other");
+        Convert.ToInt32(rows[0][0]).ShouldBe(1);
+        Convert.ToInt32(rows[0][1]).ShouldBe(0);
+    }
+
     // ---- user query shapes in bound mode ----
 
     [Theory]
