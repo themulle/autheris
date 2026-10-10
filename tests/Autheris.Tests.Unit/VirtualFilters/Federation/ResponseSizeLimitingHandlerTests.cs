@@ -156,4 +156,46 @@ public sealed class ResponseSizeLimitingHandlerTests
         ex.ErrorCode.ShouldBe("ROW_LIMIT_EXCEEDED");
         endless.BytesServed.ShouldBeLessThanOrEqualTo(Cap + Buffer);
     }
+
+    /// <summary>A body without a declared length (chunked).</summary>
+    private sealed class ChunkedContent(byte[] bytes) : HttpContent
+    {
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => stream.WriteAsync(bytes, 0, bytes.Length);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return false;
+        }
+    }
+
+    [Fact]
+    public async Task BodyStream_HonorsTheStreamContract_LengthOfANonSeekableStreamThrows()
+    {
+        // CR-09: Stream.Length throws NotSupportedException when CanSeek is false; the byte count has its own accessor.
+        using var client = Client(() => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ChunkedContent(Encoding.UTF8.GetBytes("[1,2,3]")) });
+        using var response = await client.GetAsync("https://api.example.internal/x", HttpCompletionOption.ResponseHeadersRead);
+
+        await using var body = await response.Content.ReadAsStreamAsync();
+
+        body.CanSeek.ShouldBeFalse();
+        Should.Throw<NotSupportedException>(() => _ = body.Length);
+        Should.Throw<NotSupportedException>(() => _ = body.Position);
+        await body.CopyToAsync(Stream.Null);
+        ResponseSizeLimitingHandler.BytesRead(body).ShouldBe(7);
+    }
+
+    [Fact]
+    public void BytesRead_OfASeekableStream_IsItsLength()
+    {
+        using var stream = new MemoryStream(new byte[42]);
+
+        ResponseSizeLimitingHandler.BytesRead(stream).ShouldBe(42);
+    }
+
+    [Fact]
+    public void BytesRead_OfANonSeekableStreamThatDoesNotCount_IsZero()
+    {
+        ResponseSizeLimitingHandler.BytesRead(new EndlessStream()).ShouldBe(0);
+    }
 }

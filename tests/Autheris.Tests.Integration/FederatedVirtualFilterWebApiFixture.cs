@@ -198,7 +198,7 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
         public const string Filtered = "customers_filtered";
     }
 
-    /// <summary>Response cap of the test gateway (<c>MaxStagedBytesPerTable</c>); <c>/customers_huge</c> answers above it.</summary>
+    /// <summary>Response cap of the test gateway (<c>DataSources:Http:MaxResponseBytes</c>); <c>/customers_huge</c> answers above it.</summary>
     public const long HugeResponseCapBytes = 1024 * 1024;
 
     public CountingCrmApiHandler Crm { get; } = new();
@@ -239,7 +239,7 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
             b.UseSetting("Gateway:WebSql:CrossSource:Enabled", "true");
 
             // CR-03: a small per-table cap (a response above it must fail the query), see /customers_huge.
-            b.UseSetting("Gateway:WebSql:CrossSource:MaxStagedBytesPerTable", HugeResponseCapBytes.ToString());
+            b.UseSetting("Gateway:DataSources:Http:MaxResponseBytes", HugeResponseCapBytes.ToString());
 
             b.ConfigureServices(services =>
             {

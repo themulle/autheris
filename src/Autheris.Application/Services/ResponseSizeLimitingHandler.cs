@@ -45,6 +45,16 @@ public sealed class ResponseSizeLimitingHandler : DelegatingHandler
         return response;
     }
 
+    /// <summary>
+    /// The bytes a response body stream has handed out so far: the length of a seekable stream, the running count of a
+    /// capped body stream, otherwise 0. <see cref="Stream.Length"/> of a non-seekable stream throws by contract (CR-09).
+    /// </summary>
+    internal static long BytesRead(Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        return stream is LimitedStream limited ? limited.BytesRead : stream.CanSeek ? stream.Length : 0;
+    }
+
     private static GatewaySecurityException Exceeded(long max) =>
         new($"The upstream response exceeds the maximum allowed size of {max} bytes.", ErrorCode);
 
@@ -110,12 +120,14 @@ public sealed class ResponseSizeLimitingHandler : DelegatingHandler
         public override bool CanSeek => false;
         public override bool CanWrite => false;
 
-        /// <summary>The bytes read so far (the executor reads this after parsing when the response has no length).</summary>
-        public override long Length => _read;
+        /// <summary>The bytes read so far; <see cref="Stream.Length"/> and <see cref="Stream.Position"/> stay unsupported (CanSeek is false).</summary>
+        public long BytesRead => _read;
+
+        public override long Length => throw new NotSupportedException();
 
         public override long Position
         {
-            get => _read;
+            get => throw new NotSupportedException();
             set => throw new NotSupportedException();
         }
 

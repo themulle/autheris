@@ -173,7 +173,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
             await using var stream = await response.Content.ReadAsStreamAsync(ct);
             using var jsonDoc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
 
-            totalBytes += rawBytes > 0 ? rawBytes : stream.Length;
+            totalBytes += rawBytes > 0 ? rawBytes : ResponseSizeLimitingHandler.BytesRead(stream);
             if (totalBytes > config.MaxStagedBytes)
             {
                 throw new Autheris.Application.Connectors.ConnectorRowLimitExceededException(

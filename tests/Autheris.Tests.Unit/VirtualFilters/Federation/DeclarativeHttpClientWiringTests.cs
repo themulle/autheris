@@ -55,7 +55,8 @@ public sealed class DeclarativeHttpClientWiringTests
     {
         var options = new GatewayOptions
         {
-            WebSql = new WebSqlOptions { CrossSource = new CrossSourceOptions { MaxStagedBytesPerTable = Cap } }
+            // CR-09: the cap is a global HTTP data source option, not a WebSQL cross-source setting.
+            DataSources = new SqlDataSourceOptions { Http = new HttpDataSourceOptions { MaxResponseBytes = Cap } }
         };
         var env = Substitute.For<IHostEnvironment>();
         env.EnvironmentName.Returns("Production");
@@ -95,6 +96,25 @@ public sealed class DeclarativeHttpClientWiringTests
         var ex = await Should.ThrowAsync<GatewaySecurityException>(() => client.GetAsync("https://93.184.216.34/customers"));
 
         ex.ErrorCode.ShouldBe("ROW_LIMIT_EXCEEDED");
+    }
+
+    [Fact]
+    public async Task TheCrossSourceStagingBudget_DoesNotConfigureTheClientCap()
+    {
+        var options = new GatewayOptions { WebSql = new WebSqlOptions { CrossSource = new CrossSourceOptions { MaxStagedBytesPerTable = 100 } } };
+        var primary = new StubPrimaryHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(new string('x', 5000)) });
+        var env = Substitute.For<IHostEnvironment>();
+        env.EnvironmentName.Returns("Production");
+        var services = new ServiceCollection();
+        services.AddSingleton(env);
+        services.AddSingleton(Options.Create(options));
+        services.AddLogging();
+        services.AddAutherisSqlEngine(options);
+        services.AddHttpClient(DeclarativeHttpDataSourceExecutor.HttpClientName).ConfigurePrimaryHttpMessageHandler(() => primary);
+        await using var provider = services.BuildServiceProvider();
+        var client = provider.GetRequiredService<IHttpClientFactory>().CreateClient(DeclarativeHttpDataSourceExecutor.HttpClientName);
+
+        (await client.GetStringAsync("https://93.184.216.34/customers")).Length.ShouldBe(5000);
     }
 
     [Fact]

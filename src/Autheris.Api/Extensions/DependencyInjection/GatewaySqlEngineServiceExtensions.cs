@@ -45,10 +45,11 @@ public static class GatewaySqlEngineServiceExtensions
             // SEC I-1: same URL/address decision as every other integration client (also used by plugins).
             .AddHttpMessageHandler(sp => SsrfProtectionHandler.Create(sp, "DeclarativeHttp"))
             // F-GOV-14 (SEC-17): an upstream body above the per-table staging cap aborts while it is read.
+            // CR-09: configured by DataSources:Http:MaxResponseBytes (global to every user of this client).
             .AddHttpMessageHandler(sp => new ResponseSizeLimitingHandler(
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.WebSql?.CrossSource?.MaxStagedBytesPerTable is > 0 and var cap
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.DataSources?.Http?.MaxResponseBytes is > 0 and var cap
                     ? cap
-                    : 32L * 1024 * 1024));
+                    : new HttpDataSourceOptions().MaxResponseBytes));
 #pragma warning restore CA5359
 
         services.AddSingleton<IPluginManager, PluginManager>();
