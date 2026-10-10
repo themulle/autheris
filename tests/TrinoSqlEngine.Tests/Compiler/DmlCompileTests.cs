@@ -16,7 +16,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// </summary>
 public class DmlCompileTests
 {
-    public static readonly TargetSqlDialect[] Dialects = { TargetSqlDialect.SqlServer };
+    public static readonly TargetSqlDialect[] Dialects = { TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb };
 
     public static IEnumerable<object[]> DialectData() => Dialects.Select(d => new object[] { d });
 
@@ -46,6 +46,23 @@ public class DmlCompileTests
     private void MaskEmail() =>
         _masks.Masks[(Orders, "email")] = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
 
+    /// <summary>The fixture catalog with column types the dialect's generator knows (masks cast to the catalog type).</summary>
+    private static InMemoryTableCatalog CatalogFor(TargetSqlDialect dialect)
+    {
+        if (dialect == TargetSqlDialect.SqlServer) return Catalog();
+        return new InMemoryTableCatalog(new[]
+        {
+            new TableCatalogEntry(Orders, System.Collections.Immutable.ImmutableArray.Create(
+                new CatalogColumn("Id", "integer"), new CatalogColumn("TenantId", "varchar"), new CatalogColumn("Region", "varchar"),
+                new CatalogColumn("Status", "varchar"), new CatalogColumn("Amount", "decimal(18,2)"), new CatalogColumn("Email", "varchar")),
+                "TenantId", 1),
+            new TableCatalogEntry(Entitlements, System.Collections.Immutable.ImmutableArray.Create(
+                new CatalogColumn("Id", "integer"), new CatalogColumn("TenantId", "varchar"), new CatalogColumn("OrderId", "integer")),
+                "TenantId", 1),
+            new TableCatalogEntry(Lookup, System.Collections.Immutable.ImmutableArray.Create(new CatalogColumn("Code", "varchar")), null, 1)
+        }, "dbo");
+    }
+
     private CompileRequest Request(
         TargetSqlDialect dialect,
         string tenant = "acme",
@@ -59,7 +76,7 @@ public class DmlCompileTests
         {
             RowFilters = _rowFilters,
             Masks = _masks,
-            Catalog = Catalog(),
+            Catalog = CatalogFor(dialect),
             Tenant = new TenantBinding("__autheris_tenant", tenant, SqlParameterType.String),
             Dml = dml ?? DmlGuardOptions.Strict
         }
@@ -247,12 +264,27 @@ public class DmlCompileTests
     [MemberData(nameof(DialectData))]
     public void Insert_MultiRow_OverTheBindLimit_IsRejected_WithTheTypedError(TargetSqlDialect dialect)
     {
+        _engine.MaxQueryLength = 8_000_000;   // the text guard (64 K characters) would otherwise fire before the bind limit of the larger dialects
         var max = DialectCapabilityTable.Default.Get(dialect).MaxBindParameters;
         int rows = (max / 2) + 5;   // id + status per row; the tenant marker is shared
         var sql = "INSERT INTO orders (id, tenantid, status) VALUES " +
                   string.Join(", ", Enumerable.Range(1, rows).Select(i => $"({i}, 'acme', 's{i}')"));
-        var ex = Assert.Throws<SqlLimitExceededException>(() => Compile(dialect, sql));
+        var request = Request(dialect) with { CompileTimeout = TimeSpan.FromSeconds(25) };   // a huge statement must reach the bind limit, not the 2 s budget
+        var ex = Assert.Throws<SqlLimitExceededException>(() => _engine.Compile(sql.AsMemory(), request, CancellationToken.None));
         Assert.Equal(SqlLimitKind.BindParameters, ex.Kind);
+    }
+
+    [Theory]
+    [MemberData(nameof(DialectData))]
+    public void DmlWhere_InList_OverTheDialectLimit_IsRejected_WithTheTypedError(TargetSqlDialect dialect)
+    {
+        var max = DialectCapabilityTable.Default.Get(dialect).MaxInListItems;
+        if (max is null) return;   // the dialect has no separate IN-list limit; the bind limit covers it
+        var items = string.Join(", ", Enumerable.Range(1, max.Value + 1));
+        var ex = Assert.Throws<SqlLimitExceededException>(() => Compile(dialect, $"DELETE FROM orders WHERE id IN ({items})"));
+        Assert.Equal(SqlLimitKind.InListItems, ex.Kind);
+        ex = Assert.Throws<SqlLimitExceededException>(() => Compile(dialect, $"UPDATE orders SET status = 'x' WHERE id IN ({items})"));
+        Assert.Equal(SqlLimitKind.InListItems, ex.Kind);
     }
 
     [Theory]

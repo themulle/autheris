@@ -88,7 +88,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         BindExpressionTemplates: IdentityBindTemplates,
         Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.DuckDb),
         AllowedTableFunctions: FrozenSet<string>.Empty,
-        LimitSource: "DUCK-PREP");
+        LimitSource: "DUCK-PREP",
+        DmlStatements: AllDml);
 
     private static readonly DialectCapabilities PostgreSql = new(
         Dialect: TargetSqlDialect.PostgreSql,
