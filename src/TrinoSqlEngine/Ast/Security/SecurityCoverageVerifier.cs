@@ -3,6 +3,7 @@ namespace TrinoSqlEngine.Ast.Security;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Security;
 using System.Threading;
@@ -23,6 +24,7 @@ public sealed class SecurityCoverageException : SecurityException
 /// </summary>
 /// <param name="Identity">Stable table identity used in <see cref="SecurityPredicateId.TableIdentity"/>.</param>
 /// <param name="Schema">Catalog canonical schema name (exact case).</param>
+/// <param name="Catalog">Optional catalog part (Unity Catalog); when set the canonical name has three parts.</param>
 /// <param name="Table">Catalog canonical table name (exact case).</param>
 /// <param name="RootPredicates">Predicates required when the table is referenced by the user query.</param>
 /// <param name="PolicySubqueryPredicates">Predicates required when the table is referenced inside a policy subquery (tenant only).</param>
@@ -33,7 +35,8 @@ public sealed record TableCoverageRequirement(
     string Table,
     ImmutableArray<SecurityPredicateId> RootPredicates,
     ImmutableArray<SecurityPredicateId> PolicySubqueryPredicates,
-    ImmutableHashSet<string>? MaskedColumns = null);
+    ImmutableHashSet<string>? MaskedColumns = null,
+    string? Catalog = null);
 
 /// <summary>
 /// Production post-condition of the compiler (runs on every compile). It walks the final AST and proves that every physical
@@ -232,9 +235,12 @@ public sealed class SecurityCoverageVerifier
 
             // INV-11: the emitted name is the schema-qualified canonical catalog name, always delimited, never user spelling.
             var parts = table.Name.Parts;
-            if (parts.Count != 2 || !parts[0].IsQuoted || !parts[1].IsQuoted ||
-                !string.Equals(parts[0].Value, requirement.Schema, StringComparison.Ordinal) ||
-                !string.Equals(parts[1].Value, requirement.Table, StringComparison.Ordinal))
+            int expectedParts = requirement.Catalog is null ? 2 : 3;
+            int offset = expectedParts - 2;
+            if (parts.Count != expectedParts || parts.Any(p => !p.IsQuoted) ||
+                (requirement.Catalog is not null && !string.Equals(parts[0].Value, requirement.Catalog, StringComparison.Ordinal)) ||
+                !string.Equals(parts[offset].Value, requirement.Schema, StringComparison.Ordinal) ||
+                !string.Equals(parts[offset + 1].Value, requirement.Table, StringComparison.Ordinal))
             {
                 throw new SecurityCoverageException("A physical table is not emitted as its schema-qualified canonical name.");
             }

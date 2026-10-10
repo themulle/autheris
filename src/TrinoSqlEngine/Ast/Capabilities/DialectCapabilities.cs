@@ -39,7 +39,14 @@ public enum TenantComparisonStyle
     /// so the comparison is exact even when the column has a non-deterministic (case- or accent-insensitive) ICU collation or
     /// the type is <c>citext</c>.
     /// </summary>
-    TextSendBytea
+    TextSendBytea,
+
+    /// <summary>
+    /// Databricks: <c>CAST(col AS BINARY) = CAST(t AS BINARY)</c>. Casting STRING to BINARY yields the UTF-8 bytes, whose comparison
+    /// is exact regardless of any column collation (for example <c>UTF8_LCASE</c>). There is deliberately no plain <c>col = t</c>
+    /// conjunct: Spark's constant propagation would turn the pair into a tautology on collated columns.
+    /// </summary>
+    CastBinary
 }
 
 /// <summary>Declarative Trino-function to dialect rule. No matching rule means the function is rejected (INV-1).</summary>

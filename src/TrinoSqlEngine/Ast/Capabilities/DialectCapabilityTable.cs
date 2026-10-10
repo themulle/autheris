@@ -99,6 +99,34 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "PG-PROTO");
 
+    private static readonly DialectCapabilities Databricks = new(
+        Dialect: TargetSqlDialect.Databricks,
+        Tier: DialectSupportTier.Production,
+        MaxBindParameters: 1000,                                   // provisional fail-closed budget until the live probe (WP-C5)
+        MaxInListItems: null,
+        MaxIdentifierLength: 255,
+        IdentifierLengthUnit: IdentifierLengthUnit.Characters,
+        IdentifierOpenQuote: '`',
+        IdentifierCloseQuote: '`',
+        MarkerStyle: ParameterMarkerStyle.ColonNamedOrdinal,
+        SupportsMarkerReuse: true,
+        Pagination: PaginationStyle.LimitOffset,
+        SupportsWithTies: false,
+        SupportsNullsFirstLast: true,
+        Booleans: BooleanRepresentation.Native,
+        SupportsMerge: true,
+        SupportsLateral: false,                                    // accepted only after the Spark proxy confirms it
+        SupportsGroupingSets: true,
+        SupportsFilterClause: true,
+        SupportsTryCast: true,
+        LimitGuaranteed: true,
+        InDbHmac: false,                                           // decision B-2: HMAC degrades to Redact
+        TenantComparison: TenantComparisonStyle.CastBinary,
+        BindExpressionTemplates: SqlServerBindTemplates,
+        Functions: DialectFunctionMap.Empty,
+        AllowedTableFunctions: FrozenSet<string>.Empty,
+        LimitSource: "DBX-PARAM");
+
     // Declared after the static capability entries: static initializers run in textual order.
     public static DialectCapabilityTable Default { get; } = new();
 
@@ -110,7 +138,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         {
             [TargetSqlDialect.SqlServer] = SqlServer,
             [TargetSqlDialect.DuckDb] = DuckDb,
-            [TargetSqlDialect.PostgreSql] = PostgreSql
+            [TargetSqlDialect.PostgreSql] = PostgreSql,
+            [TargetSqlDialect.Databricks] = Databricks
         }.ToFrozenDictionary();
     }
 

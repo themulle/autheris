@@ -47,7 +47,8 @@ public sealed record SqlTokenSecurityOptions
         RejectBracketLexerDifferentials = true,
         RejectNonAsciiIdentifiers = true,
         RejectDotsInQuotedIdentifiers = true,
-        RejectTimeTravelQueries = true
+        RejectTimeTravelQueries = true,
+        RejectVariableSubstitutionSequences = true
     };
 
     /// <summary>SQ-02: Reject comments.</summary>
@@ -79,6 +80,12 @@ public sealed record SqlTokenSecurityOptions
     public bool RejectTimeTravelQueries { get; init; }
 
     /// <summary>
+    /// SEC-ADG-10: Reject <c>${</c> in any token. Spark and Databricks may substitute <c>${...}</c> variables in statement text
+    /// before parsing, which could change a statement after the gateway checked it.
+    /// </summary>
+    public bool RejectVariableSubstitutionSequences { get; init; }
+
+    /// <summary>
     /// Derives the token switches from <see cref="RlsOptions"/>. Dollar quoting is always rejected for SQL Server targets.
     /// </summary>
     public static SqlTokenSecurityOptions FromRlsOptions(RlsOptions options)
@@ -95,7 +102,8 @@ public sealed record SqlTokenSecurityOptions
                 || options.TargetDialect == TargetSqlDialect.Sqlite,
             RejectNonAsciiIdentifiers = options.RejectNonAsciiIdentifiers,
             RejectDotsInQuotedIdentifiers = options.RejectDotsInQuotedIdentifiers,
-            RejectTimeTravelQueries = options.RejectTimeTravelQueries
+            RejectTimeTravelQueries = options.RejectTimeTravelQueries,
+            RejectVariableSubstitutionSequences = options.TargetDialect == TargetSqlDialect.Databricks
         };
     }
 }
@@ -532,6 +540,13 @@ public sealed partial class FastSqlEngine : ISqlEngine
 
             if (type == SqlBaseLexer.WS || type == SqlBaseLexer.SIMPLE_COMMENT || type == SqlBaseLexer.BRACKETED_COMMENT)
                 continue;
+
+            // SEC-ADG-10: ${...} variable substitution sequences (Spark / Databricks)
+            if (options.RejectVariableSubstitutionSequences && text != null && text.Contains("${", StringComparison.Ordinal))
+            {
+                throw new ParseCanceledException(
+                    $"line {token.Line}:{token.Column}: Variable substitution sequences ('${{') are not permitted.");
+            }
 
             // SQ-01: Backslash escapes in string literals
             if (options.RejectBackslashInStrings && type == SqlBaseLexer.STRING && text != null && text.Contains('\\'))

@@ -221,3 +221,12 @@ public sealed class PostgreSqlCompiledSqlBinder : DbCommandCompiledSqlBinder
     protected override DbType TimestampDbType => DbType.DateTime2;   // Npgsql: timestamp without time zone (DbType.DateTime is timestamptz)
     protected override string ParameterNameFor(BoundParameter parameter) => string.Empty;
 }
+
+/// <summary>
+/// Databricks binder: markers are <c>:p1</c>, <c>:p2</c> ... and the parameters are named <c>p1</c>, <c>p2</c> ... (named typed
+/// parameters of the Statement Execution API). The REST connector adapter is a separate work package (C3).
+/// </summary>
+public sealed class DatabricksCompiledSqlBinder : DbCommandCompiledSqlBinder
+{
+    protected override TargetSqlDialect Dialect => TargetSqlDialect.Databricks;
+}

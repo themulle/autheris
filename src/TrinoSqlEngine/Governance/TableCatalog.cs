@@ -8,9 +8,15 @@ using System.Linq;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>Canonical identity of a physical table: the exact catalog spelling of schema and table (INV-11).</summary>
-public readonly record struct TableIdentity(string Schema, string Table)
+public readonly record struct TableIdentity(string Schema, string Table, string? Catalog = null)
 {
-    public override string ToString() => $"{Schema}.{Table}";
+    public override string ToString() => Catalog is null ? $"{Schema}.{Table}" : $"{Catalog}.{Schema}.{Table}";
+
+    /// <summary>The delimited canonical name: <c>[catalog.]schema.table</c>, every part quoted, exact case.</summary>
+    public SqlQualifiedName ToQualifiedName() => new(
+        (Catalog is null
+            ? new[] { new SqlIdentifier(Schema, true), new SqlIdentifier(Table, true) }
+            : new[] { new SqlIdentifier(Catalog, true), new SqlIdentifier(Schema, true), new SqlIdentifier(Table, true) }));
 }
 
 /// <param name="Name">Canonical column name (exact case).</param>

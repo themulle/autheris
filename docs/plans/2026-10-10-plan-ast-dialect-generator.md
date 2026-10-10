@@ -1593,7 +1593,7 @@ Priority order and stacked branches (each branch is based on the head of the pre
 | 1 | `feat/ast-mssql-select` | Core (A1-A6, A8 for SELECT) plus SQL Server | see 18.2 |
 | 2 | `feat/ast-duckdb-select` | DuckDB SELECT | see 18.3 |
 | 3 | `feat/ast-postgres-select` | PostgreSQL SELECT | see 18.4 |
-| 4 | `feat/ast-databricks-select` | Databricks SELECT | planned |
+| 4 | `feat/ast-databricks-select` | Databricks SELECT | see 18.5 |
 | 5 | `feat/ast-oracle-select` | Oracle SELECT, based on the PostgreSQL head plus `feat/ast-failclosed-fixes` (WP-D4), WP-F1..F4 | planned |
 | later | `feat/ast-dml` | A7 (DML, MERGE) for all dialects | deferred; not started in this work |
 
@@ -1633,3 +1633,13 @@ Scope: capability entry (65,535 binds, 63-byte identifier limit measured in byte
 Execution evidence on `postgres:16-alpine` (Testcontainers): tenant isolation on a `citext` column and on a non-deterministic ICU collation (a plain `=` returns both `acme` and `ACME`), consent filters, policy-subquery tenant predicate, a hostile `search_path` plus a `pg_temp` decoy table (the secured query still reads `public.orders`), plan-cache rebinding per tenant, hostile tenant and user values, redact/partial/HMAC (matches a reference HMAC-SHA256)/jitter masks, bind-limit probe at 65,535 parameters.
 
 Semantic notes: PostgreSQL folds unquoted identifiers to lower case, catalog columns are emitted exactly as cataloged, so a mixed-case catalog column must be quoted by the user (Trino semantics differ); `standard_conforming_strings` has no effect because no string literal is emitted. The unqualified table alias keeps the user's folding (unquoted names stay unquoted). Session `search_path` pinning (INV-14) belongs to the runtime session initializer and is not part of this branch; the compiler does not depend on it.
+
+### 18.5 Branch `feat/ast-databricks-select` (on top of `feat/ast-postgres-select`)
+
+Scope: `TargetSqlDialect.Databricks` (appended), capability entry (provisional 1,000 bind budget, 255-character identifiers, `:pN` markers, `InDbHmac = false` so HMAC degrades to Redact, `SupportsLateral = false`), `DatabricksDialectGenerator` (backtick identifiers with doubling, `$ { }` in any identifier rejected (SEC-ADG-10), Unity Catalog three-part names through `TableIdentity.Catalog`, string literals never emitted (the generator throws if one reaches it), structural `LIMIT/OFFSET`, `WITH TIES`, TIME literals, arrays and subscripts rejected, type mapping, `timestampadd`, `DATE_TRUNC` with a reviewed unit fragment, `INSTR`/`APPROX_COUNT_DISTINCT`/`ANY_VALUE` mapping), typed masks, token guard `RejectVariableSubstitutionSequences` (part of `Strict`, on for Databricks targets), `DatabricksCompiledSqlBinder` (names `p1..pN`).
+
+Exact tenant comparison: `CAST(col AS BINARY) = CAST(t AS BINARY)` only. The Spark proxy showed that a plain `col = t` conjunct on a `UTF8_LCASE` column lets Spark propagate the constant into the binary conjunct and makes the comparison case-insensitive again, so the plain conjunct is omitted for Databricks (no data skipping on the tenant column; documented trade-off).
+
+Evidence: golden-SQL style generator tests, and execution on the Spark proxy (`apache/spark:4.0.0-python3`, pinned by digest, ANSI mode and variable substitution on, driven by `tests/Autheris.Tests.Integration/Spark/runner.py` over stdin because the Docker daemon cannot see bind mounts): RLS visibility, collation collision on a `UTF8_LCASE` column, policy subquery, shapes, hostile values including `${...}`, masks. Resolved `(verify)` items: `OFFSET` and `TIMESTAMP_NTZ` work on Spark; `LATERAL` is only probed informationally and stays rejected until Databricks SQL is probed (G9).
+
+Not done on this branch (follow-ups): the REST connector (C3, not needed for SELECT compilation; the binder produces named typed parameters that map 1:1 to the Statement Execution API), the live secret-gated job (G9/C5; the provisional bind budget stays), the 300-fixture conformance matrix (about 60 generator cases exist), Delta DML (belongs to `feat/ast-dml`). OSS Spark is not Databricks SQL (risk R-7).
