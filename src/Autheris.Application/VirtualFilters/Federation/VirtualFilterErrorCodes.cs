@@ -16,6 +16,21 @@ public static class VirtualFilterErrorCodes
     /// <summary>A table of the query has no decision, or an applied Virtual Filter is not enforced.</summary>
     public const string EnforcementIncomplete = Autheris.Domain.Interfaces.TableAccessDecision.VirtualFilterEnforcementIncompleteCode;
 
+    /// <summary>A key column has a catalog type that cannot be compared safely, or the key set has other key types.</summary>
+    public const string KeyTypeMismatch = "VF_KEY_TYPE_MISMATCH";
+
+    /// <summary>The filter cannot be evaluated in its key source (sql definition, validity window, non-SQL or untenanted table).</summary>
+    public const string KeySourceUnsupported = "VF_KEY_SOURCE_UNSUPPORTED";
+
+    /// <summary>The authorized key set exceeds <c>MaxAuthorizedKeys</c> (never truncated).</summary>
+    public const string KeySetTooLarge = "VF_KEY_SET_TOO_LARGE";
+
+    /// <summary>A binding maps a key to a column the protected object does not have, or to an invalid identifier.</summary>
+    public const string BindingMisconfigured = "VF_BINDING_MISCONFIGURED";
+
+    /// <summary>The key source could not be read (connection, query or timeout).</summary>
+    public const string SourceUnavailable = "VIRTUAL_FILTER_SOURCE_UNAVAILABLE";
+
     private static readonly IReadOnlyList<string> CodesInDenyReasons = [PatternEvaluationFailed];
 
     /// <summary>The Virtual Filter error code a deny reason starts with (<c>CODE: ...</c>), if any.</summary>
