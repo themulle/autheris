@@ -1,9 +1,12 @@
 namespace TrinoSqlEngine.Governance;
 
 using System;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
@@ -11,6 +14,9 @@ using TrinoSqlEngine.Ast.Security;
 
 /// <summary>Policy state of one table that took part in a compile; recorded for the value-free plan template (SEC-ADG-01).</summary>
 public sealed record TableUsage(TableIdentity Identity, bool PolicyApplied, string PredicateFingerprint, string MaskFingerprint);
+
+/// <summary>A catalog table the compile resolved, with the fingerprint of everything that decided its injection.</summary>
+public sealed record TableDependency(SqlQualifiedName Name, string Fingerprint);
 
 /// <summary>
 /// Typed governance input of one compile, shared by the security visitor (injection) and the coverage verifier (proof). It
@@ -21,6 +27,7 @@ public sealed class TypedPolicyContext
     private readonly Dictionary<string, PolicyValue> _values = new(StringComparer.Ordinal);
     private readonly List<SecurityPredicateId> _applied = new();
     private readonly List<TableUsage> _tables = new();
+    private readonly List<TableDependency> _dependencies = new();
 
     public TypedPolicyContext(
         ITableCatalog catalog,
@@ -49,6 +56,8 @@ public sealed class TypedPolicyContext
     public ImmutableArray<SecurityPredicateId> AppliedPredicates => _applied.ToImmutableArray();
 
     public IReadOnlyList<TableUsage> Tables => _tables;
+
+    public ImmutableArray<TableDependency> Dependencies => _dependencies.ToImmutableArray();
 
     /// <summary>The tenant predicate node for <paramref name="entry"/>, or null for a table without a tenant column.</summary>
     public Expression? BuildTenantPredicate(TableCatalogEntry entry)
@@ -90,12 +99,87 @@ public sealed class TypedPolicyContext
         if (!_tables.Contains(usage)) _tables.Add(usage);
     }
 
+    /// <summary>Records that <paramref name="name"/> resolved to <paramref name="entry"/> (plan template dependency).</summary>
+    public void RecordDependency(SqlQualifiedName name, TableCatalogEntry entry)
+    {
+        var dependency = new TableDependency(name, Fingerprint(entry));
+        if (!_dependencies.Contains(dependency)) _dependencies.Add(dependency);
+    }
+
+    /// <summary>
+    /// The mask for a column. Decision B-2: where the dialect cannot compute an HMAC in the database (<c>InDbHmac = false</c>)
+    /// an HMAC mask degrades to Redact (fail closed). Gateway-side HMAC is rejected for WebSQL because user SQL could aggregate
+    /// or sort the raw value. The key parameters of the degraded mask are dropped, so the key never reaches the statement.
+    /// </summary>
+    public MaskSpec GetMaskSpec(TableIdentity table, string column)
+    {
+        var spec = Masks.GetMask(table, column);
+        if (spec.Kind != MaskKind.Hmac || Capabilities.InDbHmac)
+        {
+            return spec;
+        }
+
+        string name = "__mask_redact_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(column)))[..8].ToLowerInvariant();
+        var constant = new PolicyParameterExpression(name, SqlParameterType.String, ParameterOrigin.Mask);
+        return new MaskSpec(
+            MaskKind.Redact,
+            new MaskArguments(Constant: constant),
+            new Dictionary<string, PolicyValue> { [name] = new PolicyValue("[REDACTED]", SqlParameterType.String) }
+                .ToFrozenDictionary(StringComparer.Ordinal));
+    }
+
+    /// <summary>Fingerprint of everything that decides how <paramref name="entry"/> is injected: catalog entry, policy, masks.</summary>
+    public string Fingerprint(TableCatalogEntry entry)
+    {
+        var id = entry.Identity;
+        bool applies = RowFilters.ShouldApplyPolicy(id);
+        string predicate = applies ? RowFilters.GetPredicate(id).Fingerprint : "-";
+        var masks = entry.Columns
+            .Where(c => Masks.HasMask(id, c.Name))
+            .Select(c =>
+            {
+                var spec = GetMaskSpec(id, c.Name);
+                return $"{c.Name}:{spec.Kind}:{AstReflection.Fingerprint(spec.Arguments)}";
+            })
+            .ToList();
+        return AstReflection.Fingerprint(new object[]
+        {
+            AstReflection.Fingerprint(entry), applies, predicate, masks.Count == 0 ? "-" : AstReflection.Fingerprint(masks)
+        });
+    }
+
+    /// <summary>
+    /// Adds the values (tenant, policy, mask) that the current providers hold for <paramref name="entry"/>. A cached template is
+    /// value-free; this rebuilds the values of the current request on a hit.
+    /// </summary>
+    public void AddTableValues(TableCatalogEntry entry)
+    {
+        var id = entry.Identity;
+        if (entry.TenantColumn != null)
+        {
+            AddValue(Tenant.ParameterName, new PolicyValue(Tenant.Value, Tenant.Type));
+        }
+
+        if (RowFilters.ShouldApplyPolicy(id))
+        {
+            AddValues(RowFilters.GetPredicate(id).Parameters);
+        }
+
+        foreach (var column in entry.Columns)
+        {
+            if (Masks.HasMask(id, column.Name))
+            {
+                AddValues(GetMaskSpec(id, column.Name).Parameters);
+            }
+        }
+    }
+
     /// <summary>
     /// A verifier whose expectations come from the providers, independent of the injector (plan 3.2): every table needs its
     /// tenant predicate (when it has a tenant column) and its policy predicate (when the provider says one applies).
     /// </summary>
-    public SecurityCoverageVerifier CreateVerifier(TargetSqlDialect dialect = TargetSqlDialect.SqlServer) =>
-        new(name => RequirementOf(name), dialect);
+    public SecurityCoverageVerifier CreateVerifier(TargetSqlDialect dialect = TargetSqlDialect.SqlServer, int maxSecuredTableReferences = 256) =>
+        new(name => RequirementOf(name), dialect, maxSecuredTableReferences);
 
     private TableCoverageRequirement? RequirementOf(SqlQualifiedName name)
     {

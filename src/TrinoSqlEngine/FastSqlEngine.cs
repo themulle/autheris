@@ -745,6 +745,19 @@ public sealed partial class FastSqlEngine : ISqlEngine
     /// SEC P-04: The token security switches are derived from <paramref name="options"/> per call and passed to the
     /// parser as an immutable object; the engine's own properties are neither read nor modified.
     /// </summary>
+    private Lazy<GovernedSqlCompiler>? _compiler;
+
+    /// <summary>Cache of verified, value-free compile templates (SEC-ADG-01).</summary>
+    public Ast.Emit.CompiledSqlTemplateCache CompileCache { get; } = new();
+
+    /// <inheritdoc />
+    public Ast.Emit.CompiledSql Compile(ReadOnlyMemory<char> sql, CompileRequest request, CancellationToken cancellationToken)
+    {
+        var compiler = (_compiler ??= new Lazy<GovernedSqlCompiler>(
+            () => new GovernedSqlCompiler(this, Ast.Capabilities.DialectCapabilityTable.Default, CompileCache))).Value;
+        return compiler.Compile(sql, request, cancellationToken);
+    }
+
     public string RewriteRls(ReadOnlyMemory<char> sql, RlsOptions? options = null)
     {
         return RewriteRls(sql, options, CancellationToken.None);

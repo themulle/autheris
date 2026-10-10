@@ -253,6 +253,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             ?? throw new SecurityException("A table reference could not be resolved against the catalog.");
         var tid = entry.Identity;
         var scope = CurrentScope;
+        typed.RecordDependency(node.Name, entry);
 
         var conjuncts = new List<Expression>(2);
         var tenant = typed.BuildTenantPredicate(entry);
@@ -293,7 +294,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             var columnRef = new ColumnReference(new SqlQualifiedName(new[] { colId }));
             if (typed.Masks.HasMask(tid, column.Name))
             {
-                var spec = DegradeUnavailableMask(typed, typed.Masks.GetMask(tid, column.Name), column.Name);
+                var spec = typed.GetMaskSpec(tid, column.Name);
                 typed.AddValues(spec.Parameters);
                 maskFingerprints.Add($"{column.Name}:{spec.Kind}:{AstReflection.Fingerprint(spec.Arguments)}");
                 projections.Add(new ColumnSelectItem(new MaskExpression(spec.Kind, columnRef, spec.Arguments, column.DataType), colId));
@@ -313,27 +314,6 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             new QuerySpecification(false, projections, new NamedTableSource(canonical, innerAlias), where, null, null),
             null, null);
         return new SubqueryTableSource(inner, node.Alias ?? new SqlIdentifier(node.Name.SimpleName, IsQuoted: true));
-    }
-
-    /// <summary>
-    /// Decision B-2: where the dialect cannot compute an HMAC in the database (<c>InDbHmac = false</c>) an HMAC mask degrades
-    /// to Redact (fail closed). Gateway-side HMAC is rejected for WebSQL because user SQL could aggregate or sort the raw value.
-    /// The key parameters of the degraded mask are dropped, so the key never reaches the statement.
-    /// </summary>
-    private static MaskSpec DegradeUnavailableMask(TypedPolicyContext typed, MaskSpec spec, string column)
-    {
-        if (spec.Kind != MaskKind.Hmac || typed.Capabilities.InDbHmac)
-        {
-            return spec;
-        }
-
-        string name = "__mask_redact_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(column)))[..8].ToLowerInvariant();
-        var constant = new PolicyParameterExpression(name, SqlParameterType.String, ParameterOrigin.Mask);
-        return new MaskSpec(
-            MaskKind.Redact,
-            new MaskArguments(Constant: constant),
-            new Dictionary<string, PolicyValue> { [name] = new PolicyValue("[REDACTED]", SqlParameterType.String) }
-                .ToFrozenDictionary(StringComparer.Ordinal));
     }
 
     private SubqueryTableSource CreateSecuredSubqueryTableSource(

@@ -13,6 +13,13 @@ using TrinoSqlEngine.Analysis;
 public interface ISqlEngine
 {
     /// <summary>
+    /// Compiles a governed read query: token guards, parse, typed AST, simplification of the user tree, typed security
+    /// injection, coverage proof, capability validation and emission with every value bound. Dialects and statement classes
+    /// without a governed path fail closed with <see cref="SqlCompileNotSupportedException"/>.
+    /// </summary>
+    Ast.Emit.CompiledSql Compile(ReadOnlyMemory<char> sql, CompileRequest request, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Rewrites the query with Row-Level Security (RLS) policies, column masking, and dialect transformations.
     /// Dispatches to AST compiler (<see cref="GenerateGovernedSql(ReadOnlyMemory{char}, RlsOptions?, CancellationToken)"/>)
     /// or legacy rewriter based on <see cref="RlsOptions.RewriterEngine"/>.
