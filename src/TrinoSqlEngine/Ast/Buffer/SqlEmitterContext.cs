@@ -112,10 +112,11 @@ public sealed class SqlEmitterContext
                 throw new SecurityException("A LIKE pattern parameter must be a string.");
             }
 
-            return Bind($"PL|{parameter.Name}", EscapeLike(text), policyValue.Type, parameter.Origin, parameter.Name);
+            return Bind($"PL|{parameter.Name}|{parameter.ColumnType}", EscapeLike(text), policyValue.Type, parameter.Origin, parameter.Name, parameter.ColumnType);
         }
 
-        return Bind($"P|{parameter.Name}", policyValue.Value, policyValue.Type, parameter.Origin, parameter.Name);
+        // The compared column's type is part of the identity: one tenant value is bound once per distinct column type.
+        return Bind($"P|{parameter.Name}|{parameter.ColumnType}", policyValue.Value, policyValue.Type, parameter.Origin, parameter.Name, parameter.ColumnType);
     }
 
     private static string EscapeLike(string text)
@@ -147,7 +148,7 @@ public sealed class SqlEmitterContext
         return Bind($"C|{parameter.Name}", null, SqlParameterType.String, ParameterOrigin.ClientNamed, parameter.Name);
     }
 
-    private string Bind(string key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName)
+    private string Bind(string key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName, string? columnType = null)
     {
         if (_bound is null || _dedup is null || Capabilities is null)
         {
@@ -173,7 +174,7 @@ public sealed class SqlEmitterContext
             ParameterMarkerStyle.QuestionOrdinal => marker.TrimStart('?'),
             _ => marker.TrimStart(':')
         };
-        _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName));
+        _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName, columnType));
         _dedup[key] = ordinal;
         ParameterCount = _bound.Count;
         return marker;

@@ -289,6 +289,7 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
             var predicate = typed.RowFilters.GetPredicate(tid);
             typed.AddValues(predicate.Parameters);
             var expression = (Expression)new PolicySubqueryTenantRewriter(typed).Visit(predicate.Expression);
+            expression = (Expression)new PolicyColumnTypeAnnotator(entry).Visit(expression);
             referencesTarget = AstReflection.Collect<ColumnReference>(expression).Any(c =>
                 c.Name.Parts.Count >= 2 && string.Equals(c.Name.Parts[^2].Value, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase));
             var id = new SecurityPredicateId(tid.ToString(), 1);

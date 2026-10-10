@@ -12,14 +12,14 @@ using TrinoSqlEngine.Ast.Nodes;
 /// </summary>
 public static class TenantPredicateFactory
 {
-    public static Expression Build(DialectCapabilities capabilities, string tenantColumn, string parameterName, SqlParameterType parameterType)
+    public static Expression Build(DialectCapabilities capabilities, string tenantColumn, string parameterName, SqlParameterType parameterType, string? columnType = null, string? columnCollation = null)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
         ArgumentException.ThrowIfNullOrEmpty(tenantColumn);
         ArgumentException.ThrowIfNullOrEmpty(parameterName);
 
         Expression Column() => new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier(tenantColumn, true) }));
-        Expression Param() => new PolicyParameterExpression(parameterName, parameterType, ParameterOrigin.Tenant);
+        Expression Param() => new PolicyParameterExpression(parameterName, parameterType, ParameterOrigin.Tenant, ColumnType: columnType);
 
         switch (capabilities.TenantComparison)
         {

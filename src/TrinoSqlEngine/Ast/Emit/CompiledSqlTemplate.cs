@@ -21,7 +21,8 @@ public sealed record SqlSlot(
     SqlParameterType Type,
     ParameterOrigin Origin,
     string? SourceName,
-    object? LiteralValue);
+    object? LiteralValue,
+    string? ColumnType = null);
 
 /// <summary>
 /// Value-free cached compile output (SEC-ADG-01, INV-12). It holds the SQL text and slot descriptors; tenant, policy and
@@ -43,7 +44,7 @@ public sealed record CompiledSqlTemplate(
             compiled.Sql,
             compiled.Parameters.Select(p => new SqlSlot(
                 p.Marker, p.Name, p.Ordinal, p.Type, p.Origin, p.SourceName,
-                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null)).ToImmutableArray(),
+                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null, p.ColumnType)).ToImmutableArray(),
             compiled.Dialect,
             compiled.StatementClass,
             compiled.AppliedPredicates,
@@ -68,7 +69,7 @@ public sealed record CompiledSqlTemplate(
                 value = current.Value;
             }
 
-            parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName));
+            parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType));
         }
 
         return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion);

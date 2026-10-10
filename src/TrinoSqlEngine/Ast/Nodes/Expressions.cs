@@ -20,13 +20,15 @@ public sealed record TrustedSqlExpression(string Sql) : Expression;
 /// A value bound by the gateway (tenant, policy, mask argument). It never originates from request text; the value comes from
 /// the <see cref="ParameterSource"/> at emission time, so the AST (and a cached template) stays value-free.
 /// <paramref name="IsLikePattern"/> marks an admin-authored LIKE pattern whose wildcards are intentional; any other policy
-/// value used as a LIKE pattern is escaped (SEC-ADG-18).
+/// value used as a LIKE pattern is escaped (SEC-ADG-18). <paramref name="ColumnType"/> is the catalog data type of the column the
+/// value is compared with (CR-ADG-09); the binder follows it.
 /// </summary>
 public sealed record PolicyParameterExpression(
     string Name,
     SqlParameterType Type,
     ParameterOrigin Origin = ParameterOrigin.Policy,
-    bool IsLikePattern = false) : Expression;
+    bool IsLikePattern = false,
+    string? ColumnType = null) : Expression;
 
 /// <summary>
 /// Semantic column mask, rendered per dialect by the generator (replaces raw trusted SQL fragments). The masked column is

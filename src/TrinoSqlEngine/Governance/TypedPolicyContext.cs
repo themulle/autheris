@@ -64,7 +64,8 @@ public sealed class TypedPolicyContext
     {
         if (entry.TenantColumn is null) return null;
         AddValue(Tenant.ParameterName, new PolicyValue(Tenant.Value, Tenant.Type));
-        return TenantPredicateFactory.Build(Capabilities, entry.TenantColumn, Tenant.ParameterName, Tenant.Type);
+        var tenantColumn = entry.Columns.FirstOrDefault(c => string.Equals(c.Name, entry.TenantColumn, StringComparison.OrdinalIgnoreCase));
+        return TenantPredicateFactory.Build(Capabilities, entry.TenantColumn, Tenant.ParameterName, Tenant.Type, tenantColumn?.DataType, tenantColumn?.Collation);
     }
 
     public void AddValues(IReadOnlyDictionary<string, PolicyValue> values)

@@ -73,6 +73,11 @@ public sealed class AstCompilerSqlServerFixture : IAsyncLifetime
                 Id int NOT NULL PRIMARY KEY,
                 TenantId nvarchar(64) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
                 OrderId int NOT NULL);
+            CREATE TABLE dbo.AnsiOrders (
+                Id int NOT NULL PRIMARY KEY,
+                TenantId varchar(64) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL);
+            CREATE INDEX IX_AnsiOrders_TenantId ON dbo.AnsiOrders (TenantId);
+            INSERT dbo.AnsiOrders VALUES (1, 'acme'), (2, 'ACME'), (3, 'other');
             INSERT dbo.Orders VALUES
                 (1, N'acme',  N'EU', N'open',   10.50, N'alice.smith@acme.example'),
                 (2, N'acme',  N'US', N'open',   20.00, N'bob.jones@acme.example'),
@@ -174,6 +179,90 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     }
 
     private static List<int> Ids(List<object?[]> rows) => rows.Select(r => Convert.ToInt32(r[0])).OrderBy(x => x).ToList();
+
+    // ---- CR-ADG-09: the tenant bind follows the catalog type of the compared column ----
+
+    private static readonly TableIdentity AnsiOrders = new("dbo", "AnsiOrders");
+
+    private static InMemoryTableCatalog AnsiCatalog(string tenantType) => new(new[]
+    {
+        new TableCatalogEntry(AnsiOrders, ImmutableArray.Create(new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", tenantType)), "TenantId", 1)
+    }, "dbo");
+
+    private CompiledSql CompileAnsi(string tenant, string tenantType) => _engine.Compile("SELECT id FROM ansiorders".AsMemory(), new CompileRequest
+    {
+        TargetDialect = TargetSqlDialect.SqlServer,
+        TokenGuards = SqlTokenSecurityOptions.Strict,
+        Policy = new GovernancePolicy
+        {
+            RowFilters = _policies,
+            Masks = _policies,
+            Catalog = AnsiCatalog(tenantType),
+            Tenant = new TenantBinding("__autheris_tenant", tenant, SqlParameterType.String)
+        }
+    }, CancellationToken.None);
+
+    private async Task<string> ShowPlanAsync(CompiledSql compiled)
+    {
+        await using var conn = new SqlConnection(_db.ConnectionString);
+        await conn.OpenAsync();
+        await using (var on = conn.CreateCommand())
+        {
+            on.CommandText = "SET STATISTICS XML ON";
+            await on.ExecuteNonQueryAsync();
+        }
+
+        await using var cmd = conn.CreateCommand();
+        _binder.Bind(cmd, compiled, new Dictionary<string, object?>());
+        await using var reader = await cmd.ExecuteReaderAsync();
+        var plans = new System.Text.StringBuilder();
+        do
+        {
+            while (await reader.ReadAsync())
+            {
+                if (reader.FieldCount == 1 && reader.GetName(0).StartsWith("Microsoft SQL Server 2005 XML Showplan", StringComparison.Ordinal))
+                {
+                    plans.Append(reader.GetString(0));
+                }
+            }
+        }
+        while (await reader.NextResultAsync());
+
+        plans.Length.ShouldBeGreaterThan(0, "the statement returned no execution plan");
+        return plans.ToString();
+    }
+
+    [Fact]
+    public async Task VarcharTenantColumn_IsBoundAsVarchar_NoImplicitConversionOfTheColumn()
+    {
+        if (!_db.IsAvailable) return;
+
+        // Isolation still exact: acme and ACME are different tenants on a case-insensitive varchar column.
+        Ids(await RunWith(CompileAnsi("acme", "varchar(64)"))).ShouldBe(new List<int> { 1 });
+        Ids(await RunWith(CompileAnsi("ACME", "varchar(64)"))).ShouldBe(new List<int> { 2 });
+
+        // Control: an nvarchar bind (what the binder produced before CR-ADG-09) converts the column, which turns the seek into a scan.
+        (await ShowPlanAsync(CompileAnsi("acme", "nvarchar(64)"))).ShouldContain("CONVERT_IMPLICIT");
+        (await ShowPlanAsync(CompileAnsi("acme", "varchar(64)"))).ShouldNotContain("CONVERT_IMPLICIT");
+    }
+
+    private async Task<List<object?[]>> RunWith(CompiledSql compiled)
+    {
+        await using var conn = new SqlConnection(_db.ConnectionString);
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        _binder.Bind(cmd, compiled, new Dictionary<string, object?>());
+        var rows = new List<object?[]>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var row = new object?[reader.FieldCount];
+            reader.GetValues(row);
+            rows.Add(row);
+        }
+
+        return rows;
+    }
 
     // ---- CR-ADG-01: CTE names never shadow a physical table differently in the gateway and in the database ----
 

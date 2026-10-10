@@ -440,7 +440,7 @@ public class SecurityCoverageTests
         {
             if (type == typeof(AstSecurityVisitor)) continue; // creates the nodes; never re-enters them (tested below)
             // Producers that run before an expression is wrapped in a SecurityPredicateExpression need constructor arguments.
-            if (type.Name is "PolicySubqueryTenantRewriter" or "PolicyShaper") continue;
+            if (type.Name is "PolicySubqueryTenantRewriter" or "PolicyShaper" or "PolicyColumnTypeAnnotator") continue;
             var rewriter = (SqlAstRewriter)Activator.CreateInstance(type, BindingFlags.Default | BindingFlags.OptionalParamBinding, null, Array.Empty<object>(), null)!;
             var result = rewriter.Visit(stmt);
             Assert.True(ContainsStatementPredicate(result, injected), $"{type.Name} rewrote an injected security predicate");

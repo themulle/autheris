@@ -68,6 +68,21 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
 
     public bool CanBind(TargetSqlDialect dialect) => dialect == Dialect;
 
+    /// <summary>How tenant and policy binds follow the catalog type of the compared column (CR-ADG-09).</summary>
+    protected virtual ColumnBindStyle ColumnStyle => ColumnBindStyle.None;
+
+    /// <summary>
+    /// A string bound as a non-Unicode type (<c>varchar</c>). The declared size is never smaller than the value: a provider
+    /// truncates a longer string to the parameter size, which could turn a long tenant value into a prefix match.
+    /// </summary>
+    private void ConfigureAnsiString(DbParameter parameter, AdaptedBind adapted)
+    {
+        parameter.DbType = DbType.AnsiString;
+        int length = (Convert.ToString(adapted.Value, CultureInfo.InvariantCulture) ?? string.Empty).Length;
+        int declared = adapted.DeclaredLength > 0 ? adapted.DeclaredLength : 8000;
+        if (SetsSizesAndPrecision) parameter.Size = length <= declared ? declared : length <= 8000 ? 8000 : -1;
+    }
+
     public void Bind(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -116,7 +131,15 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
 
             var parameter = command.CreateParameter();
             parameter.ParameterName = ParameterNameFor(bound);
-            Configure(parameter, type, value);
+
+            // CR-ADG-09: tenant and policy values follow the catalog type of the column they are compared with.
+            var adapted = ColumnBindAdapter.Adapt(ColumnStyle, type, value, bound.ColumnType);
+            Configure(parameter, adapted.Type, adapted.Value);
+            if (adapted.AnsiString)
+            {
+                ConfigureAnsiString(parameter, adapted);
+            }
+
             command.Parameters.Add(parameter);
         }
     }
@@ -237,6 +260,7 @@ public sealed class SqlServerCompiledSqlBinder : DbCommandCompiledSqlBinder
     protected override TargetSqlDialect Dialect => TargetSqlDialect.SqlServer;
     protected override bool SetsSizesAndPrecision => true;
     protected override DbType TimestampDbType => DbType.DateTime2;
+    protected override ColumnBindStyle ColumnStyle => ColumnBindStyle.SqlServer;
 }
 
 /// <summary>
@@ -272,6 +296,7 @@ public sealed class OracleCompiledSqlBinder : DbCommandCompiledSqlBinder
     protected override DbType TimestampDbType => DbType.DateTime;
     protected override string? ProviderTimestampTypeName => "TimeStamp";
     protected override bool BooleanAsInteger => true;
+    protected override ColumnBindStyle ColumnStyle => ColumnBindStyle.Oracle;
 
     protected override void PrepareCommand(DbCommand command)
     {
