@@ -80,4 +80,39 @@ public sealed class OracleBindByNameWrapperTests
         while (dir is not null && !File.Exists(Path.Combine(dir, relative))) dir = Path.GetDirectoryName(dir);
         return dir is null ? throw new FileNotFoundException(relative) : Path.Combine(dir, relative);
     }
+
+    /// <summary>CR-ADG-28: a transaction of the factory connection must not hand out the unwrapped connection.</summary>
+    private sealed class FakeTransaction : DbTransaction
+    {
+        public override System.Data.IsolationLevel IsolationLevel => System.Data.IsolationLevel.ReadCommitted;
+
+        protected override DbConnection? DbConnection => null;
+
+        public override void Commit() { }
+
+        public override void Rollback() { }
+    }
+
+    [Fact]
+    public void Transaction_Connection_IsTheWrapper_AndItsCommandsBindByName()
+    {
+        using var connection = Connection();
+        using var inner = new FakeTransaction();
+        using var transaction = new BindByNameOracleTransaction(inner, connection);
+
+        transaction.Connection.ShouldBeSameAs(connection);
+        using var command = transaction.Connection!.CreateCommand();
+        BindByNameOf(command).ShouldBeTrue();
+        command.ShouldBeOfType<BindByNameOracleCommand>();
+    }
+
+    [Fact]
+    public void Command_Transaction_RoundTripsTheWrapper_NeverTheRawTransaction()
+    {
+        using var connection = Connection();
+        using var command = connection.CreateCommand();
+        using var raw = new FakeTransaction();
+        // A foreign transaction cannot be attached: only the gateway's own wrapper is accepted.
+        Should.Throw<SecurityException>(() => command.Transaction = raw);
+    }
 }

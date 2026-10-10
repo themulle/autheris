@@ -51,7 +51,8 @@ internal sealed class BindByNameOracleConnection : DbConnection
 
     public override Task CloseAsync() => _inner.CloseAsync();
 
-    protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) => _inner.BeginTransaction(isolationLevel);
+    protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) =>
+        new BindByNameOracleTransaction(_inner.BeginTransaction(isolationLevel), this);
 
     protected override DbCommand CreateDbCommand() => new BindByNameOracleCommand(_inner.CreateCommand(), this);
 
@@ -79,6 +80,7 @@ internal sealed class BindByNameOracleCommand : DbCommand
 {
     private readonly OracleCommand _inner;
     private BindByNameOracleConnection? _connection;
+    private BindByNameOracleTransaction? _transaction;
 
     public BindByNameOracleCommand(OracleCommand inner, BindByNameOracleConnection connection)
     {
@@ -158,8 +160,20 @@ internal sealed class BindByNameOracleCommand : DbCommand
 
     protected override DbTransaction? DbTransaction
     {
-        get => _inner.Transaction;
-        set => _inner.Transaction = (OracleTransaction?)value;
+        get => _transaction;
+        set
+        {
+            if (value is null)
+            {
+                _transaction = null;
+                _inner.Transaction = null;
+                return;
+            }
+
+            _transaction = value as BindByNameOracleTransaction
+                ?? throw new SecurityException("An Oracle command can only join a transaction of the gateway connection factory.");
+            _inner.Transaction = (OracleTransaction)_transaction.Inner;
+        }
     }
 
     public override void Cancel() => _inner.Cancel();
@@ -224,5 +238,51 @@ internal sealed class BindByNameOracleCommand : DbCommand
         {
             throw new SecurityException("An Oracle command reached execution with BindByName = false; positional binding is not permitted.");
         }
+    }
+}
+
+/// <summary>
+/// CR-ADG-28: wraps the driver transaction so that <see cref="Connection"/> is the gateway connection; a command created from
+/// <c>transaction.Connection</c> therefore also binds by name.
+/// </summary>
+internal sealed class BindByNameOracleTransaction : DbTransaction
+{
+    private readonly DbTransaction _inner;
+    private readonly BindByNameOracleConnection _connection;
+
+    public BindByNameOracleTransaction(DbTransaction inner, BindByNameOracleConnection connection)
+    {
+        _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+        _connection = connection ?? throw new ArgumentNullException(nameof(connection));
+    }
+
+    internal DbTransaction Inner => _inner;
+
+    public override IsolationLevel IsolationLevel => _inner.IsolationLevel;
+
+    protected override DbConnection? DbConnection => _connection;
+
+    public override void Commit() => _inner.Commit();
+
+    public override void Rollback() => _inner.Rollback();
+
+    public override Task CommitAsync(CancellationToken cancellationToken = default) => _inner.CommitAsync(cancellationToken);
+
+    public override Task RollbackAsync(CancellationToken cancellationToken = default) => _inner.RollbackAsync(cancellationToken);
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _inner.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    public override async ValueTask DisposeAsync()
+    {
+        await _inner.DisposeAsync().ConfigureAwait(false);
+        await base.DisposeAsync().ConfigureAwait(false);
     }
 }

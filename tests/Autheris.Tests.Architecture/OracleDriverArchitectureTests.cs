@@ -67,4 +67,16 @@ public sealed class OracleDriverArchitectureTests
         result.IsSuccessful.ShouldBeTrue(
             $"Only {string.Join(", ", allowed)} may use OracleConnection: {string.Join(", ", result.FailingTypeNames ?? [])}");
     }
+
+    [Fact]
+    public void RawOracleTransaction_IsOnlyUsedByTheWrapper()
+    {
+        var result = Types.InAssembly(typeof(Autheris.Infrastructure.Persistence.SqliteGovernanceRepository).Assembly)
+            .That().DoNotHaveNameStartingWith("BindByNameOracle")
+            .ShouldNot().HaveDependencyOn("Oracle.ManagedDataAccess.Client.OracleTransaction")
+            .GetResult();
+
+        result.IsSuccessful.ShouldBeTrue(
+            $"A raw OracleTransaction exposes the unwrapped connection (CR-ADG-28): {string.Join(", ", result.FailingTypeNames ?? [])}");
+    }
 }
