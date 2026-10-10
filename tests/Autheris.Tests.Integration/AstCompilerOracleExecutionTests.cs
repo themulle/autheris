@@ -300,15 +300,37 @@ public sealed class AstCompilerOracleExecutionTests : IClassFixture<AstCompilerO
         ids.ShouldBe(new List<int> { 1, 2, 3 });
     }
 
+    private static bool BindByNameOf(DbCommand command) => (bool)command.GetType().GetProperty("BindByName")!.GetValue(command)!;
+
     [Fact]
-    public async Task CommandWithoutBindByName_IsRejectedByTheBinder_NotExecutedPositionally()
+    public async Task FactoryCommands_AreCreatedWithBindByName_AndCannotLoseIt()
+    {
+        // CR-ADG-07: the factory hands out a wrapper, so no consumer can obtain a positional OracleCommand.
+        await using var conn = await _factory.CreateOpenConnectionAsync(Options());
+        await using var cmd = conn.CreateCommand();
+        BindByNameOf(cmd).ShouldBeTrue();
+        cmd.GetType().GetProperty("BindByName")!.GetMethod!.IsPublic.ShouldBeTrue();
+        Should.Throw<System.Reflection.TargetInvocationException>(() => cmd.GetType().GetProperty("BindByName")!.SetValue(cmd, false))
+            .InnerException.ShouldBeOfType<System.Security.SecurityException>();
+
+        var compiled = _engine.Compile("SELECT id FROM orders".AsMemory(), Request("acme"), CancellationToken.None);
+        _binder.Bind(cmd, compiled, new Dictionary<string, object?>());
+        BindByNameOf(cmd).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ReusedMarkersWithOutOfOrderParameters_BindByName_ThroughTheFactoryConnection()
     {
         await using var conn = await _factory.CreateOpenConnectionAsync(Options());
         await using var cmd = conn.CreateCommand();
-        ((OracleCommand)cmd).BindByName.ShouldBeFalse();
-        var compiled = _engine.Compile("SELECT id FROM orders".AsMemory(), Request("acme"), CancellationToken.None);
-        _binder.Bind(cmd, compiled, new Dictionary<string, object?>());
-        ((OracleCommand)cmd).BindByName.ShouldBeTrue();
+        cmd.CommandText = "SELECT id FROM AUTH_APP.ORDERS WHERE tenant_id = :t AND id <= :n AND tenant_id = :t ORDER BY id";
+        // Declared in the opposite order of first use: positional binding would swap the values.
+        var n = cmd.CreateParameter(); n.ParameterName = "n"; n.Value = 3; cmd.Parameters.Add(n);
+        var t = cmd.CreateParameter(); t.ParameterName = "t"; t.Value = "acme"; cmd.Parameters.Add(t);
+        var ids = new List<int>();
+        await using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync()) ids.Add(Convert.ToInt32(reader.GetValue(0)));
+        ids.ShouldBe(new List<int> { 1, 2 });
     }
 
     // ---- RLS row visibility ----

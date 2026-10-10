@@ -55,7 +55,8 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),
             DatabaseDialect.SqlServer => new SqlConnection(options.ConnectionString),
             DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(options.ConnectionString),
-            DatabaseDialect.Oracle => new OracleConnection(options.ConnectionString),
+            // CR-ADG-07: the raw driver connection never leaves this factory; every command is created with BindByName = true.
+            DatabaseDialect.Oracle => new BindByNameOracleConnection(new OracleConnection(options.ConnectionString)),
             _ => throw UnsupportedProvider(options.Provider)
         };
 
@@ -73,7 +74,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
                 await initCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
-            if (connection is OracleConnection)
+            if (connection is BindByNameOracleConnection)
             {
                 // WP-F2: pinned and verified on every pool rental, so one tenant's session state never reaches another.
                 await using var pinCmd = connection.CreateCommand();
