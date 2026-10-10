@@ -47,28 +47,35 @@ public interface ITableCatalog
 /// </summary>
 public sealed class InMemoryTableCatalog : ITableCatalog
 {
-    private readonly FrozenDictionary<string, TableCatalogEntry?> _bySchemaTable;
+    private readonly FrozenDictionary<string, ImmutableArray<TableCatalogEntry>> _bySchemaTable;
     private readonly string _defaultSchema;
 
     public InMemoryTableCatalog(IEnumerable<TableCatalogEntry> entries, string defaultSchema)
     {
         ArgumentNullException.ThrowIfNull(entries);
         _defaultSchema = defaultSchema ?? throw new ArgumentNullException(nameof(defaultSchema));
-        var map = new Dictionary<string, TableCatalogEntry?>(StringComparer.Ordinal);
+        var map = new Dictionary<string, List<TableCatalogEntry>>(StringComparer.Ordinal);
         foreach (var entry in entries)
         {
             string key = Key(entry.Identity.Schema, entry.Identity.Table);
-            // A second entry with the same case-folded key makes the name ambiguous: neither resolves.
-            map[key] = map.ContainsKey(key) ? null : entry;
+            if (!map.TryGetValue(key, out var list)) map[key] = list = new List<TableCatalogEntry>(1);
+            list.Add(entry);
         }
 
-        _bySchemaTable = map.ToFrozenDictionary(StringComparer.Ordinal);
+        _bySchemaTable = map.ToFrozenDictionary(static p => p.Key, static p => p.Value.ToImmutableArray(), StringComparer.Ordinal);
     }
 
+    /// <summary>
+    /// A name with one or two parts resolves only when exactly one entry has that schema and table, so two catalogs (or two
+    /// spellings that differ by case) with the same <c>schema.table</c> are ambiguous. A three-part name selects the Unity
+    /// Catalog part of an entry that has one (CR-ADG-17); for entries without a catalog part the first part is the Trino catalog
+    /// name and is ignored.
+    /// </summary>
     public TableCatalogEntry? Resolve(SqlQualifiedName name)
     {
         ArgumentNullException.ThrowIfNull(name);
         string schema, table;
+        string? catalog = null;
         switch (name.Parts.Count)
         {
             case 1:
@@ -80,7 +87,7 @@ public sealed class InMemoryTableCatalog : ITableCatalog
                 table = name.Parts[1].Value;
                 break;
             case 3:
-                // catalog.schema.table: the catalog part is a Trino catalog name, not a database of the target.
+                catalog = name.Parts[0].Value;
                 schema = name.Parts[1].Value;
                 table = name.Parts[2].Value;
                 break;
@@ -88,7 +95,29 @@ public sealed class InMemoryTableCatalog : ITableCatalog
                 return null;
         }
 
-        return _bySchemaTable.TryGetValue(Key(schema, table), out var entry) ? entry : null;
+        if (!_bySchemaTable.TryGetValue(Key(schema, table), out var candidates))
+        {
+            return null;
+        }
+
+        TableCatalogEntry? match = null;
+        foreach (var candidate in candidates)
+        {
+            if (catalog is not null && candidate.Identity.Catalog is not null &&
+                !string.Equals(candidate.Identity.Catalog, catalog, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (match is not null)
+            {
+                return null;   // ambiguous: never guess a table
+            }
+
+            match = candidate;
+        }
+
+        return match;
     }
 
     private static string Key(string schema, string table) =>
