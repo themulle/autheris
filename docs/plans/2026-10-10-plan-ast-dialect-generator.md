@@ -1560,3 +1560,12 @@ These lists add to the "Tests first" lists in §11. A work package is not done u
 - 2026-10-10: Added §16 "Phase 3 Security Review" (`csharp-security-expert`): findings SEC-ADG-01..29, hardened invariants (INV-9 retired; INV-11..INV-17 added), STRIDE mapping, answers to the §14 hand-off, minimum CI gate additions M-1..M-12 and new gate G10, Stream F for the Oracle runtime (SD-8), security test criteria per work package, residual-risk assessment for the §7.3 string consumers, and stakeholder decisions B-1..B-5. Status set to Phase 3 delivered; next milestone Phase 4 TDD implementation.
 - 2026-10-10: Added §3.6 "Reference design: Trino's own JDBC pushdown generator" (per user input): adopted `PreparedQuery`/`QueryParameter`, bind-expression templates, the declarative function-rewrite DSL and capability flags; rejected domain compaction (AP-11).
 - 2026-10-10: Initial English implementation plan (Phase 2). Supersedes the German 2026-10-06 plan. Incorporates stakeholder decisions SD-1..SD-7 (single path, pre-merge evidence gate, bind-everything, typed policy IR, DML and `MERGE` in the first cut, Snowflake experimental, ADR-017 amendment, Databricks production dialect). Defines architecture, interfaces, capability table, removal list, consumer migration, gate G1-G9, work packages in streams A-E plus the cutover, risks, rollback and the Phase 3 hand-off.
+
+## Implementation Log — D4 / Stream F
+
+| Package | Status | Notes |
+|---|---|---|
+| WP-D4 | Done (branch `feat/ast-failclosed-fixes`) | `ToMaskTargetDialect` throws for unmapped dialects (F-1). `DbSessionContextInitializer.ResolveDialect` throws for unknown providers; `InitializeSessionAsync` has explicit PostgreSQL, SQL Server and no-session-state (SQLite, Databricks) branches and throws `NotSupportedException` for anything else, including Oracle until WP-F2 (SEC-ADG-14). Tests: `FailClosedDialectDefaultsTests` (incl. `NoDialectDefaultFallback_InSrc`). Known unrelated unit failure: `WormConfigurationAuditServiceTests.AuditConfigurationSnapshotAsync_MintsWormRecordOnStartup_AndSuppressesDuplicates`. |
+| WP-F4 | Not started | Re-scoped by the stakeholder: SQL Server SELECT first; Oracle continues later on `feat/ast-oracle`. |
+| WP-F1 | Not started | As above. |
+| WP-F2 | Not started | As above. The Oracle branch of `InitializeSessionAsync` is currently fail-closed (throws). |
