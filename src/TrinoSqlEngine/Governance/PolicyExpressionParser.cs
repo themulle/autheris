@@ -46,6 +46,12 @@ public sealed record PolicyParseContext(
 
     /// <summary>Cache partition (for example the tenant): one partition cannot evict another's entries.</summary>
     public string? CachePartition { get; init; }
+
+    /// <summary>
+    /// The dialect the predicate will run on, when known. For Oracle the parser rejects forms in which an empty string (which is
+    /// NULL there) could loosen the predicate (SEC-ADG-17 item 2, CR-ADG-18).
+    /// </summary>
+    public TargetSqlDialect? TargetDialect { get; init; }
 }
 
 public sealed class PolicyParseCacheOptions
@@ -117,6 +123,7 @@ public sealed class PolicyExpressionParser : IPolicyExpressionParser
         foreach (var f in context.AllowedFunctions.Select(x => x.ToLowerInvariant()).OrderBy(x => x, StringComparer.Ordinal)) sb.Append(f).Append(',');
         sb.Append('|');
         foreach (var p in context.Parameters.OrderBy(x => x.Key, StringComparer.Ordinal)) sb.Append(p.Key).Append('=').Append((int)p.Value.Type).Append(',');
+        sb.Append('|').Append(context.TargetDialect?.ToString() ?? "-");
         sb.Append('|').Append(compilerVersion);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
     }
@@ -280,6 +287,10 @@ public sealed class PolicyExpressionParser : IPolicyExpressionParser
         string hash8 = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(policySql)))[..8].ToLowerInvariant();
         var shaper = new PolicyShaper(context, hash8);
         var shaped = (Expression)shaper.Visit(expression);
+        if (context.TargetDialect == TargetSqlDialect.Oracle)
+        {
+            RejectEmptyStringSensitiveForms(shaped, context, shaper.LiteralValues);
+        }
 
         return new Shape(
             shaped,
@@ -287,6 +298,49 @@ public sealed class PolicyExpressionParser : IPolicyExpressionParser
             shaper.DeclaredNames.ToImmutableArray(),
             AstFingerprint.Compute(shaped),
             AstReflection.ReferencedTargetColumns(shaped));
+    }
+
+    private static readonly HashSet<string> NullSensitiveFunctions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "coalesce", "nvl", "nvl2", "nullif", "ifnull", "decode", "greatest", "least"
+    };
+
+    /// <summary>
+    /// SEC-ADG-17 item 2: in Oracle the empty string is NULL. <c>NOT (col = :p)</c>, <c>CASE ... ELSE</c> and <c>COALESCE</c>
+    /// over a string parameter turn into a looser predicate when the value is empty. The Oracle binder already rejects an empty
+    /// tenant or policy string; this closes the same hole at parse time (defense in depth) because any string parameter can be
+    /// empty by configuration.
+    /// </summary>
+    private static void RejectEmptyStringSensitiveForms(Expression shaped, PolicyParseContext context, IReadOnlyDictionary<string, PolicyValue> literals)
+    {
+        bool IsString(PolicyParameterExpression parameter) =>
+            (literals.TryGetValue(parameter.Name, out var literal) && literal.Type == SqlParameterType.String) ||
+            (context.Parameters.TryGetValue(parameter.Name, out var declared) && declared.Type == SqlParameterType.String) ||
+            parameter.Type == SqlParameterType.String;
+
+        bool ContainsStringParameter(object? subtree)
+        {
+            bool found = false;
+            AstReflection.Walk(subtree, child =>
+            {
+                if (child is PolicyParameterExpression parameter && IsString(parameter)) found = true;
+                return !found;
+            });
+            return found;
+        }
+
+        AstReflection.Walk(shaped, node =>
+        {
+            bool sensitive = node is CaseExpression ||
+                node is UnaryExpression { Operator: UnaryOperator.Not } ||
+                (node is FunctionCallExpression fn && NullSensitiveFunctions.Contains(fn.Name.SimpleName));
+            if (sensitive && ContainsStringParameter(node))
+            {
+                throw new PolicyParseException("CASE, COALESCE and NOT over a string policy parameter are not permitted for Oracle (an empty string is NULL).");
+            }
+
+            return true;
+        });
     }
 
     // Named markers :name become __param_name, which the AST builder turns into a ParameterReference. Quoted strings and

@@ -419,4 +419,54 @@ public class PolicyExpressionParserTests
         var denyAll = new BinaryExpression(new LiteralExpression(1L, LiteralType.Integer), BinaryOperator.Equal, new LiteralExpression(0L, LiteralType.Integer));
         verifier.Verify(Stmt(denyAll), CancellationToken.None);
     }
+
+    // ---- SEC-ADG-17 item 2 (CR-ADG-18): an empty string is NULL on Oracle ----
+
+    private static PolicyParseContext OracleCtx(TargetSqlDialect? dialect)
+    {
+        var b = Context(Orders);
+        b.Functions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "coalesce", "nullif" };
+        return b.Build() with { TargetDialect = dialect };
+    }
+
+    [Theory]
+    [InlineData("NOT (region = 'EU')")]
+    [InlineData("coalesce(region, 'x') = 'y'")]
+    [InlineData("CASE WHEN region = 'EU' THEN 1 ELSE 0 END = 1")]
+    [InlineData("status = 'a' AND NOT (region IN ('EU', 'US'))")]
+    [InlineData("nullif(region, 'x') IS NOT NULL")]
+    public void Oracle_RejectsCaseCoalesceNotOverStringParameters(string policy)
+    {
+        Assert.Throws<PolicyParseException>(() => NewParser().Parse(policy, OracleCtx(TargetSqlDialect.Oracle)));
+    }
+
+    [Theory]
+    [InlineData("NOT (region = 'EU')")]
+    [InlineData("coalesce(region, 'x') = 'y'")]
+    [InlineData("CASE WHEN region = 'EU' THEN 1 ELSE 0 END = 1")]
+    public void OtherDialects_AndUnknownDialect_AcceptTheSameForms(string policy)
+    {
+        var parser = NewParser();
+        Assert.NotNull(parser.Parse(policy, OracleCtx(TargetSqlDialect.SqlServer)));
+        Assert.NotNull(parser.Parse(policy, OracleCtx(TargetSqlDialect.PostgreSql)));
+        Assert.NotNull(parser.Parse(policy, OracleCtx(null)));
+    }
+
+    [Theory]
+    [InlineData("region = 'EU' AND amount > 10")]
+    [InlineData("NOT (amount > 10)")]                       // numeric parameters are never empty strings
+    [InlineData("region <> 'EU'")]
+    [InlineData("status IN ('a', 'b') OR region = 'EU'")]
+    public void Oracle_AcceptsSafeForms(string policy)
+    {
+        Assert.NotNull(NewParser().Parse(policy, OracleCtx(TargetSqlDialect.Oracle)));
+    }
+
+    [Fact]
+    public void CacheKey_SeparatesDialects()
+    {
+        string a = PolicyExpressionParser.ComputeCacheKey("region = 'EU'", OracleCtx(TargetSqlDialect.Oracle), "v");
+        string b = PolicyExpressionParser.ComputeCacheKey("region = 'EU'", OracleCtx(TargetSqlDialect.SqlServer), "v");
+        Assert.NotEqual(a, b);
+    }
 }

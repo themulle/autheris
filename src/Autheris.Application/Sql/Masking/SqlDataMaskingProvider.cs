@@ -121,7 +121,8 @@ public sealed class SqlDataMaskingProvider
         return dt is "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal"
             or "money" or "smallmoney" or "real" or "float" or "double precision" or "double"
             or "bit" or "bool" or "boolean" or "date" or "datetime" or "datetime2" or "smalldatetime"
-            or "timestamp" or "timestamptz" or "time" or "uniqueidentifier" or "uuid";
+            or "timestamp" or "timestamptz" or "time" or "uniqueidentifier" or "uuid"
+            or "number" or "binary_float" or "binary_double";
     }
 
     public static string BuildDefaultTypeSafeMask(TableMetadata tableMeta, string columnName)
@@ -144,6 +145,7 @@ public sealed class SqlDataMaskingProvider
             "bit" or "bool" or "boolean" => "NULL",
             "date" => "NULL",
             "datetime" or "datetime2" or "smalldatetime" or "timestamp" or "timestamptz" => "NULL",
+            "number" or "binary_float" or "binary_double" => "NULL",
             "uniqueidentifier" or "uuid" => "NULL",
             _ => "'***'"
         };
@@ -158,6 +160,13 @@ public sealed class SqlDataMaskingProvider
         }
 
         var quotedCol = $"\"{columnName.Replace("\"", "\"\"")}\"";
+        if (dialect == DatabaseDialect.Oracle)
+        {
+            // CR-ADG-18: Oracle has no TEXT type and no POSITION function (CAST ... AS TEXT failed on the executable Oracle path).
+            string text = $"CAST({quotedCol} AS VARCHAR2(4000))";
+            return $"CASE WHEN INSTR({text}, '@') > 1 THEN SUBSTR({text}, 1, 1) || '***@***' ELSE '***@***' END";
+        }
+
         if (dialect == DatabaseDialect.Sqlite)
         {
             return $"CASE WHEN INSTR(CAST({quotedCol} AS TEXT), '@') > 1 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 1) || '***@***' ELSE '***@***' END";
@@ -175,6 +184,12 @@ public sealed class SqlDataMaskingProvider
         }
 
         var quotedCol = $"\"{columnName.Replace("\"", "\"\"")}\"";
+        if (dialect == DatabaseDialect.Oracle)
+        {
+            string text = $"CAST({quotedCol} AS VARCHAR2(4000))";
+            return $"CASE WHEN LENGTH({text}) >= 8 THEN SUBSTR({text}, 1, 2) || '** **** **** ' || SUBSTR({text}, -4) ELSE '****' END";
+        }
+
         if (dialect == DatabaseDialect.Sqlite)
         {
             return $"CASE WHEN LENGTH(CAST({quotedCol} AS TEXT)) >= 8 THEN SUBSTR(CAST({quotedCol} AS TEXT), 1, 2) || '** **** **** ' || SUBSTR(CAST({quotedCol} AS TEXT), -4) ELSE '****' END";
