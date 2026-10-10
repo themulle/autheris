@@ -40,6 +40,12 @@ public static class VirtualFilterErrorCodes
     /// <summary>A <c>PushdownOnly</c> binding needs a key pushdown the table or the gateway cannot provide.</summary>
     public const string PushdownUnavailable = "VF_PUSHDOWN_UNAVAILABLE";
 
+    /// <summary>A <c>PushdownOnly</c> binding needs a pushdown whose key count or request size exceeds the configured budget.</summary>
+    public const string PushdownLimitExceeded = "VF_PUSHDOWN_LIMIT_EXCEEDED";
+
+    /// <summary>A pushdown argument would overwrite an argument the gateway already set.</summary>
+    public const string PushdownArgumentConflict = "VF_PUSHDOWN_ARGUMENT_CONFLICT";
+
     private static readonly IReadOnlyList<string> CodesInDenyReasons = [PatternEvaluationFailed, BindingMisconfigured];
 
     /// <summary>The Virtual Filter error code a deny reason starts with (<c>CODE: ...</c>), if any.</summary>

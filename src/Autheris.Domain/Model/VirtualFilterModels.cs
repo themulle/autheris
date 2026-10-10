@@ -299,8 +299,11 @@ public sealed record FilterBinding
     /// <summary>Execution strategy for federated/web-api virtual filters.</summary>
     public VirtualFilterExecutionStrategy Strategy { get; init; } = VirtualFilterExecutionStrategy.Adaptive;
 
-    /// <summary>Parameter format when pushing down allowed keys to external web-apis.</summary>
-    public PushdownParameterFormat PushdownFormat { get; init; } = PushdownParameterFormat.CommaSeparated;
+    /// <summary>
+    /// Parameter format the binding asserts for pushing keys to a web-api; null uses the capability the endpoint
+    /// declares. A format the endpoint cannot satisfy is never silently replaced (Tier 3, or denial for PushdownOnly).
+    /// </summary>
+    public PushdownParameterFormat? PushdownFormat { get; init; }
 
     /// <summary>Maximum number of keys pushed down in URL parameters before switching to DuckDB join.</summary>
     public int MaxPushdownKeys { get; init; } = 100;
@@ -384,7 +387,7 @@ public sealed record FilterBinding
           .Append(" kinds=").Append((int)ObjectKinds)
           .Append(" time=").Append(TimeColumn)
           .Append(" strat=").Append((int)Strategy)
-          .Append(" push=").Append((int)PushdownFormat)
+          .Append(" push=").Append(PushdownFormat is { } format ? ((int)format).ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty)
           .Append(" maxk=").Append(MaxPushdownKeys)
           .Append(" comp=").AppendJoin(',', CompositeKeys.OrderBy(c => c, StringComparer.Ordinal))
           .Append(" map=").AppendJoin(',', (ColumnMap ?? new Dictionary<string, string>())

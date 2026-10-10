@@ -58,6 +58,21 @@ internal static class FederatedVfPipelineHarness
         Columns = columns.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList()
     };
 
+    /// <summary>The same HTTP table with another endpoint descriptor (batch capability, pagination, auth).</summary>
+    internal static TableMetadata WithEndpoint(TableMetadata table, HttpEndpointDescriptor endpoint) => table with
+    {
+        Table = new Table
+        {
+            TableName = table.Table.TableName,
+            SchemaName = table.Table.SchemaName,
+            SourceType = table.Table.SourceType,
+            DataSourceType = DataSourceType.HttpDeclarative,
+            SourceName = table.Table.SourceName,
+            IsActive = true,
+            HttpEndpoint = endpoint
+        }
+    };
+
     internal static TableMetadata SqlTable(string domain, string schema, string table, params string[] columns) => new()
     {
         Identifier = new TableIdentifier(domain, schema, table),

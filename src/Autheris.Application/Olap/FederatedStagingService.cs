@@ -118,6 +118,23 @@ public sealed class FederatedStagingService : IFederatedStagingService
             }
 
             var sessionArgs = new Dictionary<string, object?> { ["limit"] = budget.MaxStagedRowsPerTable + 1 };
+            // F-GOV-14 (AC-8.5): the pushdown restricts what is fetched; it can never overwrite a gateway argument.
+            if (req.VirtualFilterPlan?.PushdownArguments is { } pushdown)
+            {
+                foreach (var (name, value) in pushdown)
+                {
+                    if (sessionArgs.Keys.Any(k => string.Equals(k, name, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        _logger.LogWarning("Federated staging denied table {Table}: the pushdown argument collides with a gateway argument.", req.Metadata.Identifier);
+                        throw new GatewaySecurityException(
+                            $"The Virtual Filter pushdown of '{req.Metadata.Identifier}' conflicts with a gateway argument.",
+                            Autheris.Application.VirtualFilters.Federation.VirtualFilterErrorCodes.PushdownArgumentConflict);
+                    }
+
+                    sessionArgs[name] = value;
+                }
+            }
+
             var session = new ConnectorSessionContext(
                 Principal: user,
                 Tenant: tenantId,

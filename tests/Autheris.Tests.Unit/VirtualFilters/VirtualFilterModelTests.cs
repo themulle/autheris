@@ -157,4 +157,15 @@ public sealed class VirtualFilterModelTests
         (DavidProfile() with { Bindings = [new FilterBinding { FilterName = "nicht_ausgelieferte_krane", TimeColumn = "ts" }] })
             .ComputeDefinitionHash().ShouldNotBe(DavidProfile().ComputeDefinitionHash());
     }
+
+    [Fact]
+    public void Binding_PushdownFormat_DefaultsToTheEndpointCapability_AndIsPartOfTheHash()
+    {
+        var binding = new FilterBinding { FilterName = "f" };
+
+        binding.PushdownFormat.ShouldBeNull();
+        binding.ComputeHash().ShouldNotBe((binding with { PushdownFormat = PushdownParameterFormat.CommaSeparated }).ComputeHash());
+        (binding with { PushdownFormat = PushdownParameterFormat.PostBatch }).ComputeHash()
+            .ShouldNotBe((binding with { PushdownFormat = PushdownParameterFormat.CommaSeparated }).ComputeHash());
+    }
 }

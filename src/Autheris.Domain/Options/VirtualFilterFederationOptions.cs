@@ -29,6 +29,15 @@ public sealed class VirtualFilterFederationOptions
     /// <summary>Largest number of key tuples a point lookup may expand to (IN lists of composite keys); more is a scan.</summary>
     [Range(1, 10_000)] public int MaxPointLookupTuples { get; init; } = 1_000;
 
+    /// <summary>Largest number of keys pushed to an upstream in one lookup (a binding may lower it); more is Tier 3 or a denial.</summary>
+    [Range(1, 10_000)] public int MaxPushdownKeys { get; init; } = 1_000;
+
+    /// <summary>Largest estimated request URL (characters) of a query-parameter pushdown.</summary>
+    [Range(256, 65_536)] public int MaxPushdownUrlLength { get; init; } = 2_048;
+
+    /// <summary>Largest number of single-key requests of a path lookup pushdown.</summary>
+    [Range(1, 100)] public int MaxPathLookupRequests { get; init; } = 10;
+
     /// <summary>Throws when a value is out of range (fail closed at startup instead of at query time).</summary>
     public void Validate()
     {
@@ -36,6 +45,9 @@ public sealed class VirtualFilterFederationOptions
         Check(MaxAuthorizedKeys, 1, 1_000_000, nameof(MaxAuthorizedKeys));
         Check(KeyQueryTimeoutSeconds, 1, 300, nameof(KeyQueryTimeoutSeconds));
         Check(MaxPointLookupTuples, 1, 10_000, nameof(MaxPointLookupTuples));
+        Check(MaxPushdownKeys, 1, 10_000, nameof(MaxPushdownKeys));
+        Check(MaxPushdownUrlLength, 256, 65_536, nameof(MaxPushdownUrlLength));
+        Check(MaxPathLookupRequests, 1, 100, nameof(MaxPathLookupRequests));
         Check(KeyCacheSizeLimitBytes, 1L * 1024 * 1024, 4L * 1024 * 1024 * 1024, nameof(KeyCacheSizeLimitBytes));
     }
 

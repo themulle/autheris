@@ -21,9 +21,10 @@ using TrinoSqlEngine.Ast.Nodes;
 /// <item>All key sets are loaded (bounded by the caller's cancellation token, also when the provider ignores it);
 /// every failure is a stable code, a provider failure is <c>VIRTUAL_FILTER_SOURCE_UNAVAILABLE</c> without its message.</item>
 /// <item>An empty key set is Tier 0 and a point lookup without any authorized queried key is Tier 1 (both skip the
-/// upstream call); otherwise the strategies decide: <c>ShortCircuitOnly</c> denies a query that is not a point lookup,
-/// a point lookup hit or <c>PushdownOnly</c> denies (pushdown is not available yet), everything else reads the table
-/// completely (Tier 3).</item>
+/// upstream call); otherwise the strategies decide (see <see cref="VirtualFilterPushdownSelector"/>): the authorized
+/// (and queried) keys are pushed when the endpoint declares a safe capability within budget (Tier 1 hit / Tier 2),
+/// <c>ShortCircuitOnly</c> denies a query that is not a point lookup, <c>PushdownOnly</c> and a <c>ShortCircuitOnly</c>
+/// hit deny when no pushdown is possible, everything else reads the table completely (Tier 3).</item>
 /// </list>
 /// Every plan carries the enforcement, so what is returned never depends on the tier.
 /// </summary>
@@ -130,8 +131,8 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
             return new VirtualFilterTablePlan(enforcement, VirtualFilterTier.EmptyKeySet, skipUpstream: true, "empty_key_set");
         }
 
-        // Tier 1: a point lookup whose queried keys are all unauthorized for some pair cannot return a row. The upstream
-        // call is skipped and an empty relation is staged, so the user query still yields its true (empty-side) answer.
+        // Tier 1: a point lookup without any authorized queried key for some pair cannot return a row. The upstream
+        // call is skipped and an empty relation is staged, so the user query still yields its true answer.
         var federation = Federation;
         var queried = federation.PushdownEnabled ? QueriedKeys(statement, tables, table, federation.MaxPointLookupTuples) : null;
         if (queried != null)
@@ -147,23 +148,50 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
 
         bool isPointLookup = queried != null && queried.All(q => q != null);
         var strategies = table.Pairs.Select(p => p.Binding.Strategy).ToHashSet();
-        if (strategies.Contains(VirtualFilterExecutionStrategy.ShortCircuitOnly) && !isPointLookup)
+        bool shortCircuitOnly = strategies.Contains(VirtualFilterExecutionStrategy.ShortCircuitOnly);
+        if (shortCircuitOnly && !isPointLookup)
         {
             throw new GatewaySecurityException(
                 $"The Virtual Filter bindings of '{table.Metadata.Identifier}' permit point lookups only; the query is a scan.",
                 VirtualFilterErrorCodes.ScanNotPermitted);
         }
 
-        if (strategies.Contains(VirtualFilterExecutionStrategy.ShortCircuitOnly) ||
-            strategies.Contains(VirtualFilterExecutionStrategy.PushdownOnly))
+        // A hit of ShortCircuitOnly and every PushdownOnly binding need the keys pushed; DuckDbHashJoin (or the global
+        // switch) forbids pushing. Contradictions deny instead of choosing one side (most restrictive wins).
+        bool needsPushdown = shortCircuitOnly || strategies.Contains(VirtualFilterExecutionStrategy.PushdownOnly);
+        if (!federation.PushdownEnabled || strategies.Contains(VirtualFilterExecutionStrategy.DuckDbHashJoin))
         {
-            throw new GatewaySecurityException(
-                $"The Virtual Filter bindings of '{table.Metadata.Identifier}' require a key pushdown, which is not available.",
-                VirtualFilterErrorCodes.PushdownUnavailable);
+            return needsPushdown
+                ? throw PushdownDenied(table, VirtualFilterErrorCodes.PushdownUnavailable)
+                : new VirtualFilterTablePlan(enforcement, VirtualFilterTier.FullFetch, skipUpstream: false, "full_fetch");
         }
 
-        return new VirtualFilterTablePlan(enforcement, VirtualFilterTier.FullFetch, skipUpstream: false, "full_fetch");
+        var pushPairs = new List<PushdownPair>(loaded.Count);
+        for (int i = 0; i < loaded.Count; i++)
+        {
+            pushPairs.Add(new PushdownPair(loaded[i].Pair, table.Columns[i], loaded[i].Keys, queried?[i]));
+        }
+
+        var candidate = VirtualFilterPushdownSelector.Select(table.Metadata, pushPairs, federation);
+        switch (candidate.Status)
+        {
+            case PushdownStatus.Disjoint:
+                return new VirtualFilterTablePlan(enforcement, VirtualFilterTier.EmptyKeySet, skipUpstream: true, candidate.Reason);
+            case PushdownStatus.Pushable:
+                var args = new Dictionary<string, object?> { [candidate.ParameterName!] = candidate.Values!.ToList() };
+                return new VirtualFilterTablePlan(
+                    enforcement, isPointLookup ? VirtualFilterTier.PointLookup : VirtualFilterTier.Pushdown, skipUpstream: false, candidate.Reason, args);
+            default:
+                return needsPushdown
+                    ? throw PushdownDenied(table, candidate.Status == PushdownStatus.OverLimit
+                        ? VirtualFilterErrorCodes.PushdownLimitExceeded
+                        : VirtualFilterErrorCodes.PushdownUnavailable)
+                    : new VirtualFilterTablePlan(enforcement, VirtualFilterTier.FullFetch, skipUpstream: false, candidate.Reason);
+        }
     }
+
+    private static GatewaySecurityException PushdownDenied(PreparedTable table, string code) =>
+        new($"The Virtual Filter bindings of '{table.Metadata.Identifier}' require a key pushdown that is not available within its limits.", code);
 
     /// <summary>Per pair: the queried key tuples of the point lookup, or null when the pair is not decided by the query.</summary>
     private static VirtualFilterKey[]?[]? QueriedKeys(

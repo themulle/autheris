@@ -269,7 +269,7 @@ internal static class VirtualFilterStore
             TimeColumn = b.TimeColumn,
             ColumnMap = b.ColumnMap,
             Strategy = b.Strategy ?? VirtualFilterExecutionStrategy.Adaptive,
-            PushdownFormat = b.PushdownFormat ?? PushdownParameterFormat.CommaSeparated,
+            PushdownFormat = b.PushdownFormat,
             MaxPushdownKeys = b.MaxPushdownKeys ?? 100,
             CompositeKeys = b.CompositeKeys ?? []
         }).ToList(),
