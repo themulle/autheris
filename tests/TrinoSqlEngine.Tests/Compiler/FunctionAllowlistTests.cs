@@ -67,6 +67,22 @@ public class FunctionAllowlistTests
         Assert.ThrowsAny<SecurityException>(() => Compile($"SELECT id FROM orders WHERE status = {call}", TargetSqlDialect.Databricks));
     }
 
+    /// <summary>CR-ADG-26: a delimited function name would bypass the built-in on PostgreSQL and Oracle; fail closed.</summary>
+    [Theory]
+    [InlineData(TargetSqlDialect.PostgreSql, "\"lower\"(email)")]
+    [InlineData(TargetSqlDialect.PostgreSql, "\"LOWER\"(email)")]
+    [InlineData(TargetSqlDialect.PostgreSql, "\"pg_catalog\".lower(email)")]
+    [InlineData(TargetSqlDialect.Oracle, "\"lower\"(email)")]
+    [InlineData(TargetSqlDialect.Oracle, "\"UPPER\"(email)")]
+    [InlineData(TargetSqlDialect.SqlServer, "\"lower\"(email)")]
+    [InlineData(TargetSqlDialect.DuckDb, "\"lower\"(email)")]
+    [InlineData(TargetSqlDialect.Databricks, "\"lower\"(email)")]
+    public void DelimitedFunctionName_IsRejected(TargetSqlDialect dialect, string call)
+    {
+        Assert.ThrowsAny<SecurityException>(() => Compile($"SELECT {call} FROM orders", dialect));
+        Assert.ThrowsAny<SecurityException>(() => Compile($"SELECT id FROM orders WHERE {call} = 'x'", dialect));
+    }
+
     [Theory]
     [InlineData(TargetSqlDialect.SqlServer)]
     [InlineData(TargetSqlDialect.PostgreSql)]

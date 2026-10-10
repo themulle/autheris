@@ -1130,6 +1130,12 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         if (context.nullTreatment() != null) throw Unsupported("IGNORE/RESPECT NULLS");
 
         var qName = ToSqlQualifiedName(context.qualifiedName());
+        if (qName.Parts.Any(part => part.IsQuoted))
+        {
+            // CR-ADG-26: a delimited name is case-exact and may resolve to a user function instead of the built-in.
+            throw new SecurityException($"Function '{name}' is delimited; delimited function names are not permitted.");
+        }
+
         var args = new List<Expression>();
         // Wunsch 4: argument() is an empty array (never null) for COUNT(*), so the star must be checked first.
         bool isStar = context.ASTERISK() != null;

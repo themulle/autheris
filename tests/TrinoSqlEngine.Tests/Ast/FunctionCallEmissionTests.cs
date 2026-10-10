@@ -78,11 +78,9 @@ public sealed class FunctionCallEmissionTests
     }
 
     [Fact]
-    public void QuotedFunctionName_StaysQuoted()
+    public void QuotedFunctionName_IsRejected()
     {
-        // A quoted name is the client's explicit choice of a case-sensitive object; it is not upper-cased.
-        string sql = Generate("SELECT \"lower\"(dept) FROM orders", TargetSqlDialect.PostgreSql);
-
-        Assert.Contains("\"lower\"(\"dept\")", sql);
+        // CR-ADG-26: a delimited name is case-exact and may resolve to a user function; fail closed.
+        Assert.Throws<System.Security.SecurityException>(() => Generate("SELECT \"lower\"(dept) FROM orders", TargetSqlDialect.PostgreSql));
     }
 }
