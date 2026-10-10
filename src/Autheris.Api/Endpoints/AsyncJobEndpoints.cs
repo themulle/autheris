@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Threading;
 using Autheris.Api.Extensions;
 using Autheris.Application.Jobs.Interfaces;
+using Autheris.Application.Jobs.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
@@ -47,9 +48,7 @@ public static class AsyncJobEndpoints
             CancellationToken ct) =>
         {
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
-            var userSid = httpContext.User.GetUserSid()?.Value
-                          ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                          ?? string.Empty;
+            var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
 
             var job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             if (job == null)
@@ -82,9 +81,7 @@ public static class AsyncJobEndpoints
             CancellationToken ct) =>
         {
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
-            var userSid = httpContext.User.GetUserSid()?.Value
-                          ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                          ?? string.Empty;
+            var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
 
             var stream = await jobManager.GetJobResultStreamAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             if (stream == null)
@@ -107,9 +104,7 @@ public static class AsyncJobEndpoints
             CancellationToken ct) =>
         {
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
-            var userSid = httpContext.User.GetUserSid()?.Value
-                          ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                          ?? string.Empty;
+            var userSid = AsyncJobOwner.Resolve(httpContext.User) ?? string.Empty;
 
             var cancelled = await jobManager.CancelJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             return cancelled ? Results.NoContent() : Results.NotFound();

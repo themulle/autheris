@@ -77,9 +77,10 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
             throw new ArgumentException("TenantId is required.", nameof(tenantId));
         }
 
-        var userSid = user.FindFirst("sub")?.Value
-                      ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                      ?? "anonymous";
+        // Canonical owner (same resolution as the status/result/cancel endpoints). Fail-closed: a principal without a
+        // resolvable identity must not become a shared "anonymous" owner.
+        var userSid = AsyncJobOwner.Resolve(user)
+                      ?? throw new SecurityException("Async jobs require an authenticated principal with a resolvable user identity.");
 
         var jobId = Guid.NewGuid().ToString("D");
         var format = string.IsNullOrWhiteSpace(request.Format) ? "json" : request.Format.Trim().ToLowerInvariant();
@@ -268,9 +269,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager
     {
         try
         {
-            var sidStr = user.FindFirst("sub")?.Value
-                         ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                         ?? job.SubmittedByUserId;
+            var sidStr = AsyncJobOwner.Resolve(user) ?? job.SubmittedByUserId;
 
             var entry = new AuditLogEntry
             {

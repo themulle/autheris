@@ -246,4 +246,50 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
         var content = await reader.ReadToEndAsync();
         content.ShouldContain("a***@example.com");
     }
+
+    private static ClaimsPrincipal CreateUserWithSidClaims(string primarySid, string sub, string tenantId = "tenant-a") =>
+        new(new ClaimsIdentity(new[]
+        {
+            new Claim(ClaimTypes.PrimarySid, primarySid),
+            new Claim("sub", sub),
+            new Claim("tenant_id", tenantId)
+        }, "TestAuth"));
+
+    [Fact]
+    public async Task SubmitJob_OwnerWithPrimarySid_IsAccessibleWithCanonicalOwnerResolution()
+    {
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var owner = CreateUserWithSidClaims("S-1-5-21-ALICE", "sub-alice");
+
+        var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), owner, new TenantId("tenant-a"));
+
+        // The endpoints resolve the caller with AsyncJobOwner.Resolve for status/result/cancel.
+        descriptor.SubmittedByUserId.ShouldBe("S-1-5-21-ALICE");
+        var ownerKey = AsyncJobOwner.Resolve(owner)!;
+        (await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-a"), ownerKey)).ShouldNotBeNull();
+        (await manager.CancelJobAsync(descriptor.JobId, new TenantId("tenant-a"), ownerKey)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task SubmitJob_DifferentPrincipalSharingOnlySub_CannotAccessJob()
+    {
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var owner = CreateUserWithSidClaims("S-1-5-21-ALICE", "shared-sub");
+        var other = CreateUserWithSidClaims("S-1-5-21-MALLORY", "shared-sub");
+
+        var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), owner, new TenantId("tenant-a"));
+
+        (await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-a"), AsyncJobOwner.Resolve(other)!)).ShouldBeNull();
+        (await manager.CancelJobAsync(descriptor.JobId, new TenantId("tenant-a"), AsyncJobOwner.Resolve(other)!)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task SubmitJob_PrincipalWithoutIdentity_IsRejected()
+    {
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var anonymous = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tenant_id", "tenant-a") }, "TestAuth"));
+
+        await Should.ThrowAsync<System.Security.SecurityException>(() =>
+            manager.SubmitJobAsync(new AsyncQueryJobRequest("SELECT 1"), anonymous, new TenantId("tenant-a")));
+    }
 }
