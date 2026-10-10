@@ -1264,7 +1264,21 @@ public sealed class ExtensibilityOptions
     public bool RequireJustificationForBreakGlass { get; init; } = true;
     // SEC M-06: Break-glass requires an authorized role by default.
     public bool RequireRoleForBreakGlass { get; init; } = true;
-    public List<string> BreakGlassAllowedRoles { get; init; } = ["BreakGlassOperator", "ClusterAdmin", "GovernanceAdmin", "SecurityAdmin"];
+
+    /// <summary>
+    /// Roles that may invoke break-glass when <see cref="RequireRoleForBreakGlass"/> is true. When not configured:
+    /// BreakGlassOperator, ClusterAdmin, GovernanceAdmin and SecurityAdmin. A configured list replaces that default
+    /// entirely, so an operator who restricts the list gets exactly what was configured. Nullable on purpose: the
+    /// configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON
+    /// array counts as "not configured"; to permit break-glass for nobody, set <see cref="EnableBreakGlass"/> to false.
+    /// </summary>
+    public List<string>? BreakGlassAllowedRoles { get; init; }
+
+    private static readonly string[] DefaultBreakGlassAllowedRoles = ["BreakGlassOperator", "ClusterAdmin", "GovernanceAdmin", "SecurityAdmin"];
+
+    /// <summary>Configured <see cref="BreakGlassAllowedRoles"/> or the default list.</summary>
+    public IReadOnlyList<string> GetEffectiveBreakGlassAllowedRoles() => BreakGlassAllowedRoles ?? (IReadOnlyList<string>)DefaultBreakGlassAllowedRoles;
+
     public string JustificationHeaderName { get; init; } = "X-Access-Justification";
     public string BreakGlassHeaderName { get; init; } = "X-Break-Glass";
     public string PluginDirectory { get; init; } = "plugins";
