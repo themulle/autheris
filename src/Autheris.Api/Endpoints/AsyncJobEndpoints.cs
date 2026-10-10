@@ -26,6 +26,7 @@ public static class AsyncJobEndpoints
         {
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
             var job = await jobManager.SubmitJobAsync(request, httpContext.User, tenantId, ct).ConfigureAwait(false);
+            MarkDomainAudited(httpContext);
 
             var response = new AsyncJobStatusResponse(
                 JobId: job.JobId,
@@ -93,6 +94,8 @@ public static class AsyncJobEndpoints
                 return Results.NotFound();
             }
 
+            MarkDomainAudited(httpContext);
+
             var job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             var format = job?.Format ?? "json";
             var contentType = format.Equals("csv", StringComparison.OrdinalIgnoreCase) ? "text/csv" : "application/json";
@@ -113,9 +116,21 @@ public static class AsyncJobEndpoints
                           ?? string.Empty;
 
             var cancelled = await jobManager.CancelJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            if (cancelled)
+            {
+                MarkDomainAudited(httpContext);
+            }
+
             return cancelled ? Results.NoContent() : Results.NotFound();
         }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobCancelled);
 
         return app;
     }
+
+    /// <summary>
+    /// Delegated audit routes: the job manager has written the ALLOW audit record (fail-closed), so the central
+    /// middleware must not write a second one. Denials and failures are NOT marked and stay with the middleware.
+    /// </summary>
+    private static void MarkDomainAudited(HttpContext httpContext) =>
+        httpContext.Features.Get<AuditContext>()?.MarkHandled();
 }
