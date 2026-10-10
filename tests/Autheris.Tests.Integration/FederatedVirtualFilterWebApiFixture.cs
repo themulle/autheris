@@ -167,6 +167,9 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
         public const string Paged = "customers_paged";
         public const string Mixed = "customers_mixed";
         public const string ODataFormat = "customers_odata";
+
+        /// <summary>A table with a consent row filter (<c>tenant_code = 'T1'</c>) and no Virtual Filter.</summary>
+        public const string Filtered = "customers_filtered";
     }
 
     public CountingCrmApiHandler Crm { get; } = new();
@@ -203,6 +206,7 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
 
             b.UseSetting("Gateway:WebSql:Enabled", "true");
             b.UseSetting("Gateway:WebSql:DefaultDataSourceName", "erp");
+            b.UseSetting("Gateway:WebSql:AllowedDataSources:0", "crm_api");
             b.UseSetting("Gateway:WebSql:CrossSource:Enabled", "true");
 
             b.ConfigureServices(services =>
@@ -441,7 +445,9 @@ INSERT INTO orders VALUES (1, 101), (2, 102), (3, 103), (4, 105), (5, 999);";
                 ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
                 ValidTo = DateTimeOffset.UtcNow.AddDays(30),
                 ColumnRules = meta.Columns.Select(c => new ConsentColumnRule { ColumnName = c.ColumnName, AccessLevel = ColumnAccessLevel.Clear }).ToList(),
-                RowFilters = []
+                RowFilters = meta.Identifier.TableName == Tables.Filtered
+                    ? [new ConsentRowFilter { ColumnName = "tenant_code", Operator = "EQ", ValueType = "string", ValueJson = "\"T1\"", ValueSource = "LITERAL" }]
+                    : []
             });
         }
 
@@ -487,6 +493,7 @@ INSERT INTO orders VALUES (1, 101), (2, 102), (3, 103), (4, 105), (5, 999);";
         yield return (Tables.Path, Endpoint("/api/v1/customers/{id}", HttpBatchType.ParallelSingleRequests));
         yield return (Tables.Paged, Endpoint("/customers_paged", HttpBatchType.QueryParameterList, paging: new HttpPaginationConfig(HttpPaginationStrategy.PageNumber, DefaultPageSize: 4)));
         yield return (Tables.Mixed, Endpoint("/customers_mixed", HttpBatchType.None));
+        yield return (Tables.Filtered, Endpoint("/customers_none", HttpBatchType.None));
         yield return (Tables.ODataFormat, Endpoint("/customers_odata", HttpBatchType.QueryParameterList));
     }
 }
