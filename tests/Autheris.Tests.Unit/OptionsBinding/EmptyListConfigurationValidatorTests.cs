@@ -48,6 +48,7 @@ public class EmptyListConfigurationValidatorTests
         ["""{"Gateway":{"Authentication":{"ForwardAuth":{"AllowedRoles":[]}}}}""", "Gateway:Authentication:ForwardAuth:AllowedRoles"],
         ["""{"Gateway":{"Extensibility":{"BreakGlassAllowedRoles":[]}}}""", "Gateway:Extensibility:BreakGlassAllowedRoles"],
         ["""{"Gateway":{"SystemMetrics":{"AllowedRoles":[]}}}""", "Gateway:SystemMetrics:AllowedRoles"],
+        ["""{"Gateway":{"WebSql":{"CrossSource":{"AllowedHttpAuthModes":[]}}}}""", "Gateway:WebSql:CrossSource:AllowedHttpAuthModes"],
         ["""{"Gateway":{"Authentication":{"BasicAuth":{"Session":{"AllowedEnvironments":[]}}}}}""", "Gateway:Authentication:BasicAuth:Session:AllowedEnvironments"],
     ];
 

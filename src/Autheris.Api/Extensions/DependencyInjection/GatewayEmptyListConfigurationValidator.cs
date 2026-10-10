@@ -26,6 +26,8 @@ public sealed class GatewayEmptyListConfigurationValidator : IValidateOptions<Ga
             "To switch the system metrics endpoints off, set Gateway:SystemMetrics:Enabled to false."),
         new("Authentication:BasicAuth:Session:AllowedEnvironments", true,
             "To disable the basic-auth session, set Gateway:Authentication:BasicAuth:Session:Enabled to false."),
+        new("WebSql:CrossSource:AllowedHttpAuthModes", true,
+            "To permit no federated HTTP source, set Gateway:WebSql:CrossSource:Enabled to false."),
         new("Authentication:EntraId:ReadOnlyScopes", false,
             "The default read-only scope (Agent.Read) applies, which is more restrictive than no read-only scope."),
         new("ReverseProxy:KnownNetworks", false,

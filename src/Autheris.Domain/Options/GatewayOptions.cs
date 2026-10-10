@@ -1535,8 +1535,11 @@ public sealed class CrossSourceOptions
     /// <summary>
     /// HTTP data source authentication modes allowed in federated queries. When not configured: None, StaticApiKey and
     /// ClientCredentials. A configured list replaces that default entirely. Nullable on purpose: the configuration
-    /// binder appends to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON array counts as
-    /// "not configured"; to permit no federated HTTP source, set <see cref="Enabled"/> to false.
+    /// binder appends to pre-filled lists, so a non-empty default could not be narrowed. Enforced fail-closed by the
+    /// federated staging step before any source is read: an HTTP source whose auth mode is not listed is denied with
+    /// error code HTTP_AUTH_MODE_DENIED (HTTP 403). ForwardBearerToken is never permitted, even if listed. An empty JSON
+    /// array aborts the start (it would silently apply the default); to permit no federated HTTP source, set
+    /// <see cref="Enabled"/> to false.
     /// </summary>
     public List<string>? AllowedHttpAuthModes { get; init; }
 

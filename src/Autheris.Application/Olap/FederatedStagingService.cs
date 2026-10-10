@@ -94,6 +94,14 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     throw new GatewaySecurityException($"HTTP table '{req.Metadata.Identifier}' does not declare CompleteResponse=true and cannot be federated.", "INCOMPLETE_HTTP_RESPONSE");
                 }
 
+                // CrossSource.AllowedHttpAuthModes (fail-closed): the mode must be listed (default: None, StaticApiKey, ClientCredentials).
+                var allowedModes = (_gatewayOptions.Value.WebSql?.CrossSource ?? new CrossSourceOptions()).GetEffectiveAllowedHttpAuthModes();
+                if (!allowedModes.Contains(desc.AuthMode.ToString(), StringComparer.OrdinalIgnoreCase))
+                {
+                    _logger.LogWarning("Federated staging rejected HTTP table {Table}: auth mode {AuthMode} is not in CrossSource:AllowedHttpAuthModes.", req.Metadata.Identifier, desc.AuthMode);
+                    throw new GatewaySecurityException($"HTTP table '{req.Metadata.Identifier}' uses an authentication mode that is not permitted in cross-source federation.", "HTTP_AUTH_MODE_DENIED");
+                }
+
                 if (desc.AuthMode == HttpAuthMode.ForwardBearerToken)
                 {
                     _logger.LogWarning("Federated staging rejected HTTP table {Table}: ForwardBearerToken is not supported.", req.Metadata.Identifier);
