@@ -14,6 +14,7 @@ using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -100,12 +101,16 @@ internal static class FederatedVfPipelineHarness
         TimeoutSeconds: 30,
         MaxParallelSourceReads: 1);
 
-    internal static FederatedStagingService Staging(IAutherisConnectorRegistry registry, GatewayOptions? options = null) =>
+    internal static FederatedStagingService Staging(
+        IAutherisConnectorRegistry registry,
+        GatewayOptions? options = null,
+        IAuditLogRepository? audit = null,
+        ILogger<FederatedStagingService>? logger = null) =>
         new(registry,
             Substitute.For<IColumnMaskingProvider>(),
-            Substitute.For<IAuditLogRepository>(),
+            audit ?? Substitute.For<IAuditLogRepository>(),
             Options.Create(options ?? new GatewayOptions()),
-            NullLogger<FederatedStagingService>.Instance);
+            logger ?? NullLogger<FederatedStagingService>.Instance);
 
     internal static IReadOnlyDictionary<string, object?> Row(params (string Column, object? Value)[] values) =>
         values.ToDictionary(v => v.Column, v => v.Value, StringComparer.OrdinalIgnoreCase);
@@ -162,5 +167,25 @@ internal static class StubRegistry
         }
 
         return registry;
+    }
+}
+
+/// <summary>Collects formatted log messages (and their levels) so tests can assert what was logged.</summary>
+internal sealed class ListLogger<T> : ILogger<T>
+{
+    private readonly List<(LogLevel Level, string Message)> _entries;
+
+    public ListLogger(List<(LogLevel Level, string Message)> entries) => _entries = entries;
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        lock (_entries)
+        {
+            _entries.Add((logLevel, formatter(state, exception) + (exception == null ? string.Empty : " | " + exception.Message)));
+        }
     }
 }

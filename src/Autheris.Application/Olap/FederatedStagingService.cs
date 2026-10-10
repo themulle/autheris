@@ -207,6 +207,15 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     ["inDbMaskingExecuted"] = readResult.InDbMaskingExecuted,
                     ["filterPushedDown"] = req.PushdownFilter != null
                 };
+                if (req.VirtualFilterPlan is { } vfPlan)
+                {
+                    // F-GOV-14 (FR-9): which tier read the table and how many rows the gateway enforcement removed (no key values).
+                    auditDetails["vfTier"] = vfPlan.Tier.ToString();
+                    auditDetails["upstreamCalled"] = !vfPlan.SkipUpstream;
+                    auditDetails["pushdownKeyCount"] = vfPlan.PushdownArguments?.Values.OfType<System.Collections.ICollection>().Sum(c => c.Count) ?? 0;
+                    auditDetails["rowsReceived"] = readResult.RowsBeforeVirtualFilter ?? 0;
+                    auditDetails["rowsKept"] = rows.Count;
+                }
 
                 await _auditRepo.RecordAuditEventAsync(new AuditLogEntry
                 {
@@ -215,7 +224,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     ActorSid = actorSid,
                     TargetTable = req.Metadata.Identifier.ToQualifiedName(),
                     Decision = "ALLOW",
-                    TraceId = Guid.NewGuid().ToString("N"),
+                    TraceId = budget.AuditCorrelationId ?? Guid.NewGuid().ToString("N"),
                     DetailsJson = JsonSerializer.Serialize(auditDetails)
                 }, ct).ConfigureAwait(false);
             }

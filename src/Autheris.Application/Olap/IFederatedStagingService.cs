@@ -26,7 +26,8 @@ public sealed record FederationBudget(
     long MaxStagedBytesPerTable,
     long MaxTotalStagedBytes,
     int TimeoutSeconds,
-    int MaxParallelSourceReads);
+    int MaxParallelSourceReads,
+    string? AuditCorrelationId = null);
 
 public interface IFederatedStagingService
 {

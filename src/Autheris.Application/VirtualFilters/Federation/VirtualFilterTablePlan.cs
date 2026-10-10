@@ -22,6 +22,9 @@ public enum VirtualFilterTier
     FullFetch = 3
 }
 
+/// <summary>One key set read of a plan (audit only; never carries key values).</summary>
+public sealed record VirtualFilterKeySetAudit(string Filter, string Source, string BindingHash, string Strategy, int KeyCount, int DroppedKeys, bool CacheHit);
+
 /// <summary>
 /// F-GOV-14 (WI-6): the plan of one protected HTTP table. <see cref="Enforcement"/> is always present, also when
 /// <see cref="SkipUpstream"/> is set, so the governed read path runs the same guards and coverage check for a table
@@ -61,6 +64,15 @@ public sealed class VirtualFilterTablePlan
     /// when the table is read without a key restriction. The staging service refuses an argument name that is already set.
     /// </summary>
     public IReadOnlyDictionary<string, object?>? PushdownArguments { get; }
+
+    /// <summary>The key sets read for this table, one per applied (filter, binding) pair, in order (audit).</summary>
+    public IReadOnlyList<VirtualFilterKeySetAudit> KeySets { get; private set; } = [];
+
+    internal VirtualFilterTablePlan WithKeySets(IReadOnlyList<VirtualFilterKeySetAudit> keySets)
+    {
+        KeySets = keySets;
+        return this;
+    }
 
     public TableIdentifier Table => Enforcement.Table;
 }

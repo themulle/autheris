@@ -111,7 +111,17 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
                 loaded.Add((table.Pairs[i], keys));
             }
 
-            plans[table.Metadata.Identifier] = Decide(statement, tables, table, loaded);
+            var audits = loaded
+                .Select(l => new VirtualFilterKeySetAudit(
+                    l.Pair.Filter.Name,
+                    l.Pair.Filter.Source,
+                    l.Pair.Binding.ComputeHash(),
+                    l.Pair.Binding.Strategy.ToString(),
+                    l.Keys.Count,
+                    l.Keys.DroppedKeyCount,
+                    l.Keys.CacheHit))
+                .ToList();
+            plans[table.Metadata.Identifier] = Decide(statement, tables, table, loaded).WithKeySets(audits);
         }
 
         return plans;

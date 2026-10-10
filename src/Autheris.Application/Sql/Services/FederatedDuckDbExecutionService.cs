@@ -282,6 +282,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             throw new WebSqlPolicyException($"Query references {routing.Tables.Count} tables, which exceeds the cross-source maximum of {maxTables}.");
         }
 
+        // One correlation id for every audit record of this query (start, key set reads, source reads, denial).
+        var correlationId = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
         try
         {
             // Budget and Timeout (INV-12, INV-13). SEC-12: the timeout also covers authorization, planning and key loading.
@@ -302,7 +304,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             var plan = _planner.Plan(request.Sql, metadata, routing.Tables, decisions, crossSourceOptions, vfPlans, statement);
 
             // Start Audit (fail-closed, INV-17)
-            await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, ct).ConfigureAwait(false);
+            await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, vfPlans, correlationId, ct).ConfigureAwait(false);
 
             var budget = new FederationBudget(
                 MaxTableCount: maxTables,
@@ -311,7 +313,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 MaxStagedBytesPerTable: crossSourceOptions.MaxStagedBytesPerTable > 0 ? crossSourceOptions.MaxStagedBytesPerTable : 32 * 1024 * 1024,
                 MaxTotalStagedBytes: crossSourceOptions.MaxTotalStagedBytes > 0 ? crossSourceOptions.MaxTotalStagedBytes : 128 * 1024 * 1024,
                 TimeoutSeconds: timeoutSeconds,
-                MaxParallelSourceReads: crossSourceOptions.MaxParallelSourceReads > 0 ? crossSourceOptions.MaxParallelSourceReads : 4);
+                MaxParallelSourceReads: crossSourceOptions.MaxParallelSourceReads > 0 ? crossSourceOptions.MaxParallelSourceReads : 4,
+                AuditCorrelationId: correlationId);
 
             // Phase B: Governed Staging (INV-3, INV-10, INV-17)
             var stagedSources = await _stagingService.StageAsync(plan.StagingRequests, user, tenantId, budget, timeoutCts.Token).ConfigureAwait(false);
@@ -332,7 +335,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
         catch (Exception ex)
         {
-            await RecordFailureAuditAsync(request, tenantId, user, ex).ConfigureAwait(false);
+            await RecordFailureAuditAsync(request, tenantId, user, ex, correlationId).ConfigureAwait(false);
             throw;
         }
     }
@@ -460,6 +463,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         IReadOnlyList<ResolvedSourceTable> tables,
         Sid userSid,
         TenantId tenantId,
+        IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? vfPlans,
+        string correlationId,
         CancellationToken ct)
     {
         if (_auditLogRepository == null)
@@ -480,7 +485,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             originalSql = redactedOriginalSql,
             originalSqlHash,
             tables = tablesAudit,
-            transport = request.Transport ?? "WebSql"
+            transport = request.Transport ?? "WebSql",
+            virtualFilters = VirtualFilterAudit(vfPlans)
         });
 
         try
@@ -492,9 +498,36 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 ActorSid = userSid,
                 TargetTable = string.Join(",", tables.Select(t => t.EffectiveDataSource).Distinct()),
                 Decision = "ALLOW",
-                TraceId = Guid.NewGuid().ToString("N"),
+                TraceId = correlationId,
                 DetailsJson = startDetails
             }, ct).ConfigureAwait(false);
+
+            // F-GOV-14 (FR-9): every key set read is its own record (counts and cache state, never key values).
+            foreach (var (table, plan) in vfPlans ?? new Dictionary<TableIdentifier, VirtualFilterTablePlan>())
+            {
+                foreach (var keySet in plan.KeySets)
+                {
+                    await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
+                    {
+                        TenantId = tenantId,
+                        EventType = AuditEventTypes.WebSqlCrossSourceSourceRead,
+                        ActorSid = userSid,
+                        TargetTable = table.ToString(),
+                        Decision = "ALLOW",
+                        TraceId = correlationId,
+                        DetailsJson = JsonSerializer.Serialize(new
+                        {
+                            kind = "virtualFilterKeySource",
+                            table = table.ToString(),
+                            filter = keySet.Filter,
+                            source = keySet.Source,
+                            keyCount = keySet.KeyCount,
+                            droppedKeys = keySet.DroppedKeys,
+                            cacheHit = keySet.CacheHit
+                        })
+                    }, ct).ConfigureAwait(false);
+                }
+            }
         }
         catch (Exception auditEx)
         {
@@ -503,11 +536,26 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
     }
 
+    private static object[] VirtualFilterAudit(IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? vfPlans) =>
+        (vfPlans ?? new Dictionary<TableIdentifier, VirtualFilterTablePlan>())
+            .OrderBy(p => p.Key.ToString(), StringComparer.Ordinal)
+            .Select(p => (object)new
+            {
+                table = p.Key.ToString(),
+                filters = p.Value.KeySets.Select(k => new { name = k.Filter, bindingHash = k.BindingHash, strategy = k.Strategy }).ToList(),
+                tier = p.Value.Tier.ToString(),
+                tierReason = p.Value.Reason,
+                shortCircuited = p.Value.SkipUpstream,
+                pushdownKeyCount = p.Value.PushdownArguments?.Values.OfType<System.Collections.ICollection>().Sum(c => c.Count) ?? 0
+            })
+            .ToArray();
+
     private async Task RecordFailureAuditAsync(
         GovernedSqlQueryRequest request,
         TenantId tenantId,
         ClaimsPrincipal user,
-        Exception ex)
+        Exception ex,
+        string correlationId)
     {
         if (_auditLogRepository == null) return;
 
@@ -523,7 +571,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 originalSql = redactedOriginalSql,
                 originalSqlHash,
                 reasonCode = ex is GatewaySecurityException gse ? gse.ErrorCode : isDenied ? "POLICY_VIOLATION" : ex.GetType().Name,
-                error = ex.Message
+                // SEC-11: a denial stores its code only; messages may carry names or data values of the failing source.
+                error = ex is GatewaySecurityException denial ? $"Access denied ({denial.ErrorCode})" : ex.Message
             });
 
             await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
@@ -533,13 +582,14 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 ActorSid = userSid,
                 TargetTable = "cross-source",
                 Decision = isDenied ? "DENY" : "ERROR",
-                TraceId = Guid.NewGuid().ToString("N"),
+                TraceId = correlationId,
                 DetailsJson = detailsJson
             }, CancellationToken.None).ConfigureAwait(false);
         }
-        catch
+        catch (Exception auditEx)
         {
-            // Do not mask original failure
+            // Do not mask the original failure, but never lose a denial silently (SEC-22).
+            _logger?.LogError(auditEx, "Failed to record the failure audit of a cross-source query; the original error is rethrown.");
         }
     }
 

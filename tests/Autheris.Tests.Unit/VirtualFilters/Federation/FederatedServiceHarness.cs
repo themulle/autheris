@@ -15,6 +15,7 @@ using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -98,7 +99,8 @@ internal static class FederatedServiceHarness
         bool withPlanner = true,
         int? timeoutSeconds = null,
         int? maxStagedRowsPerTable = null,
-        VirtualFilterFederationOptions? federation = null)
+        VirtualFilterFederationOptions? federation = null,
+        List<(LogLevel Level, string Message)>? logs = null)
     {
         var repository = Substitute.For<ITableMetadataRepository>();
         foreach (var (table, _) in tables)
@@ -131,12 +133,13 @@ internal static class FederatedServiceHarness
             audit,
             new CrossSourceQueryRouter(repository, options.WebSql.CrossSource, options.WebSql),
             new CrossSourcePlanner(FastSqlEngine.Default),
-            Staging(StubRegistry.For(tables.ToArray()), options),
+            Staging(StubRegistry.For(tables.ToArray()), options, audit, logs == null ? null : new ListLogger<FederatedStagingService>(logs)),
             new DuckDbOlapEngine(options.DuckDbOlap, NullLogger<DuckDbOlapEngine>.Instance),
             sqlEngine: FastSqlEngine.Default,
             consentResolution: new ConsentResolutionService(),
             consentRepository: consents,
             mandatoryFilters: resolver,
+            logger: logs == null ? null : new ListLogger<FederatedDuckDbExecutionService>(logs),
             vfPlanner: withPlanner ? new VirtualFilterFederationPlanner(keySetProvider, Options.Create(options)) : null);
 
         return new Pipeline { Service = service, Audit = audit, KeySetProvider = keySetProvider };
