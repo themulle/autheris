@@ -211,6 +211,25 @@ public sealed class AstCompilerOracleExecutionTests : IClassFixture<AstCompilerO
 
     private static List<int> Ids(List<object?[]> rows) => rows.Select(r => Convert.ToInt32(r[0])).OrderBy(x => x).ToList();
 
+    // ---- CR-ADG-01: CTE names never shadow a physical table differently in the gateway and in the database ----
+
+    [Theory]
+    [InlineData("WITH \"orders\" AS (SELECT 1 AS id) SELECT id FROM orders")]
+    [InlineData("WITH \"orders\" AS (SELECT 1 AS id) SELECT id FROM ORDERS")]
+    [InlineData("WITH orders AS (SELECT 1 AS id) SELECT id FROM Orders")]
+    public async Task QuotedCteVsUnquotedPhysical_CaseVariants_AlwaysSecured(string sql)
+    {
+        // Review reproduction: the gateway sees a CTE, Oracle bound the unquoted-upper-cased reference to the physical ORDERS table
+        // and tenant "other" received rows 1-6 of all tenants. Now the reference is printed from the CTE definition.
+        Ids(await RunAsync(sql, "other")).ShouldBe(new List<int> { 1 });
+    }
+
+    [Fact]
+    public async Task CteBodyReadingThePhysicalTable_IsSecured()
+    {
+        Ids(await RunAsync("WITH \"orders\" AS (SELECT id FROM orders) SELECT id FROM \"orders\"", "other")).ShouldBe(new List<int> { 5 });
+    }
+
     // ---- gateway path: session semantics (SEC-ADG-14, INV-14) ----
 
     [Fact]

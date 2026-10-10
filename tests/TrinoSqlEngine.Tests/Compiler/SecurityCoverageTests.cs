@@ -74,8 +74,8 @@ public class SecurityCoverageTests
         Case("Subquery", w => Select(new SubqueryTableSource(Select(Secured("t", "t", w)), new SqlIdentifier("s", true)))),
         Case("CteBody", w => SelectBody(
             new QuerySpecification(false, new SelectItem[] { new WildcardSelectItem(null) },
-                new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("c") }), null), null, null, null),
-            new WithClause(false, new[] { new CommonTableExpression(new SqlIdentifier("c"), null, Select(Secured("t", "t", w))) }))),
+                new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("c", true) }), null), null, null, null),
+            new WithClause(false, new[] { new CommonTableExpression(new SqlIdentifier("c", true), null, Select(Secured("t", "t", w))) }))),
         Case("SetOperationBranch", w => SelectBody(new SetOperationQuery(
             Spec(Secured("t", "a", Pred(RootId, SecurityScope.Root))), SetOperator.Union, false, Spec(Secured("t", "b", w))))),
         Case("Lateral", w => Select(new JoinedTableSource(
@@ -176,25 +176,54 @@ public class SecurityCoverageTests
     {
         // WITH t AS (SELECT * FROM <physical t, unsecured>) SELECT * FROM t -- the CTE named t must not hide the physical t.
         var unsecuredBody = Select(new NamedTableSource(Canonical("t"), null));
-        var stmt = Select(new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("t") }), null), null,
-            new WithClause(false, new[] { new CommonTableExpression(new SqlIdentifier("t"), null, unsecuredBody) }));
+        var stmt = Select(new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("t", true) }), null), null,
+            new WithClause(false, new[] { new CommonTableExpression(new SqlIdentifier("t", true), null, unsecuredBody) }));
         Assert.Throws<SecurityCoverageException>(() => Verify(stmt));
 
         var securedBody = Select(Secured("t", "t", Pred(RootId, SecurityScope.Root)));
-        var ok = Select(new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("t") }), null), null,
-            new WithClause(false, new[] { new CommonTableExpression(new SqlIdentifier("t"), null, securedBody) }));
+        var ok = Select(new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("t", true) }), null), null,
+            new WithClause(false, new[] { new CommonTableExpression(new SqlIdentifier("t", true), null, securedBody) }));
         Verify(ok);
+    }
+
+    [Theory]
+    [InlineData("t", false)]   // unquoted reference to a delimited definition: Oracle would bind it to the physical table T
+    [InlineData("T", true)]    // different case: a case-sensitive database binds a different name
+    [InlineData("t", true)]    // exact: the only accepted form
+    public void CteReference_MustMatchTheDefinitionIdentifierExactly(string reference, bool quoted)
+    {
+        var body = Select(Secured("t", "t", Pred(RootId, SecurityScope.Root)));
+        var stmt = Select(new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier(reference, quoted) }), null), null,
+            new WithClause(false, new[] { new CommonTableExpression(new SqlIdentifier("t", true), null, body) }));
+
+        if (quoted && reference == "t")
+        {
+            Verify(stmt);
+        }
+        else
+        {
+            Assert.Throws<SecurityCoverageException>(() => Verify(stmt));
+        }
+    }
+
+    [Fact]
+    public void CteDefinition_MustBeDelimited()
+    {
+        var body = Select(Secured("t", "t", Pred(RootId, SecurityScope.Root)));
+        var stmt = Select(new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("c", true) }), null), null,
+            new WithClause(false, new[] { new CommonTableExpression(new SqlIdentifier("c"), null, body) }));
+        Assert.Throws<SecurityCoverageException>(() => Verify(stmt));
     }
 
     [Fact]
     public void RecursiveCteSelfReference_OnlyInsideWithRecursive()
     {
         SelectStatement Body(bool recursive) => Select(
-            new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("r") }), null), null,
+            new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("r", true) }), null), null,
             new WithClause(recursive, new[]
             {
-                new CommonTableExpression(new SqlIdentifier("r"), null,
-                    Select(new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("r") }), null)))
+                new CommonTableExpression(new SqlIdentifier("r", true), null,
+                    Select(new NamedTableSource(new SqlQualifiedName(new[] { new SqlIdentifier("r", true) }), null)))
             }));
 
         Verify(Body(true));

@@ -27,10 +27,37 @@ public sealed class AstCompilerSqlServerFixture : IAsyncLifetime
 {
     public SqlServerTestDatabase? Db { get; private set; }
 
+    /// <summary>A second database with a case-sensitive collation (CR-ADG-01): <c>[orders]</c> and <c>[Orders]</c> are different names.</summary>
+    public string CaseSensitiveConnectionString { get; private set; } = string.Empty;
+
     public async Task InitializeAsync()
     {
         Db = await SqlServerTestDatabase.CreateAsync();
         if (!Db.IsAvailable) return;
+
+        var csName = "autheris_cs_" + Guid.NewGuid().ToString("N");
+        var master = new SqlConnectionStringBuilder(Db.ConnectionString) { InitialCatalog = "master" }.ConnectionString;
+        await using (var admin = new SqlConnection(master))
+        {
+            await admin.OpenAsync();
+            await using var create = admin.CreateCommand();
+            create.CommandText = $"CREATE DATABASE [{csName}] COLLATE Latin1_General_100_CS_AS";
+            await create.ExecuteNonQueryAsync();
+        }
+
+        CaseSensitiveConnectionString = new SqlConnectionStringBuilder(Db.ConnectionString) { InitialCatalog = csName }.ConnectionString;
+        await using (var cs = new SqlConnection(CaseSensitiveConnectionString))
+        {
+            await cs.OpenAsync();
+            await using var create = cs.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE dbo.Orders (Id int NOT NULL PRIMARY KEY, TenantId nvarchar(64) NOT NULL, Region nvarchar(20) NOT NULL,
+                    Status nvarchar(20) NOT NULL, Amount decimal(18,2) NOT NULL, Email nvarchar(200) NULL);
+                INSERT dbo.Orders VALUES (1, N'acme', N'EU', N'open', 10.50, NULL), (2, N'acme', N'US', N'open', 20.00, NULL),
+                    (5, N'other', N'EU', N'open', 50.00, NULL);
+                """;
+            await create.ExecuteNonQueryAsync();
+        }
 
         await using var conn = new SqlConnection(Db.ConnectionString);
         await conn.OpenAsync();
@@ -73,6 +100,7 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     private static readonly TableIdentity Entitlements = new("dbo", "Entitlements");
 
     private readonly SqlServerTestDatabase _db;
+    private readonly AstCompilerSqlServerFixture _fixture;
     private readonly FastSqlEngine _engine = new();
     private readonly SqlServerCompiledSqlBinder _binder = new();
     private readonly Policies _policies = new();
@@ -80,6 +108,7 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     public AstCompilerSqlServerExecutionTests(AstCompilerSqlServerFixture fixture)
     {
         _db = fixture.Db!;
+        _fixture = fixture;
     }
 
     // ---- fixtures ----
@@ -125,10 +154,10 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
         }
     };
 
-    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null)
+    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null, string? connectionString = null)
     {
         var compiled = _engine.Compile(sql.AsMemory(), Request(tenant), CancellationToken.None);
-        await using var conn = new SqlConnection(_db.ConnectionString);
+        await using var conn = new SqlConnection(connectionString ?? _db.ConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         _binder.Bind(cmd, compiled, client ?? new Dictionary<string, object?>());
@@ -145,6 +174,27 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     }
 
     private static List<int> Ids(List<object?[]> rows) => rows.Select(r => Convert.ToInt32(r[0])).OrderBy(x => x).ToList();
+
+    // ---- CR-ADG-01: CTE names never shadow a physical table differently in the gateway and in the database ----
+
+    [Theory]
+    [InlineData("WITH orders AS (SELECT 1 AS id) SELECT id FROM Orders")]
+    [InlineData("WITH \"orders\" AS (SELECT 1 AS id) SELECT id FROM orders")]
+    [InlineData("WITH Orders AS (SELECT 1 AS id) SELECT id FROM ORDERS")]
+    public async Task QuotedCteVsUnquotedPhysical_CaseVariants_AlwaysSecured_OnACaseSensitiveDatabase(string sql)
+    {
+        if (!_db.IsAvailable) return;
+        // The gateway sees a CTE; the database must see the same CTE, not the physical Orders (rows 1, 2 and 5).
+        Ids(await RunAsync(sql, "other", connectionString: _fixture.CaseSensitiveConnectionString)).ShouldBe(new List<int> { 1 });
+    }
+
+    [Fact]
+    public async Task CteBodyReadingThePhysicalTable_IsSecured_OnACaseSensitiveDatabase()
+    {
+        if (!_db.IsAvailable) return;
+        Ids(await RunAsync("WITH orders AS (SELECT Id FROM orders) SELECT Id FROM orders", "other", connectionString: _fixture.CaseSensitiveConnectionString))
+            .ShouldBe(new List<int> { 5 });
+    }
 
     // ---- RLS row visibility ----
 

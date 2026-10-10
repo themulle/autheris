@@ -87,8 +87,6 @@ public sealed class SecurityCoverageVerifier
         return walker.Applied.ToImmutableArray();
     }
 
-    private static string Fold(SqlIdentifier id) => id.IsQuoted ? id.Value : id.Value.ToLowerInvariant();
-
     private sealed class Walker(SecurityCoverageVerifier owner, CancellationToken ct)
     {
         private int _ticks;
@@ -118,9 +116,16 @@ public sealed class SecurityCoverageVerifier
                 foreach (var c in s.With.Ctes)
                 {
                     // Exit-timing: a CTE is visible in its own body only for WITH RECURSIVE; later CTEs and the body see it.
-                    var bodyScope = s.With.IsRecursive ? scope.Add(Fold(c.Name)) : scope;
+                    // CR-ADG-01: the definition must be a delimited identifier; references are compared to it exactly (ordinal),
+                    // never re-folded, so the verifier cannot disagree with the database about which name binds.
+                    if (!c.Name.IsQuoted)
+                    {
+                        throw new SecurityCoverageException("A CTE name is not emitted as a delimited identifier.");
+                    }
+
+                    var bodyScope = s.With.IsRecursive ? scope.Add(c.Name.Value) : scope;
                     Select(c.Query, bodyScope, policyScope);
-                    scope = scope.Add(Fold(c.Name));
+                    scope = scope.Add(c.Name.Value);
                 }
             }
 
@@ -196,7 +201,7 @@ public sealed class SecurityCoverageVerifier
         }
 
         private static bool IsCte(NamedTableSource named, ImmutableHashSet<string> cte) =>
-            named.Name.IsSimple && cte.Contains(Fold(named.Name.Parts[0]));
+            named.Name.IsSimple && named.Name.Parts[0].IsQuoted && cte.Contains(named.Name.Parts[0].Value);
 
         private void Source(TableSource source, ImmutableHashSet<string> cte, bool policyScope)
         {

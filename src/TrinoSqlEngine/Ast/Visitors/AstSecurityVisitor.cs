@@ -123,7 +123,13 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
                 var cteQuery = (SelectStatement)WithScope(SecurityScope.CteBody, () => Visit(cte.Query));
                 string cteKey = SqlIdentifierHelper.FoldIdentifierForScope(cte.Name);
                 _cteScopeStack.Peek().Add(cteKey);
-                ctes.Add(cte with { Query = cteQuery });
+
+                // CR-ADG-01 / INV-11: on the typed path the definition is emitted as the delimited scope key, so the gateway's
+                // CTE decision and the database's name binding cannot diverge (Oracle upper-cases unquoted names, SQL Server
+                // keeps the user spelling and may be case-sensitive). References are rewritten to the same identifier.
+                ctes.Add(_typed != null
+                    ? cte with { Name = new SqlIdentifier(cteKey, IsQuoted: true), Query = cteQuery }
+                    : cte with { Query = cteQuery });
             }
             with = node.With with { Ctes = ctes.AsReadOnly() };
         }
@@ -221,7 +227,18 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         // SEC C-02: Only simple (unqualified) names in CTE scope are considered CTEs
         if (node.Name.IsSimple && _cteScopeStack.Peek().Contains(scopeKey))
         {
-            return node;
+            if (_typed == null)
+            {
+                return node;
+            }
+
+            // CR-ADG-01: the reference is emitted from the definition identifier (delimited scope key). The user spelling
+            // survives as the alias so that qualified column references keep binding under the dialect's own folding.
+            return node with
+            {
+                Name = new SqlQualifiedName(new[] { new SqlIdentifier(scopeKey, IsQuoted: true) }),
+                Alias = node.Alias ?? node.Name.Parts[0]
+            };
         }
 
         if (_typed != null)
