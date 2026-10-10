@@ -40,13 +40,11 @@ internal sealed class GovernedSqlCompiler
     public CompiledSql Compile(ReadOnlyMemory<char> sql, CompileRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        request = CompileLimits.Normalize(request);   // CR-ADG-14, CR-ADG-15
         using var activity = CompilerTelemetry.Source.StartActivity("sql.compile");
         var clock = Stopwatch.StartNew();
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        if (request.CompileTimeout > TimeSpan.Zero && request.CompileTimeout != Timeout.InfiniteTimeSpan)
-        {
-            budget.CancelAfter(request.CompileTimeout);
-        }
+        budget.CancelAfter(request.CompileTimeout);
 
         try
         {
@@ -82,7 +80,7 @@ internal sealed class GovernedSqlCompiler
     private static void CheckBudget(CompileRequest request, Stopwatch clock, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
-        if (request.CompileTimeout > TimeSpan.Zero && clock.Elapsed >= request.CompileTimeout)
+        if (clock.Elapsed >= request.CompileTimeout)
         {
             throw new SqlLimitExceededException(SqlLimitKind.CompileTime, request.TargetDialect, clock.ElapsedMilliseconds, (long)request.CompileTimeout.TotalMilliseconds);
         }

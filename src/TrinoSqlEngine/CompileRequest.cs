@@ -68,6 +68,48 @@ public sealed record CompileRequest
     public int MaxExpansionFactor { get; init; } = 64;
 }
 
+/// <summary>
+/// CR-ADG-14 / CR-ADG-15 / SEC-ADG-05: bounds the caller-controlled compile knobs and forces the dialect-mandatory token guards.
+/// A non-positive or infinite timeout and a non-positive expansion factor are rejected; larger values are clamped to the maximum.
+/// </summary>
+public static class CompileLimits
+{
+    /// <summary>Upper bound of <see cref="CompileRequest.CompileTimeout"/>.</summary>
+    public static readonly TimeSpan MaxCompileTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>Upper bound of <see cref="CompileRequest.MaxExpansionFactor"/>.</summary>
+    public const int MaxExpansionFactorLimit = 256;
+
+    /// <summary>The request the compiler actually runs: validated, clamped, with the mandatory guards of the dialect.</summary>
+    public static CompileRequest Normalize(CompileRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.CompileTimeout <= TimeSpan.Zero || request.CompileTimeout == System.Threading.Timeout.InfiniteTimeSpan)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "CompileTimeout must be positive and finite; the compile budget cannot be disabled.");
+        }
+
+        if (request.MaxExpansionFactor < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "MaxExpansionFactor must be at least 1.");
+        }
+
+        var timeout = request.CompileTimeout > MaxCompileTimeout ? MaxCompileTimeout : request.CompileTimeout;
+        int factor = Math.Min(request.MaxExpansionFactor, MaxExpansionFactorLimit);
+
+        // Databricks resolves ${...} variable substitution in the engine: the guard is not optional (SEC-ADG-10, CR-ADG-15).
+        var guards = request.TokenGuards;
+        if (request.TargetDialect == TargetSqlDialect.Databricks && !guards.RejectVariableSubstitutionSequences)
+        {
+            guards = guards with { RejectVariableSubstitutionSequences = true };
+        }
+
+        return timeout == request.CompileTimeout && factor == request.MaxExpansionFactor && ReferenceEquals(guards, request.TokenGuards)
+            ? request
+            : request with { CompileTimeout = timeout, MaxExpansionFactor = factor, TokenGuards = guards };
+    }
+}
+
 public enum SqlCompileNotSupportedReason { Dialect, StatementClass, Construct }
 
 /// <summary>
