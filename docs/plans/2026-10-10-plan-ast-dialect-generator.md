@@ -2,7 +2,7 @@
 
 **Document ID:** `PLAN-AST-DIALECT-GEN-16` (implementation plan, Phase 2 of the 6-phase lifecycle)
 **Date:** 2026-10-10
-**Status:** IN PROGRESS - Phase 5 DQL review approved (§19.9, loop 2); Minor follow-ups CR-ADG-30 and -32 fixed (§22), CR-ADG-31 tracked as X1 precondition; open question OQ-GQL (GraphQL path); `feat/ast-dml` (WP-A7) branches from `fe9d3f7`
+**Status:** IN PROGRESS - Phase 5 DML review delivered (§19.10, changes requested: CR-ADG-33); DQL approved (§19.9)
 **Author:** Solution Architect (`csharp-architect`); Phase 3 review (§16) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
@@ -1576,6 +1576,7 @@ Affected work packages and test criteria (additions to §11 and §16.8):
 
 ## 17. Changelog
 
+- 2026-10-10: Added §19.10 "Phase 5 Code Review — DML" (`csharp-code-reviewer`) of `feat/ast-dml` at `78a6c42`: verdict changes requested (narrow) for CR-ADG-33 (MERGE source/target alias collision; all engines refuse it today, the compiler must too); CR-ADG-34 (generic error mapping) and CR-ADG-35 (check option instead of rejecting INSERT into policy tables) added as X1 preconditions; Minor/Nit CR-ADG-36..41.
 - 2026-10-10: Added §22 "Implementation Log — DQL review loop 3": CR-ADG-30 (`199d2a1`) and CR-ADG-32 (`5f98531`, test alignment `9f30f17`) fixed; CR-ADG-31 recorded as X1 precondition 6; open question OQ-GQL (GraphQL tree compiler) added.
 - 2026-10-10: Added §19.9 "Re-review (loop 2)" (`csharp-code-reviewer`) of `feat/ast-dql` at `fe9d3f7`: CR-ADG-25..29 and the B-1 request-time denial verified (red-first for CR-ADG-28 and B-1 confirmed by behavioral mutants); new Minor/Nit findings CR-ADG-30..32; verdict approved.
 - 2026-10-10: Added §19.8 "Re-review (loop 1)" (`csharp-code-reviewer`) of `feat/ast-dql` at `4e0be2d`: CR-ADG-01 and CR-ADG-02 closed, all loop-1 fixes verified, new findings CR-ADG-25 (Major: unrestricted CAST target types on PostgreSQL and DuckDB) and CR-ADG-26..29 (Minor); verdict changes requested (narrow); `feat/ast-dml` may branch from `feat/ast-dql`.
@@ -1929,6 +1930,80 @@ Red-first is therefore confirmed for CR-ADG-28 and B-1 by behavioral mutants, no
 
 1. Fix CR-ADG-30..32 on `feat/ast-dql` and merge forward into `feat/ast-dml`. No further DQL review loop is needed; the fixes are checked in the DML review.
 2. X1 preconditions are unchanged (§20.3), plus the tenant registry for IdP-only collisions (CR-ADG-31).
+
+### 19.10 Phase 5 Code Review — DML (`feat/ast-dml`)
+
+**Scope:** `fe9d3f7..78a6c42` (WP-A7, plan §23): INSERT, UPDATE, DELETE and MERGE on SQL Server, DuckDB, PostgreSQL, Databricks/Delta and Oracle, plus the DQL loop-3 fixes merged forward (`199d2a1` CR-ADG-30, `5f98531` CR-ADG-32, `9f30f17`). Method: code reading; compile probes on all five dialects (about 30 DML attack shapes); one execution probe class added to the shared DML contract and run on all five engines; 12 mutants; and a full reviewer-run of every suite (`-m:2`, `CI=true`). Probes and mutants were never committed.
+
+**Verdict: CHANGES REQUESTED (narrow).** Tenant forcing, the check option, SEC-ADG-06, the masked-column rules, the closed MERGE clause set, the `;` rule and the unfiltered guard hold on every dialect. Every mutant is killed by the injector, by the verifier, or by both together. One compiler gap must be fixed on `feat/ast-dml`: CR-ADG-33 (MERGE alias collision). It is not exploitable today, because all five engines refuse such a statement, but isolation must not depend on a backend name-resolution error. CR-ADG-34 and CR-ADG-35 are X1 preconditions.
+
+#### 19.10.1 Scrutiny results
+
+| Area | Result |
+|---|---|
+| Tenant forcing, INSERT | VALUES and SELECT (including set operations): the tenant column must be listed (`RequireTenantColumnInInsert`); the value must be a literal equal to the caller's tenant (an ordinal compare, so `ACME` is rejected for `acme`, and `NULL` or a column is rejected); the literal is then replaced by the bound tenant parameter. The verifier independently requires the tenant parameter in every row and projection. Execution: `Insert_AlwaysWritesTheCallersTenant_Exactly` on all five engines. |
+| MERGE | The tenant (and policy) predicates are `MergeOn` conjuncts of ON, qualified with the target alias; the user ON is parenthesized. The source is secured like DQL, including a CTE in the source subquery. INSERT branches carry the forced tenant; a foreign tenant literal is rejected. A same-key row of another tenant is never matched (execution, all engines). **Gap: CR-ADG-33.** |
+| Cross-tenant write attempts | Correlated subquery in SET: the subquery tables are secured and target masked reads are rejected. CTE in the source: secured. NULL tenant: rejected. Case variants under case-insensitive collations: the binary tenant compare on UPDATE/DELETE/MERGE (contract test `Update_AffectsOnlyTheCallersTenant_NotTheCaseVariantNorTheOtherTenant`). SQL Server varbinary padding: `DATALENGTH` is in every DML tenant predicate. `UPDATE ... SET tenant = ...` is rejected even with the caller's own tenant. |
+| SEC-ADG-06 | Assignments to policy-referenced columns are rejected in UPDATE and MERGE UPDATE, in both the injector and the verifier. Computed expressions that only *read* a policy column (`SET status = CASE WHEN region = ...`) are allowed, which is correct. Correlated target policies on DML are rejected. Residual risk (accepted, documented): writing a column that another table's policy subquery depends on (for example `entitlements.orderid`) is not a target-policy column and stays allowed. |
+| Masked columns | Rejected when written; rejected when read in SET, WHERE, ON and WHEN conditions and in inserted values; whole-row references are rejected. INSERT ... SELECT copies only the masked projection of the secured source. Availability false positive: CR-ADG-36. |
+| Unfiltered guard | Present on UPDATE, DELETE and MERGE ON on every dialect; the verifier also requires a WHERE. The tautology heuristic misses e.g. `id IS NOT NULL OR id IS NULL` (CR-ADG-37). This does not affect isolation, because the tenant predicate is always ANDed. |
+| INSERT into a table with a row policy rejected | See CR-ADG-35 (recommendation). |
+| `EnforceWithCheckOption = false` has no effect | Accepted as fail closed, but the knob is misleading (CR-ADG-38). |
+| Builder change (INSERT source with WITH/ORDER BY/LIMIT rejected; also legacy) | Accepted. Before, the legacy path silently dropped them, so `INSERT ... SELECT ... LIMIT n` inserted more rows than asked; rejecting is the correct fix. The legacy unit suite is green (4,023/4,024). Record it as a behavior change in the release notes. |
+| `DmlPermissions_AreRejected_NotHonored` replaced | Legitimate. The new tests cover a missing request permission, a class that the capability entry does not list, a dialect without MERGE, unknown permission bits, and one permission per class. |
+| Delta | Subqueries in UPDATE/DELETE conditions and UPDATE on non-Delta tables are refused by Spark at analysis, before any write; Delta commits atomically, and the contract tests verify an unchanged snapshot after each rejection. The missing INSERT row count is acceptable for now but blocks a row-count based check option (CR-ADG-35). Prefer a compile-time capability rejection (CR-ADG-39). |
+| `DmlErrorSanitizer` | Correct for the mapped constraint classes (fixed message, no inner exception). Coverage gap: CR-ADG-34. |
+| Bind limits | Multi-row INSERT is counted against `MaxBindParameters` (typed `SqlLimitExceededException`); the IN-list limit applies to DML WHERE. Production `FastSqlEngine.MaxQueryLength` stays 65,536; only one test instance raises it (CR-ADG-41). |
+| CR-ADG-30 | Fail closed: an unresolvable options monitor or guard denies with 403 and an audit entry (`MissingOptions_FailClosed_With403_AndAnAuditEntry`), and a reload is picked up (`Reload_ThatAddsACollision_IsDenied_WithoutRestart`). Nit: CR-ADG-40. |
+| CR-ADG-32 | Holds on all dialects. A non-recursive self-reference is rejected. A self-reference that differs in case or quoting is treated as physical, and physical tables are always emitted schema-qualified, so it can never bind to the CTE. |
+
+#### 19.10.2 Findings
+
+| ID | Sev. | Location | Finding | Fix |
+|---|---|---|---|---|
+| CR-ADG-33 | Major | `AstSecurityVisitor.TypedDml.cs:30,67-70`, `SecurityCoverageVerifier.Dml.cs:276-289` | **MERGE source alias may equal the target alias.** `MERGE INTO orders t USING (SELECT 1 AS id, 'acme' AS tenantid) t ON t.id = 1 WHEN MATCHED THEN UPDATE ...` compiles on all dialects. A case variant (`t`/`T`) and an unaliased target whose name equals the source alias (`MERGE INTO orders USING (...) orders`) compile as well. The injected tenant predicate `t.TenantId = :tenant` then names an ambiguous alias. If an engine bound it to the source, the target would be unrestricted and `WHEN MATCHED` would update or delete every tenant's rows. Execution probe on all five engines: every engine refuses (SQL Server "source and target cannot have the same name or alias", PostgreSQL 42712, DuckDB binder error, Oracle ORA-00918, Spark AMBIGUOUS_REFERENCE), so there is **no live bypass**. Today, though, isolation depends on these backend errors, the verifier does not check alias uniqueness, and the Oracle error text echoes object names. | Reject, in the injector and the verifier, a MERGE whose source alias (or any top-level source alias) equals the target alias or target table name case-insensitively. Emit the target alias as a delimited identifier and require the injected predicates' qualifier to be exactly that identifier. Test on all dialects. |
+| CR-ADG-34 | Major (X1 precondition) | `DmlConstraintViolationException.cs:59-117` | The sanitizer is a positive list of constraint codes; every other provider error keeps driver text with values or names. Examples: SQL Server 2628 (truncation, includes the table, column and *truncated value*), 245/8114 (conversion, includes the value); Oracle ORA-12899 (schema.table.column) and ORA-00918 (seen in the probe); PostgreSQL 22P02 (value); Delta `CAST_INVALID_INPUT` (value). SQL Server 547 is classified `ForeignKey` but also covers CHECK. | Before X1 wiring, map **every** `DbException` on the governed path to a generic typed error (SEC-ADG-16 item 1), with this sanitizer as the refinement for constraint classes; add per-provider tests for the non-constraint classes above; split 547 using the message class. |
+| CR-ADG-35 | Major (decision before X1) | `AstSecurityVisitor.TypedDml.cs:188-198`, `SecurityCoverageVerifier.Dml.cs:147-150` | INSERT (and MERGE INSERT) into **any** table with a row policy is rejected. The plan required this only for consent-filtered tables (SQ-07, §16.4 item 4). The implementation applies it to every policy (`ShouldApplyPolicy`), so tables with an admin row filter are not insertable. Fail closed, but it blocks most real inserts. | Recommendation: keep the rejection for correlated policies and for consent filters. For non-correlated admin predicates, implement the check option on the inserted rows: `INSERT ... SELECT <cols> FROM (<VALUES or source>) v WHERE <policy over v>`, inside a transaction that compares the affected count with the source row count and rolls back on a difference (SQL Server, PostgreSQL, Oracle, DuckDB). Keep rejection on Delta until a row count is available. Needs stakeholder sign-off; until then the strict rejection stands. |
+| CR-ADG-36 | Minor | `DmlMaskedReadGuard.cs:21-40` | False positive: the verifier rejects `UPDATE orders SET status = (SELECT max(o2.status) FROM orders o2 WHERE ...)` on a table with a masked column, because the guard walks into the injected secured derived table and sees the unqualified column inside its `MaskExpression`. Fail closed, availability only. | Do not descend into `MaskExpression` or secured derived tables (or only count references qualified with the target and unqualified references in the target's own scope). |
+| CR-ADG-37 | Minor | `AstSecurityVisitor.Dml.cs:271-290` | The unfiltered-DML heuristic accepts tautologies such as `id IS NOT NULL OR id IS NULL`. This is a safety net only; tenant and policy predicates are always ANDed. | Document it as best effort, or require at least one comparison of a column with a bound value. |
+| CR-ADG-38 | Minor | `CompileRequest.cs` (`DmlGuardOptions`), `GovernedSqlCompiler.cs` (`BuildOptions`) | `EnforceWithCheckOption = false` is ignored on the typed path (good), but the knob suggests otherwise. Other switches (`RejectMaskedColumnsInDml`, `RejectPolicyColumnAssignment`, `RejectConsentFilteredInsert`) can be relaxed per request, and the verifier then follows them. | Reject `EnforceWithCheckOption = false`. Add an architecture test that `src` passes only `DmlGuardOptions.Strict`. |
+| CR-ADG-39 | Minor | Databricks capability entry | Subqueries in Delta UPDATE/DELETE conditions are left to the backend (nothing is written, as verified). | Add a capability flag and reject at compile time, so the error is typed and no backend text is involved. |
+| CR-ADG-40 | Nit | `SecurityContextResolutionMiddleware.cs` (`_cached`) | The nullable value tuple `(Options, Guard)?` is read and written without atomicity, so a reload race can pair new options with an old guard for one request. | Store an immutable reference holder and swap it atomically. |
+| CR-ADG-41 | Nit | `FastSqlEngine.MaxQueryLength` | A mutable engine limit that is not part of the cache key: a template compiled under a higher limit can be served after the limit is lowered. | Include the engine limits in the key material, or make them init-only. |
+
+#### 19.10.3 Mutation results (scratch worktree on `78a6c42`, reverted after each run)
+
+| Mutant | `TrinoSqlEngine.Tests` (2,471) | DML execution tests | Result |
+|---|---|---|---|
+| INSERT tenant literal not replaced by the bound tenant | 22 failed | — | Killed (the verifier rejects) |
+| Same, verifier tenant check also off | 17 failed | DuckDB DML: 2 failed (`Merge_Insert_WritesTheCallersTenant_NeverTheSourceTenant`, ...) | Killed |
+| Same, plus caller-tenant literal check off | 32 failed | DuckDB DML: 4 failed (`Insert_AlwaysWritesTheCallersTenant_Exactly`, ...) | Killed |
+| UPDATE target predicates not injected, verifier off | 25 failed | DuckDB DML: 10 failed (case-variant leak, cache rebinding, other tenant's row) | Killed |
+| Policy-column assignment check off (injector only) | 0 failed | — | Survives the injector alone; caught by the verifier (defense in depth) |
+| Same, verifier also off | 10 failed | DuckDB DML: 2 failed | Killed |
+| MERGE masked ON check off (injector only) | 0 failed | — | Survives the injector alone; caught by the verifier |
+| MERGE masked ON and WHEN off, injector and verifier | 5 failed | DuckDB DML: 1 failed | Killed |
+| Oracle MERGE DELETE clause allowed | 1 failed | Oracle Free DML: 1 failed | Killed |
+| `;` accepted at any position | 1 failed | — | Killed |
+| Unfiltered-DML guard off | 25 failed | — | Killed |
+| Sanitizer: SQL Server unique (2627/2601) unmapped | 3 failed | SQL Server DML: 3 failed | Killed |
+
+#### 19.10.4 Build and test evidence (observed by the reviewer on `78a6c42`)
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror -m:2` | 0 warnings, 0 errors |
+| `tests/TrinoSqlEngine.Tests` | 2,471 / 2,471 |
+| `tests/Autheris.Tests.Unit` | 4,023 / 4,024 (only the known `WormConfigurationAuditServiceTests` failure) |
+| `tests/Autheris.Tests.Architecture` | 19 / 19 |
+| All `AstCompiler*` integration tests, `CI=true` (DQL and DML classes on SQL Server, PostgreSQL, Oracle Free, Spark/Delta, DuckDB) | 345 / 345, none skipped |
+| Review probe: MERGE alias collision (not committed) | All five engines refuse it at execution (see CR-ADG-33) |
+
+#### 19.10.5 Next steps
+
+1. Fix CR-ADG-33 on `feat/ast-dml` (injector, verifier, tests on all dialects). A delta re-review covers only CR-ADG-33.
+2. CR-ADG-34 and CR-ADG-35 join the X1 preconditions (§20.3); CR-ADG-35 needs a stakeholder decision.
+3. CR-ADG-36..41 may land in the same loop.
 
 ## 20. Implementation Log — DQL review loop 1
 
