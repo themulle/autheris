@@ -347,6 +347,27 @@ public class DmlCompileTests
         Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "UPDATE orders SET status = 'x' WHERE true"));
     }
 
+    // CR-ADG-37: more tautology shapes; the filter is a safety net (the tenant predicate is always ANDed), but it must not be trivial to defeat.
+    [Theory]
+    [MemberData(nameof(DialectData))]
+    public void Update_WithFurtherTautologies_IsRejected_AsUnfilteredDml(TargetSqlDialect dialect)
+    {
+        foreach (var where in new[]
+                 {
+                     "id IS NOT NULL OR id IS NULL", "id IS NULL OR id IS NOT NULL", "(id IS NOT NULL) OR (id IS NULL)",
+                     "NOT (false)", "NOT (1 = 0)", "NOT (NOT (true))", "1 = 1 OR id = 5", "id = 5 OR (1 = 1)",
+                     "(id IS NOT NULL OR id IS NULL) AND true"
+                 })
+        {
+            Assert.Throws<UnfilteredDmlException>(() => Compile(dialect, "UPDATE orders SET status = 'x' WHERE " + where));
+        }
+
+        // a genuine filter is untouched
+        Compile(dialect, "UPDATE orders SET status = 'x' WHERE id IS NOT NULL AND status IS NULL");
+        Compile(dialect, "UPDATE orders SET status = 'x' WHERE id IS NOT NULL OR status IS NULL");
+        Compile(dialect, "UPDATE orders SET status = 'x' WHERE NOT (id = 5)");
+    }
+
     [Theory]
     [MemberData(nameof(DialectData))]
     public void Update_TenantColumnAssignment_IsRejected(TargetSqlDialect dialect)

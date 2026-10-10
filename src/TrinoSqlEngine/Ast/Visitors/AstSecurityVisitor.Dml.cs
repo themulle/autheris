@@ -353,6 +353,55 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         return false;
     }
 
+    /// <summary><c>x IS NULL OR x IS NOT NULL</c> (either order, same column): true for every row.</summary>
+    private static bool IsNullComplement(Expression left, Expression right)
+    {
+        static Expression Unwrap(Expression e)
+        {
+            while (e is ParenthesizedExpression p) e = p.Expression;
+            return e;
+        }
+
+        return Unwrap(left) is UnaryExpression { Operand: ColumnReference a } l &&
+               Unwrap(right) is UnaryExpression { Operand: ColumnReference b } r &&
+               l.Operator != r.Operator &&
+               l.Operator is UnaryOperator.IsNull or UnaryOperator.IsNotNull &&
+               r.Operator is UnaryOperator.IsNull or UnaryOperator.IsNotNull &&
+               a.Name.NormalizedName.Equals(b.Name.NormalizedName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Constant-false forms (<c>false</c>, <c>1 = 0</c>, <c>NOT true</c>, ...), so that <c>NOT (...)</c> of them is a tautology.</summary>
+    private static bool IsTriviallyFalse(Expression? expr)
+    {
+        switch (expr)
+        {
+            case ParenthesizedExpression p:
+                return IsTriviallyFalse(p.Expression);
+            case LiteralExpression { Type: LiteralType.Boolean } lit:
+                return false.Equals(lit.Value);
+            case UnaryExpression { Operator: UnaryOperator.Not } not:
+                return IsTriviallyTrue(not.Operand);
+            case BinaryExpression { Operator: BinaryOperator.And } and:
+                return IsTriviallyFalse(and.Left) || IsTriviallyFalse(and.Right);
+            case BinaryExpression { Operator: BinaryOperator.Or } or:
+                return IsTriviallyFalse(or.Left) && IsTriviallyFalse(or.Right);
+            case BinaryExpression { Left: LiteralExpression l, Right: LiteralExpression r } cmp
+                when TryCompareNumericLiterals(l, r, out int c):
+                return cmp.Operator switch
+                {
+                    BinaryOperator.Equal => c != 0,
+                    BinaryOperator.NotEqual => c == 0,
+                    BinaryOperator.LessThan => c >= 0,
+                    BinaryOperator.LessThanOrEqual => c > 0,
+                    BinaryOperator.GreaterThan => c <= 0,
+                    BinaryOperator.GreaterThanOrEqual => c < 0,
+                    _ => false
+                };
+            default:
+                return false;
+        }
+    }
+
     private static bool IsTriviallyTrue(Expression? expr)
     {
         if (expr == null) return false;
@@ -364,7 +413,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             case LiteralExpression lit when lit.Type == LiteralType.Boolean:
                 return true.Equals(lit.Value);
             case BinaryExpression b when b.Operator == BinaryOperator.Or:
-                return IsTriviallyTrue(b.Left) || IsTriviallyTrue(b.Right);
+                return IsTriviallyTrue(b.Left) || IsTriviallyTrue(b.Right) || IsNullComplement(b.Left, b.Right);
             case BinaryExpression b when b.Operator == BinaryOperator.And:
                 return IsTriviallyTrue(b.Left) && IsTriviallyTrue(b.Right);
             case BinaryExpression b when b.Operator == BinaryOperator.Equal:
@@ -446,7 +495,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 }
                 return false;
             case UnaryExpression u when u.Operator == UnaryOperator.Not:
-                return u.Operand is LiteralExpression boolLit && boolLit.Type == LiteralType.Boolean && false.Equals(boolLit.Value);
+                return IsTriviallyFalse(u.Operand);
             case UnaryExpression u when u.Operator == UnaryOperator.IsNotNull:
                 return u.Operand is LiteralExpression constLit && constLit.Type != LiteralType.Null;
             default:
