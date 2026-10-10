@@ -112,6 +112,7 @@ Da sich Enterprise-Workflows zwischen agilen Data-Mesh-Teams und regulierten Fin
             },
             "PreClassification": {
               "Mode": "HumanInTheLoop",
+              "ZeroTouchAutoApprovePublicAndLowRisk": true, // KI klassifiziert Public/Internal mit >= 95% -> sofort aktiv ohne Klick!
               "AutoApproveConfidenceThreshold": 0.95,
               "AutoApproveMaxSensitivityRank": 20,
               "RequireManualReviewIfDisputed": true
@@ -121,15 +122,17 @@ Da sich Enterprise-Workflows zwischen agilen Data-Mesh-Teams und regulierten Fin
               "Mode": "ConditionalDualStage",          // "SingleStageDataOwnerOnly" | "SingleStageComplianceOnly" | "DualStageStrict" | "ConditionalDualStage"
               "FourEyesThresholdRank": 35,             // Bei Conditional: 4-Augen greift erst ab Rang 35 (z.B. CONFIDENTIAL_FINANCE)
               "RequireSecondStageOnDisputed": true,    // 4-Augen auch bei strittigen KI-Feldern (is_disputed) erzwingen
+              "RequireStepUpAuthThresholdRank": 40,    // Ab Rang 40 (RESTRICTED): 2-Faktor-Authentifizierung (MFA/WebAuthn) Pflicht!
               "RequireFourEyesOnDowngrades": true      // Bei Lockerung / PII-Entfernung 4-Augen erzwingen
             }
           },
-          "LIGHTWEIGHT_DATA_MESH": {
-            "OwnerResolution": { "Strategy": "MetadataMandatoryOrReject" },
-            "PreClassification": { "Mode": "AutoApproveUnambiguous" },
+          "LEAN_STARTUP_MESH": {
+            "OwnerResolution": { "Strategy": "MetadataFirstThenCatalogCascade" },
+            "PreClassification": { "Mode": "AutoApproveUnambiguous", "ZeroTouchAutoApprovePublicAndLowRisk": true },
             "ApprovalPipeline": {
-              "EnableFourEyes": false,                 // Deaktiviert: 1-stufiger Prozess
+              "EnableFourEyes": false,                 // Weder initial noch später ein 4-Augen-Prinzip
               "Mode": "SingleStageDataOwnerOnly",
+              "RequireStepUpAuthThresholdRank": 999,   // Keine MFA erzwungen
               "RequireFourEyesOnDowngrades": false
             }
           }
@@ -140,25 +143,27 @@ Da sich Enterprise-Workflows zwischen agilen Data-Mesh-Teams und regulierten Fin
 }
 ```
 
-#### Unterstützte Workflow-Varianten:
-1. **Owner-Resolution:**
-   - `MetadataFirst`: Übernimmt bestehende Owner-Tags aus dbt-Manifesten, DataHub, Backstage oder Tabellenkommentaren direkt beim Import.
-   - `RuleBased`: Regex-Routing nach Schema- oder Tabellennamen auf hinterlegte Gruppen/SIDs.
-   - `ManualSteward`: Lead Steward weist manuell zu (unterstützt durch KI-Vorschlag).
-2. **KI-Vorqualifizierung:**
-   - `Disabled`: Rein manueller Prozess ohne LLM-Inferenz.
-   - `HumanInTheLoop`: KI generiert Vorschläge mit Konfidenz und Strittigkeitsmarkierung (`is_disputed`), Mensch bestätigt.
-   - `AutoApproveUnambiguous`: Eindeutige Felder mit hoher Konfidenz ($\ge 95\%$) und niedriger Schutzstufe (`rank < 20`) werden direkt freigegeben; nur kritische/strittige Spalten gehen in den Review.
-3. **Freigabe-Stufen & 4-Augen-Optionen (`ApprovalPipeline`):**
-   - **`EnableFourEyes: false` (1-stufig – 4-Augen komplett abgeschaltet):**  
-     Eine einzige Freigabe genügt – die Tabelle und alle Maskings sind sofort clusterweit aktiv.
-     - `SingleStageDataOwnerOnly`: Der fachliche Data Owner gibt frei (autonomes Data Mesh).
-     - `SingleStageComplianceOnly`: Das zentrale DPO-/Governance-Team gibt frei.
-   - **`EnableFourEyes: true` (2-stufig – 4-Augen aktiviert):**  
-     - `DualStageStrict`: Strikter Konzernstandard – jede Tabelle durchläuft zwingend Data Owner $\rightarrow$ Compliance Reviewer.
-     - `ConditionalDualStage`: Risikobasiertes 4-Augen-Prinzip: Unkritische Daten (`PUBLIC`, `INTERNAL`) werden 1-stufig aktiviert; erst ab `FourEyesThresholdRank` (z. B. $\ge 35$ wie `CONFIDENTIAL_FINANCE`) oder bei `is_disputed = true` greift automatisch die 2. Stufe.
-   - **`RequireFourEyesOnDowngrades` (true/false):**  
-     Steuert, ob nachträgliche Schutzstufen-Lockerungen eine 2. Gegenzeichnung verlangen oder ob der Owner das alleine darf.
+#### Risikobasierte Staffelung (Zero-Touch vs. 1-Stufig vs. 4-Augen vs. 2-Faktor/MFA):
+
+Das System passt den Prüfaufwand dynamisch an das tatsächliche Risiko der Daten an:
+
+| Schutzstufe | Rang | Erforderliche Freigabe (Initial & Änderung) | 4-Augen-Prinzip? | Step-Up 2FA / MFA Pflicht? |
+| :--- | :--- | :--- | :--- | :--- |
+| **`PUBLIC`** | 10 | **Zero-Touch Auto-Approve** (bei KI-Konfidenz $\ge 95\%$) oder 1-Klick | ❌ Ausgeschaltet | ❌ Nein |
+| **`INTERNAL`** | 20 | **Zero-Touch Auto-Approve** oder 1-stufig (Data Owner) | ❌ Ausgeschaltet | ❌ Nein |
+| **`INTERNAL_AUDIT`** | 25 | 1-stufig (Data Owner oder Compliance) | ❌ Ausgeschaltet | ❌ Nein |
+| **`CONFIDENTIAL`** | 30 | 1-stufig (Data Owner) | ❌ Ausgeschaltet | ❌ Nein |
+| **`CONFIDENTIAL_FINANCE`** | 35 | 2-stufig (Data Owner $\rightarrow$ Compliance) | ✅ **Aktiv** (`FourEyesThresholdRank`) | ❌ Nein |
+| **`RESTRICTED`** | 40 | 2-stufig (Data Owner $\rightarrow$ DPO/Compliance) | ✅ **Aktiv** | 🔐 **Ja (MFA/FIDO2/TOTP Pflicht)** |
+| **`STRICTLY_CONFIDENTIAL`** | 50 | 2-stufig (Data Owner $\rightarrow$ DPO/Compliance) | ✅ **Aktiv** | 🔐 **Ja (MFA/FIDO2/TOTP Pflicht)** |
+
+#### Unterstützte Flexibilitäts-Dimensionen:
+1. **Kompletter Verzicht auf das 4-Augen-Prinzip (`EnableFourEyes: false`):**  
+   Für unregulierte Umgebungen, interne Entwicklungsplattformen oder agile Data Meshes. Weder beim Import, noch bei der Klassifizierung, noch bei späteren Datenzugriffen (Consents) wird eine 2. Genehmigung erzwungen.
+2. **Zero-Touch AI Ingestion für unkritische Daten (`ZeroTouchAutoApprovePublicAndLowRisk: true`):**  
+   Stuft die KI eine Tabelle mit $\ge 95\%$ Konfidenz als `PUBLIC` oder `INTERNAL` ein und liegt kein strittiges Feld (`is_disputed == false`) vor, wird die Tabelle **vollautomatisch ohne jeden menschlichen Klick aktiviert**. Der Data Owner erhält lediglich eine informative Benachrichtigung ("Audit / FYI"). Dies eliminiert Genehmigungs-Fatigue bei Tausenden unkritischen Referenztabellen (z. B. PLZ, ISO-Ländercodes).
+3. **Zwei-Faktor-Authentifizierung (Step-Up MFA) bei hochsensiblen Daten:**  
+   Erreicht eine Tabelle oder Spalte die Schutzstufe `RESTRICTED` oder `STRICTLY_CONFIDENTIAL` (`RequireStepUpAuthThresholdRank: 40`), kann die Freigabe oder Änderung nicht durch einfache Klicks erfolgen. Der Benutzer muss sich via **WebAuthn / FIDO2-Sicherheitsschlüssel, TOTP oder OIDC Step-Up (`acr_values: mfa`)** authentifizieren. Dies schützt hochsensible Datenbestände vor Session-Hijacking und unbefugten Freigaben an ungesperrten Terminals.
 
 ---
 
