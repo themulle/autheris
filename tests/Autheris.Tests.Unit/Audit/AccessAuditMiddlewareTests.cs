@@ -221,4 +221,19 @@ public sealed class AccessAuditMiddlewareTests
 
         entry.TenantId.Value.ShouldBe("tenant-ctx");
     }
+
+    [Fact]
+    public async Task InvokeAsync_MalformedTenantClaim_And403_RecordsDenyWithoutRawValue()
+    {
+        var entry = await RunWithClaimsAsync(403, null,
+            new Claim("sid", "S-1-5-21-USER1"),
+            new Claim("tid", MalformedTenant));
+
+        entry.Decision.ShouldBe("DENY");
+        entry.EventType.ShouldBe(AuditEventTypes.AuthzEndpointDenied);
+        entry.DetailsJson.ShouldContain("\"tenantClaim\":\"INVALID\"");
+        entry.DetailsJson.ShouldNotContain("evil");
+        entry.DetailsJson.ShouldNotContain("script");
+        entry.TenantId.Value.ShouldNotContain("evil");
+    }
 }
