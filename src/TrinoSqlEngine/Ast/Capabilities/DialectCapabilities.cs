@@ -26,7 +26,13 @@ public enum TenantComparisonStyle
     /// SQL Server: <c>col = @t AND CAST(CAST(col AS nvarchar(256)) AS varbinary(512)) = CAST(CAST(@t AS nvarchar(256)) AS varbinary(512))</c>.
     /// The plain equality keeps an index seek, the binary conjunct removes case, accent and trailing-space insensitivity.
     /// </summary>
-    Utf16BinaryCast
+    Utf16BinaryCast,
+
+    /// <summary>
+    /// DuckDB: <c>col = t AND encode(CAST(col AS varchar)) = encode(CAST(t AS varchar))</c>. <c>encode</c> yields a BLOB, whose
+    /// comparison is exact regardless of any collation on the column.
+    /// </summary>
+    EncodedBlob
 }
 
 /// <summary>Declarative Trino-function to dialect rule. No matching rule means the function is rejected (INV-1).</summary>

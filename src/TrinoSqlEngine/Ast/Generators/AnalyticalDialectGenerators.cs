@@ -2,7 +2,9 @@ namespace TrinoSqlEngine.Ast.Generators;
 
 using System;
 using TrinoSqlEngine;
+using System.Collections.Frozen;
 using TrinoSqlEngine.Ast.Buffer;
+using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
@@ -85,9 +87,24 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
     protected override bool SupportsGroupByDistinct => true;
     public override int MaxParameterBudget => 65535;
 
-    /// <summary>Virtual filters (phase 7b): <c>(x + INTERVAL '±n unit')</c>.</summary>
+    // The inline structural positions of this generator are registered with the emitter context (WP-A3 for DuckDB).
+    protected override bool BindLiterals => true;
+
+    /// <summary>Virtual filters (phase 7b): <c>(x + INTERVAL '±n unit')</c>; on the governed path the amount is bound.</summary>
     protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
     {
+        if (context.IsBound)
+        {
+            builder.Append('(');
+            GenerateExpression(source, ref builder, context);
+            builder.Append(" + INTERVAL (CAST(");
+            builder.Append(BindInteger(amount, context));
+            builder.Append(" AS BIGINT)) ");
+            builder.Append(DateUnitName(unit).ToUpperInvariant());
+            builder.Append(')');
+            return;
+        }
+
         builder.Append('(');
         GenerateExpression(source, ref builder, context);
         builder.Append(" + INTERVAL '");
@@ -96,6 +113,164 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
         builder.Append(DateUnitName(unit));
         builder.Append("')");
     }
+
+    /// <summary><c>DATE_TRUNC('unit', x)</c>: the unit keyword comes from a closed enum and is a reviewed constant fragment.</summary>
+    protected override void FormatDateTrunc(ref ValueStringBuilder builder, DateUnit unit, Expression source, SqlEmitterContext context)
+    {
+        builder.Append("DATE_TRUNC(");
+        AppendConstantFragment(ref builder, context, "'" + DateUnitName(unit) + "'");
+        builder.Append(", ");
+        GenerateExpression(source, ref builder, context);
+        builder.Append(')');
+    }
+
+    protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context)
+    {
+        if (!context.IsBound)
+        {
+            base.FormatTypedLiteral(ref builder, literal, context);
+            return;
+        }
+
+        var (value, type) = ParseTypedLiteralValue(literal);
+        builder.Append("CAST(");
+        builder.Append(context.BindValue(value, type, ParameterOrigin.QueryLiteral));
+        builder.Append(literal.Kind switch
+        {
+            TypedLiteralKind.Date => " AS DATE)",
+            TypedLiteralKind.Time => " AS TIME)",
+            _ => " AS TIMESTAMP)"
+        });
+    }
+
+    protected override void FormatIntervalLiteral(ref ValueStringBuilder builder, IntervalLiteralExpression interval, SqlEmitterContext context)
+    {
+        if (!context.IsBound)
+        {
+            base.FormatIntervalLiteral(ref builder, interval, context);
+            return;
+        }
+
+        // INTERVAL (n) FIELD: the amount is a bound integer, the field a validated keyword.
+        builder.Append("INTERVAL (CAST(");
+        builder.Append(BindInteger(long.Parse(interval.Value, System.Globalization.CultureInfo.InvariantCulture), context));
+        builder.Append(" AS BIGINT)) ");
+        builder.Append(interval.Field);
+    }
+
+    // ---- typed column masks ----
+
+    private static readonly System.Text.RegularExpressions.Regex NativeTypeRegex = new(
+        @"\A(?<name>[a-z][a-z0-9]*)(?:\((?<args>[0-9]{1,4}(?:, ?[0-9]{1,4})?)\))?\z",
+        System.Text.RegularExpressions.RegexOptions.CultureInvariant | System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+        TimeSpan.FromMilliseconds(100));
+
+    private static readonly System.Collections.Frozen.FrozenSet<string> NumericOrTemporalTypes = new[]
+    {
+        "tinyint", "smallint", "integer", "int", "bigint", "hugeint", "utinyint", "usmallint", "uinteger", "ubigint", "decimal",
+        "numeric", "double", "float", "real", "boolean", "bool", "date", "time", "timestamp", "timestamptz", "uuid"
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    private static readonly System.Collections.Frozen.FrozenSet<string> TextTypes = new[]
+    {
+        "varchar", "char", "bpchar", "text", "string", "blob"
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    private static (string Text, bool NumericOrTemporal) NativeType(string? dataType)
+    {
+        if (string.IsNullOrWhiteSpace(dataType))
+        {
+            throw new System.Security.SecurityException("A typed column mask requires the catalog data type of the column.");
+        }
+
+        var match = NativeTypeRegex.Match(dataType.Trim());
+        if (!match.Success)
+        {
+            throw new System.Security.SecurityException("The catalog data type of a masked column is not permitted.");
+        }
+
+        string name = match.Groups["name"].Value.ToLowerInvariant();
+        bool numeric = NumericOrTemporalTypes.Contains(name);
+        if (!numeric && !TextTypes.Contains(name))
+        {
+            throw new System.Security.SecurityException("The catalog data type of a masked column is not permitted.");
+        }
+
+        string args = match.Groups["args"].Success ? "(" + match.Groups["args"].Value.Replace(" ", string.Empty, StringComparison.Ordinal) + ")" : string.Empty;
+        return (name.ToUpperInvariant() + args, numeric);
+    }
+
+    private static void Put(ref ValueStringBuilder builder, params ReadOnlySpan<string> parts)
+    {
+        foreach (var part in parts) builder.Append(part);
+    }
+
+    protected override void FormatMask(ref ValueStringBuilder builder, MaskExpression mask, SqlEmitterContext context)
+    {
+        var (type, numeric) = NativeType(mask.DataType);
+        string column = "\"" + mask.Column.Name.SimpleName.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+        var args = mask.Arguments;
+
+        switch (mask.Kind)
+        {
+            case Governance.MaskKind.Nullify:
+                AppendStructural(ref builder, context, "CAST(NULL AS " + type + ")");
+                break;
+
+            case Governance.MaskKind.Redact:
+                if (numeric)
+                {
+                    AppendStructural(ref builder, context, "CAST(NULL AS " + type + ")");
+                }
+                else
+                {
+                    builder.Append("CAST(");
+                    builder.Append(context.BindPolicy(args.Constant ?? throw MissingArgument(mask, "Constant")));
+                    builder.Append(" AS VARCHAR)");
+                }
+
+                break;
+
+            case Governance.MaskKind.Constant:
+                builder.Append("CAST(");
+                builder.Append(context.BindPolicy(args.Constant ?? throw MissingArgument(mask, "Constant")));
+                AppendStructural(ref builder, context, " AS " + type + ")");
+                break;
+
+            case Governance.MaskKind.PartialMask:
+            {
+                string prefix = "CAST(" + context.BindPolicy(args.KeepPrefix ?? throw MissingArgument(mask, "KeepPrefix")) + " AS BIGINT)";
+                string suffix = "CAST(" + context.BindPolicy(args.KeepSuffix ?? throw MissingArgument(mask, "KeepSuffix")) + " AS BIGINT)";
+                string maskChar = "CAST(" + context.BindPolicy(args.MaskChar ?? throw MissingArgument(mask, "MaskChar")) + " AS VARCHAR)";
+                string keep = "(" + prefix + " + " + suffix + ")";
+                Put(ref builder, "CASE WHEN ", column, " IS NULL THEN NULL WHEN length(", column, ") <= ", keep, " THEN repeat(", maskChar, ", ");
+                AppendInlineInteger(ref builder, 5, context);
+                Put(ref builder, ") ELSE concat(left(", column, ", ", prefix, "), repeat(", maskChar, ", CASE WHEN length(", column, ") > ", keep,
+                    " THEN length(", column, ") - ", keep, " ELSE ");
+                AppendInlineInteger(ref builder, 5, context);
+                Put(ref builder, " END), right(", column, ", ", suffix, ")) END");
+                break;
+            }
+
+            case Governance.MaskKind.GeoJitter:
+            {
+                int decimals = Math.Clamp(args.Decimals ?? 2, 0, 6);
+                Put(ref builder, "CASE WHEN ", column, " IS NULL OR ", column, " = ");
+                AppendStructural(ref builder, context, "0.0");
+                Put(ref builder, " THEN ", column, " ELSE round(", column, ", ");
+                AppendInlineInteger(ref builder, decimals, context);
+                builder.Append(") END");
+                break;
+            }
+
+            default:
+                // HMAC is not computed inside DuckDB (InDbHmac = false): the compiler degrades it to Redact before emission.
+                throw UnsupportedConstruct($"column mask {mask.Kind}", TargetDialect);
+        }
+    }
+
+    private static System.Security.SecurityException MissingArgument(MaskExpression mask, string argument) =>
+        new($"The {mask.Kind} mask requires the {argument} argument.");
 
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
     {
@@ -127,14 +302,14 @@ public sealed class DuckDbDialectGenerator : SqlDialectGeneratorBase
         if (pagination.Limit != null)
         {
             builder.Append("LIMIT ");
-            GenerateExpression(pagination.Limit, ref builder, context);
+            GenerateStructuralInteger(pagination.Limit, ref builder, context);
         }
 
         if (pagination.Offset != null)
         {
             if (pagination.Limit != null) builder.Append(' ');
             builder.Append("OFFSET ");
-            GenerateExpression(pagination.Offset, ref builder, context);
+            GenerateStructuralInteger(pagination.Offset, ref builder, context);
         }
     }
 }

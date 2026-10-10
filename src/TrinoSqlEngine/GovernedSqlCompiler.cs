@@ -56,11 +56,11 @@ internal sealed class GovernedSqlCompiler
             activity?.SetTag("sql.bind_count", compiled.Parameters.Length);
             return compiled;
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested && budget.IsCancellationRequested && ex is not Antlr4.Runtime.Misc.ParseCanceledException)
         {
-            var ex = new SqlLimitExceededException(SqlLimitKind.CompileTime, request.TargetDialect, clock.ElapsedMilliseconds, (long)request.CompileTimeout.TotalMilliseconds);
-            CompilerTelemetry.RecordRejected(request.TargetDialect, ex);
-            throw ex;
+            var limit = new SqlLimitExceededException(SqlLimitKind.CompileTime, request.TargetDialect, clock.ElapsedMilliseconds, (long)request.CompileTimeout.TotalMilliseconds);
+            CompilerTelemetry.RecordRejected(request.TargetDialect, limit);
+            throw limit;
         }
         catch (Exception ex)
         {

@@ -43,6 +43,34 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "MSSQL-CAP");
 
+    private static readonly DialectCapabilities DuckDb = new(
+        Dialect: TargetSqlDialect.DuckDb,
+        Tier: DialectSupportTier.Production,
+        MaxBindParameters: 65535,                                  // conservative; no published limit [DUCK-PREP], probed in tests
+        MaxInListItems: null,
+        MaxIdentifierLength: int.MaxValue,
+        IdentifierLengthUnit: IdentifierLengthUnit.Characters,
+        IdentifierOpenQuote: '"',
+        IdentifierCloseQuote: '"',
+        MarkerStyle: ParameterMarkerStyle.DollarOrdinal,
+        SupportsMarkerReuse: true,
+        Pagination: PaginationStyle.LimitOffset,
+        SupportsWithTies: false,
+        SupportsNullsFirstLast: true,
+        Booleans: BooleanRepresentation.Native,
+        SupportsMerge: true,
+        SupportsLateral: true,
+        SupportsGroupingSets: true,
+        SupportsFilterClause: true,
+        SupportsTryCast: true,
+        LimitGuaranteed: true,
+        InDbHmac: false,                                           // decision B-2: HMAC degrades to Redact
+        TenantComparison: TenantComparisonStyle.EncodedBlob,
+        BindExpressionTemplates: SqlServerBindTemplates,
+        Functions: DialectFunctionMap.Empty,
+        AllowedTableFunctions: FrozenSet<string>.Empty,
+        LimitSource: "DUCK-PREP");
+
     // Declared after the static capability entries: static initializers run in textual order.
     public static DialectCapabilityTable Default { get; } = new();
 
@@ -52,7 +80,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
     {
         _table = new Dictionary<TargetSqlDialect, DialectCapabilities>
         {
-            [TargetSqlDialect.SqlServer] = SqlServer
+            [TargetSqlDialect.SqlServer] = SqlServer,
+            [TargetSqlDialect.DuckDb] = DuckDb
         }.ToFrozenDictionary();
     }
 

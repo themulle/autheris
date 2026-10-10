@@ -29,14 +29,25 @@ public sealed class MissingClientParameterException : SecurityException
 }
 
 /// <summary>
-/// SQL Server binder (<c>Microsoft.Data.SqlClient</c> binds by name: <c>@p0</c>, <c>@p1</c> ...). Written against
-/// <see cref="DbCommand"/> so the engine needs no provider reference.
+/// Shared binder logic for ADO.NET providers that bind by parameter name. Written against <see cref="DbCommand"/> so the
+/// engine needs no provider reference. Only client named parameters read client values, and only by their own source name
+/// (SEC-ADG-19); every other parameter carries the gateway-bound value of the compiled SQL.
 /// </summary>
-public sealed class SqlServerCompiledSqlBinder : ICompiledSqlBinder
+public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
 {
     private const int DefaultStringSize = 4000;
 
-    public bool CanBind(TargetSqlDialect dialect) => dialect == TargetSqlDialect.SqlServer;
+    protected abstract TargetSqlDialect Dialect { get; }
+
+    /// <summary>Fixed string and binary sizes keep one cached plan per statement (SQL Server).</summary>
+    protected virtual bool SetsSizesAndPrecision => false;
+
+    protected virtual DbType TimestampDbType => DbType.DateTime;
+
+    /// <summary>The provider passes strings as C strings and would truncate at an embedded NUL (fail closed instead).</summary>
+    protected virtual bool RejectsEmbeddedNul => false;
+
+    public bool CanBind(TargetSqlDialect dialect) => dialect == Dialect;
 
     public void Bind(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues)
     {
@@ -44,9 +55,9 @@ public sealed class SqlServerCompiledSqlBinder : ICompiledSqlBinder
         ArgumentNullException.ThrowIfNull(compiled);
         ArgumentNullException.ThrowIfNull(clientParameterValues);
 
-        if (compiled.Dialect != TargetSqlDialect.SqlServer)
+        if (compiled.Dialect != Dialect)
         {
-            throw new InvalidOperationException("The compiled SQL was not generated for SQL Server.");
+            throw new InvalidOperationException("The compiled SQL was generated for another dialect.");
         }
 
         if (command.Parameters.Count > 0)
@@ -77,6 +88,11 @@ public sealed class SqlServerCompiledSqlBinder : ICompiledSqlBinder
                 throw new SecurityException("Positional client parameters are not supported.");
             }
 
+            if (RejectsEmbeddedNul && value is string text && text.Contains('\0', StringComparison.Ordinal))
+            {
+                throw new SecurityException("A string parameter contains an embedded NUL character, which the provider would truncate.");
+            }
+
             var parameter = command.CreateParameter();
             parameter.ParameterName = bound.Name;
             Configure(parameter, type, value);
@@ -101,7 +117,7 @@ public sealed class SqlServerCompiledSqlBinder : ICompiledSqlBinder
         _ => throw new SecurityException($"Unsupported client parameter value type '{value.GetType().Name}'.")
     };
 
-    private static void Configure(DbParameter parameter, SqlParameterType type, object? value)
+    private void Configure(DbParameter parameter, SqlParameterType type, object? value)
     {
         if (value is null or DBNull || type == SqlParameterType.Null)
         {
@@ -116,7 +132,7 @@ public sealed class SqlServerCompiledSqlBinder : ICompiledSqlBinder
                 string text = Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
                 parameter.DbType = DbType.String; // nvarchar
                 // A fixed size keeps one cached plan per statement instead of one per value length.
-                parameter.Size = text.Length <= DefaultStringSize ? DefaultStringSize : -1;
+                if (SetsSizesAndPrecision) parameter.Size = text.Length <= DefaultStringSize ? DefaultStringSize : -1;
                 parameter.Value = text;
                 break;
             case SqlParameterType.Int32:
@@ -130,7 +146,7 @@ public sealed class SqlServerCompiledSqlBinder : ICompiledSqlBinder
             case SqlParameterType.Decimal:
                 decimal d = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
                 parameter.DbType = DbType.Decimal;
-                if (parameter is IDbDataParameter dbData)
+                if (SetsSizesAndPrecision && parameter is IDbDataParameter dbData)
                 {
                     dbData.Precision = 38;
                     dbData.Scale = (byte)((decimal.GetBits(d)[3] >> 16) & 0xFF);
@@ -151,7 +167,7 @@ public sealed class SqlServerCompiledSqlBinder : ICompiledSqlBinder
                 parameter.Value = value is DateOnly dateOnly ? dateOnly.ToDateTime(TimeOnly.MinValue) : Convert.ToDateTime(value, CultureInfo.InvariantCulture);
                 break;
             case SqlParameterType.Timestamp:
-                parameter.DbType = DbType.DateTime2;
+                parameter.DbType = TimestampDbType;
                 parameter.Value = Convert.ToDateTime(value, CultureInfo.InvariantCulture);
                 break;
             case SqlParameterType.TimestampTz:
@@ -165,11 +181,28 @@ public sealed class SqlServerCompiledSqlBinder : ICompiledSqlBinder
             case SqlParameterType.Binary:
                 var bytes = (byte[])value;
                 parameter.DbType = DbType.Binary;
-                parameter.Size = bytes.Length <= 8000 ? 8000 : -1;
+                if (SetsSizesAndPrecision) parameter.Size = bytes.Length <= 8000 ? 8000 : -1;
                 parameter.Value = bytes;
                 break;
             default:
                 throw new SecurityException($"Unsupported parameter type '{type}'.");
         }
     }
+}
+
+/// <summary>SQL Server binder (<c>Microsoft.Data.SqlClient</c> binds by name: <c>@p0</c>, <c>@p1</c> ...).</summary>
+public sealed class SqlServerCompiledSqlBinder : DbCommandCompiledSqlBinder
+{
+    protected override TargetSqlDialect Dialect => TargetSqlDialect.SqlServer;
+    protected override bool SetsSizesAndPrecision => true;
+    protected override DbType TimestampDbType => DbType.DateTime2;
+}
+
+/// <summary>
+/// DuckDB binder (<c>DuckDB.NET</c>): markers are <c>$1</c>, <c>$2</c> ... and the parameters are named <c>1</c>, <c>2</c> ...
+/// </summary>
+public sealed class DuckDbCompiledSqlBinder : DbCommandCompiledSqlBinder
+{
+    protected override TargetSqlDialect Dialect => TargetSqlDialect.DuckDb;
+    protected override bool RejectsEmbeddedNul => true;
 }

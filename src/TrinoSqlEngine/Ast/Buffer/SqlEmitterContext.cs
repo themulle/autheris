@@ -166,7 +166,13 @@ public sealed class SqlEmitterContext
         }
 
         string marker = FormatMarker(Capabilities.MarkerStyle, ordinal);
-        string name = Capabilities.MarkerStyle == ParameterMarkerStyle.AtNamedOrdinal ? marker : marker.TrimStart(':');
+        string name = Capabilities.MarkerStyle switch
+        {
+            ParameterMarkerStyle.AtNamedOrdinal => marker,
+            ParameterMarkerStyle.DollarOrdinal => marker.TrimStart('$'),
+            ParameterMarkerStyle.QuestionOrdinal => marker.TrimStart('?'),
+            _ => marker.TrimStart(':')
+        };
         _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName));
         _dedup[key] = ordinal;
         ParameterCount = _bound.Count;

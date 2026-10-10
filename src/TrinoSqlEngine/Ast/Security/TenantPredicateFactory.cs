@@ -44,6 +44,17 @@ public static class TenantPredicateFactory
                     BinaryOperator.And,
                     new BinaryExpression(Length(Column()), BinaryOperator.Equal, Length(Param())));
             }
+            case TenantComparisonStyle.EncodedBlob:
+            {
+                // col = t AND encode(CAST(col AS varchar)) = encode(CAST(t AS varchar)); BLOB comparison is byte-exact.
+                static Expression Encoded(Expression operand) =>
+                    new FunctionCallExpression(new SqlQualifiedName("encode"), new[] { (Expression)new CastExpression(operand, "varchar") });
+
+                return new BinaryExpression(
+                    new BinaryExpression(Column(), BinaryOperator.Equal, Param()),
+                    BinaryOperator.And,
+                    new BinaryExpression(Encoded(Column()), BinaryOperator.Equal, Encoded(Param())));
+            }
             default:
                 throw new NotSupportedException($"No binary-exact tenant comparison is defined for {capabilities.Dialect}.");
         }

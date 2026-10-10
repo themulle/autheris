@@ -138,7 +138,6 @@ public class CompileApiTests
     [InlineData(TargetSqlDialect.Ansi)]
     [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.Sqlite)]
-    [InlineData(TargetSqlDialect.DuckDb)]
     [InlineData(TargetSqlDialect.Snowflake)]
     [InlineData(TargetSqlDialect.Oracle)]
     public void NonSqlServerDialects_FailClosed_WithATypedNotYetSupportedError(TargetSqlDialect dialect)

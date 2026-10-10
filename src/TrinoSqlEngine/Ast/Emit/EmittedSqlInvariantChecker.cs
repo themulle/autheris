@@ -54,10 +54,10 @@ public static class EmittedSqlInvariantChecker
             throw new SqlLimitExceededException(SqlLimitKind.EmittedSqlLength, dialect, sql.Length, MaxEmittedSqlLength);
         }
 
-        if (dialect != TargetSqlDialect.SqlServer)
-        {
-            throw new ArgumentOutOfRangeException(nameof(dialect), dialect, "No emitted-text lexer exists for this dialect.");
-        }
+        // The lexer rules come from the capability table (delimiter characters and marker style); a dialect without an entry throws.
+        var caps = DialectCapabilityTable.Default.Get(dialect);
+        char open = caps.IdentifierOpenQuote, close = caps.IdentifierCloseQuote;
+        var style = caps.MarkerStyle;
 
         var sorted = new EmittedRange[ranges.Count];
         for (int r = 0; r < sorted.Length; r++) sorted[r] = ranges[r];
@@ -74,9 +74,16 @@ public static class EmittedSqlInvariantChecker
             }
 
             char c = sql[i];
-            if (c == '[')
+            if (c == open)
             {
-                i = SkipBracketIdentifier(sql, i);
+                i = SkipDelimitedIdentifier(sql, i, close);
+                continue;
+            }
+
+            if (TryReadMarker(sql, i, style, out int markerEnd))
+            {
+                markersInText.Add(sql.Substring(i, markerEnd - i));
+                i = markerEnd;
                 continue;
             }
 
@@ -85,11 +92,7 @@ public static class EmittedSqlInvariantChecker
                 int start = i;
                 while (i < sql.Length && IsTokenChar(sql[i])) i++;
                 var token = sql.AsSpan(start, i - start);
-                if (IsMarker(token))
-                {
-                    markersInText.Add(token.ToString());
-                }
-                else if (!structuralOnly && char.IsAsciiDigit(token[0]) && !IsNumericAllowed(sorted, start, i - start))
+                if (!structuralOnly && char.IsAsciiDigit(token[0]) && !IsNumericAllowed(sorted, start, i - start))
                 {
                     throw new EmittedSqlInvariantViolationException("unregistered-numeric-token", start);
                 }
@@ -102,7 +105,7 @@ public static class EmittedSqlInvariantChecker
                 switch (c)
                 {
                     case '\'':
-                    case '"':
+                    case '"' when open != '"':
                     case ';':
                     case '$':
                     case '`':
@@ -149,25 +152,53 @@ public static class EmittedSqlInvariantChecker
     private static bool IsTokenChar(char c) =>
         char.IsAsciiLetterOrDigit(c) || c is '_' or '@' or '#' || c > 127;
 
-    private static bool IsMarker(ReadOnlySpan<char> token)
+    /// <summary>Reads a parameter marker of the dialect's style at <paramref name="start"/>; it must end at a token boundary.</summary>
+    private static bool TryReadMarker(string sql, int start, ParameterMarkerStyle style, out int end)
     {
-        if (token.Length < 3 || token[0] != '@' || token[1] != 'p') return false;
-        for (int k = 2; k < token.Length; k++)
+        end = start;
+        int i = start;
+        switch (style)
         {
-            if (!char.IsAsciiDigit(token[k])) return false;
+            case ParameterMarkerStyle.AtNamedOrdinal:
+                if (sql[i] != '@' || i + 1 >= sql.Length || sql[i + 1] != 'p') return false;
+                i += 2;
+                break;
+            case ParameterMarkerStyle.DollarOrdinal:
+                if (sql[i] != '$') return false;
+                i++;
+                break;
+            case ParameterMarkerStyle.QuestionOrdinal:
+                if (sql[i] != '?') return false;
+                i++;
+                break;
+            case ParameterMarkerStyle.ColonNamedOrdinal:
+                if (sql[i] != ':' || i + 1 >= sql.Length || sql[i + 1] != 'p' || (i > 0 && sql[i - 1] == ':')) return false;
+                i += 2;
+                break;
+            case ParameterMarkerStyle.ColonOrdinal:
+                if (sql[i] != ':' || (i > 0 && sql[i - 1] == ':')) return false;
+                i++;
+                break;
+            default:
+                return false;
         }
 
+        int numberStart = i;
+        while (i < sql.Length && char.IsAsciiDigit(sql[i])) i++;
+        if (i == numberStart || (i < sql.Length && IsTokenChar(sql[i]))) return false;
+        end = i;
         return true;
     }
 
-    private static int SkipBracketIdentifier(string sql, int start)
+    /// <summary>Skips a delimited identifier; the closing delimiter is escaped by doubling it.</summary>
+    private static int SkipDelimitedIdentifier(string sql, int start, char close)
     {
         int i = start + 1;
         while (i < sql.Length)
         {
-            if (sql[i] == ']')
+            if (sql[i] == close)
             {
-                if (i + 1 < sql.Length && sql[i + 1] == ']')
+                if (i + 1 < sql.Length && sql[i + 1] == close)
                 {
                     i += 2;
                     continue;

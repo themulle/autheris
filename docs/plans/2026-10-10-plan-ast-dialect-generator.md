@@ -1591,7 +1591,7 @@ Priority order and stacked branches (each branch is based on the head of the pre
 | # | Branch | Content | Status |
 |---|---|---|---|
 | 1 | `feat/ast-mssql-select` | Core (A1-A6, A8 for SELECT) plus SQL Server | see 18.2 |
-| 2 | `feat/ast-duckdb-select` | DuckDB SELECT | planned |
+| 2 | `feat/ast-duckdb-select` | DuckDB SELECT | see 18.3 |
 | 3 | `feat/ast-postgres-select` | PostgreSQL SELECT | planned |
 | 4 | `feat/ast-databricks-select` | Databricks SELECT | planned |
 | 5 | `feat/ast-oracle-select` | Oracle SELECT, based on the PostgreSQL head plus `feat/ast-failclosed-fixes` (WP-D4), WP-F1..F4 | planned |
@@ -1617,3 +1617,11 @@ Deviations from the plan text (all fail-closed or stricter):
 - `GatewayStartupValidator` checks for existing tenant ID case collisions (decision B-1), the audit wiring of `CompiledSqlDigest`, and the Application consumers are cutover work and not part of this branch.
 
 Deferred to separate branches: `feat/ast-dml` (A7, DML and MERGE), then X1 after all dialects.
+
+### 18.3 Branch `feat/ast-duckdb-select` (on top of `feat/ast-mssql-select`)
+
+Scope: capability entry (65,535 bind parameters, probed in process; `$n` markers; `"` quoting; `LIMIT/OFFSET`; no `WITH TIES`; `InDbHmac = false`), `DuckDbCompiledSqlBinder` (parameters named `1..n`, embedded NUL rejected because DuckDB.NET passes C strings), generator opt-in to bound mode (structural LIMIT/OFFSET, bound typed and interval literals, reviewed `DATE_TRUNC` unit fragment), typed masks (nullify, redact, constant, partial, geo jitter; HMAC degrades to Redact per B-2), exact tenant comparison `col = t AND encode(CAST(col AS varchar)) = encode(CAST(t AS varchar))` (BLOB comparison is byte-exact, tested against a `COLLATE NOCASE` column), in-process execution tests (RLS visibility, collision, policy subquery, masks, hostile values, cache rebinding, bind-limit probe).
+
+Core changes that stay dialect-neutral: `EmittedSqlInvariantChecker` takes delimiter characters and marker style from the capability table (all five marker styles are lexed); the binder logic moved into `DbCommandCompiledSqlBinder` with per-provider hooks; the compile-budget mapping no longer treats ANTLR `ParseCanceledException` as a timeout.
+
+Federation staging (`CrossSourcePlanner`) keeps the legacy string path (`GenerateSql`), which is unchanged; the full `Autheris.Tests.Unit` suite covers it.
