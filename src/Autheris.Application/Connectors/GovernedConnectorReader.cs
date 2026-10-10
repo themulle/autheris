@@ -56,7 +56,6 @@ public static class GovernedConnectorReader
 {
     public const string RlsPushdownExecutedKey = "RlsPushdownExecuted";
     public const string InDbColumnMaskingExecutedKey = "InDbColumnMaskingExecuted";
-    public const string VirtualFilterFederationHandledKey = "VirtualFilterFederationHandled";
 
     public static async Task<GovernedReadResult> ReadAsync(
         IAutherisConnector connector,
@@ -67,8 +66,12 @@ public static class GovernedConnectorReader
     {
         ArgumentNullException.ThrowIfNull(policy);
         var rawRows = await ReadRawAsync(connector, session, metadata, policy.MaxRows, ct).ConfigureAwait(false);
-        var pushedDown = IsSet(session.Items, RlsPushdownExecutedKey) || IsSet(session.Items, VirtualFilterFederationHandledKey);
-        var masked = IsSet(session.Items, InDbColumnMaskingExecutedKey);
+
+        // SEC-2 (F-GOV-14): an HTTP API cannot evaluate the gateway's row filter or masking rules, so a declarative HTTP
+        // connector never relaxes enforcement by self-attestation; the gateway always filters and masks its rows.
+        var mayAttest = metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative;
+        var pushedDown = mayAttest && IsSet(session.Items, RlsPushdownExecutedKey);
+        var masked = mayAttest && IsSet(session.Items, InDbColumnMaskingExecutedKey);
         var rows = Apply(rawRows, metadata, session.AccessDecision, session.Tenant?.Value, pushedDown, masked, policy);
         return new GovernedReadResult(rows, pushedDown, masked);
     }

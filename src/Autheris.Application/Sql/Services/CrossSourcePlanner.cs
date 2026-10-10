@@ -175,12 +175,6 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
 
             var qualName = t.Metadata.Identifier.ToQualifiedName();
-            var sessionItems = new Dictionary<string, object?>();
-            if (t.Metadata.Table.DataSourceType == DataSourceType.HttpDeclarative || dec.AppliedVirtualFilters is { Count: > 0 })
-            {
-                sessionItems[Autheris.Application.Connectors.GovernedConnectorReader.VirtualFilterFederationHandledKey] = true;
-            }
-
             IReadOnlyDictionary<string, object?>? customArgs = null;
             if (targetCustomArguments != null && targetCustomArguments.TryGetValue(qualName, out var ca))
             {
@@ -194,7 +188,6 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
                 stagingName,
                 projected.ToList(),
                 PushdownFilter: null,
-                SessionItems: sessionItems.Count > 0 ? sessionItems : null,
                 CustomArguments: customArgs));
         }
 
