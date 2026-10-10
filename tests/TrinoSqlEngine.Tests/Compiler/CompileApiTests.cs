@@ -518,20 +518,7 @@ public class CompileApiTests
         Assert.Equal(64, da.Length);
     }
 
-    [Fact]
-    public void AllowExperimentalDialect_OnlyInTests()
-    {
-        string root = AppContext.BaseDirectory;
-        while (root is not null && !Directory.Exists(Path.Combine(root, "src", "TrinoSqlEngine"))) root = Path.GetDirectoryName(root)!;
-        Assert.NotNull(root);
-        foreach (var file in Directory.EnumerateFiles(Path.Combine(root, "src"), "*.cs", SearchOption.AllDirectories))
-        {
-            if (file.Contains(Path.Combine("TrinoSqlEngine", "CompileRequest.cs"), StringComparison.Ordinal)) continue;
-            string text = File.ReadAllText(file);
-            Assert.DoesNotContain("AllowExperimentalDialect = true", text);
-            Assert.DoesNotContain("AllowExperimentalDialect=true", text);
-        }
-    }
+    // AllowExperimentalDialect_OnlyInTests moved to Autheris.Tests.Architecture (IL scan, CR-ADG-20).
 
     // ---- tenant isolation property at the API level ----
 
