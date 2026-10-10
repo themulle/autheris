@@ -582,8 +582,16 @@ public sealed class EntraIdAuthOptions
     /// <summary>
     /// Delegated scopes (<c>scp</c>) that only permit reading, e.g. an agent scope. A user token whose scopes all appear
     /// here is read-only: writes over HTTP, GraphQL mutations and WebSQL DML are rejected.
+    /// When not configured, "Agent.Read" is the read-only scope; a configured list replaces that default entirely.
+    /// Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty default could not be
+    /// replaced. An empty JSON array counts as "not configured".
     /// </summary>
-    public List<string> ReadOnlyScopes { get; init; } = ["Agent.Read"];
+    public List<string>? ReadOnlyScopes { get; init; }
+
+    private static readonly string[] DefaultReadOnlyScopes = ["Agent.Read"];
+
+    /// <summary>Configured <see cref="ReadOnlyScopes"/> or the default list (Agent.Read).</summary>
+    public IReadOnlyList<string> GetEffectiveReadOnlyScopes() => ReadOnlyScopes ?? (IReadOnlyList<string>)DefaultReadOnlyScopes;
 
     /// <summary>How app-only tokens (client credentials, no signed-in person) are treated. Defaults to ReadOnly.</summary>
     public AppOnlyTokenAccess AppOnlyTokens { get; init; } = AppOnlyTokenAccess.ReadOnly;
