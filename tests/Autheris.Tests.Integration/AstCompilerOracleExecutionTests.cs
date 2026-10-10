@@ -32,7 +32,10 @@ public sealed class AstCompilerOracleFixture : IAsyncLifetime
     public const string AppUser = "AUTH_APP";
     public const string AppPassword = "App_Password_2026";
 
-    private readonly OracleContainer _container = new OracleBuilder("gvenzl/oracle-free:23-slim-faststart")
+    // Pinned by digest (WP-F5, SEC-ADG-24, CR-ADG-08 d). Update together with the digest recorded in docs/plans (implementation log).
+    public const string Image = "gvenzl/oracle-free:23-slim-faststart@sha256:d86d09794ae138a8951e97d7ee010778dcd43088e8d0f83a51002abab8c6d7fd";
+
+    private readonly OracleContainer _container = new OracleBuilder(Image)
         .WithPassword("Oracle_Password_2026")
         .Build();
 

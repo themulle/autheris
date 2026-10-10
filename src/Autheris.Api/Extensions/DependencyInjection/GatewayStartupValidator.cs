@@ -30,6 +30,9 @@ public static class GatewayStartupValidator
 
         ValidateObjectRecursively(options);
 
+        ValidateOracleRuntime(options, environment, logger);
+        ValidateTenantCollisions(options, environment, logger);
+
         // SEC E-01: the egress allowlist is validated in every environment; invalid or too broad entries abort the start.
         var egressErrors = EgressAllowlist.Validate(options.Egress);
         if (egressErrors.Count > 0)
@@ -567,6 +570,85 @@ public static class GatewayStartupValidator
         {
             throw new ValidationException("Security violation (E-2): Multi-node cluster mode and more than 1 replica are not allowed with SQLite, because SQLite uses local database files per instance. Configure GovernanceDb.Provider = 'PostgreSql' or 'SqlServer' for cluster operation.");
         }
+    }
+
+    /// <summary>
+    /// WP-F1 / CR-ADG-08: outside Development an Oracle data source never carries a plaintext password (the connection string
+    /// has no <c>Password</c>; <c>PasswordKeyVaultRef</c> names the Key Vault secret) and always uses the policy-compliant account.
+    /// </summary>
+    public static void ValidateOracleRuntime(GatewayOptions options, IHostEnvironment environment, ILogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+        bool development = environment.IsDevelopment();
+
+        foreach (var (name, connection) in options.DataSources.Connections)
+        {
+            if (!DataSourceProvider.Is(connection.Provider, DatabaseDialect.Oracle) || string.IsNullOrWhiteSpace(connection.ConnectionString))
+            {
+                continue;
+            }
+
+            if (development)
+            {
+                if (OracleConnectionStringPolicy.HasPlaintextPassword(connection.ConnectionString))
+                {
+                    logger?.LogWarning("Oracle data source '{DataSource}' uses a plaintext password (allowed in Development only).", name);
+                }
+
+                continue;
+            }
+
+            OracleConnectionStringPolicy.Validate(connection.ConnectionString, requireTcps: true);
+            if (OracleConnectionStringPolicy.HasPlaintextPassword(connection.ConnectionString))
+            {
+                throw new ValidationException(
+                    $"Security violation: Oracle data source '{name}' has a plaintext password in its connection string. Outside Development the password must come from Key Vault (DataSources:Connections:{name}:PasswordKeyVaultRef).");
+            }
+
+            if (string.IsNullOrWhiteSpace(connection.PasswordKeyVaultRef))
+            {
+                throw new ValidationException(
+                    $"Security violation: Oracle data source '{name}' needs DataSources:Connections:{name}:PasswordKeyVaultRef outside Development.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Decision B-1: tenant ids that collide case-insensitively are reported; outside Development the start is refused (all
+    /// requests of the colliding tenants are denied until an operator resolves the collision). Ids are never rewritten.
+    /// </summary>
+    public static void ValidateTenantCollisions(GatewayOptions options, IHostEnvironment environment, ILogger? logger = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        var collisions = TenantCollisionCheck.FindCollisions(ConfiguredTenantIds(options));
+        if (collisions.Count == 0)
+        {
+            return;
+        }
+
+        string description = string.Join("; ", collisions.Select(c => string.Join(" / ", c.Spellings)));
+        if (environment.IsDevelopment())
+        {
+            logger?.LogWarning("Tenant ids collide case-insensitively (decision B-1): {Collisions}. Resolve before production.", description);
+            return;
+        }
+
+        throw new ValidationException(
+            $"Security violation (B-1): tenant ids that differ only in case are configured ({description}). The colliding tenants are denied; rename one of them.");
+    }
+
+    private static IEnumerable<string?> ConfiguredTenantIds(GatewayOptions options)
+    {
+        var forwardAuth = options.Authentication.ForwardAuth;
+        yield return forwardAuth.DefaultTenantId;
+        foreach (var id in forwardAuth.AllowedTenantIds) yield return id;
+        foreach (var id in options.WebSql.TenantDataSourceAllowlist.Keys) yield return id;
+        yield return options.OpenMetadata.DefaultTenantId;
+        foreach (var id in options.OpenMetadata.ServiceDatabaseToTenantMap.Values) yield return id;
+        foreach (var id in options.Itsm.InstanceToTenantMap.Values) yield return id;
     }
 
     internal static bool IsSupportedGovernanceDbProvider(string? provider) =>

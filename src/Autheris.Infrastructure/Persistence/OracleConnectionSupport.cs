@@ -35,7 +35,14 @@ public static class OracleConnectionStringPolicy
             throw new SecurityException("Oracle logins need an explicit database user; OS authentication is not permitted.");
         }
 
-        if (user.Equals("SYS", StringComparison.OrdinalIgnoreCase) || user.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase))
+        // CR-ADG-08: a delimited user name ("SYSTEM") is the same account; strip quotes and blanks before the comparison.
+        string unquoted = user.Trim('"', '\'', ' ');
+        if (unquoted.Length == 0)
+        {
+            throw new SecurityException("Oracle logins need an explicit database user; OS authentication is not permitted.");
+        }
+
+        if (unquoted.Equals("SYS", StringComparison.OrdinalIgnoreCase) || unquoted.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase))
         {
             throw new SecurityException("Built-in administrative Oracle accounts are not permitted.");
         }
@@ -48,6 +55,20 @@ public static class OracleConnectionStringPolicy
         if (requireTcps && !UsesTcps(builder.DataSource))
         {
             throw new SecurityException("Oracle connections outside Development must use TCPS.");
+        }
+    }
+
+    /// <summary>True when the connection string carries a literal (non-empty) <c>Password</c>.</summary>
+    public static bool HasPlaintextPassword(string connectionString)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionString);
+        try
+        {
+            return !string.IsNullOrEmpty(new OracleConnectionStringBuilder(connectionString).Password);
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException)
+        {
+            throw new SecurityException("The Oracle connection string is not valid.");
         }
     }
 

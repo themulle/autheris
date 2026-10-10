@@ -11,7 +11,7 @@ namespace Autheris.Tests.Integration;
 
 public sealed class OracleContainerFixture : IAsyncLifetime
 {
-    public OracleContainer Container { get; } = new OracleBuilder("gvenzl/oracle-free:23-slim-faststart")
+    public OracleContainer Container { get; } = new OracleBuilder("gvenzl/oracle-free:23-slim-faststart@sha256:d86d09794ae138a8951e97d7ee010778dcd43088e8d0f83a51002abab8c6d7fd")
         .WithPassword("Oracle_Password_2026")
         .Build();
 

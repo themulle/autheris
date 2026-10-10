@@ -998,6 +998,12 @@ public sealed class DataSourceConnectionOptions
     /// on busy operational databases; default false. Ignored by other providers (PostgreSQL has no dirty reads).
     /// </summary>
     public bool ReadUncommitted { get; init; }
+
+    /// <summary>
+    /// Oracle only (WP-F1, CR-ADG-08): Key Vault reference of the database password. Outside Development the connection string
+    /// must not contain a plaintext <c>Password</c>; the factory injects the resolved secret when it opens the connection.
+    /// </summary>
+    public string? PasswordKeyVaultRef { get; init; }
 }
 
 public sealed class ItsmOptions
