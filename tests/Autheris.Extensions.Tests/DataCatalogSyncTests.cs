@@ -265,4 +265,43 @@ public class DataCatalogSyncTests
             Arg.Is<TableMetadata>(m => m.Identifier.Equals(tableId) && m.Table.IsActive == true),
             Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task SyncCatalogAsync_WithRebacStore_SeedsParentStructureTuples_AndRespectsDryRun()
+    {
+        var rebacStore = Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacStore>();
+        var sut = new DataCatalogSyncService(
+            _clientFactory,
+            _tableRepo,
+            _epochService,
+            Options.Create(new GatewayOptions()),
+            rebacStore,
+            NullLogger<DataCatalogSyncService>.Instance);
+
+        var tableId = new TableIdentifier("corp", "hr", "employees");
+        var catalogTable = new CatalogTableAsset
+        {
+            Identifier = tableId,
+            DisplayName = "Employees",
+            Tags = [],
+            Columns = [new() { ColumnName = "id", DataType = "int" }]
+        };
+
+        _catalogClient.GetTablesAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new List<CatalogTableAsset> { catalogTable });
+        _tableRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>())
+            .Returns((TableMetadata?)null);
+
+        // Dry run should NOT seed ReBAC tuples
+        await sut.SyncCatalogAsync(dryRun: true);
+        await rebacStore.DidNotReceive().AddTuplesAsync(Arg.Any<IEnumerable<RebacTuple>>(), Arg.Any<CancellationToken>());
+
+        // Actual sync should seed structure tuples
+        await sut.SyncCatalogAsync(dryRun: false);
+        await rebacStore.Received(1).AddTuplesAsync(
+            Arg.Is<IEnumerable<RebacTuple>>(tuples =>
+                tuples.Any(t => t.TenantId == "corp" && t.User == "schema:corp.hr" && t.Relation == "parent" && t.Object == "table:corp.hr.employees") &&
+                tuples.Any(t => t.TenantId == "corp" && t.User == "domain:corp" && t.Relation == "parent" && t.Object == "schema:corp.hr")),
+            Arg.Any<CancellationToken>());
+    }
 }

@@ -36,17 +36,22 @@ public sealed class Table
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
 
     /// <summary>Rank of a sensitivity class; unknown classes rank like HIGH (fail-closed). Empty means NORMAL.</summary>
-    public static int SensitivityRank(string? sensitivity) => (sensitivity ?? "NORMAL").Trim().ToUpperInvariant() switch
+    public static int SensitivityRank(string? sensitivity)
     {
-        "" => 1,
-        "LOW" or "PUBLIC" => 0,
-        "NORMAL" or "INTERNAL" => 1,
-        "MEDIUM" => 2,
-        "CONFIDENTIAL" => 3,
-        "HIGH" => 4,
-        "RESTRICTED" or "SECRET" => 5,
-        _ => 4
-    };
+        var s = (sensitivity ?? "NORMAL").Trim().ToUpperInvariant();
+        if (s.Length > 2 && char.IsAsciiDigit(s[0]) && s[1] == '_')
+        {
+            s = s[2..];
+        }
+        return s switch
+        {
+            "LOW" or "PUBLIC" => 1,
+            "" or "NORMAL" or "INTERNAL" or "MEDIUM" or "UNKNOWN_CUSTOM" => 2,
+            "CONFIDENTIAL" or "RESTRICTED" => 3,
+            "HIGH" or "SECRET" or "STRICTLY_CONFIDENTIAL" => 4,
+            _ => 4
+        };
+    }
 
     /// <summary>
     /// D-4 (ADR-010): CONFIDENTIAL and above count as highly sensitive (four eyes, shorter consent TTL, degraded mode,
@@ -84,55 +89,6 @@ public sealed class TableColumn
     public IReadOnlyDictionary<string, string> Meta { get; init; } = new Dictionary<string, string>();
 }
 
-public sealed class MaskingRule
-{
-    public Guid Id { get; init; } = Guid.NewGuid();
-    public Guid TableColumnId { get; init; }
-    public string RuleType { get; init; } = "REDACT"; // REGEX, HMAC, REDACT, NULLIFY
-    public string? PatternOrFormat { get; init; }
-    public string? Replacement { get; init; }
-    public string? HmacKeyId { get; init; }
-
-    /// <summary>R-POL-12: the one definition of a keyed pseudonymization rule (HMAC, HMAC_SHA256 and the HASH alias).</summary>
-    public bool IsHmac => (RuleType ?? string.Empty).Trim().ToUpperInvariant() is "HMAC" or "HMAC_SHA256" or "HASH";
-
-    /// <summary>
-    /// SEC H-13 / SEC D-3: Creates a tenant-scoped copy of an HMAC masking rule, keyed as {baseKeyId}|tenant:{tenant}.
-    /// Idempotent: a rule that is already scoped to the requested tenant is returned unchanged.
-    /// Rejects rules that are already scoped to a DIFFERENT tenant (prevents cross-tenant correlation).
-    /// </summary>
-    public static MaskingRule CreateTenantScopedHmacRule(MaskingRule rule, string tenant, string? defaultKeyId = null)
-    {
-        ArgumentNullException.ThrowIfNull(rule);
-        ArgumentException.ThrowIfNullOrWhiteSpace(tenant);
-
-        var expectedSuffix = $"|tenant:{tenant}";
-        if (rule.HmacKeyId != null)
-        {
-            if (rule.HmacKeyId.EndsWith(expectedSuffix, StringComparison.Ordinal))
-            {
-                return rule;
-            }
-
-            if (rule.HmacKeyId.Contains("|tenant:", StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    $"The masking rule is already bound to another tenant ('{rule.HmacKeyId}'). Cross-tenant use for tenant '{tenant}' is not allowed.");
-            }
-        }
-
-        var baseKeyId = !string.IsNullOrWhiteSpace(rule.HmacKeyId) ? rule.HmacKeyId : (defaultKeyId ?? "default");
-        return new MaskingRule
-        {
-            Id = rule.Id,
-            TableColumnId = rule.TableColumnId,
-            RuleType = "HMAC_SHA256",
-            PatternOrFormat = rule.PatternOrFormat,
-            Replacement = rule.Replacement,
-            HmacKeyId = $"{baseKeyId}{expectedSuffix}"
-        };
-    }
-}
 
 public sealed record TableMetadata
 {

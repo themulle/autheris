@@ -29,6 +29,7 @@ public partial class PostgreSqlGovernanceRepository
             ? null
             : NpgsqlDataSource.Create(_migrationConnectionString);
         using var conn = (migrationDataSource ?? _dataSource).OpenConnection();
+        DeduplicateDataOwnersBeforeIndex(conn);
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS TABLES (
@@ -190,6 +191,15 @@ public partial class PostgreSqlGovernanceRepository
             -- Review PG-1: second line of defence against forks / duplicate sequence numbers.
             CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_seq ON AUDIT_LOG_ENTRIES (seq);
 
+            -- AU-05: Dead-letter queue for failed audit batches
+            CREATE TABLE IF NOT EXISTS AUDIT_DEAD_LETTER (
+                id TEXT PRIMARY KEY,
+                batch_json TEXT NOT NULL,
+                error_message TEXT NOT NULL,
+                failed_at TEXT NOT NULL,
+                tenant_id TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS CONSENT_REQUESTS (
                 id TEXT PRIMARY KEY,
                 table_id TEXT NOT NULL,
@@ -288,7 +298,7 @@ public partial class PostgreSqlGovernanceRepository
                 UNIQUE (tenant_id, name)
             );
 
-            CREATE TABLE IF NOT EXISTS ACCESS_PROFILES (
+            CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_ACCESS_PROFILES (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
                 name TEXT NOT NULL,
@@ -300,6 +310,35 @@ public partial class PostgreSqlGovernanceRepository
                 updated_at TEXT NOT NULL,
                 UNIQUE (tenant_id, name)
             );
+
+            CREATE TABLE IF NOT EXISTS access_profiles (
+                profile_id VARCHAR(128) NOT NULL,
+                tenant_id VARCHAR(64) NOT NULL,
+                name VARCHAR(256) NOT NULL,
+                masking_mode VARCHAR(32) NOT NULL DEFAULT 'Default',
+                target_tables TEXT NOT NULL DEFAULT '[""*.*""]',
+                row_filter_predicate TEXT NULL,
+                justification TEXT NULL,
+                created_by VARCHAR(256) NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                valid_to TIMESTAMPTZ NULL,
+                CONSTRAINT pk_access_profiles PRIMARY KEY (tenant_id, profile_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS access_profile_assignments (
+                profile_id VARCHAR(128) NOT NULL,
+                tenant_id VARCHAR(64) NOT NULL,
+                subject VARCHAR(256) NOT NULL,
+                subject_type VARCHAR(32) NOT NULL DEFAULT 'User',
+                assigned_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMPTZ NULL,
+                CONSTRAINT pk_access_profile_assignments PRIMARY KEY (tenant_id, profile_id, subject),
+                CONSTRAINT fk_profile_assignments_profile FOREIGN KEY (tenant_id, profile_id) 
+                    REFERENCES access_profiles (tenant_id, profile_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_access_profile_assignments_subject 
+                ON access_profile_assignments(tenant_id, subject);
 
             CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_GENERATION (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -640,5 +679,73 @@ public partial class PostgreSqlGovernanceRepository
         cmd.Parameters.AddWithValue("@sid", sid);
         var existing = cmd.ExecuteScalar()?.ToString();
         return !string.IsNullOrEmpty(existing) ? existing : fallbackId;
+    }
+
+    private void DeduplicateDataOwnersBeforeIndex(NpgsqlConnection conn)
+    {
+        try
+        {
+            using var checkCmd = conn.CreateCommand();
+            checkCmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_name = 'data_owners' LIMIT 1;";
+            if (checkCmd.ExecuteScalar() == null) return;
+
+            using var dupCmd = conn.CreateCommand();
+            dupCmd.CommandText = "SELECT ad_sid FROM DATA_OWNERS WHERE ad_sid IS NOT NULL AND ad_sid != '' GROUP BY ad_sid HAVING COUNT(*) > 1;";
+            var duplicateSids = new List<string>();
+            using (var reader = dupCmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    duplicateSids.Add(reader.GetString(0));
+                }
+            }
+
+            if (duplicateSids.Count == 0) return;
+
+            _logger?.LogWarning("Found {Count} duplicate ad_sid values in DATA_OWNERS; merging duplicates before applying unique constraint (B-05).", duplicateSids.Count);
+
+            foreach (var sid in duplicateSids)
+            {
+                using var fetchCmd = conn.CreateCommand();
+                fetchCmd.CommandText = "SELECT id, is_active FROM DATA_OWNERS WHERE ad_sid = @sid ORDER BY is_active DESC, id ASC;";
+                fetchCmd.Parameters.AddWithValue("@sid", sid);
+                var rows = new List<(string id, int active)>();
+                using (var reader = fetchCmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        rows.Add((reader.GetString(0), Convert.ToInt32(reader.GetValue(1))));
+                    }
+                }
+
+                if (rows.Count <= 1) continue;
+
+                var primaryId = rows[0].id;
+                for (int i = 1; i < rows.Count; i++)
+                {
+                    var secondaryId = rows[i].id;
+                    _logger?.LogInformation("Merging duplicate DATA_OWNERS id '{SecondaryId}' into primary id '{PrimaryId}' for ad_sid '{Sid}'.", secondaryId, primaryId, sid);
+
+                    using var updateTableOwnersCmd = conn.CreateCommand();
+                    updateTableOwnersCmd.CommandText = @"
+                        UPDATE TABLE_OWNERS SET data_owner_id = @primaryId WHERE data_owner_id = @secondaryId
+                        AND NOT EXISTS (SELECT 1 FROM TABLE_OWNERS WHERE data_owner_id = @primaryId);
+                        DELETE FROM TABLE_OWNERS WHERE data_owner_id = @secondaryId;
+                    ";
+                    updateTableOwnersCmd.Parameters.AddWithValue("@primaryId", primaryId);
+                    updateTableOwnersCmd.Parameters.AddWithValue("@secondaryId", secondaryId);
+                    updateTableOwnersCmd.ExecuteNonQuery();
+
+                    using var deleteCmd = conn.CreateCommand();
+                    deleteCmd.CommandText = "DELETE FROM DATA_OWNERS WHERE id = @secondaryId;";
+                    deleteCmd.Parameters.AddWithValue("@secondaryId", secondaryId);
+                    deleteCmd.ExecuteNonQuery();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error while deduplicating DATA_OWNERS table before unique index creation.");
+        }
     }
 }

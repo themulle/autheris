@@ -10,6 +10,8 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
+using Autheris.Application.State;
+
 namespace Autheris.Extensions.OpenMetadata;
 
 public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
@@ -20,6 +22,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
     private readonly IPolicyEpochRepository _epochRepo;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<OpenMetadataSyncService> _logger;
+    private readonly IDistributedClusterStateProvider? _clusterState;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -43,7 +46,8 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         IConsentRepository consentRepo,
         IPolicyEpochRepository epochRepo,
         IOptions<GatewayOptions> options,
-        ILogger<OpenMetadataSyncService> logger)
+        ILogger<OpenMetadataSyncService> logger,
+        IDistributedClusterStateProvider? clusterState = null)
     {
         _client = client;
         _metadataRepo = metadataRepo;
@@ -51,6 +55,7 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         _epochRepo = epochRepo;
         _options = options;
         _logger = logger;
+        _clusterState = clusterState;
     }
 
     public async Task<OpenMetadataSyncResult> SyncPermissionsAsync(bool dryRun = false, CancellationToken ct = default)
@@ -587,10 +592,30 @@ public sealed class OpenMetadataSyncService : IOpenMetadataSyncService
         }
 
         // Event ID deduplication
-        if (webhookEvent.Id.HasValue && !ProcessedWebhookEvents.TryAdd(webhookEvent.Id.Value, DateTimeOffset.UtcNow))
+        if (webhookEvent.Id.HasValue)
         {
-            _logger.LogInformation("OpenMetadata webhook event {EventId} has already been processed. Skipping duplicate.", webhookEvent.Id.Value);
-            return true;
+            if (!ProcessedWebhookEvents.TryAdd(webhookEvent.Id.Value, DateTimeOffset.UtcNow))
+            {
+                _logger.LogInformation("OpenMetadata webhook event {EventId} has already been processed. Skipping duplicate.", webhookEvent.Id.Value);
+                return true;
+            }
+
+            if (_clusterState != null)
+            {
+                try
+                {
+                    var count = await _clusterState.IncrementAsync($"om:dedup:{webhookEvent.Id.Value}", 1, TimeSpan.FromMinutes(15), ct).ConfigureAwait(false);
+                    if (count > 1)
+                    {
+                        _logger.LogInformation("Cluster OpenMetadata webhook event {EventId} has already been processed. Skipping duplicate.", webhookEvent.Id.Value);
+                        return true;
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "OpenMetadata webhook cluster state unavailable; falling back to in-memory deduplication.");
+                }
+            }
         }
 
             // Bound the size of the deduplication dictionary

@@ -52,6 +52,7 @@ public sealed class GatewayOptions
     [Required] public RowFilterOptions RowFilters { get; init; } = new();
     [Required] public VirtualFilterOptions VirtualFilters { get; init; } = new();
     [Required] public LoggingOptions Logging { get; init; } = new();
+    [Required] public ClassificationOptions Classification { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".
@@ -475,6 +476,9 @@ public sealed class BasicAuthOptions
     /// <summary>RR-L2-03: Lifetime of a verified-credential cache entry in seconds (0 disables the cache).</summary>
     public int SuccessCacheSeconds { get; init; } = 30;
 
+    /// <summary>DoS-Schutz: Maximale gleichzeitige Passwort-Hash-Berechnungen (Argon2id/PBKDF2).</summary>
+    public int MaxConcurrentPasswordHashes { get; init; } = Environment.ProcessorCount;
+
     /// <summary>
     /// F-AUTH-DX: Optional cookie session issued after a successful Basic login (developer experience).
     /// Only permitted in the environments listed in <see cref="BasicAuthSessionOptions.AllowedEnvironments"/>,
@@ -574,7 +578,7 @@ public sealed class AdfsAuthOptions
 
 public sealed class GovernanceDbOptions
 {
-    public string Provider { get; init; } = "Sqlite"; // "Sqlite" or "PostgreSql" ("Postgres", "PgSql")
+    public string Provider { get; init; } = "Sqlite"; // "Sqlite", "PostgreSql" ("Postgres", "PgSql") or "SqlServer" ("MsSql")
     public string ConnectionString { get; init; } = "Data Source=governance.db;Cache=Shared";
     [Range(1, 60)] public int CommandTimeoutSeconds { get; init; } = 15;
     public bool EnableOutboxProcessor { get; init; } = true;
@@ -582,7 +586,7 @@ public sealed class GovernanceDbOptions
     public string? AuditHmacKeyVaultRef { get; init; }
 
     /// <summary>
-    /// Review PG-7: optional connection string of a separate role that applies the schema (DDL) at startup (PostgreSQL). When set,
+    /// Review PG-7: optional connection string of a separate role that applies the schema (DDL) at startup (PostgreSQL / SQL Server). When set,
     /// the runtime connection string only needs DML rights (INSERT/SELECT on AUDIT_LOG_ENTRIES), so the runtime account cannot
     /// alter or truncate the audit table.
     /// </summary>
@@ -672,6 +676,7 @@ public sealed class L1MemoryCacheOptions
     [Range(16, 4096)] public int SizeLimitMb { get; init; } = 512;
     [Range(1, 120)] public int DefaultTtlMinutes { get; init; } = 10;
     [Range(1, 600)] public int SensitiveTableTtlSeconds { get; init; } = 60;
+    [Range(0, 5000)] public int AccessProfileEpochCacheMilliseconds { get; init; } = 1000;
 }
 
 public sealed class RedisOptions
@@ -716,6 +721,8 @@ public sealed class EpochValidationOptions
     public bool FailClosedOnSensitiveTables { get; init; } = true;
     [Range(1, 300)] public int DegradedMaxStalenessSeconds { get; init; } = 30;
     public bool PipelinedMGetEnabled { get; init; } = true;
+    [Range(0, 250)] public int LocalStalenessBudgetMilliseconds { get; init; } = 0;
+    public int MaxLocalEpochEntries { get; init; } = 50_000;
 }
 
 public sealed class RateLimitingOptions
@@ -822,11 +829,34 @@ public sealed class WormAuditOptions
     public bool EnforceObjectLock { get; init; } = true;
 }
 
+public enum AuditCatalogReadMode
+{
+    Summarized,
+    Full
+}
+
+public sealed class AuditRetentionOptions
+{
+    [Range(365, 7300)] public int SecurityDays { get; init; } = 3650;
+    [Range(30, 7300)] public int DataAccessDays { get; init; } = 400;
+    [Range(30, 7300)] public int AggregatedDays { get; init; } = 90;
+    [Range(7, 7300)] public int OperationsDays { get; init; } = 30;
+}
+
 public sealed class AuditOptions
 {
+    /// <summary>
+    /// Obsolete / no-op (L-7): Fail-closed tiering is now intrinsic to the audit pipeline.
+    /// </summary>
+    [Obsolete("TierAEnabled is no longer configurable; security-critical audit is fail-closed by default.")]
     public bool TierAEnabled { get; init; } = true;
+
     [Range(1, 3600)] public int TierBAggregationWindowSeconds { get; init; } = 60;
-    [Range(1, 7300)] public int AuditLogRetentionDays { get; init; } = 3650;
+    [Range(365, 7300)] public int AuditLogRetentionDays { get; init; } = 3650;
+    public AuditCatalogReadMode CatalogReadMode { get; init; } = AuditCatalogReadMode.Summarized;
+    [Range(1, 3600)] public int CatalogSummaryWindowSeconds { get; init; } = 60;
+    public AuditRetentionOptions Retention { get; init; } = new();
+    public bool StoreStatementText { get; init; }
     [Range(1, 168)] public int VerifyHashChainIntervalHours { get; init; } = 24;
 
     /// <summary>Review E-11: verify the audit hash chain periodically at runtime (first run shortly after start).</summary>
@@ -873,6 +903,9 @@ public sealed class AuditOptions
 
     /// <summary>SEC R2-3: Capacity of the asynchronous query audit channel = upper bound of entries lost on a crash.</summary>
     [Range(1, 100000)] public int QueryAuditChannelCapacity { get; init; } = 5000;
+
+    /// <summary>AU-03: Indicates whether the audit HMAC key was resolved from fallback or default values.</summary>
+    public bool HmacKeyIsFallback { get; set; }
 }
 
 public sealed class OpenMetadataOptions
@@ -1129,6 +1162,8 @@ public sealed class McpOptions
     public bool RequirePiiMasking { get; init; } = true;
     public List<string> AllowedOperations { get; init; } = [];
     public bool AllowAnonymousDiscovery { get; init; } = false;
+    public bool EnableDeveloperCors { get; init; } = false;
+    public List<string> DeveloperCorsOrigins { get; init; } = [];
 }
 
 public sealed class LakehouseStorageOptions
@@ -1305,6 +1340,8 @@ public sealed class HitLStepUpOptions
     public bool RequireDifferentApprover { get; init; } = true;
     public bool AutoCreateItsmTicket { get; init; } = true;
     public ItsmSystemType PreferredItsmSystem { get; init; } = ItsmSystemType.ServiceNow;
+    public bool RequireTotp2Fa { get; init; } = false;
+    public bool FailClosedOnClusterPartition { get; init; } = false;
 }
 
 /// <summary>
@@ -1398,8 +1435,37 @@ public sealed class WebSqlOptions
     public string? SqlRewriterEngine { get; init; }
 
     /// <summary>
-    /// Legacy alias for <see cref="AllowDml"/> (reported as WARN with the hint to use WebSql.AllowDml).
+    /// Configuration for bounded compiled SQL query plan cache (AR-10 / AR-19).
     /// </summary>
+    public WebSqlPlanCacheOptions PlanCache { get; init; } = new();
+
+    /// <summary>
+    /// Heterogeneous Cross-Source / Federation Join options (DuckDB in-process engine).
+    /// </summary>
+    public CrossSourceOptions CrossSource { get; init; } = new();
+}
+
+public sealed class CrossSourceOptions
+{
+    public bool Enabled { get; init; } = false;
+    public List<string> AllowedTransports { get; init; } = ["WebSql", "Trino"];
+    public int MaxTableCount { get; init; } = 5;
+    public int MaxStagedRowsPerTable { get; init; } = 50000;
+    public int MaxTotalStagedRows { get; init; } = 200000;
+    public long MaxStagedBytesPerTable { get; init; } = 32 * 1024 * 1024;
+    public long MaxTotalStagedBytes { get; init; } = 128 * 1024 * 1024;
+    public string MaxMemory { get; init; } = "256MB";
+    public string MaxTempDirectorySize { get; init; } = "0B";
+    public int TimeoutSeconds { get; init; } = 30;
+    public int MaxParallelSourceReads { get; init; } = 4;
+    public bool AllowNonEquiJoins { get; init; } = false;
+    public List<string> AllowedHttpAuthModes { get; init; } = ["None", "StaticApiKey", "ClientCredentials"];
+}
+
+public sealed class WebSqlPlanCacheOptions
+{
+    public int MaxEntries { get; init; } = 10_000;
+    public int TtlSeconds { get; init; } = 600;
 }
 
 public sealed class SqlEndpointsOptions
@@ -1587,6 +1653,7 @@ public sealed class RebacOptions
     public int MaxTraversalDepth { get; init; } = 10;
     public int CacheTtlSeconds { get; init; } = 60;
     public int MaxCachedDecisions { get; init; } = 50000;
+    [Range(0, 5000)] public int GenerationCacheMilliseconds { get; init; } = 1000;
     public bool EnforceOnStreaming { get; init; } = false;
 
     /// <summary>

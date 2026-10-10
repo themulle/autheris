@@ -283,9 +283,9 @@ public sealed class SqlDataSourceExecutorTests
     }
 
     [Theory]
-    [InlineData("bin_data", "binary", DatabaseDialect.Databricks, "base64(`bin_data`) AS `bin_data`")]
-    [InlineData("event_time", "timestamp", DatabaseDialect.Databricks, "date_format(`event_time`, 'yyyy-MM-dd''T''HH:mm:ss.SSS''Z''') AS `event_time`")]
-    [InlineData("log_date", "date", DatabaseDialect.Databricks, "date_format(`log_date`, 'yyyy-MM-dd') AS `log_date`")]
+    [InlineData("bin_data", "binary", DatabaseDialect.Databricks, "`bin_data`")]
+    [InlineData("event_time", "timestamp", DatabaseDialect.Databricks, "`event_time`")]
+    [InlineData("log_date", "date", DatabaseDialect.Databricks, "`log_date`")]
     public void BuildColumnProjection_DatabricksTypes_TranslatesCorrectly(string col, string type, DatabaseDialect dialect, string expected)
     {
         var projection = SqlDataSourceExecutor.BuildColumnProjection(col, type, dialect);

@@ -13,7 +13,7 @@ public static class SqlKeywords
         const int maxTokenType = 512;
         IsKeywordTable = new bool[maxTokenType];
 
-        var keywordLiteralRegex = new Regex(@"^'[A-Z_]+'$", RegexOptions.Compiled);
+        var keywordLiteralRegex = new Regex(@"^'[A-Z0-9_]+'$", RegexOptions.Compiled);
 
         for (int i = 0; i < maxTokenType; i++)
         {

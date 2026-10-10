@@ -11,6 +11,12 @@ if (args.Length > 0 && (args[0] == "hash-password" || args[0] == "--hash-passwor
     return;
 }
 
+if (args.Length > 0 && (args[0] == "healthcheck" || args[0] == "--healthcheck"))
+{
+    Environment.ExitCode = await Autheris.Api.Security.HealthCheckCli.RunAsync(args);
+    return;
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 // SEC M-01: Kestrel limits (configurable via Gateway:Hosting). Global body limit is small (default 2 MB);
@@ -36,7 +42,7 @@ builder.WebHost.ConfigureKestrel(options =>
 // 1. Serilog Setup
 // DEP-8: code defaults first (Microsoft.AspNetCore at Warning, query strings redacted), then the Serilog section.
 builder.Host.UseSerilog((ctx, lc) => Autheris.Api.Logging.SensitiveLogPropertyEnricher.ApplyDefaults(lc)
-    .ReadFrom.Configuration(ctx.Configuration)
+    .ReadFrom.Configuration(ctx.Configuration, new Serilog.Settings.Configuration.ConfigurationReaderOptions(typeof(Program).Assembly))
     .Enrich.FromLogContext()
     .WriteTo.Console());
 
@@ -60,6 +66,7 @@ builder.Services.AddGatewayAuth(gatewayOptions, builder.Environment);
 var demoDataEnabled = Autheris.Domain.Options.DemoDataSwitch.Resolve(gatewayOptions, builder.Environment.EnvironmentName);
 builder.Services.AddSingleton<Autheris.Domain.Options.IDemoDataSwitch>(new Autheris.Domain.Options.DemoDataSwitch(demoDataEnabled));
 builder.Services.AddGatewayGraphQL(gatewayOptions, demoDataEnabled);
+builder.Services.AddPlan9Services(builder.Configuration);
 
 // 4. Build and Pipeline Configuration
 var app = builder.Build();

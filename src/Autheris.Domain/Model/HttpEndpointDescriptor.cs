@@ -55,4 +55,30 @@ public sealed class HttpEndpointDescriptor
     // Response Mapping
     public string? JsonRootPath { get; init; } // e.g. "data.items" or null for root
     public string PrimaryKeyField { get; init; } = "id";
+    public bool CompleteResponse { get; init; } = false;
+
+    // Pagination Configuration (R-56)
+    public HttpPaginationConfig? Pagination { get; init; }
 }
+
+public enum HttpPaginationStrategy
+{
+    None = 0,
+    OffsetLimit = 1,     // ?offset={offset}&limit={limit}
+    PageNumber = 2,      // ?page={page}&size={size}
+    NextLinkUrl = 3,     // Body contains next page URL (e.g. @odata.nextLink)
+    Cursor = 4           // ?cursor={next_cursor}
+}
+
+public sealed record HttpPaginationConfig(
+    HttpPaginationStrategy Strategy = HttpPaginationStrategy.None,
+    string? PageParamName = "page",
+    string? SizeParamName = "limit",
+    int DefaultPageSize = 100,
+    int MaxPages = 50,
+    string? NextCursorJsonPath = null,
+    string? NextLinkJsonPath = null,
+    bool ZeroIndexedPage = false,
+    bool EnforceSameHost = true,
+    int MaxStagedRows = 100_000,
+    long MaxStagedBytes = 52_428_800);

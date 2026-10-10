@@ -92,6 +92,8 @@ public sealed record DbtGovernanceSyncResult(
     int VirtualFiltersCount,
     int AccessProfilesCount,
     IReadOnlyList<string> Warnings,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    int RemovedMaskingRulesCount = 0,
+    int RelaxedMaskingRulesCount = 0
 );
 

@@ -22,6 +22,8 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
     private readonly IServiceScopeFactory? _scopeFactory;
     private readonly ILogger<HitLStepUpApprovalService> _logger;
     private readonly Autheris.Application.State.IDistributedClusterStateProvider? _clusterState;
+    private readonly Autheris.Application.Security.Totp.Interfaces.ITotpVerificationService? _totpService;
+    private readonly Autheris.Application.Security.Totp.Interfaces.ITotpSecretStore? _totpSecretStore;
     private readonly byte[] _hmacKey;
     private static readonly byte[] ProcessFallbackHmacKey = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
 
@@ -92,12 +94,16 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         IOptions<GatewayOptions> options,
         ILogger<HitLStepUpApprovalService> logger,
         IServiceScopeFactory? scopeFactory = null,
-        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null)
+        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null,
+        Autheris.Application.Security.Totp.Interfaces.ITotpVerificationService? totpVerificationService = null,
+        Autheris.Application.Security.Totp.Interfaces.ITotpSecretStore? totpSecretStore = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _scopeFactory = scopeFactory;
         _clusterState = clusterState;
+        _totpService = totpVerificationService;
+        _totpSecretStore = totpSecretStore;
         _hmacKey = ResolveHitLHmacKey(options.Value);
     }
 
@@ -215,6 +221,10 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
             {
                 var safeApprovalIdForLog = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
                 _logger.LogWarning(ex, "Failed to register HitL ticket '{ApprovalId}' in cluster state.", safeApprovalIdForLog);
+                if (_options.Value.HitLStepUp.FailClosedOnClusterPartition)
+                {
+                    throw new InvalidOperationException($"Failed to register HitL ticket '{safeApprovalIdForLog}' in cluster state (fail-closed policy active).", ex);
+                }
             }
         }
 
@@ -310,17 +320,28 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
 
     public Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, string approverSid, CancellationToken ct = default)
     {
+        return ApproveStepUpRequestAsync(approvalId, approverSid, totpCode: null, ct);
+    }
+
+    public Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, string approverSid, string? totpCode, CancellationToken ct = default)
+    {
         if (string.IsNullOrWhiteSpace(approverSid))
             throw new ArgumentException("Approver SID cannot be null or whitespace.", nameof(approverSid));
 
-        return ApproveStepUpRequestAsync(approvalId, new HitLApproverContext(approverSid, new[] { approverSid }, TenantId: null, IsCrossTenantAdmin: true), ct);
+        return ApproveStepUpRequestAsync(approvalId, new HitLApproverContext(approverSid, new[] { approverSid }, TenantId: null, IsCrossTenantAdmin: true), totpCode, ct);
+    }
+
+    public Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, HitLApproverContext approver, CancellationToken ct = default)
+    {
+        return ApproveStepUpRequestAsync(approvalId, approver, totpCode: null, ct);
     }
 
     /// <summary>
     /// MCP-2: the decision itself happens under the ticket lock without I/O; the distributed lock, the cluster write
     /// and the broadcast are awaited outside of it (no sync-over-async, no Redis call inside a lock).
+    /// ADR-05 / R-62: verifies RFC 6238 TOTP step-up authentication when configured or provided.
     /// </summary>
-    public async Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, HitLApproverContext approver, CancellationToken ct = default)
+    public async Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, HitLApproverContext approver, string? totpCode, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(approvalId))
             throw new ArgumentException("Approval ID cannot be null or whitespace.", nameof(approvalId));
@@ -344,6 +365,52 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
 
         try
         {
+            // Step-Up 2FA Validation (RFC 6238 TOTP, ADR-05, R-62)
+            if (_totpService != null)
+            {
+                var isTotpEnforced = _options.Value.HitLStepUp.RequireTotp2Fa;
+                var enrolledSecret = _totpSecretStore != null
+                    ? await _totpSecretStore.GetSecretAsync(approver.ApproverSid, ct).ConfigureAwait(false)
+                    : null;
+
+                if (isTotpEnforced || !string.IsNullOrWhiteSpace(enrolledSecret) || !string.IsNullOrWhiteSpace(totpCode))
+                {
+                    if (string.IsNullOrWhiteSpace(totpCode))
+                    {
+                        return new HitLApprovalResult(
+                            false,
+                            entry.Ticket,
+                            "TOTP 2FA code is required for Step-Up approval.");
+                    }
+
+                    if (string.IsNullOrWhiteSpace(enrolledSecret))
+                    {
+                        return new HitLApprovalResult(
+                            false,
+                            entry.Ticket,
+                            "Approver has not enrolled in TOTP 2FA or secret is missing.");
+                    }
+
+                    var isTotpValid = await _totpService.VerifyAndConsumeTotpAsync(
+                        approver.ApproverSid,
+                        enrolledSecret,
+                        totpCode,
+                        ct).ConfigureAwait(false);
+
+                    if (!isTotpValid)
+                    {
+                        var safeTotpApproverSid = (approver.ApproverSid ?? string.Empty).Replace("\r", string.Empty).Replace("\n", string.Empty);
+                        var safeTotpApprovalId = approvalId.Replace("\r", string.Empty).Replace("\n", string.Empty);
+                        _logger.LogWarning("TOTP verification failed for approver '{ApproverSid}' on ticket '{ApprovalId}'.",
+                            safeTotpApproverSid, safeTotpApprovalId);
+
+                        return new HitLApprovalResult(
+                            false,
+                            entry.Ticket,
+                            "TOTP 2FA verification failed or one-time code was already used.");
+                    }
+                }
+            }
             HitLApprovalResult approvedResult;
             lock (entry.Lock)
             {

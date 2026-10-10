@@ -31,7 +31,7 @@ public sealed class VirtualFilterModelTests
         }
     };
 
-    internal static AccessProfile DavidProfile(string name = "david", params string[] filters) => new()
+    internal static VirtualFilterAccessProfile DavidProfile(string name = "david", params string[] filters) => new()
     {
         TenantId = Tenant,
         Name = name,

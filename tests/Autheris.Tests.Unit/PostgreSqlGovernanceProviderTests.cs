@@ -25,6 +25,8 @@ public class PostgreSqlGovernanceProviderTests
     [InlineData("pgsql")]
     [InlineData("Sqlite")]
     [InlineData("sqlite")]
+    [InlineData("SqlServer")]
+    [InlineData("mssql")]
     public void ProviderValidation_AcceptsSupportedProviders(string provider)
     {
         var options = new GatewayOptions
@@ -46,7 +48,6 @@ public class PostgreSqlGovernanceProviderTests
     [InlineData("Oracle")]
     [InlineData("MySql")]
     [InlineData("MariaDb")]
-    [InlineData("SqlServer")]
     [InlineData("Cosmos")]
     [InlineData("InMemory")]
     public void ProviderValidation_RejectsUnsupportedProviders(string provider)

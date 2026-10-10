@@ -157,7 +157,7 @@ public static class CatalogVisibility
             return FilterByContract(allTables, contract);
         }
 
-        var userSid = principal.GetUserSid();
+        var userSid = principal.GetUserSid() ?? (!string.IsNullOrWhiteSpace(principal.Identity?.Name) ? new Sid(principal.Identity.Name) : (Sid?)null);
         if (userSid == null || consentRepository == null)
         {
             return Array.Empty<TableMetadata>();

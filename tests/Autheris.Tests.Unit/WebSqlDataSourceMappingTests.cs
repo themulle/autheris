@@ -117,7 +117,6 @@ public sealed class WebSqlDataSourceMappingTests
             policyEnforcement: null,
             consentResolution: resolution,
             tableRepository: repo,
-            auditLogRepository: null,
             connectionFactory: factory,
             clientIpResolver: null,
             environment: null,

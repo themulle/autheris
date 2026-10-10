@@ -56,6 +56,21 @@ SET epoch = epoch + 1,
 WHERE table_id = (SELECT table_id FROM CONSENTS WHERE id = 'b8a92e10-67c3-4d7a-8f81-54625b902da1');
 ```
 
+Microsoft SQL Server (T-SQL):
+
+```sql
+UPDATE CONSENTS
+SET is_revoked = 1,
+    revoke_reason = 'Emergency security incident',
+    revoked_at = CONVERT(VARCHAR(33), SYSUTCDATETIME(), 127)
+WHERE id = 'b8a92e10-67c3-4d7a-8f81-54625b902da1';
+
+UPDATE POLICY_EPOCHS
+SET epoch = epoch + 1,
+    updated_at = CONVERT(VARCHAR(33), SYSUTCDATETIME(), 127)
+WHERE table_id = (SELECT table_id FROM CONSENTS WHERE id = 'b8a92e10-67c3-4d7a-8f81-54625b902da1');
+```
+
 Notes:
 - A direct database change **bypasses the audit chain**: no `CONSENT_REVOKED` event is written and nothing is published on the Redis channels. Document the intervention manually (ticket, who, when) and write the audit event as soon as the API is available again. Never edit `AUDIT_LOG_ENTRIES`; it is hash-chained and (PostgreSQL) append-only.
 - Nodes pick up the change through the epoch check. After the update, verify with a test query from an affected account that access is `FORBIDDEN`; if a node still serves the old decision, restart it.

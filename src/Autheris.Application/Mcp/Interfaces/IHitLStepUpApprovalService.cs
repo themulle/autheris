@@ -18,13 +18,18 @@ public interface IHitLStepUpApprovalService
 
     Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, string approverSid, CancellationToken ct = default);
 
+    Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, string approverSid, string? totpCode, CancellationToken ct = default);
+
     Task<HitLApprovalResult> RejectStepUpRequestAsync(string approvalId, string approverSid, string? reason = null, CancellationToken ct = default);
 
     /// <summary>
     /// SEC C-05: Approves a ticket with full approver context (all identifiers + tenant binding).
     /// MCP-2: asynchronous, the cluster state is never awaited synchronously.
+    /// Supports optional RFC 6238 TOTP Step-Up 2FA validation (ADR-05).
     /// </summary>
     Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, HitLApproverContext approver, CancellationToken ct = default);
+
+    Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, HitLApproverContext approver, string? totpCode, CancellationToken ct = default);
 
     /// <summary>
     /// SEC C-05: Rejects a ticket with full approver context (tenant binding).

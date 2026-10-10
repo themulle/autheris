@@ -37,6 +37,7 @@ public interface IConsentRepository
 public interface IAuditLogRepository
 {
     Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default);
+    Task RecordAuditEventAsync(AuditLogEntry entry, System.Data.Common.DbTransaction existingTx, CancellationToken ct = default);
     Task<IReadOnlyList<AuditLogEntry>> GetAuditLogEntriesAsync(int limit = 100, TenantId? tenantId = null, CancellationToken ct = default);
     Task<IReadOnlyList<AuditLogEntry>> QueryAuditLogsAsync(
         string? targetTable = null,

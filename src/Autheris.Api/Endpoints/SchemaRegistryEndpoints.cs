@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.SchemaRegistry;
+using Autheris.Domain.Audit;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -72,7 +73,8 @@ public static class SchemaRegistryEndpoints
                 ? Results.Ok(response)
                 : Results.BadRequest(response);
         }).RequireAuthorization()
-          .WithRequestBodyLimit(MaxSchemaPayloadBytes); // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithRequestBodyLimit(MaxSchemaPayloadBytes) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapPost("/api/schema-registry/check", async (
             HttpContext httpContext,
@@ -107,7 +109,8 @@ public static class SchemaRegistryEndpoints
                 changes = diff.Changes
             });
         }).RequireAuthorization()
-          .WithRequestBodyLimit(MaxSchemaPayloadBytes); // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithRequestBodyLimit(MaxSchemaPayloadBytes) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/api/schema-registry/{service}/latest", async (
             string service,
@@ -122,7 +125,7 @@ public static class SchemaRegistryEndpoints
 
             var latest = await registry.GetLatestSchemaAsync(service, ct);
             return latest != null ? Results.Ok(latest) : Results.NotFound(new { error = $"No active schema found for service '{service}'." });
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/api/schema-registry/{service}/history", async (
             string service,
@@ -137,7 +140,7 @@ public static class SchemaRegistryEndpoints
 
             var history = await registry.GetSchemaHistoryAsync(service, ct);
             return Results.Ok(history);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/api/schema-registry/services", async (
             ISchemaRegistryService registry,
@@ -151,7 +154,7 @@ public static class SchemaRegistryEndpoints
 
             var services = await registry.GetAllServicesAsync(ct);
             return Results.Ok(services);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         return app;
     }

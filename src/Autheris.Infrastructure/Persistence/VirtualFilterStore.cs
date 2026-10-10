@@ -8,7 +8,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Virtual filters: storage shared by the SQLite and PostgreSQL governance repositories (portable SQL: ON CONFLICT,
+/// Virtual filters: storage shared by the SQLite and PostgreSQL governance repositories (portable SQL: ON CONFLICT, MERGE on SQL Server,
 /// named parameters). Definitions are stored as JSON with their hash; a change set is one transaction and increments
 /// the generation once.
 /// </summary>
@@ -24,7 +24,9 @@ internal static class VirtualFilterStore
         FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
         FilterDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null);
     private sealed record BindingDto(
-        string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap);
+        string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap,
+        VirtualFilterExecutionStrategy? Strategy = null, PushdownParameterFormat? PushdownFormat = null,
+        int? MaxPushdownKeys = null, List<string>? CompositeKeys = null);
     private sealed record ProfileDto(
         GranteeType GranteeType, string? GranteeSid, string? RoleName, string Scope, UncoveredPolicy? Uncovered, List<BindingDto> Bindings,
         FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
@@ -47,10 +49,10 @@ internal static class VirtualFilterStore
             }
         }
 
-        var profiles = new List<AccessProfile>();
+        var profiles = new List<VirtualFilterAccessProfile>();
         await using (var cmd = Command(connection, tx, @"
             SELECT id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at
-            FROM ACCESS_PROFILES ORDER BY tenant_id, name;", []))
+            FROM VIRTUAL_FILTER_ACCESS_PROFILES ORDER BY tenant_id, name;", []))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -72,10 +74,18 @@ internal static class VirtualFilterStore
             return;
         }
 
+        var sqlServer = connection is Microsoft.Data.SqlClient.SqlConnection;
         await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         foreach (var filter in changes.SaveFilters)
         {
-            await ExecuteAsync(connection, tx, @"
+            await ExecuteAsync(connection, tx, sqlServer ? @"
+                MERGE VIRTUAL_FILTERS WITH (HOLDLOCK) AS t
+                USING (SELECT @tenant AS tenant_id, @name AS name) AS s ON t.tenant_id = s.tenant_id AND t.name = s.name
+                WHEN MATCHED THEN UPDATE SET
+                    source = @source, definition_json = @json, definition_hash = @hash,
+                    managed_path = @path, managed_commit = @commit, updated_by = @by, updated_at = @at
+                WHEN NOT MATCHED THEN INSERT (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
+                    VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at);" : @"
                 INSERT INTO VIRTUAL_FILTERS (id, tenant_id, name, source, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
                 VALUES (@id, @tenant, @name, @source, @json, @hash, @path, @commit, @by, @at)
                 ON CONFLICT (tenant_id, name) DO UPDATE SET
@@ -98,8 +108,15 @@ internal static class VirtualFilterStore
 
         foreach (var profile in changes.SaveProfiles)
         {
-            await ExecuteAsync(connection, tx, @"
-                INSERT INTO ACCESS_PROFILES (id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
+            await ExecuteAsync(connection, tx, sqlServer ? @"
+                MERGE VIRTUAL_FILTER_ACCESS_PROFILES WITH (HOLDLOCK) AS t
+                USING (SELECT @tenant AS tenant_id, @name AS name) AS s ON t.tenant_id = s.tenant_id AND t.name = s.name
+                WHEN MATCHED THEN UPDATE SET
+                    definition_json = @json, definition_hash = @hash,
+                    managed_path = @path, managed_commit = @commit, updated_by = @by, updated_at = @at
+                WHEN NOT MATCHED THEN INSERT (id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
+                    VALUES (@id, @tenant, @name, @json, @hash, @path, @commit, @by, @at);" : @"
+                INSERT INTO VIRTUAL_FILTER_ACCESS_PROFILES (id, tenant_id, name, definition_json, definition_hash, managed_path, managed_commit, updated_by, updated_at)
                 VALUES (@id, @tenant, @name, @json, @hash, @path, @commit, @by, @at)
                 ON CONFLICT (tenant_id, name) DO UPDATE SET
                     definition_json = excluded.definition_json, definition_hash = excluded.definition_hash,
@@ -120,7 +137,7 @@ internal static class VirtualFilterStore
 
         foreach (var (tenant, name) in changes.DeleteProfiles)
         {
-            await ExecuteAsync(connection, tx, "DELETE FROM ACCESS_PROFILES WHERE tenant_id = @tenant AND name = @name;",
+            await ExecuteAsync(connection, tx, "DELETE FROM VIRTUAL_FILTER_ACCESS_PROFILES WHERE tenant_id = @tenant AND name = @name;",
                 [("@tenant", tenant.Value), ("@name", name)], ct).ConfigureAwait(false);
         }
 
@@ -182,13 +199,22 @@ internal static class VirtualFilterStore
         filter.PendingDeletion,
         filter.DeletionRequestedBy?.Value);
 
-    private static ProfileDto ProfileToDto(AccessProfile profile) => new(
+    private static ProfileDto ProfileToDto(VirtualFilterAccessProfile profile) => new(
         profile.GranteeType,
         profile.GranteeSid?.Value,
         profile.RoleName,
         profile.Scope,
         profile.Uncovered,
-        profile.Bindings.Select(b => new BindingDto(b.FilterName, b.TargetPattern, b.ObjectKinds, b.TimeColumn, b.ColumnMap?.ToDictionary(p => p.Key, p => p.Value))).ToList(),
+        profile.Bindings.Select(b => new BindingDto(
+            b.FilterName,
+            b.TargetPattern,
+            b.ObjectKinds,
+            b.TimeColumn,
+            b.ColumnMap?.ToDictionary(p => p.Key, p => p.Value),
+            b.Strategy,
+            b.PushdownFormat,
+            b.MaxPushdownKeys,
+            b.CompositeKeys.Count > 0 ? b.CompositeKeys.ToList() : null)).ToList(),
         profile.Status,
         profile.CreatedBy?.Value,
         profile.ApprovedBy?.Value,
@@ -225,7 +251,7 @@ internal static class VirtualFilterStore
         DeletionRequestedBy = string.IsNullOrWhiteSpace(dto.DeletionRequestedBy) ? (Sid?)null : new Sid(dto.DeletionRequestedBy!)
     };
 
-    private static AccessProfile DtoToProfile(ProfileDto dto, Guid id, TenantId tenantId, string name) => new()
+    private static VirtualFilterAccessProfile DtoToProfile(ProfileDto dto, Guid id, TenantId tenantId, string name) => new()
     {
         Id = id,
         TenantId = tenantId,
@@ -241,7 +267,11 @@ internal static class VirtualFilterStore
             TargetPattern = b.Target,
             ObjectKinds = b.ObjectKinds,
             TimeColumn = b.TimeColumn,
-            ColumnMap = b.ColumnMap
+            ColumnMap = b.ColumnMap,
+            Strategy = b.Strategy ?? VirtualFilterExecutionStrategy.Adaptive,
+            PushdownFormat = b.PushdownFormat ?? PushdownParameterFormat.CommaSeparated,
+            MaxPushdownKeys = b.MaxPushdownKeys ?? 100,
+            CompositeKeys = b.CompositeKeys ?? []
         }).ToList(),
         Status = dto.Status ?? FilterApprovalStatus.Active,
         CreatedBy = string.IsNullOrWhiteSpace(dto.CreatedBy) ? (Sid?)null : new Sid(dto.CreatedBy!),
@@ -270,7 +300,7 @@ internal static class VirtualFilterStore
         };
     }
 
-    private static AccessProfile ReadProfile(DbDataReader reader)
+    private static VirtualFilterAccessProfile ReadProfile(DbDataReader reader)
     {
         var dto = JsonSerializer.Deserialize<ProfileDto>(reader.GetString(3))
             ?? throw new InvalidOperationException("Access profile definition is empty.");

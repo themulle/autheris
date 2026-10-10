@@ -15,6 +15,7 @@ using Autheris.Api.Serialization;
 using Autheris.Application.Serialization;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Options;
@@ -45,7 +46,8 @@ public static class WebSqlEndpoints
         // OpenAPI description of the endpoint (documentation only, no data). Like the other specs it is anonymous only
         // in OpenSchema mode.
         var openApi = app.MapGet("/api/v1/sql/openapi.json", () => Results.Json(BuildOpenApiSpec(gatewayOptions)))
-            .WithName("GetWebSqlOpenApiSpec");
+            .WithName("GetWebSqlOpenApiSpec")
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         if (gatewayOptions?.IsOpenSchemaAllowed == true)
         {
             openApi.AllowAnonymous();
@@ -59,46 +61,56 @@ public static class WebSqlEndpoints
            .WithName("ExecuteGovernedWebSqlV1")
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .WithRequestBodyLimit(2 * 1024 * 1024)
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         app.MapPost("/api/sql", HandleWebSqlRequest)
            .WithName("ExecuteGovernedWebSql")
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .WithRequestBodyLimit(2 * 1024 * 1024)
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         app.MapPost("/v1/statement", HandleWebSqlRequest)
            .WithName("ExecuteTrinoStatementV1")
            .WithRequestBodyLimit(2 * 1024 * 1024)
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         app.MapGet("/v1/statement/queued/{statementId}", HandleTrinoQueuedStatementRequest)
            .WithName("GetTrinoQueuedStatementV1")
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         app.MapGet("/v1/statement/executing/{statementId}", HandleTrinoQueuedStatementRequest)
            .WithName("GetTrinoExecutingStatementV1")
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         app.MapDelete("/v1/statement/{statementId}", HandleTrinoCancelStatementRequest)
            .WithName("CancelTrinoStatementV1")
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         app.MapGet("/api/v1/sql/statements/{statementId}", HandleTrinoQueuedStatementRequest)
            .WithName("GetWebSqlStatementV1")
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         app.MapGet("/api/sql/statements/{statementId}", HandleTrinoQueuedStatementRequest)
            .WithName("GetWebSqlStatement")
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         app.MapDelete("/api/v1/sql/statements/{statementId}", HandleTrinoCancelStatementRequest)
            .WithName("CancelWebSqlStatementV1")
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         app.MapDelete("/api/sql/statements/{statementId}", HandleTrinoCancelStatementRequest)
            .WithName("CancelWebSqlStatement")
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         return app;
     }
@@ -200,7 +212,7 @@ public static class WebSqlEndpoints
             dataSource = trinoCatalogHeader.ToString().Trim();
         }
 
-        var governedRequest = new GovernedSqlQueryRequest(sql, parameters, dataSource);
+        var governedRequest = new GovernedSqlQueryRequest(sql, parameters, dataSource, Transport: isTrinoRoute ? "Trino" : "WebSql");
 
         if (isTrinoRoute || trinoWaitTimeout != null)
         {
@@ -214,7 +226,8 @@ public static class WebSqlEndpoints
             {
                 var trinoRequest = governedRequest with
                 {
-                    RowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Trino)
+                    RowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Trino),
+                    Transport = "Trino"
                 };
                 var status = await statementManager.SubmitOrWaitAsync(trinoRequest, user, tenantId, timeout, ct);
                 await WriteTrinoStatementResponseAsync(httpContext, status, ct);

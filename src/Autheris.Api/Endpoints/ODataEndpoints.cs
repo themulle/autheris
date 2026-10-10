@@ -7,12 +7,14 @@ using System.Globalization;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Api.Serialization;
 using Autheris.Application.Common;
 using Autheris.Application.Interfaces;
 using Autheris.Application.OData.Interfaces;
 using Autheris.Application.Serialization;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
@@ -66,7 +68,9 @@ public static class ODataEndpoints
             return Results.Json(doc, contentType: "application/json;odata.metadata=minimal;charset=utf-8");
         }
 
-        app.MapGet("/odata/v4", HandleServiceDocumentAsync).RequireAuthorization();
+        app.MapGet("/odata/v4", HandleServiceDocumentAsync)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/odata/v4/$metadata", async (
             IODataHandler odataHandler,
@@ -80,7 +84,8 @@ public static class ODataEndpoints
             context.Response.Headers["OData-Version"] = "4.0";
             var xml = await odataHandler.GetMetadataCsdlAsync(context.User, context.RequestAborted);
             return Results.Content(xml, "application/xml;charset=utf-8");
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+          .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         bool IsOpenApiAuthorized(HttpContext context)
         {
@@ -150,7 +155,7 @@ public static class ODataEndpoints
 
             var contentType = isYaml ? "application/yaml;charset=utf-8" : "application/json;charset=utf-8";
             return Results.Bytes(bytes, contentType: contentType);
-        }));
+        })).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // OpenAPI Catalog Index Endpoint (Lists all available domain slices & API specs)
         ConfigureOpenApiAuth(app.MapGet("/odata/v4/$openapi/index", async (
@@ -164,7 +169,7 @@ public static class ODataEndpoints
             var origin = $"{context.Request.Scheme}://{context.Request.Host}";
             var indexDoc = await generator.GetIndexDocumentAsync(origin, context.RequestAborted);
             return Results.Json(indexDoc, contentType: "application/json;charset=utf-8");
-        }));
+        })).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         ConfigureOpenApiAuth(app.MapGet("/api/v1/openapi/index", async (
             IDynamicOpenApiGenerator generator,
@@ -177,7 +182,7 @@ public static class ODataEndpoints
             var origin = $"{context.Request.Scheme}://{context.Request.Host}";
             var indexDoc = await generator.GetIndexDocumentAsync(origin, context.RequestAborted);
             return Results.Json(indexDoc, contentType: "application/json;charset=utf-8");
-        }));
+        })).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // Isolated Entity Schema Endpoint ($ref target for modular OpenAPI specifications)
         ConfigureOpenApiAuth(app.MapGet("/odata/v4/$openapi/schemas/{domain}/{schema}/{tableName}", async (
@@ -198,7 +203,7 @@ public static class ODataEndpoints
             }
 
             return Results.Content(json, "application/json;charset=utf-8");
-        }));
+        })).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         ConfigureOpenApiAuth(app.MapGet("/odata/v4/{domain}/openapi.json", async (
             string domain,
@@ -220,7 +225,7 @@ public static class ODataEndpoints
                 ct: context.RequestAborted);
 
             return Results.Bytes(bytes, contentType: "application/json;charset=utf-8");
-        }));
+        })).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         ConfigureOpenApiAuth(app.MapGet("/odata/v4/{domain}/openapi.yaml", async (
             string domain,
@@ -242,7 +247,7 @@ public static class ODataEndpoints
                 ct: context.RequestAborted);
 
             return Results.Bytes(bytes, contentType: "application/yaml;charset=utf-8");
-        }));
+        })).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // Swagger UI: Seite unter /ui/swagger (analog /graphql fuer Nitro); /docs und /odata/v4/$swagger bleiben als Aliase.
         // Die UI-Assets werden aus dem Assembly ausgeliefert (kein CDN, offline-faehig).
@@ -259,10 +264,10 @@ public static class ODataEndpoints
         }
 
         // SEC M-03: handlers perform their own (OpenSchema/Dev/authenticated) check
-        app.MapGet("/ui/swagger", ServeSwaggerUi).AllowAnonymous();
-        app.MapGet("/odata/v4/$swagger", ServeSwaggerUi).AllowAnonymous();
-        app.MapGet("/docs", ServeSwaggerUi).AllowAnonymous();
-        app.MapGet("/swagger", ServeSwaggerUi).AllowAnonymous();
+        app.MapGet("/ui/swagger", ServeSwaggerUi).AllowAnonymous().WithAuditExemption("Developer swagger documentation");
+        app.MapGet("/odata/v4/$swagger", ServeSwaggerUi).AllowAnonymous().WithAuditExemption("Developer swagger documentation");
+        app.MapGet("/docs", ServeSwaggerUi).AllowAnonymous().WithAuditExemption("Developer swagger documentation");
+        app.MapGet("/swagger", ServeSwaggerUi).AllowAnonymous().WithAuditExemption("Developer swagger documentation");
 
         // Statische, oeffentliche Bibliotheksdateien (nur Allowlist, keine Pfadauflosung vom Client)
         app.MapGet("/ui/swagger/assets/{file}", (string file) =>
@@ -277,18 +282,21 @@ public static class ODataEndpoints
                 return Results.NotFound();
             }
             return Results.Stream(stream, contentType, enableRangeProcessing: false);
-        }).AllowAnonymous();
+        }).AllowAnonymous().WithAuditExemption("Swagger UI static asset");
 
         app.MapGet("/odata/v4/{domain}/{schema}/{tableName}", HandleEntitySetRequestAsync)
            .WithMetadata(new ParquetOutputSupportedMetadata())
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         app.MapGet("/odata/v4/{domain}/{schema}/{tableName}/$count", HandleCountRequestAsync)
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         app.MapGet("/odata/v4/{entitySetName}", HandleFlatEntitySetRequestAsync)
            .WithMetadata(new ParquetOutputSupportedMetadata())
-           .RequireAuthorization();
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return app;
     }
@@ -317,6 +325,16 @@ public static class ODataEndpoints
 
         if (matchingTables.Count != 1)
         {
+            var env = context.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>();
+            if (env != null && !env.IsDevelopment())
+            {
+                return Results.Json(
+                    new { error = new { code = "ACCESS_DENIED", message = "Access to the table is denied or the table does not exist." } },
+                    statusCode: StatusCodes.Status403Forbidden,
+                    contentType: "application/json;odata.metadata=minimal;charset=utf-8"
+                );
+            }
+
             return Results.NotFound(new { error = new { code = "ResourceNotFound", message = $"The entity set '{entitySetName}' was not found." } });
         }
 

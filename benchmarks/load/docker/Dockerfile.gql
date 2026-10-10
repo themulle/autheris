@@ -4,15 +4,23 @@ WORKDIR /src
 
 # Copy project files first for efficient caching
 COPY src/Autheris.Domain/Autheris.Domain.csproj src/Autheris.Domain/
+COPY src/Autheris.Domain/packages.lock.json src/Autheris.Domain/
 COPY src/Autheris.Application/Autheris.Application.csproj src/Autheris.Application/
+COPY src/Autheris.Application/packages.lock.json src/Autheris.Application/
 COPY src/Autheris.Infrastructure/Autheris.Infrastructure.csproj src/Autheris.Infrastructure/
+COPY src/Autheris.Infrastructure/packages.lock.json src/Autheris.Infrastructure/
 COPY src/Autheris.GraphQL/Autheris.GraphQL.csproj src/Autheris.GraphQL/
+COPY src/Autheris.GraphQL/packages.lock.json src/Autheris.GraphQL/
 COPY src/Autheris.Extensions/Autheris.Extensions.csproj src/Autheris.Extensions/
+COPY src/Autheris.Extensions/packages.lock.json src/Autheris.Extensions/
 COPY src/TrinoSqlEngine/TrinoSqlEngine.csproj src/TrinoSqlEngine/
+COPY src/TrinoSqlEngine/packages.lock.json src/TrinoSqlEngine/
 COPY src/Autheris.Api/Autheris.Api.csproj src/Autheris.Api/
+COPY src/Autheris.Api/packages.lock.json src/Autheris.Api/
 COPY Directory.Build.props ./
+COPY NuGet.config ./
 
-RUN dotnet restore src/Autheris.Api/Autheris.Api.csproj
+RUN dotnet restore src/Autheris.Api/Autheris.Api.csproj --locked-mode
 
 # Copy remaining source code
 COPY src/ src/
@@ -26,10 +34,11 @@ RUN dotnet publish src/Autheris.Api/Autheris.Api.csproj -c Release -o /app/publi
 
 # Runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:222759b391a1aaf241166672c8f99b2d4ada452e7b5319f3c6e8f265a37b5ad4 AS runtime
+LABEL org.opencontainers.image.description="BENCHMARK ONLY – never publish"
 WORKDIR /app
 
 ENV ASPNETCORE_URLS=http://+:5000 \
-    ASPNETCORE_ENVIRONMENT=Development \
+    ASPNETCORE_ENVIRONMENT=Benchmark \
     DOTNET_gcServer=1 \
     DOTNET_GCConcurrent=1 \
     DOTNET_GCDynamicAdaptationMode=1 \
@@ -40,7 +49,11 @@ ENV ASPNETCORE_URLS=http://+:5000 \
     DOTNET_USE_POLLING_FILE_WATCHER=false
 
 COPY --from=build /app/publish .
-COPY benchmarks/load/configs/gql-gateway/appsettings.bench.json appsettings.Production.json
+COPY benchmarks/load/configs/gql-gateway/appsettings.bench.json appsettings.Benchmark.json
 
 EXPOSE 5000
+
+# Non-root execution
+USER 10001:10001
+
 ENTRYPOINT ["dotnet", "Autheris.Api.dll"]

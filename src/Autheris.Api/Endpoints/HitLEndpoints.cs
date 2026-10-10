@@ -3,8 +3,10 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
@@ -15,7 +17,8 @@ using Microsoft.Extensions.Options;
 
 public static class HitLEndpoints
 {
-    public sealed record ApproveTicketRequest(string ApprovalId);
+    public sealed record ApproveTicketRequest(string ApprovalId, string? TotpCode = null);
+    public sealed record ApproveTicketByIdRequest(string? TotpCode = null);
     public sealed record RejectTicketRequest(string ApprovalId, string? Reason);
 
     public static IEndpointRouteBuilder MapHitLEndpoints(this IEndpointRouteBuilder app)
@@ -46,7 +49,7 @@ public static class HitLEndpoints
 
             var tickets = hitlService.GetPendingTickets(effectiveTenant);
             return Results.Ok(tickets);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
 
         app.MapPost("/api/governance/hitl/approve", async (
             ApproveTicketRequest request,
@@ -76,9 +79,42 @@ public static class HitLEndpoints
                 return forbidden;
             }
 
-            var result = await hitlService.ApproveStepUpRequestAsync(request.ApprovalId, approver, context.RequestAborted);
+            var result = await hitlService.ApproveStepUpRequestAsync(request.ApprovalId, approver, request.TotpCode, context.RequestAborted);
             return result.IsApproved ? Results.Ok(result) : Results.BadRequest(result);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
+
+        app.MapPost("/api/governance/hitl/tickets/{ticketId}/approve", async (
+            string ticketId,
+            ApproveTicketByIdRequest? body,
+            HttpContext context,
+            IHitLStepUpApprovalService hitlService,
+            IOptions<GatewayOptions> options) =>
+        {
+            if (!options.Value.HitLStepUp.Enabled)
+            {
+                return Results.NotFound(new { error = "HitL step-up approval is disabled." });
+            }
+
+            if (!EndpointSecurity.IsApprover(context.User) || string.IsNullOrWhiteSpace(ticketId))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var approver = BuildApproverContext(context);
+            if (approver == null)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var forbidden = await EnsureTableApproverAsync(context, hitlService, ticketId, approver).ConfigureAwait(false);
+            if (forbidden != null)
+            {
+                return forbidden;
+            }
+
+            var result = await hitlService.ApproveStepUpRequestAsync(ticketId, approver, body?.TotpCode, context.RequestAborted);
+            return result.IsApproved ? Results.Ok(result) : Results.BadRequest(result);
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         app.MapPost("/api/governance/hitl/reject", async (
             RejectTicketRequest request,
@@ -110,7 +146,7 @@ public static class HitLEndpoints
 
             var result = await hitlService.RejectStepUpRequestAsync(request.ApprovalId, approver, request.Reason, context.RequestAborted);
             return Results.Ok(result);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentDenied);
 
         return app;
     }

@@ -94,4 +94,40 @@ public sealed class SubgraphCanarySecurityTests
         decA.ShouldNotBeNull();
         decB.ShouldNotBeNull();
     }
+
+    [Fact]
+    public async Task ResolveTarget_RequiresAllConfiguredCriteria_LogicalAnd()
+    {
+        // SG-23: When multiple criteria (header, role, tenant) are defined on a rule,
+        // all must match (logical AND). A client cannot bypass role or tenant restrictions
+        // merely by specifying the variant header.
+        var defaultUri = new Uri("https://subgraph-orders.internal:4000/graphql");
+        var canaryUri = "https://subgraph-orders-v2.internal:4001/graphql";
+
+        _router.RegisterRule(new SubgraphCanaryRule(
+            RuleId: "rule-multi",
+            SubgraphName: "orders",
+            VariantName: "v2-secure",
+            TargetUrl: canaryUri,
+            HeaderValueMatch: "v2-secure",
+            RequiredRole: "OrderAdmin",
+            AllowedTenants: ["tenant-prod-a"]
+        ));
+
+        var authorizedPrincipal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "OrderAdmin")], "Bearer"));
+        var unauthorizedPrincipal = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "User")], "Bearer"));
+
+        // Case 1: Header matches, but user lacks role -> Denied canary
+        var d1 = await _router.ResolveTargetAsync("orders", defaultUri, unauthorizedPrincipal, "tenant-prod-a", "v2-secure");
+        d1.IsCanary.ShouldBeFalse();
+
+        // Case 2: Header matches, role matches, but wrong tenant -> Denied canary
+        var d2 = await _router.ResolveTargetAsync("orders", defaultUri, authorizedPrincipal, "tenant-unrelated", "v2-secure");
+        d2.IsCanary.ShouldBeFalse();
+
+        // Case 3: All match -> Canary routed
+        var d3 = await _router.ResolveTargetAsync("orders", defaultUri, authorizedPrincipal, "tenant-prod-a", "v2-secure");
+        d3.IsCanary.ShouldBeTrue();
+        d3.EffectiveUri.ToString().ShouldBe(canaryUri);
+    }
 }

@@ -4,23 +4,70 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      github-actions:
+        patterns: ["*"]
+
   - package-ecosystem: "nuget"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      nuget:
+        patterns: ["*"]
+
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
+
   - package-ecosystem: "docker"
     directory: "/deploy/containers/gqlgateway-api"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "docker"
+    directory: "/benchmarks/load/docker"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "docker-compose"
+    directory: "/deploy"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "docker-compose"
+    directory: "/benchmarks/load/docker"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+
   - package-ecosystem: "npm"
     directory: "/benchmarks/load/configs/apollo-server"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
+
   - package-ecosystem: "npm"
     directory: "/benchmarks/load/configs/postgraphile"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: "npm"
+    directory: "/src/Autheris.Api/Assets/swagger-ui"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10

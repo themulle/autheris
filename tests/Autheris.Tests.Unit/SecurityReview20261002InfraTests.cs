@@ -165,7 +165,7 @@ public sealed class SecurityReview20261002InfraTests : IDisposable
         multiplexer.IsConnected.Returns(true);
         multiplexer.GetDatabase(Arg.Any<int>(), Arg.Any<object?>()).Returns(db);
 
-        var epochService = new EpochValidationService(Options.Create(new GatewayOptions()), Substitute.For<IEventBus>(), multiplexer);
+        var epochService = new EpochValidationService(Options.Create(new GatewayOptions()), Substitute.For<IEventBus>(), multiplexer: multiplexer);
 
         (await epochService.GetCurrentEpochAsync(table)).ShouldBe(5);
 

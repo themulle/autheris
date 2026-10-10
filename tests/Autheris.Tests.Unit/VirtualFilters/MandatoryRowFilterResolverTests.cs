@@ -42,7 +42,7 @@ public sealed class MandatoryRowFilterResolverTests
         KeyColumns = keys.Select(k => "client." + k).ToList()
     };
 
-    internal static AccessProfile Profile(UncoveredPolicy uncovered, params FilterBinding[] bindings) => new()
+    internal static VirtualFilterAccessProfile Profile(UncoveredPolicy uncovered, params FilterBinding[] bindings) => new()
     {
         TenantId = Tenant,
         Name = "david",
@@ -62,7 +62,7 @@ public sealed class MandatoryRowFilterResolverTests
     private static MandatoryRowFilterResolver Resolver(VirtualFilterSnapshot snapshot) =>
         new(new FixedSnapshot(snapshot), new PlaceholderPredicates());
 
-    private static VirtualFilterSnapshot Snapshot(IEnumerable<VirtualFilter> filters, params AccessProfile[] profiles) => new(1, filters.ToList(), profiles);
+    private static VirtualFilterSnapshot Snapshot(IEnumerable<VirtualFilter> filters, params VirtualFilterAccessProfile[] profiles) => new(1, filters.ToList(), profiles);
 
     private static MandatoryFilterQuery Query(TableMetadata table, Sid? user = null, IReadOnlySet<Sid>? groups = null, IReadOnlySet<string>? roles = null,
         FilterObjectKinds kind = FilterObjectKinds.Relation, TenantId? tenant = null) =>

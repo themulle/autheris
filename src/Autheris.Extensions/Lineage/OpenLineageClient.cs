@@ -60,6 +60,12 @@ public sealed class OpenLineageClient : IOpenLineageClient
         // Build dataset list from active LineageGraphStore
         foreach (var node in _graphStore.GetAllNodes())
         {
+            // SEC SG-30: Filter nodes by tenant namespace if the node ID contains tenant scoping
+            if (node.Id.Contains(':') && !node.Id.StartsWith($"{tenant.Value}:", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             var dataset = new OpenLineageDataset(rootNamespace, node.Id, new Dictionary<string, object>
             {
                 ["type"] = node.Type.ToString(),

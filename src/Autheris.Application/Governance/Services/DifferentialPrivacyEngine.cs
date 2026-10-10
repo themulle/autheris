@@ -1,52 +1,104 @@
 namespace Autheris.Application.Governance.Services;
 
 using System;
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Interfaces;
+using Autheris.Application.State;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-public sealed class DifferentialPrivacyEngine(ILogger<DifferentialPrivacyEngine>? logger = null) : IDifferentialPrivacyEngine
+/// <summary>
+/// AR-04: High-performance Differential Privacy engine with atomic cluster-wide epsilon budget tracking.
+/// Uses atomic Redis Lua / InMemory Check-and-Consume counters with ceiling micro-units to prevent TOCTOU and drift.
+/// Fails closed when cluster budget store is unavailable.
+/// </summary>
+public sealed class DifferentialPrivacyEngine : IDifferentialPrivacyEngine
 {
     private const double DefaultDailyEpsilonBudget = 10.0;
-    private readonly ConcurrentDictionary<string, ClientBudgetState> _budgets = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ILogger<DifferentialPrivacyEngine> _logger = logger ?? NullLogger<DifferentialPrivacyEngine>.Instance;
+    private const long MicroUnits = 1_000_000L;
+    private static readonly TimeSpan BudgetTtl = TimeSpan.FromHours(48);
 
-    public ValueTask<PrivacyBudget> GetBudgetAsync(string clientId, CancellationToken cancellationToken = default)
+    private readonly IDistributedClusterStateProvider _clusterState;
+    private readonly IAuditLogRepository _auditLog;
+    private readonly TimeProvider _timeProvider;
+    private readonly ILogger<DifferentialPrivacyEngine> _logger;
+
+    public DifferentialPrivacyEngine(
+        IDistributedClusterStateProvider? clusterState = null,
+        TimeProvider? timeProvider = null,
+        ILogger<DifferentialPrivacyEngine>? logger = null)
+        : this(Autheris.Application.Audit.NullAuditLogRepository.Instance, clusterState, timeProvider, logger)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(clientId);
-        var state = GetOrCreateState(clientId);
-        lock (state)
-        {
-            state.CheckAndApplyDailyRollOver();
-            return ValueTask.FromResult(new PrivacyBudget(
-                ClientId: clientId,
-                TotalDailyEpsilonBudget: state.TotalDailyBudget,
-                ConsumedEpsilon: state.ConsumedEpsilon,
-                LastResetUtc: state.LastResetUtc
-            ));
-        }
     }
 
-    public ValueTask ResetBudgetAsync(string clientId, CancellationToken cancellationToken = default)
+    public DifferentialPrivacyEngine(
+        IDistributedClusterStateProvider clusterState,
+        IAuditLogRepository auditLog)
+        : this(auditLog, clusterState)
+    {
+    }
+
+    public DifferentialPrivacyEngine(
+        IAuditLogRepository auditLog,
+        IDistributedClusterStateProvider? clusterState = null,
+        TimeProvider? timeProvider = null,
+        ILogger<DifferentialPrivacyEngine>? logger = null)
+    {
+        _clusterState = clusterState ?? new InMemoryClusterStateProvider();
+        _auditLog = auditLog ?? throw new ArgumentNullException(nameof(auditLog));
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _logger = logger ?? NullLogger<DifferentialPrivacyEngine>.Instance;
+    }
+
+    public async ValueTask<PrivacyBudget> GetBudgetAsync(string clientId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clientId);
-        var state = GetOrCreateState(clientId);
-        lock (state)
+        var key = GetBudgetKey(clientId);
+        long consumedMicro = 0;
+        try
         {
-            state.ConsumedEpsilon = 0.0;
-            state.LastResetUtc = DateTimeOffset.UtcNow;
+            var stored = await _clusterState.GetAsync<long>(key, cancellationToken).ConfigureAwait(false);
+            consumedMicro = stored;
         }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read DP budget from cluster store for client '{ClientId}'.", clientId);
+        }
+
+        var consumed = consumedMicro / (double)MicroUnits;
+        return new PrivacyBudget(
+            ClientId: clientId,
+            TotalDailyEpsilonBudget: DefaultDailyEpsilonBudget,
+            ConsumedEpsilon: consumed,
+            LastResetUtc: _timeProvider.GetUtcNow()
+        );
+    }
+
+    public async ValueTask ResetBudgetAsync(string clientId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(clientId);
+        var key = GetBudgetKey(clientId);
+        await _clusterState.RemoveAsync(key, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation("Epsilon privacy budget manually reset for client '{ClientId}'.", clientId);
-        return ValueTask.CompletedTask;
+
+        if (_auditLog != null)
+        {
+            await RecordAuditAsync("DP_BUDGET_RESET", "ALLOW", clientId, new
+            {
+                action = "ResetBudget",
+                resetAt = _timeProvider.GetUtcNow()
+            }, cancellationToken).ConfigureAwait(false);
+        }
     }
 
-    public ValueTask<DifferentialPrivacyPerturbationResult> PerturbAsync(
+    public async ValueTask<DifferentialPrivacyPerturbationResult> PerturbAsync(
         DifferentialPrivacyPerturbationRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -63,96 +115,92 @@ public sealed class DifferentialPrivacyEngine(ILogger<DifferentialPrivacyEngine>
             throw new ArgumentOutOfRangeException(nameof(request), "Sensitivity (Delta f) must be at least 0.01 to ensure effective differential privacy noise.");
         }
 
-        var state = GetOrCreateState(request.ClientId);
-
         // 1. Check small-cohort suppression (k-Anonymity Guardrail)
         if (request.CohortCount.HasValue && request.CohortCount.Value < request.MinimumCohortSize)
         {
-            lock (state)
-            {
-                state.CheckAndApplyDailyRollOver();
-                return ValueTask.FromResult(new DifferentialPrivacyPerturbationResult(
-                    ClientId: request.ClientId,
-                    OriginalValue: request.Value,
-                    PerturbedValue: null,
-                    Noise: 0.0,
-                    IsSuppressed: true,
-                    SuppressionReason: $"Cohort size ({request.CohortCount.Value}) is below k-anonymity threshold ({request.MinimumCohortSize}).",
-                    ConsumedEpsilon: state.ConsumedEpsilon,
-                    RemainingEpsilon: Math.Max(0.0, state.TotalDailyBudget - state.ConsumedEpsilon),
-                    Timestamp: DateTimeOffset.UtcNow
-                ));
-            }
+            var currentBudget = await GetBudgetAsync(request.ClientId, cancellationToken).ConfigureAwait(false);
+            return new DifferentialPrivacyPerturbationResult(
+                ClientId: request.ClientId,
+                OriginalValue: request.Value,
+                PerturbedValue: null,
+                Noise: 0.0,
+                IsSuppressed: true,
+                SuppressionReason: $"Cohort size ({request.CohortCount.Value}) is below k-anonymity threshold ({request.MinimumCohortSize}).",
+                ConsumedEpsilon: currentBudget.ConsumedEpsilon,
+                RemainingEpsilon: currentBudget.RemainingEpsilon,
+                Timestamp: _timeProvider.GetUtcNow()
+            );
         }
 
-        // 2. Dynamic Epsilon Budget Verification & Deduction
-        double consumed;
-        double remaining;
-        lock (state)
-        {
-            state.CheckAndApplyDailyRollOver();
-            var projected = state.ConsumedEpsilon + request.Epsilon;
-            if (projected > state.TotalDailyBudget)
-            {
-                _logger.LogWarning(
-                    "Client '{ClientId}' exhausted daily privacy budget. Attempted to consume {Attempted:F2} with {Consumed:F2}/{Total:F2} already consumed.",
-                    request.ClientId, request.Epsilon, state.ConsumedEpsilon, state.TotalDailyBudget);
+        // 2. Dynamic Epsilon Budget Verification & Deduction via Atomic Cluster Counter
+        var costMicro = (long)Math.Ceiling(request.Epsilon * MicroUnits);
+        var limitMicro = (long)Math.Round(DefaultDailyEpsilonBudget * MicroUnits);
+        var key = GetBudgetKey(request.ClientId);
 
-                throw new PrivacyBudgetExhaustedException(request.ClientId, projected, state.TotalDailyBudget);
+        var (outcome, consumedAfterMicro) = await _clusterState.TryConsumeBudgetAsync(
+            key, costMicro, limitMicro, BudgetTtl, cancellationToken).ConfigureAwait(false);
+
+        if (outcome == BudgetConsumeOutcome.Exhausted)
+        {
+            var consumed = consumedAfterMicro / (double)MicroUnits;
+            var attemptedTotal = (consumedAfterMicro + costMicro) / (double)MicroUnits;
+            _logger.LogWarning(
+                "Client '{ClientId}' exhausted daily privacy budget. Attempted to consume {Attempted:F2} with {Consumed:F2}/{Total:F2} already consumed.",
+                request.ClientId, request.Epsilon, consumed, DefaultDailyEpsilonBudget);
+
+            if (_auditLog != null)
+            {
+                await RecordAuditAsync("DP_BUDGET_EXHAUSTED", "DENY", request.ClientId, new
+                {
+                    attempted = request.Epsilon,
+                    consumed,
+                    limit = DefaultDailyEpsilonBudget
+                }, cancellationToken).ConfigureAwait(false);
             }
 
-            state.ConsumedEpsilon = projected;
-            consumed = state.ConsumedEpsilon;
-            remaining = Math.Max(0.0, state.TotalDailyBudget - state.ConsumedEpsilon);
+            throw new PrivacyBudgetExhaustedException(request.ClientId, attemptedTotal, DefaultDailyEpsilonBudget);
+        }
+
+        if (outcome == BudgetConsumeOutcome.StoreUnavailable)
+        {
+            _logger.LogError("Differential privacy cluster budget store is unavailable for client '{ClientId}'. Fail-closed.", request.ClientId);
+
+            if (_auditLog != null)
+            {
+                await RecordAuditAsync("DP_BUDGET_STORE_UNAVAILABLE", "DENY", request.ClientId, new
+                {
+                    attempted = request.Epsilon,
+                    error = "Cluster budget store unavailable"
+                }, cancellationToken).ConfigureAwait(false);
+            }
+
+            throw new InvalidOperationException($"Differential privacy budget store is unavailable for client '{request.ClientId}'. Failing closed.");
         }
 
         // 3. Cryptographically secure Laplace Noise Perturbation (Inverse-CDF method)
-        // b = Delta f / epsilon
         var scale = request.Sensitivity / request.Epsilon;
         var noise = GenerateLaplaceNoise(scale);
         var perturbedValue = Math.Round(request.Value + noise, 4);
+        var consumedEpsilon = consumedAfterMicro / (double)MicroUnits;
+        var remainingEpsilon = Math.Max(0.0, DefaultDailyEpsilonBudget - consumedEpsilon);
 
-        return ValueTask.FromResult(new DifferentialPrivacyPerturbationResult(
+        return new DifferentialPrivacyPerturbationResult(
             ClientId: request.ClientId,
             OriginalValue: request.Value,
             PerturbedValue: perturbedValue,
             Noise: Math.Round(noise, 4),
             IsSuppressed: false,
             SuppressionReason: null,
-            ConsumedEpsilon: consumed,
-            RemainingEpsilon: remaining,
-            Timestamp: DateTimeOffset.UtcNow
-        ));
+            ConsumedEpsilon: consumedEpsilon,
+            RemainingEpsilon: remainingEpsilon,
+            Timestamp: _timeProvider.GetUtcNow()
+        );
     }
 
-    private const int MaxTrackedClients = 10_000;
-
-    private ClientBudgetState GetOrCreateState(string clientId)
+    private string GetBudgetKey(string clientId)
     {
-        if (_budgets.TryGetValue(clientId, out var existing))
-        {
-            return existing;
-        }
-
-        if (_budgets.Count >= MaxTrackedClients)
-        {
-            // Evict stale clients older than 48 hours
-            var cutoff = DateTimeOffset.UtcNow.AddHours(-48);
-            foreach (var (key, state) in _budgets)
-            {
-                if (state.LastResetUtc < cutoff)
-                {
-                    _budgets.TryRemove(key, out _);
-                }
-            }
-
-            if (_budgets.Count >= MaxTrackedClients)
-            {
-                throw new InvalidOperationException($"Differential privacy budget tracker exceeded maximum capacity of {MaxTrackedClients} clients.");
-            }
-        }
-
-        return _budgets.GetOrAdd(clientId, id => new ClientBudgetState(id, DefaultDailyEpsilonBudget));
+        var dateUtc = _timeProvider.GetUtcNow().ToString("yyyyMMdd");
+        return $"dp:budget:{clientId.Trim()}:{dateUtc}";
     }
 
     private static double GenerateLaplaceNoise(double scale)
@@ -171,21 +219,24 @@ public sealed class DifferentialPrivacyEngine(ILogger<DifferentialPrivacyEngine>
         return -scale * Math.Sign(u) * Math.Log(1.0 - (2.0 * Math.Abs(u)));
     }
 
-    private sealed class ClientBudgetState(string clientId, double totalDailyBudget)
+    private async ValueTask RecordAuditAsync(string eventType, string decision, string clientId, object details, CancellationToken ct)
     {
-        public string ClientId { get; } = clientId;
-        public double TotalDailyBudget { get; set; } = totalDailyBudget;
-        public double ConsumedEpsilon { get; set; }
-        public DateTimeOffset LastResetUtc { get; set; } = DateTimeOffset.UtcNow;
-
-        public void CheckAndApplyDailyRollOver()
+        try
         {
-            var now = DateTimeOffset.UtcNow;
-            if (now.Date > LastResetUtc.Date)
+            await _auditLog!.RecordAuditEventAsync(new AuditLogEntry
             {
-                ConsumedEpsilon = 0.0;
-                LastResetUtc = now;
-            }
+                TenantId = TenantId.LegacySingleTenant,
+                EventType = eventType,
+                ActorSid = new Sid(clientId),
+                TargetTable = "DifferentialPrivacy",
+                Decision = decision,
+                TraceId = string.Empty,
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(details)
+            }, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to record audit event {EventType} for DP", eventType);
         }
     }
 }

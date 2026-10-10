@@ -1,24 +1,51 @@
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using StackExchange.Redis;
 
 namespace Autheris.Infrastructure.Cache;
 
 public sealed class EpochValidationService : IEpochValidationService
 {
+    private sealed record LocalEpochEntry(long Epoch, DateTimeOffset CachedAt);
+
     private readonly ConcurrentDictionary<string, long> _epochs = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastEpochRefresh = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, LocalEpochEntry> _microCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly EpochValidationOptions _options;
     private readonly IEventBus _eventBus;
     private readonly string _invalidationChannel;
-    private readonly StackExchange.Redis.IConnectionMultiplexer? _multiplexer;
+    private readonly IConnectionMultiplexer? _multiplexer;
     private readonly string _redisPrefix;
     private readonly ConcurrentDictionary<string, long> _highestSeenRedisEpoch = new(StringComparer.OrdinalIgnoreCase);
     private readonly ILogger<EpochValidationService>? _logger;
-    private readonly IServiceProvider? _serviceProvider;
+    private readonly ITableSensitivityLookup _sensitivityLookup;
+
+    private const string RollbackLuaScript = @"
+local current = redis.call('GET', KEYS[1])
+local currentNum = tonumber(current)
+local minRequired = tonumber(ARGV[1])
+if not currentNum then
+    local newEpoch = redis.call('INCR', KEYS[1])
+    if newEpoch < minRequired then
+        redis.call('SET', KEYS[1], minRequired)
+        return minRequired
+    end
+    return newEpoch
+elseif currentNum < minRequired then
+    redis.call('SET', KEYS[1], minRequired)
+    return minRequired
+else
+    return currentNum
+end";
 
     // SEC H-01: Epoch values read from Redis/Garnet are not trusted blindly. Each node remembers the highest
     // epoch it has observed per table; a lower value (Redis restart without persistence, or a tampered key that
@@ -28,18 +55,16 @@ public sealed class EpochValidationService : IEpochValidationService
     public EpochValidationService(
         IOptions<GatewayOptions>? options = null,
         IEventBus? eventBus = null,
-        StackExchange.Redis.IConnectionMultiplexer? multiplexer = null,
-        ILogger<EpochValidationService>? logger = null,
-        IServiceProvider? serviceProvider = null)
+        ITableSensitivityLookup? sensitivityLookup = null,
+        IConnectionMultiplexer? multiplexer = null,
+        ILogger<EpochValidationService>? logger = null)
     {
         _logger = logger;
         _options = options?.Value?.Caching?.EpochValidation ?? new EpochValidationOptions();
         _invalidationChannel = options?.Value?.Caching?.Redis?.InvalidationChannel ?? "consent:invalidations";
         _eventBus = eventBus ?? new Messaging.InProcessChannelEventBus();
+        _sensitivityLookup = sensitivityLookup ?? new Application.Services.TableMetadataSensitivityLookup(() => null);
         _multiplexer = multiplexer;
-        // The governance repository depends on this service; it is therefore resolved lazily from the provider
-        // (taking it in the constructor made both singletons wait for each other and the application never started).
-        _serviceProvider = serviceProvider;
 
         if (_multiplexer != null)
         {
@@ -48,6 +73,7 @@ public sealed class EpochValidationService : IEpochValidationService
                 _logger?.LogInformation("Redis connection restored. Evicting local L1 epoch cache to synchronize with cluster (POL-9).");
                 _epochs.Clear();
                 _lastEpochRefresh.Clear();
+                _microCache.Clear();
             };
         }
 
@@ -61,6 +87,7 @@ public sealed class EpochValidationService : IEpochValidationService
                 var key = message.ToLowerInvariant();
                 _epochs.AddOrUpdate(key, 2, (_, current) => current + 1);
                 _lastEpochRefresh[key] = DateTimeOffset.UtcNow;
+                _microCache.TryRemove(key, out _);
             }
             return Task.CompletedTask;
         });
@@ -91,17 +118,15 @@ public sealed class EpochValidationService : IEpochValidationService
                 {
                     // Missing or rolled-back epoch: never fall back below anything this node has already seen.
                     var restored = highestSeen > 0 ? highestSeen + 1 : 1;
-                    if (highestSeen > 0)
-                    {
-                        _logger?.LogWarning("Policy epoch rollback detected for {Table} (redis={RedisEpoch}, highestSeen={HighestSeen}); forcing epoch {Restored}.", key, rEpoch, highestSeen, restored);
-                        await db.StringSetAsync(redisKey, restored).ConfigureAwait(false);
-                        rEpoch = restored;
-                    }
-                    else
-                    {
-                        // Atomic INCR creates a missing key with 1 and never overwrites a concurrently created epoch.
-                        rEpoch = await db.StringIncrementAsync(redisKey).ConfigureAwait(false);
-                    }
+                    _logger?.LogWarning("Policy epoch rollback detected for {Table} (redis={RedisEpoch}, highestSeen={HighestSeen}); forcing epoch {Restored}.", key, rEpoch, highestSeen, restored);
+                    var evalResult = await db.ScriptEvaluateAsync(
+                        RollbackLuaScript,
+                        [(RedisKey)redisKey],
+                        [(RedisValue)restored.ToString()]).ConfigureAwait(false);
+
+                    rEpoch = evalResult is not null && !evalResult.IsNull && long.TryParse(evalResult.ToString(), out var scriptVal)
+                        ? scriptVal
+                        : restored;
                 }
 
                 _highestSeenRedisEpoch.AddOrUpdate(key, rEpoch, (_, current) => Math.Max(current, rEpoch));
@@ -125,59 +150,268 @@ public sealed class EpochValidationService : IEpochValidationService
         IEnumerable<TableIdentifier> tables,
         CancellationToken ct = default)
     {
-        var result = new Dictionary<TableIdentifier, long>();
-        foreach (var t in tables)
+        var tableList = tables.ToList();
+        var result = new Dictionary<TableIdentifier, long>(tableList.Count);
+
+        if (_multiplexer != null && _multiplexer.IsConnected && _options.PipelinedMGetEnabled && tableList.Count > 1)
+        {
+            var checks = tableList.Select(t => new EpochCheck(t, 0, false)).ToList();
+            await AreEpochsValidAsync(checks, ct).ConfigureAwait(false);
+            foreach (var t in tableList)
+            {
+                var key = t.ToString().ToLowerInvariant();
+                result[t] = _epochs.TryGetValue(key, out var ep) ? ep : 1;
+            }
+            return result;
+        }
+
+        foreach (var t in tableList)
         {
             result[t] = await GetCurrentEpochAsync(t, ct).ConfigureAwait(false);
         }
         return result;
     }
 
-    public async Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default)
+    public async ValueTask<IReadOnlyDictionary<TableIdentifier, bool>> AreEpochsValidAsync(
+        IReadOnlyList<EpochCheck> checks,
+        CancellationToken ct = default)
     {
-        var key = table.ToString().ToLowerInvariant();
+        if (checks == null || checks.Count == 0)
+        {
+            return new Dictionary<TableIdentifier, bool>();
+        }
 
-        // Check degraded / multi-node partition state:
+        var results = new Dictionary<TableIdentifier, bool>(checks.Count);
         bool isDegraded = _multiplexer != null && !_multiplexer.IsConnected;
+
         if (isDegraded)
         {
-            // SEC-EPOCH-01: In degraded state without Redis cluster coordination,
-            // fail-closed on sensitive tables to prevent stale consent bypasses.
-            if (_options.FailClosedOnSensitiveTables)
+            foreach (var check in checks)
             {
-                var repo = _serviceProvider?.GetService(typeof(ITableMetadataRepository)) as ITableMetadataRepository;
-                bool isSensitive = true; // Fail closed if repository is unavailable or metadata lookup fails
-                if (repo != null)
+                var key = check.Table.ToString().ToLowerInvariant();
+                if (_options.FailClosedOnSensitiveTables)
                 {
-                    try
+                    bool isSensitive = check.IsHighlySensitive || await _sensitivityLookup.IsSensitiveAsync(check.Table, ct).ConfigureAwait(false);
+                    if (isSensitive)
                     {
-                        var metadata = await repo.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
-                        if (metadata?.Table != null)
-                        {
-                            isSensitive = metadata.Table.IsHighlySensitive
-                                || (metadata.Columns != null && metadata.Columns.Any(c => c.IsSensitive))
-                                || (metadata.ColumnMaskingRules != null && metadata.ColumnMaskingRules.Count > 0);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger?.LogWarning(ex, "Failed to resolve table metadata for {Table} in degraded epoch mode; treating as highly sensitive (fail-closed).", table);
-                        isSensitive = true;
+                        results[check.Table] = false;
+                        continue;
                     }
                 }
 
-                if (isSensitive)
+                if (_lastEpochRefresh.TryGetValue(key, out var lastRefresh))
+                {
+                    if (DateTimeOffset.UtcNow - lastRefresh > TimeSpan.FromSeconds(_options.DegradedMaxStalenessSeconds))
+                    {
+                        results[check.Table] = false;
+                        continue;
+                    }
+                }
+
+                var (current, _) = await GetCurrentEpochCoreAsync(check.Table).ConfigureAwait(false);
+                results[check.Table] = current == check.CachedEpoch;
+            }
+
+            return results;
+        }
+
+        if (_multiplexer == null)
+        {
+            foreach (var check in checks)
+            {
+                var (current, _) = await GetCurrentEpochCoreAsync(check.Table).ConfigureAwait(false);
+                results[check.Table] = current == check.CachedEpoch;
+            }
+
+            return results;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var pendingRedisChecks = new List<EpochCheck>();
+        var budgetMs = _options.LocalStalenessBudgetMilliseconds;
+
+        foreach (var check in checks)
+        {
+            var key = check.Table.ToString().ToLowerInvariant();
+
+            // Sensitive tables NEVER use micro-cache (zero-tolerance revocation)
+            if (!check.IsHighlySensitive && budgetMs > 0 && _microCache.TryGetValue(key, out var entry))
+            {
+                if ((now - entry.CachedAt).TotalMilliseconds <= budgetMs)
+                {
+                    _highestSeenRedisEpoch.TryGetValue(key, out var highestSeen);
+                    if (entry.Epoch >= highestSeen)
+                    {
+                        results[check.Table] = entry.Epoch == check.CachedEpoch;
+                        continue;
+                    }
+                }
+            }
+
+            pendingRedisChecks.Add(check);
+        }
+
+        if (pendingRedisChecks.Count == 0)
+        {
+            return results;
+        }
+
+        try
+        {
+            var db = _multiplexer.GetDatabase();
+
+            if (_options.PipelinedMGetEnabled)
+            {
+                var redisKeys = pendingRedisChecks
+                    .Select(c => (RedisKey)$"{_redisPrefix}epoch:{c.Table.ToString().ToLowerInvariant()}")
+                    .ToArray();
+
+                var values = await db.StringGetAsync(redisKeys).ConfigureAwait(false);
+
+                for (int i = 0; i < pendingRedisChecks.Count; i++)
+                {
+                    var check = pendingRedisChecks[i];
+                    var key = check.Table.ToString().ToLowerInvariant();
+                    var redisKey = redisKeys[i];
+                    var val = values[i];
+
+                    long authoritativeEpoch;
+                    _highestSeenRedisEpoch.TryGetValue(key, out var highestSeen);
+
+                    long parsed = val.HasValue && long.TryParse(val.ToString(), out var p) ? p : 0;
+                    if (parsed <= 0 || parsed < highestSeen)
+                    {
+                        var minRequired = highestSeen > 0 ? highestSeen + 1 : 1;
+                        var evalResult = await db.ScriptEvaluateAsync(
+                            RollbackLuaScript,
+                            [redisKey],
+                            [(RedisValue)minRequired.ToString()]).ConfigureAwait(false);
+
+                        if (evalResult is not null && !evalResult.IsNull && long.TryParse(evalResult.ToString(), out var scriptVal))
+                        {
+                            authoritativeEpoch = scriptVal;
+                        }
+                        else
+                        {
+                            authoritativeEpoch = minRequired;
+                        }
+
+                        _highestSeenRedisEpoch.AddOrUpdate(key, authoritativeEpoch, (_, old) => Math.Max(old, authoritativeEpoch));
+                    }
+                    else
+                    {
+                        authoritativeEpoch = parsed;
+                        _highestSeenRedisEpoch.AddOrUpdate(key, authoritativeEpoch, (_, old) => Math.Max(old, authoritativeEpoch));
+                    }
+
+                    _epochs[key] = authoritativeEpoch;
+                    _lastEpochRefresh[key] = DateTimeOffset.UtcNow;
+
+                    if (budgetMs > 0 && _microCache.Count < _options.MaxLocalEpochEntries)
+                    {
+                        _microCache[key] = new LocalEpochEntry(authoritativeEpoch, DateTimeOffset.UtcNow);
+                    }
+
+                    results[check.Table] = authoritativeEpoch == check.CachedEpoch;
+                }
+            }
+            else
+            {
+                foreach (var check in pendingRedisChecks)
+                {
+                    var key = check.Table.ToString().ToLowerInvariant();
+                    var redisKey = (RedisKey)$"{_redisPrefix}epoch:{key}";
+                    var val = await db.StringGetAsync(redisKey).ConfigureAwait(false);
+
+                    long authoritativeEpoch;
+                    _highestSeenRedisEpoch.TryGetValue(key, out var highestSeen);
+
+                    long parsed = val.HasValue && long.TryParse(val.ToString(), out var p) ? p : 0;
+                    if (parsed <= 0 || parsed < highestSeen)
+                    {
+                        var minRequired = highestSeen > 0 ? highestSeen + 1 : 1;
+                        var evalResult = await db.ScriptEvaluateAsync(
+                            RollbackLuaScript,
+                            [redisKey],
+                            [(RedisValue)minRequired.ToString()]).ConfigureAwait(false);
+
+                        if (evalResult is not null && !evalResult.IsNull && long.TryParse(evalResult.ToString(), out var scriptVal))
+                        {
+                            authoritativeEpoch = scriptVal;
+                        }
+                        else
+                        {
+                            authoritativeEpoch = minRequired;
+                        }
+
+                        _highestSeenRedisEpoch.AddOrUpdate(key, authoritativeEpoch, (_, old) => Math.Max(old, authoritativeEpoch));
+                    }
+                    else
+                    {
+                        authoritativeEpoch = parsed;
+                        _highestSeenRedisEpoch.AddOrUpdate(key, authoritativeEpoch, (_, old) => Math.Max(old, authoritativeEpoch));
+                    }
+
+                    _epochs[key] = authoritativeEpoch;
+                    _lastEpochRefresh[key] = DateTimeOffset.UtcNow;
+
+                    if (budgetMs > 0 && _microCache.Count < _options.MaxLocalEpochEntries)
+                    {
+                        _microCache[key] = new LocalEpochEntry(authoritativeEpoch, DateTimeOffset.UtcNow);
+                    }
+
+                    results[check.Table] = authoritativeEpoch == check.CachedEpoch;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to read policy epochs from Redis; failing closed for pending tables.");
+            foreach (var check in pendingRedisChecks)
+            {
+                results[check.Table] = false;
+            }
+        }
+
+        return results;
+    }
+
+    public async Task<bool> IsEpochValidAsync(TableIdentifier table, long cachedEpoch, CancellationToken ct = default)
+    {
+        bool isDegraded = _multiplexer != null && !_multiplexer.IsConnected;
+        var key = table.ToString().ToLowerInvariant();
+
+        if (isDegraded)
+        {
+            if (_options.FailClosedOnSensitiveTables)
+            {
+                if (await _sensitivityLookup.IsSensitiveAsync(table, ct).ConfigureAwait(false))
                 {
                     return false;
                 }
             }
 
-            // SEC-EPOCH-02: Enforce DegradedMaxStalenessSeconds
             if (_lastEpochRefresh.TryGetValue(key, out var lastRefresh))
             {
                 if (DateTimeOffset.UtcNow - lastRefresh > TimeSpan.FromSeconds(_options.DegradedMaxStalenessSeconds))
                 {
-                    return false; // Stale epoch beyond degraded threshold -> fail closed
+                    return false;
+                }
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var budgetMs = _options.LocalStalenessBudgetMilliseconds;
+        bool isSensitive = await _sensitivityLookup.IsSensitiveAsync(table, ct).ConfigureAwait(false);
+
+        if (!isSensitive && budgetMs > 0 && _microCache.TryGetValue(key, out var entry))
+        {
+            if ((now - entry.CachedAt).TotalMilliseconds <= budgetMs)
+            {
+                _highestSeenRedisEpoch.TryGetValue(key, out var highestSeen);
+                if (entry.Epoch >= highestSeen)
+                {
+                    return entry.Epoch == cachedEpoch;
                 }
             }
         }
@@ -189,12 +423,18 @@ public sealed class EpochValidationService : IEpochValidationService
             return false;
         }
 
+        if (authoritative && budgetMs > 0 && _microCache.Count < _options.MaxLocalEpochEntries)
+        {
+            _microCache[key] = new LocalEpochEntry(current, DateTimeOffset.UtcNow);
+        }
+
         return current == cachedEpoch;
     }
 
     public async Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
         var key = table.ToString().ToLowerInvariant();
+        _microCache.TryRemove(key, out _);
         _epochs.AddOrUpdate(key, 2, (_, current) => current + 1);
         _lastEpochRefresh[key] = DateTimeOffset.UtcNow;
 

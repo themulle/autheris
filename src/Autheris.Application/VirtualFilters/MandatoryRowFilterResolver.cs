@@ -203,11 +203,11 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             .ToList();
 
         var filtersByName = snapshot.Filters.Where(f => f.TenantId == query.Tenant).ToDictionary(f => f.Name, StringComparer.Ordinal);
-        var applying = new List<(VirtualFilter Filter, FilterBinding Binding, AccessProfile Profile)>();
+        var applying = new List<(VirtualFilter Filter, FilterBinding Binding, VirtualFilterAccessProfile Profile)>();
         string? currentFilter = null;
         try
         {
-            var explained = new List<(AccessProfile Profile, List<(VirtualFilter? Filter, FilterBinding Binding, string? Reason, IReadOnlyList<string> Missing)> Bindings)>();
+            var explained = new List<(VirtualFilterAccessProfile Profile, List<(VirtualFilter? Filter, FilterBinding Binding, string? Reason, IReadOnlyList<string> Missing)> Bindings)>();
             MandatoryFilterOutcome? uncoveredDeny = null;
             foreach (var profile in profiles)
             {
@@ -345,7 +345,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
     }
 
     /// <summary>Whether the binding applies; otherwise the reason and the missing columns.</summary>
-    private (bool Applies, string? Reason, IReadOnlyList<string> Missing) Check(VirtualFilter filter, FilterBinding binding, AccessProfile profile, MandatoryFilterQuery query)
+    private (bool Applies, string? Reason, IReadOnlyList<string> Missing) Check(VirtualFilter filter, FilterBinding binding, VirtualFilterAccessProfile profile, MandatoryFilterQuery query)
     {
         if (filter.Status != FilterApprovalStatus.Active)
         {
@@ -358,20 +358,28 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             return (false, $"object kind {query.ObjectKind} not bound", []);
         }
 
-        if (!string.Equals(table.Domain, filter.Source, StringComparison.OrdinalIgnoreCase))
+        bool isCrossSource = !string.Equals(table.Domain, filter.Source, StringComparison.OrdinalIgnoreCase);
+        if (isCrossSource)
         {
-            return (false, $"object is not in the filter's data source '{filter.Source}'", []);
+            if (query.Metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative ||
+                binding.TargetPattern == null ||
+                !binding.MatchesTarget(table))
+            {
+                return (false, $"object is not in the filter's data source '{filter.Source}'", []);
+            }
         }
-
-        var pattern = Pattern(binding.TargetPattern ?? profile.Scope);
-        if (!pattern.MatchesObject(table))
+        else
         {
-            return (false, "pattern does not match the object", []);
-        }
+            var pattern = Pattern(binding.TargetPattern ?? profile.Scope);
+            if (!pattern.MatchesObject(table))
+            {
+                return (false, "pattern does not match the object", []);
+            }
 
-        if (pattern.HasColumnSegment && !query.Metadata.Columns.Any(c => pattern.MatchesColumn(c.ColumnName)))
-        {
-            return (false, "pattern matches no column of the object", []);
+            if (pattern.HasColumnSegment && !query.Metadata.Columns.Any(c => pattern.MatchesColumn(c.ColumnName)))
+            {
+                return (false, "pattern matches no column of the object", []);
+            }
         }
 
         var missing = VirtualFilterColumns.RequiredTargetColumns(filter, binding).Where(c => !query.Metadata.HasColumn(c)).ToList();

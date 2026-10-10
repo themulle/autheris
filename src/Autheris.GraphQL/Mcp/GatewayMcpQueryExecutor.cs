@@ -38,6 +38,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     private readonly IMcpProvenanceEnricher? _provenanceEnricher;
     private readonly IPersistedToolValidator? _persistedToolValidator;
     private readonly IMcpDatasetCatalog? _datasetCatalog;
+    private readonly IMcpToolExecutionHandler? _toolExecutionHandler;
     private readonly ILogger<GatewayMcpQueryExecutor> _logger;
 
     public GatewayMcpQueryExecutor(
@@ -47,7 +48,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         IPreFlightQuerySimulator? querySimulator = null,
         IMcpProvenanceEnricher? provenanceEnricher = null,
         IPersistedToolValidator? persistedToolValidator = null,
-        IMcpDatasetCatalog? datasetCatalog = null)
+        IMcpDatasetCatalog? datasetCatalog = null,
+        IMcpToolExecutionHandler? toolExecutionHandler = null)
     {
         _executorProvider = executorProvider ?? throw new ArgumentNullException(nameof(executorProvider));
         _gatewayExecutionService = gatewayExecutionService ?? throw new ArgumentNullException(nameof(gatewayExecutionService));
@@ -56,6 +58,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         _provenanceEnricher = provenanceEnricher;
         _persistedToolValidator = persistedToolValidator;
         _datasetCatalog = datasetCatalog;
+        _toolExecutionHandler = toolExecutionHandler;
     }
 
     public async Task<string> ExecuteOperationAsync(
@@ -118,6 +121,12 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
             // SEC M-17: Ohne Simulator keine erfundene Freigabe ("isAllowed":true) zurückgeben.
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "Query simulator is not available.");
+        }
+
+        // Hybrid tools: SQL, dataset REST, catalog discovery, permissions, datasources, lineage, dynamic API
+        if (_toolExecutionHandler != null && _toolExecutionHandler.CanHandle(tool.Name))
+        {
+            return await _toolExecutionHandler.ExecuteToolAsync(tool, argumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
         }
 
         // Dataset tools: catalog discovery and governed sample rows

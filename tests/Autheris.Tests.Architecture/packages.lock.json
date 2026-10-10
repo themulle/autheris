@@ -1461,6 +1461,11 @@
         "resolved": "8.0.1",
         "contentHash": "BVYuec3jV23EMRDeR7Dr1/qhx7369dZzJ9IWy2xylvb4YfXsrUxspWc4UWYid/tj4zZK58uGZqn2WQiaDMhmAg=="
       },
+      "System.Numerics.Tensors": {
+        "type": "Transitive",
+        "resolved": "10.0.12",
+        "contentHash": "17brFrnQHV/XMMazXNqFq4GkvzWy8yzDPo5Gb8TT8zJtMFbUqDycOCyPCp9F+eMc4L75kcCKRZqaeBHMwLCL9Q=="
+      },
       "System.Security.Cryptography.Pkcs": {
         "type": "Transitive",
         "resolved": "9.0.18",
@@ -1564,6 +1569,7 @@
           "FluentValidation": "[12.1.1, )",
           "HotChocolate.Language": "[16.6.7, )",
           "MemoryPack": "[1.21.4, )",
+          "Microsoft.Extensions.Caching.Memory": "[10.0.12, )",
           "Microsoft.Extensions.Configuration.Abstractions": "[10.0.12, )",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.12, )",
           "Microsoft.Extensions.Hosting.Abstractions": "[10.0.12, )",
@@ -1572,7 +1578,9 @@
           "Microsoft.Extensions.Options": "[10.0.12, )",
           "Parquet.Net": "[6.1.0, )",
           "System.IO.Hashing": "[10.0.12, )",
-          "YamlDotNet": "[18.1.0, )"
+          "System.Numerics.Tensors": "[10.0.12, )",
+          "YamlDotNet": "[18.1.0, )",
+          "prometheus-net": "[8.2.1, )"
         }
       },
       "autheris.domain": {
@@ -1616,6 +1624,7 @@
           "Npgsql": "[10.0.3, )",
           "OpenTelemetry.Exporter.OpenTelemetryProtocol": "[1.19.1, )",
           "StackExchange.Redis": "[3.3.1, )",
+          "System.Numerics.Tensors": "[10.0.12, )",
           "prometheus-net": "[8.2.1, )"
         }
       },

@@ -67,7 +67,7 @@ public sealed record VirtualFilterSyncRequest(
     TenantId TenantId,
     ManagedBy ManagedBy,
     IReadOnlyList<VirtualFilter> Filters,
-    IReadOnlyList<AccessProfile> Profiles);
+    IReadOnlyList<VirtualFilterAccessProfile> Profiles);
 
 /// <summary>
 /// Differences between the file repository and Autheris. Drift = a stored row changed outside Autheris.
@@ -118,6 +118,8 @@ public sealed class VirtualFilterAdministrationService
         _options = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
         _snapshots = snapshots;
     }
+
+    public VirtualFilterOptions Options => _options;
 
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _processedWebhookDeliveries = new(StringComparer.Ordinal);
     private DateTimeOffset? _lastWebhookTriggerAt;
@@ -396,7 +398,7 @@ public sealed class VirtualFilterAdministrationService
             throw new VirtualFilterConflictException($"The virtual filter '{name}' is superseded by another filter.");
         }
 
-        if (_options.RequireApproval && !actor.IsSync && existing.Status == FilterApprovalStatus.Active)
+        if (_options.RequireApproval && existing.Status == FilterApprovalStatus.Active)
         {
             var pendingDeletion = existing with
             {
@@ -414,7 +416,7 @@ public sealed class VirtualFilterAdministrationService
         await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_DELETED", $"virtual_filter:{name}", new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
     }
 
-    public async Task<AccessProfile> SaveProfileAsync(AccessProfile profile, VirtualFilterActor actor, CancellationToken ct = default)
+    public async Task<VirtualFilterAccessProfile> SaveProfileAsync(VirtualFilterAccessProfile profile, VirtualFilterActor actor, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(actor);
@@ -500,10 +502,10 @@ public sealed class VirtualFilterAdministrationService
         return direct;
     }
 
-    public Task<AccessProfile> ApproveProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, CancellationToken ct) =>
+    public Task<VirtualFilterAccessProfile> ApproveProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, CancellationToken ct) =>
         ApproveProfileAsync(tenantId, name, actor, expectedHash: null, ct);
 
-    public async Task<AccessProfile> ApproveProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, string? expectedHash = null, CancellationToken ct = default)
+    public async Task<VirtualFilterAccessProfile> ApproveProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, string? expectedHash = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(actor);
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
@@ -577,7 +579,7 @@ public sealed class VirtualFilterAdministrationService
         var existing = FindProfile(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The access profile '{name}' does not exist.");
         EnsureWritable(existing.ManagedBy, null, actor, $"access profile '{name}'");
 
-        if (_options.RequireApproval && !actor.IsSync && existing.Status == FilterApprovalStatus.Active)
+        if (_options.RequireApproval && existing.Status == FilterApprovalStatus.Active)
         {
             var pendingDeletion = existing with
             {
@@ -709,7 +711,7 @@ public sealed class VirtualFilterAdministrationService
 
         // SR15-15: Removing bindings, weakening uncovered policies (Deny -> Skip), narrowing scopes,
         // or deleting profiles/filters widens what grantees see: count them for the safety check across a sliding time window.
-        static IEnumerable<string> Keys(AccessProfile p) => p.Bindings.Select(b => p.Name + "|" + b.FilterName + "|" + b.TargetPattern);
+        static IEnumerable<string> Keys(VirtualFilterAccessProfile p) => p.Bindings.Select(b => p.Name + "|" + b.FilterName + "|" + b.TargetPattern);
         var existingKeys = managedProfiles.Values.SelectMany(Keys).ToHashSet(StringComparer.Ordinal);
         var desiredKeys = desiredProfiles.SelectMany(Keys).ToHashSet(StringComparer.Ordinal);
         int removedBindings = existingKeys.Count(k => !desiredKeys.Contains(k));
@@ -801,10 +803,10 @@ public sealed class VirtualFilterAdministrationService
     private static VirtualFilter? FindFilter(VirtualFilterSnapshot snapshot, TenantId tenantId, string name) =>
         snapshot.Filters.FirstOrDefault(f => f.TenantId == tenantId && string.Equals(f.Name, name, StringComparison.Ordinal));
 
-    private static AccessProfile? FindProfile(VirtualFilterSnapshot snapshot, TenantId tenantId, string name) =>
+    private static VirtualFilterAccessProfile? FindProfile(VirtualFilterSnapshot snapshot, TenantId tenantId, string name) =>
         snapshot.Profiles.FirstOrDefault(p => p.TenantId == tenantId && string.Equals(p.Name, name, StringComparison.Ordinal));
 
-    private static void EnsureFiltersExist(AccessProfile profile, IEnumerable<string> filterNames)
+    private static void EnsureFiltersExist(VirtualFilterAccessProfile profile, IEnumerable<string> filterNames)
     {
         var known = filterNames.ToHashSet(StringComparer.Ordinal);
         var unknown = profile.Bindings.FirstOrDefault(b => !known.Contains(b.FilterName));
@@ -913,7 +915,7 @@ public sealed class VirtualFilterAdministrationService
         return set;
     }
 
-    private static HashSet<string> GetContributorIdentifiers(AccessProfile profile)
+    private static HashSet<string> GetContributorIdentifiers(VirtualFilterAccessProfile profile)
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         AddToContributors(set, profile.CreatedBy, profile.UpdatedBy);

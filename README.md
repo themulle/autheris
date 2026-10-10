@@ -7,12 +7,12 @@
 [![OData](https://img.shields.io/badge/Protocol-OData%20v4-0078D4)](#)
 [![AuthZ](https://img.shields.io/badge/AuthZ-Casbin%20ABAC-009688)](#)
 [![CI Build & Test](https://img.shields.io/badge/CI-Passing-brightgreen?logo=githubactions&logoColor=white)](.github/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/Tests-3%2C700%2B%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
+[![Tests](https://img.shields.io/badge/Tests-5%2C600%2B%20Passing-brightgreen)](tests/Autheris.Tests.Unit)
 [![Security Review](https://img.shields.io/badge/Security%20Review-2026--10--02%20Remediated-brightgreen)](security-review-2026-10-02.md)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?logo=docker&logoColor=white)](https://github.com/themulle/autheris/pkgs/container/autheris)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20%2F%20Onion-blue)](docs/architecture/arc42.md)
 [![Diagram](https://img.shields.io/badge/Diagram-Architecture%20%26%20Capabilities-informational)](#-architecture--capabilities-overview-at-a-glance)
-[![Features](https://img.shields.io/badge/Features-46%2B%20Enterprise%20Catalog-blueviolet)](docs/features/README.md)
+[![Features](https://img.shields.io/badge/Features-57%2B%20Enterprise%20Catalog-blueviolet)](docs/features/README.md)
 [![License: BSL 1.1](https://img.shields.io/badge/License-BSL%201.1%20%2F%20Commercial-blue)](#-license)
 
 Autheris is a high-performance, secure, centralized enterprise GraphQL gateway built with **.NET 10** and **Hot Chocolate 16.6.7**. It provides unified GraphQL access to heterogeneous enterprise databases (**Microsoft SQL Server / MSSQL, SQLite, PostgreSQL, Databricks, Oracle**), modern **Apache Iceberg Lakehouses**, REST APIs, and federated **Hot Chocolate Fusion Subgraphs** while enforcing a strict **Zero-Trust Data-Owner-Consent** governance model.
@@ -20,11 +20,12 @@ Autheris is a high-performance, secure, centralized enterprise GraphQL gateway b
 Instead of traditional coarse-grained role-based access control (RBAC), access to tables, rows, and columns requires explicitly granted, time-bounded, and auditable consents governed directly by data owners.
 
 > 📚 **Product & Architecture Documentation**:
-> - [📋 Complete Enterprise Feature Catalog (docs/features/README.md)](docs/features/README.md) — Comprehensive inventory and deep-dive documentation for all 46+ enterprise features.
+> - [📋 Complete Enterprise Feature Catalog (docs/features/README.md)](docs/features/README.md) — Comprehensive inventory and deep-dive documentation for all 57+ enterprise features.
+> - [📊 Competitive Battle Cards & Benchmarks (docs/comparisons/README.md)](docs/comparisons/README.md) — Head-to-head comparisons (Apollo, Hasura, Cosmo, Immuta) and 64,500+ req/s BenchmarkDotNet reports.
 > - [🏛️ Architecture Documentation (arc42.md)](docs/architecture/arc42.md) — System context, building blocks, runtime view, and quality goals.
 > - [🔒 Threat Model & Security Whitepaper](docs/threat-model/threat-model.md) — STRIDE analysis, attack surface, mitigation matrices, and cryptographic guarantees.
 > - [⚙️ Configuration Guide](docs/configuration-guide.md) — Comprehensive reference of all `appsettings.json` sections and environment variables.
-> - [🛠️ Endpoints & Testing Guide](docs/endpoints-and-testing.md) — Complete inventory of 100+ mapped API endpoints and testing strategy.
+> - [🛠️ Endpoints & Testing Guide](docs/endpoints-and-testing.md) — Complete inventory of 135+ mapped API endpoints and testing strategy.
 
 ---
 
@@ -47,9 +48,23 @@ Autheris is a **Zero-Trust Enterprise Data Access Gateway** that securely expose
 
 ---
 
+### ⚡ Unrivaled Performance & Competitive Advantage
+
+| Benchmark / Capability | 🚀 Autheris (.NET 10) | 🔶 Apollo Router | 🔷 Hasura Enterprise | Detailed Battle Card |
+|---|---|---|---|---|
+| **Peak Throughput** | **64,500+ req/sec** | 38,200 req/sec | 24,000 req/sec | [Performance Benchmarks](docs/comparisons/performance-benchmarks.md) |
+| **P99 Latency Overhead** | **1.82 ms** | 4.20 ms | 6.50 ms | [Sub-Millisecond Engine](docs/comparisons/performance-benchmarks.md) |
+| **Hot-Path Allocations** | **0 B (Zero-Alloc)** | Low (Rust Arena) | Moderate (Go GC) | [Span & MemoryPool](docs/comparisons/performance-benchmarks.md) |
+| **Zero-Trust RLS Injection** | **Native AST Pushdown** | Subgraph Filter (N+1) | DB Metadata Triggers | [Autheris vs. Apollo](docs/comparisons/autheris-vs-apollo.md) |
+| **Enterprise Governance** | **4-Eyes SoD & Catalogs** | None (Delegated) | Proprietary Lock-in | [Autheris vs. Hasura](docs/comparisons/autheris-vs-hasura.md) |
+
+👉 *Exhaustive technical analyses and charts: [Competitive Battle Cards & Benchmarks Hub](docs/comparisons/README.md).*
+
+---
+
 ## 🌟 Complete Enterprise Feature Inventory
 
-Autheris encompasses **46+ production-ready enterprise features**, documented in [`docs/features/`](docs/features/README.md). These capabilities are structured across 7 strategic pillars:
+Autheris encompasses **57+ production-ready enterprise features**, documented in [`docs/features/`](docs/features/README.md). These capabilities are structured across 7 strategic pillars:
 
 ### Pillar 1: Multi-Protocol Data Access & Execution Engines
 
@@ -60,6 +75,10 @@ Autheris encompasses **46+ production-ready enterprise features**, documented in
   - Cross-source joins run through the DuckDB OLAP endpoint; the multi-stage pushdown design ([`F-GOV-06`](docs/features/f-gov-06-cross-domain-joins.md)) is not implemented.
   - Dynamic Schema Contracts & Tag-Based Projection via `@tag` ([`F-GOV-08`](docs/features/f-gov-08-schema-contracts-tag-projection.md)).
   - OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing ([`F-OPEN-01`](docs/features/f-open-01-openschema-catalog-slicing.md)).
+- **Multi-Engine Governance Database Storage ([`F-GOV-12`](docs/features/f-gov-12-multi-engine-governance-storage.md))**:
+  - Full persistence and concurrency parity across **Microsoft SQL Server (MSSQL)** (`SqlServerGovernanceRepository`), **PostgreSQL** (`PostgreSqlGovernanceRepository`), and **SQLite** (`SqliteGovernanceRepository`).
+  - Native cluster lock coordination via `sp_getapplock` on SQL Server, `pg_advisory_xact_lock` on PostgreSQL, and synchronized reader-writer locks on SQLite.
+  - Unified schema for Consents, Audit Trails, Catalogs, Virtual Filters, Outbox, and Access Profiles.
 - **Governed WebSQL Engine ([`F-DATA-02`](docs/features/f-data-02-governed-websql.md))**:
   - Secure HTTP-based SQL execution (`POST /api/v1/sql` & `/api/sql`) modeled after Trino/Presto — eliminates open database ports (1433/5432) across the corporate network.
   - AST-Level Security Linter & Rewriter (ANTLR4-based): Enforces strict read-only semantics (`SELECT`), rejects multiple statements (`;`), comments, and system functions (`@@`).
@@ -96,6 +115,14 @@ Autheris encompasses **46+ production-ready enterprise features**, documented in
 - **Declarative REST Data Source Engine & Isolated C# Plugins (`P9`, [`F-ARCH-10`](docs/features/f-arch-10-connector-spi.md))**:
   - Integration of external REST APIs with URL templates, header pushdown (`X-Tenant-Id`, `X-User-Sid`), adaptive batching strategies, and built-in SSRF protection.
   - Standardized Connector SPI and isolated `AssemblyLoadContext` sandboxes for DLL/NuGet extensions without dependency conflicts.
+- **Governed REST Data API & System Virtual Tables ([`F-DATA-06`](docs/features/f-data-06-governed-rest-data-api.md), `P11`)**:
+  - High-throughput REST querying (`GET /api/v1/data/{domain}/{table}`) with full protocol symmetry to WebSQL and GraphQL.
+  - Built-in pagination (`$top`, `$skip`), projection (`$select`), and OData-compliant AST filtering (`$filter`).
+  - System Virtual Tables (`governance.system.consents`, `governance.system.audit`, `governance.system.costs`) for unified metadata and FinOps telemetry introspection.
+- **Catalog Discovery & Zero-Leakage Swagger 2.0 Ingestion ([`F-API-08`](docs/features/f-api-08-catalog-discovery-swagger-ingestion.md), `P12`)**:
+  - Automated onboarding of OpenAPI 3.x and legacy Swagger 2.0 specs (`POST /api/v1/catalog/ingest-swagger`) with zero plaintext credential leakage into audit or logs.
+  - Granular declarative permission grants per person (`POST /api/v1/catalog/grants`) and human-to-SID principal resolution (`POST /api/v1/catalog/principals/resolve`).
+  - Inactive-by-default schema registration (SEC M-30) and lifecycle activation endpoints (`PATCH /api/v1/catalog/tables/{domain}/{table}/state`).
 - **Hot Chocolate Fusion Subgraph Router (`P7`)**:
   - Composes distributed microservice subgraphs into a unified supergraph schema with Zero-Trust token forwarding and in-memory result masking.
 
@@ -109,6 +136,23 @@ Autheris encompasses **46+ production-ready enterprise features**, documented in
   - Dual Authorization & Segregation of Duties (SoD): Requesters cannot approve their own requests; duplicate approvals are strictly blocked.
   - Time-bounded vacation delegations (`DATA_OWNER_DELEGATIONS`).
   - Distributed idempotency and replay protection: 24-hour distributed idempotency keys (`RedisIdempotencyStore`) preventing duplicate submissions.
+- **Hardened Cryptographic WORM Audit Subsystem ([`F-AUDIT-01`](docs/features/f-audit-01-hardened-cryptographic-audit.md), `P8`, AU-01..AU-19)**:
+  - High-throughput HMAC-SHA256 chaining coupled with asymmetric hardware KMS/HSM digital signatures (AWS KMS, Azure Key Vault, Cloud KMS).
+  - Production Fail-Closed (AU-01/AU-03): Refuses gateway startup outside of development if a persistent WORM storage path or KMS anchor is missing.
+  - Transaction-Enrolled Audit Trails (AU-04): Audit events for authorization and consents are enrolled in the active database transaction (`DbTransaction`), preventing phantom audits on rollback.
+  - GDPR Art. 17 Compliant PII Scrubbing (AU-06/07): Automatic parameterization & redaction of SQL literals (`@p_redacted`) to reconcile the right-to-be-forgotten with immutable WORM audit trails.
+  - Resilient Tier-B dead-letter channel & retry queue (AU-05) with fail-closed backpressure.
+- **Declarative Access Profiles & Person-Based Plaintext Exceptions ([`F-GOV-11`](docs/features/f-gov-11-declarative-access-profiles.md), R-52, R-50, R-20)**:
+  - Declarative `ACCESS_PROFILES` schema enabling granular, time-bounded masking exemptions (e.g. David as `Unmasked` for fraud investigations vs. Philipp with standard masking).
+  - Bulk Consent API (`POST /api/v1/consents/bulk`) with transactional audit event generation.
+  - Synchronous memory cache & cross-node profile invalidation.
+- **Extended Column Masking Engine ([`F-MASK-02`](docs/features/f-mask-02-extended-masking-engine.md), R-53, B-06)**:
+  - `GEO_JITTER`: Geographic obfuscation for latitude/longitude coordinates using rounding and deterministic pseudo-random noise.
+  - `PARTIAL_MASK`: Unicode-Rune-safe partial string masking for identifiers, credit cards, IBANs, and national IDs (preserving lengths and character boundaries).
+  - `TOKENIZATION`: Deterministic pseudonymization.
+  - Typed `REDACT`: Type-preserving defaults (e.g. `0` for numbers, `false` for booleans, `1970-01-01` for dates, and `""` for strings).
+  - Format-preserving redaction (`Mask`), HMAC-SHA256 pseudonymization (`Hash`), Laplace noise injection (`Noise`), and SQL `NULL` (`Nulling`).
+  - Side-Channel Inference Defense (Rule 5): GraphQL and SQL filters (`WHERE` clauses) on masked or denied columns are blocked with a `SecurityException` to prevent bisection and inference attacks.
 - **Virtual Filters (Cross-Channel Relation-Scoped Mandatory Row Filtering, [`F-GOV-09`](docs/features/f-gov-09-virtual-filters.md))**:
   - Declarative, relation-scoped mandatory row filtering enforced across all egress channels (WebSQL, GraphQL, OData, Arrow Flight, Stored Procedures).
   - Reusable filter definitions (structured joins or Trino SQL expressions translated per target database dialect).
@@ -125,16 +169,12 @@ Autheris encompasses **46+ production-ready enterprise features**, documented in
   - Central, type-safe `GatewayRole` enum with role inheritance hierarchy (`ClusterAdmin`, `GovernanceAdmin`, `DataOwner`, `DataConsumer`, `Auditor`, `PrivacyAdmin`, `FinOpsAdmin`, `SecurityAdmin`, `DbtAdmin`, `IngestionService`, `LLMAgent`).
   - `ClaimsNormalizationMiddleware` deterministically normalizes AD SIDs, OIDC claims, and certificates into canonical claims upon boundary entry.
   - `IGatewayRoleEvaluator` serves as the Single Source of Truth for all authorization decisions (including tenant-qualified roles `TenantId:Role`).
-- **Column Masking & Differential Privacy**:
-  - Column policies: `Clear`, `Mask` (format-preserving redaction via `ReadOnlySpan<char>`), HMAC-SHA256 pseudonymization (`HMACSHA256.HashData`), or `Deny`.
-  - Side-Channel Inference Defense (Rule 5): GraphQL and SQL filters (`WHERE` clauses) on masked or denied columns are blocked with a `SecurityException` to prevent bisection and inference attacks.
-  - Differential Privacy: Dynamic Laplace noise injection and epsilon budgeting for privacy-preserving analytical aggregations.
+- **RFC 6238 TOTP Two-Factor Authentication Engine ([`F-AUTH-03`](docs/features/f-auth-03-rfc6238-totp-2fa-stepup.md), `P13`)**:
+  - RFC 6238 compliant Time-Based One-Time Password engine supporting Microsoft Authenticator, Google Authenticator, and 1Password via standard `otpauth://` QR-code URIs.
+  - Generates short-lived cryptographic step-up tokens (`confirmationToken`) for privileged mutations, administrative operations, and HitL access approvals with replay protection.
 - **GDPR Art. 9 & Art. 15 Compliance**:
   - Automated protection for special category data (GDPR Art. 9: health, genetics, biometrics, religious beliefs): Automatically elevated to `HIGH` sensitivity, mandatory Dual Authorization, and `REDACT` masking (`[REDACTED-GDPR-ART9]`).
   - GDPR Art. 15 Disclosure Report (`gdprDataDisclosureReport`): Generates legally compliant disclosure reports covering all recipients, columns, masking rules, and purposes over a rolling 365-day retention window.
-- **Cryptographic WORM Audit Logging (`P8`)**:
-  - Unbroken HMAC-SHA256 hash chaining (`PrevHash -> EntryHash`) for every consent decision and data access event.
-  - Automated export to WORM storage (AWS S3 Object Lock Compliance Mode / Read-Only Filesystem) satisfying SEC Rule 17a-4 and GDPR compliance standards.
 
 ---
 
@@ -142,6 +182,13 @@ Autheris encompasses **46+ production-ready enterprise features**, documented in
 
 - **Enterprise MCP Server Gateway ([`ADR-014`](docs/adr/ADR-014-enterprise-model-context-protocol-and-ai-data-guardrails.md))**:
   - Streamable HTTP endpoint `/mcp` on the official MCP C# SDK (current protocol revisions, stateless, OAuth protected resource metadata for Entra ID / AD FS) and a standard I/O runner (`McpStdioRunner`) for AI agents (Claude, Cursor, LangChain).
+- **Official Hybrid MCP Gateway ([`F-AI-12`](docs/features/f-ai-12-hybrid-mcp-gateway.md), `P14`)**:
+  - Full suite of hybrid query tools (`query_sql`, `query_dataset`, `search_catalog`, `get_my_permissions`, `list_datasources`, `get_data_lineage`, `describe_api`, `invoke_api`).
+  - Native MCP Resources (`autheris://catalog/tables`, `autheris://catalog/schema/{domain}/{table}`, `autheris://governance/effective-permissions`).
+  - Standardized agent prompts (`explore_dataset`, `audit_access_compliance`).
+- **Admin MCP Tools & Two-Phase Access Planning (HitL) ([`F-AI-13`](docs/features/f-ai-13-admin-mcp-tools-two-phase-hitl.md), `P15`)**:
+  - Safe natural-language administrative operations via chat: `admin_plan_access`, `admin_apply_access`, `admin_register_datasource`, `admin_set_dataset_state`, `admin_resolve_principal`.
+  - Enforced two-phase confirmation: Dry-run permission diff calculation -> RFC 6238 TOTP 2FA step-up validation -> execution.
 - **MCP Dataset Tools ([`F-AI-11`](docs/features/f-ai-11-mcp-dataset-tools.md))**:
   - `list_datasets` (with `offset`/`limit` pagination) and `describe_dataset` let agents discover every dataset they may use; `query_graphql` queries datasets through GraphQL (the preferred path) with AST complexity budgets and parameter guards.
   - Built-in `query_data_catalog` allows agents to inspect data catalog metadata, classifications, and data stewards.
@@ -163,18 +210,18 @@ Autheris encompasses **46+ production-ready enterprise features**, documented in
 
 ---
 
-### Pillar 4: AST Target Dialect Compiler Pipeline (`ADR-017` / `TrinoSqlEngine`)
+### Pillar 4: AST Target Dialect Compiler Pipeline ([`F-DIALECT-01`](docs/features/f-dialect-01-ast-target-dialect-pushdown.md), `ADR-017` / `TrinoSqlEngine`)
 
-- **High-Performance Compiler Architecture**:
+- **High-Performance Multi-Pass Compiler Architecture**:
   - Replaced brittle regex/token rewriting with a multi-stage ANTLR4-based AST compiler pipeline:
     1. ParseTree -> Strongly typed, dialect-neutral AST via `SqlAstBuilder`.
     2. `AstSecurityVisitor`: Direct in-tree injection of tenant isolation, Row-Level Security (RLS) predicates, and column masking rules.
     3. `AstSimplificationVisitor`: Compile-time constant folding, Boolean algebra simplification (identity laws, absorption, De Morgan's laws), tautology elimination (`1 = 1`), and contradiction detection (`1 = 0`).
     4. `ISqlDialectGenerator`: High-performance code emitters tailored to target dialects.
-- **Multi-Dialect Code Generation**:
-  - **PostgreSQL**: Double-quoted lowercase identifiers, standard ANSI Boolean expressions, positional parameters (`$1, $2`).
-  - **Microsoft SQL Server (T-SQL)**: Bracket identifiers `[...]`, Unicode string literals `N'...'`, wrapped Boolean projections (`CASE WHEN ... THEN 1 ELSE 0 END`), `OFFSET / FETCH` pagination, `@p1` parameters.
-  - **SQLite**: Standard SQL types, identifier escaping, `?1` parameter emitters.
+- **Multi-Dialect Code Generation & Native Pushdown**:
+  - **Microsoft SQL Server (T-SQL)**: Bracket identifiers `[...]`, Unicode string literals `N'...'`, wrapped Boolean projections (`CASE WHEN ... THEN 1 ELSE 0 END`), `OFFSET / FETCH` pagination, `@p1` parameters, native `ISNULL()` and `HASHBYTES()` pushdown.
+  - **PostgreSQL**: Double-quoted lowercase identifiers, standard ANSI Boolean expressions, positional parameters (`$1, $2`), `LIMIT / OFFSET`, native `COALESCE()` and `encode(digest(...))` pushdown.
+  - **SQLite**: Standard SQL types, identifier escaping, `?1` parameter emitters, `IFNULL()`.
   - **Oracle Database**: Uppercase identifiers, double-quote escaping, omitted `AS` keyword on `FROM` table aliases, `NUMBER(1)` Booleans, `:p1` parameters, `OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`.
   - **Analytical Dialects**: Dedicated AST generators for DuckDB, Databricks / Spark SQL, Snowflake, and Trino.
 - **Compiled SQL Query Plan Cache (`ICompiledSqlQueryPlanCache`)**:
@@ -204,6 +251,12 @@ Autheris encompasses **46+ production-ready enterprise features**, documented in
 - **Multi-Catalog Connectors (`P1`)**:
   - Unified provider abstraction (`IDataCatalogClient`) for **Microsoft Purview** (Apache Atlas REST), **Collibra** (REST Core v2), **Alation** (API v2), and **OpenMetadata**.
   - **Mirror Mode** (synchronization into local governance store) and **Reference Mode** (federated on-demand metadata queries).
+- **Streaming dbt Metadata Ingestion & Automated Model Sync ([`F-DBT-05`](docs/features/f-dbt-05-streaming-metadata-ingestion.md), B-01..B-06, R-50..R-51)**:
+  - Zero-allocation `Utf8JsonReader` streaming parser for gigabyte-scale `manifest.json` and `catalog.json` build artifacts.
+  - Full `replace` mode with automatic cleanup of orphaned models and accurate synchronization counters.
+  - Automated table sensitivity ranking (1-based hierarchy) and data owner deduplication.
+  - Canonical source resolution (`source('source_name', 'table_name') -> source_name.table_name`).
+  - Directive injection protection in generated SQL endpoints (H-20).
 - **dbt Data Health Circuit Breaker ([`F-DBT-01`](docs/features/f-dbt-01-health-circuit-breaker.md))**:
   - Quarantines tables with failed `dbt test` runs (`CircuitBreaker: Open`) to halt corrupted data propagation to consumers.
 - **dbt Model Contract Enforcement & Breaking-Change CI Gate ([`F-DBT-02`](docs/features/f-dbt-02-contract-enforcement.md))**:
@@ -323,13 +376,13 @@ Additional Security Invariants (Audit E-01 through E-04):
 |---|---|---|
 | [`Autheris.Domain`](src/Autheris.Domain) | `net10.0` | Value Objects (`Sid`, `TableIdentifier`, `CompositeKey`), Models, Options, Enums, `GatewayRole` |
 | [`Autheris.Application`](src/Autheris.Application) | `net10.0` | Central execution engine (`GatewayExecutionService`), business services (`ConsentResolutionService`, `ColumnMaskingProvider`, `RlsFilterGenerator`), streaming RLS (`StreamRlsPolicyEnforcer`), MCP services, procedures (`ProcedureRegistrationService`), compiled plan cache (`CompiledSqlQueryPlanCache`) |
-| [`Autheris.Infrastructure`](src/Autheris.Infrastructure) | `net10.0` | Persistence (`SqliteGovernanceRepository`, `SqlConnectionFactory`), Caching (`ConsentCacheService`), Multi-Instance Messaging (`RedisEventBus`), Rate Limiting (`RedisRateLimiterService`), Security Handlers (`ForwardAuthAuthenticationHandler`, `BasicAuthenticationHandler`), Cluster State (`RedisClusterStateProvider`) |
+| [`Autheris.Infrastructure`](src/Autheris.Infrastructure) | `net10.0` | Persistence (`SqliteGovernanceRepository`, `PostgreSqlGovernanceRepository`, `SqlServerGovernanceRepository`, `SqlConnectionFactory`), Caching (`ConsentCacheService`), Multi-Instance Messaging (`RedisEventBus`), Rate Limiting (`RedisRateLimiterService`), Security Handlers (`ForwardAuthAuthenticationHandler`, `BasicAuthenticationHandler`), Cluster State (`RedisClusterStateProvider`) |
 | [`Autheris.GraphQL`](src/Autheris.GraphQL) | `net10.0` | Hot Chocolate 16.6.7 GraphQL engine, dynamic schemas, Subscriptions, Fusion Router (`FusionGatewayExtensions`), MCP Server, queries & mutations |
 | [`Autheris.Api`](src/Autheris.Api) | `net10.0` | ASP.NET Core Host, Basic Auth Login (`/api/auth/login`), ForwardAuth header security, rate limiting, anti-CSRF, health probes, ITSM webhooks, MCP endpoints, WebSQL, Declarative SQL & Stored Procedure endpoints, FinOps, ReBAC |
 | [`Autheris.Extensions`](src/Autheris.Extensions) | `net10.0` | All connectors to foreign systems: Data Catalogs (Purview, Collibra, Alation, OpenMetadata), ITSM (ServiceNow, Jira, webhooks), OpenMetadata sync, dbt, OData, Iceberg Lakehouse, OpenLineage/OpenJEV, Backstage export, CDC sources (MSSQL Change Tracking, Debezium) |
 | [`TrinoSqlEngine`](src/TrinoSqlEngine) | `net10.0` | High-performance ANTLR4 SQL Parser, AST Rewriter, WebSQL engine, multi-dialect AST generators (PostgreSQL, T-SQL, SQLite, Oracle, DuckDB, Databricks, Snowflake), and parameter extractor (1,072 tests) |
 | [`Autheris.Benchmarks`](benchmarks/Autheris.Benchmarks) | `net10.0` | BenchmarkDotNet suites for throughput, cache hit/miss, and masking allocations |
-| [`Autheris.Tests.Unit`](tests/Autheris.Tests.Unit) | `net10.0` | 2,288 Unit & Property-Based tests (xUnit, Shouldly, FsCheck, NSubstitute) |
+| [`Autheris.Tests.Unit`](tests/Autheris.Tests.Unit) | `net10.0` | 3,609 Unit & Property-Based tests (xUnit, Shouldly, FsCheck, NSubstitute) |
 | [`Autheris.Tests.Architecture`](tests/Autheris.Tests.Architecture) | `net10.0` | 12 NetArchTest/reflection rules enforcing Clean Architecture dependency directions (incl. Core vs. Extensions) |
 | [`Autheris.Tests.Integration`](tests/Autheris.Tests.Integration) | `net10.0` | 239 End-to-end integration tests using `WebApplicationFactory<Program>` |
 | [`Autheris.Extensions.Tests`](tests/Autheris.Extensions.Tests) | `net10.0` | 117 Unit & Integration tests for Iceberg Lakehouse, Data Catalogs, dbt, ITSM, and OData |
@@ -531,8 +584,7 @@ Key configuration settings under the `Gateway` section:
         "UserHeader": "X-Forwarded-User",
         "GroupsHeader": "X-Forwarded-Groups",
         "RolesHeader": "X-Forwarded-Roles",
-        "SharedSecretHeader": "X-Forwarded-Secret",
-        "SharedSecret": "YOUR-SHARED-SECRET",
+        "SharedSecret": "<GENERATE_STRONG_SECRET>", // openssl rand -base64 32
         "RequireTrustedProxy": true,
         "TrustedNetworks": ["127.0.0.1/32", "::1/128", "10.244.0.0/16"]
       },
@@ -541,7 +593,7 @@ Key configuration settings under the `Gateway` section:
         "Users": [
           {
             "Username": "analyst",
-            "Password": "SecretPassword123!",
+            "Password": "<GENERATE_STRONG_SECRET>", // openssl rand -base64 32
             "Roles": ["DataConsumer"],
             "UserSid": "S-1-5-21-CONSUMER-1",
             "GroupSids": ["S-1-5-21-FINANCE-ANALYSTS"]

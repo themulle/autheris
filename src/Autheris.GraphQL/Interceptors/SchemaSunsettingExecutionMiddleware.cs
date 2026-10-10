@@ -11,6 +11,7 @@ using HotChocolate.Language;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using RequestDelegate = HotChocolate.Execution.RequestDelegate;
+using RequestContext = HotChocolate.Execution.RequestContext;
 
 public sealed class SchemaSunsettingExecutionMiddleware
 {

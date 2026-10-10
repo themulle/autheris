@@ -40,4 +40,18 @@ public sealed record StreamCdcEvent(
     string? TenantId,
     string PayloadJson,
     DateTimeOffset Timestamp
-);
+)
+{
+    public TableIdentifier? TableIdentifier => Autheris.Domain.Common.TableIdentifier.TryParse(Table, out var tid) ? tid : null;
+
+    public StreamCdcEvent(
+        string eventId,
+        TableIdentifier table,
+        string operation,
+        string? tenantId,
+        string payloadJson,
+        DateTimeOffset timestamp)
+        : this(eventId, table.ToString(), operation, tenantId, payloadJson, timestamp)
+    {
+    }
+}

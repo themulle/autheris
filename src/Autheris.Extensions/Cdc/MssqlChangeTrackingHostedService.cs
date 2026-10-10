@@ -23,15 +23,18 @@ public sealed class MssqlChangeTrackingHostedService : BackgroundService
     private readonly IMssqlChangeTrackingPoller _poller;
     private readonly IOptions<GatewayOptions> _gatewayOptions;
     private readonly ILogger<MssqlChangeTrackingHostedService> _logger;
+    private readonly Autheris.Application.State.IDistributedClusterStateProvider? _clusterState;
 
     public MssqlChangeTrackingHostedService(
         IMssqlChangeTrackingPoller poller,
         IOptions<GatewayOptions> gatewayOptions,
-        ILogger<MssqlChangeTrackingHostedService> logger)
+        ILogger<MssqlChangeTrackingHostedService> logger,
+        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null)
     {
         _poller = poller ?? throw new ArgumentNullException(nameof(poller));
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clusterState = clusterState;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -60,21 +63,44 @@ public sealed class MssqlChangeTrackingHostedService : BackgroundService
         {
             try
             {
-                foreach (var table in trackedTableIds)
+                IAsyncDisposable? pollLock = null;
+                if (_clusterState != null)
                 {
-                    if (stoppingToken.IsCancellationRequested) break;
-
-                    try
+                    var leaseDuration = TimeSpan.FromMilliseconds(Math.Max(5000, interval * 3));
+                    pollLock = await _clusterState.TryAcquireLockAsync("cdc:mssql:poll", leaseDuration, stoppingToken).ConfigureAwait(false);
+                    if (pollLock == null)
                     {
-                        var processed = await _poller.PollTableChangesAsync(table, stoppingToken).ConfigureAwait(false);
-                        if (processed > 0)
+                        _logger.LogDebug("MSSQL Change Tracking polling lock held by another cluster replica; skipping cycle.");
+                        try
                         {
-                            _logger.LogDebug("Polled and dispatched {Count} CDC changes for table {Table}.", processed, table);
+                            await Task.Delay(interval, stoppingToken).ConfigureAwait(false);
                         }
+                        catch (OperationCanceledException)
+                        {
+                            break;
+                        }
+                        continue;
                     }
-                    catch (Exception ex) when (ex is not OperationCanceledException)
+                }
+
+                await using (pollLock)
+                {
+                    foreach (var table in trackedTableIds)
                     {
-                        _logger.LogError(ex, "Failed to poll change tracking for table {Table}.", table);
+                        if (stoppingToken.IsCancellationRequested) break;
+
+                        try
+                        {
+                            var processed = await _poller.PollTableChangesAsync(table, stoppingToken).ConfigureAwait(false);
+                            if (processed > 0)
+                            {
+                                _logger.LogDebug("Polled and dispatched {Count} CDC changes for table {Table}.", processed, table);
+                            }
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            _logger.LogError(ex, "Failed to poll change tracking for table {Table}.", table);
+                        }
                     }
                 }
             }

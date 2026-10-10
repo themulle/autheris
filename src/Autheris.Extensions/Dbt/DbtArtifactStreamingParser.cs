@@ -70,7 +70,9 @@ public static class DbtArtifactStreamingParser
                                 foreach (var dn in depNodes.EnumerateArray())
                                 {
                                     var dnStr = dn.GetString() ?? "";
-                                    if (dnStr.StartsWith("model.", StringComparison.OrdinalIgnoreCase))
+                                    if (dnStr.StartsWith("model.", StringComparison.OrdinalIgnoreCase) ||
+                                        dnStr.StartsWith("source.", StringComparison.OrdinalIgnoreCase) ||
+                                        dnStr.StartsWith("seed.", StringComparison.OrdinalIgnoreCase))
                                     {
                                         var mName = ExtractModelName(dnStr);
                                         if (!string.Equals(mName, cleanParent, StringComparison.OrdinalIgnoreCase))
@@ -272,10 +274,81 @@ public static class DbtArtifactStreamingParser
             }
         }
 
+        // B-04: Support source tables from dbt manifest
+        if (root.TryGetProperty("sources", out var sourcesElement) && sourcesElement.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var srcProp in sourcesElement.EnumerateObject())
+            {
+                ct.ThrowIfCancellationRequested();
+                var srcNode = srcProp.Value;
+                var uniqueId = srcProp.Name;
+                var name = srcNode.TryGetProperty("name", out var np) ? np.GetString() ?? "" : "";
+                var database = srcNode.TryGetProperty("database", out var dbp) ? dbp.GetString() ?? "" : "";
+                var schema = srcNode.TryGetProperty("schema", out var sp) ? sp.GetString() ?? "" : "";
+                var description = srcNode.TryGetProperty("description", out var dp) ? dp.GetString() : null;
+
+                var tags = new List<string>();
+                if (srcNode.TryGetProperty("tags", out var tp) && tp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var tag in tp.EnumerateArray())
+                    {
+                        var s = tag.GetString();
+                        if (!string.IsNullOrWhiteSpace(s)) tags.Add(s);
+                    }
+                }
+
+                var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (srcNode.TryGetProperty("meta", out var mp) && mp.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var m in mp.EnumerateObject())
+                    {
+                        meta[m.Name] = JsonValueText.From(m.Value);
+                    }
+                }
+
+                var columns = new Dictionary<string, DbtColumnDefinition>(StringComparer.OrdinalIgnoreCase);
+                if (srcNode.TryGetProperty("columns", out var cp) && cp.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var colProp in cp.EnumerateObject())
+                    {
+                        var colName = colProp.Name;
+                        var colVal = colProp.Value;
+                        var colType = colVal.TryGetProperty("data_type", out var dtp) ? dtp.GetString() : null;
+                        var colDesc = colVal.TryGetProperty("description", out var cdp) ? cdp.GetString() : null;
+                        var colTags = new List<string>();
+                        if (colVal.TryGetProperty("tags", out var ctp) && ctp.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var item in ctp.EnumerateArray()) if (item.GetString() is string s) colTags.Add(s);
+                        }
+                        var colMeta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        if (colVal.TryGetProperty("meta", out var cmp) && cmp.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var cm in cmp.EnumerateObject()) colMeta[cm.Name] = JsonValueText.From(cm.Value);
+                        }
+                        columns[colName] = new DbtColumnDefinition(colName, colType, colDesc, colTags, colMeta);
+                    }
+                }
+
+                models.Add(new DbtModelDefinition(
+                    uniqueId,
+                    name,
+                    database,
+                    schema,
+                    "source",
+                    description,
+                    tags,
+                    meta,
+                    columns,
+                    [],
+                    false
+                ));
+            }
+        }
+
         return (models, relationships);
     }
 
-    private static string ExtractModelName(string raw)
+    public static string ExtractModelName(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return "";
         var trimmed = raw.Trim();
@@ -286,6 +359,16 @@ public static class DbtArtifactStreamingParser
         if (refMatch.Success)
         {
             return refMatch.Groups[1].Value;
+        }
+
+        // B-04: Support source('source_name', 'table_name')
+        var sourceMatch = System.Text.RegularExpressions.Regex.Match(
+            trimmed,
+            @"source\s*\(\s*['""]([^'""]+)['""]\s*,\s*['""]([^'""]+)['""]\s*\)",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (sourceMatch.Success)
+        {
+            return $"{sourceMatch.Groups[1].Value}.{sourceMatch.Groups[2].Value}";
         }
 
         var parts = trimmed.Split('.');

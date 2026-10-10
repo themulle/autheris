@@ -108,7 +108,7 @@ public sealed class MandatoryRowFilterResolverKeyTests
         var snapshotProvider = Substitute.For<IVirtualFilterSnapshotProvider>();
         var predicateBuilder = Substitute.For<IVirtualFilterPredicateBuilder>();
 
-        var profile = new AccessProfile
+        var profile = new VirtualFilterAccessProfile
         {
             Name = "prof1",
             TenantId = new TenantId("tenant_a"),

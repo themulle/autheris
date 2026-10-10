@@ -2,7 +2,9 @@ namespace Autheris.Api.Endpoints;
 
 using System.Linq;
 using Autheris.Api.Configuration;
+using Autheris.Api.Extensions;
 using Autheris.Api.Security;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -28,14 +30,17 @@ public static class DevEndpoints
         var group = app.MapGroup("/api/dev").AllowAnonymous();
         if (features.Info)
         {
-            group.MapGet("/info", () => Results.Ok(BuildInfo(options, env, report)));
+            group.MapGet("/info", () => Results.Ok(BuildInfo(options, env, report)))
+                .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         }
 
         if (features.PersonaLogin)
         {
-            group.MapGet("/personas", () => Results.Ok(ListPersonas(options)));
+            group.MapGet("/personas", () => Results.Ok(ListPersonas(options)))
+                .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
             group.MapGet("/login/{persona}", (string persona, string? redirect, HttpContext context) =>
-                LoginAsync(persona, redirect, context, options, env));
+                LoginAsync(persona, redirect, context, options, env))
+                .WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
         }
 
         return app;

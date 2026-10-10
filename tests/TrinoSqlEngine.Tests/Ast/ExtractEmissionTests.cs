@@ -75,8 +75,8 @@ public sealed class ExtractEmissionTests
     }
 
     [Theory]
-    [InlineData("DOW", "EXTRACT(DAYOFWEEKISO FROM CREATED_AT)")]
-    [InlineData("WEEK", "EXTRACT(WEEKISO FROM CREATED_AT)")]
+    [InlineData("DOW", "EXTRACT(DAYOFWEEKISO FROM \"CREATED_AT\")")]
+    [InlineData("WEEK", "EXTRACT(WEEKISO FROM \"CREATED_AT\")")]
     public void Snowflake(string field, string expected)
     {
         Assert.Contains(expected, Extract(field, TargetSqlDialect.Snowflake));

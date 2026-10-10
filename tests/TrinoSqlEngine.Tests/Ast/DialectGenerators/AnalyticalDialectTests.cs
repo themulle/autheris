@@ -52,10 +52,25 @@ public sealed class AnalyticalDialectTests
             Pagination: null);
 
         string sql = _snowflakeGenerator.GenerateSql(stmt);
-        // Unquoted folded to uppercase
-        Assert.Contains("LOWERCASE_COL", sql, StringComparison.Ordinal);
-        Assert.Contains("MY_TABLE", sql, StringComparison.Ordinal);
+        // Unquoted folded to uppercase and quoted
+        Assert.Contains("\"LOWERCASE_COL\"", sql, StringComparison.Ordinal);
+        Assert.Contains("\"MY_TABLE\"", sql, StringComparison.Ordinal);
         // Quoted preserves case
         Assert.Contains("\"PreserveCase\"", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Snowflake_EmitsQuotedUpperIdentifiers_ProtectingKeywords()
+    {
+        string sql = "SELECT user, account, date FROM orders WHERE role = 'admin'";
+        var engine = new FastSqlEngine();
+        string generated = engine.GenerateGovernedSql(sql, new RlsOptions { TargetDialect = TargetSqlDialect.Snowflake });
+
+        // Assert: Alle Bezeichner müssen gequotet und upper-case sein
+        Assert.Contains("\"USER\"", generated);
+        Assert.Contains("\"ACCOUNT\"", generated);
+        Assert.Contains("\"DATE\"", generated);
+        Assert.Contains("\"ORDERS\"", generated);
+        Assert.Contains("\"ROLE\"", generated);
     }
 }

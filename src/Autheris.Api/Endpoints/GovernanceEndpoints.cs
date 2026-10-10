@@ -13,12 +13,19 @@ using Autheris.Api.Security;
 using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
+using Autheris.Application.State;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
+using TrinoSqlEngine;
 
 public static class GovernanceEndpoints
 {
@@ -124,7 +131,8 @@ public static class GovernanceEndpoints
 
             return Results.Ok(result);
         }).RequireAuthorization()
-          .WithRequestBodyLimit(20 * 1024 * 1024); // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithRequestBodyLimit(20 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // P10: Multi-Tenant Policy Simulation Sandbox ("What-If" Replay via Audit Logs)
         app.MapPost("/api/governance/policy-simulation/replay", async (
@@ -155,7 +163,7 @@ public static class GovernanceEndpoints
 
             var result = await simulationService.SimulateAsync(request, effectiveTenant, context.RequestAborted);
             return Results.Ok(result);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditRead);
 
         // P11: Automated Schema Deprecation & Client-Impact Sunsetting (Smart Sunsetting Engine)
         app.MapGet("/api/governance/sunsetting/rules", async (
@@ -170,7 +178,7 @@ public static class GovernanceEndpoints
 
             var rules = await sunsettingService.GetRulesAsync(context.RequestAborted);
             return Results.Ok(rules);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapPost("/api/governance/sunsetting/rules", async (
             FieldSunsettingRule rule,
@@ -185,7 +193,7 @@ public static class GovernanceEndpoints
 
             await sunsettingService.RegisterRuleAsync(rule, context.RequestAborted);
             return Results.Created($"/api/governance/sunsetting/rules/{rule.Id}", rule);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapPost("/api/governance/sunsetting/evaluate", async (
             EvaluateFieldSunsettingRequest request,
@@ -240,7 +248,7 @@ public static class GovernanceEndpoints
 
             context.Response.Headers["Sunset"] = evaluation.HttpSunsetHeader;
             return Results.Ok(evaluation);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         // P12: Federated Differential Privacy & Dynamic Epsilon-Perturbation Engine
         app.MapGet("/api/governance/differential-privacy/budget/{clientId}", async (
@@ -269,7 +277,7 @@ public static class GovernanceEndpoints
 
             var budget = await dpEngine.GetBudgetAsync(targetKey, context.RequestAborted);
             return Results.Ok(budget);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapPost("/api/governance/differential-privacy/budget/{clientId}/reset", async (
             string clientId,
@@ -284,6 +292,18 @@ public static class GovernanceEndpoints
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
 
+            var callerId = context.User.FindFirst("client_id")?.Value
+                         ?? context.User.FindFirst("azp")?.Value
+                         ?? context.User.FindFirst("sub")?.Value
+                         ?? context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                         ?? context.User.Identity?.Name;
+
+            // SEC SG-29: Prevent self-reset of privacy budget
+            if (!string.IsNullOrWhiteSpace(callerId) && string.Equals(callerId, clientId, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
             // SEC M-4: Non-canonical cluster admins may only reset clients within their tenant scope
             var targetKey = ResolveTenantBoundClientId(context, clientId, out var isForbidden);
             if (isForbidden)
@@ -292,8 +312,29 @@ public static class GovernanceEndpoints
             }
 
             await dpEngine.ResetBudgetAsync(targetKey, context.RequestAborted);
+
+            var auditRepo = context.RequestServices.GetService<IAuditLogRepository>();
+            if (auditRepo != null)
+            {
+                await auditRepo.RecordAuditEventAsync(new AuditLogEntry
+                {
+                    TenantId = EndpointSecurity.GetRequestTenant(context),
+                    EventType = AuditEventTypes.AuditConfigChanged,
+                    ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+                    TargetTable = clientId,
+                    Decision = "ALLOW",
+                    TraceId = context.TraceIdentifier,
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        clientId,
+                        targetKey,
+                        resetBy = callerId
+                    })
+                }, context.RequestAborted).ConfigureAwait(false);
+            }
+
             return Results.Ok(new { message = $"Privacy budget reset for client '{clientId}'." });
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapPost("/api/governance/differential-privacy/perturb", async (
             DifferentialPrivacyPerturbationRequest request,
@@ -308,7 +349,7 @@ public static class GovernanceEndpoints
                                             ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
                                             ?? context.User.Identity?.Name;
 
-                var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
+                var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin]);
 
                 if (!isPrivileged || string.IsNullOrWhiteSpace(request.ClientId))
                 {
@@ -342,7 +383,8 @@ public static class GovernanceEndpoints
                     totalBudget = ex.TotalBudget
                 }, statusCode: StatusCodes.Status429TooManyRequests);
             }
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+          .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         // F-AI-12-B: EU AI Act Article 10 Compliance Certificate Endpoint
         app.MapGet("/api/governance/eu-ai-act/article-10-certificate", async (
@@ -368,7 +410,8 @@ public static class GovernanceEndpoints
             context.Response.Headers["X-Certificate-Id"] = cert.CertificateId;
             context.Response.Headers["X-Integrity-Seal"] = cert.IntegritySealSha256;
             return Results.Ok(cert);
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+          .WithAudit(AuditLevel.Full, AuditEventTypes.MetadataExport);
 
         // GDPR Article 15 PDF Export for Data Protection Officers (DSB)
         app.MapGet("/api/governance/gdpr/export-pdf", async (
@@ -387,11 +430,7 @@ public static class GovernanceEndpoints
             var groupSids = principal.GetGroupSids().ToList();
             var roles = principal.GetUserRoles().ToList();
 
-            var tenantId = TenantId.LegacySingleTenant;
-            if (context.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
-            {
-                tenantId = tid;
-            }
+            var tenantId = EndpointSecurity.GetRequestTenant(context);
 
             bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
             bool isClusterAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase);
@@ -424,7 +463,8 @@ public static class GovernanceEndpoints
 
             context.Response.Headers["X-Audit-Seal-SHA256"] = exportResult.Sha256AuditSeal;
             return Results.File(exportResult.DocumentBytes, exportResult.ContentType, exportResult.FileName);
-        }).RequireAuthorization();
+        }).RequireAuthorization()
+          .WithAudit(AuditLevel.Full, AuditEventTypes.MetadataExport);
 
         // OpenLineage Lineage Push Trigger
         app.MapPost("/api/lineage/openlineage/sync", async (
@@ -440,12 +480,385 @@ public static class GovernanceEndpoints
 
             var tenantId = context.User.FindFirst("tenant_id")?.Value ?? "default";
             var success = await openLineageClient.PushLineageGraphAsync(new TenantId(tenantId), ct);
-            return success
-                ? Results.Ok(new { message = "OpenLineage sync completed successfully." })
-                : Results.StatusCode(StatusCodes.Status502BadGateway);
-        }).RequireAuthorization();
+            if (success)
+            {
+                return Results.Ok(new { message = "OpenLineage sync completed successfully." });
+            }
+            return Results.StatusCode(StatusCodes.Status502BadGateway);
+        }).RequireAuthorization()
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        // =========================================================================
+        // Declarative Access Profiles & Subject Cleartext Exceptions (R-52 & R-50)
+        // =========================================================================
+
+        app.MapPost("/api/v1/consents/bulk", CreateBulkConsentAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
+        app.MapGet("/api/v1/profiles", GetProfilesAsync).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        app.MapGet("/api/v1/profiles/{id}", GetProfileByIdAsync).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        app.MapDelete("/api/v1/profiles/{id}", DeleteProfileAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
+    }
+
+    internal static async Task<IResult> CreateBulkConsentAsync(
+        BulkConsentRequest req,
+        HttpContext context,
+        IAccessProfileRepository accessProfileRepo,
+        CancellationToken ct)
+    {
+        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin])
+            || context.User.IsInRole("SecurityAdmin")
+            || context.User.IsInRole("ClusterAdmin");
+        if (!isPrivileged)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (req == null)
+        {
+            return Results.BadRequest(new { error = "Request body is required." });
+        }
+
+        if (string.IsNullOrWhiteSpace(req.Subject))
+        {
+            return Results.BadRequest(new { error = "Subject is required." });
+        }
+
+        var trimmedSubject = req.Subject.Trim();
+        var callerSid = context.User.GetUserSid()?.Value ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? context.User.Identity?.Name ?? string.Empty;
+        var callerName = context.User.Identity?.Name ?? string.Empty;
+
+        // Segregation of Duties (SoD): self-grant is strictly forbidden
+        if (string.Equals(callerSid, trimmedSubject, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(callerName, trimmedSubject, StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.BadRequest(new { error = "Segregation of Duties (SoD) violation: Self-grant of access profiles is strictly prohibited." });
+        }
+
+        // Justification validation (minimum 15 characters)
+        if (string.IsNullOrWhiteSpace(req.Justification) || req.Justification.Trim().Length < 15)
+        {
+            return Results.BadRequest(new { error = "Justification is required and must be at least 15 characters long." });
+        }
+
+        // ValidDays validation (1 to 180 days)
+        if (req.ValidDays < 1 || req.ValidDays > 180)
+        {
+            return Results.BadRequest(new { error = "validDays must be between 1 and 180." });
+        }
+
+        // MaskingMode validation
+        if (!Enum.TryParse<MaskingPolicyMode>(req.MaskingMode, ignoreCase: true, out var mode))
+        {
+            return Results.BadRequest(new { error = $"Invalid maskingMode '{req.MaskingMode}'. Supported values: Default, Unmasked, Strict." });
+        }
+
+        // Tables validation
+        if (req.Tables == null || req.Tables.Count == 0)
+        {
+            return Results.BadRequest(new { error = "At least one target table pattern must be provided in 'tables'." });
+        }
+
+        // Overbroad wildcard restriction: *.* or * is forbidden for Unmasked
+        if (mode == MaskingPolicyMode.Unmasked)
+        {
+            if (req.Tables.Any(t => string.IsNullOrWhiteSpace(t) || t.Trim() is "*.*" or "*"))
+            {
+                return Results.BadRequest(new { error = "Overbroad wildcard '*.*' is prohibited for Unmasked access profiles. Minimum schema scope required (e.g. 'tem.*')." });
+            }
+        }
+
+        // RowFilter sandbox AST validation
+        if (!string.IsNullOrWhiteSpace(req.RowFilter))
+        {
+            var trimmedFilter = req.RowFilter.Trim();
+            if (trimmedFilter.Contains(';') || trimmedFilter.Contains("--") || trimmedFilter.Contains("/*") || trimmedFilter.Contains("*/"))
+            {
+                return Results.BadRequest(new { error = "Row filter predicate contains prohibited SQL constructs (semicolons or comments)." });
+            }
+
+            try
+            {
+                var parser = new FastSqlEngine();
+                _ = parser.ParseExpression(trimmedFilter.AsMemory(), SqlTokenSecurityOptions.None, ct);
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { error = $"Invalid row filter syntax: {ex.Message}" });
+            }
+        }
+
+        var tenantId = EndpointSecurity.GetRequestTenant(context);
+        var now = DateTimeOffset.UtcNow;
+        var validTo = now.AddDays(req.ValidDays);
+        var profileId = $"prof-{trimmedSubject.ToLowerInvariant()}-{mode.ToString().ToLowerInvariant()}-{now:yyyyMMddHHmmss}-{Guid.NewGuid().ToString("N")[..6]}";
+        var targetTables = req.Tables.Select(t => t.Trim()).ToList();
+
+        // Calculate matched tables
+        int tablesMatched = 0;
+        var metaRepo = context.RequestServices.GetService<ITableMetadataRepository>();
+        if (metaRepo != null)
+        {
+            try
+            {
+                var allTables = await metaRepo.GetAllTablesAsync(ct).ConfigureAwait(false);
+                tablesMatched = allTables.Count(t => targetTables.Any(pattern => AccessProfile.MatchesPattern(pattern, t.Identifier)));
+            }
+            catch
+            {
+                // Fallback to table count if metadata repository query fails
+                tablesMatched = targetTables.Count;
+            }
+        }
+        else
+        {
+            tablesMatched = targetTables.Count;
+        }
+
+        var subjectType = string.IsNullOrWhiteSpace(req.SubjectType) ? "User" : req.SubjectType.Trim();
+        var profile = new AccessProfile
+        {
+            ProfileId = profileId,
+            TenantId = tenantId,
+            Name = $"BulkConsent_{trimmedSubject}_{mode}",
+            MaskingMode = mode,
+            TargetTables = targetTables,
+            RowFilterPredicate = string.IsNullOrWhiteSpace(req.RowFilter) ? null : req.RowFilter.Trim(),
+            AssignedSubjects = [trimmedSubject],
+            CreatedAt = now,
+            ValidTo = validTo,
+            Justification = req.Justification.Trim(),
+            CreatedBy = callerSid
+        };
+
+        await accessProfileRepo.UpsertProfileAsync(profile, ct).ConfigureAwait(false);
+
+        // Audit-Verankerung (Tier-A CONSENT_GRANTED)
+        var auditEvent = new AuditLogEntry
+        {
+            TenantId = tenantId,
+            EventType = "CONSENT_GRANTED",
+            ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
+            TargetTable = string.Join(",", targetTables),
+            Decision = "ALLOW",
+            TraceId = context.TraceIdentifier,
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                profileId,
+                subject = trimmedSubject,
+                subjectType,
+                maskingMode = mode.ToString(),
+                tables = targetTables,
+                rowFilter = profile.RowFilterPredicate,
+                validDays = req.ValidDays,
+                validTo,
+                justification = profile.Justification,
+                tablesMatched
+            })
+        };
+
+        var auditRepo = context.RequestServices.GetService<IAuditLogRepository>();
+        if (auditRepo != null)
+        {
+            await auditRepo.RecordAuditEventAsync(auditEvent, ct).ConfigureAwait(false);
+        }
+
+        // Cluster-weite Cache-Invalidierung (AR-01)
+        var accessProfileCache = context.RequestServices.GetService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
+        if (accessProfileCache != null)
+        {
+            try
+            {
+                await accessProfileCache.InvalidateTenantAsync(tenantId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                if (auditRepo != null)
+                {
+                    var failAudit = new AuditLogEntry
+                    {
+                        TenantId = tenantId,
+                        EventType = "PROFILE_INVALIDATION_FAILED",
+                        ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
+                        Decision = "DENY",
+                        TraceId = context.TraceIdentifier,
+                        DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            reason = ex.Message,
+                            tenant = tenantId.Value,
+                            subject = trimmedSubject
+                        })
+                    };
+                    await auditRepo.RecordAuditEventAsync(failAudit, ct).ConfigureAwait(false);
+                }
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+        }
+        else
+        {
+            var clusterState = context.RequestServices.GetService<IDistributedClusterStateProvider>();
+            if (clusterState != null)
+            {
+                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, ct).ConfigureAwait(false);
+                if (!bumped.HasValue)
+                {
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                }
+            }
+        }
+
+        var message = mode == MaskingPolicyMode.Unmasked
+            ? "Bulk consent and unmasked access profile successfully created and activated."
+            : "Bulk consent and access profile successfully created and activated.";
+
+        return Results.Created($"/api/v1/profiles/{profileId}", new
+        {
+            profileId,
+            subject = trimmedSubject,
+            maskingMode = mode.ToString(),
+            tablesMatched,
+            rowFilter = profile.RowFilterPredicate,
+            validTo,
+            auditEventId = auditEvent.Id,
+            message
+        });
+    }
+
+    internal static async Task<IResult> GetProfilesAsync(
+        HttpContext context,
+        IAccessProfileRepository accessProfileRepo,
+        CancellationToken ct)
+    {
+        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor])
+            || context.User.IsInRole("SecurityAdmin")
+            || context.User.IsInRole("ClusterAdmin");
+        if (!isPrivileged)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var tenantId = EndpointSecurity.GetRequestTenant(context);
+        var profiles = await accessProfileRepo.GetAllProfilesAsync(tenantId, ct).ConfigureAwait(false);
+        return Results.Ok(profiles);
+    }
+
+    internal static async Task<IResult> GetProfileByIdAsync(
+        string id,
+        HttpContext context,
+        IAccessProfileRepository accessProfileRepo,
+        CancellationToken ct)
+    {
+        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor])
+            || context.User.IsInRole("SecurityAdmin")
+            || context.User.IsInRole("ClusterAdmin");
+        if (!isPrivileged)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var tenantId = EndpointSecurity.GetRequestTenant(context);
+        var profile = await accessProfileRepo.GetProfileAsync(tenantId, id, ct).ConfigureAwait(false);
+        if (profile == null)
+        {
+            return Results.NotFound(new { error = $"Profile '{id}' not found." });
+        }
+
+        return Results.Ok(profile);
+    }
+
+    internal static async Task<IResult> DeleteProfileAsync(
+        string id,
+        HttpContext context,
+        IAccessProfileRepository accessProfileRepo,
+        CancellationToken ct)
+    {
+        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin])
+            || context.User.IsInRole("SecurityAdmin")
+            || context.User.IsInRole("ClusterAdmin");
+        if (!isPrivileged)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var tenantId = EndpointSecurity.GetRequestTenant(context);
+        var profile = await accessProfileRepo.GetProfileAsync(tenantId, id, ct).ConfigureAwait(false);
+        if (profile == null)
+        {
+            return Results.NotFound(new { error = $"Profile '{id}' not found." });
+        }
+
+        await accessProfileRepo.DeleteProfileAsync(tenantId, id, ct).ConfigureAwait(false);
+
+        var callerSid = context.User.GetUserSid()?.Value ?? context.User.Identity?.Name ?? "UNKNOWN";
+        var auditEvent = new AuditLogEntry
+        {
+            TenantId = tenantId,
+            EventType = "CONSENT_REVOKED",
+            ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
+            TargetTable = string.Join(",", profile.TargetTables),
+            Decision = "DENY",
+            TraceId = context.TraceIdentifier,
+            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                profileId = id,
+                profile.Name,
+                profile.MaskingMode,
+                profile.TargetTables,
+                profile.AssignedSubjects,
+                revokedBy = callerSid
+            })
+        };
+
+        var auditRepo = context.RequestServices.GetService<IAuditLogRepository>();
+        if (auditRepo != null)
+        {
+            await auditRepo.RecordAuditEventAsync(auditEvent, ct).ConfigureAwait(false);
+        }
+
+        // Cluster-weite Cache-Invalidierung (AR-01)
+        var accessProfileCache = context.RequestServices.GetService<Autheris.Application.Policy.Interfaces.IAccessProfileCache>();
+        if (accessProfileCache != null)
+        {
+            try
+            {
+                await accessProfileCache.InvalidateTenantAsync(tenantId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                if (auditRepo != null)
+                {
+                    var failAudit = new AuditLogEntry
+                    {
+                        TenantId = tenantId,
+                        EventType = "PROFILE_INVALIDATION_FAILED",
+                        ActorSid = context.User.GetUserSid() ?? new Sid(callerSid),
+                        Decision = "DENY",
+                        TraceId = context.TraceIdentifier,
+                        DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                        {
+                            reason = ex.Message,
+                            tenant = tenantId.Value,
+                            profileId = id.ToString()
+                        })
+                    };
+                    await auditRepo.RecordAuditEventAsync(failAudit, ct).ConfigureAwait(false);
+                }
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
+        }
+        else
+        {
+            var clusterState = context.RequestServices.GetService<IDistributedClusterStateProvider>();
+            if (clusterState != null)
+            {
+                var bumped = await clusterState.IncrementAsync($"profile_epoch:{tenantId.Value}", 1, TimeSpan.Zero, ct).ConfigureAwait(false);
+                if (!bumped.HasValue)
+                {
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                }
+            }
+        }
+
+        return Results.Ok(new { message = $"Profile '{id}' successfully revoked.", auditEventId = auditEvent.Id });
     }
 
     private static string ResolveTenantBoundClientId(HttpContext context, string clientId, out bool isForbidden)
@@ -468,4 +881,15 @@ public static class GovernanceEndpoints
 
         return string.IsNullOrWhiteSpace(reqTenant) ? clientId : $"{reqTenant}:{clientId}";
     }
+}
+
+public sealed class BulkConsentRequest
+{
+    public string? Subject { get; set; }
+    public string? SubjectType { get; set; }
+    public string? MaskingMode { get; set; }
+    public List<string>? Tables { get; set; }
+    public string? RowFilter { get; set; }
+    public int ValidDays { get; set; }
+    public string? Justification { get; set; }
 }

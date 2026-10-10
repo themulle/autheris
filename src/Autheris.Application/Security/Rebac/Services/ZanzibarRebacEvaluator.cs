@@ -27,14 +27,24 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
     // Relation -> Relations that inherit it (e.g., "viewer" is inherited by ["editor", "owner"])
     private readonly ConcurrentDictionary<string, HashSet<string>> _inheritedBy = new(StringComparer.OrdinalIgnoreCase);
 
-    // Decision cache: TenantId -> (CacheKey -> (Allowed, Expiry))
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, (bool Allowed, DateTimeOffset Expiry)>> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly record struct CachedDecision(bool Allowed, DateTimeOffset Expiry, long Generation);
+
+    // Decision cache: TenantId -> (CacheKey -> CachedDecision)
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, CachedDecision>> _cache = new(StringComparer.OrdinalIgnoreCase);
+
+    // Degraded tenant state when generation bump fails: bypasses decision cache until bump succeeds
+    private readonly ConcurrentDictionary<string, bool> _degradedTenants = new(StringComparer.OrdinalIgnoreCase);
+
+    // Local generation cache: TenantId -> (Generation, ExpiryTimestamp)
+    private readonly ConcurrentDictionary<string, (long Generation, DateTimeOffset ExpiresAt)> _tenantGenerationCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>RR-L4-04: Event-bus channel used to invalidate decision caches on every replica.</summary>
     public const string InvalidationChannel = "autheris:rebac:invalidate";
 
     /// <summary>Monotonic cluster generation key stored in the broker to detect partition drift on reconnect.</summary>
     public const string GenerationKey = "rebac:generation";
+
+    public static string GetTenantGenerationKey(string tenant) => $"rebac:generation:{tenant}";
 
     private readonly IEventBus? _eventBus;
 
@@ -57,6 +67,8 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             {
                 _logger.LogInformation("Event bus connection restored. Evicting ReBAC decision cache to synchronize with cluster (1.8).");
                 _cache.Clear();
+                _tenantGenerationCache.Clear();
+                _degradedTenants.Clear();
             };
 
             // Singleton for the application lifetime; the subscription lives as long as the event bus.
@@ -83,49 +95,72 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         }
     }
 
-    public void InvalidateTenantCache(string tenantId)
+    public async Task InvalidateTenantCacheAsync(string tenantId, CancellationToken ct = default)
     {
         var tenant = InvalidateLocal(tenantId);
 
         if (_eventBus != null)
         {
-            _ = IncrementGenerationAsync();
-            _ = PublishInvalidationAsync(tenant);
-        }
-    }
+            try
+            {
+                var tenantKey = GetTenantGenerationKey(tenant);
+                await _eventBus.IncrementCounterAsync(tenantKey, ct).ConfigureAwait(false);
+                await _eventBus.IncrementCounterAsync(GenerationKey, ct).ConfigureAwait(false);
+                await _eventBus.PublishAsync(InvalidationChannel, tenant, ct).ConfigureAwait(false);
 
-    private async Task IncrementGenerationAsync()
-    {
-        try
-        {
-            await _eventBus!.IncrementCounterAsync(GenerationKey).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "ReBAC cluster generation counter could not be incremented in event bus.");
-        }
-    }
-
-    private async Task PublishInvalidationAsync(string tenant)
-    {
-        try
-        {
-            await _eventBus!.PublishAsync(InvalidationChannel, tenant).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "RR-L4-04 ReBAC cluster-wide cache invalidation for tenant {Tenant} could not be published.", tenant);
+                // Successfully bumped: clear degraded state for tenant if any
+                _degradedTenants.TryRemove(tenant, out _);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "ReBAC cluster generation bump or publish failed for tenant {Tenant}. Entering degraded state.", tenant);
+                _degradedTenants[tenant] = true;
+                InvalidateLocal(tenant);
+                throw;
+            }
         }
     }
 
     private string InvalidateLocal(string? tenantId)
     {
         var tenant = string.IsNullOrWhiteSpace(tenantId) ? "default" : tenantId.Trim();
+        _tenantGenerationCache.TryRemove(tenant, out _);
         if (_cache.TryRemove(tenant, out _))
         {
             _logger.LogDebug("F-SEC-04 ReBAC invalidated decision cache for tenant {Tenant}", tenant);
         }
         return tenant;
+    }
+
+    private async ValueTask<long?> GetTenantGenerationAsync(string tenant, CancellationToken ct)
+    {
+        if (_eventBus == null)
+        {
+            return 0L;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var cacheMs = _gatewayOptions.Value.Rebac?.GenerationCacheMilliseconds ?? 1000;
+        if (cacheMs > 0 && _tenantGenerationCache.TryGetValue(tenant, out var cached) && cached.ExpiresAt > now)
+        {
+            return cached.Generation;
+        }
+
+        try
+        {
+            var tenantGenKey = GetTenantGenerationKey(tenant);
+            var gen = await _eventBus.GetCounterAsync(tenantGenKey, ct).ConfigureAwait(false);
+            if (cacheMs > 0)
+            {
+                _tenantGenerationCache[tenant] = (gen, now.AddMilliseconds(cacheMs));
+            }
+            return gen;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read ReBAC generation counter for tenant {Tenant}. Cache validation failed-closed to cache miss.", tenant);
+            return null;
+        }
     }
 
     public async ValueTask<RebacCheckResult> CheckAsync(RebacCheckRequest request, CancellationToken ct = default)
@@ -149,33 +184,53 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
         var tenant = string.IsNullOrWhiteSpace(request.TenantId) ? "default" : request.TenantId.Trim();
         var cacheKey = $"{request.User}#{request.Relation}@{request.Object}";
 
-        // 1. Check cache
-        if (_cache.TryGetValue(tenant, out var tenantCache) &&
-            tenantCache.TryGetValue(cacheKey, out var entry) &&
-            entry.Expiry > DateTimeOffset.UtcNow)
+        var isDegraded = _degradedTenants.ContainsKey(tenant);
+        long? currentGen = null;
+
+        // 1. Check cache (only if tenant is not degraded)
+        if (!isDegraded)
         {
-            return entry.Allowed ? RebacCheckResult.Permitted : RebacCheckResult.Denied;
+            currentGen = await GetTenantGenerationAsync(tenant, ct).ConfigureAwait(false);
+            if (currentGen.HasValue &&
+                _cache.TryGetValue(tenant, out var tenantCache) &&
+                tenantCache.TryGetValue(cacheKey, out var entry) &&
+                entry.Expiry > DateTimeOffset.UtcNow &&
+                entry.Generation == currentGen.Value)
+            {
+                return entry.Allowed ? RebacCheckResult.Permitted : RebacCheckResult.Denied;
+            }
         }
 
         // 2. Perform graph resolution with cycle & depth guard
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var maxDepth = _gatewayOptions.Value.Rebac.MaxTraversalDepth;
 
-        var allowed = await TraverseAndEvaluateAsync(tenant, request.User, request.Relation, request.Object, depth: 0, maxDepth, visited, ct).ConfigureAwait(false);
+        try
+        {
+            var allowed = await TraverseAndEvaluateAsync(tenant, request.User, request.Relation, request.Object, depth: 0, maxDepth, visited, ct).ConfigureAwait(false);
 
-        // 3. Store in cache
-        var ttl = _gatewayOptions.Value.Rebac.CacheTtlSeconds;
-        var expiry = DateTimeOffset.UtcNow.AddSeconds(ttl);
-        StoreInCache(tenant, cacheKey, allowed, expiry);
+            // 3. Store in cache (only if not degraded and generation is known)
+            if (!isDegraded && currentGen.HasValue)
+            {
+                var ttl = _gatewayOptions.Value.Rebac.CacheTtlSeconds;
+                var expiry = DateTimeOffset.UtcNow.AddSeconds(ttl);
+                StoreInCache(tenant, cacheKey, allowed, expiry, currentGen.Value);
+            }
 
-        return allowed ? RebacCheckResult.Permitted : RebacCheckResult.Denied;
+            return allowed ? RebacCheckResult.Permitted : RebacCheckResult.Denied;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "F-SEC-04 ReBAC evaluation failed closed due to store exception for {User}#{Rel}@{Obj} in tenant {Tenant}", request.User, request.Relation, request.Object, tenant);
+            return RebacCheckResult.Denied;
+        }
     }
 
     /// <summary>Review E-3: bounded decision cache (arbitrary user/object combinations must not grow memory unbounded).</summary>
     internal const int MaxCachedTenants = 1_000;
     internal const int MaxCachedDecisionsPerTenant = 10_000;
 
-    private void StoreInCache(string tenant, string cacheKey, bool allowed, DateTimeOffset expiry)
+    private void StoreInCache(string tenant, string cacheKey, bool allowed, DateTimeOffset expiry, long generation)
     {
         if (!_cache.TryGetValue(tenant, out var tc))
         {
@@ -184,7 +239,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
                 return; // do not cache rather than grow without bound
             }
 
-            tc = _cache.GetOrAdd(tenant, _ => new ConcurrentDictionary<string, (bool, DateTimeOffset)>(StringComparer.OrdinalIgnoreCase));
+            tc = _cache.GetOrAdd(tenant, _ => new ConcurrentDictionary<string, CachedDecision>(StringComparer.OrdinalIgnoreCase));
         }
 
         if (tc.Count >= MaxCachedDecisionsPerTenant)
@@ -204,7 +259,7 @@ public sealed class ZanzibarRebacEvaluator : IRebacEvaluator
             }
         }
 
-        tc[cacheKey] = (allowed, expiry);
+        tc[cacheKey] = new CachedDecision(allowed, expiry, generation);
     }
 
     public async ValueTask<RebacBatchCheckResult> BatchCheckAsync(RebacBatchCheckRequest request, CancellationToken ct = default)

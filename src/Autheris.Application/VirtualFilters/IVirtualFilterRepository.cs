@@ -5,7 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 
 /// <summary>All virtual filters and access profiles with the generation they belong to.</summary>
-public sealed record VirtualFilterSnapshot(long Generation, IReadOnlyList<VirtualFilter> Filters, IReadOnlyList<AccessProfile> Profiles)
+public sealed record VirtualFilterSnapshot(long Generation, IReadOnlyList<VirtualFilter> Filters, IReadOnlyList<VirtualFilterAccessProfile> Profiles)
 {
     public static readonly VirtualFilterSnapshot Empty = new(0, [], []);
 }
@@ -14,7 +14,7 @@ public sealed record VirtualFilterSnapshot(long Generation, IReadOnlyList<Virtua
 public sealed record VirtualFilterChangeSet
 {
     public IReadOnlyList<VirtualFilter> SaveFilters { get; init; } = [];
-    public IReadOnlyList<AccessProfile> SaveProfiles { get; init; } = [];
+    public IReadOnlyList<VirtualFilterAccessProfile> SaveProfiles { get; init; } = [];
     public IReadOnlyList<(TenantId Tenant, string Name)> DeleteProfiles { get; init; } = [];
     public IReadOnlyList<(TenantId Tenant, string Name)> DeleteFilters { get; init; } = [];
 

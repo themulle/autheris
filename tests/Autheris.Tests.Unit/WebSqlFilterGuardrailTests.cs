@@ -95,7 +95,6 @@ public sealed class WebSqlFilterGuardrailTests
             policyEnforcement: null,
             consentResolution: resolution,
             tableRepository: repo,
-            auditLogRepository: null,
             connectionFactory: null,
             clientIpResolver: null,
             environment: env,

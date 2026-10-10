@@ -10,6 +10,7 @@ using Prometheus;
 using System;
 using System.Linq;
 using ChilliCream.Nitro.App;
+using Autheris.Domain.Audit;
 
 namespace Autheris.Api.Extensions;
 
@@ -291,6 +292,7 @@ public static class GatewayApplicationBuilderExtensions
             app.UseMiddleware<DevForbiddenDiagnosticsMiddleware>();
         }
 
+        app.UseMiddleware<AccessAuditMiddleware>();
         app.UseMiddleware<PreAuthIpRateLimitingMiddleware>();
         app.UseAuthentication();
         app.UseMiddleware<TokenRevocationMiddleware>();
@@ -349,7 +351,7 @@ public static class GatewayApplicationBuilderExtensions
 
     public static WebApplication MapGatewayEndpoints(this WebApplication app, GatewayOptions gatewayOptions)
     {
-        app.MapMetrics().RequireAuthorization();
+        app.MapMetrics().RequireAuthorization().WithAuditExemption("Prometheus scrape endpoint");
 
         // 1. Health & Readiness Probes
         app.MapHealthEndpoints(gatewayOptions, app.Environment);
@@ -383,7 +385,8 @@ public static class GatewayApplicationBuilderExtensions
         // GraphQL API endpoint: Nitro (Banana Cake Pop) UI is disabled on /graphql so it serves strictly as
         // a headless, deterministic machine-to-machine API without HTML multiplexing.
         var gqlEndpoint = app.MapGraphQL(endpoint)
-            .WithOptions((NitroAppOptions nitro) => nitro.Enable = false);
+            .WithOptions((NitroAppOptions nitro) => nitro.Enable = false)
+            .WithAudit(AuditLevel.Delegated, AuditEventTypes.TableQuery);
         // SEC H-02: OpenSchema no longer opens /graphql; only the Development-only anonymous mode does.
         // (SEC M-03: with the authenticated-user FallbackPolicy the anonymous mode must opt out explicitly.)
         if (gatewayOptions.IsAnonymousAccessAllowed)
@@ -414,7 +417,8 @@ public static class GatewayApplicationBuilderExtensions
                     nitro.DisableTelemetry = true;
                     nitro.Title = "Autheris GraphQL";
                     nitro.Document = "{\n  catalog(first: 5) {\n    domain\n    schema\n    tableName\n    sensitivity\n  }\n}\n";
-                });
+                })
+                .WithAuditExemption("Embedded developer tool UI");
 
             if (gatewayOptions.IsAnonymousAccessAllowed)
             {
@@ -432,12 +436,16 @@ public static class GatewayApplicationBuilderExtensions
         app.MapStreamingCdcEndpoints();
         app.MapDbtEndpoints();
         app.MapGovernanceEndpoints();
+        app.MapGovernanceClassificationEndpoints();
+        app.MapCatalogEndpoints();
         app.MapSystemEndpoints();
         app.MapODataEndpoints(gatewayOptions);
         app.MapMcpEndpoints(gatewayOptions);
         app.MapSchemaRegistryEndpoints();
         app.MapBackstageEndpoints(gatewayOptions);
         app.MapHitLEndpoints();
+        app.MapGovernanceApiEndpoints();
+        app.MapGovernancePlanEndpoints();
         app.MapTokenRevocationEndpoints(); // SEC M-14 (GAP-B)
         app.MapFinOpsEndpoints();
         app.MapRebacEndpoints();
@@ -448,10 +456,12 @@ public static class GatewayApplicationBuilderExtensions
         app.MapIcebergRestCatalogEndpoints();
         app.MapEnvoyExtAuthzEndpoints();
         app.MapWebSqlEndpoints(gatewayOptions);
+        app.MapDatasetDataEndpoints();
         app.MapSqlEndpoints(gatewayOptions);
         app.MapProcedureEndpoints(gatewayOptions);
         app.MapDevPortalEndpoints(gatewayOptions);
         app.MapDevEndpoints(gatewayOptions); // F-AUTH-DX: Development only (no routes elsewhere)
+        app.MapPlan9Endpoints();
 
         if (gatewayOptions.SqlEndpoints.Enabled)
         {

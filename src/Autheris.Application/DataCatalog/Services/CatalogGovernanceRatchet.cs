@@ -138,7 +138,7 @@ public static class CatalogGovernanceRatchet
     {
         "NULLIFY" => 4,
         "REDACT" => 3,
-        "HMAC" or "HMAC_SHA256" => 2,
+        "HMAC" or "HMAC_SHA256" or "TOKENIZE" or "TOKENIZATION" => 2,
         _ => 1
     };
 }

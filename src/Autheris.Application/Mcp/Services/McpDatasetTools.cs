@@ -7,7 +7,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// The built-in MCP dataset tools: names, tool definitions and the table a call targets.
+/// The built-in MCP dataset and hybrid tools: names, tool definitions and target tables.
 /// </summary>
 public static class McpDatasetTools
 {
@@ -16,13 +16,23 @@ public static class McpDatasetTools
     public const string SampleRows = "sample_rows";
     public const string QueryGraphQl = "query_graphql";
 
+    // Track D: Hybrid MCP Tools (ADR-02)
+    public const string QuerySql = "query_sql";
+    public const string QueryDataset = "query_dataset";
+    public const string SearchCatalog = "search_catalog";
+    public const string GetMyPermissions = "get_my_permissions";
+    public const string ListDatasources = "list_datasources";
+    public const string GetDataLineage = "get_data_lineage";
+    public const string DescribeApi = "describe_api";
+    public const string InvokeApi = "invoke_api";
+
     /// <summary>Sent as MCP <c>instructions</c> on initialize: how an agent finds and queries data.</summary>
     public const string ServerInstructions =
         "Autheris is a governed data gateway. To answer questions with data: " +
-        "1) call list_datasets to find the datasets you may use, " +
-        "2) call describe_dataset for columns, types, the GraphQL field and an example query, " +
-        "3) query with query_graphql - GraphQL is the preferred query path (filter, sort, paging and relations in one query; always pass a small first). " +
-        "sample_rows shows a few rows. Other protocols (OData, OpenAPI/REST, WebSQL / Trino /v1/statement, procedures, OLAP, Arrow) are listed by list_datasets and describe_dataset. " +
+        "1) call list_datasets or search_catalog to find datasets you may use, " +
+        "2) call describe_dataset or get_my_permissions for columns, types and access permissions, " +
+        "3) query with query_sql, query_dataset or query_graphql. " +
+        "sample_rows shows a few sample rows. Use describe_api and invoke_api for dynamic REST access. " +
         "Results are filtered and masked for your identity; hidden datasets and columns do not appear.";
 
     /// <summary>ABAC object for catalog listings (like <c>query_data_catalog</c>).</summary>
@@ -32,21 +42,52 @@ public static class McpDatasetTools
         string.Equals(toolName, ListDatasets, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, SampleRows, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(toolName, QueryGraphQl, StringComparison.OrdinalIgnoreCase);
+        string.Equals(toolName, QueryGraphQl, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, QuerySql, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, QueryDataset, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, SearchCatalog, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, GetMyPermissions, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, ListDatasources, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, GetDataLineage, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, DescribeApi, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, InvokeApi, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Tools that return rows; only these need four-eyes approval on a four-eyes table.</summary>
     public static bool ReadsRows(string? toolName) =>
         string.Equals(toolName, SampleRows, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(toolName, QueryGraphQl, StringComparison.OrdinalIgnoreCase);
+        string.Equals(toolName, QueryGraphQl, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, QuerySql, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, QueryDataset, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The table a dataset tool call targets. Null (fail-closed) when a table tool has no valid <c>dataset</c> argument.
     /// </summary>
     public static TableIdentifier? TargetTable(string toolName, string? argumentsJson)
     {
-        if (string.Equals(toolName, ListDatasets, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(toolName, ListDatasets, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(toolName, SearchCatalog, StringComparison.OrdinalIgnoreCase))
         {
             return CatalogTable;
+        }
+
+        if (string.Equals(toolName, ListDatasources, StringComparison.OrdinalIgnoreCase))
+        {
+            return new TableIdentifier("governance", "catalog", "datasources");
+        }
+
+        if (string.Equals(toolName, DescribeApi, StringComparison.OrdinalIgnoreCase))
+        {
+            return new TableIdentifier("governance", "api", "describe");
+        }
+
+        if (string.Equals(toolName, InvokeApi, StringComparison.OrdinalIgnoreCase))
+        {
+            return new TableIdentifier("governance", "api", "invoke");
+        }
+
+        if (string.Equals(toolName, QuerySql, StringComparison.OrdinalIgnoreCase))
+        {
+            return new TableIdentifier("governance", "sql", "query");
         }
 
         if (string.Equals(toolName, QueryGraphQl, StringComparison.OrdinalIgnoreCase))
@@ -122,11 +163,133 @@ public static class McpDatasetTools
             }
             """,
             TargetGraphQLOperation: SampleRows);
+
+        yield return new McpToolDefinition(
+            Name: QuerySql,
+            Description: "Executes a governed SQL query with row-level security, column masking, and tenant isolation under the caller's context.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["query"],
+              "properties": {
+                "query": { "type": "string", "description": "SQL SELECT query to execute against the gateway." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: QuerySql);
+
+        yield return new McpToolDefinition(
+            Name: QueryDataset,
+            Description: "Queries a dataset (table) by identifier with optional column selection, filter expression, ordering, limit and offset.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["dataset"],
+              "properties": {
+                "dataset": { "type": "string", "description": "Dataset identifier (domain.schema.table)." },
+                "select": { "type": "array", "items": { "type": "string" }, "description": "Optional list of columns to select." },
+                "filter": { "type": "string", "description": "Optional filter predicate expression." },
+                "orderBy": { "type": "string", "description": "Optional sort order (e.g. 'createdDate desc')." },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Maximum rows to return (default 50)." },
+                "offset": { "type": "integer", "minimum": 0, "description": "Number of rows to skip (default 0)." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: QueryDataset);
+
+        yield return new McpToolDefinition(
+            Name: SearchCatalog,
+            Description: "Performs hybrid semantic vector and keyword search across thousands of tables in the catalog. Input natural language inquiries (e.g. 'monthly revenue by customer', 'unpaid invoices') or exact table codes. Returns ranked candidate tables, relevance score, matching columns, and explicit join relations.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["query"],
+              "properties": {
+                "query": { "type": "string", "description": "Search query text (natural language intention, keywords, or exact table codes)." },
+                "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales', 'finance', 'core')." },
+                "limit": { "type": "integer", "description": "Maximum number of candidate tables to return (default: 5, max: 20)." },
+                "mode": { "type": "string", "enum": ["hybrid", "semantic", "keyword"], "description": "Search mode: 'hybrid' (default), 'semantic', or 'keyword'." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: SearchCatalog);
+
+        yield return new McpToolDefinition(
+            Name: GetMyPermissions,
+            Description: "Checks effective permissions, ReBAC authorization, column masking rules and row filters for the current caller on a dataset.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["dataset"],
+              "properties": {
+                "dataset": { "type": "string", "description": "Dataset identifier (domain.schema.table)." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: GetMyPermissions);
+
+        yield return new McpToolDefinition(
+            Name: ListDatasources,
+            Description: "Lists configured enterprise data sources and connectors with their health status and domain (without leaking secrets).",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "properties": {
+                "status": { "type": "string", "description": "Optional status filter (e.g. healthy, active, degraded, inactive)." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: ListDatasources);
+
+        yield return new McpToolDefinition(
+            Name: GetDataLineage,
+            Description: "Retrieves provenance and data lineage graph for a dataset, including upstream sources and downstream consumers.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["dataset"],
+              "properties": {
+                "dataset": { "type": "string", "description": "Dataset identifier (domain.schema.table)." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: GetDataLineage);
+
+        yield return new McpToolDefinition(
+            Name: DescribeApi,
+            Description: "Inspects API endpoint schemas, parameters, required permissions, and request/response contracts.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["endpoint"],
+              "properties": {
+                "endpoint": { "type": "string", "description": "API route path (e.g. '/api/v1/data/{domain}/{table}')." },
+                "method": { "type": "string", "description": "Optional HTTP method (GET, POST, PUT, DELETE)." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: DescribeApi);
+
+        yield return new McpToolDefinition(
+            Name: InvokeApi,
+            Description: "Universally invokes an Autheris API endpoint with dynamic parameters and payload under full governance and audit.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["endpoint", "method"],
+              "properties": {
+                "endpoint": { "type": "string", "description": "API route path (e.g. '/api/v1/catalog/datasets')." },
+                "method": { "type": "string", "description": "HTTP method (GET, POST, PUT, DELETE)." },
+                "parameters": { "type": "object", "description": "Optional query or route parameters." },
+                "body": { "type": "object", "description": "Optional request body payload." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: InvokeApi);
     }
 
     /// <summary>
-    /// A string argument that occurs exactly once (case-insensitive). The executor reads arguments case-insensitively
-    /// with the last value winning, so a repeated name could make the guardrail check something else than is executed.
+    /// A string argument that occurs exactly once (case-insensitive).
     /// </summary>
     public static bool TryGetStringArgument(string? argumentsJson, string name, out string? value)
     {
@@ -144,8 +307,6 @@ public static class McpDatasetTools
                 return false;
             }
 
-            // The executor reads arguments case-insensitively (last one wins), so a name that occurs more than once
-            // could make ABAC check a different table than the one that is read: such calls are rejected.
             var found = 0;
             foreach (var prop in doc.RootElement.EnumerateObject())
             {

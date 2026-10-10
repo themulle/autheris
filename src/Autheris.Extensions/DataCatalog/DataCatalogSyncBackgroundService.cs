@@ -15,15 +15,18 @@ public sealed class DataCatalogSyncBackgroundService : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<DataCatalogSyncBackgroundService> _logger;
+    private readonly Autheris.Application.State.IDistributedClusterStateProvider? _clusterState;
 
     public DataCatalogSyncBackgroundService(
         IServiceProvider serviceProvider,
         IOptions<GatewayOptions> options,
-        ILogger<DataCatalogSyncBackgroundService> logger)
+        ILogger<DataCatalogSyncBackgroundService> logger,
+        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null)
     {
         _serviceProvider = serviceProvider;
         _options = options;
         _logger = logger;
+        _clusterState = clusterState;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -42,23 +45,41 @@ public sealed class DataCatalogSyncBackgroundService : BackgroundService
         // Run an initial sync after a brief startup delay
         await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken).ConfigureAwait(false);
 
+        var leaseDuration = TimeSpan.FromMinutes(Math.Max(5, catalogOpts.SyncIntervalMinutes));
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                using var scope = _serviceProvider.CreateScope();
-                var syncService = scope.ServiceProvider.GetRequiredService<IDataCatalogSyncService>();
-
-                var result = await syncService.SyncCatalogAsync(dryRun: false, ct: stoppingToken).ConfigureAwait(false);
-                if (result.Success)
+                IAsyncDisposable? syncLock = null;
+                if (_clusterState != null)
                 {
-                    _logger.LogInformation(
-                        "Periodic Data Catalog sync succeeded. Synced {Tables} tables, {Columns} columns, {Art9} Art-9 GDPR protected tables.",
-                        result.SyncedTablesCount, result.SyncedColumnsCount, result.Art9ProtectedTablesCount);
+                    syncLock = await _clusterState.TryAcquireLockAsync("catalog:datacatalog:sync", leaseDuration, stoppingToken).ConfigureAwait(false);
+                    if (syncLock == null)
+                    {
+                        _logger.LogDebug("Data Catalog sync lock held by another cluster replica; skipping cycle.");
+                        var skipMinutes = Math.Clamp(_options.Value.Catalog.SyncIntervalMinutes, 1, 1440);
+                        await Task.Delay(TimeSpan.FromMinutes(skipMinutes), stoppingToken).ConfigureAwait(false);
+                        continue;
+                    }
                 }
-                else
+
+                await using (syncLock)
                 {
-                    _logger.LogWarning("Periodic Data Catalog sync completed with warnings: {Warnings}", string.Join("; ", result.Warnings));
+                    using var scope = _serviceProvider.CreateScope();
+                    var syncService = scope.ServiceProvider.GetRequiredService<IDataCatalogSyncService>();
+
+                    var result = await syncService.SyncCatalogAsync(dryRun: false, ct: stoppingToken).ConfigureAwait(false);
+                    if (result.Success)
+                    {
+                        _logger.LogInformation(
+                            "Periodic Data Catalog sync succeeded. Synced {Tables} tables, {Columns} columns, {Art9} Art-9 GDPR protected tables.",
+                            result.SyncedTablesCount, result.SyncedColumnsCount, result.Art9ProtectedTablesCount);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Periodic Data Catalog sync completed with warnings: {Warnings}", string.Join("; ", result.Warnings));
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

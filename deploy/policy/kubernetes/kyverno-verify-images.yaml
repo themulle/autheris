@@ -1,0 +1,32 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: verify-autheris-images
+  annotations:
+    policies.kyverno.io/title: Verify Autheris Image Signatures
+    policies.kyverno.io/category: Supply Chain Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Verifies that Autheris container images are signed by the official GitHub Actions workflow
+      using Sigstore Cosign keyless OIDC tokens.
+spec:
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 30
+  rules:
+    - name: verify-signature
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      verifyImages:
+        - imageReferences:
+            - "ghcr.io/themulle/autheris*"
+          mutateDigest: true
+          attestors:
+            - entries:
+                - keyless:
+                    issuer: https://token.actions.githubusercontent.com
+                    subject: "^https://github\\.com/themulle/autheris/\\.github/workflows/docker-publish\\.yml@refs/(heads/main|tags/v.+)$"
+                    rekor:
+                      url: https://rekor.sigstore.dev

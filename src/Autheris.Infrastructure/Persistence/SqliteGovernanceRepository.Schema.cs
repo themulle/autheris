@@ -58,6 +58,9 @@ public partial class SqliteGovernanceRepository
             }
         }
 
+        DeduplicateDataOwnersBeforeIndex(_connection);
+        EnsureAccessProfilesTableMigration(_connection);
+
         using var cmd = _connection.CreateCommand();
         cmd.CommandText = @"
             CREATE TABLE IF NOT EXISTS TABLES (
@@ -214,6 +217,15 @@ public partial class SqliteGovernanceRepository
             CREATE INDEX IF NOT EXISTS idx_audit_target_table ON AUDIT_LOG_ENTRIES (target_table, occurred_at);
             CREATE INDEX IF NOT EXISTS idx_audit_actor_sid ON AUDIT_LOG_ENTRIES (actor_sid, occurred_at);
 
+            -- AU-05: Dead-letter queue for failed audit batches
+            CREATE TABLE IF NOT EXISTS AUDIT_DEAD_LETTER (
+                id TEXT PRIMARY KEY,
+                batch_json TEXT NOT NULL,
+                error_message TEXT NOT NULL,
+                failed_at TEXT NOT NULL,
+                tenant_id TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS CONSENT_REQUESTS (
                 id TEXT PRIMARY KEY,
                 table_id TEXT NOT NULL,
@@ -300,7 +312,7 @@ public partial class SqliteGovernanceRepository
                 UNIQUE (tenant_id, name)
             );
 
-            CREATE TABLE IF NOT EXISTS ACCESS_PROFILES (
+            CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_ACCESS_PROFILES (
                 id TEXT PRIMARY KEY,
                 tenant_id TEXT NOT NULL,
                 name TEXT NOT NULL,
@@ -312,6 +324,34 @@ public partial class SqliteGovernanceRepository
                 updated_at TEXT NOT NULL,
                 UNIQUE (tenant_id, name)
             );
+
+            CREATE TABLE IF NOT EXISTS ACCESS_PROFILES (
+                profile_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                masking_mode TEXT NOT NULL DEFAULT 'Default',
+                target_tables TEXT NOT NULL DEFAULT '[""*.*""]',
+                row_filter_predicate TEXT,
+                justification TEXT,
+                created_by TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                valid_to TEXT,
+                PRIMARY KEY (tenant_id, profile_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS ACCESS_PROFILE_ASSIGNMENTS (
+                profile_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                subject_type TEXT NOT NULL DEFAULT 'User',
+                assigned_at TEXT NOT NULL,
+                expires_at TEXT,
+                PRIMARY KEY (tenant_id, profile_id, subject),
+                FOREIGN KEY (tenant_id, profile_id) REFERENCES ACCESS_PROFILES (tenant_id, profile_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS IX_ACCESS_PROFILE_ASSIGNMENTS_SUBJECT 
+                ON ACCESS_PROFILE_ASSIGNMENTS(tenant_id, subject);
 
             CREATE TABLE IF NOT EXISTS VIRTUAL_FILTER_GENERATION (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -938,6 +978,111 @@ public partial class SqliteGovernanceRepository
         {
             idxCmd.CommandText = "CREATE INDEX IF NOT EXISTS idx_audit_tenant_id ON AUDIT_LOG_ENTRIES (tenant_id, occurred_at);";
             idxCmd.ExecuteNonQuery();
+        }
+    }
+
+    private void DeduplicateDataOwnersBeforeIndex(SqliteConnection connection)
+    {
+        try
+        {
+            using var checkCmd = connection.CreateCommand();
+            checkCmd.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='DATA_OWNERS';";
+            if (checkCmd.ExecuteScalar() == null) return;
+
+            using var dupCmd = connection.CreateCommand();
+            dupCmd.CommandText = "SELECT ad_sid FROM DATA_OWNERS WHERE ad_sid IS NOT NULL AND ad_sid != '' GROUP BY ad_sid HAVING COUNT(*) > 1;";
+            var duplicateSids = new List<string>();
+            using (var reader = dupCmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    duplicateSids.Add(reader.GetString(0));
+                }
+            }
+
+            if (duplicateSids.Count == 0) return;
+
+            _logger?.LogWarning("Found {Count} duplicate ad_sid values in DATA_OWNERS; merging duplicates before applying unique constraint (B-05).", duplicateSids.Count);
+
+            foreach (var sid in duplicateSids)
+            {
+                using var fetchCmd = connection.CreateCommand();
+                fetchCmd.CommandText = "SELECT id, is_active FROM DATA_OWNERS WHERE ad_sid = @sid ORDER BY is_active DESC, rowid ASC;";
+                fetchCmd.Parameters.AddWithValue("@sid", sid);
+                var rows = new List<(string id, long active)>();
+                using (var reader = fetchCmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        rows.Add((reader.GetString(0), reader.GetInt64(1)));
+                    }
+                }
+
+                if (rows.Count <= 1) continue;
+
+                var primaryId = rows[0].id;
+                for (int i = 1; i < rows.Count; i++)
+                {
+                    var secondaryId = rows[i].id;
+                    _logger?.LogInformation("Merging duplicate DATA_OWNERS id '{SecondaryId}' into primary id '{PrimaryId}' for ad_sid '{Sid}'.", secondaryId, primaryId, sid);
+
+                    using var updateTableOwnersCmd = connection.CreateCommand();
+                    updateTableOwnersCmd.CommandText = @"
+                        UPDATE OR IGNORE TABLE_OWNERS SET data_owner_id = @primaryId WHERE data_owner_id = @secondaryId;
+                        DELETE FROM TABLE_OWNERS WHERE data_owner_id = @secondaryId;
+                    ";
+                    updateTableOwnersCmd.Parameters.AddWithValue("@primaryId", primaryId);
+                    updateTableOwnersCmd.Parameters.AddWithValue("@secondaryId", secondaryId);
+                    updateTableOwnersCmd.ExecuteNonQuery();
+
+                    using var updateDefaultsCmd = connection.CreateCommand();
+                    updateDefaultsCmd.CommandText = @"
+                        UPDATE OR IGNORE DOMAIN_DEFAULTS SET data_owner_id = @primaryId WHERE data_owner_id = @secondaryId;
+                        DELETE FROM DOMAIN_DEFAULTS WHERE data_owner_id = @secondaryId;
+                    ";
+                    updateDefaultsCmd.Parameters.AddWithValue("@primaryId", primaryId);
+                    updateDefaultsCmd.Parameters.AddWithValue("@secondaryId", secondaryId);
+                    try { updateDefaultsCmd.ExecuteNonQuery(); } catch { }
+
+                    using var deleteCmd = connection.CreateCommand();
+                    deleteCmd.CommandText = "DELETE FROM DATA_OWNERS WHERE id = @secondaryId;";
+                    deleteCmd.Parameters.AddWithValue("@secondaryId", secondaryId);
+                    deleteCmd.ExecuteNonQuery();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Error while deduplicating DATA_OWNERS table before unique index creation.");
+        }
+    }
+
+    private static void EnsureAccessProfilesTableMigration(SqliteConnection conn)
+    {
+        try
+        {
+            using var pragma = conn.CreateCommand();
+            pragma.CommandText = "PRAGMA table_info(ACCESS_PROFILES);";
+            using var reader = pragma.ExecuteReader();
+            bool hasProfileId = false;
+            bool hasId = false;
+            while (reader.Read())
+            {
+                var col = reader.GetString(1);
+                if (string.Equals(col, "profile_id", StringComparison.OrdinalIgnoreCase)) hasProfileId = true;
+                if (string.Equals(col, "id", StringComparison.OrdinalIgnoreCase)) hasId = true;
+            }
+            reader.Close();
+            if (hasId && !hasProfileId)
+            {
+                using var migrate = conn.CreateCommand();
+                migrate.CommandText = "ALTER TABLE ACCESS_PROFILES RENAME TO VIRTUAL_FILTER_ACCESS_PROFILES;";
+                migrate.ExecuteNonQuery();
+            }
+        }
+        catch
+        {
+            // Table might not exist yet; ignore
         }
     }
 }
