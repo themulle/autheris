@@ -255,4 +255,49 @@ public sealed class FederatedVirtualFilterAuditTests
         ex.ErrorCode.ShouldBe("VF_KEY_SET_TOO_LARGE");
         logs.Count(l => l.Level == LogLevel.Error).ShouldBe(1);
     }
+
+    private static IEnumerable<JsonElement> KeySourceReads(Pipeline pipeline) =>
+        Entries(pipeline)
+            .Where(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead)
+            .Select(Details)
+            .Where(d => d.TryGetProperty("kind", out var k) && k.GetString() == "virtualFilterKeySource");
+
+    [Fact]
+    public async Task PlanDenialAfterKeysWereLoaded_StillAuditsTheKeySourceRead()
+    {
+        // CR-04 (AC-9.1): ShortCircuitOnly denies the scan after the key set was read; the read must still be on record.
+        var (crm, pipeline, _) = Setup(strategy: VirtualFilterExecutionStrategy.ShortCircuitOnly);
+
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(() => pipeline.RunAsync(Scan));
+
+        ex.ErrorCode.ShouldBe("VF_SCAN_NOT_PERMITTED");
+        crm.UpstreamCalls.ShouldBe(0);
+        var keyRead = KeySourceReads(pipeline).ShouldHaveSingleItem();
+        keyRead.GetProperty("filter").GetString().ShouldBe("vf_customers");
+        keyRead.GetProperty("keyCount").GetInt32().ShouldBe(2);
+        Entries(pipeline).ShouldContain(e => e.EventType == AuditEventTypes.WebSqlQueryDenied);
+        Entries(pipeline).Select(e => e.TraceId).Distinct().Count().ShouldBe(1);
+        Entries(pipeline).ShouldNotContain(e => e.EventType == AuditEventTypes.WebSqlCrossSourceQuery);   // the start record never ran
+    }
+
+    [Fact]
+    public async Task PushdownLimitDenial_AuditsTheKeySourceReadExactlyOnce()
+    {
+        var (_, pipeline, _) = Setup(strategy: VirtualFilterExecutionStrategy.PushdownOnly, options: new Autheris.Domain.Options.VirtualFilterFederationOptions { MaxPushdownKeys = 1 });
+
+        // PushdownOnly with two keys and a limit of one is denied by the planner.
+        await Should.ThrowAsync<GatewaySecurityException>(() => pipeline.RunAsync(Scan));
+
+        KeySourceReads(pipeline).ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task SuccessfulQuery_WritesEachKeySourceRecordOnce()
+    {
+        var (_, pipeline, _) = Setup();
+
+        await pipeline.RunAsync(Scan);
+
+        KeySourceReads(pipeline).ShouldHaveSingleItem();
+    }
 }

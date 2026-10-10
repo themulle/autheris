@@ -60,7 +60,8 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         TenantId tenant,
-        CancellationToken ct)
+        CancellationToken ct,
+        ICollection<VirtualFilterKeySourceRead>? keySourceReads = null)
     {
         ArgumentNullException.ThrowIfNull(tables);
         ArgumentNullException.ThrowIfNull(decisions);
@@ -109,23 +110,18 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
             {
                 var keys = await LoadAsync(table.Pairs[i].Filter, table.KeyTypes[i], tenant, ct).ConfigureAwait(false);
                 loaded.Add((table.Pairs[i], keys));
+                keySourceReads?.Add(new VirtualFilterKeySourceRead(table.Metadata.Identifier, KeySetAudit(table.Pairs[i], keys)));
             }
 
-            var audits = loaded
-                .Select(l => new VirtualFilterKeySetAudit(
-                    l.Pair.Filter.Name,
-                    l.Pair.Filter.Source,
-                    l.Pair.Binding.ComputeHash(),
-                    l.Pair.Binding.Strategy.ToString(),
-                    l.Keys.Count,
-                    l.Keys.DroppedKeyCount,
-                    l.Keys.CacheHit))
-                .ToList();
+            var audits = loaded.Select(l => KeySetAudit(l.Pair, l.Keys)).ToList();
             plans[table.Metadata.Identifier] = Decide(statement, tables, table, loaded).WithKeySets(audits);
         }
 
         return plans;
     }
+
+    private static VirtualFilterKeySetAudit KeySetAudit(AppliedVirtualFilterBinding pair, VirtualFilterKeySet keys) =>
+        new(pair.Filter.Name, pair.Filter.Source, pair.Binding.ComputeHash(), pair.Binding.Strategy.ToString(), keys.Count, keys.DroppedKeyCount, keys.CacheHit);
 
     private VirtualFilterTablePlan Decide(
         SqlStatement? statement,

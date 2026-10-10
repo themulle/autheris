@@ -284,6 +284,9 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         // One correlation id for every audit record of this query (start, key set reads, source reads, denial).
         var correlationId = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
+        // CR-04 (AC-9.1): key set reads are on record even when the plan is denied after the keys were loaded.
+        var keySourceReads = new List<VirtualFilterKeySourceRead>();
+        bool keySourceReadsAudited = false;
         try
         {
             // Budget and Timeout (INV-12, INV-13). SEC-12: the timeout also covers authorization, planning and key loading.
@@ -300,11 +303,12 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             // F-GOV-14 (WI-6): the planner decides per protected HTTP table how the authorized keys are loaded and enforced
             // (single policy decision point: the decisions). Without a planner a table with applied Virtual Filters is denied.
             var statement = ParseStatement(request.Sql);
-            var vfPlans = await PlanVirtualFiltersAsync(statement, routing.Tables, decisions, tenantId, timeoutCts.Token).ConfigureAwait(false);
+            var vfPlans = await PlanVirtualFiltersAsync(statement, routing.Tables, decisions, tenantId, keySourceReads, timeoutCts.Token).ConfigureAwait(false);
             var plan = _planner.Plan(request.Sql, metadata, routing.Tables, decisions, crossSourceOptions, vfPlans, statement);
 
             // Start Audit (fail-closed, INV-17)
-            await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, vfPlans, correlationId, ct).ConfigureAwait(false);
+            await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, vfPlans, keySourceReads, correlationId, ct).ConfigureAwait(false);
+            keySourceReadsAudited = true;
 
             var budget = new FederationBudget(
                 MaxTableCount: maxTables,
@@ -335,7 +339,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
         catch (Exception ex)
         {
-            await RecordFailureAuditAsync(request, tenantId, user, ex, correlationId).ConfigureAwait(false);
+            await RecordFailureAuditAsync(request, tenantId, user, ex, correlationId, keySourceReadsAudited ? [] : keySourceReads).ConfigureAwait(false);
             throw;
         }
     }
@@ -351,6 +355,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         TenantId tenantId,
+        ICollection<VirtualFilterKeySourceRead> keySourceReads,
         CancellationToken ct)
     {
         if (_vfPlanner == null)
@@ -369,7 +374,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             return null;
         }
 
-        return await _vfPlanner.PlanAsync(statement, tables, decisions, tenantId, ct).ConfigureAwait(false);
+        return await _vfPlanner.PlanAsync(statement, tables, decisions, tenantId, ct, keySourceReads).ConfigureAwait(false);
     }
 
     private async Task<(Dictionary<TableIdentifier, TableAccessDecision> Decisions, Sid UserSid)> AuthorizeAllTablesAsync(
@@ -496,6 +501,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         Sid userSid,
         TenantId tenantId,
         IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>? vfPlans,
+        IReadOnlyList<VirtualFilterKeySourceRead> keySourceReads,
         string correlationId,
         CancellationToken ct)
     {
@@ -535,36 +541,39 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             }, ct).ConfigureAwait(false);
 
             // F-GOV-14 (FR-9): every key set read is its own record (counts and cache state, never key values).
-            foreach (var (table, plan) in vfPlans ?? new Dictionary<TableIdentifier, VirtualFilterTablePlan>())
-            {
-                foreach (var keySet in plan.KeySets)
-                {
-                    await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
-                    {
-                        TenantId = tenantId,
-                        EventType = AuditEventTypes.WebSqlCrossSourceSourceRead,
-                        ActorSid = userSid,
-                        TargetTable = table.ToString(),
-                        Decision = "ALLOW",
-                        TraceId = correlationId,
-                        DetailsJson = JsonSerializer.Serialize(new
-                        {
-                            kind = "virtualFilterKeySource",
-                            table = table.ToString(),
-                            filter = keySet.Filter,
-                            source = keySet.Source,
-                            keyCount = keySet.KeyCount,
-                            droppedKeys = keySet.DroppedKeys,
-                            cacheHit = keySet.CacheHit
-                        })
-                    }, ct).ConfigureAwait(false);
-                }
-            }
+            await RecordKeySourceReadsAsync(keySourceReads, userSid, tenantId, correlationId, ct).ConfigureAwait(false);
         }
         catch (Exception auditEx)
         {
             _logger?.LogError(auditEx, "Failed to record start audit for cross-source query.");
             throw new InvalidOperationException("Audit logging failure during cross-source query execution.", auditEx);
+        }
+    }
+
+    private async Task RecordKeySourceReadsAsync(
+        IReadOnlyList<VirtualFilterKeySourceRead> reads, Sid userSid, TenantId tenantId, string correlationId, CancellationToken ct)
+    {
+        foreach (var read in reads)
+        {
+            await _auditLogRepository!.RecordAuditEventAsync(new AuditLogEntry
+            {
+                TenantId = tenantId,
+                EventType = AuditEventTypes.WebSqlCrossSourceSourceRead,
+                ActorSid = userSid,
+                TargetTable = read.Table.ToString(),
+                Decision = "ALLOW",
+                TraceId = correlationId,
+                DetailsJson = JsonSerializer.Serialize(new
+                {
+                    kind = "virtualFilterKeySource",
+                    table = read.Table.ToString(),
+                    filter = read.KeySet.Filter,
+                    source = read.KeySet.Source,
+                    keyCount = read.KeySet.KeyCount,
+                    droppedKeys = read.KeySet.DroppedKeys,
+                    cacheHit = read.KeySet.CacheHit
+                })
+            }, ct).ConfigureAwait(false);
         }
     }
 
@@ -587,12 +596,19 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         TenantId tenantId,
         ClaimsPrincipal user,
         Exception ex,
-        string correlationId)
+        string correlationId,
+        IReadOnlyList<VirtualFilterKeySourceRead> unauditedKeySourceReads)
     {
         if (_auditLogRepository == null) return;
 
         try
         {
+            if (unauditedKeySourceReads.Count > 0)
+            {
+                // Keys were read but the query was denied before the start record: the reads are still on record (AC-9.1).
+                await RecordKeySourceReadsAsync(unauditedKeySourceReads, ResolveUserSid(user), tenantId, correlationId, CancellationToken.None).ConfigureAwait(false);
+            }
+
             var (redactedOriginalSql, originalSqlHash) = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.AnonymizeSqlForAudit(request.Sql);
             var userSid = ResolveUserSid(user);
             bool isDenied = ex is WebSqlPolicyException or SecurityException or GatewaySecurityException;

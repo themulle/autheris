@@ -6,6 +6,9 @@ using System.Threading.Tasks;
 using Autheris.Application.Sql.Services;
 using TrinoSqlEngine.Ast.Nodes;
 
+/// <summary>One key set read of the planner (audit only; never carries key values).</summary>
+public sealed record VirtualFilterKeySourceRead(TableIdentifier Table, VirtualFilterKeySetAudit KeySet);
+
 /// <summary>
 /// F-GOV-14 (M5): plans, for every protected HTTP table of a WebSQL cross-source query, how the authorized keys are
 /// loaded and enforced. The (filter, binding) pairs come only from the access decisions (single policy decision
@@ -19,11 +22,16 @@ public interface IVirtualFilterFederationPlanner
     /// <param name="decisions">The access decision of every table, keyed by source-qualified identifier.</param>
     /// <param name="tenant">The caller's tenant.</param>
     /// <param name="ct">Cancellation; the request timeout covers key loading (SEC-12).</param>
+    /// <param name="keySourceReads">
+    /// Receives every key set read as soon as it completes, so a later denial of the plan still leaves the reads on record
+    /// (AC-9.1, CR-04). Optional.
+    /// </param>
     /// <returns>One plan per protected HTTP table, keyed by source-qualified identifier.</returns>
     Task<IReadOnlyDictionary<TableIdentifier, VirtualFilterTablePlan>> PlanAsync(
         SqlStatement? statement,
         IReadOnlyList<ResolvedSourceTable> tables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisions,
         TenantId tenant,
-        CancellationToken ct);
+        CancellationToken ct,
+        ICollection<VirtualFilterKeySourceRead>? keySourceReads = null);
 }
