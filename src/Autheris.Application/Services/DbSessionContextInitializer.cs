@@ -21,7 +21,8 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
             return dialect;
         }
 
-        return DatabaseDialect.Sqlite;
+        // SEC-ADG-14: an unknown provider must never fall back to another dialect (fail closed).
+        throw new NotSupportedException($"SQL provider '{provider}' is not supported for session initialization.");
     }
 
     public Task<DbTransaction?> InitializeSessionAsync(
@@ -88,7 +89,12 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
             return null;
         }
 
-        return null;
+        if (HasNoSessionState(dialect))
+        {
+            return null;
+        }
+
+        throw UnsupportedSessionDialect(dialect);
     }
 
     public async Task InitializeSessionAsync(
@@ -111,7 +117,18 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
         {
             await ExecuteSqlServerInitAsync(connection, tx, tenantId, userSid, purpose, ct).ConfigureAwait(false);
         }
+        else if (!HasNoSessionState(dialect))
+        {
+            throw UnsupportedSessionDialect(dialect);
+        }
     }
+
+    /// <summary>Explicit "no session state" dialects: SQLite is a file-local engine, Databricks is stateless over HTTP.</summary>
+    private static bool HasNoSessionState(DatabaseDialect dialect) =>
+        dialect is DatabaseDialect.Sqlite or DatabaseDialect.Databricks;
+
+    private static NotSupportedException UnsupportedSessionDialect(DatabaseDialect dialect) =>
+        new($"Session initialization for dialect '{dialect}' is not supported (fail closed).");
 
     private static async Task ExecutePostgreSqlInitAsync(
         DbConnection connection,
