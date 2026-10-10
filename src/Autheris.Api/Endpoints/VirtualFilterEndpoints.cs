@@ -149,7 +149,6 @@ public static class VirtualFilterEndpoints
             }
 
             var model = body.ToModel(name, tenant.Value);
-            await VirtualFilterBindingValidator.ValidateAsync([model], context).ConfigureAwait(false);
             var saved = await service.SaveProfileAsync(model, actor, context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(ProfileView(saved));
         });
@@ -619,7 +618,6 @@ public static class VirtualFilterEndpoints
         }
 
         var profiles = (body.Profiles ?? []).Select(p => p.Value.ToModel(p.Key, tenant.Value)).ToList();
-        await VirtualFilterBindingValidator.ValidateAsync(profiles, context).ConfigureAwait(false);
         return new VirtualFilterSyncRequest(
             tenant.Value,
             new ManagedBy(body.Path, body.Commit),

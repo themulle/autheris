@@ -272,7 +272,7 @@ The governance HTTP bodies (`PUT /api/v1/governance/access-profiles/{name}` and 
 
 The profile response echoes `strategy`, `pushdown_format` and `max_pushdown_keys` for every binding. The values are part of the binding's canonical hash and therefore of the profile's `definition_hash`, so a change follows the same authorization, audit, draft and approval path as any other binding field. Omitted fields keep the defaults.
 
-A request that violates one of these rules answers HTTP 400 and stores nothing; a file repository sync with such a binding is rejected as a whole:
+The rules are enforced by the administration service, so every path that writes a profile is covered: the HTTP API, the file repository sync (plan and apply) and the dbt governance import. A request that violates one of these rules answers HTTP 400 and stores nothing; a file repository sync with such a binding is rejected as a whole; a dbt import reports the profile as a warning and skips it:
 
 - An unknown `strategy`, `pushdown_format` or `uncovered` value. Values must match exactly (snake_case, lower case, as listed above); other cases, names without underscores and numbers are rejected: error code `VF_BINDING_INVALID`.
 - `max_pushdown_keys` outside `1..1000`, or an explicitly sent value above the gateway-wide `Gateway:VirtualFilters:Federation:MaxPushdownKeys`: error code `VF_PUSHDOWN_KEY_BUDGET_INVALID`. A binding that omits `max_pushdown_keys` keeps the default `100` and is not checked against the gateway-wide limit; at query time the effective budget is the lower of the two.

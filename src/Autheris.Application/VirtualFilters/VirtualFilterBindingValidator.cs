@@ -1,4 +1,4 @@
-namespace Autheris.Api.Endpoints;
+namespace Autheris.Application.VirtualFilters;
 
 using System;
 using System.Collections.Generic;
@@ -9,12 +9,9 @@ using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 
 /// <summary>A binding option is rejected when the profile is written; <see cref="Code"/> is a stable <see cref="VirtualFilterErrorCodes"/> value.</summary>
-internal sealed class VirtualFilterBindingException(string code, string message) : ArgumentException(message)
+public sealed class VirtualFilterBindingException(string code, string message) : ArgumentException(message)
 {
     public string Code { get; } = code;
 }
@@ -24,7 +21,7 @@ internal sealed class VirtualFilterBindingException(string code, string message)
 /// <c>max_pushdown_keys</c>). They fail closed: an invalid value is a 400 and nothing is stored. The format check reuses
 /// <see cref="HttpKeyPushdownCapability"/>, the logic the planner applies at query time; the planner still decides per query.
 /// </summary>
-internal static class VirtualFilterBindingValidator
+public static class VirtualFilterBindingValidator
 {
     private static readonly IReadOnlyDictionary<VirtualFilterExecutionStrategy, string> StrategyNames = new Dictionary<VirtualFilterExecutionStrategy, string>
     {
@@ -82,11 +79,14 @@ internal static class VirtualFilterBindingValidator
             ? name
             : throw new InvalidOperationException($"{typeof(T).Name}.{value} has no binding name.");
 
-    public static async Task ValidateAsync(IEnumerable<VirtualFilterAccessProfile> profiles, HttpContext context)
+    /// <param name="profiles">Profiles about to be written (API, file repository sync, dbt import).</param>
+    /// <param name="federation">The gateway-wide <c>Gateway:VirtualFilters:Federation</c> options.</param>
+    /// <param name="catalog">Catalog used to check an exact target's endpoint capability; null skips that check.</param>
+    public static async Task ValidateAsync(IEnumerable<VirtualFilterAccessProfile> profiles, VirtualFilterFederationOptions federation, ITableMetadataRepository? catalog, CancellationToken ct)
     {
-        var services = context.RequestServices;
-        int gatewayLimit = (services.GetService<IOptions<GatewayOptions>>()?.Value.VirtualFilters?.Federation ?? new VirtualFilterFederationOptions()).MaxPushdownKeys;
-        var catalog = services.GetService<ITableMetadataRepository>();
+        ArgumentNullException.ThrowIfNull(profiles);
+        ArgumentNullException.ThrowIfNull(federation);
+        int gatewayLimit = federation.MaxPushdownKeys;
 
         foreach (var profile in profiles)
         {
@@ -101,7 +101,7 @@ internal static class VirtualFilterBindingValidator
 
                 if (binding.PushdownFormat is { } format)
                 {
-                    await ValidateFormatAsync(binding, format, catalog, context.RequestAborted).ConfigureAwait(false);
+                    await ValidateFormatAsync(binding, format, catalog, ct).ConfigureAwait(false);
                 }
             }
         }

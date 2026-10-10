@@ -1,7 +1,7 @@
 namespace Autheris.Tests.Unit.VirtualFilters;
 
 using System;
-using Autheris.Api.Endpoints;
+using Autheris.Application.VirtualFilters;
 using Autheris.Application.VirtualFilters.Federation;
 using Autheris.Domain.Model;
 using Shouldly;

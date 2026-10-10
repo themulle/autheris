@@ -387,13 +387,24 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("nicht_ausgelieferte_krane", put, _service), put)).ShouldBe(StatusCodes.Status200OK);
     }
 
+    /// <summary>A service wired like production: gateway options and catalog come from DI, the endpoint does not validate bindings.</summary>
+    private VirtualFilterAdministrationService ServiceWith(Action<IServiceCollection>? configure)
+    {
+        var services = new ServiceCollection().AddLogging();
+        configure?.Invoke(services);
+        var provider = services.BuildServiceProvider();
+        return new VirtualFilterAdministrationService(
+            _repository,
+            Substitute.For<IAuditLogRepository>(),
+            provider.GetService<IOptions<GatewayOptions>>(),
+            snapshots: null,
+            catalog: provider.GetService<ITableMetadataRepository>());
+    }
+
     private async Task<(int Status, string Body)> PutBindingAsync(object binding, Action<IServiceCollection>? configure = null)
     {
         var context = Context(Tenant, BindingProfile(binding), "FilterAdmin");
-        var services = new ServiceCollection().AddLogging();
-        configure?.Invoke(services);
-        context.RequestServices = services.BuildServiceProvider();
-        var status = await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, _service), context);
+        var status = await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, ServiceWith(configure)), context);
         context.Response.Body.Position = 0;
         return (status, await new StreamReader(context.Response.Body).ReadToEndAsync());
     }
@@ -568,11 +579,8 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
             profiles = new Dictionary<string, object> { ["david"] = BindingProfile(new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id" }) }
         };
         var context = Context(Tenant, body, "FilterSync");
-        var services = new ServiceCollection().AddLogging();
-        Configure(services);
-        context.RequestServices = services.BuildServiceProvider();
 
-        (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(context, _service), context)).ShouldBe(StatusCodes.Status200OK);
+        (await StatusAsync(await VirtualFilterEndpoints.ApplySyncAsync(context, ServiceWith(Configure)), context)).ShouldBe(StatusCodes.Status200OK);
         (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
     }
 
