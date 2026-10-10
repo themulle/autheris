@@ -208,7 +208,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
             {
                 var auditDetails = new Dictionary<string, object?>
                 {
-                    ["table"] = req.Metadata.Identifier.ToQualifiedName(),
+                    ["table"] = req.Metadata.Identifier.ToString(),   // with the domain: two sources may share schema.table (SEC-1)
                     ["stagingName"] = req.StagingName,
                     ["dataSourceType"] = req.Metadata.Table.DataSourceType.ToString(),
                     ["sourceName"] = req.Metadata.Table.SourceName ?? req.Metadata.Identifier.Domain,
@@ -231,6 +231,15 @@ public sealed class FederatedStagingService : IFederatedStagingService
                         auditDetails["upstreamRequests"] = lookupConnector.Stats.Requests;
                         auditDetails["upstreamKeysNotFound"] = lookupConnector.Stats.KeysNotFound;
                     }
+                    else if (vfPlan.SkipUpstream)
+                    {
+                        auditDetails["upstreamRequests"] = 0;
+                    }
+                    else if (req.Metadata.HttpEndpoint is { Pagination: null or { Strategy: HttpPaginationStrategy.None } })
+                    {
+                        // CR-05: one request. A paged read issues one request per page and is not counted here.
+                        auditDetails["upstreamRequests"] = 1;
+                    }
                 }
 
                 await _auditRepo.RecordAuditEventAsync(new AuditLogEntry
@@ -238,7 +247,7 @@ public sealed class FederatedStagingService : IFederatedStagingService
                     TenantId = tenantId.Value,
                     EventType = AuditEventTypes.WebSqlCrossSourceSourceRead,
                     ActorSid = actorSid,
-                    TargetTable = req.Metadata.Identifier.ToQualifiedName(),
+                    TargetTable = req.Metadata.Identifier.ToString(),
                     Decision = "ALLOW",
                     TraceId = budget.AuditCorrelationId ?? Guid.NewGuid().ToString("N"),
                     DetailsJson = JsonSerializer.Serialize(auditDetails)

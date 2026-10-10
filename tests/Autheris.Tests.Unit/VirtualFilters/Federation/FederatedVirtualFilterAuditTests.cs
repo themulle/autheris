@@ -98,7 +98,7 @@ public sealed class FederatedVirtualFilterAuditTests
         filter.GetProperty("strategy").GetString().ShouldBe("Adaptive");
         filter.GetProperty("bindingHash").GetString().ShouldNotBeNullOrWhiteSpace();
 
-        var upstream = entries.Where(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == "public.customers"
+        var upstream = entries.Where(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == "crm_api.public.customers"
                                           && Details(e).TryGetProperty("upstreamCalled", out _)).ShouldHaveSingleItem();
         var read = Details(upstream);
         read.GetProperty("upstreamCalled").GetBoolean().ShouldBeFalse();
@@ -134,7 +134,7 @@ public sealed class FederatedVirtualFilterAuditTests
         await pipeline.RunAsync(Scan);
 
         var read = Entries(pipeline)
-            .Where(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == "public.customers")
+            .Where(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == "crm_api.public.customers")
             .Select(Details).Single(d => d.TryGetProperty("upstreamCalled", out _));
         read.GetProperty("vfTier").GetString().ShouldBe("FullFetch");
         read.GetProperty("upstreamCalled").GetBoolean().ShouldBeTrue();
@@ -151,7 +151,7 @@ public sealed class FederatedVirtualFilterAuditTests
         await pipeline.RunAsync(Scan);
 
         var read = Entries(pipeline)
-            .Where(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == "public.customers")
+            .Where(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == "crm_api.public.customers")
             .Select(Details).Single(d => d.TryGetProperty("upstreamCalled", out _));
         read.GetProperty("vfTier").GetString().ShouldBe("Pushdown");
         read.GetProperty("pushdownKeyCount").GetInt32().ShouldBe(2);
@@ -299,5 +299,42 @@ public sealed class FederatedVirtualFilterAuditTests
         await pipeline.RunAsync(Scan);
 
         KeySourceReads(pipeline).ShouldHaveSingleItem();
+    }
+
+    private static JsonElement UpstreamRead(Pipeline pipeline) =>
+        Entries(pipeline)
+            .Where(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == "crm_api.public.customers")
+            .Select(Details).Single(d => d.TryGetProperty("upstreamCalled", out _));
+
+    [Fact]
+    public async Task UpstreamRead_NamesTheTableWithItsDomain_SoTwoSourcesWithTheSameTableNameDiffer()
+    {
+        // CR-05 (SEC-1 in the audit): crm_api.public.customers and erp.public.customers must not share an audit target.
+        var (_, pipeline, _) = Setup();
+
+        await pipeline.RunAsync(Scan);
+
+        var reads = Entries(pipeline).Where(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && Details(e).TryGetProperty("rowCount", out _)).ToList();
+        reads.Select(e => e.TargetTable).ShouldBe(["crm_api.public.customers", "erp.public.orders"], ignoreOrder: true);
+        reads.ShouldAllBe(e => Details(e).GetProperty("table").GetString() == e.TargetTable);
+    }
+
+    [Theory]
+    [InlineData("pushdown", 1)]
+    [InlineData("tier3", 1)]
+    [InlineData("tier1miss", 0)]
+    [InlineData("tier0", 0)]
+    public async Task UpstreamRead_RecordsTheNumberOfUpstreamRequests(string scenario, int requests)
+    {
+        var (_, pipeline, _) = scenario switch
+        {
+            "tier0" => Setup(k => k.With("vf_customers")),
+            "tier3" => Setup(pushdownCapable: false),
+            _ => Setup()
+        };
+
+        await pipeline.RunAsync(scenario == "tier1miss" ? Scan + " WHERE c.id = '" + Queried + "'" : Scan);
+
+        UpstreamRead(pipeline).GetProperty("upstreamRequests").GetInt32().ShouldBe(requests);
     }
 }
