@@ -31,7 +31,6 @@ public class DialectCapabilitiesTests
     }
 
     [Theory]
-    [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.Oracle)]
     [InlineData(TargetSqlDialect.Ansi)]
     [InlineData((TargetSqlDialect)999)]

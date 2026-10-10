@@ -136,7 +136,6 @@ public class CompileApiTests
 
     [Theory]
     [InlineData(TargetSqlDialect.Ansi)]
-    [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Snowflake)]
     [InlineData(TargetSqlDialect.Oracle)]

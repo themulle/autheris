@@ -32,7 +32,14 @@ public enum TenantComparisonStyle
     /// DuckDB: <c>col = t AND encode(CAST(col AS varchar)) = encode(CAST(t AS varchar))</c>. <c>encode</c> yields a BLOB, whose
     /// comparison is exact regardless of any collation on the column.
     /// </summary>
-    EncodedBlob
+    EncodedBlob,
+
+    /// <summary>
+    /// PostgreSQL: <c>col = t AND textsend(CAST(col AS text)) = textsend(CAST(t AS text))</c>. <c>textsend</c> yields the raw bytes,
+    /// so the comparison is exact even when the column has a non-deterministic (case- or accent-insensitive) ICU collation or
+    /// the type is <c>citext</c>.
+    /// </summary>
+    TextSendBytea
 }
 
 /// <summary>Declarative Trino-function to dialect rule. No matching rule means the function is rejected (INV-1).</summary>

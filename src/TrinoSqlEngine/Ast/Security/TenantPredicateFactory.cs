@@ -55,6 +55,17 @@ public static class TenantPredicateFactory
                     BinaryOperator.And,
                     new BinaryExpression(Encoded(Column()), BinaryOperator.Equal, Encoded(Param())));
             }
+            case TenantComparisonStyle.TextSendBytea:
+            {
+                // col = t AND textsend(CAST(col AS text)) = textsend(CAST(t AS text)); bytea comparison is byte-exact.
+                static Expression Raw(Expression operand) =>
+                    new FunctionCallExpression(new SqlQualifiedName("textsend"), new[] { (Expression)new CastExpression(operand, "text") });
+
+                return new BinaryExpression(
+                    new BinaryExpression(Column(), BinaryOperator.Equal, Param()),
+                    BinaryOperator.And,
+                    new BinaryExpression(Raw(Column()), BinaryOperator.Equal, Raw(Param())));
+            }
             default:
                 throw new NotSupportedException($"No binary-exact tenant comparison is defined for {capabilities.Dialect}.");
         }

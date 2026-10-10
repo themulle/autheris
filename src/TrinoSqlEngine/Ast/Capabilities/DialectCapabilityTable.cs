@@ -71,6 +71,34 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "DUCK-PREP");
 
+    private static readonly DialectCapabilities PostgreSql = new(
+        Dialect: TargetSqlDialect.PostgreSql,
+        Tier: DialectSupportTier.Production,
+        MaxBindParameters: 65535,                                  // Int16 count in the Bind message [PG-PROTO]
+        MaxInListItems: null,
+        MaxIdentifierLength: 63,                                   // NAMEDATALEN - 1; silently truncated, so rejected [PG-LEX]
+        IdentifierLengthUnit: IdentifierLengthUnit.Bytes,
+        IdentifierOpenQuote: '"',
+        IdentifierCloseQuote: '"',
+        MarkerStyle: ParameterMarkerStyle.DollarOrdinal,
+        SupportsMarkerReuse: true,
+        Pagination: PaginationStyle.LimitOffset,
+        SupportsWithTies: true,
+        SupportsNullsFirstLast: true,
+        Booleans: BooleanRepresentation.Native,
+        SupportsMerge: true,
+        SupportsLateral: true,
+        SupportsGroupingSets: true,
+        SupportsFilterClause: true,
+        SupportsTryCast: false,
+        LimitGuaranteed: true,
+        InDbHmac: true,                                            // pgcrypto hmac(); a missing extension fails at execution
+        TenantComparison: TenantComparisonStyle.TextSendBytea,
+        BindExpressionTemplates: SqlServerBindTemplates,
+        Functions: DialectFunctionMap.Empty,
+        AllowedTableFunctions: FrozenSet<string>.Empty,
+        LimitSource: "PG-PROTO");
+
     // Declared after the static capability entries: static initializers run in textual order.
     public static DialectCapabilityTable Default { get; } = new();
 
@@ -81,7 +109,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         _table = new Dictionary<TargetSqlDialect, DialectCapabilities>
         {
             [TargetSqlDialect.SqlServer] = SqlServer,
-            [TargetSqlDialect.DuckDb] = DuckDb
+            [TargetSqlDialect.DuckDb] = DuckDb,
+            [TargetSqlDialect.PostgreSql] = PostgreSql
         }.ToFrozenDictionary();
     }
 

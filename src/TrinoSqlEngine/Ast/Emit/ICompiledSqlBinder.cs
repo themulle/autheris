@@ -47,6 +47,9 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
     /// <summary>The provider passes strings as C strings and would truncate at an embedded NUL (fail closed instead).</summary>
     protected virtual bool RejectsEmbeddedNul => false;
 
+    /// <summary>The provider-side parameter name. Positional providers (Npgsql with <c>$n</c>) use an empty name.</summary>
+    protected virtual string ParameterNameFor(BoundParameter parameter) => parameter.Name;
+
     public bool CanBind(TargetSqlDialect dialect) => dialect == Dialect;
 
     public void Bind(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues)
@@ -94,7 +97,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
             }
 
             var parameter = command.CreateParameter();
-            parameter.ParameterName = bound.Name;
+            parameter.ParameterName = ParameterNameFor(bound);
             Configure(parameter, type, value);
             command.Parameters.Add(parameter);
         }
@@ -205,4 +208,16 @@ public sealed class DuckDbCompiledSqlBinder : DbCommandCompiledSqlBinder
 {
     protected override TargetSqlDialect Dialect => TargetSqlDialect.DuckDb;
     protected override bool RejectsEmbeddedNul => true;
+}
+
+/// <summary>
+/// PostgreSQL binder (<c>Npgsql</c>): markers are <c>$1</c>, <c>$2</c> ... and the parameters are positional (unnamed, added in
+/// ordinal order). PostgreSQL text cannot hold NUL, so a string with an embedded NUL is rejected instead of failing late.
+/// </summary>
+public sealed class PostgreSqlCompiledSqlBinder : DbCommandCompiledSqlBinder
+{
+    protected override TargetSqlDialect Dialect => TargetSqlDialect.PostgreSql;
+    protected override bool RejectsEmbeddedNul => true;
+    protected override DbType TimestampDbType => DbType.DateTime2;   // Npgsql: timestamp without time zone (DbType.DateTime is timestamptz)
+    protected override string ParameterNameFor(BoundParameter parameter) => string.Empty;
 }

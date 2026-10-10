@@ -313,7 +313,8 @@ public sealed class AstSecurityVisitor : SqlAstRewriter
         var inner = new SelectStatement(null,
             new QuerySpecification(false, projections, new NamedTableSource(canonical, innerAlias), where, null, null),
             null, null);
-        return new SubqueryTableSource(inner, node.Alias ?? new SqlIdentifier(node.Name.SimpleName, IsQuoted: true));
+        // An unquoted user name stays unquoted, so the dialect folds the alias and the user's references the same way.
+        return new SubqueryTableSource(inner, node.Alias ?? new SqlIdentifier(node.Name.SimpleName, IsQuoted: node.Name.Parts[^1].IsQuoted));
     }
 
     private SubqueryTableSource CreateSecuredSubqueryTableSource(

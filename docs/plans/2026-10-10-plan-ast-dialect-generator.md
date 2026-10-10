@@ -1592,7 +1592,7 @@ Priority order and stacked branches (each branch is based on the head of the pre
 |---|---|---|---|
 | 1 | `feat/ast-mssql-select` | Core (A1-A6, A8 for SELECT) plus SQL Server | see 18.2 |
 | 2 | `feat/ast-duckdb-select` | DuckDB SELECT | see 18.3 |
-| 3 | `feat/ast-postgres-select` | PostgreSQL SELECT | planned |
+| 3 | `feat/ast-postgres-select` | PostgreSQL SELECT | see 18.4 |
 | 4 | `feat/ast-databricks-select` | Databricks SELECT | planned |
 | 5 | `feat/ast-oracle-select` | Oracle SELECT, based on the PostgreSQL head plus `feat/ast-failclosed-fixes` (WP-D4), WP-F1..F4 | planned |
 | later | `feat/ast-dml` | A7 (DML, MERGE) for all dialects | deferred; not started in this work |
@@ -1625,3 +1625,11 @@ Scope: capability entry (65,535 bind parameters, probed in process; `$n` markers
 Core changes that stay dialect-neutral: `EmittedSqlInvariantChecker` takes delimiter characters and marker style from the capability table (all five marker styles are lexed); the binder logic moved into `DbCommandCompiledSqlBinder` with per-provider hooks; the compile-budget mapping no longer treats ANTLR `ParseCanceledException` as a timeout.
 
 Federation staging (`CrossSourcePlanner`) keeps the legacy string path (`GenerateSql`), which is unchanged; the full `Autheris.Tests.Unit` suite covers it.
+
+### 18.4 Branch `feat/ast-postgres-select` (on top of `feat/ast-duckdb-select`)
+
+Scope: capability entry (65,535 binds, 63-byte identifier limit measured in bytes so over-long names are rejected instead of silently truncated, `$n` markers, `InDbHmac = true` through pgcrypto, no `TRY_CAST`), `PostgreSqlCompiledSqlBinder` (positional unnamed Npgsql parameters in ordinal order, `timestamp` through `DbType.DateTime2`, NUL rejected), bound-literal emission (structural pagination including `WITH TIES`, reviewed constant fragments `INTERVAL '1 day'`, `DATE_TRUNC('unit', ...)`, `'sha256'`, `'hex'`), typed masks (HMAC through `ENCODE(HMAC(..., 'sha256'), 'hex')` with a bound key; partial masks clamp the counts with `GREATEST(n, 0)`, so a negative count cannot expose the value; the DuckDB partial mask received the same clamp), byte-exact tenant comparison `col = t AND textsend(CAST(col AS text)) = textsend(CAST(t AS text))` (SEC-ADG-04), schema-qualified canonical names (SEC-ADG-07).
+
+Execution evidence on `postgres:16-alpine` (Testcontainers): tenant isolation on a `citext` column and on a non-deterministic ICU collation (a plain `=` returns both `acme` and `ACME`), consent filters, policy-subquery tenant predicate, a hostile `search_path` plus a `pg_temp` decoy table (the secured query still reads `public.orders`), plan-cache rebinding per tenant, hostile tenant and user values, redact/partial/HMAC (matches a reference HMAC-SHA256)/jitter masks, bind-limit probe at 65,535 parameters.
+
+Semantic notes: PostgreSQL folds unquoted identifiers to lower case, catalog columns are emitted exactly as cataloged, so a mixed-case catalog column must be quoted by the user (Trino semantics differ); `standard_conforming_strings` has no effect because no string literal is emitted. The unqualified table alias keeps the user's folding (unquoted names stay unquoted). Session `search_path` pinning (INV-14) belongs to the runtime session initializer and is not part of this branch; the compiler does not depend on it.
