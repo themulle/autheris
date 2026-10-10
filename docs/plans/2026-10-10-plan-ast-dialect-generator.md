@@ -2,7 +2,7 @@
 
 **Document ID:** `PLAN-AST-DIALECT-GEN-16` (implementation plan, Phase 2 of the 6-phase lifecycle)
 **Date:** 2026-10-10
-**Status:** IN PROGRESS - DML re-review loop 1 delivered (§19.11, changes requested: CR-ADG-42); DQL approved (§19.9) and ready for Phase 6
+**Status:** IN PROGRESS - DML review loop 2 implemented (§25: CR-ADG-42, -43, -44 fixed, awaiting the Phase 5 re-review); DQL approved (§19.9) and ready for Phase 6
 **Author:** Solution Architect (`csharp-architect`); Phase 3 review (§16) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
@@ -1576,6 +1576,7 @@ Affected work packages and test criteria (additions to §11 and §16.8):
 
 ## 17. Changelog
 
+- 2026-10-10: Added §25 "Implementation Log — DML review loop 2": CR-ADG-42 (Blocker: the INSERT check option now evaluates the policy on the stored value through native catalog casts and compares string columns byte-exact), CR-ADG-43 (binders refuse a row-count-checked statement; `CheckedDmlExecutor` is the only way to run it) and CR-ADG-44 (balanced row tree) fixed on `feat/ast-dml`; the §24.2 "known limit" text corrected; X1 preconditions updated.
 - 2026-10-10: Added §19.11 "Re-review (DML loop 1)" (`csharp-code-reviewer`) of `feat/ast-dml` at `4f18436`: CR-ADG-33, -34, -36..41 closed; changes requested for CR-ADG-42 (Blocker: the CR-ADG-35 INSERT check option is bypassed by type coercion on four engines and by column collation); CR-ADG-43 (X1) and CR-ADG-44 (Minor) added.
 - 2026-10-10: Added §24 "Implementation Log — DML review loop 1": CR-ADG-33..41 fixed on `feat/ast-dml` (one commit per finding); CR-ADG-35 decided by the orchestrator under stakeholder delegation (check-option INSERT for admin row policies, row-count contract in `CompiledSql`); CR-ADG-34 delivered as a total error mapper, runtime wiring stays at X1.
 - 2026-10-10: Added §19.10 "Phase 5 Code Review — DML" (`csharp-code-reviewer`) of `feat/ast-dml` at `78a6c42`: verdict changes requested (narrow) for CR-ADG-33 (MERGE source/target alias collision; all engines refuse it today, the compiler must too); CR-ADG-34 (generic error mapping) and CR-ADG-35 (check option instead of rejecting INSERT into policy tables) added as X1 preconditions; Minor/Nit CR-ADG-36..41.
@@ -2301,12 +2302,12 @@ Track `PLAN-AST-DIALECT-GEN-16`, Phase 4 loop-back after the Phase 5 DML review 
 
 **Execution evidence.** The shared contract (`AstCompilerDmlContract`) has a transaction harness (`RunCheckedAsync`: begin, execute, `DmlCheckOption.Enforce`, commit, roll back on any exception) that every ADO.NET dialect class uses. Three scenarios run on SQL Server, PostgreSQL, Oracle Free and DuckDB: an insert that satisfies the policy is written (two rows); an insert that violates it is rolled back and the table snapshot is unchanged; a three-row insert with one violating row is rolled back as a whole and the key of a passing row is still free afterwards. A fourth scenario (INSERT ... SELECT and a missing policy column) is rejected by the compiler before the database. On Delta the same test asserts the typed compile error.
 
-**Known limit (documented, fail closed in the safe direction).** The check compares bound values with the database's default collation, not with the target column's collation. If the read filter is case-insensitive and the check is not, an insert such as `'eu'` for `Region = 'EU'` can be rolled back although a read would have shown it (a false reject). The opposite direction (a row passes the check but a read does not show it) hides a row from its writer but never exposes it to anyone else.
+**Known limit (corrected by §25; the original text was wrong).** This text said that the check compares bound values with the database's default collation, that the false-reject direction is harmless, and that the opposite direction "hides a row from its writer but never exposes it to anyone else". The re-review (§19.11.2) showed that the opposite direction does cross a policy boundary: when the check is case-insensitive and the column is case-sensitive, `'eu'` passes a `Region = 'EU'` check and is stored as `'eu'`, where another principal of the same tenant whose policy is `Region = 'eu'` can read it. The check also evaluated unconverted values (decimal rounding, date truncation). Both are fixed in §25 (CR-ADG-42); this paragraph no longer describes the implementation.
 
 ### 24.3 X1 preconditions (updated)
 
 1. CR-ADG-34: wire `DmlErrorSanitizer.Map` into every runtime executor on the governed compile and execute path (SQL Server, PostgreSQL, Oracle, DuckDB, Spark/Delta client), and log the original error server-side only.
-2. CR-ADG-35: wire `DmlCheckOption.Enforce` into the DML executors (transaction, compare, rollback) for statements with `RequiresRowCountCheck`.
+2. CR-ADG-35: wire `DmlCheckOption.Enforce` into the DML executors (transaction, compare, rollback) for statements with `RequiresRowCountCheck`. Superseded by §25.4 item 2: the executors adopt `ICheckedDmlExecutor`, which already performs this.
 3. The earlier preconditions of §20.3 stand.
 
 ### 24.4 Evidence
@@ -2327,3 +2328,68 @@ Observed on `feat/ast-dml` after the last fix commit (`CI=true`, `TESTCONTAINERS
 - A request that sets any `DmlGuardOptions` switch other than the strict value is now rejected with `SqlCompileConfigurationException`.
 - INSERT into a table with an admin row policy is now supported (VALUES only) with a row-count check that the executor must perform.
 - `CompiledSql` has two new members (`ExpectedAffectedRows`, `RequiresRowCountCheck`); the capability record has `SupportsSubqueryInDmlCondition` and `ReportsInsertRowCount` (table version `cap-5`).
+
+## 25. Implementation Log — DML review loop 2
+
+Track `PLAN-AST-DIALECT-GEN-16`, Phase 4 loop-back after the Phase 5 re-review of the DML loop 1 (§19.11). Branch `feat/ast-dml`, fast-forwarded to `4928b27`; one commit per finding (Phase 4 developer, Sonnet). Tests first: the new contract scenarios were run against the injector with the casts and the string rewrite disabled (verifier checks off as well) and failed on DuckDB (decimal rounding and date truncation), then passed with the fix. Nothing is pushed.
+
+### 25.1 Status per finding
+
+| ID | Status | Commit | Notes |
+|---|---|---|---|
+| CR-ADG-42 | Fixed on all four ADO.NET dialects; no dialect fell back | `e7c8ef2` | See 25.2. |
+| CR-ADG-43 | Fixed (compile and bind side); runtime adoption at X1 | `1e837d3` | See 25.3. |
+| CR-ADG-44 | Fixed | `bb60c14` | The balanced `UNION ALL` tree is built in the CR-ADG-42 change (same function); the tests that pin it are in their own commit. See 25.5. |
+
+### 25.2 CR-ADG-42 design as implemented
+
+**Principle.** The policy is evaluated on exactly the value the database will store, and strings are compared byte-exact.
+
+1. **Cast to the stored type.** In the check-option row selects every written value except the bound tenant is wrapped in `CAST(value AS <native catalog type>)` (`CastExpression.IsNativeType`). The same cast expression is the value that the INSERT projects (`SELECT v.cols FROM (SELECT CAST(...) AS col UNION ALL ...) v WHERE <policy over v>`), so the check and the write cannot differ. The tenant value stays the plain bound tenant parameter: a cast could truncate it to another tenant on SQL Server, while an uncast value makes the database refuse an over-long tenant.
+2. **Closed type map.** `CatalogTypeMap` resolves a catalog `DataType` to the native spelling per dialect, with precision, scale, length and fractional seconds, and with the closed argument forms (a length is required for SQL Server and Oracle character types, so the `CAST` default of 1 cannot truncate silently). Listed types: SQL Server `bit`, `tinyint`, `smallint`, `int`, `bigint`, `real`, `float(n)`, `money`, `smallmoney`, `decimal`/`numeric(p,s)`, `date`, `time(n)`, `datetime`, `smalldatetime`, `datetime2(n)`, `datetimeoffset(n)`, `uniqueidentifier`, `char`/`nchar`/`varchar`/`nvarchar(n or max)`, `binary`/`varbinary`; PostgreSQL integers, `real`, `double precision`, `boolean`, `text`, `varchar`/`character varying`/`char`/`character(n)`, `numeric`/`decimal(p,s)`, `date`, `time`/`timestamp(n)` with or without time zone, `uuid`, `bytea`; Oracle `NUMBER(p,s)`, `FLOAT`, `BINARY_FLOAT`, `BINARY_DOUBLE`, `DATE`, `VARCHAR2`/`NVARCHAR2(n)`, `CHAR`/`NCHAR`, `TIMESTAMP(n)` with or without time zone, `RAW`; DuckDB integers, `REAL`, `FLOAT`, `DOUBLE`, `BOOLEAN`, `DATE`, `TIME`, `TIMESTAMP`, `UUID`, `BLOB`, `VARCHAR(n)`, `TEXT`, `DECIMAL`/`NUMERIC(p,s)`. Anything else (unknown, empty, `geography`, `xml`, `citext`, Oracle `VARCHAR2(n CHAR)`, `CLOB`, request-like text) has no cast, and the INSERT is rejected with `SqlCompileNotSupportedException(Construct)` (fail closed). The emitter checks that the native type resolves through the map and is spelled exactly as the map spells it, so emitted type text is never request text. Databricks has no entry (it already rejects the check option: no INSERT row count).
+3. **String predicates.** For a string-typed column (by the same map) the check accepts only equality and IN with a bound value, evaluated with the dialect's byte-exact comparison of the tenant predicate (`TenantPredicateFactory.ExactEquals`, now shared): SQL Server `col = v AND CAST(CAST(col AS nvarchar(max)) AS varbinary(max)) = ... AND DATALENGTH(...) = DATALENGTH(...)`, PostgreSQL `textsend`, DuckDB `encode`, Oracle `UTL_RAW.CAST_TO_RAW`. An IN list is a parenthesized OR of exact equalities. A byte-exact match is never looser than any collation for equality. Rejected with a typed error: range, LIKE, BETWEEN, functions or expressions over a string column, comparing two columns, `<>`, `NOT` and `NOT IN` (byte-exact inequality is wider than a case-insensitive one, so a negated comparison could accept a row the reader's filter hides or show). `IS [NOT] NULL` on a string column is allowed.
+4. **Collation.** The catalog collation (`CatalogColumn.Collation`) is not used: the byte-exact comparison never depends on it. The `COLLATE <collation>` branch for range and LIKE (known collation, verifier requires it) was **not implemented**; those predicates stay rejected with the typed error whether or not the collation is known. That is stricter than the requested design, never weaker; it can be added later without changing the rest.
+5. **Verifier.** `VerifyCheckOptionSource` proves independently of the injector: every row value except the tenant is a `CastExpression` with `IsNativeType` (not TRY_CAST) whose target equals the native type the map gives for the catalog type of that column (the requirement now carries `ColumnTypes`); a column without a resolvable type is a coverage failure; the check predicate is validated by `InsertCheckPolicy.Validate`, which rebuilds the expected byte-exact comparison through the factory and compares it structurally (`AstReflection.StructurallyEqual`), and rejects any other use of a string column (plain equality, range, LIKE, function, negated comparison). Mutants rejected on every dialect: cast removed (policy column and non-policy column), cast to another type, Trino-typed instead of native cast, TRY_CAST, plain equality, byte-exact comparison with a conjunct dropped, range, LIKE, function, NOT over the byte-exact comparison, extra string range conjunct.
+
+**Per dialect result.** SQL Server, PostgreSQL, Oracle Free and DuckDB: all five parts are implemented and verified by execution (see 25.6). No dialect needed the strict-rejection fallback. Databricks stays rejected as before CR-ADG-35 (no INSERT row count). The capability table version is unchanged (`cap-5`): the fallback flag was not needed.
+
+**Execution evidence (contract, transaction harness, four dialects).** The reviewer's coercion case (`Amount < 100`, `99.999` into `decimal(18,2)` / `NUMBER(18,2)` / `numeric(18,2)`) is rolled back with `DmlCheckOptionViolationException` and the table snapshot is unchanged; `99.99` is written and reads back as `99.99`; `99.994` (rounds to `99.99`, inside the policy) is written. Date truncation: policy `Due > 2026-01-01`, value `TIMESTAMP '2026-01-01 00:00:00.500'` into a `date` column is rolled back, a later date is written. Over-long string (`'EU'` plus 30 characters into a 20-character column): rejected (check violation where the dialect truncates or has no length, a provider error where it refuses), nothing written. Case variant: `'eu'` against `Region = 'EU'` is rejected (the SQL Server `Region` column is now declared `COLLATE SQL_Latin1_General_CP1_CS_AS` in a database whose default is case-insensitive, which is exactly the reviewer's boundary case; on PostgreSQL, Oracle and DuckDB the default is case-sensitive). An IN policy accepts each listed value and rejects `'eu'` and an unlisted value. Valid inserts still succeed. Where the check is case-insensitive in the reader's view and the writer's value differs only by case, the byte-exact check rejects (a false reject, never an accept).
+
+**Residual (documented).** A trigger that changes a policy column after the insert is not covered (§19.11.2); DBA guidance: no triggers on policy columns of governed tables. Every written column of a policy table needs a catalog type from the map, so an INSERT into a policy table that writes a column of an unsupported type (for example `xml`) is rejected until the map covers it.
+
+### 25.3 CR-ADG-43: checked execution by construction
+
+- `DbCommandCompiledSqlBinder.Bind` (every provider binder) throws `CheckedExecutionRequiredException` (`GovernedSqlException`, code `DML_CHECKED_EXECUTION_REQUIRED`, fixed message, no inner exception) for a `CompiledSql` with `RequiresRowCountCheck`, before it touches the command. An internal `BindForCheckedExecution` is the only way to bind such a statement.
+- `ICheckedDmlExecutor` / `CheckedDmlExecutor` (public, over an ADO.NET `DbConnection` and a provider binder) is its only caller: open the connection if needed, begin a transaction, bind, execute, `DmlCheckOption.Enforce(affected)`, commit; roll back on any exception, a count difference or an unreported count (`-1`). It also runs statements without a check unchanged.
+- The execution contract's transaction harness uses `CheckedDmlExecutor`. Tests: per-binder refusal (five binders), executor commit and both rollback paths and a dialect mismatch (in-memory SQLite), a contract scenario on the container dialects that the plain bind-and-execute path is refused and writes nothing, and two architecture tests (IL scan: only `CheckedDmlExecutor` calls `BindForCheckedExecution`, with the scan's positive control; every production binder derives from the refusing base class).
+- **Runtime adoption at X1:** the runtime executors (SQL Server, PostgreSQL, Oracle, DuckDB) run every governed DML through `ICheckedDmlExecutor`; there is no production caller yet.
+
+### 25.4 X1 preconditions (updated; replaces §24.3 items 1 and 2)
+
+1. CR-ADG-34: wire `DmlErrorSanitizer.Map` into every runtime executor (SQL Server, PostgreSQL, Oracle, DuckDB, Spark/Delta client) and log the original error server-side only.
+2. CR-ADG-35 / CR-ADG-43: the runtime executors adopt `ICheckedDmlExecutor` for all governed DML (plain `Bind` already refuses a check-option statement, so an executor that is not wired fails closed instead of writing). The Spark/Delta client does not bind through ADO.NET; it must refuse a statement with `RequiresRowCountCheck`, which the compiler never produces for Databricks (`ReportsInsertRowCount` is false).
+3. CR-ADG-42: DBA guidance for governed tables: no triggers that change policy columns; the catalog must carry the provider-native column type of every column of a table with a row policy (the compiler rejects an INSERT into such a table otherwise).
+4. The earlier preconditions of §20.3 stand.
+
+### 25.5 CR-ADG-44: row limit
+
+The check-option row set is a balanced `UNION ALL` tree built from the VALUES rows, so the AST depth is about `log2(rows)` and no longer one level per row. The emitted SQL is the same flat `SELECT ... UNION ALL SELECT ...` chain (UNION ALL is associative, so the multiset of rows is the same). 1,000 rows compile on SQL Server (or fail with the typed `SqlLimitExceededException(BindParameters)` at 2,100 parameters), PostgreSQL, Oracle and DuckDB, and the contract executes 1,000 rows on the four container dialects (written, or the typed bind-limit error). The multi-row `VALUES` derived-table alternative was not needed. The remaining limits are the existing, typed ones (bind parameters, query text length, expansion factor).
+
+### 25.6 Evidence
+
+Observed on `feat/ast-dml` after the last fix commit (`CI=true`, `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal`, `-m:2`):
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror -m:2` | 0 warnings, 0 errors |
+| `tests/TrinoSqlEngine.Tests` | 2,649 / 2,649 passed (2,540 before the loop) |
+| `tests/Autheris.Tests.Unit` | 4,024 / 4,025 passed; the failure is the known `WormConfigurationAuditServiceTests` |
+| `tests/Autheris.Tests.Architecture` | 23 / 23 passed (21 before; two new binder scans) |
+| All `AstCompiler*` integration tests in one run | 400 / 400 passed, none skipped (365 before) |
+| Per class | SQL Server DML 44, PostgreSQL DML 44, Oracle Free DML 47, DuckDB DML 43, Spark/Delta DML 45 (the seven new contract scenarios return early there: no INSERT row count); DQL classes SQL Server 42, PostgreSQL 50, Oracle 43, Spark 39; three provider smoke tests |
+
+### 25.7 Changes for the release notes
+
+- An INSERT into a table with an admin row policy now casts every written value to the catalog column type and compares string columns byte-exact; it requires a provider-native catalog type for every written column and rejects string predicates other than equality and IN.
+- `CompiledSql` statements with `RequiresRowCountCheck` can no longer be bound with `Bind`; use `CheckedDmlExecutor`.
+- `CastExpression` has a new flag `IsNativeType`; `TableCoverageRequirement` has a new member `ColumnTypes`; `TenantPredicateFactory.ExactEquals` is public.
