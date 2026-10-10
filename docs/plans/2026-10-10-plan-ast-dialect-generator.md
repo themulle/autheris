@@ -2,7 +2,7 @@
 
 **Document ID:** `PLAN-AST-DIALECT-GEN-16` (implementation plan, Phase 2 of the 6-phase lifecycle)
 **Date:** 2026-10-10
-**Status:** IN PROGRESS - Phase 4 loop-back for the DML review done (§24, CR-ADG-33..41 fixed on `feat/ast-dml`), awaiting the Phase 5 delta re-review; DQL approved (§19.9)
+**Status:** IN PROGRESS - DML re-review loop 1 delivered (§19.11, changes requested: CR-ADG-42); DQL approved (§19.9) and ready for Phase 6
 **Author:** Solution Architect (`csharp-architect`); Phase 3 review (§16) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
@@ -1576,6 +1576,7 @@ Affected work packages and test criteria (additions to §11 and §16.8):
 
 ## 17. Changelog
 
+- 2026-10-10: Added §19.11 "Re-review (DML loop 1)" (`csharp-code-reviewer`) of `feat/ast-dml` at `4f18436`: CR-ADG-33, -34, -36..41 closed; changes requested for CR-ADG-42 (Blocker: the CR-ADG-35 INSERT check option is bypassed by type coercion on four engines and by column collation); CR-ADG-43 (X1) and CR-ADG-44 (Minor) added.
 - 2026-10-10: Added §24 "Implementation Log — DML review loop 1": CR-ADG-33..41 fixed on `feat/ast-dml` (one commit per finding); CR-ADG-35 decided by the orchestrator under stakeholder delegation (check-option INSERT for admin row policies, row-count contract in `CompiledSql`); CR-ADG-34 delivered as a total error mapper, runtime wiring stays at X1.
 - 2026-10-10: Added §19.10 "Phase 5 Code Review — DML" (`csharp-code-reviewer`) of `feat/ast-dml` at `78a6c42`: verdict changes requested (narrow) for CR-ADG-33 (MERGE source/target alias collision; all engines refuse it today, the compiler must too); CR-ADG-34 (generic error mapping) and CR-ADG-35 (check option instead of rejecting INSERT into policy tables) added as X1 preconditions; Minor/Nit CR-ADG-36..41.
 - 2026-10-10: Added §22 "Implementation Log — DQL review loop 3": CR-ADG-30 (`199d2a1`) and CR-ADG-32 (`5f98531`, test alignment `9f30f17`) fixed; CR-ADG-31 recorded as X1 precondition 6; open question OQ-GQL (GraphQL tree compiler) added.
@@ -2005,6 +2006,71 @@ Red-first is therefore confirmed for CR-ADG-28 and B-1 by behavioral mutants, no
 1. Fix CR-ADG-33 on `feat/ast-dml` (injector, verifier, tests on all dialects). A delta re-review covers only CR-ADG-33.
 2. CR-ADG-34 and CR-ADG-35 join the X1 preconditions (§20.3); CR-ADG-35 needs a stakeholder decision.
 3. CR-ADG-36..41 may land in the same loop.
+
+### 19.11 Re-review (DML loop 1)
+
+**Scope:** `f18d492..4f18436` (plan §24): CR-ADG-33..41, and CR-ADG-35 as the new INSERT check option for admin-policy tables. Method: code reading, an execution probe added to the shared DML contract (not committed), CR-ADG-35 mutants, and a full reviewer-run of every suite (`-m:2`, `CI=true`).
+
+**Verdict: CHANGES REQUESTED.** CR-ADG-33, -34, -36..41 are closed. The new CR-ADG-35 check option can be bypassed through type coercion on every engine (CR-ADG-42, Blocker). Fix it, or fall back to the previous rejection of INSERT into policy tables.
+
+#### 19.11.1 Loop-1 findings
+
+| ID | Result |
+|---|---|
+| CR-ADG-33 | Closed. `MergeAliasGuard` in the injector and in the verifier rejects a source qualifier (alias or table name, also of joined sources) that equals the target alias or table name, case-insensitively. An unknown source shape contributes no qualifier, but the verifier's `Source` rejects unknown shapes anyway. |
+| CR-ADG-34 | Closed on the compile side. `Map` is total: constraint, data and provider errors all get fixed messages. Wiring is an X1 item (§24.3 item 1). |
+| CR-ADG-36, -37, -39, -40, -41 | Closed. CR-ADG-41 was a real length-check bypass on a cache hit; the limit is now part of the key material. |
+| CR-ADG-38 | Closed. Only `DmlGuardOptions.Strict` is accepted on the typed path (typed configuration error, never cached), and an IL architecture test enforces it. The three rewritten tests covered relaxed switches of the **typed** path only. The legacy `RlsOptions` path is untouched and its suite is green, so no legacy behavior lost coverage. |
+
+#### 19.11.2 CR-ADG-35 (INSERT check option): assessment
+
+| Question | Result |
+|---|---|
+| NULL in a policy column | Three-valued logic: `WHERE` drops the row, the count differs, the insert is rolled back. Consistent with read semantics (a read also hides NULL rows). Not a bypass. |
+| Type coercion | **Bypass (CR-ADG-42).** The check evaluates the policy over the bound row values, but the database stores the values after conversion to the column type. With the policy `Amount < 100` on `decimal(18,2)` / `NUMBER(18,2)`, `INSERT ... VALUES (..., 99.999)` passes the check and stores `100.00`. Executed through the contract's transaction harness (with `DmlCheckOption.Enforce`) on SQL Server, PostgreSQL, Oracle Free and DuckDB: all four report `WRITTEN affected=1 storedAmount=100`. The row is outside the writer's policy and inside the caller's tenant. That is exactly the policy-boundary move that SEC-ADG-06 and INV-10 forbid. |
+| Collation | The §24 "known limit" is incomplete. When the check is case-insensitive (database default) and the column is case-sensitive, `'eu'` passes a `Region = 'EU'` check and is stored as `'eu'`. The writer cannot see it, but **another principal of the same tenant whose policy is `Region = 'eu'` can**, so the row does cross a policy boundary. The statement "never exposes it to anyone else" is not correct. |
+| Defaults, computed or identity columns | Every policy-referenced column must be supplied (otherwise a typed rejection). A computed column cannot be written (database error). Sound. |
+| Triggers | A trigger that changes a policy column after the insert is not covered. Document it as a residual (DBA guidance: no triggers on policy columns of governed tables). Extra trigger rows on SQL Server change the affected count, so the insert fails closed. |
+| Duplicate rows | `UNION ALL` keeps duplicates; the expected count is the number of rows. Sound. With `SET NOCOUNT ON` the count is -1, so the insert fails closed. |
+| Row-count contract without wiring | §24.2 (executor contract) and §24.3 item 2 state that `DmlCheckOption.Enforce` must be wired at X1. Executing the compiled SQL alone does **not** roll back: a violating row is simply filtered out, and a row affected by coercion is written. Recommendation (CR-ADG-43): fail closed by construction. The binder or executor must refuse a `RequiresRowCountCheck` statement unless it runs through the checked-execution helper. |
+| Verifier shape proof | Independent and complete for the intended shape. The projection must be exactly the listed `autheris_ins` columns; the `InsertCheck` predicate must be a top-level conjunct; rows must be a non-DISTINCT `UNION ALL` of FROM-less, WHERE-less row selects; every row must carry the bound tenant. It does not (and cannot today) prove that the row values carry the column types (CR-ADG-42). |
+| Scale | Each VALUES row adds one level of nested `UNION ALL`, so large inserts reach the AST depth limit (512). This fails closed (availability; Minor, CR-ADG-44). |
+
+#### 19.11.3 New findings
+
+| ID | Sev. | Location | Finding | Fix |
+|---|---|---|---|---|
+| CR-ADG-42 | **Blocker** | `AstSecurityVisitor.TypedDml.cs:159-190` (`WrapInCheckOption`, `RowSelect`), `SecurityCoverageVerifier.Dml.cs` (`VerifyCheckOptionRows`) | The check option is evaluated on pre-conversion values (type coercion: execution evidence on four engines) and with the default collation (policy-boundary move within the tenant). | Make each row value `CAST(value AS <catalog column type>)` (the catalog already carries `DataType`). On dialects with `COLLATE`, emit the column's catalog collation (or reject policies on columns whose collation is not the database default). Let the verifier require the cast on every check-option row value. Add the coercion scenario (`Amount < 100`, value `99.999`) and a case-sensitive collation scenario to the contract. Alternatively, revert to rejecting INSERT into policy tables until this is done. Correct the §24 "known limit" text. |
+| CR-ADG-43 | Major (X1) | `CompiledSql.RequiresRowCountCheck`, binders | Executing a check-option statement without `Enforce` writes partial or coerced rows silently. | Have the binders refuse `RequiresRowCountCheck` statements unless they run through the checked-execution path (fail closed by construction). |
+| CR-ADG-44 | Minor | check-option row chain | The left-deep `UNION ALL` grows the AST depth by one per row; more than about 500 rows hits `AstDepth`. | Build a balanced tree, or document the row limit. |
+
+#### 19.11.4 Mutation results (scratch worktree on `4f18436`, reverted after each run)
+
+| Mutant | `TrinoSqlEngine.Tests` (2,540) | DuckDB + PostgreSQL DML (73) | Result |
+|---|---|---|---|
+| Check-option policy conjunct dropped (injector) | 9 failed | 6 failed | Killed |
+| Same, with the verifier's check-predicate requirement off | 9 failed | 6 failed | Killed |
+| Foreign tenant literal in the first check-option row (injector) | 5 failed | 6 failed | Killed |
+| Same, with the verifier's per-row tenant check off | 8 failed | 2 failed | Killed |
+| `ExpectedAffectedRows` off by one | 5 failed | 4 failed | Killed |
+| `DmlCheckOption.Enforce` never throws | 1 failed | 4 failed | Killed |
+
+All mutants are killed. CR-ADG-42 is a semantic gap that none of the tests model, not a missing guard.
+
+#### 19.11.5 Build and test evidence (observed by the reviewer on `4f18436`)
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror -m:2` | 0 warnings, 0 errors (the first run hit out-of-memory file-copy errors only; the rebuild is clean) |
+| `tests/TrinoSqlEngine.Tests` | 2,540 / 2,540 |
+| `tests/Autheris.Tests.Unit` | 4,024 / 4,025 (only the known `WormConfigurationAuditServiceTests` failure) |
+| `tests/Autheris.Tests.Architecture` | 21 / 21 |
+| All `AstCompiler*` integration tests, `CI=true` | 365 / 365, none skipped |
+| Review probe: check-option coercion (not committed) | Policy bypassed on SQL Server, PostgreSQL, Oracle Free, DuckDB |
+
+#### 19.11.6 Phase 6 readiness
+
+DQL: ready for Phase 6 (approved in §19.9; the loop-3 fixes are verified in §19.10). DML: ready once CR-ADG-42 is fixed and re-verified by the coercion and collation scenarios, or once the CR-ADG-35 check option is withdrawn in favor of the strict rejection. Phase 6 must document CR-ADG-43 and §24.3 as X1 preconditions.
 
 ## 20. Implementation Log — DQL review loop 1
 
