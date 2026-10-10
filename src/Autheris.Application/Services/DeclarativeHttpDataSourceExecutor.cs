@@ -543,7 +543,8 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         return fullUrl;
     }
 
-    private static readonly string[] StaticReservedParameterNames = ["tenant_id", "tid", "tenant", "tenantid", "isAdmin", "role", "roles"];
+    /// <summary>Parameter names the gateway sets itself; shared with the Virtual Filter pushdown capability so the two cannot drift.</summary>
+    internal static readonly string[] StaticReservedParameterNames = ["tenant_id", "tid", "tenant", "tenantid", "isAdmin", "role", "roles"];
 
     private static HashSet<string> GetReservedParameterNames(HttpEndpointDescriptor descriptor, bool includeStaticNames)
     {

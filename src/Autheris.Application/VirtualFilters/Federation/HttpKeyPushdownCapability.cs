@@ -2,6 +2,7 @@ namespace Autheris.Application.VirtualFilters.Federation;
 
 using System;
 using System.Collections.Generic;
+using Autheris.Application.Services;
 using Autheris.Domain.Model;
 
 /// <summary>How the authorized keys can be sent to a web-api so that it only returns those rows.</summary>
@@ -30,8 +31,6 @@ public readonly record struct HttpKeyPushdownCapability(HttpKeyPushdownKind Kind
 {
     private const int MaxNameLength = 64;
     private const int MaxValueLength = 256;
-
-    private static readonly string[] ReservedNames = ["tenant_id", "tid", "tenant", "tenantid", "isAdmin", "role", "roles"];
 
     public static HttpKeyPushdownCapability None => new(HttpKeyPushdownKind.None, string.Empty, string.Empty);
 
@@ -153,18 +152,20 @@ public readonly record struct HttpKeyPushdownCapability(HttpKeyPushdownKind Kind
             }
         }
 
-        var reserved = new List<string>(ReservedNames);
-        AddIfSet(reserved, descriptor.TenantIdQueryParam);
-        AddIfSet(reserved, descriptor.TenantIdHeaderName);
-        AddIfSet(reserved, descriptor.ApiKeyHeaderName);
-        return !reserved.Exists(r => string.Equals(r, name, StringComparison.OrdinalIgnoreCase));
+        // The executor's own list (no copy of it here) plus the descriptor's gateway-set names; no allocation per call.
+        foreach (var reserved in DeclarativeHttpDataSourceExecutor.StaticReservedParameterNames)
+        {
+            if (string.Equals(reserved, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return !IsDescriptorReserved(descriptor.TenantIdQueryParam, name) &&
+               !IsDescriptorReserved(descriptor.TenantIdHeaderName, name) &&
+               !IsDescriptorReserved(descriptor.ApiKeyHeaderName, name);
     }
 
-    private static void AddIfSet(List<string> names, string? name)
-    {
-        if (!string.IsNullOrWhiteSpace(name))
-        {
-            names.Add(name.Trim());
-        }
-    }
+    private static bool IsDescriptorReserved(string? reserved, string name) =>
+        !string.IsNullOrWhiteSpace(reserved) && string.Equals(reserved.Trim(), name, StringComparison.OrdinalIgnoreCase);
 }

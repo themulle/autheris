@@ -114,7 +114,7 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
             }
 
             var audits = loaded.Select(l => KeySetAudit(l.Pair, l.Keys)).ToList();
-            plans[table.Metadata.Identifier] = Decide(statement, tables, table, loaded).WithKeySets(audits);
+            plans[table.Metadata.Identifier] = Decide(statement, tables, table, loaded, audits);
         }
 
         return plans;
@@ -127,9 +127,10 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
         SqlStatement? statement,
         IReadOnlyList<ResolvedSourceTable> tables,
         PreparedTable table,
-        IReadOnlyList<(AppliedVirtualFilterBinding Pair, VirtualFilterKeySet Keys)> loaded)
+        IReadOnlyList<(AppliedVirtualFilterBinding Pair, VirtualFilterKeySet Keys)> loaded,
+        IReadOnlyList<VirtualFilterKeySetAudit> audits)
     {
-        var plan = DecideTier(statement, tables, table, loaded);
+        var plan = DecideTier(statement, tables, table, loaded, audits);
 
         // CR-01: what is fetched must never depend on a request the gateway cannot form. A read of a path template that
         // keeps a placeholder (a full scan, an unsafe or over-budget key set, the switch off, a second placeholder) would go
@@ -148,14 +149,19 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
         SqlStatement? statement,
         IReadOnlyList<ResolvedSourceTable> tables,
         PreparedTable table,
-        IReadOnlyList<(AppliedVirtualFilterBinding Pair, VirtualFilterKeySet Keys)> loaded)
+        IReadOnlyList<(AppliedVirtualFilterBinding Pair, VirtualFilterKeySet Keys)> loaded,
+        IReadOnlyList<VirtualFilterKeySetAudit> audits)
     {
         var enforcement = VirtualFilterEnforcement.Create(table.Metadata, loaded);
+
+        VirtualFilterTablePlan Plan(
+            VirtualFilterTier tier, bool skip, string reason, IReadOnlyDictionary<string, object?>? args = null, VirtualFilterPathLookup? pathLookup = null) =>
+            new(enforcement, tier, skip, reason, args, pathLookup, audits);
 
         // Tier 0: nothing can be authorized, whatever the strategy; the read path still runs all guards.
         if (loaded.Any(l => l.Keys.Count == 0))
         {
-            return new VirtualFilterTablePlan(enforcement, VirtualFilterTier.EmptyKeySet, skipUpstream: true, "empty_key_set");
+            return Plan(VirtualFilterTier.EmptyKeySet, skip: true, "empty_key_set");
         }
 
         // Tier 1: a point lookup without any authorized queried key for some pair cannot return a row. The upstream
@@ -169,7 +175,7 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
             {
                 if (queried[i] is { } keys && !keys.Any(loaded[i].Keys.Contains))
                 {
-                    return new VirtualFilterTablePlan(enforcement, VirtualFilterTier.PointLookup, skipUpstream: true, "point_lookup_miss");
+                    return Plan(VirtualFilterTier.PointLookup, skip: true, "point_lookup_miss");
                 }
             }
         }
@@ -191,7 +197,7 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
         {
             return needsPushdown
                 ? throw PushdownDenied(table, VirtualFilterErrorCodes.PushdownUnavailable)
-                : new VirtualFilterTablePlan(enforcement, VirtualFilterTier.FullFetch, skipUpstream: false, "full_fetch");
+                : Plan(VirtualFilterTier.FullFetch, skip: false, "full_fetch");
         }
 
         var pushPairs = new List<PushdownPair>(loaded.Count);
@@ -204,7 +210,7 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
         switch (candidate.Status)
         {
             case PushdownStatus.Disjoint:
-                return new VirtualFilterTablePlan(enforcement, VirtualFilterTier.EmptyKeySet, skipUpstream: true, candidate.Reason);
+                return Plan(VirtualFilterTier.EmptyKeySet, skip: true, candidate.Reason);
             case PushdownStatus.Pushable:
                 var args = new Dictionary<string, object?> { [candidate.ParameterName!] = candidate.Values!.ToList() };
                 VirtualFilterPathLookup? pathLookup = null;
@@ -214,14 +220,14 @@ public sealed class VirtualFilterFederationPlanner : IVirtualFilterFederationPla
                     pathLookup = new VirtualFilterPathLookup(candidate.PathKeyField, table.Columns[keyPair][0], table.KeyTypes[keyPair][0], candidate.Values!);
                 }
 
-                return new VirtualFilterTablePlan(
-                    enforcement, isPointLookup ? VirtualFilterTier.PointLookup : VirtualFilterTier.Pushdown, skipUpstream: false, candidate.Reason, args, pathLookup);
+                return Plan(
+                    isPointLookup ? VirtualFilterTier.PointLookup : VirtualFilterTier.Pushdown, skip: false, candidate.Reason, args, pathLookup);
             default:
                 return needsPushdown
                     ? throw PushdownDenied(table, candidate.Status == PushdownStatus.OverLimit
                         ? VirtualFilterErrorCodes.PushdownLimitExceeded
                         : VirtualFilterErrorCodes.PushdownUnavailable)
-                    : new VirtualFilterTablePlan(enforcement, VirtualFilterTier.FullFetch, skipUpstream: false, candidate.Reason);
+                    : Plan(VirtualFilterTier.FullFetch, skip: false, candidate.Reason);
         }
     }
 

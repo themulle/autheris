@@ -117,4 +117,30 @@ public sealed class HttpKeyPushdownCapabilityTests
         HttpKeyPushdownCapability.Resolve(Descriptor()).IsValueEligible(new string('x', 257)).ShouldBeFalse();
         HttpKeyPushdownCapability.Resolve(Descriptor()).IsValueEligible(new string('x', 256)).ShouldBeTrue();
     }
+
+    [Fact]
+    public void EveryNameTheExecutorReserves_IsNoUsableBatchParameter_TheTwoListsCannotDrift()
+    {
+        // CR-15: one shared list; a name added to the executor is automatically not pushable.
+        foreach (var reserved in Autheris.Application.Services.DeclarativeHttpDataSourceExecutor.StaticReservedParameterNames)
+        {
+            HttpKeyPushdownCapability.Resolve(Descriptor(param: reserved)).Kind.ShouldBe(HttpKeyPushdownKind.None, reserved);
+            HttpKeyPushdownCapability.Resolve(Descriptor(param: reserved.ToUpperInvariant())).Kind.ShouldBe(HttpKeyPushdownKind.None, reserved);
+        }
+    }
+
+    [Theory]
+    [InlineData("/customers/{id}", "id", false)]
+    [InlineData("/customers/{ID}", "id", false)]
+    [InlineData("/customers/{id}/items", "id", false)]
+    [InlineData("/customers/{id}/{region}", "id", true)]
+    [InlineData("/customers/{region}", "id", true)]
+    [InlineData("/customers", "id", false)]
+    [InlineData("/customers/{id", "id", true)]
+    [InlineData("/customers/id}", "id", true)]
+    [InlineData("/customers/{id}", null, true)]
+    public void HasUnfillablePlaceholder_OnlyTheKeyPlaceholderCanBeFilled(string path, string? filledKey, bool unfillable)
+    {
+        HttpKeyPushdownCapability.HasUnfillablePlaceholder(Descriptor(path: path), filledKey).ShouldBe(unfillable);
+    }
 }

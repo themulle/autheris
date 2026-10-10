@@ -45,7 +45,8 @@ public sealed class VirtualFilterTablePlan
         bool skipUpstream,
         string reason,
         IReadOnlyDictionary<string, object?>? pushdownArguments = null,
-        VirtualFilterPathLookup? pathLookup = null)
+        VirtualFilterPathLookup? pathLookup = null,
+        IReadOnlyList<VirtualFilterKeySetAudit>? keySets = null)
     {
         ArgumentNullException.ThrowIfNull(enforcement);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
@@ -55,6 +56,7 @@ public sealed class VirtualFilterTablePlan
         Reason = reason;
         PushdownArguments = pushdownArguments;
         PathLookup = pathLookup;
+        KeySets = keySets ?? [];
     }
 
     /// <summary>The gateway semi-join of the table; never null.</summary>
@@ -82,13 +84,7 @@ public sealed class VirtualFilterTablePlan
     public VirtualFilterPathLookup? PathLookup { get; }
 
     /// <summary>The key sets read for this table, one per applied (filter, binding) pair, in order (audit).</summary>
-    public IReadOnlyList<VirtualFilterKeySetAudit> KeySets { get; private set; } = [];
-
-    internal VirtualFilterTablePlan WithKeySets(IReadOnlyList<VirtualFilterKeySetAudit> keySets)
-    {
-        KeySets = keySets;
-        return this;
-    }
+    public IReadOnlyList<VirtualFilterKeySetAudit> KeySets { get; }
 
     public TableIdentifier Table => Enforcement.Table;
 }

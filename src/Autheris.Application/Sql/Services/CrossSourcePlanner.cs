@@ -84,7 +84,6 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
     /// staging request of their table; the user query is never rewritten for Virtual Filters. <paramref name="statement"/>
     /// is the already parsed user statement (parsed here when it is not supplied).
     /// </summary>
-
     public CrossSourcePlan Plan(
         string rawSql,
         SqlQueryMetadata metadata,

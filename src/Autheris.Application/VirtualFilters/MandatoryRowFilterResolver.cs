@@ -202,7 +202,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         try
         {
             var snapshot = await _snapshots.GetAsync(ct).ConfigureAwait(false);
-            return snapshot.Profiles.Any(p => p.TenantId == tenant);
+            return snapshot.Profiles.Any(p => p.TenantId == tenant && p.Status == FilterApprovalStatus.Active);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

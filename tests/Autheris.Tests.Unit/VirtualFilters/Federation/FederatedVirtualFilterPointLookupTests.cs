@@ -91,11 +91,11 @@ public sealed class FederatedVirtualFilterPointLookupTests
     }
 
     [Theory]
-    [InlineData("SELECT o.id, c.id AS cid FROM erp.public.orders o LEFT JOIN crm_api.public.customers c ON c.id = o.customer_id WHERE c.id = '2'")]
-    [InlineData("SELECT COUNT(*) AS n FROM crm_api.public.customers c WHERE c.id = '2'")]
-    [InlineData("SELECT c.id FROM crm_api.public.customers c WHERE c.id IN ('2', '4')")]
-    [InlineData("SELECT o.id FROM erp.public.orders o LEFT JOIN crm_api.public.customers c ON c.id = o.customer_id AND c.id = '2' ORDER BY o.id")]
-    public async Task Miss_ResultEqualsFullFetchResult_Differential(string sql)
+    [InlineData("SELECT o.id, c.id AS cid FROM erp.public.orders o LEFT JOIN crm_api.public.customers c ON c.id = o.customer_id WHERE c.id = '2'", 0)]
+    [InlineData("SELECT COUNT(*) AS n FROM crm_api.public.customers c WHERE c.id = '2'", 0)]
+    [InlineData("SELECT c.id FROM crm_api.public.customers c WHERE c.id IN ('2', '4')", 0)]
+    [InlineData("SELECT o.id FROM erp.public.orders o LEFT JOIN crm_api.public.customers c ON c.id = o.customer_id AND c.id = '2' ORDER BY o.id", 1)]   // a predicate in the ON clause of an outer join is not a point lookup
+    public async Task Miss_ResultEqualsFullFetchResult_Differential(string sql, int expectedShortCircuitCalls)
     {
         var (shortCrm, shortCircuit) = Setup();
         var (fullCrm, full) = Setup(options: new VirtualFilterFederationOptions { PushdownEnabled = false });
@@ -105,7 +105,7 @@ public sealed class FederatedVirtualFilterPointLookupTests
 
         Normalize(withShortCircuit).ShouldBe(Normalize(withFullFetch));
         fullCrm.UpstreamCalls.ShouldBe(1);
-        shortCrm.UpstreamCalls.ShouldBeLessThanOrEqualTo(1);
+        shortCrm.UpstreamCalls.ShouldBe(expectedShortCircuitCalls);   // CR-13: exact, so a disabled short-circuit fails
     }
 
     private static List<string> Normalize(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows) =>

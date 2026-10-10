@@ -12,7 +12,7 @@ using static Autheris.Tests.Unit.VirtualFilters.Federation.FederatedVfPipelineHa
 /// F-GOV-14 WI-6 (ST-22): without a registered federation planner, a Virtual Filter on an HTTP table denies every WebSQL
 /// cross-source query shape (fail closed) before any key is loaded or any upstream call is made.
 /// </summary>
-public sealed class FederatedVirtualFilterInterimTests
+public sealed class FederatedVirtualFilterNoPlannerTests
 {
     private static readonly TableMetadata CrmCustomers = HttpTable("crm_api", "public", "customers", "id", "name");
     private static readonly TableMetadata ErpOrders = SqlTable("erp", "public", "orders", "id", "customer_id");
