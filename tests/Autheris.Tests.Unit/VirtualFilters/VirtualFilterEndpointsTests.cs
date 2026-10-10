@@ -567,6 +567,50 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
         JsonDocument.Parse(body).RootElement.GetProperty("code").GetString().ShouldBe("VF_PUSHDOWN_KEY_BUDGET_INVALID");
     }
 
+    [Theory]
+    [InlineData("deny", UncoveredPolicy.Deny)]
+    [InlineData("Deny", UncoveredPolicy.Deny)]
+    [InlineData("DENY", UncoveredPolicy.Deny)]
+    [InlineData("skip", UncoveredPolicy.Skip)]
+    [InlineData("Skip", UncoveredPolicy.Skip)]
+    public async Task PutProfile_UncoveredIsAcceptedInAnyCasing(string value, UncoveredPolicy expected)
+    {
+        await PutFilterAsync();
+        var body = new
+        {
+            grantee = new { type = "user", sid = "S-1-5-21-LWE-DAVID" },
+            scope = "web_crm.*.*",
+            uncovered = value,
+            bindings = new[] { new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id" } }
+        };
+        var context = Context(Tenant, body, "FilterAdmin");
+
+        (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, ServiceWith(null)), context)).ShouldBe(StatusCodes.Status200OK);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem().Uncovered.ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData("allow")]
+    [InlineData("deny ")]
+    [InlineData("0")]
+    public async Task PutProfile_UnknownUncoveredValue_Returns400WithStableCode(string value)
+    {
+        await PutFilterAsync();
+        var body = new
+        {
+            grantee = new { type = "user", sid = "S-1-5-21-LWE-DAVID" },
+            scope = "web_crm.*.*",
+            uncovered = value,
+            bindings = new[] { new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id" } }
+        };
+        var context = Context(Tenant, body, "FilterAdmin");
+
+        (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, ServiceWith(null)), context)).ShouldBe(StatusCodes.Status400BadRequest);
+        context.Response.Body.Position = 0;
+        JsonDocument.Parse(await new StreamReader(context.Response.Body).ReadToEndAsync()).RootElement.GetProperty("code").GetString().ShouldBe("VF_BINDING_INVALID");
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task Sync_OmittedMaxPushdownKeys_IsNotCheckedAgainstALowGatewayLimit()
     {

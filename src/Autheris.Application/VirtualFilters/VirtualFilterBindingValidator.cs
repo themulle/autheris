@@ -56,13 +56,15 @@ public static class VirtualFilterBindingValidator
 
     /// <summary>
     /// Parses a binding enum from its documented snake_case name (<c>pushdown_only</c>). Only the exact name is accepted:
-    /// no other case, no stripped underscores, no numbers. Anything else is <see cref="VirtualFilterErrorCodes.BindingInvalid"/>.
+    /// no other case, no stripped underscores, no numbers. <paramref name="ignoreCase"/> relaxes only the casing (kept for the
+    /// pre-existing <c>uncovered</c> field). Anything else is <see cref="VirtualFilterErrorCodes.BindingInvalid"/>.
     /// </summary>
-    public static T ParseEnum<T>(string value, string field) where T : struct, Enum
+    public static T ParseEnum<T>(string value, string field, bool ignoreCase = false) where T : struct, Enum
     {
+        var comparison = ignoreCase ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         foreach (var (candidate, name) in NamesOf<T>())
         {
-            if (string.Equals(name, value, StringComparison.Ordinal))
+            if (string.Equals(name, value, comparison))
             {
                 return candidate;
             }

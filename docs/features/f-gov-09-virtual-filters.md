@@ -119,7 +119,7 @@ Authorization: Bearer <token>
       "granteeType": "Role",
       "roleName": "SalesAnalyst",
       "scope": "sales.dbo.*",
-      "uncovered": "Deny",
+      "uncovered": "deny",
       "bindings": [
         {
           "filterName": "active_client_only",
@@ -156,7 +156,7 @@ Authorization: Bearer <token>
   "granteeType": "Role",
   "roleName": "SalesAnalyst",
   "scope": "sales.dbo.*",
-  "uncovered": "Deny",
+  "uncovered": "deny",
   "bindings": [
     {
       "filterName": "active_client_only",
@@ -166,6 +166,8 @@ Authorization: Bearer <token>
   ]
 }
 ```
+
+The `uncovered` policy is `deny` or `skip`; its value is matched case-insensitively (`Deny` is accepted), and any other value is rejected with `400 VF_BINDING_INVALID`. The binding fields `strategy`, `pushdown_format` and `max_pushdown_keys` are matched strictly.
 
 ### 4.4 Declarative Sync & Safety Thresholds
 

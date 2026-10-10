@@ -873,7 +873,7 @@ public static class VirtualFilterEndpoints
                 GranteeSid = string.IsNullOrWhiteSpace(grantee.Sid) ? (Sid?)null : new Sid(grantee.Sid),
                 RoleName = grantee.Role,
                 Scope = Scope,
-                Uncovered = Uncovered == null ? null : VirtualFilterBindingValidator.ParseEnum<UncoveredPolicy>(Uncovered, "uncovered"),
+                Uncovered = Uncovered == null ? null : VirtualFilterBindingValidator.ParseEnum<UncoveredPolicy>(Uncovered, "uncovered", ignoreCase: true),
                 Bindings = (Bindings ?? []).Select(b => b.ToModel()).ToList()
             };
         }
