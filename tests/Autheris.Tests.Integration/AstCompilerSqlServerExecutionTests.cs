@@ -594,4 +594,13 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
         var rows = await RunAsync($"SELECT id FROM orders WHERE id = 1 AND {predicate}", "acme", translateDates: true);
         Ids(rows).ShouldBe(new List<int> { 1 });
     }
+
+    [Fact]
+    public async Task ScalarSubqueryInTheSelectList_IsExecutedWithTheTenantCondition()
+    {
+        if (!_db.IsAvailable) return;
+        var rows = await RunAsync("SELECT (SELECT count(*) FROM orders) AS n FROM orders WHERE id = 1", "acme");
+        rows.Count.ShouldBe(1);
+        Convert.ToInt32(rows[0][0]).ShouldBe(3);   // the subquery sees the three rows of tenant acme only
+    }
 }

@@ -4927,7 +4927,7 @@
       "Group": "subquery",
       "Sql": "SELECT a, (SELECT count(*) FROM u WHERE u.a = t.a) AS c FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT [a], (SELECT COUNT(*) FROM [u] WHERE CASE WHEN [u].[a] = [t].[a] THEN 1 ELSE 0 END) AS [c] FROM [t]",
+      "Expected": "SELECT [a], (SELECT COUNT(*) FROM [u] WHERE [u].[a] = [t].[a]) AS [c] FROM [t]",
       "Parameters": []
     },
     {

@@ -4957,7 +4957,7 @@
       "Group": "subquery",
       "Sql": "SELECT a, (SELECT count(*) FROM u WHERE u.a = t.a) AS c FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT \"A\", (SELECT COUNT(*) FROM \"U\" WHERE CASE WHEN \"U\".\"A\" = \"T\".\"A\" THEN 1 ELSE 0 END) AS \"C\" FROM \"T\"",
+      "Expected": "SELECT \"A\", (SELECT COUNT(*) FROM \"U\" WHERE \"U\".\"A\" = \"T\".\"A\") AS \"C\" FROM \"T\"",
       "Parameters": []
     },
     {
