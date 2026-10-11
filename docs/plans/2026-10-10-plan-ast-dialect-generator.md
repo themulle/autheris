@@ -3598,3 +3598,25 @@ The orchestrator accepted the fail-closed defaults written in §28.8. They are b
 - The live `TableAccessPolicy` construction sites (`UnifiedPolicyDecisionPoint`, cross-domain resolver, procedures) do not pass the `RowPolicyFactory`: a typed projection uses `@__gql_rls_N` markers that the legacy consumers do not all bind, and access-profile text becomes canonical Trino syntax. X0l/X1 switch them over.
 - Consent decisions and Casbin decisions are still string-only (the consent cache envelope stores text only). X0l assembles the typed policy; until then a consent row filter makes `RequireTypedRowPolicy()` deny, which is the intended fail-closed state for the not yet live compiler path.
 - `MandatoryRowPredicateSql` of a typed Virtual Filter is the projection of that predicate alone, so its markers can differ from those of the combined text.
+
+### WP-X0f implementation log (`feat/ast-x1-masks`)
+
+Base: `feat/ast-x1-access-decision` (X0e), because the typed masks are carried on `TableAccessDecision`; `feat/ast-x1-sqlite` (X0h) is merged in because rendering a mask through the generator needs the SQLite capability entry.
+
+**Built** (additive; legacy string consumers keep working until X1):
+
+- `Autheris.Domain/Interfaces/IColumnMaskPolicy.cs`: opaque typed masks (`Fingerprint`, `MaskedColumns`, `HasMask`). `TableAccessDecision.ColumnMasks` carries it; `RequireTypedColumnMasks(TableMetadata? = null)` denies a decision that masks a column (explicit `Mask` level, or catalog-sensitive when metadata is passed) without a typed mask for it, analogous to `RequireTypedRowPolicy()`.
+- `Autheris.Application/Policy/ColumnMaskPolicy.cs`: `IColumnMaskPolicy` over `MaskSpec`s; fails closed when an argument is not a declared `ParameterOrigin.Mask` parameter. `Sql/Masking/DecisionColumnMaskProvider.cs`: `IColumnMaskProvider` over the masks of decisions (never invents a mask).
+- `SqlDataMaskingProvider.GetMaskSpec(rule, column, dataType, dialect, tenant, hmacKeyId?)` and static `BuildUnkeyedMaskSpec`: a typed spec for every rule type. Every value (replacement, counts, mask character, HMAC key, SQL Server key pads) is a mask parameter named `__gql_mask_{hash}_{role}`. HMAC degrades to Redact when `PreventInDbHmacKeyExposure`, on dialects without in-database HMAC, or without a key.
+- `Sql/Masking/MaskSpecRenderer.cs`: renders a `MaskSpec` through the dialect generator (bound emitter, emitted-SQL invariants) and returns text plus a marker-keyed value map; a literal or foreign parameter in the output fails closed.
+- String facade: `GetMaskExpressionForRule` (GEO_JITTER, PARTIAL_MASK) and `SqlDataSourceExecutor.BuildMaskedColumnProjection` (new overload with a parameter sink, bound by the executor) render from the spec. `AstSecurityVisitor.BuildDialectMaskExpression` (L-9) has no caller outside the engine.
+
+**Tests**: `Masking/TypedMaskSpecTests` (`MaskSpec_*` for every rule type, `HmacKey_IsParameter_AndNeverInRenderedText`, `HmacKey_SqlServer_UsesTwoBinaryPadParameters`, `Hmac_WhereTheKeyMayNotReachTheDatabase_DegradesToRedact`, `Render_EveryValueIsAParameter_NeverText` on four dialects, `RenderedMask_*_MatchesPreviousOutput` with SQLite execution, string facade and executor projection), `Policy/TypedColumnMaskDecisionTests`, architecture `TypedMaskArchitectureTests.NoCallerOf_BuildDialectMaskExpression_OutsideTheEngine` (IL scan with a positive control).
+
+**Deviations and open items:**
+
+- `GetMaskSpec` takes the catalog rule, data type, dialect and tenant instead of `(rule, column, hmacKeyId)`: the HMAC key derivation and the dialect-specific pads need them.
+- MASK_EMAIL and MASK_IBAN have no `MaskKind`; the typed spec is a partial mask (1/0 and 2/4) that keeps less than the legacy text. A fixed-length partial mask becomes Redact (the typed partial mask reveals the length). The legacy string builders for email, IBAN and HMAC are unchanged and stay until X1.
+- The SQLite legacy partial-mask string always used five mask characters; the typed emitter keeps the variable-length rule of PostgreSQL and SQL Server, so on SQLite the masked length is now visible (value content is not).
+- A column whose catalog type is missing or unsupported falls back to the default mask on the string facade (the emitter requires a type).
+- The live compiler assembly (X0l) must populate `ColumnMasks` and call `RequireTypedColumnMasks`; the decision producers do not yet.

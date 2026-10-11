@@ -227,7 +227,7 @@ public sealed class TypedMaskSpecTests
 
     // --- RenderedMask_MatchesPreviousOutput: SQLite execution against the previous string producers ---
 
-    private static List<object?> Run(string expression, IEnumerable<KeyValuePair<string, object?>>? parameters = null)
+    private static List<object?> Run(string expression, IEnumerable<KeyValuePair<string, object?>>? parameters = null, bool numeric = false)
     {
         using var connection = new SqliteConnection("Data Source=:memory:");
         connection.Open();
@@ -235,7 +235,9 @@ public sealed class TypedMaskSpecTests
             value is null ? null : Convert.ToHexStringLower(HMACSHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key), System.Text.Encoding.UTF8.GetBytes(value))));
         using (var setup = connection.CreateCommand())
         {
-            setup.CommandText = "CREATE TABLE t (id INTEGER, col TEXT); INSERT INTO t VALUES (1, 'abcdefghij'), (2, 'ab'), (3, NULL), (4, 'x@example.com'), (5, '');";
+            setup.CommandText = numeric
+                ? "CREATE TABLE t (id INTEGER, col REAL); INSERT INTO t VALUES (1, 48.298197), (2, 0.0), (3, NULL);"
+                : "CREATE TABLE t (id INTEGER, col TEXT); INSERT INTO t VALUES (1, 'abcdefghij'), (2, 'ab'), (3, NULL), (4, 'x@example.com'), (5, '');";
             setup.ExecuteNonQuery();
         }
 
@@ -260,8 +262,17 @@ public sealed class TypedMaskSpecTests
     {
         var spec = Spec(rule, dataType, DatabaseDialect.Sqlite);
         var rendered = new MaskSpecRenderer().Render(spec, "col", dataType, TargetSqlDialect.Sqlite);
-        return Run(rendered.Sql, rendered.Parameters);
+        return Run(rendered.Sql, rendered.Parameters, numeric: dataType == "real");
     }
+
+    // The previous PostgreSQL and SQL Server output (the SQLite legacy string always used five mask characters, which the typed
+    // emitter replaces by the same variable-length rule as the other dialects).
+    private static List<object?> ReferencePartial(int prefix, int suffix, char maskChar) =>
+        new string?[] { "abcdefghij", "ab", null, "x@example.com", string.Empty }
+            .Select(v => v is null ? null
+                : v.Length <= prefix + suffix ? new string(maskChar, 5)
+                : v[..prefix] + new string(maskChar, v.Length - prefix - suffix) + v[^suffix..])
+            .Cast<object?>().ToList();
 
     [Fact]
     public void RenderedMask_Nullify_MatchesPreviousOutput() =>
@@ -282,11 +293,8 @@ public sealed class TypedMaskSpecTests
     [InlineData(20, 20, '*')]
     public void RenderedMask_PartialMask_MatchesPreviousOutput(int prefix, int suffix, char maskChar)
     {
-        var legacy = AstSecurityVisitor.BuildDialectMaskExpression("col", "PARTIAL_MASK", TargetSqlDialect.Sqlite,
-            keepPrefix: prefix, keepSuffix: suffix, maskChar: maskChar);
-
         RunTyped(new MaskingRule { RuleType = "PARTIAL_MASK", KeepPrefix = prefix, KeepSuffix = suffix, MaskChar = maskChar })
-            .ShouldBe(Run(legacy));
+            .ShouldBe(ReferencePartial(prefix, suffix, maskChar));
     }
 
     [Fact]
@@ -294,22 +302,7 @@ public sealed class TypedMaskSpecTests
     {
         var legacy = AstSecurityVisitor.BuildDialectMaskExpression("col", "GEO_JITTER", TargetSqlDialect.Sqlite, decimals: 2);
 
-        RunTyped(new MaskingRule { RuleType = "GEO_JITTER", Decimals = 2 }, "real").ShouldBe(RunNumeric(legacy));
-    }
-
-    private static List<object?> RunNumeric(string expression)
-    {
-        using var connection = new SqliteConnection("Data Source=:memory:");
-        connection.Open();
-        using var setup = connection.CreateCommand();
-        setup.CommandText = "CREATE TABLE t (id INTEGER, col REAL); INSERT INTO t VALUES (1, 48.298197), (2, 0.0), (3, NULL);";
-        setup.ExecuteNonQuery();
-        using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT {expression} FROM t ORDER BY id";
-        using var reader = command.ExecuteReader();
-        var rows = new List<object?>();
-        while (reader.Read()) rows.Add(reader.IsDBNull(0) ? null : reader.GetValue(0));
-        return rows;
+        RunTyped(new MaskingRule { RuleType = "GEO_JITTER", Decimals = 2 }, "real").ShouldBe(Run(legacy, numeric: true));
     }
 
     [Fact]
@@ -354,8 +347,37 @@ public sealed class TypedMaskSpecTests
         if (ruleType == "PARTIAL_MASK")
         {
             parameters.Values.ShouldContain("#");
-            Run(sql, parameters).ShouldBe(Run(
-                AstSecurityVisitor.BuildDialectMaskExpression("col", "PARTIAL_MASK", TargetSqlDialect.Sqlite, keepPrefix: 3, keepSuffix: 1, maskChar: '#')));
+            Run(sql, parameters).ShouldBe(ReferencePartial(3, 1, '#'));
         }
     }
+
+    // --- the projection used by the SQL data source executor (added after the code; not a Red step) ---
+
+    private static TableMetadata PartialMaskMeta() => new()
+    {
+        Table = new Table { TableName = "t", SchemaName = "main", SourceName = "d", SourceType = "Sqlite" },
+        Columns = [new TableColumn { ColumnName = "col", DataType = "text" }],
+        ColumnMaskingRules = new Dictionary<string, MaskingRule>
+        {
+            ["col"] = new() { RuleType = "PARTIAL_MASK", KeepPrefix = 2, KeepSuffix = 1, MaskChar = '#' }
+        }
+    };
+
+    [Fact]
+    public void ExecutorProjection_PartialMask_ReturnsBoundValues_NotText()
+    {
+        var parameters = new Dictionary<string, object?>();
+
+        var projection = Autheris.Application.Services.SqlDataSourceExecutor.BuildMaskedColumnProjection(
+            "col", "text", DatabaseDialect.Sqlite, PartialMaskMeta(), parameters);
+
+        projection.ShouldNotContain("#");
+        parameters.Values.ShouldContain("#");
+        parameters.Keys.ShouldAllBe(k => projection.Contains(k));
+    }
+
+    [Fact]
+    public void ExecutorProjection_WithoutParameterSink_RefusesAMaskWithBoundValues() =>
+        Should.Throw<InvalidOperationException>(() => Autheris.Application.Services.SqlDataSourceExecutor.BuildMaskedColumnProjection(
+            "col", "text", DatabaseDialect.Sqlite, PartialMaskMeta()));
 }
