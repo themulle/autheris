@@ -83,8 +83,15 @@ public sealed class AstCompilerPostgreSqlDmlExecutionTests : AstCompilerDmlContr
         return await cmd.ExecuteNonQueryAsync();
     }
 
+    protected override async Task<System.Data.Common.DbConnection?> OpenSessionConnectionAsync()
+    {
+        var conn = new NpgsqlConnection(_fx.ConnectionString);
+        await conn.OpenAsync();
+        return conn;
+    }
+
     protected override Task<int> ExecuteInTransactionAsync(CompiledSql compiled) =>
-        RunCheckedAsync(new NpgsqlConnection(_fx.ConnectionString), true, _binder, compiled);
+        RunCheckedAsync(new NpgsqlConnection(_fx.ConnectionString), true, compiled);
 
     protected override async Task<List<object?[]>> QueryAsync(string sql)
     {

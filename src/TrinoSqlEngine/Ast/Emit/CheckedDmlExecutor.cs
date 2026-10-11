@@ -24,7 +24,28 @@ public interface ICheckedDmlExecutor
         IReadOnlyDictionary<string, object?> clientParameterValues,
         IsolationLevel isolationLevel = IsolationLevel.ReadCommitted,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// X0k (G-3): runs <paramref name="compiled"/> inside the caller's session transaction (no nested transaction: PostgreSQL pins the
+    /// tenant with a transaction-local setting) with the command timeout of <paramref name="limits"/>. Binds, executes, enforces the
+    /// check option and then <see cref="CheckedDmlLimits.MaxAffectedRows"/>. This method is the single owner of the completion of
+    /// <paramref name="transaction"/> (SEC-X1-06): it commits on success and rolls back on any failure, including a timeout and a
+    /// cancellation (the rollback ignores the token). The caller must neither commit nor roll it back again, and disposes it.
+    /// A transaction that is no longer usable (completed, or on a closed connection) is rejected.
+    /// </summary>
+    Task<int> ExecuteInTransactionAsync(
+        DbTransaction transaction,
+        CompiledSql compiled,
+        IReadOnlyDictionary<string, object?> clientParameterValues,
+        CheckedDmlLimits limits,
+        CancellationToken cancellationToken = default);
 }
+
+/// <summary>
+/// Limits of one governed DML execution (X0k). <paramref name="CommandTimeoutSeconds"/> is applied to the command (0 = provider
+/// default). <paramref name="MaxAffectedRows"/>: 0 = no limit; with a limit, an unreported count (-1) fails closed.
+/// </summary>
+public sealed record CheckedDmlLimits(int CommandTimeoutSeconds, long MaxAffectedRows);
 
 /// <summary>The default <see cref="ICheckedDmlExecutor"/> over an ADO.NET connection.</summary>
 public sealed class CheckedDmlExecutor : ICheckedDmlExecutor
@@ -32,7 +53,8 @@ public sealed class CheckedDmlExecutor : ICheckedDmlExecutor
     private readonly DbCommandCompiledSqlBinder _binder;
 
     /// <param name="binder">The provider binder of the dialect; only the engine's own binders can bind a checked statement.</param>
-    public CheckedDmlExecutor(DbCommandCompiledSqlBinder binder)
+    /// <remarks>Internal (SEC-X1-07): <see cref="CompiledSqlBinders.CheckedExecutorFor"/> is the only factory.</remarks>
+    internal CheckedDmlExecutor(DbCommandCompiledSqlBinder binder)
     {
         _binder = binder ?? throw new ArgumentNullException(nameof(binder));
     }
@@ -58,22 +80,140 @@ public sealed class CheckedDmlExecutor : ICheckedDmlExecutor
         }
 
         await using var transaction = await connection.BeginTransactionAsync(isolationLevel, cancellationToken).ConfigureAwait(false);
+        return await RunAndCompleteAsync(transaction, compiled, clientParameterValues, new CheckedDmlLimits(0, 0), cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<int> ExecuteInTransactionAsync(
+        DbTransaction transaction,
+        CompiledSql compiled,
+        IReadOnlyDictionary<string, object?> clientParameterValues,
+        CheckedDmlLimits limits,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentNullException.ThrowIfNull(compiled);
+        ArgumentNullException.ThrowIfNull(clientParameterValues);
+        ArgumentNullException.ThrowIfNull(limits);
+        if (limits.CommandTimeoutSeconds < 0) throw new ArgumentOutOfRangeException(nameof(limits), "The command timeout must not be negative.");
+        if (limits.MaxAffectedRows < 0) throw new ArgumentOutOfRangeException(nameof(limits), "The affected-row limit must not be negative.");
+
+        // Nothing is run on a transaction that is not usable. It is not completed here either: a completed transaction has nothing to complete.
+        if (transaction.Connection is not { State: ConnectionState.Open })
+        {
+            throw new InvalidOperationException("The transaction is completed or its connection is not open.");
+        }
+
+        // From here on the executor owns the completion, so a rejected statement (for example of another dialect) rolls back as well.
+        return await RunAndCompleteAsync(transaction, compiled, clientParameterValues, limits, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<int> RunAndCompleteAsync(
+        DbTransaction transaction,
+        CompiledSql compiled,
+        IReadOnlyDictionary<string, object?> clientParameterValues,
+        CheckedDmlLimits limits,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            await using var command = connection.CreateCommand();
+            if (!_binder.CanBind(compiled.Dialect))
+            {
+                throw new InvalidOperationException("The compiled SQL was generated for another dialect.");
+            }
+
+            await using var command = transaction.Connection!.CreateCommand();
             command.Transaction = transaction;
+            if (limits.CommandTimeoutSeconds > 0) command.CommandTimeout = limits.CommandTimeoutSeconds;
             _binder.BindForCheckedExecution(command, compiled, clientParameterValues);
             int affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
             // an unreported count (-1, for example SET NOCOUNT ON) differs from the expected count and fails closed
             DmlCheckOption.Enforce(compiled, affected);
+            if (limits.MaxAffectedRows > 0 && (affected < 0 || affected > limits.MaxAffectedRows))
+            {
+                throw new DmlAffectedRowsLimitException(compiled.Dialect);
+            }
+
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return affected;
         }
         catch
         {
-            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+            await RollbackQuietlyAsync(transaction).ConfigureAwait(false);
             throw;
         }
+    }
+
+    private static async Task RollbackQuietlyAsync(DbTransaction transaction)
+    {
+        try
+        {
+            await transaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // a failed rollback (for example a dead connection) must not mask the original error; the server discards the transaction
+        }
+    }
+}
+
+/// <summary>
+/// The executor of Databricks (X0k, S-2). Delta has no transaction, so a governed DML statement cannot be rolled back and
+/// <see cref="CheckedDmlLimits.MaxAffectedRows"/> cannot be enforced atomically: DML is rejected, before any command is created or
+/// request is sent, while a limit is configured. A row-count check is never supported (the compiler does not emit one for Delta).
+/// </summary>
+internal sealed class DatabricksCheckedDmlExecutor : ICheckedDmlExecutor
+{
+    private readonly DbCommandCompiledSqlBinder _binder;
+
+    internal DatabricksCheckedDmlExecutor(DbCommandCompiledSqlBinder binder)
+    {
+        _binder = binder ?? throw new ArgumentNullException(nameof(binder));
+    }
+
+    public Task<int> ExecuteAsync(
+        DbConnection connection,
+        CompiledSql compiled,
+        IReadOnlyDictionary<string, object?> clientParameterValues,
+        IsolationLevel isolationLevel = IsolationLevel.ReadCommitted,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Databricks has no transaction; use ExecuteInTransactionAsync.");
+
+    public async Task<int> ExecuteInTransactionAsync(
+        DbTransaction transaction,
+        CompiledSql compiled,
+        IReadOnlyDictionary<string, object?> clientParameterValues,
+        CheckedDmlLimits limits,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(transaction);
+        ArgumentNullException.ThrowIfNull(compiled);
+        ArgumentNullException.ThrowIfNull(clientParameterValues);
+        ArgumentNullException.ThrowIfNull(limits);
+        if (limits.CommandTimeoutSeconds < 0) throw new ArgumentOutOfRangeException(nameof(limits), "The command timeout must not be negative.");
+        if (limits.MaxAffectedRows < 0) throw new ArgumentOutOfRangeException(nameof(limits), "The affected-row limit must not be negative.");
+        if (!_binder.CanBind(compiled.Dialect))
+        {
+            throw new InvalidOperationException("The compiled SQL was generated for another dialect.");
+        }
+
+        // fail closed before anything reaches the facade connection
+        if (limits.MaxAffectedRows > 0)
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, "Databricks DML while an affected-row limit is configured");
+        }
+
+        if (compiled.RequiresRowCountCheck)
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, "Databricks has no row-count check");
+        }
+
+        // there is no transaction to complete: the facade transaction stays the caller's
+        var connection = transaction.Connection ?? throw new InvalidOperationException("The transaction is completed.");
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        if (limits.CommandTimeoutSeconds > 0) command.CommandTimeout = limits.CommandTimeoutSeconds;
+        _binder.Bind(command, compiled, clientParameterValues);
+        return await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 }

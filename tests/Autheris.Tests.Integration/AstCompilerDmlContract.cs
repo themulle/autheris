@@ -69,17 +69,53 @@ public abstract class AstCompilerDmlContract
     /// The shared transaction harness for the ADO.NET dialects: the engine's checked executor (CR-ADG-43), the only path that may
     /// run a statement with a row-count check.
     /// </summary>
-    protected static async Task<int> RunCheckedAsync(DbConnection connection, bool ownsConnection, DbCommandCompiledSqlBinder binder, CompiledSql compiled,
+    protected static async Task<int> RunCheckedAsync(DbConnection connection, bool ownsConnection, CompiledSql compiled,
         System.Data.IsolationLevel isolation = System.Data.IsolationLevel.ReadCommitted)
     {
         try
         {
-            return await new CheckedDmlExecutor(binder).ExecuteAsync(connection, compiled, new Dictionary<string, object?>(), isolation);
+            return await CompiledSqlBinders.CheckedExecutorFor(compiled.Dialect).ExecuteAsync(connection, compiled, new Dictionary<string, object?>(), isolation);
         }
         finally
         {
             if (ownsConnection) await connection.DisposeAsync();
         }
+    }
+
+    /// <summary>X0k: a fresh open connection for the session-transaction scenarios; null (the default) skips them for the dialect.</summary>
+    protected virtual Task<DbConnection?> OpenSessionConnectionAsync() => Task.FromResult<DbConnection?>(null);
+
+    [Fact]
+    public async Task ExecuteInTransaction_UsesCallerTransaction_NoNestedBegin()
+    {
+        if (!Available()) return;
+        await using var connection = await OpenSessionConnectionAsync();
+        if (connection is null) return;
+        var compiled = Engine.Compile($"UPDATE {O} SET status = 'sess' WHERE id > 0".AsMemory(), Request("acme"), default);
+        await using (var transaction = await connection.BeginTransactionAsync())   // the session transaction; a second Begin would fail
+        {
+            int affected = await CompiledSqlBinders.CheckedExecutorFor(Dialect)
+                .ExecuteInTransactionAsync(transaction, compiled, new Dictionary<string, object?>(), new CheckedDmlLimits(30, 0));
+            affected.ShouldBe(3);
+        }
+
+        Convert.ToInt32((await QueryAsync($"SELECT count(*) FROM {RawTable("Orders")} WHERE {ReadExpr("Status")} = 'sess'"))[0][0]).ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task ExecuteInTransaction_MaxAffectedRowsExceeded_RollsBack()
+    {
+        if (!Available()) return;
+        await using var connection = await OpenSessionConnectionAsync();
+        if (connection is null) return;
+        var compiled = Engine.Compile($"UPDATE {O} SET status = 'sess' WHERE id > 0".AsMemory(), Request("acme"), default);
+        await using (var transaction = await connection.BeginTransactionAsync())
+        {
+            await Should.ThrowAsync<DmlAffectedRowsLimitException>(() => CompiledSqlBinders.CheckedExecutorFor(Dialect)
+                .ExecuteInTransactionAsync(transaction, compiled, new Dictionary<string, object?>(), new CheckedDmlLimits(30, 2)));
+        }
+
+        Convert.ToInt32((await QueryAsync($"SELECT count(*) FROM {RawTable("Orders")} WHERE {ReadExpr("Status")} = 'sess'"))[0][0]).ShouldBe(0);
     }
 
     protected abstract Task<List<object?[]>> QueryAsync(string sql);

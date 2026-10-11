@@ -40,6 +40,11 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
 {
     private const int DefaultStringSize = 4000;
 
+    /// <summary>SEC-X1-07: <c>private protected</c>, so no binder can be derived outside the engine (a subclass could drop the refusals).</summary>
+    private protected DbCommandCompiledSqlBinder()
+    {
+    }
+
     protected abstract TargetSqlDialect Dialect { get; }
 
     /// <summary>Fixed string and binary sizes keep one cached plan per statement (SQL Server).</summary>
