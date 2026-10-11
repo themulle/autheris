@@ -3575,3 +3575,11 @@ Branch `feat/ast-x1-catalog` (base `9757a85`). CR-ADG-47 and the SEC-X1-09 amend
   - No Databricks reader: it belongs to X0j/X0k (`DatabricksCatalog_ReadsFullDataTypeAndCollation`); the `UTF8_BINARY` relaxation stays X0j's to disable.
   - The SQLite declared type is kept as the native type (it is hashed); the affinity is derived from it for the tenant check only.
   - Nothing maps the `DuckDb` provider name to a connection yet (`SqlConnectionFactory` has no DuckDB branch), so the DuckDB reader is reachable only with a caller-supplied connection until X1.
+
+### WP-X0i implementation log
+
+Branch `feat/ast-x1-databricks-client` (Red commit `13237d9`, Green commit follows it). Not wired into `SqlConnectionFactory` or WebSQL admission (WP-X0j; S-4).
+
+- **Delivered:** `src/Autheris.Infrastructure/Databricks/**` (`DatabricksStatementExecutionClient`, `DatabricksTokenCache`, `DatabricksHostPolicy`, request/result/exception types, `AddDatabricksStatementExecution`), `DatabricksDataSourceOptions` / `DatabricksAuthOptions` / `DatabricksAuthMode` in `GatewayOptions.cs` (`DataSources:Connections:<name>:Databricks`), `GatewayStartupValidator.ValidateDatabricks`, `EgressIntegrations.Databricks`.
+- **Tests (63, `tests/Autheris.Tests.Unit/Databricks`):** every WP-X0i and Phase 3 amendment test name, run against an HTTP fake. The `statement_id` format, chunk-link pinning, `external_links`, redirect, header redaction, Pat-only-in-Development (client and startup validator), host-derived token endpoint, wait-timeout clamp and no-token-in-errors/logs controls each have a test.
+- **Choices:** the client is the REST client only (no `DbConnection` adapters; those belong to X0j). `ExecuteAsync` takes an optional `DataSource` name (null = the single configured Databricks source). Chunk requests are rebuilt from the validated chunk index, never from the server link. `ByteLimit` is enforced on the summed cell bytes, on `manifest.truncated`, and on the response buffer (`ByteLimit` + 256 KiB). The host policy is an exact DNS name (no IP literal, wildcard, scheme, port or path); private-link hosts are not yet allow-listable (`Databricks` is not in `EgressIntegrations.AllowlistCapable`).
