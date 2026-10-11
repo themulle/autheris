@@ -110,4 +110,44 @@ public sealed class AcceptedDifferencesTests
 
         accepted.HasPendingEntries.ShouldBeFalse("accepted-differences.json still has pending entries: the security reviewers have not signed off");
     }
+
+    private static string Defect(string approval = "approved", string reviewer = "stakeholder (2026-10-11)") => $$"""
+        {
+          "schemaVersion": 1,
+          "entries": [],
+          "legacyDefects": [
+            {
+              "dialects": ["PostgreSql"],
+              "statements": ["{{Id}}"],
+              "defect": "Legacy under-returns the rows of a recursive CTE (8 instead of 24).",
+              "justification": "The AST result is the correct one; the legacy baseline is wrong.",
+              "reviewer": "{{reviewer}}",
+              "approval": "{{approval}}"
+            }
+          ]
+        }
+        """;
+
+    [Fact]
+    public void LegacyDefect_ApprovedEntry_IsRecognisedPerStatementAndDialect()
+    {
+        var accepted = AcceptedDifferences.Parse(Defect());
+
+        accepted.IsLegacyDefect(Id, GateDialect.PostgreSql).ShouldBeTrue();
+        accepted.IsLegacyDefect(Id, GateDialect.Oracle).ShouldBeFalse();
+        accepted.IsLegacyDefect("ba9876543210", GateDialect.PostgreSql).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void LegacyDefect_PendingEntry_IsRejected() =>
+        Should.Throw<AcceptedDifferencesSchemaException>(() => AcceptedDifferences.Parse(Defect(approval: "pending")));
+
+    [Fact]
+    public void LegacyDefect_AnonymousReviewer_IsRejected() =>
+        Should.Throw<AcceptedDifferencesSchemaException>(() => AcceptedDifferences.Parse(Defect(reviewer: "someone")));
+
+    [Fact]
+    public void LegacyDefect_DoesNotMakeAnAstLooserClassAcceptable() =>
+        // the class enum of entries is unchanged: an ast-looser-rows entry is still invalid
+        Should.Throw<AcceptedDifferencesSchemaException>(() => AcceptedDifferences.Parse(Entry("ast-looser-rows")));
 }

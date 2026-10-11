@@ -116,7 +116,16 @@ public abstract class DifferentialGateBase<TDatabase>(DifferentialFixture<TDatab
         var results = await ResultsAsync();
         if (results is null) return;
 
-        var looser = results.Where(r => r.Classification.Class.IsLooser()).ToList();
+        var accepted = AcceptedDifferences.Parse(File.ReadAllText(Path.Combine(CorpusLoader.CorpusDirectory, "accepted-differences.json")));
+
+        // A confirmed legacy defect (approved, listed by statement id) is skipped, but only while the AST path has zero oracle violations.
+        // Everything else that is looser stays red: ast-looser-* is never acceptable as a class.
+        bool IsSkippedLegacyDefect(StatementResult r) =>
+            accepted.IsLegacyDefect(r.Statement.Id, Fixture.Database.Dialect) && r.Classification.AstViolations.Count == 0;
+
+        var skipped = results.Where(r => r.Classification.Class.IsLooser() && IsSkippedLegacyDefect(r)).ToList();
+        if (skipped.Count > 0) output.WriteLine($"{skipped.Count} ast-looser results skipped as confirmed legacy defects:\n{Describe(skipped)}");
+        var looser = results.Where(r => r.Classification.Class.IsLooser() && !IsSkippedLegacyDefect(r)).ToList();
 
         looser.ShouldBeEmpty($"{looser.Count} ast-looser results on {Fixture.Database.Dialect}:\n{Describe(looser)}");
     }

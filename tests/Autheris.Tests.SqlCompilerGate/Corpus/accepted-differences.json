@@ -334,5 +334,35 @@
       "reviewer": null,
       "approval": "pending"
     }
+  ],
+  "legacyDefects": [
+    {
+      "dialects": [
+        "PostgreSql"
+      ],
+      "statements": [
+        "582b869c9140",
+        "5730f78b10ab",
+        "d119663e7737"
+      ],
+      "defect": "The legacy token-stream rewriter does not iterate a WITH RECURSIVE member: it returns only the anchor rows (8, or 4 under consent) where the recursion yields 24 (12 under consent).",
+      "justification": "The AST result is the correct recursive result (3 levels x 8 rows) and every row is tenant-scoped. The gate skips these ids only while the PolicyOracle reports zero violations on the AST path.",
+      "issue": null,
+      "reviewer": "stakeholder (2026-10-11)",
+      "approval": "approved"
+    },
+    {
+      "dialects": [
+        "Oracle"
+      ],
+      "statements": [
+        "16eb9fc1d7da"
+      ],
+      "defect": "Legacy passes EXISTS through as Oracle's native boolean select item (ODP.NET returns Boolean); the AST emits the portable 1/0 NUMBER form. Same truth value; a typing difference, not a security difference.",
+      "justification": "A table-free statement that touches no tenant data; the stakeholder accepts the AST form. Skipped only while the PolicyOracle reports zero violations on the AST path.",
+      "issue": null,
+      "reviewer": "stakeholder (2026-10-11)",
+      "approval": "approved"
+    }
   ]
 }

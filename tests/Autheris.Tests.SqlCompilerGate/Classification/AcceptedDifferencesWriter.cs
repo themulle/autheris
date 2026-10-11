@@ -48,6 +48,17 @@ public static class AcceptedDifferencesWriter
                 reviewer = e.Reviewer,
                 approval = e.Approval
             });
-        File.WriteAllText(path, JsonSerializer.Serialize(new { schemaVersion = 1, entries }, Options) + "\n");
+        var legacyDefects = current.LegacyDefects.Select(l => new
+        {
+            dialects = l.Dialects,
+            statements = l.Statements,
+            defect = l.Defect,
+            justification = l.Justification,
+            issue = l.Issue,
+            reviewer = l.Reviewer,
+            approval = l.Approval
+        });
+        // legacyDefects are human decisions: a proposal run keeps them untouched
+        File.WriteAllText(path, JsonSerializer.Serialize(new { schemaVersion = 1, entries, legacyDefects }, Options) + "\n");
     }
 }
