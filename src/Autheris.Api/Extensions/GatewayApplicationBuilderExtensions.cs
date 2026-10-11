@@ -463,12 +463,22 @@ public static class GatewayApplicationBuilderExtensions
         app.MapDevEndpoints(gatewayOptions); // F-AUTH-DX: Development only (no routes elsewhere)
         app.MapPlan9Endpoints();
 
-        if (gatewayOptions.SqlEndpoints.Enabled)
-        {
-            var loader = app.Services.GetService<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
-            loader?.LoadFromDirectory(gatewayOptions.SqlEndpoints.Directory, gatewayOptions.SqlEndpoints.EnableHotReload);
-        }
+        LoadSqlEndpoints(app.Services, gatewayOptions);
 
         return app;
+    }
+
+    /// <summary>
+    /// Loads declarative SQL endpoints. Fail-closed: when enabled, a missing loader registration aborts startup.
+    /// </summary>
+    public static void LoadSqlEndpoints(IServiceProvider services, GatewayOptions gatewayOptions)
+    {
+        if (!gatewayOptions.SqlEndpoints.Enabled)
+        {
+            return;
+        }
+
+        var loader = services.GetRequiredService<Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader>();
+        loader.LoadFromDirectory(gatewayOptions.SqlEndpoints.Directory, gatewayOptions.SqlEndpoints.EnableHotReload);
     }
 }

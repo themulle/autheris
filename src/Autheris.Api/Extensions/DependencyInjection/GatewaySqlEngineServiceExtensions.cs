@@ -76,6 +76,7 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddScoped<IGovernedSqlExecutionService, GovernedSqlExecutionService>();
         services.AddSingleton<IWebSqlStatementManager, WebSqlStatementManager>();
         services.AddSingleton<ISqlEndpointRegistry, InMemorySqlEndpointRegistry>();
+        services.AddSingleton<SqlEndpointLoader>();
         services.AddScoped<ISqlEndpointExecutionService, SqlEndpointExecutionService>();
 
         // WebSQL Federation & Cross-Source Joins (Plan 7)
