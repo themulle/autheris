@@ -1916,4 +1916,26 @@ public sealed class TenantIsolationOptions
     /// outside Development (strict mode).
     /// </summary>
     public bool StrictCollisionStartup { get; init; }
+
+    /// <summary>CR-ADG-31 / WP-X0p: the tenant registry that detects collisions between tenants known only to the identity provider.</summary>
+    public TenantRegistryOptions Registry { get; init; } = new();
+}
+
+/// <summary>Tenant registry settings (<c>Gateway:TenantIsolation:Registry</c>). Off by default; the legacy configured-tenant guard stays active either way.</summary>
+public sealed class TenantRegistryOptions
+{
+    /// <summary>When <c>true</c> every authenticated request registers its tenant id; the registry being unavailable then denies the request (503).</summary>
+    public bool Enabled { get; init; }
+
+    /// <summary>Budget of new tenant registrations per identity provider issuer and window (SEC-X1-13).</summary>
+    [Range(1, 100_000)] public int MaxNewTenantsPerIssuerPerWindow { get; init; } = 20;
+
+    [Range(1, 86_400)] public int WindowSeconds { get; init; } = 60;
+
+    /// <summary>TTL of the in-memory positive cache; a collision recorded by another replica takes effect within this time.</summary>
+    [Range(1, 3_600)] public int CacheTtlSeconds { get; init; } = 60;
+
+    [Range(1, 1_000_000)] public int MaxCacheEntries { get; init; } = 10_000;
+
+    [Range(1, 100_000)] public int MaxTrackedIssuers { get; init; } = 1_024;
 }

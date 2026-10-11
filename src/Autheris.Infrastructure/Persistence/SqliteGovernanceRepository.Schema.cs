@@ -359,6 +359,14 @@ public partial class SqliteGovernanceRepository
             );
 
             INSERT INTO VIRTUAL_FILTER_GENERATION (id, generation) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;
+
+            -- CR-ADG-31: tenant registry (grouped by NFKC + upper-case key; collided = 1 denies every spelling of the group)
+            CREATE TABLE IF NOT EXISTS TENANT_REGISTRY (
+                normalized_key TEXT PRIMARY KEY,
+                tenant_id TEXT NOT NULL,
+                collided INTEGER NOT NULL DEFAULT 0,
+                first_seen_at TEXT NOT NULL
+            );
         ";
         cmd.ExecuteNonQuery();
 
