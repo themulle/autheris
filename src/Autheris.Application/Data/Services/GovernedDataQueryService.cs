@@ -101,6 +101,15 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             throw new UnauthorizedAccessException($"Access to table '{request.Table.ToQualifiedName()}' is forbidden: {reasons}");
         }
 
+        // WP-X0n / SEC-X1-17: the row policy is no longer spliced from this decision, so the rewriter's own decision is the only
+        // one that restricts rows. It must be computed from the same inputs. The unified PDP drops a ClusterAdmin role claim of a
+        // non-canonical principal while the rewriter keeps every role claim; that one input difference fails closed here.
+        if (context.User.GetUserRoles().Any(ClusterAdminPolicy.IsClusterAdminRole) && !ClusterAdminPolicy.IsCanonicalClusterAdmin(context.User))
+        {
+            throw new UnauthorizedAccessException(
+                $"Access to table '{request.Table.ToQualifiedName()}' is forbidden: the cluster administrator role claim is not canonical.");
+        }
+
         // 3. Resolve columns to select and enforce column permissions
         IReadOnlyList<string> columnsToSelect;
         if (request.SelectColumns != null && request.SelectColumns.Count > 0)
@@ -188,37 +197,27 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         }
 
         var sb = new StringBuilder();
-        sb.Append("SELECT ").Append(string.Join(", ", columnsToSelect)).Append(" FROM ").Append(request.Table.ToString());
+        sb.Append("SELECT ").Append(string.Join(", ", columnsToSelect.Select(DataApiFilterTranslator.QuoteIdentifier))).Append(" FROM ").Append(request.Table.ToString());
 
-        var predicates = new List<string>();
+        // WP-X0n (G-5): no policy text is spliced here. The decision above authorizes the request and drives column access;
+        // the row policy is applied exactly once, by the rewriter on the single-source branch and by the staging service
+        // from its own decision on the cross-source branch. Identifiers are emitted as quoted catalog spellings.
         if (!string.IsNullOrWhiteSpace(request.FilterExpression))
         {
-            var translated = DataApiFilterTranslator.TranslateFilterToSql(request.FilterExpression);
+            var translated = DataApiFilterTranslator.TranslateFilterToTrino(request.FilterExpression, metadata);
             if (!string.IsNullOrWhiteSpace(translated))
             {
-                predicates.Add(translated);
+                sb.Append(" WHERE ").Append(translated);
             }
-        }
-
-        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
-        {
-            // WP-X0l: the text of a typed row policy carries markers. The dataset text is parsed as user SQL, so the bound values
-            // are inlined here (legacy splice, removed by WP-X0n).
-            predicates.Add($"({Autheris.Application.Services.PolicyMarkerInliner.Inline(decision.CombinedRowFilterSql, decision.RowFilterParameters)})");
-        }
-
-        if (predicates.Count > 0)
-        {
-            sb.Append(" WHERE ").Append(string.Join(" AND ", predicates));
         }
 
         if (!string.IsNullOrWhiteSpace(request.OrderBy))
         {
-            sb.Append(" ORDER BY ").Append(request.OrderBy);
+            sb.Append(" ORDER BY ").Append(DataApiFilterTranslator.BuildOrderByClause(request.OrderBy, metadata));
         }
         else if (metadata.PrimaryKeyColumns.Count > 0)
         {
-            sb.Append(" ORDER BY ").Append(string.Join(", ", metadata.PrimaryKeyColumns));
+            sb.Append(" ORDER BY ").Append(string.Join(", ", metadata.PrimaryKeyColumns.Select(DataApiFilterTranslator.QuoteIdentifier)));
         }
 
         // Fetch offset + limit + 1 rows: the skipped window plus one row to accurately populate HasMore

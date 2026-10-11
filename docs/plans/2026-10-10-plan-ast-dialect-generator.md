@@ -3809,3 +3809,21 @@ Branch `feat/ast-x1-oracle-gateway` (stacked on X0b). WP-F5 / M-10.
 - Architecture test `OracleIntegrationTestArchitectureTests`: `new OracleConnection(` / `new OracleCommand(` only in `OracleTestFixtures.cs`. Red first (three files violated it), then green by moving the fixture and the raw hostile-session probe into it.
 - WebSQL admission is unchanged: `WebSqlEndpoint_DoesNotAdmitOracle_UntilX1Decides` pins the current 403 over HTTP. No test-only admission switch was added: the production WebSQL path is still the legacy `RewriteRls` string path, so an HTTP-to-Oracle run would not exercise the compiler, the binder or `BindByName`. X1.3 flips the gate and this test, and must then add the end-to-end HTTP cases (tenant isolation, masks, binds, errors) for Oracle on the compiled path.
 - Deviations / open: the new gateway-path tests are guard tests over code that already existed (the G6 Oracle suites of WP-A7/F4 were green before); only the architecture test had a Red step. `ICompiledSqlBinder` is not registered in DI (X1 wires it); the tests construct `OracleCompiledSqlBinder`. DML check option and `MERGE` are covered by `AstCompilerOracleDmlExecutionTests` on the same shared container and factory path, not duplicated through the host. Image digest pin is unchanged (`AstCompilerOracleFixture.Image`).
+
+### WP-X0n implementation log (`feat/ast-x1-rest-dataset`)
+
+Base: `feat/ast-x1-masks` (X0f). X0g (typed Virtual Filters) is not needed: the package only removes text from the REST and MCP dataset SQL.
+
+**Built:**
+
+- `GovernedDataQueryService` no longer appends `decision.CombinedRowFilterSql`. The decision authorizes the request and drives column access; the row policy is applied once by the rewriter (single source) or by the staging service from its own `req.Decision` (cross-source).
+- `DataApiFilterTranslator`: `QuoteIdentifier`, `TranslateFilterToTrino` (catalog column words become quoted identifiers, string literals untouched) and `BuildOrderByClause` (`column [ASC|DESC]` over catalog columns, anything else is an `ArgumentException`). The select list, filter, `ORDER BY` and primary-key ordering are emitted as quoted identifiers.
+- Fail-closed input guard: the unified PDP drops a `ClusterAdmin` role claim of a non-canonical principal (for example ForwardAuth) while the rewriter keeps every role claim. Because the splice used to AND both decisions, that case is now denied.
+
+**Tests** (`Autheris.Tests.Unit/DataApi/RestDatasetPolicySpliceTests`): `RestDataset_SqlServerPolicy_NoBracketTextInInput`, `RestDataset_ColumnsFilterAndOrderBy_AreQuotedIdentifiers`, `RestDataset_MalformedOrderBy_IsRejected`, `RestDataset_NonCanonicalClusterAdminRole_IsDeniedBecauseDecisionInputsDiffer`, `RestDataset_ResultEqualsSplicedResult_OnFixture` (real rewriter, predicate present once), `RestDataset_DecisionInputsEqualRewriterInputs` (real PDP and real rewriter over recording consent and Casbin stubs, purpose-bound), `McpDatasetTool_SameRows`, `CrossSourceDataset_RowFilterStillApplied_AfterSpliceRemoval`, `RestDataset_TenantBRowsAbsent_OnEveryBranch`, `TranslateFilterToTrino_*`.
+
+**Deviations and open items:**
+
+- Filter literals stay inline in the translated filter text (the plan's change line asks only for quoted identifiers); binding them is left to X1, when the dataset query becomes an AST. Limit and offset are numeric values computed in code, not request text.
+- The rewriter's decision still differs from the PDP's in inputs that only add information on the rewriter side: `gql.action` attribute, `RebacEnforcement.QueryPaths` versus `WhenEnabled`, all catalog columns as requested columns, and the access-profile repository. The PDP check remains an authorization gate, so the rewriter applies the superset of row restrictions.
+- `RestDataset_ResultEqualsSplicedResult_OnFixture` compares rewritten SQL text on a mocked rewriter fixture; it does not execute against SQLite (the filtered integration suite covers the end-to-end path).
