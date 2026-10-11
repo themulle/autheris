@@ -14,6 +14,13 @@ public static class BenchmarkRunnerApp
         Console.WriteLine("================================================================================");
         Console.WriteLine();
 
+        // BenchmarkDotNet switches (for example the G8 gate: --filter "*SqlCompiler*" --job short --exporters json).
+        if (args.Length > 0 && args[0].StartsWith("--", StringComparison.Ordinal))
+        {
+            BenchmarkDotNet.Running.BenchmarkSwitcher.FromAssembly(typeof(BenchmarkRunnerApp).Assembly).Run(args);
+            return;
+        }
+
         if (args.Length > 0 && args[0].Equals("vf", StringComparison.OrdinalIgnoreCase))
         {
             await VirtualFilterResolverBenchmark.RunAsync();

@@ -906,6 +906,9 @@
           "Antlr4.Runtime.Standard": "[4.13.1, )",
           "Microsoft.Extensions.ObjectPool": "[10.0.12, )"
         }
+      },
+      "sqlgate.benchcheck": {
+        "type": "Project"
       }
     }
   }
