@@ -2,7 +2,7 @@
 
 **Document ID:** `PLAN-AST-DIALECT-GEN-16` (implementation plan, Phase 2 of the 6-phase lifecycle)
 **Date:** 2026-10-10
-**Status:** IN PROGRESS - DML review loop 2 implemented (§25: CR-ADG-42, -43, -44 fixed, awaiting the Phase 5 re-review); DQL approved (§19.9) and ready for Phase 6
+**Status:** IN PROGRESS - Phase 5 approved for DQL (§19.9) and DML (§19.12); next: Phase 6 documentation, then the X1 preconditions
 **Author:** Solution Architect (`csharp-architect`); Phase 3 review (§16) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
@@ -1576,6 +1576,7 @@ Affected work packages and test criteria (additions to §11 and §16.8):
 
 ## 17. Changelog
 
+- 2026-10-11: Added §19.12 "Re-review (DML loop 2)" (`csharp-code-reviewer`) of `feat/ast-dml` at `f90677c`: CR-ADG-42 closed on SQL Server, PostgreSQL, Oracle Free and DuckDB (coercion and string variants rejected), CR-ADG-43/44 verified; verdict approved; CR-ADG-45 (row-count flag forgeable through a `with` copy) and CR-ADG-47 (catalog types from metadata) added as X1 preconditions, CR-ADG-46/-48 Minor; DQL and DML ready for Phase 6.
 - 2026-10-10: Added §25 "Implementation Log — DML review loop 2": CR-ADG-42 (Blocker: the INSERT check option now evaluates the policy on the stored value through native catalog casts and compares string columns byte-exact), CR-ADG-43 (binders refuse a row-count-checked statement; `CheckedDmlExecutor` is the only way to run it) and CR-ADG-44 (balanced row tree) fixed on `feat/ast-dml`; the §24.2 "known limit" text corrected; X1 preconditions updated.
 - 2026-10-10: Added §19.11 "Re-review (DML loop 1)" (`csharp-code-reviewer`) of `feat/ast-dml` at `4f18436`: CR-ADG-33, -34, -36..41 closed; changes requested for CR-ADG-42 (Blocker: the CR-ADG-35 INSERT check option is bypassed by type coercion on four engines and by column collation); CR-ADG-43 (X1) and CR-ADG-44 (Minor) added.
 - 2026-10-10: Added §24 "Implementation Log — DML review loop 1": CR-ADG-33..41 fixed on `feat/ast-dml` (one commit per finding); CR-ADG-35 decided by the orchestrator under stakeholder delegation (check-option INSERT for admin row policies, row-count contract in `CompiledSql`); CR-ADG-34 delivered as a total error mapper, runtime wiring stays at X1.
@@ -2072,6 +2073,82 @@ All mutants are killed. CR-ADG-42 is a semantic gap that none of the tests model
 #### 19.11.6 Phase 6 readiness
 
 DQL: ready for Phase 6 (approved in §19.9; the loop-3 fixes are verified in §19.10). DML: ready once CR-ADG-42 is fixed and re-verified by the coercion and collation scenarios, or once the CR-ADG-35 check option is withdrawn in favor of the strict rejection. Phase 6 must document CR-ADG-43 and §24.3 as X1 preconditions.
+
+### 19.12 Re-review (DML loop 2)
+
+**Scope:** `4928b27..f90677c` (plan §25): CR-ADG-42 (casts to the catalog type, byte-exact string checks, balanced `UNION ALL`), CR-ADG-44 (1,000-row tests) and CR-ADG-43 (checked execution). Method: code reading; the coercion attack and variants re-run on four engines through the contract's checked-execution harness; a compile-level bypass probe for CR-ADG-43; six mutants; a full reviewer-run with per-class counts taken from a TRX log. Probes were never committed.
+
+**Verdict: APPROVED.** The CR-ADG-42 blocker is closed on every engine. The remaining items are an X1 precondition (CR-ADG-45) and Minor test and residual items (CR-ADG-46..48). They do not block Phase 6.
+
+#### 19.12.1 Coercion and comparison attacks
+
+Executed with policy `Amount < 100` on `decimal(18,2)`/`NUMBER(18,2)`, and with policy `Region = 'EU'`. Each case ran through `ExecCheckedAsync` (transaction, `DmlCheckOption.Enforce`, rollback):
+
+| Input | SQL Server | PostgreSQL | Oracle Free | DuckDB |
+|---|---|---|---|---|
+| `amount = 99.999` (was written as 100.00 before the fix) | rejected | rejected | rejected | rejected |
+| `amount = 99.995` | rejected | rejected | rejected | rejected |
+| `region = 'eu'` | rejected | rejected | rejected | rejected |
+| `region = 'EU '` (trailing space) | rejected | rejected | rejected | rejected |
+| `region = 'EU'` (control) | written | written | written | written |
+
+Analysis of the remaining variants. The inserted values **are** the cast values of the derived table (`INSERT ... SELECT autheris_ins.col`), so the check and the storage see the same value whenever the catalog type equals the real column type.
+
+| Variant | Assessment |
+|---|---|
+| float/real, money/smallmoney, Oracle `NUMBER` without scale | The cast rounds exactly as the storage does (same type). Closed. |
+| DuckDB `HUGEINT`, decimal overflow | `HUGEINT` is not in `CatalogTypeMap`, so it is rejected (typed). An overflow raises in the cast and the transaction rolls back. |
+| timestamp with and without time zone | PostgreSQL evaluates `CAST($n AS timestamp with time zone)` once with the session `TimeZone`, and that value is what is stored, so a shift is identical on both sides. DuckDB `timestamptz` and Oracle `WITH LOCAL TIME ZONE` are not mapped, so they are rejected. |
+| varchar vs nvarchar, code-page conversion | The cast performs the conversion; the byte-exact compare runs on the converted value. A character that cannot be represented becomes `?` and fails the compare (false reject only). |
+| SQL Server `CHAR(n)` padding | `CAST('EU' AS char(10))` is padded and never byte-equal to `'EU'`, so a policy on a `CHAR` column always rejects (fail closed, availability). See CR-ADG-48. |
+| Oracle empty string | `CAST('' AS VARCHAR2(n))` is `NULL`, so the check is unknown and the insert is rejected. |
+| Unicode normalization | Precomposed and decomposed forms differ in bytes, so only false rejects are possible. |
+| Tenant (not cast) | The bound tenant is ASCII `[A-Za-z0-9_-]{1,64}` and is compared byte-exact on read (INV-15). It cannot become another valid tenant. Truncation raises on all four engines under default session settings. Residual: a SQL Server session with `ANSI_WARNINGS OFF` would truncate silently, so the gateway's SQL Server session must keep the default (document for X1). |
+| Catalog type drift | If the catalog says `decimal(18,3)` but the column is `decimal(18,2)`, the coercion bypass returns. See CR-ADG-47. |
+
+#### 19.12.2 CR-ADG-43 (checked execution)
+
+| Check | Result |
+|---|---|
+| Binders | Every `DbCommandCompiledSqlBinder` refuses a `RequiresRowCountCheck` statement before touching the command; `BindForCheckedExecution` is internal and only `CheckedDmlExecutor` calls it (architecture tests). `InternalsVisibleTo` covers only the two test projects. |
+| Cache | The template stores `ExpectedAffectedRows`, and `Rebind` carries it forward. Closed. |
+| `CompiledSql` copies | **Bypass (CR-ADG-45).** `ExpectedAffectedRows` is a public positional record property, so `compiled with { ExpectedAffectedRows = null }` yields a statement that `Bind` accepts. Probe: the SQL Server binder bound the forged copy. This is a deliberate act, not an accident (other `with` copies keep the flag), but it contradicts the claim of "fail closed by construction". |
+| Other `ICompiledSqlBinder` implementations | The interface documents the duty; today only `DbCommandCompiledSqlBinder` subclasses exist. A future REST binder (Databricks C3) must implement the refusal as well. |
+
+#### 19.12.3 Findings
+
+| ID | Sev. | Location | Finding | Fix |
+|---|---|---|---|---|
+| CR-ADG-45 | Major (X1 precondition) | `CompiledSql.cs` (positional `ExpectedAffectedRows`) | `with { ExpectedAffectedRows = null }` removes the row-count requirement, and the binder then binds the statement unchecked. | Make the property non-positional with an `internal init`, or let the binders derive the requirement independently (a check-option INSERT is recognizable by the reserved `autheris_ins` alias in the SQL text) and refuse whenever either says so. Add a test with the forged copy. |
+| CR-ADG-46 | Minor | `AstCompilerDmlContract.cs` (check-option scenarios), `AstCompilerDatabricksSparkDmlExecutionTests.cs:84` | On Databricks, 8 of the check-option scenarios `return` because `ReportsInsertCount` is false. Only one asserts the typed rejection, so the rest pass vacuously. The DML Spark class uses `[Fact]` with `Available()`, so a missing image is a silent green locally (on CI it fails, so this is **not** a CR-ADG-11 regression for the gate). | Assert the typed `SqlCompileNotSupportedException(Construct)` in every check-option scenario on Databricks, and use `SparkFact`-style skips with a reason for the class. |
+| CR-ADG-47 | Minor (X1 precondition) | `CatalogTypeMap`, catalog loader | The check is only as exact as the catalog's `DataType`; drift reopens the coercion bypass. | Load the column types from database metadata, and verify them at startup and catalog reload (deny the table on a mismatch). |
+| CR-ADG-48 | Minor | `InsertCheckPolicy` / `TenantPredicateFactory.ExactEquals` on `CHAR`/`NCHAR` | A policy on a fixed-length string column always fails the byte-exact check because of padding (fail closed). | Document it, or compare `RTRIM`-normalized bytes for `CHAR` columns only. |
+
+#### 19.12.4 Mutation results (scratch worktree on `f90677c`, reverted after each run)
+
+| Mutant | `TrinoSqlEngine.Tests` (2,649) | DuckDB + PostgreSQL DML (87) | Result |
+|---|---|---|---|
+| Binder accepts a `RequiresRowCountCheck` statement | 5 failed | 2 failed | Killed |
+| Row values not cast (injector) | 29 failed | 18 failed | Killed |
+| Same, with the verifier's cast proof off | 8 failed | 4 failed | Killed |
+| String check plain `=` instead of byte-exact (injector) | 17 failed | 12 failed | Killed |
+| Same, with the verifier accepting a bare comparison | 8 failed | 0 failed | Killed (unit only: the execution fixtures have no case-insensitive policy column on DuckDB/PostgreSQL) |
+| Range operators on string columns allowed, verifier relaxed | 8 failed | 0 failed | Killed (unit only) |
+
+#### 19.12.5 Build and test evidence (observed by the reviewer on `f90677c`)
+
+| Check | Result |
+|---|---|
+| `dotnet build Autheris.sln -warnaserror -m:2` | 0 warnings, 0 errors |
+| `tests/TrinoSqlEngine.Tests` | 2,649 / 2,649 |
+| `tests/Autheris.Tests.Unit` | 4,024 / 4,025 (only the known `WormConfigurationAuditServiceTests` failure) |
+| `tests/Autheris.Tests.Architecture` | 23 / 23 |
+| All `AstCompiler*` integration tests, `CI=true` | 400 / 400, none skipped |
+| Per class (TRX, observed) | SQL Server DQL 42, DML 44; PostgreSQL DQL 50, DML 44; Oracle Free DQL 43, DML 47; Spark DQL 39, Delta DML 45; DuckDB DML 43; provider smoke tests 3 |
+
+#### 19.12.6 Phase 6 readiness
+
+**DQL and DML are ready for Phase 6 (documentation).** Phase 6 must list these X1 preconditions: §20.3, §24.3, CR-ADG-31 (tenant registry), CR-ADG-34 and CR-ADG-35/43 runtime wiring, CR-ADG-45 (unforgeable row-count requirement) and CR-ADG-47 (catalog types from metadata). It must also document the residuals: SEC-ADG-16 error side channel for user literals, `CHAR` columns in check-option policies, triggers on policy columns, SQL Server `ANSI_WARNINGS`, Databricks held at the Experimental tier, and the Oracle driver license as a release gate. CR-ADG-46 and -48 can be fixed during Phase 6 or X1 without another review loop.
 
 ## 20. Implementation Log — DQL review loop 1
 
