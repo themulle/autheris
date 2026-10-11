@@ -69,7 +69,12 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             MergeStatement => SqlStatementClass.Merge,
             _ => throw new NotSupportedException($"Unsupported statement type: {statement.GetType().Name}")
         };
-        EmittedSqlInvariantChecker.Check(sql, TargetDialect, parameters, context.Ranges, structuralOnly: !BindLiterals, statementClass);
+#if DEBUG
+        if (!CompilerTestSeams.IsDisabled(SecurityControl.EmittedTextChecker))
+#endif
+        {
+            EmittedSqlInvariantChecker.Check(sql, TargetDialect, parameters, context.Ranges, structuralOnly: !BindLiterals, statementClass);
+        }
 
         return new CompiledSql(
             sql,
@@ -180,7 +185,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void GenerateSelect(SelectStatement statement, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
         if (statement.With != null)
         {
             GenerateWithClause(statement.With, ref builder, context);
@@ -238,7 +243,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void GenerateQueryBody(QueryBody body, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
         switch (body)
         {
             case QuerySpecification spec:
@@ -345,7 +350,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void GenerateTableSource(TableSource source, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
         switch (source)
         {
             case NamedTableSource named:
@@ -535,7 +540,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     /// </summary>
     protected virtual void GenerateMerge(MergeStatement merge, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
         builder.Append("MERGE INTO ");
         GenerateTableSource(merge.Target, ref builder, context);
         builder.Append(" USING ");

@@ -31,6 +31,14 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     private readonly RlsOptions _options;
     private readonly ISqlEngine _engine;
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
+
+    /// <summary>CTE names are compared by ordinal bytes: a delimited physical name that differs in case is not the CTE (INV-11).</summary>
+    private static StringComparer CteScopeComparer =>
+#if DEBUG
+        CompilerTestSeams.IsDisabled(SecurityControl.CteCaseInsensitiveScope) ? StringComparer.OrdinalIgnoreCase :
+#endif
+        StringComparer.Ordinal;
+
     // CR-ADG-32: names of non-recursive CTEs whose body is being visited; a reference to one of them (not shadowed) is a self-reference.
     private readonly List<string> _definingNonRecursiveCtes = new();
     private readonly TypedPolicyContext? _typed;
@@ -48,7 +56,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         _options = options ?? new RlsOptions();
         _engine = engine ?? new FastSqlEngine();
         _typed = typedPolicy;
-        _cteScopeStack.Push(new HashSet<string>(StringComparer.Ordinal));
+        _cteScopeStack.Push(new HashSet<string>(CteScopeComparer));
     }
 
     private SecurityScope CurrentScope =>
@@ -117,7 +125,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         WithClause? with = null;
         if (node.With != null)
         {
-            _cteScopeStack.Push(new HashSet<string>(_cteScopeStack.Peek(), StringComparer.Ordinal));
+            _cteScopeStack.Push(new HashSet<string>(_cteScopeStack.Peek(), CteScopeComparer));
             var ctes = new List<CommonTableExpression>();
             foreach (var cte in node.With.Ctes)
             {

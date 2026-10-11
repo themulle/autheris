@@ -128,7 +128,24 @@ public sealed class CheckedDmlExecutor : ICheckedDmlExecutor
             int affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
 
             // an unreported count (-1, for example SET NOCOUNT ON) differs from the expected count and fails closed
+#if DEBUG
+            if (CompilerTestSeams.IsDisabled(SecurityControl.CheckedDmlCommitBeforeEnforce))
+            {
+                await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!CompilerTestSeams.IsDisabled(SecurityControl.CheckedDmlRowCount))
+            {
+                DmlCheckOption.Enforce(compiled, affected);
+            }
+
+            if (CompilerTestSeams.IsDisabled(SecurityControl.CheckedDmlCommitBeforeEnforce))
+            {
+                return affected;
+            }
+#else
             DmlCheckOption.Enforce(compiled, affected);
+#endif
             if (limits.MaxAffectedRows > 0 && (affected < 0 || affected > limits.MaxAffectedRows))
             {
                 throw new DmlAffectedRowsLimitException(compiled.Dialect);

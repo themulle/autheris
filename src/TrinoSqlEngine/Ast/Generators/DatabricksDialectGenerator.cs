@@ -27,10 +27,22 @@ public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
 
     // ---- identifiers and literals ----
 
+    /// <summary>SEC-ADG-10: <c>$</c>, <c>{</c> and <c>}</c> start a variable substitution on Databricks; such an identifier is never emitted.</summary>
+    private static bool HasSubstitutionCharacters(string value)
+    {
+#if DEBUG
+        if (CompilerTestSeams.IsDisabled(SecurityControl.VariableSubstitution))
+        {
+            return false;
+        }
+#endif
+        return value.AsSpan().IndexOfAny('$', '{', '}') >= 0;
+    }
+
     public override void FormatIdentifier(ref ValueStringBuilder builder, SqlIdentifier identifier, SqlEmitterContext context)
     {
         string value = identifier.Value;
-        if (value.AsSpan().IndexOfAny('$', '{', '}') >= 0)
+        if (HasSubstitutionCharacters(value))
         {
             // SEC-ADG-10: variable substitution (${...}) could change the statement after the gateway checked it.
             throw new SecurityException("A Databricks identifier must not contain '$', '{' or '}'.");
@@ -259,7 +271,7 @@ public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
     {
         var (type, numeric) = NativeType(mask.DataType);
         string column = "`" + mask.Column.Name.SimpleName.Replace("`", "``", StringComparison.Ordinal) + "`";
-        if (mask.Column.Name.SimpleName.AsSpan().IndexOfAny('$', '{', '}') >= 0)
+        if (HasSubstitutionCharacters(mask.Column.Name.SimpleName))
         {
             throw new SecurityException("A Databricks identifier must not contain '$', '{' or '}'.");
         }
