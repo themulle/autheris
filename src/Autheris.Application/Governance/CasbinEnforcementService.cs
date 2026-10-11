@@ -137,6 +137,7 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
     private FileSystemWatcher? _globalFileWatcher;
     private System.Timers.Timer? _globalDebounceTimer;
     private readonly IRlsFilterGenerator _rlsFilterGenerator;
+    private readonly Autheris.Application.Policy.RowPolicyFactory? _rowPolicies;
     private readonly string _modelText;
 
     public event Action<string>? OnPolicyReloaded;
@@ -173,8 +174,10 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
     public CasbinEnforcementService(
         string? modelConfigPath = null,
         IRlsFilterGenerator? rlsFilterGenerator = null,
-        ILogger<CasbinEnforcementService>? logger = null)
+        ILogger<CasbinEnforcementService>? logger = null,
+        Autheris.Application.Policy.RowPolicyFactory? rowPolicies = null)
     {
+        _rowPolicies = rowPolicies;
         _logger = logger;
         _rlsFilterGenerator = rlsFilterGenerator ?? RlsFilterGenerator.Instance;
 
@@ -825,7 +828,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         if (allowed)
         {
             // Resolve any attached RLS pushdown filters from exactly the allow rules that granted access
-            var activeRlsFilters = CollectActiveRlsFilters(matchedAllowRules, context, tableStr);
+            var activeRlsFilters = CollectActiveRlsFilters(matchedAllowRules, context, tableStr, out var typedRowPolicy);
 
             string? combinedSql = null;
             if (activeRlsFilters.Count > 0)
@@ -840,6 +843,13 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 new Dictionary<string, ColumnAccessLevel>(),
                 rowFilterSql: combinedSql,
                 hasUnconstrainedColumnAllow: true);
+
+            // WP-X0l: the typed form of the same filters. The text above stays for the direct consumers; TableAccessPolicy.Restrict
+            // merges the typed policy and re-projects the text, so the merged decision has one source.
+            if (typedRowPolicy != null)
+            {
+                decision = decision with { RowPolicy = typedRowPolicy };
+            }
         }
         else
         {
@@ -951,12 +961,22 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         return _rlsFilterGenerator.BuildCorrelatedPredicate(filter, $"__gql_rls_c{ruleOrdinal}_");
     }
 
-    private List<string> CollectActiveRlsFilters(IReadOnlyList<CasbinRuleMetadata> matchedAllowRules, SecurityEvaluationContext context, string tableStr)
+    private List<string> CollectActiveRlsFilters(
+        IReadOnlyList<CasbinRuleMetadata> matchedAllowRules,
+        SecurityEvaluationContext context,
+        string tableStr,
+        out IRowPolicy? typedRowPolicy)
     {
         var result = new List<string>();
 
-        foreach (var rule in matchedAllowRules)
+        // WP-X0l: the typed parts are built from the same rule inputs, in the same order. Once one part cannot be typed (no parser,
+        // text that is not canonical SQL, a column outside the catalog) the decision stays string-only: the compiler path denies it.
+        var typedParts = _rowPolicies != null && context.TargetDialect is { } ? new List<PolicyPredicate>() : null;
+
+        for (int ordinal = 0; ordinal < matchedAllowRules.Count; ordinal++)
         {
+            var rule = matchedAllowRules[ordinal];
+
             // Handle Correlated Row Filter (Fail-closed on generation failure)
             if (rule.CorrelatedRowFilter != null)
             {
@@ -973,6 +993,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 {
                     throw new SecurityException($"Security error: Correlated row filter for table '{tableStr}' could not be generated.");
                 }
+
+                typedParts = TryType(typedParts, () => BuildCorrelatedRowFilterPredicate(rule.CorrelatedRowFilter, context.TargetDialect, ordinal));
             }
 
             // Handle Direct RLS SQL Filter with parameter/context interpolation
@@ -986,10 +1008,48 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 }
 
                 result.Add(interpolated);
+                typedParts = TryType(typedParts, () => _rowPolicies!.ParseAdminPredicate(
+                    interpolated,
+                    new TableIdentity(context.TargetTable.Schema, context.TargetTable.TableName),
+                    context.TableColumns ?? context.RequestedColumns.ToList(),
+                    context.TargetDialect!.Value));
+            }
+        }
+
+        typedRowPolicy = null;
+        if (typedParts is { Count: > 0 })
+        {
+            try
+            {
+                var combined = typedParts.Aggregate(static (left, right) => left.Or(right));
+                typedRowPolicy = _rowPolicies!.FromPredicate(combined, context.TargetDialect!.Value);
+            }
+            catch (Exception ex) when (ex is SecurityException or ArgumentException or InvalidOperationException)
+            {
+                typedRowPolicy = null;
             }
         }
 
         return result;
+    }
+
+    /// <summary>Adds the typed part, or drops the whole typed form (returns null) when it cannot be built.</summary>
+    private static List<PolicyPredicate>? TryType(List<PolicyPredicate>? parts, Func<PolicyPredicate> build)
+    {
+        if (parts == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            parts.Add(build());
+            return parts;
+        }
+        catch (Exception ex) when (ex is SecurityException or ArgumentException or InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

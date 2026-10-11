@@ -69,7 +69,12 @@ public sealed record PolicyPredicate(
     }
 
     /// <summary>Typed AND-merge. A parameter name bound to different values or types throws <see cref="PolicyConflictException"/>.</summary>
-    public PolicyPredicate And(PolicyPredicate other)
+    public PolicyPredicate And(PolicyPredicate other) => Combine(other, BinaryOperator.And);
+
+    /// <summary>Typed OR-merge (several matching allow rules). Same parameter rules as <see cref="And"/>.</summary>
+    public PolicyPredicate Or(PolicyPredicate other) => Combine(other, BinaryOperator.Or);
+
+    private PolicyPredicate Combine(PolicyPredicate other, BinaryOperator op)
     {
         ArgumentNullException.ThrowIfNull(other);
         var merged = new Dictionary<string, PolicyValue>(Parameters, StringComparer.Ordinal);
@@ -89,7 +94,7 @@ public sealed record PolicyPredicate(
         }
 
         var expression = new BinaryExpression(
-            new ParenthesizedExpression(Expression), BinaryOperator.And, new ParenthesizedExpression(other.Expression));
+            new ParenthesizedExpression(Expression), op, new ParenthesizedExpression(other.Expression));
         return Create(expression, merged);
     }
 

@@ -75,18 +75,36 @@ public sealed class RowPolicyFactory
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(predicate);
         ArgumentNullException.ThrowIfNull(metadata);
-        var parser = _parser ?? throw new InvalidOperationException("No policy expression parser is registered.");
-
-        var dialect = PolicyParameterNamer.ToTargetDialect(metadata.Dialect);
-        var context = new PolicyParseContext(
+        var parsed = ParseAdminPredicate(
+            predicate,
             new TableIdentity(metadata.Identifier.Schema, metadata.Identifier.TableName),
             metadata.Columns.Select(c => c.ColumnName).ToList(),
-            SqlFunctionAllowlists.Build(dialect, null),
+            metadata.Dialect);
+        return new PolicyPredicateRowPolicy(parsed, PolicyParameterNamer.ToTargetDialect(metadata.Dialect), _renderer);
+    }
+
+    /// <summary>
+    /// Parses admin-authored predicate text (canonical Trino syntax, for example a Casbin row filter after claim interpolation) into a typed
+    /// predicate: every literal becomes a bound policy parameter, columns must be in <paramref name="columns"/>, functions must be allow-listed.
+    /// </summary>
+    /// <exception cref="PolicyParseException">The predicate is invalid (the message never echoes the text).</exception>
+    /// <exception cref="InvalidOperationException">No parser is registered.</exception>
+    public PolicyPredicate ParseAdminPredicate(string predicate, TableIdentity table, IReadOnlyList<string> columns, DatabaseDialect dialect)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(predicate);
+        ArgumentNullException.ThrowIfNull(columns);
+        var parser = _parser ?? throw new InvalidOperationException("No policy expression parser is registered.");
+
+        var target = PolicyParameterNamer.ToTargetDialect(dialect);
+        var context = new PolicyParseContext(
+            table,
+            columns,
+            SqlFunctionAllowlists.Build(target, null),
             new Dictionary<string, PolicyValue>(),
             CatalogVersion: 0)
         {
-            TargetDialect = dialect
+            TargetDialect = target
         };
-        return new PolicyPredicateRowPolicy(parser.Parse(predicate, context), dialect, _renderer);
+        return parser.Parse(predicate, context);
     }
 }

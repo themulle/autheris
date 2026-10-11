@@ -418,7 +418,7 @@ public sealed class TableAccessPolicy
 
         // WP-X0e: a typed Casbin policy is AND-merged as a typed policy (one projection, one marker namespace). Parameter names bound
         // to different values deny, exactly like the text path below.
-        if (policyDecision.RowPolicy is { } typedPolicy)
+        if (policyDecision.RowPolicy is { } typedPolicy && metadata.DataSourceType == DataSourceType.Sql)
         {
             TableAccessDecision typed;
             try
@@ -622,7 +622,10 @@ public sealed class TableAccessPolicy
             Timestamp: DateTimeOffset.UtcNow,
             PurposeId: purpose,
             Attributes: attributes,
-            TargetDialect: query.Metadata.Dialect);
+            TargetDialect: query.Metadata.Dialect)
+        {
+            TableColumns = query.Metadata.Columns.Select(c => c.ColumnName).ToList()
+        };
     }
 
     private static TableAccessDecision CreateDecisionFromProfile(AccessProfile profile, TableIdentifier table, TableMetadata metadata, IRowPolicy? rowPolicy = null)
