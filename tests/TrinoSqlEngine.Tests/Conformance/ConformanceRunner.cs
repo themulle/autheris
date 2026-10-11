@@ -49,7 +49,7 @@ internal static class ConformanceRunner
     private static bool IsDml(string group) => group.StartsWith("dml", StringComparison.Ordinal);
 
     /// <summary>
-    /// The statement the generator sees: the Trino input is parsed and built like <c>Compile</c> does (dialect function allowlist, validation,
+    /// The statement the generator sees: the Trino input is parsed and built like <c>Compile</c> does (the compiler function map of the dialect, validation,
     /// simplification), without the security injection; <c>@name</c> inputs are in-memory ASTs. DML keeps the pre-injection tree.
     /// </summary>
     public static SqlStatement Prepare(string input, string group, TargetSqlDialect dialect)
@@ -61,7 +61,7 @@ internal static class ConformanceRunner
         {
             EnforceReadOnlyQueries = !IsDml(group),
             EnforceFunctionPolicy = true,
-            AllowedFunctions = SqlFunctionAllowlists.GetDefault(dialect),
+            AllowedFunctions = SqlFunctionAllowlists.CompilerNames(dialect),
             TranslateTrinoDateFunctions = group == "date-translated"
         }).BuildStatement(tree);
         new AstValidationVisitor().Validate(ast);
