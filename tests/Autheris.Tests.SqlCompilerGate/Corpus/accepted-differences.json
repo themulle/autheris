@@ -1,0 +1,253 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "dialects": [
+        "Oracle"
+      ],
+      "class": "ast-stricter",
+      "reason": "FewerRows",
+      "statements": [
+        "0e645e441865",
+        "f7d03393fdce"
+      ],
+      "justification": "Triage proposal of the gate run: ast-stricter with reason FewerRows. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "Oracle"
+      ],
+      "class": "ast-stricter",
+      "reason": "SecurityException",
+      "statements": [
+        "14cfdc335f81",
+        "1d3959068c96",
+        "64ac23670ed7",
+        "91007dd671e0",
+        "ad5cd4f566c0",
+        "c7dfb295e122",
+        "cff25ceef2db",
+        "de5ef5a6102b",
+        "e2712c89dd72",
+        "ed3b1a0bbe10",
+        "f210a6ba1cee"
+      ],
+      "justification": "Triage proposal of the gate run: ast-stricter with reason SecurityException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "Oracle"
+      ],
+      "class": "ast-stricter",
+      "reason": "UnfilteredDmlException",
+      "statements": [
+        "0e88eb7c54c9",
+        "5ed3bc9ebd95",
+        "77fe307f5acd",
+        "7e911c998b68",
+        "8fcb56f9dc61",
+        "f2a7aaa89c78"
+      ],
+      "justification": "Triage proposal of the gate run: ast-stricter with reason UnfilteredDmlException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "PostgreSql"
+      ],
+      "class": "ast-error",
+      "reason": "PostgresException",
+      "statements": [
+        "0b3f1bb008ae",
+        "474e2dafa33e",
+        "4a9d7964a207",
+        "8867d3341044",
+        "a1f1acf85184",
+        "a90a65b0afb4",
+        "b1628116ebf5",
+        "e1db24324c58",
+        "e44f3822e5e8",
+        "fb9c0264e3fe"
+      ],
+      "justification": "Triage proposal of the gate run: ast-error with reason PostgresException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "PostgreSql"
+      ],
+      "class": "ast-stricter",
+      "reason": "AstBuildException",
+      "statements": [
+        "23208521524f",
+        "588720bd45e3",
+        "655397aa4f94",
+        "74d46e9fd7aa",
+        "7f18f5fa8136",
+        "80d5942dea95",
+        "f41a2db71b5b",
+        "fcd5a192cc16"
+      ],
+      "justification": "Triage proposal of the gate run: ast-stricter with reason AstBuildException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "PostgreSql"
+      ],
+      "class": "ast-stricter",
+      "reason": "SecurityException",
+      "statements": [
+        "0942d51d3edb",
+        "14cfdc335f81",
+        "1d3959068c96",
+        "1d4b9bbee7e4",
+        "27524e860b25",
+        "36eba39c100b",
+        "64ac23670ed7",
+        "818d39247803",
+        "91007dd671e0",
+        "92dc10ff5873",
+        "9c0126dbc6d7",
+        "9d76cb6bb832",
+        "a41b6e2c9dc4",
+        "ad5cd4f566c0",
+        "ba4ff8251786",
+        "be4d771d1a8c",
+        "c521511c7d8c",
+        "c7dfb295e122",
+        "cccd0c46a058",
+        "cff25ceef2db",
+        "d8d0b1957286",
+        "de5ef5a6102b",
+        "e2712c89dd72",
+        "ed3b1a0bbe10",
+        "f210a6ba1cee",
+        "f63d88ecb0d5"
+      ],
+      "justification": "Triage proposal of the gate run: ast-stricter with reason SecurityException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "PostgreSql"
+      ],
+      "class": "ast-stricter",
+      "reason": "UnfilteredDmlException",
+      "statements": [
+        "0e88eb7c54c9",
+        "5ed3bc9ebd95",
+        "77fe307f5acd",
+        "7e911c998b68",
+        "8fcb56f9dc61",
+        "f2a7aaa89c78"
+      ],
+      "justification": "Triage proposal of the gate run: ast-stricter with reason UnfilteredDmlException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "SqlServer"
+      ],
+      "class": "ast-error",
+      "reason": "SqlException",
+      "statements": [
+        "43226cf954d6",
+        "a51c6e5a66f2",
+        "cea7a73038a9",
+        "d0ea68c125f0",
+        "fd2f693dafd4"
+      ],
+      "justification": "Triage proposal of the gate run: ast-error with reason SqlException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "SqlServer"
+      ],
+      "class": "ast-stricter",
+      "reason": "AstBuildException",
+      "statements": [
+        "655397aa4f94",
+        "fcd5a192cc16"
+      ],
+      "justification": "Triage proposal of the gate run: ast-stricter with reason AstBuildException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "SqlServer"
+      ],
+      "class": "ast-stricter",
+      "reason": "SecurityException",
+      "statements": [
+        "14cfdc335f81",
+        "1d3959068c96",
+        "2151c8b198aa",
+        "27524e860b25",
+        "36eba39c100b",
+        "5747e7d132da",
+        "648cbdff45d7",
+        "64ac23670ed7",
+        "818d39247803",
+        "91007dd671e0",
+        "92dc10ff5873",
+        "9c0126dbc6d7",
+        "9d76cb6bb832",
+        "ba4ff8251786",
+        "be4d771d1a8c",
+        "c521511c7d8c",
+        "c7dfb295e122",
+        "cccd0c46a058",
+        "de5ef5a6102b",
+        "e2712c89dd72",
+        "ed3b1a0bbe10",
+        "f210a6ba1cee",
+        "f63d88ecb0d5"
+      ],
+      "justification": "Triage proposal of the gate run: ast-stricter with reason SecurityException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    },
+    {
+      "dialects": [
+        "SqlServer"
+      ],
+      "class": "ast-stricter",
+      "reason": "UnfilteredDmlException",
+      "statements": [
+        "0e88eb7c54c9",
+        "5ed3bc9ebd95",
+        "77fe307f5acd",
+        "7e911c998b68",
+        "8fcb56f9dc61",
+        "f2a7aaa89c78"
+      ],
+      "justification": "Triage proposal of the gate run: ast-stricter with reason UnfilteredDmlException. Needs security review before approval.",
+      "issue": null,
+      "reviewer": null,
+      "approval": "pending"
+    }
+  ]
+}
