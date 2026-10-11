@@ -98,6 +98,7 @@ public sealed class TableAccessPolicy
     private readonly GatewayOptions _options;
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
     private readonly RowPolicyFactory? _rowPolicyFactory;
+    private readonly ColumnMaskPolicyFactory? _maskPolicyFactory;
     private readonly ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
@@ -120,9 +121,11 @@ public sealed class TableAccessPolicy
         IAccessProfileRepository? accessProfileRepository = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
         Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null,
-        RowPolicyFactory? rowPolicyFactory = null)
+        RowPolicyFactory? rowPolicyFactory = null,
+        ColumnMaskPolicyFactory? maskPolicyFactory = null)
     {
         _rowPolicyFactory = rowPolicyFactory;
+        _maskPolicyFactory = maskPolicyFactory;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
@@ -151,6 +154,35 @@ public sealed class TableAccessPolicy
     public async Task<TableAccessDecision> DecideAsync(TableAccessQuery query, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(query);
+        var decision = await DecideCoreAsync(query, ct).ConfigureAwait(false);
+        return AttachTypedMasks(decision, query);
+    }
+
+    /// <summary>
+    /// WP-X0l: the typed masks come from the final column levels (after the Casbin restriction), with the catalog rules of the same
+    /// table. A mask that cannot be expressed as a typed spec leaves the decision string-only, which the compiler path denies
+    /// (<see cref="TableAccessDecision.RequireTypedColumnMasks"/>); the string consumers are not affected.
+    /// </summary>
+    private TableAccessDecision AttachTypedMasks(TableAccessDecision decision, TableAccessQuery query)
+    {
+        if (_maskPolicyFactory == null || !decision.IsAllowed || decision.ColumnMasks != null)
+        {
+            return decision;
+        }
+
+        try
+        {
+            var masks = _maskPolicyFactory.ForDecision(decision, query.Metadata, query.Tenant);
+            return masks == null ? decision : decision with { ColumnMasks = masks };
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or ArgumentException)
+        {
+            return decision;
+        }
+    }
+
+    private async Task<TableAccessDecision> DecideCoreAsync(TableAccessQuery query, CancellationToken ct)
+    {
         var table = query.Metadata.Identifier;
 
         // SG-12: Inactive tables are treated as not found / denied centrally
