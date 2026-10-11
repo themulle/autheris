@@ -17,6 +17,7 @@ using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 using Xunit;
+using Xunit.Sdk;
 
 /// <summary>
 /// WP-A7 execution contract, run on every dialect that lists DML (SQL Server, PostgreSQL and Oracle containers, in-process
@@ -35,7 +36,7 @@ public abstract class AstCompilerDmlContract
 
     protected abstract TargetSqlDialect Dialect { get; }
 
-    /// <summary>False when the database is missing (an early return locally, a failure on CI).</summary>
+    /// <summary>False when the database is missing (an early return locally, a failure on CI). May throw <see cref="SparkSkipException"/> to report a skip with a reason.</summary>
     protected abstract bool Available();
 
     protected abstract InMemoryTableCatalog Catalog();
@@ -214,7 +215,7 @@ public abstract class AstCompilerDmlContract
 
     // ---- UPDATE ----
 
-    [Fact]
+    [DmlFact]
     public async Task Update_AffectsOnlyTheCallersTenant_NotTheCaseVariantNorTheOtherTenant()
     {
         if (!Available()) return;
@@ -230,7 +231,7 @@ public abstract class AstCompilerDmlContract
         (await OrdersAsync()).Where(r => r.Status == "upper").Select(r => r.Id).ShouldBe(new[] { 3, 4 });
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Update_OfAnotherTenantsRowById_ChangesNothing()
     {
         if (!Available()) return;
@@ -239,7 +240,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Update_WithAnOrTautology_StillOnlyAffectsTheCallersRows()
     {
         if (!Available()) return;
@@ -247,7 +248,7 @@ public abstract class AstCompilerDmlContract
         (await OrdersAsync()).Single(r => r.Id == 5).Status.ShouldBe("open");
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Update_RowPolicy_IsAndedOntoTheTenant()
     {
         if (!Available()) return;
@@ -256,7 +257,7 @@ public abstract class AstCompilerDmlContract
         (await OrdersAsync()).Where(r => r.Status == "eu").Select(r => r.Id).ShouldBe(new[] { 1, 6 });
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Update_PolicyColumnAssignment_TenantAssignment_AndMaskedColumn_AreRejected_NothingChanges()
     {
         if (!Available()) return;
@@ -271,7 +272,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Update_Unfiltered_IsRejected_NothingChanges()
     {
         if (!Available()) return;
@@ -282,7 +283,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Update_SubqueryInWhere_NeverSeesTheOtherTenantsRows()
     {
         if (!Available()) return;
@@ -302,7 +303,7 @@ public abstract class AstCompilerDmlContract
 
     // ---- DELETE ----
 
-    [Fact]
+    [DmlFact]
     public async Task Delete_AffectsOnlyTheCallersTenant()
     {
         if (!Available()) return;
@@ -313,7 +314,7 @@ public abstract class AstCompilerDmlContract
         (await OrdersAsync()).Select(r => r.Id).ShouldBe(new[] { 5 });
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Delete_PolicyAndSubquery_AreApplied_UnfilteredIsRejected()
     {
         if (!Available()) return;
@@ -333,7 +334,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Delete_DenyAllPolicy_DeletesNothing()
     {
         if (!Available()) return;
@@ -345,7 +346,7 @@ public abstract class AstCompilerDmlContract
 
     // ---- INSERT ----
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_AlwaysWritesTheCallersTenant_Exactly()
     {
         if (!Available()) return;
@@ -360,7 +361,7 @@ public abstract class AstCompilerDmlContract
         await SecurityRejectedAsync(() => ExecAsync($"INSERT INTO {O} (id, tenantid, region, status, amount) VALUES (13, 'acme', 'EU', 'new', 1.5)", "ACME"));
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_ForeignTenantOrNonLiteralTenant_IsRejected_NothingIsWritten()
     {
         if (!Available()) return;
@@ -372,7 +373,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task InsertSelect_CopiesOnlyTheCallersSourceRows_AsTheCallersTenant()
     {
         if (!Available()) return;
@@ -382,7 +383,7 @@ public abstract class AstCompilerDmlContract
         rows.Where(r => r.Status == "copied").Select(r => (r.Id, r.Tenant)).ShouldBe(new[] { (101, "acme"), (103, "acme") });
     }
 
-    [Fact]
+    [DmlFact]
     public async Task InsertSelect_SourceTenantColumnOrWildcard_IsRejected()
     {
         if (!Available()) return;
@@ -392,7 +393,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task InsertSelect_MaskedSourceColumn_InsertsTheMaskedValueOnly()
     {
         if (!Available()) return;
@@ -407,7 +408,24 @@ public abstract class AstCompilerDmlContract
     // CR-ADG-35: INSERT into a table with an admin row policy has check-option semantics (Delta reports no count and stays rejected).
     private const string PolicyColumns = "(id, tenantid, region, status, amount)";
 
-    [Fact]
+    /// <summary>
+    /// CR-ADG-46: on a dialect without an INSERT row count (Delta) every check-option scenario asserts the typed rejection
+    /// (<see cref="SqlCompileNotSupportedException"/>, "needs an affected row count") instead of passing vacuously. Returns true when it did.
+    /// </summary>
+    private async Task<bool> AssertCheckOptionRejectedWhereNoRowCountAsync()
+    {
+        if (ReportsInsertCount) return false;
+        RegionEuPolicy();
+        var before = await SnapshotAsync();
+        var ex = await Should.ThrowAsync<SqlCompileNotSupportedException>(() =>
+            ExecAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'US', 'new', 1)", "acme"));
+        ex.Reason.ShouldBe(SqlCompileNotSupportedReason.Construct);
+        ex.Message.ShouldContain("needs an affected row count");
+        (await SnapshotAsync()).ShouldBe(before);
+        return true;
+    }
+
+    [DmlFact]
     public async Task Insert_IntoAPolicyTable_ThatSatisfiesThePolicy_IsWritten()
     {
         if (!Available()) return;
@@ -424,10 +442,10 @@ public abstract class AstCompilerDmlContract
         rows.Where(r => r.Id >= 10).Select(r => (r.Id, r.Tenant)).ShouldBe(new[] { (10, "acme"), (11, "acme") });
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_IntoAPolicyTable_ThatViolatesThePolicy_IsRolledBack_NothingIsWritten()
     {
-        if (!Available() || !ReportsInsertCount) return;
+        if (!Available() || await AssertCheckOptionRejectedWhereNoRowCountAsync()) return;
         RegionEuPolicy();
         var before = await SnapshotAsync();
         var ex = await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'US', 'new', 1)", "acme"));
@@ -436,10 +454,10 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_CheckOptionStatement_CannotBeBoundOrRunOutsideTheCheckedExecutor()
     {
-        if (!Available() || !ReportsInsertCount) return;
+        if (!Available() || await AssertCheckOptionRejectedWhereNoRowCountAsync()) return;
         RegionEuPolicy();
         var before = await SnapshotAsync();
         var compiled = Engine.Compile($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'US', 'new', 1)".AsMemory(), Request("acme"), CancellationToken.None);
@@ -450,10 +468,10 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_MultiRow_WithOneViolatingRow_RollsBackAllRows()
     {
-        if (!Available() || !ReportsInsertCount) return;
+        if (!Available() || await AssertCheckOptionRejectedWhereNoRowCountAsync()) return;
         RegionEuPolicy();
         var before = await SnapshotAsync();
         await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync(
@@ -474,10 +492,10 @@ public abstract class AstCompilerDmlContract
         new BinaryExpression(PolicyColumn("Due"), BinaryOperator.GreaterThan, new PolicyParameterExpression("__pol_due", SqlParameterType.Date)),
         new Dictionary<string, PolicyValue> { ["__pol_due"] = new(new DateTime(2026, 1, 1), SqlParameterType.Date) });
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_DecimalRoundingAcrossThePolicyBoundary_IsRolledBack_AndTheRoundedInRangeValueIsWritten()
     {
-        if (!Available() || !ReportsInsertCount) return;
+        if (!Available() || await AssertCheckOptionRejectedWhereNoRowCountAsync()) return;
         AmountBelowPolicy();
         var before = await SnapshotAsync();
         // 99.999 passes "Amount < 100" as a bound value but the column (scale 2) stores 100.00: the check sees the stored value
@@ -492,10 +510,10 @@ public abstract class AstCompilerDmlContract
         (await ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (11, 'acme', 'EU', 'new', 99.994)", "acme")).ShouldBe(1);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_DateTruncationAcrossThePolicyBoundary_IsRolledBack_AndAnInRangeDateIsWritten()
     {
-        if (!Available() || !ReportsInsertCount) return;
+        if (!Available() || await AssertCheckOptionRejectedWhereNoRowCountAsync()) return;
         DueAfterPolicy();
         const string columns = "(id, tenantid, region, status, amount, due)";
         var before = await SnapshotAsync();
@@ -507,10 +525,10 @@ public abstract class AstCompilerDmlContract
         (await ExecCheckedAsync($"INSERT INTO {O} {columns} VALUES (10, 'acme', 'EU', 'new', 1, TIMESTAMP '2026-01-02 10:30:00')", "acme")).ShouldBe(1);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_ValueLongerThanTheColumn_NeverMatchesThePolicyByItsTruncatedPrefix()
     {
-        if (!Available() || !ReportsInsertCount) return;
+        if (!Available() || await AssertCheckOptionRejectedWhereNoRowCountAsync()) return;
         RegionEuPolicy();
         var before = await SnapshotAsync();
         // 'EU' plus 30 characters: the dialects that truncate (SQL Server, PostgreSQL varchar) see the value they store; the others
@@ -520,10 +538,10 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_CaseVariantOfThePolicyValue_IsRejected_OnACaseSensitiveColumn()
     {
-        if (!Available() || !ReportsInsertCount) return;
+        if (!Available() || await AssertCheckOptionRejectedWhereNoRowCountAsync()) return;
         RegionEuPolicy();   // Region = 'EU'; the Region column is case-sensitive on every engine here (SQL Server: an explicit _CS_ collation)
         var before = await SnapshotAsync();
         // a case-insensitive check would accept 'eu' and the case-sensitive column would store it, a value a reader with Region = 'eu' sees
@@ -533,10 +551,10 @@ public abstract class AstCompilerDmlContract
         (await ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 1)", "acme")).ShouldBe(1);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_StringInPolicy_AcceptsEachListedValue_AndRejectsTheRest()
     {
-        if (!Available() || !ReportsInsertCount) return;
+        if (!Available() || await AssertCheckOptionRejectedWhereNoRowCountAsync()) return;
         Policy.Predicates[OrdersId] = PolicyPredicate.Create(
             new InListExpression(PolicyColumn("Region"), new Expression[] { new PolicyParameterExpression("__pol_a", SqlParameterType.String), new PolicyParameterExpression("__pol_b", SqlParameterType.String) }, false),
             new Dictionary<string, PolicyValue> { ["__pol_a"] = new("EU", SqlParameterType.String), ["__pol_b"] = new("US", SqlParameterType.String) });
@@ -547,10 +565,10 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_ThousandRows_AreWritten_OrFailWithTheTypedBindLimit()
     {
-        if (!Available() || !ReportsInsertCount) return;
+        if (!Available() || await AssertCheckOptionRejectedWhereNoRowCountAsync()) return;
         RegionEuPolicy();
         string rows = string.Join(", ", Enumerable.Range(100, 1000).Select(i => $"({i}, 'acme', 'EU', 'n', 1)"));
         try
@@ -565,7 +583,7 @@ public abstract class AstCompilerDmlContract
         }
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_IntoAPolicyTable_SelectSourceOrMissingPolicyColumn_IsRejectedBeforeExecution()
     {
         if (!Available()) return;
@@ -576,7 +594,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Insert_DuplicateKeyOfAnotherTenant_IsADmlConstraintViolation_WithoutKeyValueOrConstraintName()
     {
         if (!Available() || !HasUniqueKey) return;
@@ -604,7 +622,7 @@ public abstract class AstCompilerDmlContract
         return false;
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Merge_OtherTenantRowWithSameKey_IsNeverMatched_AndNeverDeletedOrUpdated()
     {
         if (!await MergeAvailableAsync()) return;
@@ -619,7 +637,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Merge_UpdateAndDelete_TouchOnlyTheCallersRows_AndSourceIsSecured()
     {
         if (!await MergeAvailableAsync()) return;
@@ -634,7 +652,7 @@ public abstract class AstCompilerDmlContract
         rows.Single(r => r.Id == 3).Status.ShouldBe("open");   // ACME: untouched
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Merge_SourceAliasEqualToTheTargetAlias_IsRejectedByTheCompiler_BeforeAnyExecution()
     {
         if (!await MergeAvailableAsync()) return;   // CR-ADG-33
@@ -648,7 +666,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Merge_Insert_WritesTheCallersTenant_NeverTheSourceTenant()
     {
         if (!await MergeAvailableAsync()) return;
@@ -662,7 +680,7 @@ public abstract class AstCompilerDmlContract
             "WHEN NOT MATCHED THEN INSERT (id, tenantid, region, status, amount) VALUES (s.id + 600, s.tenantid, 'EU', 'x', 1)", "acme"));
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Merge_PolicyColumn_TenantColumn_MaskedColumn_AndTrivialOn_AreRejected_NothingChanges()
     {
         if (!await MergeAvailableAsync()) return;
@@ -677,7 +695,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Merge_RowPolicy_IsPartOfTheOnCondition()
     {
         if (!await MergeAvailableAsync()) return;
@@ -687,7 +705,7 @@ public abstract class AstCompilerDmlContract
         (await OrdersAsync()).Where(r => r.Status == "eu").Select(r => r.Id).ShouldBe(new[] { 1, 6 });
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Merge_NotMatchedBySource_CannotBeExpressed_SoOtherTenantsRowsSurvive()
     {
         if (!Available()) return;
@@ -696,7 +714,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task Merge_InsertOfAnotherTenantsKey_IsADmlConstraintViolation_AndChangesNothing()
     {
         if (!await MergeAvailableAsync() || !HasUniqueKey) return;
@@ -712,7 +730,7 @@ public abstract class AstCompilerDmlContract
 
     // ---- shared ----
 
-    [Fact]
+    [DmlFact]
     public async Task ReturningAndOutput_AreRejectedBeforeAnyStatementReachesTheDatabase()
     {
         if (!Available()) return;
@@ -730,7 +748,16 @@ public abstract class AstCompilerDmlContract
     [InlineData("' OR 1=1 --")]
     public async Task HostileTenantValues_AreBound_NeverInterpreted_AndMatchNoRow(string tenant)
     {
-        if (!Available()) return;
+        // a theory cannot report a run-time skip, so a locally missing Spark image is a quiet return here (CI fails in Available())
+        try
+        {
+            if (!Available()) return;
+        }
+        catch (SparkSkipException)
+        {
+            return;
+        }
+
         var before = await SnapshotAsync();
         (await ExecAsync($"UPDATE {O} SET status = 'x' WHERE id > 0", tenant)).ShouldBe(0);
         (await ExecAsync($"DELETE FROM {O} WHERE id > 0", tenant)).ShouldBe(0);
@@ -742,7 +769,7 @@ public abstract class AstCompilerDmlContract
         (await SnapshotAsync()).ShouldBe(before);
     }
 
-    [Fact]
+    [DmlFact]
     public async Task PlanCache_RebindsTheTenantOnADmlHit()
     {
         if (!Available()) return;
@@ -752,7 +779,7 @@ public abstract class AstCompilerDmlContract
         Engine.CompileCache.Stats.Hits.ShouldBe(2);
     }
 
-    [Fact]
+    [DmlFact]
     public void DmlStatementMatrix_ListsAllFourClasses()
     {
         var statements = DialectCapabilityTable.Default.Get(Dialect).DmlStatements;
@@ -761,4 +788,13 @@ public abstract class AstCompilerDmlContract
         statements.HasFlag(StatementPermissions.Delete).ShouldBeTrue();
         statements.HasFlag(StatementPermissions.Merge).ShouldBe(SupportsMerge);
     }
+}
+
+/// <summary>
+/// A DML contract fact that can be skipped at run time with <see cref="SparkSkipException"/> (CR-ADG-11 / CR-ADG-46): the Spark
+/// Delta class skips with a reason when its image is missing locally and fails on CI. Other dialects never skip.
+/// </summary>
+[XunitTestCaseDiscoverer("Autheris.Tests.Integration.SparkFactDiscoverer", "Autheris.Tests.Integration")]
+public sealed class DmlFactAttribute : FactAttribute
+{
 }

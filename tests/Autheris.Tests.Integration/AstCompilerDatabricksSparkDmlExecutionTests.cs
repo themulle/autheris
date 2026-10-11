@@ -83,14 +83,15 @@ public sealed class AstCompilerDatabricksSparkDmlExecutionTests : AstCompilerDml
 
     protected override bool Available()
     {
-        // CR-ADG-11: absence of the pinned base image is a skip locally and a failure on CI; a proxy that does not start fails.
-        if (!SparkAvailability.ImagePresent && !SparkAvailability.IsCi) return false;
+        // CR-ADG-11: absence of the pinned base image is a reported skip locally and a failure on CI; a proxy that does not start fails.
+        if (SparkAvailability.SkipReason is { } reason) throw new SparkSkipException(reason);
         if (!_spark.IsAvailable) throw new InvalidOperationException("The Spark Delta proxy did not start: " + _spark.StartupError);
         return true;
     }
 
     public async Task InitializeAsync()
     {
+        if (SparkAvailability.SkipReason is not null) return;   // the tests report the skip
         if (!Available()) return;
         await DdlAsync($"CREATE SCHEMA {_schema}");
         await DdlAsync($"CREATE TABLE {_schema}.orders (id INT, tenantid STRING, region STRING, status STRING, amount DECIMAL(18,2), email STRING) USING delta");
