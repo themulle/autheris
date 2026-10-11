@@ -56,4 +56,16 @@ public static class AuditEventTypes
     public const string AsyncJobCompleted = "ASYNC_JOB_COMPLETED";
     public const string AsyncJobDownloaded = "ASYNC_JOB_DOWNLOADED";
     public const string AsyncJobCancelled = "ASYNC_JOB_CANCELLED";
+    public const string AsyncJobStatusRead = "ASYNC_JOB_STATUS_READ";
+    public const string AsyncJobAccessDenied = "ASYNC_JOB_ACCESS_DENIED";
+
+    // Governance classification, access plans and DevPortal step-up consoles
+    public const string ClassificationProposed = "CLASSIFICATION_PROPOSED";
+    public const string ClassificationTransitioned = "CLASSIFICATION_TRANSITIONED";
+    public const string GovernanceConfigHashRead = "GOVERNANCE_CONFIG_HASH_READ";
+    public const string AccessPlanRead = "ACCESS_PLAN_READ";
+    public const string TwoFactorEnrollmentStarted = "TWO_FACTOR_ENROLLMENT_STARTED";
+    public const string TwoFactorEnrollmentVerified = "TWO_FACTOR_ENROLLMENT_VERIFIED";
+    public const string StepUpApprovalsListed = "STEP_UP_APPROVALS_LISTED";
+    public const string StepUpApprovalAttempted = "STEP_UP_APPROVAL_ATTEMPTED";
 }

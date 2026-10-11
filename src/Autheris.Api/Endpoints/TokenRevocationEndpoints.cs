@@ -77,6 +77,7 @@ public static class TokenRevocationEndpoints
                 TraceId = context.TraceIdentifier,
                 DetailsJson = JsonSerializer.Serialize(new { subjectOrJti = request.SubjectOrJti, until, scope = isClusterAdmin ? "global" : "tenant", tenant = isClusterAdmin ? null : tenantId.Value })
             }, ct).ConfigureAwait(false);
+            context.Features.Get<AuditContext>()?.MarkHandled();
 
             // Review R4-3: name the tenant scope explicitly. A tenant-scoped revocation only affects tokens that carry this tenant;
             // tokens of the same subject issued under another tenant claim need a ClusterAdmin (global revocation).

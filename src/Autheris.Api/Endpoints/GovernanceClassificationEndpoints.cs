@@ -4,7 +4,9 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
@@ -61,7 +63,7 @@ public static class GovernanceClassificationEndpoints
             }
 
             return Results.Ok(proposal);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationProposed);
 
         // 2. Submit Approval / Review Transition (1-Stage or 2-Stage SoD)
         app.MapPost("/api/governance/classification/transition", async (
@@ -71,7 +73,7 @@ public static class GovernanceClassificationEndpoints
         {
             var result = await stateMachine.TransitionAsync(payload.Proposal, payload.Request, ct).ConfigureAwait(false);
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
 
         // 3. Inspect Current Active Governance WORM Configuration Hash
         app.MapGet("/api/governance/classification/config-hash", (
@@ -82,7 +84,7 @@ public static class GovernanceClassificationEndpoints
                 CurrentConfigHash = auditService.CurrentConfigHash ?? "UNINITIALIZED",
                 TimestampUtc = DateTimeOffset.UtcNow
             });
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.GovernanceConfigHashRead);
 
         return app;
     }

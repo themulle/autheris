@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Threading;
 using Autheris.Api.Extensions;
 using Autheris.Application.Jobs.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
@@ -25,6 +26,7 @@ public static class AsyncJobEndpoints
         {
             var tenantId = EndpointSecurity.GetRequestTenant(httpContext);
             var job = await jobManager.SubmitJobAsync(request, httpContext.User, tenantId, ct).ConfigureAwait(false);
+            MarkDomainAudited(httpContext);
 
             var response = new AsyncJobStatusResponse(
                 JobId: job.JobId,
@@ -38,7 +40,7 @@ public static class AsyncJobEndpoints
                 ResultDownloadUrl: $"/api/v1/jobs/{job.JobId}/result");
 
             return Results.Accepted($"/api/v1/jobs/{job.JobId}/status", response);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobSubmitted);
 
         group.MapGet("/{jobId}/status", async (
             string jobId,
@@ -73,7 +75,7 @@ public static class AsyncJobEndpoints
                 ResultDownloadUrl: downloadUrl);
 
             return Results.Ok(response);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.AsyncJobStatusRead);
 
         group.MapGet("/{jobId}/result", async (
             string jobId,
@@ -92,13 +94,15 @@ public static class AsyncJobEndpoints
                 return Results.NotFound();
             }
 
+            MarkDomainAudited(httpContext);
+
             var job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             var format = job?.Format ?? "json";
             var contentType = format.Equals("csv", StringComparison.OrdinalIgnoreCase) ? "text/csv" : "application/json";
             var fileName = $"query-result-{jobId}.{format}";
 
             return Results.File(stream, contentType, fileDownloadName: fileName);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobDownloaded);
 
         group.MapDelete("/{jobId}", async (
             string jobId,
@@ -112,9 +116,21 @@ public static class AsyncJobEndpoints
                           ?? string.Empty;
 
             var cancelled = await jobManager.CancelJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            if (cancelled)
+            {
+                MarkDomainAudited(httpContext);
+            }
+
             return cancelled ? Results.NoContent() : Results.NotFound();
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobCancelled);
 
         return app;
     }
+
+    /// <summary>
+    /// Delegated audit routes: the job manager has written the ALLOW audit record (fail-closed), so the central
+    /// middleware must not write a second one. Denials and failures are NOT marked and stay with the middleware.
+    /// </summary>
+    private static void MarkDomainAudited(HttpContext httpContext) =>
+        httpContext.Features.Get<AuditContext>()?.MarkHandled();
 }
