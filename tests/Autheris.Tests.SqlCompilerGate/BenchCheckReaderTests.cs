@@ -68,6 +68,28 @@ public sealed class BenchCheckReaderTests
         json.ShouldContain("test-machine");
     }
 
+    [Fact]
+    public void BenchCheck_Baseline_RoundTripsTheLegacyGen2Reference()
+    {
+        var samples = new List<BenchSample>
+        {
+            new("64KB", BenchEngine.Legacy, 1, 1, 1, 1000, 250),
+            new("64KB", BenchEngine.Ast, 1, 1, 1, 1100, 100)
+        };
+
+        var baseline = BenchResultReader.ReadBaseline(BenchResultReader.WriteBaseline(samples, "m", "2026-10-11"));
+
+        baseline.Buckets["64KB"].LegacyGen2CollectionsPerThousandOps.ShouldBe(250);
+    }
+
+    [Fact]
+    public void BenchCheck_Baseline_WithoutTheGen2Field_ReadsAsNoReference()
+    {
+        var baseline = BenchResultReader.ReadBaseline("{\"schema\":1,\"buckets\":{\"4KB\":{\"legacyAllocatedBytesPerOp\":1,\"astAllocatedBytesPerOp\":1}}}");
+
+        baseline.Buckets["4KB"].LegacyGen2CollectionsPerThousandOps.ShouldBeNull();
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("{\"schema\":1,\"buckets\":{}}")]
