@@ -95,7 +95,7 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
     {
         try
         {
-            var spec = Autheris.Application.Sql.Masking.SqlDataMaskingProvider.BuildUnkeyedMaskSpec(rule, columnName);
+            var spec = Autheris.Application.Sql.Masking.SqlDataMaskingProvider.BuildUnkeyedMaskSpec(rule, columnName, dialect);
             var rendered = new Autheris.Application.Sql.Masking.MaskSpecRenderer()
                 .Render(spec, columnName, dataType, ToMaskTargetDialect(dialect), name => dialect.FormatParameterMarker(name));
             foreach (var (marker, value) in rendered.Parameters)

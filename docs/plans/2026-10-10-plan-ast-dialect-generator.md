@@ -3734,3 +3734,11 @@ Branch `feat/ast-x1-gate-parity` (base: X0l, X0s and the X0c/X0d/X0e/X0f/X0g/X0h
 - The reserved namespace of the implementation is `__gql_rls_`, `__gql_vf_`, `__gql_mask_`, `__pl_` with the marker `@` on every dialect; Oracle consumers rewrite it to `:name` (`OracleBindByName`). The plan names `@__ap_`, `:__ap_` and `$__ap_`; the repository's existing names were kept.
 - The L2 consent envelope stores no parameter values; a typed text read back has none, which `TableAccessPolicy` handles by treating a cached text without a recipe as a miss.
 - `TableAccessDecision.MergeStrict` still compares keys case-insensitively but with the prefix (`@x` and `x` are two keys); the consumers now refuse them, the merge itself was not changed.
+
+### Mask parity fix implementation log
+
+Branch `feat/ast-x1-mask-parity-fix` (stacked on X0y). Closes the G10 finding `MaskParity_TypedMaskNeverRevealsMoreThanLegacy`: a typed mask must never reveal more than the legacy mask, neither characters nor length.
+
+- `MASK_EMAIL` is the constant redact `***@***`, `MASK_IBAN` the constant redact `****` (bound parameter, every dialect). The former 1/0 and 2/4 partial masks revealed the first character of values without `@` and the value length.
+- `PARTIAL_MASK` on SQLite is a redact of five mask characters (the legacy SQLite output had constant length); other dialects keep the variable-length typed partial mask, as their legacy output did. `BuildUnkeyedMaskSpec` now takes the dialect.
+- Tests: `TypedMaskSpecTests` (constant specs per dialect, SQLite partial mask, constant rendered output on every value), adjusted `TypedMaskAttachmentTests`, `GovernancePolicyEndToEndTests`, `GovernancePolicyFactoryTests`.

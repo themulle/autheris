@@ -66,7 +66,7 @@ public sealed class GovernancePolicyFactoryTests
 
     private static ColumnMaskPolicy EmailMask() => new(new Dictionary<string, MaskSpec>
     {
-        ["email"] = SqlDataMaskingProvider.BuildUnkeyedMaskSpec(null, "email")
+        ["email"] = SqlDataMaskingProvider.BuildUnkeyedMaskSpec(null, "email", DatabaseDialect.Sqlite)
     });
 
     private static GovernedPolicyInput Input(

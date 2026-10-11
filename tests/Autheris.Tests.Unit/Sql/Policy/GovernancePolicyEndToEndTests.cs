@@ -129,7 +129,7 @@ public sealed class GovernancePolicyEndToEndTests
         // Only the acme/EU row: the US row by the consent filter, 'other' and 'ACME' by the exact tenant comparison.
         rows.Count.ShouldBe(1);
         Convert.ToInt32(rows[0][0]).ShouldBe(1);
-        rows[0][1].ShouldBe("a**************");   // typed PARTIAL_MASK keeping the first character
+        rows[0][1].ShouldBe("*****");   // typed PARTIAL_MASK on SQLite: the constant-length mask of the legacy SQLite output
         rows[0][2].ShouldBeNull();                // Deny becomes a typed NULL
     }
 

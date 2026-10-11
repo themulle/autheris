@@ -67,7 +67,8 @@ public sealed class TypedMaskAttachmentTests
 
         decision.ColumnMasks.ShouldNotBeNull();
         decision.ColumnMasks!.HasMask("email").ShouldBeTrue();
-        ((ColumnMaskPolicy)decision.ColumnMasks).Specs["email"].Kind.ShouldBe(MaskKind.PartialMask);
+        // SQLite: the typed partial mask is the constant-length redact of the legacy SQLite output.
+        ((ColumnMaskPolicy)decision.ColumnMasks).Specs["email"].Kind.ShouldBe(MaskKind.Redact);
         decision.RequireTypedColumnMasks(meta).ShouldBeSameAs(decision);
     }
 

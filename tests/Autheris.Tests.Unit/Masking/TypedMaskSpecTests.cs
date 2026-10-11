@@ -111,15 +111,27 @@ public sealed class TypedMaskSpecTests
     }
 
     [Theory]
-    [InlineData("MASK_EMAIL", 1, 0)]
-    [InlineData("MASK_IBAN", 2, 4)]
-    public void MaskSpec_EmailAndIban_AreStricterPartialMasks(string ruleType, int prefix, int suffix)
+    [InlineData("MASK_EMAIL", "***@***")]
+    [InlineData("MASK_IBAN", "****")]
+    public void MaskSpec_EmailAndIban_AreConstantRedact_NeverRevealingCharactersOrLength(string ruleType, string constant)
     {
-        var spec = Spec(new MaskingRule { RuleType = ruleType });
+        foreach (var dialect in new[] { DatabaseDialect.Sqlite, DatabaseDialect.PostgreSql, DatabaseDialect.SqlServer, DatabaseDialect.Oracle })
+        {
+            var spec = Spec(new MaskingRule { RuleType = ruleType }, dialect: dialect);
 
-        spec.Kind.ShouldBe(MaskKind.PartialMask);
-        Value(spec, spec.Arguments.KeepPrefix).ShouldBe(prefix);
-        Value(spec, spec.Arguments.KeepSuffix).ShouldBe(suffix);
+            spec.Kind.ShouldBe(MaskKind.Redact);
+            Value(spec, spec.Arguments.Constant).ShouldBe(constant);
+            EveryParameterIsDeclaredMaskValue(spec);
+        }
+    }
+
+    [Fact]
+    public void MaskSpec_PartialMask_OnSqlite_IsRedactedBecauseTheLegacyOutputHadConstantLength()
+    {
+        var spec = Spec(new MaskingRule { RuleType = "PARTIAL_MASK", KeepPrefix = 2, KeepSuffix = 3, MaskChar = '#' }, dialect: DatabaseDialect.Sqlite);
+
+        spec.Kind.ShouldBe(MaskKind.Redact);
+        Value(spec, spec.Arguments.Constant).ShouldBe("#####");
     }
 
     [Theory]
@@ -265,15 +277,6 @@ public sealed class TypedMaskSpecTests
         return Run(rendered.Sql, rendered.Parameters, numeric: dataType == "real");
     }
 
-    // The previous PostgreSQL and SQL Server output (the SQLite legacy string always used five mask characters, which the typed
-    // emitter replaces by the same variable-length rule as the other dialects).
-    private static List<object?> ReferencePartial(int prefix, int suffix, char maskChar) =>
-        new string?[] { "abcdefghij", "ab", null, "x@example.com", string.Empty }
-            .Select(v => v is null ? null
-                : v.Length <= prefix + suffix ? new string(maskChar, 5)
-                : v[..prefix] + new string(maskChar, v.Length - prefix - suffix) + v[^suffix..])
-            .Cast<object?>().ToList();
-
     [Fact]
     public void RenderedMask_Nullify_MatchesPreviousOutput() =>
         RunTyped(new MaskingRule { RuleType = "NULLIFY" }).ShouldBe(Run("NULL"));
@@ -289,13 +292,20 @@ public sealed class TypedMaskSpecTests
     [Theory]
     [InlineData(1, 0, '*')]
     [InlineData(2, 3, '#')]
-    [InlineData(0, 4, '*')]
     [InlineData(20, 20, '*')]
-    public void RenderedMask_PartialMask_MatchesPreviousOutput(int prefix, int suffix, char maskChar)
+    public void RenderedMask_PartialMask_OnSqlite_IsConstantLengthAndRevealsNothing(int prefix, int suffix, char maskChar)
     {
+        var expected = new string(maskChar, 5);
+
         RunTyped(new MaskingRule { RuleType = "PARTIAL_MASK", KeepPrefix = prefix, KeepSuffix = suffix, MaskChar = maskChar })
-            .ShouldBe(ReferencePartial(prefix, suffix, maskChar));
+            .ShouldAllBe(v => (string?)v == expected);
     }
+
+    [Theory]
+    [InlineData("MASK_EMAIL", "***@***")]
+    [InlineData("MASK_IBAN", "****")]
+    public void RenderedMask_EmailAndIban_AreConstantOnEveryValue(string ruleType, string constant) =>
+        RunTyped(new MaskingRule { RuleType = ruleType }).ShouldAllBe(v => (string?)v == constant);
 
     [Fact]
     public void RenderedMask_GeoJitter_MatchesPreviousOutput()
@@ -346,8 +356,8 @@ public sealed class TypedMaskSpecTests
 
         if (ruleType == "PARTIAL_MASK")
         {
-            parameters.Values.ShouldContain("#");
-            Run(sql, parameters).ShouldBe(ReferencePartial(3, 1, '#'));
+            parameters.Values.ShouldContain("#####");
+            Run(sql, parameters).ShouldAllBe(v => (string?)v == "#####");
         }
     }
 
@@ -372,7 +382,7 @@ public sealed class TypedMaskSpecTests
             "col", "text", DatabaseDialect.Sqlite, PartialMaskMeta(), parameters);
 
         projection.ShouldNotContain("#");
-        parameters.Values.ShouldContain("#");
+        parameters.Values.ShouldContain("#####");
         parameters.Keys.ShouldAllBe(k => projection.Contains(k));
     }
 

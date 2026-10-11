@@ -106,8 +106,9 @@ public sealed class SqlDataMaskingProvider
     /// WP-X0f: the typed mask of a column. Every value (replacement, prefix and suffix counts, mask character, HMAC key) is a bound
     /// parameter of the returned spec (origin <see cref="ParameterOrigin.Mask"/>); the dialect generator renders it. A rule that
     /// cannot be expressed exactly is mapped to the stricter mask (fail closed): an HMAC that may not reach the database (policy,
-    /// Oracle, no key) and a fixed-length partial mask become Redact; MASK_EMAIL and MASK_IBAN become partial masks that keep less
-    /// than the legacy text did.
+    /// Oracle, no key) and a fixed-length partial mask become Redact; MASK_EMAIL and MASK_IBAN become the constants
+    /// <c>***@***</c> and <c>****</c> (neither characters nor length of the value are revealed); on SQLite a partial mask becomes the
+    /// five-character constant of the legacy SQLite mask.
     /// </summary>
     /// <param name="rule">The catalog rule, or null for a column that is masked without a rule (ABAC).</param>
     /// <param name="dataType">The catalog data type; the emitter requires it (numeric and temporal columns redact to a typed NULL).</param>
@@ -124,11 +125,11 @@ public sealed class SqlDataMaskingProvider
                 ?? Redact(new MaskParameterNames(columnName), DefaultRedactText(rule));
         }
 
-        return BuildUnkeyedMaskSpec(rule, columnName);
+        return BuildUnkeyedMaskSpec(rule, columnName, dialect);
     }
 
     /// <summary>The typed mask of every rule that needs no key (everything except HMAC, which degrades to Redact here).</summary>
-    public static MaskSpec BuildUnkeyedMaskSpec(MaskingRule? rule, string columnName)
+    public static MaskSpec BuildUnkeyedMaskSpec(MaskingRule? rule, string columnName, DatabaseDialect dialect)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
         var names = new MaskParameterNames(columnName);
@@ -151,11 +152,20 @@ public sealed class SqlDataMaskingProvider
                     return Redact(names, new string(rule.MaskChar ?? '*', 5));
                 }
 
+                if (dialect == DatabaseDialect.Sqlite)
+                {
+                    // The legacy SQLite partial mask always produced five mask characters; the typed variable-length mask would
+                    // reveal the value length there, so SQLite redacts to the same constant length (never more than the legacy output).
+                    return Redact(names, new string(rule.MaskChar ?? '*', 5));
+                }
+
                 return PartialMask(names, rule.KeepPrefix ?? 1, rule.KeepSuffix ?? 0, rule.MaskChar ?? '*');
             case "MASK_EMAIL":
-                return PartialMask(names, 1, 0, '*');
+                // A typed mask never reveals more than the legacy one, neither characters nor length: the legacy mask kept the first
+                // character of an address and nothing of a value without '@'; a constant is the only output that is never looser.
+                return Redact(names, "***@***");
             case "MASK_IBAN":
-                return PartialMask(names, 2, 4, '*');
+                return Redact(names, "****");
             default:
                 return Redact(names, DefaultRedactText(rule));
         }
