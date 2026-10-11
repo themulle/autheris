@@ -105,6 +105,9 @@ public static partial class TreeSqlCompiler
                 return filterSql;
             }
 
+            // SEC-ADG-02: two keys of one decision that name the same parameter (marker prefix or case) fail closed.
+            _ = Autheris.Application.Sql.Policy.RowFilterParameterNames.Checked(parameters);
+
             var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (name, value) in parameters)
             {

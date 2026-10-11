@@ -154,6 +154,9 @@ public sealed class SqlDataSourceResolver
             return;
         }
 
+        // SEC-ADG-02: two keys of one decision that name the same parameter (marker prefix or case) fail closed.
+        _ = Autheris.Application.Sql.Policy.RowFilterParameterNames.Checked(source);
+
         foreach (var (name, value) in source)
         {
             if (target.TryGetValue(name, out var existing) && !Equals(existing, value))

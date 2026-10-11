@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Security;
 using System.Text;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Sql.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -134,6 +135,20 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
         await using var connection = await _connectionFactory.CreateOpenConnectionAsync(connOptions, ct).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
         command.CommandTimeout = Math.Max(1, connOptions.CommandTimeoutSeconds);
+
+        // SEC-ADG-02: every parameter of the statement is bound through this set; a duplicate bare name (a row filter value that names the
+        // tenant, another filter value, an argument) fails closed instead of letting the provider pick one of two values.
+        var boundNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void BindUnique(DbParameter parameter)
+        {
+            if (!boundNames.Add(RowFilterParameterNames.Bare(parameter.ParameterName)))
+            {
+                throw new SecurityException("A statement parameter name is bound twice (fail-closed).");
+            }
+
+            command.Parameters.Add(parameter);
+        }
+
         if (dialect == DatabaseDialect.Oracle)
         {
             // SEC-ADG-03: ODP.NET binds by position unless BindByName is set; every marker below is also dialect-aware.
@@ -206,7 +221,7 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
             var maskParameter = command.CreateParameter();
             maskParameter.ParameterName = dialect.FormatParameterName(marker.TrimStart('@', ':'));
             maskParameter.Value = value ?? DBNull.Value;
-            command.Parameters.Add(maskParameter);
+            BindUnique(maskParameter);
         }
 
         var selectClause = string.Join(", ", selectParts);
@@ -230,7 +245,7 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
             var tp = command.CreateParameter();
             tp.ParameterName = dialect.FormatParameterName(tenantParamName);
             tp.Value = tenantVal;
-            command.Parameters.Add(tp);
+            BindUnique(tp);
         }
 
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
@@ -254,7 +269,7 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
                     var p = command.CreateParameter();
                     p.ParameterName = dialect.FormatParameterName(pName.TrimStart('@', ':'));
                     p.Value = pVal ?? DBNull.Value;
-                    command.Parameters.Add(p);
+                    BindUnique(p);
                 }
             }
         }
@@ -283,7 +298,7 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
                 var p = command.CreateParameter();
                 p.ParameterName = dialect.FormatParameterName(argParamName);
                 p.Value = argVal;
-                command.Parameters.Add(p);
+                BindUnique(p);
             }
         }
 
@@ -317,7 +332,7 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
                 var p = command.CreateParameter();
                 p.ParameterName = dialect.FormatParameterName(pName.TrimStart('@', ':'));
                 p.Value = pVal ?? DBNull.Value;
-                command.Parameters.Add(p);
+                BindUnique(p);
             }
         }
 
@@ -346,7 +361,7 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
             var pagination = command.CreateParameter();
             pagination.ParameterName = dialect.FormatParameterName(logicalName);
             pagination.Value = value;
-            command.Parameters.Add(pagination);
+            BindUnique(pagination);
         }
 
         if (dialect is DatabaseDialect.SqlServer or DatabaseDialect.Oracle)

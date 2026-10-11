@@ -36,6 +36,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Autheris.Tests.Unit" />
+    <InternalsVisibleTo Include="Autheris.Tests.SqlCompilerGate" />
     <InternalsVisibleTo Include="Autheris.Benchmarks" />
   </ItemGroup>
 

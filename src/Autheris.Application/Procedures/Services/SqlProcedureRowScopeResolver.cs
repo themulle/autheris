@@ -179,16 +179,18 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
                 _logger?.LogDebug("SqlProcedureRowScopeResolver: Generated SQL: {Sql}", cmd.CommandText);
             }
 
+            // SEC-ADG-02: a duplicate bare parameter name (two filter values, a filter value that names the tenant or a key) fails closed.
+            var bound = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (tenantColumn != null)
             {
-                AddParameter(cmd, "@rs_tenant", security.TenantId);
+                AddParameter(cmd, "@rs_tenant", security.TenantId, bound);
             }
 
             if (!string.IsNullOrWhiteSpace(filterSql) && decision.RowFilterParameters != null)
             {
                 foreach (var (pName, pVal) in decision.RowFilterParameters)
                 {
-                    AddParameter(cmd, pName, pVal);
+                    AddParameter(cmd, pName, pVal, bound);
                 }
             }
 
@@ -196,7 +198,7 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
             {
                 for (int k = 0; k < keyColumns.Count; k++)
                 {
-                    AddParameter(cmd, $"@rs_{i}_{k}", batch[i][k]);
+                    AddParameter(cmd, $"@rs_{i}_{k}", batch[i][k], bound);
                 }
             }
 
@@ -378,8 +380,13 @@ public sealed class SqlProcedureRowScopeResolver : IProcedureRowScopeResolver
     private static InvalidOperationException NotUnique(TableMetadata table, IReadOnlyList<string> keyColumns) =>
         new($"row_scope_key ({string.Join(", ", keyColumns)}) is not a primary key or unique index of '{table.Identifier}'.");
 
-    private static void AddParameter(DbCommand cmd, string name, object? value)
+    private static void AddParameter(DbCommand cmd, string name, object? value, ISet<string>? bound = null)
     {
+        if (bound != null && !bound.Add(Autheris.Application.Sql.Policy.RowFilterParameterNames.Bare(name)))
+        {
+            throw new System.Security.SecurityException("A statement parameter name is bound twice (fail-closed).");
+        }
+
         var p = cmd.CreateParameter();
         p.ParameterName = name;
         p.Value = value ?? DBNull.Value;
