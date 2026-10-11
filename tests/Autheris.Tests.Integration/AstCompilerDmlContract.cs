@@ -129,6 +129,9 @@ public abstract class AstCompilerDmlContract
 
     protected virtual bool HasUniqueKey => true;
 
+    /// <summary>False where the column stores the value as written (SQLite): decimal rounding and date truncation cannot cross a policy boundary.</summary>
+    protected virtual bool StorageAltersValues => true;
+
     /// <summary>False where the engine refuses a subquery in the WHERE of UPDATE or DELETE (open-source Delta: DELTA_UNSUPPORTED_SUBQUERY).</summary>
     protected virtual bool SupportsSubqueryInDmlWhere => true;
 
@@ -534,6 +537,14 @@ public abstract class AstCompilerDmlContract
         if (!Available() || await AssertCheckOptionRejectedWhereNoRowCountAsync()) return;
         AmountBelowPolicy();
         var before = await SnapshotAsync();
+        if (!StorageAltersValues)
+        {
+            // the column stores 99.999 as written, so the value really is below the policy limit
+            (await ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 99.999)", "acme")).ShouldBe(1);
+            await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (11, 'acme', 'EU', 'new', 100.5)", "acme"));
+            return;
+        }
+
         // 99.999 passes "Amount < 100" as a bound value but the column (scale 2) stores 100.00: the check sees the stored value
         var ex = await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync($"INSERT INTO {O} {PolicyColumns} VALUES (10, 'acme', 'EU', 'new', 99.999)", "acme"));
         ex.Code.ShouldBe("DML_CHECK_OPTION_VIOLATION");
@@ -553,6 +564,15 @@ public abstract class AstCompilerDmlContract
         DueAfterPolicy();
         const string columns = "(id, tenantid, region, status, amount, due)";
         var before = await SnapshotAsync();
+        if (!StorageAltersValues)
+        {
+            // SQLite keeps ISO text, so a date column is a string column for the check: a range policy on it is rejected fail closed
+            await Should.ThrowAsync<SqlCompileNotSupportedException>(() => ExecCheckedAsync(
+                $"INSERT INTO {O} {columns} VALUES (10, 'acme', 'EU', 'new', 1, TIMESTAMP '2026-01-01 00:00:00.500')", "acme"));
+            (await SnapshotAsync()).ShouldBe(before);
+            return;
+        }
+
         // 2026-01-01 00:00:00.5 is "after 2026-01-01" as a timestamp, but the date column stores 2026-01-01
         await Should.ThrowAsync<DmlCheckOptionViolationException>(() => ExecCheckedAsync(
             $"INSERT INTO {O} {columns} VALUES (10, 'acme', 'EU', 'new', 1, TIMESTAMP '2026-01-01 00:00:00.500')", "acme"));
@@ -614,7 +634,8 @@ public abstract class AstCompilerDmlContract
         }
         catch (SqlLimitExceededException ex)
         {
-            ex.Kind.ShouldBe(SqlLimitKind.BindParameters);   // never an AST depth error: the row set is a balanced tree
+            // never an AST depth error: the row set is a balanced tree. SQLite counts the UNION ALL terms of the check chain first.
+            ex.Kind.ShouldBeOneOf(SqlLimitKind.BindParameters, SqlLimitKind.CompoundSelectTerms);
             (await OrdersAsync()).Count(r => r.Id >= 100).ShouldBe(0);
         }
     }

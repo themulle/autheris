@@ -136,7 +136,6 @@ public class CompileApiTests
 
     [Theory]
     [InlineData(TargetSqlDialect.Ansi)]
-    [InlineData(TargetSqlDialect.Sqlite)]
     [InlineData(TargetSqlDialect.Snowflake)]
     public void NonSqlServerDialects_FailClosed_WithATypedNotYetSupportedError(TargetSqlDialect dialect)
     {
