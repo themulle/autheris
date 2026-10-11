@@ -1,3 +1,4 @@
+using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
@@ -38,7 +39,10 @@ public class CompileLimitsTests
         Assert.Equal(1, _engine.CompileCache.Stats.Hits);
 
         _engine.MaxQueryLength = sql.Length - 1;
-        Assert.Throws<ArgumentOutOfRangeException>(() => Compile(Request(), sql));
+        var limit = Assert.Throws<SqlLimitExceededException>(() => Compile(Request(), sql));
+        Assert.Equal(SqlLimitKind.QueryLength, limit.Kind);
+        Assert.Equal(sql.Length, limit.Requested);
+        Assert.Equal(sql.Length - 1, limit.Maximum);
         Assert.Equal(1, _engine.CompileCache.Stats.Hits);   // no further hit
 
         _engine.MaxQueryLength = 65_536;
