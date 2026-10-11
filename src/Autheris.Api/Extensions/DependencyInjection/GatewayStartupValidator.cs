@@ -33,6 +33,7 @@ public static class GatewayStartupValidator
 
         ValidateOracleRuntime(options, environment, logger);
         ValidateDatabricks(options, environment);
+        ValidateDefaultSchemas(options);
         ValidateTenantCollisions(options, environment, logger);
 
         // SEC E-01: the egress allowlist is validated in every environment; invalid or too broad entries abort the start.
@@ -658,6 +659,48 @@ public static class GatewayStartupValidator
                     $"Security violation: Oracle data source '{name}' needs DataSources:Connections:{name}:PasswordKeyVaultRef outside Development.");
             }
         }
+    }
+
+    /// <summary>
+    /// WP-X0b, SEC-X1-08: <c>DefaultSchema</c> must match the strict identifier rule in every environment, and a WebSQL-reachable
+    /// PostgreSQL or Oracle data source must have one (the session pin needs it).
+    /// </summary>
+    public static void ValidateDefaultSchemas(GatewayOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var webSqlSources = options.WebSql.Enabled
+            ? WebSqlReachableDataSources(options)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (name, connection) in options.DataSources.Connections)
+        {
+            if (connection.DefaultSchema is not null && !DefaultSchemaPolicy.IsValid(connection.DefaultSchema))
+            {
+                throw new ValidationException(
+                    $"Security violation: DataSources:Connections:{name}:DefaultSchema must match ^[A-Za-z_][A-Za-z0-9_$#]{{0,127}}$.");
+            }
+
+            bool pinned = DataSourceProvider.Is(connection.Provider, DatabaseDialect.PostgreSql) || DataSourceProvider.Is(connection.Provider, DatabaseDialect.Oracle);
+            if (pinned && connection.DefaultSchema is null && webSqlSources.Contains(name))
+            {
+                throw new ValidationException(
+                    $"WebSQL data source '{name}' ({connection.Provider}) needs DataSources:Connections:{name}:DefaultSchema; the session pin cannot be applied without it.");
+            }
+        }
+    }
+
+    private static HashSet<string> WebSqlReachableDataSources(GatewayOptions options)
+    {
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { options.WebSql.DefaultDataSourceName };
+        names.UnionWith(options.WebSql.AllowedDataSources);
+        names.UnionWith(options.WebSql.DataSourceMappings.Values);
+        foreach (var list in options.WebSql.TenantDataSourceAllowlist.Values)
+        {
+            names.UnionWith(list);
+        }
+
+        return names;
     }
 
     /// <summary>

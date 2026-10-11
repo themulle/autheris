@@ -3782,3 +3782,20 @@ Branch `feat/ast-x1-databricks-wiring` (Red commit `8f67990`, Green commit follo
 - Flight stream: the body-writer stream is no longer disposed before an error answer (`AsStream(leaveOpen: true)`), otherwise the ProblemDetails write failed.
 - Pre-existing, not changed: Antlr `ParseCanceledException` derives from `OperationCanceledException`, so an async statement that fails to parse reports state `CANCELED` (the faulted exception is not recoverable). `GatewayInvalidQueryException` in the global handler still uses its curated message as title (OData surface, not a compiler error).
 - Masked (not denied) columns used in a filter or join keep `SQL_POLICY_VIOLATION`.
+
+## WP-X0b implementation log
+
+Branch `feat/ast-x1-session-pinning`.
+
+- `DataSourceConnectionOptions.DefaultSchema` (validated by `DefaultSchemaPolicy`, `^[A-Za-z_][A-Za-z0-9_$#]{0,127}\z`; `\z` rather than `$` so a trailing line feed is rejected) and `RequireDefaultSchema`.
+- `SqlConnectionFactory` pins on every rental (new `SessionPinning`): PostgreSQL `set_config('search_path', format('pg_catalog, %I, pg_temp', @schema::text), false)` verified in the same statement; Oracle `ALTER SESSION SET CURRENT_SCHEMA` through `DBMS_ASSERT.ENQUOTE_NAME(DBMS_ASSERT.SCHEMA_NAME(:schema), FALSE)` with read-back of `USERENV.CURRENT_SCHEMA` (a missing schema raises and the connection is disposed); SQL Server ANSI options verified through `@@OPTIONS`.
+- A missing or invalid schema on a source with `RequireDefaultSchema`, or a pin that does not verify, throws `SqlSourceUnavailableException` (`SQL_SOURCE_UNAVAILABLE`) before or instead of handing out a connection. An invalid value fails regardless of the flag.
+- `GatewayStartupValidator.ValidateDefaultSchemas`: strict regex for every source; PostgreSQL/Oracle sources reachable by WebSQL need `DefaultSchema`.
+- Deviations / open: the request-time requirement is the explicit `RequireDefaultSchema` flag (the factory does not know which sources WebSQL reaches); X1 should flip it to the default or derive it. The `SQL_SOURCE_UNAVAILABLE` exception is not yet mapped to an HTTP response (X1 error mapping). SEC-X1-14 provider part was already fail-closed (`UnsupportedProvider`, `UnsupportedSessionDialect`) and is now covered by a test.
+
+### WP-X0o implementation log
+
+- Branch `feat/ast-x1-oracle-signing` (stacked on X0b). `NuGet.config` now sets `signatureValidationMode=require` and trusts only the nuget.org repository signer, pinned by three certificate SHA-256 fingerprints (the current one valid until 2027-05-18 and its two predecessors, which countersign older packages that transitive dependencies still use). No `<author>` signer: `Oracle.ManagedDataAccess.Core` 23.26.301 carries only the nuget.org repository signature (verified with `dotnet nuget verify --all`), so the "Oracle author certificate" of the §28.5 text cannot be pinned and the `Oracle.*` owner scoping is not possible without rejecting every other package.
+- Tests: `NuGetConfig_RequiresSignatures_TrustsOnlyPinnedRepositoryCertificate` (replaces the planned `..._TrustsOracleAuthor`) and `NuGetConfig_StillMapsEveryPackageToNuGetOrgOnly`. Red was a Shouldly assertion on the missing `signatureValidationMode`.
+- Verified: a clean-cache `dotnet restore Autheris.sln --force --locked-mode` succeeds with 0 errors; the same restore with altered fingerprints fails closed with NU3034.
+- Ops (open): verify the three fingerprints out of band; add the successor repository certificate before 2027-05-18 or restore will fail.
