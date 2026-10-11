@@ -513,6 +513,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     /// <summary>INV-4: a literal value reaches the database only as a bound parameter.</summary>
     private void FormatBoundLiteral(ref ValueStringBuilder builder, LiteralExpression lit, SqlEmitterContext context)
     {
+        string? columnType = lit.Type is LiteralType.Integer or LiteralType.Decimal or LiteralType.String ? ResolveLiteralColumnType(lit) : null;
         switch (lit.Type)
         {
             case LiteralType.Boolean:
@@ -524,7 +525,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 break;
             }
             case LiteralType.Integer:
-                builder.Append(BindInteger(Convert.ToInt64(lit.Value, CultureInfo.InvariantCulture), context));
+                builder.Append(BindInteger(Convert.ToInt64(lit.Value, CultureInfo.InvariantCulture), context, columnType));
                 break;
             case LiteralType.Decimal:
             {
@@ -534,11 +535,11 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                     double dbl => (decimal)dbl,
                     _ => decimal.Parse(Convert.ToString(lit.Value, CultureInfo.InvariantCulture)!, NumberStyles.Float, CultureInfo.InvariantCulture)
                 };
-                builder.Append(context.BindValue(value, SqlParameterType.Decimal, ParameterOrigin.QueryLiteral));
+                builder.Append(context.BindValue(value, SqlParameterType.Decimal, ParameterOrigin.QueryLiteral, columnType));
                 break;
             }
             case LiteralType.String:
-                builder.Append(context.BindValue(lit.Value!.ToString() ?? string.Empty, SqlParameterType.String, ParameterOrigin.QueryLiteral));
+                builder.Append(context.BindValue(lit.Value!.ToString() ?? string.Empty, SqlParameterType.String, ParameterOrigin.QueryLiteral, columnType));
                 break;
             case LiteralType.Binary:
                 builder.Append(context.BindValue(ParseBinaryLiteral(lit.Value!.ToString() ?? string.Empty), SqlParameterType.Binary, ParameterOrigin.QueryLiteral));
@@ -546,6 +547,34 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             default:
                 throw new NotSupportedException($"Unsupported literal type: {lit.Type}");
         }
+    }
+
+    /// <summary>
+    /// SEC-ADG-16 item 2: the catalog type a literal binds with, or null when the literal is not compared with a catalog column. A
+    /// numeric literal against a text column is rejected (the database would convert the column and could raise a data-dependent
+    /// error such as ORA-01722). On Oracle a comparison with a column of unknown type is rejected as well; the other dialects
+    /// keep the literal type for it.
+    /// </summary>
+    private string? ResolveLiteralColumnType(LiteralExpression lit)
+    {
+        if (lit.ColumnTypeUnknown)
+        {
+            if (TargetDialect == TargetSqlDialect.Oracle)
+            {
+                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "literal compared with a column of unknown type");
+            }
+
+            return null;
+        }
+
+        if (lit.ColumnType is null) return null;
+        if (lit.Type is LiteralType.Integer or LiteralType.Decimal &&
+            ColumnBindAdapter.Classify(lit.ColumnType) is ColumnTypeClass.AnsiText or ColumnTypeClass.UnicodeText)
+        {
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "numeric literal compared with a text column");
+        }
+
+        return lit.ColumnType;
     }
 
     private static byte[] ParseBinaryLiteral(string literal)

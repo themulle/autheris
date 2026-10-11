@@ -1028,6 +1028,12 @@ public sealed class SqlDataSourceOptions
 
     public Dictionary<string, DataSourceConnectionOptions> Connections { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// WP-X0c (SEC-X1-09): how long the column types and collations read from the database metadata are cached, in seconds.
+    /// The hard maximum is 300; configuration can only lower it. A larger value fails the startup.
+    /// </summary>
+    [Range(1, 300)] public int CatalogCacheTtlSeconds { get; init; } = 300;
+
     /// <summary>Global settings of the declarative HTTP data sources (web-api tables).</summary>
     public HttpDataSourceOptions Http { get; init; } = new();
 }

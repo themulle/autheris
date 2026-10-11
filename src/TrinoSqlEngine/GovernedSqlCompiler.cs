@@ -12,6 +12,7 @@ using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Ast.Security;
 using TrinoSqlEngine.Ast.Visitors;
 using TrinoSqlEngine.Governance;
 
@@ -167,12 +168,13 @@ internal sealed class GovernedSqlCompiler
         var simplified = (SqlStatement)new AstSimplificationVisitor { CancellationToken = token }.Visit(ast);
         CheckBudget(request, clock, token);
 
-        // 6. typed security injection
+        // 6. typed security injection; user literals first learn the catalog type of the column they are compared with (SEC-ADG-16 item 2)
         Pass("inject");
+        var typedLiterals = (SqlStatement)new LiteralColumnTypeAnnotator(policy.Catalog) { CancellationToken = token }.Visit(simplified);
         var secured = (SqlStatement)new AstSecurityVisitor(BuildOptions(request, typed), _engine, typed)
         {
             CancellationToken = token
-        }.Visit(simplified);
+        }.Visit(typedLiterals);
         CheckBudget(request, clock, token);
 
 #if DEBUG

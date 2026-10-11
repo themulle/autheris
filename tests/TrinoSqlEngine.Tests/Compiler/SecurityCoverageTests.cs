@@ -440,11 +440,22 @@ public class SecurityCoverageTests
         {
             if (type == typeof(AstSecurityVisitor)) continue; // creates the nodes; never re-enters them (tested below)
             // Producers that run before an expression is wrapped in a SecurityPredicateExpression need constructor arguments.
-            if (type.Name is "PolicySubqueryTenantRewriter" or "PolicyShaper" or "PolicyColumnTypeAnnotator") continue;
+            if (type.Name is "PolicySubqueryTenantRewriter" or "PolicyShaper" or "PolicyColumnTypeAnnotator" or "LiteralColumnTypeAnnotator") continue;
             var rewriter = (SqlAstRewriter)Activator.CreateInstance(type, BindingFlags.Default | BindingFlags.OptionalParamBinding, null, Array.Empty<object>(), null)!;
             var result = rewriter.Visit(stmt);
             Assert.True(ContainsStatementPredicate(result, injected), $"{type.Name} rewrote an injected security predicate");
         }
+    }
+
+    [Fact]
+    public void LiteralColumnTypeAnnotator_DoesNotDescendIntoSecurityPredicate()
+    {
+        var inner = new BinaryExpression(Col("a"), Equal, new LiteralExpression("x", LiteralType.String));
+        var injected = Pred(RootId, SecurityScope.Root, inner);
+        var stmt = WithInjected(injected, new BinaryExpression(Col("a"), Equal, Int(1)));
+
+        var result = new TrinoSqlEngine.Ast.Security.LiteralColumnTypeAnnotator(new TrinoSqlEngine.Governance.InMemoryTableCatalog(Array.Empty<TrinoSqlEngine.Governance.TableCatalogEntry>(), "dbo")).Visit(stmt);
+        Assert.True(ContainsStatementPredicate(result, injected), "the annotator rewrote an injected security predicate");
     }
 
     [Fact]
