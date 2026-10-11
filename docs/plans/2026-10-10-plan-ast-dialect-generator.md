@@ -2,7 +2,7 @@
 
 **Document ID:** `PLAN-AST-DIALECT-GEN-16` (implementation plan, Phase 2 of the 6-phase lifecycle)
 **Date:** 2026-10-10
-**Status:** IN PROGRESS - Phase 5 approved for DQL (§19.9) and DML (§19.12); next: Phase 6 documentation, then the X1 preconditions
+**Status:** IN PROGRESS - DQL and DML approved (§19.9, §19.12) and documented (Phase 6, §27); next: the X1 cutover preconditions (§20.3, §24.3, §25.4, §26)
 **Author:** Solution Architect (`csharp-architect`); Phase 3 review (§16) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
@@ -1576,6 +1576,7 @@ Affected work packages and test criteria (additions to §11 and §16.8):
 
 ## 17. Changelog
 
+- 2026-10-11: Added §27 "Phase 6 Documentation": feature doc F-DIALECT-02 (supersedes F-DIALECT-01), ADR-017 amendment, master plan row, and the list of plan-versus-code differences found while documenting.
 - 2026-10-11: Added §19.12 "Re-review (DML loop 2)" (`csharp-code-reviewer`) of `feat/ast-dml` at `f90677c`: CR-ADG-42 closed on SQL Server, PostgreSQL, Oracle Free and DuckDB (coercion and string variants rejected), CR-ADG-43/44 verified; verdict approved; CR-ADG-45 (row-count flag forgeable through a `with` copy) and CR-ADG-47 (catalog types from metadata) added as X1 preconditions, CR-ADG-46/-48 Minor; DQL and DML ready for Phase 6.
 - 2026-10-10: Added §25 "Implementation Log — DML review loop 2": CR-ADG-42 (Blocker: the INSERT check option now evaluates the policy on the stored value through native catalog casts and compares string columns byte-exact), CR-ADG-43 (binders refuse a row-count-checked statement; `CheckedDmlExecutor` is the only way to run it) and CR-ADG-44 (balanced row tree) fixed on `feat/ast-dml`; the §24.2 "known limit" text corrected; X1 preconditions updated.
 - 2026-10-10: Added §19.11 "Re-review (DML loop 1)" (`csharp-code-reviewer`) of `feat/ast-dml` at `4f18436`: CR-ADG-33, -34, -36..41 closed; changes requested for CR-ADG-42 (Blocker: the CR-ADG-35 INSERT check option is bypassed by type coercion on four engines and by column collation); CR-ADG-43 (X1) and CR-ADG-44 (Minor) added.
@@ -2484,3 +2485,36 @@ Track `PLAN-AST-DIALECT-GEN-16`, branch `feat/ast-dml`, after the re-review §19
 CR-ADG-47 (catalog types from metadata) stays an X1 precondition.
 
 Evidence: see the commit messages and the final build and test run of this loop.
+
+## 27. Phase 6 Documentation
+
+Track `PLAN-AST-DIALECT-GEN-16`, branch `feat/ast-dml` (from `a4ce0e4`), Phase 6 (`documentation-expert`). Every option name, error code and default in the documents below was checked against the code.
+
+### 27.1 Deliverables
+
+| Document | Change |
+|---|---|
+| `docs/features/f-dialect-02-ast-sql-compiler.md` | New feature reference: pipeline, value-free plan cache, typed policy IR and masks, binders and checked execution, dialect tiers and statement matrix, configuration, security and fail-closed behavior, typed errors and codes, sanitizer mapping, reference benchmark values, limitations. |
+| `docs/features/f-dialect-01-ast-target-dialect-pushdown.md` | Reduced to a superseded pointer; its dialect and default-engine claims were wrong. |
+| `docs/features/README.md`, `README.md` (Pillar 4) | F-DIALECT-02 registered; F-DIALECT-01 marked superseded; Pillar 4 states that legacy is the default engine. |
+| `docs/adr/ADR-017-*.md` | Amendment 2026-10-11 (decisions of plan §1, one-code-path end state, AST opt-in until the cutover); the §2 "Garantie" and "default AstCompiler" statements are struck through and withdrawn. The text differs from the draft in §13: it does not say that the legacy rewriter was already removed, because the cutover (X1) has not happened. |
+| `docs/plans/00-master-plan-overview.md` | PLAN-AST-DIALECT-GEN-16 row: status and next milestone. |
+
+### 27.2 Plan versus code (the documents follow the code)
+
+| Topic | Plan | Code |
+|---|---|---|
+| SQLite tier | §5: Production | No capability entry; `Compile` rejects `Sqlite` (and `Snowflake`, `Ansi`) with `SqlCompileNotSupportedException(Dialect)`. The SQLite generator serves the legacy string path only. The capability table holds SQL Server, DuckDB, PostgreSQL, Oracle, Databricks. |
+| Snowflake | §5: Experimental entry | No capability entry, so it is not compilable even with `AllowExperimentalDialect`. |
+| `WebSql:SqlRewriterEngine = AstCompiler` | §0, ADR-017 draft: the AST compiler | Selects `FastSqlEngine.GenerateGovernedSql`, the earlier string-returning AST path over `RlsOptions`; it does not call `ISqlEngine.Compile`. No production service calls `ISqlEngine.Compile`; the typed compiler and its binders are reached only from tests and the benchmark runner. |
+| Provider binders | §16.6: provider binders | Production code has the abstract `DbCommandCompiledSqlBinder` and `CheckedDmlExecutor`; the concrete per-provider binder subclasses exist in the test projects only. |
+| Databricks runtime | §6.3: Statement Execution API connector | No connector, no HTTP settings and no Databricks branch in `SqlConnectionFactory`. |
+| INV-14 session pinning | `search_path` and `CURRENT_SCHEMA` pinned | Not pinned (logged deviation in §20.2). PostgreSQL pins `standard_conforming_strings` and `TimeZone`; Oracle pins the NLS block; SQL Server does not set `ANSI_WARNINGS`. |
+| Cache key | §4: SHA-256 plus full compare | As planned (hash of the full key material plus ordinal compare of the material); capacity 512 entries, first-in-first-out. |
+| NFR-2 measurement | BenchmarkDotNet gate | Stopwatch runner `dotnet run -c Release -- compile`: cache hit 16.1 µs, miss 0.73 ms on the Phase 6 machine (limits 250 µs and 10 ms). |
+| HTTP mapping of compiler errors | §16 | None; only `TENANT_ID_COLLISION` (403) exists. |
+| Master plan diagram | n/a | The Mermaid node label for this plan still reads "IN PROGRESS"; only the table row was updated, as instructed. |
+
+### 27.3 Open items carried to X1
+
+Unchanged from §20.3, §24.3, §25.4 and §26: runtime wiring of `DmlErrorSanitizer` and `CheckedDmlExecutor`, catalog types and collation from database metadata (CR-ADG-47), the tenant registry (CR-ADG-31), literal bind types (SEC-ADG-16 item 2), the Oracle driver license review and package signing, a Databricks G9 run, and the OQ-GQL / OQ-4 text consumers.

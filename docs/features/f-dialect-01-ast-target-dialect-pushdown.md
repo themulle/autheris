@@ -1,49 +1,16 @@
 # F-DIALECT-01: Multi-Target SQL AST Compiler & Native Dialect Pushdown
 
-## Executive Summary
+> [!IMPORTANT]
+> This document is superseded by [F-DIALECT-02: Governed AST SQL Compiler](f-dialect-02-ast-sql-compiler.md). It described the first, string-returning AST path and overstated dialect support. F-DIALECT-02 is the reference for the typed compiler, the dialect tiers, the configuration and the security behavior.
 
-Autheris abandons fragile string-replacement and token-based regex rewriting in favor of a full-fledged, multi-pass **SQL AST Compiler Pipeline** (implemented in [`TrinoSqlEngine`](../../src/TrinoSqlEngine)).
+## What this document covered
 
-The compiler parses incoming SQL statements into an Abstract Syntax Tree, validates security invariants, injects Row-Level Security (RLS) predicates and column masking expressions in-tree, optimizes Boolean algebra, and compiles the final tree into native, dialect-accurate SQL for heterogeneous destination engines.
+The first AST path (`FastSqlEngine.GenerateGovernedSql`, selected with `WebSql:SqlRewriterEngine = AstCompiler`) parses Trino SQL into a typed AST, injects tenant, row-policy and masking nodes, simplifies the tree and emits dialect text through an `ISqlDialectGenerator`. It returns a SQL string and is not the typed compiler `ISqlEngine.Compile`.
 
----
+## Engine selection
 
-## Supported Target Dialects
+The legacy token-stream rewriter is the default engine (`WebSql:SqlRewriterEngine` unset or `LegacyTokenStream`). `AstCompiler` and `ShadowDualRun` are opt-in values of the same setting. See [F-DIALECT-02, section 4.1](f-dialect-02-ast-sql-compiler.md#41-engine-selection).
 
-| Dialect | Engine Targets | Key Code Generation Features |
-|---|---|---|
-| **T-SQL** | Microsoft SQL Server, Azure SQL DB | Bracket quoting (`[column]`), Unicode prefixing (`N'value'`), wrapped Boolean projections (`CASE WHEN ... THEN 1 ELSE 0 END`), `OFFSET ... FETCH NEXT ... ROWS ONLY`, `ISNULL()`, `HASHBYTES()`. |
-| **PostgreSQL** | PostgreSQL 12+, AWS Aurora PG, TimescaleDB | Double-quote escaping (`"column"`), native standard Booleans (`true`/`false`), positional parameters (`$1, $2`), `LIMIT / OFFSET`, `COALESCE()`. |
-| **SQLite** | SQLite 3 in-memory and disk databases | ANSI quoting, standard SQLite type casting, parameter index emitters (`?1, ?2`), `IFNULL()`. |
-| **DuckDB** | DuckDB in-memory OLAP engine | Advanced analytical projection syntax, native regex matching, vectorized timestamp functions. |
-| **Snowflake** | Snowflake Cloud Data Platform | Case-sensitive identifier quoting, native JSON traversal pushdown, native hashing and zero-copy string functions. |
-| **Oracle** | Oracle Database 19c / 21c / 23ai | Uppercase normalized identifiers, omitted `AS` keyword on `FROM` table aliases, `NUMBER(1)` Boolean representations, `:p1` bind variables. |
+## Dialect generators
 
----
-
-## Compiler Pipeline Architecture
-
-```mermaid
-flowchart LR
-    RAW_SQL["Incoming SQL Query"] --> PARSER["ANTLR4 Lexer & Parser"]
-    PARSER --> AST_BUILDER["SqlAstBuilder (Neutral AST)"]
-    AST_BUILDER --> SEC_VISITOR["AstSecurityVisitor<br/>(Inject RLS & Masking)"]
-    SEC_VISITOR --> OPT_VISITOR["AstSimplificationVisitor<br/>(Constant Folding & Logic Optimization)"]
-    OPT_VISITOR --> GENERATOR["Target ISqlDialectGenerator"]
-    GENERATOR --> TARGET_SQL["Target Engine Executable SQL"]
-```
-
-### Compiler Phases:
-1. **Parsing:** ANTLR4 converts raw SQL into a concrete syntax parse tree.
-2. **AST Construction:** `SqlAstBuilder` maps parse trees into strongly typed, immutable AST nodes (`QuerySpecification`, `TableReference`, `BinaryExpression`, `FunctionCall`).
-3. **Security Visitor (`AstSecurityVisitor`):** Inspects queried tables, validates column access rights, and grafts tenant isolation filters (`tenant_id = @p0`) and virtual filters into the `WHERE` clause tree using logical `AND`. Injects dialect masking functions directly into projected expressions.
-4. **Simplification (`AstSimplificationVisitor`):** Evaluates compile-time constants, eliminates tautologies (`WHERE 1=1 AND status = 'active'` -> `WHERE status = 'active'`), and optimizes Boolean logic using De Morgan's laws.
-5. **Code Emission:** The target dialect generator formats the optimized AST into syntactically perfect SQL for the target database.
-
----
-
-## Security Invariants & Protections
-
-- **Anti-DoS Depth Guard:** Rejects deeply nested or cyclical recursive queries exceeding configured complexity limits.
-- **Comment & System Variable Stripping:** Automatically removes SQL comments and disallows server configuration reads (such as `@@version`, `current_user()`).
-- **Strict Single-Statement Enforcement:** Terminates with a security violation if multiple statements or statement terminators (`;`) are present.
+Generators exist for SQL Server, PostgreSQL, SQLite, DuckDB, Oracle, Databricks, Snowflake and ANSI. Support tiers apply only to the typed compiler: SQL Server, PostgreSQL, DuckDB and Oracle are Production, Databricks is Experimental, and SQLite, Snowflake and ANSI have no entry in the compiler's capability table. See [F-DIALECT-02, section 3](f-dialect-02-ast-sql-compiler.md#3-supported-dialects-and-tiers).

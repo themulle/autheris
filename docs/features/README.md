@@ -50,7 +50,8 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DBT-4** | Zero-Touch dbt Cloud & Orchestrator Webhook Integration | [f-dbt-04-orchestrator-webhooks.md](f-dbt-04-orchestrator-webhooks.md) |
 | **F-DBT-05** | Streaming dbt Metadata Ingestion & Automated Model Sync | [f-dbt-05-streaming-metadata-ingestion.md](f-dbt-05-streaming-metadata-ingestion.md) |
 | **F-DBT-6** | Policy & RLS Auto-Sync from dbt Metadata | [f-dbt-06-policy-rls-sync.md](f-dbt-06-policy-rls-sync.md) |
-| **F-DIALECT-01** | Multi-Target SQL AST Compiler & Native Dialect Pushdown | [f-dialect-01-ast-target-dialect-pushdown.md](f-dialect-01-ast-target-dialect-pushdown.md) |
+| **F-DIALECT-01** | Multi-Target SQL AST Compiler & Native Dialect Pushdown (superseded by F-DIALECT-02) | [f-dialect-01-ast-target-dialect-pushdown.md](f-dialect-01-ast-target-dialect-pushdown.md) |
+| **F-DIALECT-02** | Governed AST SQL Compiler (DQL and DML: SQL Server, PostgreSQL, DuckDB, Oracle; Databricks experimental) | [f-dialect-02-ast-sql-compiler.md](f-dialect-02-ast-sql-compiler.md) |
 | **F-DOC-01** | Omnichannel Semantic Documentation Passthrough | [f-doc-01-omnichannel-documentation.md](f-doc-01-omnichannel-documentation.md) |
 | **F-DX-01** | Zero-Config Developer Quickstart & Dev Portal Hub | [f-dx-01-developer-quickstart.md](f-dx-01-developer-quickstart.md) |
 | **F-GOV-06** | Multi-Stage Pushdown Cascades & Cross-Domain Joins (not implemented) | [f-gov-06-cross-domain-joins.md](f-gov-06-cross-domain-joins.md) |
