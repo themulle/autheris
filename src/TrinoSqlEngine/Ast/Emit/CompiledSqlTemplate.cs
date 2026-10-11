@@ -74,7 +74,10 @@ public sealed record CompiledSqlTemplate(
             parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType));
         }
 
-        return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion, ExpectedAffectedRows);
+        return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion)
+        {
+            ExpectedAffectedRows = ExpectedAffectedRows
+        };
     }
 }
 

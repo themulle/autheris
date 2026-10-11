@@ -89,14 +89,20 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
     public void Bind(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues)
     {
         ArgumentNullException.ThrowIfNull(compiled);
-        if (compiled.RequiresRowCountCheck)
+        if (compiled.RequiresRowCountCheck || ContainsCheckAlias(compiled.Sql))
         {
+            // CR-ADG-45: the reserved alias marks a check-option INSERT even when the flag was lost.
             // CR-ADG-43: fail closed by construction; the checked path is the only way to bind (and so to run) this statement.
             throw new CheckedExecutionRequiredException(compiled.Dialect);
         }
 
         BindCore(command, compiled, clientParameterValues);
     }
+
+    private static bool ContainsCheckAlias(string sql) =>
+        sql.Contains(CheckAliasText, StringComparison.OrdinalIgnoreCase);
+
+    private const string CheckAliasText = "autheris_ins";
 
     /// <summary>The binding of <see cref="CheckedDmlExecutor"/>, the only caller that may bind a statement with a row-count check.</summary>
     internal void BindForCheckedExecution(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues) =>

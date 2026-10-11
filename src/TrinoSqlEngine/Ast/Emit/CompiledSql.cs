@@ -38,9 +38,14 @@ public sealed record CompiledSql(
     TargetSqlDialect Dialect,
     SqlStatementClass StatementClass,
     ImmutableArray<SecurityPredicateId> AppliedPredicates,
-    string CompilerVersion,
-    int? ExpectedAffectedRows = null)
+    string CompilerVersion)
 {
+    /// <summary>
+    /// CR-ADG-45: the expected affected row count of a check-option INSERT. The setter is internal, so a <c>with</c> copy outside
+    /// the assembly cannot drop the requirement; the binders additionally derive it from the reserved check alias in the SQL.
+    /// </summary>
+    public int? ExpectedAffectedRows { get; internal init; }
+
     /// <summary>
     /// CR-ADG-35: true for an INSERT with check-option semantics. The executor must run the statement inside a transaction and call
     /// <see cref="DmlCheckOption.Enforce"/> with the affected row count before it commits; a difference rolls the transaction back.

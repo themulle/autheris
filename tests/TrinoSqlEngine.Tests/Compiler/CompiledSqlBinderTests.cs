@@ -114,7 +114,7 @@ public class CompiledSqlBinderTests
 
     private static CompiledSql Checked(string sql, int expected, params BoundParameter[] ps) =>
         new(sql, ps.ToImmutableArray(), TargetSqlDialect.SqlServer, SqlStatementClass.Insert,
-            ImmutableArray<TrinoSqlEngine.Ast.Nodes.SecurityPredicateId>.Empty, "test", expected);
+            ImmutableArray<TrinoSqlEngine.Ast.Nodes.SecurityPredicateId>.Empty, "test") { ExpectedAffectedRows = expected };
 
     public static IEnumerable<object[]> AllBinders() => new[]
     {
@@ -144,6 +144,42 @@ public class CompiledSqlBinderTests
         Assert.Null(ex.InnerException);
         Assert.Equal(string.Empty, cmd.CommandText);   // nothing reached the command
         Assert.Empty(cmd.Parameters);
+    }
+
+    [Fact]
+    public void ExpectedAffectedRows_CannotBeSetFromOutsideTheAssembly()
+    {
+        // CR-ADG-45: a public init accessor would let `compiled with { ExpectedAffectedRows = null }` strip the requirement.
+        var property = typeof(CompiledSql).GetProperty(nameof(CompiledSql.ExpectedAffectedRows))!;
+        Assert.True(property.GetMethod!.IsPublic);
+        var setter = property.SetMethod!;
+        Assert.False(setter.IsPublic);
+        Assert.False(setter.IsFamily);
+        Assert.True(setter.IsAssembly || setter.IsFamilyAndAssembly);
+        Assert.DoesNotContain(typeof(CompiledSql).GetConstructors(), c => c.GetParameters().Any(p => p.Name == "ExpectedAffectedRows"));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllBinders))]
+    public void Bind_OfAStatementWithTheReservedCheckAlias_IsRefusedEvenWithoutTheFlag(TargetSqlDialect dialect)
+    {
+        // CR-ADG-45 defense in depth: the binder derives the requirement from the SQL text as well.
+        foreach (var sql in new[]
+                 {
+                     "INSERT INTO t (a) SELECT \"autheris_ins\".\"a\" FROM (VALUES (1)) AS \"autheris_ins\" (\"a\")",
+                     "INSERT INTO t (a) SELECT [autheris_ins].[a] FROM (VALUES (1)) AS [autheris_ins] ([a])",
+                     "INSERT INTO t (a) SELECT `autheris_ins`.`a` FROM (VALUES (1)) AS `autheris_ins` (`a`)",
+                     "INSERT INTO t (a) SELECT AUTHERIS_INS.a FROM x AS AUTHERIS_INS"
+                 })
+        {
+            var compiled = Compiled(sql) with { Dialect = dialect, StatementClass = SqlStatementClass.Insert };
+            Assert.False(compiled.RequiresRowCountCheck);
+            using var cmd = new SqliteCommand();
+            var ex = Assert.Throws<CheckedExecutionRequiredException>(() => BinderOf(dialect).Bind(cmd, compiled, new Dictionary<string, object?>()));
+            Assert.Equal(dialect, ex.Dialect);
+            Assert.Equal(string.Empty, cmd.CommandText);
+            Assert.Empty(cmd.Parameters);
+        }
     }
 
     [Fact]
