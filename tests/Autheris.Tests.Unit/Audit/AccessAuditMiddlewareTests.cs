@@ -325,4 +325,5 @@ public sealed class AccessAuditMiddlewareTests
         entry.DetailsJson.ShouldNotContain("evil");
         entry.DetailsJson.ShouldNotContain("script");
         entry.TenantId.Value.ShouldNotContain("evil");
+    }
 }
