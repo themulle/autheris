@@ -233,4 +233,14 @@ public sealed class TypedPolicySourcesWiringTests
         FieldsOf(policy, typeof(RowPolicyFactory)).ShouldHaveSingleItem().ShouldNotBeNull();
         FieldsOf(policy, typeof(ColumnMaskPolicyFactory)).ShouldHaveSingleItem().ShouldNotBeNull();
     }
+
+    [Fact]
+    public void CasbinService_GetsTheRowPolicyFactory()
+    {
+        using var provider = BuildProvider();
+
+        var casbin = provider.GetRequiredService<IPolicyEnforcementService>();
+
+        FieldsOf(casbin, typeof(RowPolicyFactory)).ShouldHaveSingleItem().ShouldNotBeNull();
+    }
 }

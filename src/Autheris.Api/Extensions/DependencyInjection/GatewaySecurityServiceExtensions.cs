@@ -62,7 +62,9 @@ public static class GatewaySecurityServiceExtensions
             var service = new CasbinEnforcementService(
                 string.IsNullOrWhiteSpace(options.Casbin.ModelPath) ? null : options.Casbin.ModelPath,
                 rlsGen,
-                logger);
+                logger,
+                // WP-X0l: lets the Casbin decisions carry their row filters as typed policies.
+                sp.GetService<Autheris.Application.Policy.RowPolicyFactory>());
             if (options.Casbin.Enabled && !string.IsNullOrWhiteSpace(options.Casbin.PolicyPath))
             {
                 service.LoadPolicyFromFile(options.Casbin.PolicyPath, options.Casbin.WatchPolicyFile);
