@@ -34,5 +34,8 @@ public sealed record PolicyLintFinding(PolicyLintKind Kind, string Table, string
 
 public sealed record PolicyLintReport(int Checked, IReadOnlyList<PolicyLintFinding> Findings)
 {
+    /// <summary>Predicates whose target matches no catalog table; they could not be checked against a table.</summary>
+    public int Unchecked { get; init; }
+
     public bool IsClean => Findings.Count == 0;
 }
