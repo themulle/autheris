@@ -33,9 +33,10 @@ public sealed class PostgreSqlGovernanceContractTests : IAsyncLifetime
             await _container.StartAsync();
             _available = true;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             _available = false; // no Docker on this machine
+            ContainerStartup.FailIfRequired(ex, "The PostgreSQL test container");
         }
     }
 

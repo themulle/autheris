@@ -29,9 +29,10 @@ public sealed class PostgreSqlTenantRegistryContractTests : IAsyncLifetime
             await _container.StartAsync();
             _available = true;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             _available = false;
+            ContainerStartup.FailIfRequired(ex, "The PostgreSQL test container");
         }
     }
 
