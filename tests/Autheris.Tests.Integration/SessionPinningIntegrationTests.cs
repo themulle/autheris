@@ -149,7 +149,8 @@ public sealed class SqlServerSessionPinningTests : IClassFixture<AstCompilerSqlS
 }
 
 /// <summary>WP-X0b: Oracle CURRENT_SCHEMA is pinned (existence proven by DBMS_ASSERT) on every rental.</summary>
-public sealed class OracleSessionPinningTests : IClassFixture<AstCompilerOracleFixture>
+[Collection(OracleCollection.Name)]
+public sealed class OracleSessionPinningTests
 {
     private readonly AstCompilerOracleFixture _fx;
     private readonly SqlConnectionFactory _factory = new(new DevelopmentEnvironment());

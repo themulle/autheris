@@ -1,59 +1,63 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Oracle.ManagedDataAccess.Client;
+using System.Data.Common;
+using Autheris.Application.Interfaces;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Shouldly;
-using Testcontainers.Oracle;
 using TrinoSqlEngine;
 using Xunit;
 
 namespace Autheris.Tests.Integration;
 
-public sealed class OracleContainerFixture : IAsyncLifetime
+/// <summary>
+/// WP-X0z: the connection comes from the real host container (pinned, BindByName wrapper); tables are created in the application schema
+/// under names that no other Oracle test uses, because the Oracle container is shared.
+/// </summary>
+[Collection(OracleCollection.Name)]
+public class OracleIntegrationTests : IDisposable
 {
-    public OracleContainer Container { get; } = new OracleBuilder("gvenzl/oracle-free:23-slim-faststart@sha256:d86d09794ae138a8951e97d7ee010778dcd43088e8d0f83a51002abab8c6d7fd")
-        .WithPassword("Oracle_Password_2026")
-        .Build();
+    private readonly Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> _host;
+    private readonly ISqlConnectionFactory _connections;
+    private readonly DataSourceConnectionOptions _options;
 
-    public string ConnectionString => Container.GetConnectionString();
-
-    public async Task InitializeAsync()
+    public OracleIntegrationTests(AstCompilerOracleFixture fixture)
     {
-        await Container.StartAsync();
+        _host = OracleGatewayHost.Create(fixture, nameof(OracleIntegrationTests));
+        _connections = _host.Services.GetRequiredService<ISqlConnectionFactory>();
+        _options = _host.Services.GetRequiredService<IOptions<GatewayOptions>>().Value.DataSources!.Connections![OracleGatewayHost.Source];
     }
 
-    public async Task DisposeAsync()
-    {
-        await Container.DisposeAsync();
-    }
-}
+    public void Dispose() => _host.Dispose();
 
-public class OracleIntegrationTests : IClassFixture<OracleContainerFixture>
-{
-    private readonly string _connectionString;
+    private Task<DbConnection> OpenAsync() => _connections.CreateOpenConnectionAsync(_options);
 
-    public OracleIntegrationTests(OracleContainerFixture fixture)
+    private static void AddParameter(DbCommand command, string name, object value)
     {
-        _connectionString = fixture.ConnectionString;
+        var p = command.CreateParameter();
+        p.ParameterName = name;
+        p.Value = value;
+        command.Parameters.Add(p);
     }
 
     [Fact]
     public async Task CanConnect_CreateTable_AndQueryData_OnOracleContainer()
     {
-        await using var connection = new OracleConnection(_connectionString);
-        await connection.OpenAsync();
+        await using var connection = await OpenAsync();
 
         // 1. Tabelle anlegen
         await using (var dropCmd = connection.CreateCommand())
         {
-            dropCmd.CommandText = "DROP TABLE IF EXISTS integration_tenants";
+            dropCmd.CommandText = "DROP TABLE IF EXISTS x0z_integration_tenants";
             await dropCmd.ExecuteNonQueryAsync();
         }
 
         await using (var createCmd = connection.CreateCommand())
         {
             createCmd.CommandText = """
-                CREATE TABLE integration_tenants (
+                CREATE TABLE x0z_integration_tenants (
                     id NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     tenant_key VARCHAR2(50) NOT NULL,
                     display_name VARCHAR2(100) NOT NULL,
@@ -67,12 +71,12 @@ public class OracleIntegrationTests : IClassFixture<OracleContainerFixture>
         await using (var insertCmd = connection.CreateCommand())
         {
             insertCmd.CommandText = """
-                INSERT INTO integration_tenants (tenant_key, display_name, is_active)
+                INSERT INTO x0z_integration_tenants (tenant_key, display_name, is_active)
                 VALUES (:p1, :p2, :p3)
                 """;
-            insertCmd.Parameters.Add(new OracleParameter("p1", "tenant-ora-01"));
-            insertCmd.Parameters.Add(new OracleParameter("p2", "Oracle Tenant Alpha"));
-            insertCmd.Parameters.Add(new OracleParameter("p3", 1));
+            AddParameter(insertCmd, "p1", "tenant-ora-01");
+            AddParameter(insertCmd, "p2", "Oracle Tenant Alpha");
+            AddParameter(insertCmd, "p3", 1);
 
             await insertCmd.ExecuteNonQueryAsync();
         }
@@ -80,8 +84,8 @@ public class OracleIntegrationTests : IClassFixture<OracleContainerFixture>
         // 3. Abfragen und verifizieren
         await using (var queryCmd = connection.CreateCommand())
         {
-            queryCmd.CommandText = "SELECT tenant_key, display_name, is_active FROM integration_tenants WHERE tenant_key = :p1";
-            queryCmd.Parameters.Add(new OracleParameter("p1", "tenant-ora-01"));
+            queryCmd.CommandText = "SELECT tenant_key, display_name, is_active FROM x0z_integration_tenants WHERE tenant_key = :p1";
+            AddParameter(queryCmd, "p1", "tenant-ora-01");
 
             await using var reader = await queryCmd.ExecuteReaderAsync();
             (await reader.ReadAsync()).ShouldBeTrue();
@@ -95,20 +99,19 @@ public class OracleIntegrationTests : IClassFixture<OracleContainerFixture>
     [Fact]
     public async Task AstCompiler_GeneratedOracleQuery_ExecutesSuccessfully_WithRlsAndPagination()
     {
-        await using var connection = new OracleConnection(_connectionString);
-        await connection.OpenAsync();
+        await using var connection = await OpenAsync();
 
         // 1. Tabelle vorbereiten
         await using (var dropCmd = connection.CreateCommand())
         {
-            dropCmd.CommandText = "DROP TABLE IF EXISTS orders";
+            dropCmd.CommandText = "DROP TABLE IF EXISTS x0z_legacy_orders";
             await dropCmd.ExecuteNonQueryAsync();
         }
 
         await using (var createCmd = connection.CreateCommand())
         {
             createCmd.CommandText = """
-                CREATE TABLE orders (
+                CREATE TABLE x0z_legacy_orders (
                     id NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     tenant_id VARCHAR2(50) NOT NULL,
                     customer_name VARCHAR2(100) NOT NULL,
@@ -121,12 +124,12 @@ public class OracleIntegrationTests : IClassFixture<OracleContainerFixture>
         // 3 Datensätze für tenant-alpha
         string[] seedSqls = new[]
         {
-            "INSERT INTO orders (tenant_id, customer_name, total_amount) VALUES ('tenant-alpha', 'Oracle Customer 1', 120.00)",
-            "INSERT INTO orders (tenant_id, customer_name, total_amount) VALUES ('tenant-alpha', 'Oracle Customer 2', 240.50)",
-            "INSERT INTO orders (tenant_id, customer_name, total_amount) VALUES ('tenant-alpha', 'Oracle Customer 3', 360.75)",
+            "INSERT INTO x0z_legacy_orders (tenant_id, customer_name, total_amount) VALUES ('tenant-alpha', 'Oracle Customer 1', 120.00)",
+            "INSERT INTO x0z_legacy_orders (tenant_id, customer_name, total_amount) VALUES ('tenant-alpha', 'Oracle Customer 2', 240.50)",
+            "INSERT INTO x0z_legacy_orders (tenant_id, customer_name, total_amount) VALUES ('tenant-alpha', 'Oracle Customer 3', 360.75)",
             // 2 Datensätze für tenant-beta (sollen durch RLS ausgeblendet werden)
-            "INSERT INTO orders (tenant_id, customer_name, total_amount) VALUES ('tenant-beta', 'Oracle Beta Customer', 999.99)",
-            "INSERT INTO orders (tenant_id, customer_name, total_amount) VALUES ('tenant-beta', 'Oracle Beta Customer 2', 888.88)"
+            "INSERT INTO x0z_legacy_orders (tenant_id, customer_name, total_amount) VALUES ('tenant-beta', 'Oracle Beta Customer', 999.99)",
+            "INSERT INTO x0z_legacy_orders (tenant_id, customer_name, total_amount) VALUES ('tenant-beta', 'Oracle Beta Customer 2', 888.88)"
         };
 
         foreach (var sql in seedSqls)
@@ -147,7 +150,7 @@ public class OracleIntegrationTests : IClassFixture<OracleContainerFixture>
         var engine = new FastSqlEngine();
 
         // Quellabfrage in ANSI/Trino-Syntax mit Paginierung
-        string sourceSql = "SELECT id, customer_name, total_amount FROM orders ORDER BY id OFFSET 1 LIMIT 2";
+        string sourceSql = "SELECT id, customer_name, total_amount FROM x0z_legacy_orders ORDER BY id OFFSET 1 LIMIT 2";
 
         // 3. Durch den neuen AST-Compiler für Oracle kompilieren
         string compiledOracleSql = engine.GenerateGovernedSql(sourceSql, rlsOptions);
@@ -157,10 +160,10 @@ public class OracleIntegrationTests : IClassFixture<OracleContainerFixture>
         // - RLS-Prädikat ("TENANT_ID" = 'tenant-alpha')
         // - Subquery-Alias OHNE 'AS'-Schlüsselwort: ) "ORDERS"
         // - Oracle 12c+ Paginierung (OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY)
-        compiledOracleSql.ShouldContain("\"ORDERS\"");
+        compiledOracleSql.ShouldContain("\"X0Z_LEGACY_ORDERS\"");
         compiledOracleSql.ShouldContain("\"TENANT_ID\" = 'tenant-alpha'");
-        compiledOracleSql.ShouldNotContain(") AS \"ORDERS\"");
-        compiledOracleSql.ShouldContain(") \"ORDERS\"");
+        compiledOracleSql.ShouldNotContain(") AS \"X0Z_LEGACY_ORDERS\"");
+        compiledOracleSql.ShouldContain(") \"X0Z_LEGACY_ORDERS\"");
         compiledOracleSql.ShouldContain("OFFSET 1 ROWS FETCH NEXT 2 ROWS ONLY");
 
         // 4. Den generierten Oracle-SQL-String direkt auf dem echten Container ausführen
