@@ -2470,3 +2470,17 @@ Observed on `feat/ast-dml` after the last fix commit (`CI=true`, `TESTCONTAINERS
 - An INSERT into a table with an admin row policy now casts every written value to the catalog column type and compares string columns byte-exact; it requires a provider-native catalog type for every written column and rejects string predicates other than equality and IN.
 - `CompiledSql` statements with `RequiresRowCountCheck` can no longer be bound with `Bind`; use `CheckedDmlExecutor`.
 - `CastExpression` has a new flag `IsNativeType`; `TableCoverageRequirement` has a new member `ColumnTypes`; `TenantPredicateFactory.ExactEquals` is public.
+
+## 26. Implementation Log — pre-Phase-6 fixes
+
+Track `PLAN-AST-DIALECT-GEN-16`, branch `feat/ast-dml`, after the re-review §19.12. Each finding was fixed test-first (the failing test was seen red before the fix), one commit per finding.
+
+| ID | Status | Fix |
+|---|---|---|
+| CR-ADG-45 | Fixed | `CompiledSql.ExpectedAffectedRows` is no longer a positional parameter: it is a property with an `internal init`, so a `with` copy outside the assembly cannot drop the row-count requirement. Defense in depth: `DbCommandCompiledSqlBinder.Bind` refuses any statement whose SQL contains the reserved alias `autheris_ins` (any quoting, any case) even when the flag is missing; only `CheckedDmlExecutor` binds such a statement. Tests: a reflection test proves the setter is not public and no constructor parameter carries the count; a theory over all 5 binders proves the alias refusal. The test projects see the internals (`InternalsVisibleTo`), so a compile-failure test is not possible there and reflection is the proof. |
+| CR-ADG-46 | Fixed | Every check-option scenario of `AstCompilerDmlContract` now asserts, on a dialect without an INSERT row count (Delta), the typed `SqlCompileNotSupportedException(Construct)` with the reason "needs an affected row count" and an unchanged table, instead of returning. The contract facts use `[DmlFact]` (the run-time-skippable test case of CR-ADG-11): the Spark Delta class throws `SparkSkipException` from `Available()` when the image is missing locally (a reported skip with a reason) and fails when `CI=true`. The one theory (`HostileTenantValues_*`) cannot report a run-time skip and still returns quietly locally. |
+| CR-ADG-48 | Fixed | On SQL Server, a policy column of type `CHAR(n)` or `NCHAR(n)` is rejected at compile time with `SqlCompileNotSupportedException(Construct)`: "CHAR policy columns are not supported for INSERT check option; use VARCHAR". A `CHAR` column the policy does not reference, and a `VARCHAR` policy column, still compile. |
+
+CR-ADG-47 (catalog types from metadata) stays an X1 precondition.
+
+Evidence: see the commit messages and the final build and test run of this loop.
