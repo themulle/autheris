@@ -3,9 +3,12 @@ using Autheris.Application.Interfaces;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.Databricks;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Oracle.ManagedDataAccess.Client;
 
 namespace Autheris.Infrastructure.Persistence;
@@ -15,6 +18,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     private readonly bool _requireOracleTcps;
     private readonly IKeyVaultSecretProvider? _secrets;
     private readonly IHostEnvironment? _environment;
+    private readonly IServiceProvider? _services;
 
     public SqlConnectionFactory()
         : this(null, null)
@@ -29,12 +33,14 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
 
     /// <summary>
     /// Oracle connections must use TCPS and a Key Vault password everywhere except in Development
-    /// (<see cref="DataSourceConnectionOptions.PasswordKeyVaultRef"/>, WP-F1).
+    /// (<see cref="DataSourceConnectionOptions.PasswordKeyVaultRef"/>, WP-F1). <paramref name="services"/> resolves the Databricks REST
+    /// client (WP-X0j); without it a Databricks data source is refused (fail closed).
     /// </summary>
-    public SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets)
+    public SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets, IServiceProvider? services = null)
     {
         _environment = environment;
         _secrets = secrets;
+        _services = services;
         _requireOracleTcps = environment is null || !environment.IsDevelopment();
     }
 
@@ -50,6 +56,12 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     public async Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+        if (DataSourceProvider.Is(options.Provider, DatabaseDialect.Databricks))
+        {
+            // WP-X0j: no ADO.NET driver and no connection string; the facade sends every statement through the hardened REST client.
+            return await CreateDatabricksConnectionAsync(options, ct).ConfigureAwait(false);
+        }
+
         if (string.IsNullOrWhiteSpace(options.ConnectionString))
         {
             throw new ArgumentException("Connection string cannot be empty for SQL data source.", nameof(options));
@@ -68,7 +80,6 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             connectionString = ResolveOraclePassword(options, connectionString);
         }
 
-        // Architecture 5: Databricks is a dialect without a driver here.
         DbConnection connection = dialect switch
         {
             DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),
@@ -137,6 +148,37 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         }
     }
 
+    private async Task<DbConnection> CreateDatabricksConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct)
+    {
+        var settings = options.Databricks
+            ?? throw new ArgumentException("A Databricks data source requires its Databricks section.", nameof(options));
+        if (!DatabricksHostPolicy.IsValidHost(settings.Host))
+        {
+            throw new ArgumentException("The Databricks host must be one exact DNS name without scheme, port, path or wildcard.", nameof(options));
+        }
+
+        var client = _services?.GetService<DatabricksStatementExecutionClient>()
+            ?? throw new NotSupportedException("The Databricks REST client is not registered; a Databricks data source cannot be opened.");
+
+        // The client resolves the section by data source name; the options instance is the configured one, so find its name by identity.
+        string? dataSourceName = null;
+        if (_services?.GetService<IOptions<GatewayOptions>>()?.Value.DataSources.Connections is { } connections)
+        {
+            foreach (var (name, candidate) in connections)
+            {
+                if (ReferenceEquals(candidate, options))
+                {
+                    dataSourceName = name;
+                    break;
+                }
+            }
+        }
+
+        var connection = new DatabricksDbConnection(client, settings, dataSourceName);
+        await connection.OpenAsync(ct).ConfigureAwait(false);
+        return connection;
+    }
+
     /// <summary>
     /// CR-ADG-08: outside Development a plaintext password in the connection string is refused (fail closed); the password is
     /// resolved from the Key Vault reference and never logged.
@@ -165,5 +207,5 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     }
 
     private static NotSupportedException UnsupportedProvider(string? provider) =>
-        new($"SQL provider '{provider}' is not supported. Supported providers are: 'Sqlite', 'SqlServer', 'PostgreSql'.");
+        new($"SQL provider '{provider}' is not supported. Supported providers are: 'Sqlite', 'SqlServer', 'PostgreSql', 'Oracle', 'Databricks'.");
 }

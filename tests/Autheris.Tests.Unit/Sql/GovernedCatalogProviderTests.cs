@@ -107,6 +107,20 @@ public sealed class GovernedCatalogProviderTests
     }
 
     [Fact]
+    public async Task Databricks_TableIsLoadedThroughTheMapperAndTheDatabricksReader()
+    {
+        // WP-X0j (written after the wiring; a guard, not a Red test): the Databricks dialect is mapped, so the table is no longer denied by default.
+        var (sut, reader, _) = Build("Databricks", TargetSqlDialect.Databricks, new[] { "id", "tenantid" },
+            new DbColumnMetadata[] { new("id", "int", null), new("tenantid", "string", "UTF8_BINARY") });
+
+        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
+
+        reader.Calls.ShouldBe(1);
+        entry.ShouldNotBeNull();
+        entry.Columns.Select(c => (c.Name, c.DataType, c.Collation)).ShouldBe(new[] { ("id", "int", (string?)null), ("tenantid", "string", "UTF8_BINARY") });
+    }
+
+    [Fact]
     public async Task GovernanceColumnMissingInDatabase_DeniesTable()
     {
         var (sut, _, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id", "tenant_id", "ghost" }, SqlServerColumns);

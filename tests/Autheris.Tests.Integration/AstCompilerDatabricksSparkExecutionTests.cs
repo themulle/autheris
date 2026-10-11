@@ -367,13 +367,13 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
     }
 
     [SparkFact]
-    public async Task Utf8BinaryTenantColumn_UsesThePlainSargableComparison_AndStaysExact()
+    public async Task Utf8BinaryTenantColumn_StillUsesTheBinaryComparison_AndStaysExact()
     {
         RequireSpark();
-        // CR-ADG-10: on a UTF8_BINARY column "tenantid = :t" is exact and sargable; no binary cast is needed.
+        // SEC-X1-09 (WP-X0j): the catalog collation is never trusted for the tenant comparison; the binary template is always used.
         var compiled = _engine.Compile("SELECT id FROM orders".AsMemory(), Request("acme"), CancellationToken.None);
-        compiled.Sql.ShouldNotContain("BINARY");
-        compiled.Sql.ShouldContain("`tenantid` = :p1");
+        compiled.Sql.ShouldContain("AS BINARY");
+        compiled.Sql.ShouldNotContain("`tenantid` = :p1");
         Ids(await RunAsync("SELECT id FROM orders", "acme")).ShouldBe(new List<int> { 1, 2, 6 });
         Ids(await RunAsync("SELECT id FROM orders", "ACME")).ShouldBe(new List<int> { 3, 4 });
     }

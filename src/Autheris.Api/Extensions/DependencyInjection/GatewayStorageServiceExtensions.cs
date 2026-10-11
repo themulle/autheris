@@ -13,6 +13,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Cache;
+using Autheris.Infrastructure.Databricks;
 using Autheris.Infrastructure.Diagnostics;
 using Autheris.Infrastructure.Garnet;
 using Autheris.Infrastructure.Health;
@@ -106,6 +107,9 @@ public static class GatewayStorageServiceExtensions
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();
 
         // SQL Connection Factory & Health Checks
+        // WP-X0j: Databricks is opened through the REST facade over the Statement Execution client. Wired but Experimental: it is not
+        // admitted to WebSQL (SqlDialectMapper.IsExecutable, S-4) until a green G9 run.
+        services.AddDatabricksStatementExecution();
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
 
         // WP-X0c (CR-ADG-47): column types and collations from database metadata. The TTL is validated here, so a value above
@@ -118,6 +122,7 @@ public static class GatewayStorageServiceExtensions
         services.AddSingleton<IColumnMetadataReader, OracleColumnMetadataReader>();
         services.AddSingleton<IColumnMetadataReader, SqliteColumnMetadataReader>();
         services.AddSingleton<IColumnMetadataReader, DuckDbColumnMetadataReader>();
+        services.AddSingleton<IColumnMetadataReader, DatabricksColumnMetadataReader>();
         services.AddSingleton<GovernedCatalogProvider>();
         services.AddSingleton<IGovernedCatalogProvider>(sp => sp.GetRequiredService<GovernedCatalogProvider>());
         services.AddSingleton<AuditChainIntegrityMonitor>();

@@ -13,6 +13,7 @@ using TrinoSqlEngine.Ast.Nodes;
 /// </summary>
 public static class TenantPredicateFactory
 {
+    /// <param name="columnCollation">Kept for callers; no dialect reads it (the collation is never trusted for the tenant comparison, SEC-X1-09).</param>
     public static Expression Build(DialectCapabilities capabilities, string tenantColumn, string parameterName, SqlParameterType parameterType, string? columnType = null, string? columnCollation = null)
     {
         ArgumentNullException.ThrowIfNull(capabilities);
@@ -100,13 +101,9 @@ public static class TenantPredicateFactory
             }
             case TenantComparisonStyle.CastBinary:
             {
-                // CR-ADG-10: on a column whose catalog collation is UTF8_BINARY the plain equality is already byte-exact and sargable
-                // (data skipping, partition pruning). Any other or unknown collation keeps the binary comparison.
-                if (string.Equals(columnCollation, "UTF8_BINARY", StringComparison.OrdinalIgnoreCase))
-                {
-                    return new BinaryExpression(Column(), BinaryOperator.Equal, Param());
-                }
-
+                // SEC-X1-09 (WP-X0j): the binary template is always used. The former plain-equality relaxation for a catalog collation
+                // of UTF8_BINARY trusted cached metadata, so a collation change inside the cache TTL would have made the tenant comparison
+                // case-insensitive. X1-DBX may re-enable it only with G9 evidence and a catalog freshness check per compile.
                 // Only the binary comparison. A plain "col = t" conjunct must NOT be added for the index/data-skipping benefit:
                 // on a UTF8_LCASE column Spark's constant propagation turns "col = 'acme' AND CAST(col AS BINARY) = CAST('acme' AS BINARY)"
                 // into a tautology (found by the Spark proxy test), which would make the comparison case-insensitive again.
