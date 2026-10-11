@@ -14,14 +14,19 @@ using Autheris.Domain.Options;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 using TrinoSqlEngine.Ast.Builder;
+using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
 
 public sealed record CrossSourcePlan(
-    string GeneratedDuckDbSql,
+    CompiledSql Compiled,
     IReadOnlyList<StagingTableRequest> StagingRequests,
-    IReadOnlyList<string> StagingNames);
+    IReadOnlyList<string> StagingNames)
+{
+    /// <summary>The DuckDB text with <c>$n</c> markers; every value is bound through <see cref="Compiled"/>.</summary>
+    public string GeneratedDuckDbSql => Compiled.Sql;
+}
 
 public interface ICrossSourcePlanner
 {
@@ -273,9 +278,10 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         var rewrittenAst = (SqlStatement)rewriter.Visit(statement);
 
         var generator = SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.DuckDb);
-        var duckSql = generator.GenerateSql(rewrittenAst);
+        // WP-X3: every query value is bound ($n); the staged rows are the only data DuckDB sees.
+        var compiled = generator.Generate(rewrittenAst, ParameterSource.Empty);
 
-        return new CrossSourcePlan(duckSql, stagingRequests, stagingNames);
+        return new CrossSourcePlan(compiled, stagingRequests, stagingNames);
     }
 
     private static bool MatchesProjectedColumn(string p, string colName, TableAccessTarget target)

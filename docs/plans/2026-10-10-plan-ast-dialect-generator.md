@@ -3541,3 +3541,11 @@ The orchestrator accepted the fail-closed defaults written in §28.8. They are b
   - A Phase 3 sign-off is given on the final `accepted-differences.json` and on the cutover PR itself.
 - **WP-X1-DBX:** blocked on X1, a green G9 (S-4) and the S-2 rule.
 - **WP-X4:** not scheduled (S-5).
+
+### WP-X3 implementation log
+
+- `CrossSourcePlanner` now calls `Generate(statement, ParameterSource.Empty)` for the DuckDB dialect. `CrossSourcePlan` carries the `CompiledSql` (`Compiled`); `GeneratedDuckDbSql` is a view of `Compiled.Sql` with `$n` markers.
+- `GeneratedOlapQuery` and `OlapQueryRequest` carry the bound parameters; `DuckDbOlapEngine` binds them as `DuckDBParameter` values. The dollar rule (SG-24) stays strict for user OLAP SQL. When parameters are supplied, only a `$n` marker outside quotes with an existing ordinal is accepted; `$$`, `$name`, `$0`, a marker beyond the parameter count and any `$` inside quotes are rejected.
+- `GenerateInlineForInternalPlan` did not exist on this base (the planner used `GenerateSql(statement)`), so there was nothing to delete and no architecture pin to remove. The inline `GenerateSql` call in the planner is gone.
+- Tests: `FederatedPlan_BindsParameters` (Red: `Parameters.Length` was 0 against the stub), `DuckDbBoundParameterTests` (bound filter and injection string as data: Red; the rejection cases were guard tests written after the code and do not count as Red). Federated suites (`CrossSource`, `Federat`, `VirtualFilter`, `DuckDb`, `WebSql`) are green.
+- Client-named parameters are not wired for federated queries (the planner has no values for them, same as before); a statement with a client parameter marker fails closed in `Generate`.
