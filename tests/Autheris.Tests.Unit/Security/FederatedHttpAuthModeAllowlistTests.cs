@@ -32,7 +32,7 @@ public sealed class FederatedHttpAuthModeAllowlistTests
 
     private static FederationBudget Budget() => new(5, 1000, 5000, 32 * 1024 * 1024, 128 * 1024 * 1024, 30, 4);
 
-    private static StagingTableRequest HttpRequest(HttpAuthMode mode, bool preloaded)
+    private static StagingTableRequest HttpRequest(HttpAuthMode mode)
     {
         var meta = new TableMetadata
         {
@@ -61,8 +61,7 @@ public sealed class FederatedHttpAuthModeAllowlistTests
             meta,
             TableAccessDecision.Allowed(meta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
             "s0",
-            ["id"],
-            PreloadedRows: preloaded ? [new Dictionary<string, object?> { ["id"] = "A" }] : null);
+            ["id"]);
     }
 
     private static (FederatedStagingService Service, IAutherisConnectorRegistry Registry) Create(List<string>? allowedModes)
@@ -81,25 +80,33 @@ public sealed class FederatedHttpAuthModeAllowlistTests
         return (service, registry);
     }
 
+    // The stub registry has no connector: a request that passes the auth-mode gate reaches the read phase and stops there.
+    private static async Task ShouldPassAuthGateAsync(FederatedStagingService service, HttpAuthMode mode)
+    {
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(async () =>
+            await service.StageAsync([HttpRequest(mode)], User(), new TenantId(Tenant), Budget()));
+        ex.ErrorCode.ShouldBe("CONNECTOR_UNAVAILABLE");
+    }
+
     [Fact]
     public async Task ModeNotListed_IsDenied_WithStableCode_BeforeAnyRead()
     {
         var (service, registry) = Create(["None"]);
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(async () =>
-            await service.StageAsync([HttpRequest(HttpAuthMode.StaticApiKey, preloaded: false)], User(), new TenantId(Tenant), Budget()));
+            await service.StageAsync([HttpRequest(HttpAuthMode.StaticApiKey)], User(), new TenantId(Tenant), Budget()));
 
         ex.ErrorCode.ShouldBe("HTTP_AUTH_MODE_DENIED");
         registry.ReceivedCalls().ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task ModeNotListed_IsDenied_EvenWhenRowsArePreloaded()
+    public async Task ModeNoneNotListed_IsDenied()
     {
         var (service, _) = Create(["ClientCredentials"]);
 
         var ex = await Should.ThrowAsync<GatewaySecurityException>(async () =>
-            await service.StageAsync([HttpRequest(HttpAuthMode.None, preloaded: true)], User(), new TenantId(Tenant), Budget()));
+            await service.StageAsync([HttpRequest(HttpAuthMode.None)], User(), new TenantId(Tenant), Budget()));
 
         ex.ErrorCode.ShouldBe("HTTP_AUTH_MODE_DENIED");
     }
@@ -109,9 +116,7 @@ public sealed class FederatedHttpAuthModeAllowlistTests
     {
         var (service, _) = Create(["staticapikey"]);
 
-        var staged = await service.StageAsync([HttpRequest(HttpAuthMode.StaticApiKey, preloaded: true)], User(), new TenantId(Tenant), Budget());
-
-        staged.Count.ShouldBe(1);
+        await ShouldPassAuthGateAsync(service, HttpAuthMode.StaticApiKey);
     }
 
     [Fact]
@@ -121,8 +126,7 @@ public sealed class FederatedHttpAuthModeAllowlistTests
 
         foreach (var mode in new[] { HttpAuthMode.None, HttpAuthMode.StaticApiKey, HttpAuthMode.ClientCredentials })
         {
-            var staged = await service.StageAsync([HttpRequest(mode, preloaded: true)], User(), new TenantId(Tenant), Budget());
-            staged.Count.ShouldBe(1);
+            await ShouldPassAuthGateAsync(service, mode);
         }
     }
 
@@ -132,6 +136,6 @@ public sealed class FederatedHttpAuthModeAllowlistTests
         var (service, _) = Create(["ForwardBearerToken"]);
 
         await Should.ThrowAsync<GatewaySecurityException>(async () =>
-            await service.StageAsync([HttpRequest(HttpAuthMode.ForwardBearerToken, preloaded: true)], User(), new TenantId(Tenant), Budget()));
+            await service.StageAsync([HttpRequest(HttpAuthMode.ForwardBearerToken)], User(), new TenantId(Tenant), Budget()));
     }
 }
