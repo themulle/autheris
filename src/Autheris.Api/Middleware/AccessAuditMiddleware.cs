@@ -9,6 +9,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -209,12 +210,23 @@ public sealed class AccessAuditMiddleware
                 auditContext.ActorSid = new Sid(sidClaim);
             }
 
-            var tidClaim = context.User.FindFirst("tid")?.Value
-                ?? context.User.FindFirst("tenant_id")?.Value;
-
-            if (!string.IsNullOrWhiteSpace(tidClaim))
+            // Tenant attribution uses the same precedence as the rest of the pipeline: the resolved SecurityPrincipalContext
+            // first, then the canonical claim resolution. An invalid claim never fails the audit finalizer (API-7: that
+            // surfaced as a 500); the entry keeps the default tenant, is flagged, and never records the raw claim value.
+            if (context.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var item) && item is SecurityPrincipalContext principalContext)
             {
-                auditContext.TenantId = new TenantId(tidClaim);
+                auditContext.TenantId = principalContext.TenantId;
+            }
+            else
+            {
+                try
+                {
+                    auditContext.TenantId = context.User.GetTenantId();
+                }
+                catch (System.Security.SecurityException)
+                {
+                    auditContext.AdditionalDetails["tenantClaim"] = "INVALID";
+                }
             }
         }
     }
