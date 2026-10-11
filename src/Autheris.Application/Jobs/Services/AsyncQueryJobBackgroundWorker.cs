@@ -208,9 +208,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
     {
         try
         {
-            var sidStr = user.FindFirst("sub")?.Value
-                         ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                         ?? job.SubmittedByUserId;
+            var sidStr = AsyncJobOwner.Resolve(user) ?? job.SubmittedByUserId;
 
             var entry = new AuditLogEntry
             {
