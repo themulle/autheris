@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Data.Common;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Sql;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -156,8 +157,8 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
             return null;
         }
 
-        var target = ToTarget(dialect);
-        if (target is null || !_readers.TryGetValue(target.Value, out var reader))
+        // Databricks has no mapping (and no reader before X1-DBX): the table is denied.
+        if (!SqlDialectMapper.TryToTargetDialect(dialect, out var target) || !_readers.TryGetValue(target, out var reader))
         {
             return null;
         }
@@ -253,14 +254,4 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
 
         return found;
     }
-
-    private static TargetSqlDialect? ToTarget(DatabaseDialect dialect) => dialect switch
-    {
-        DatabaseDialect.PostgreSql => TargetSqlDialect.PostgreSql,
-        DatabaseDialect.SqlServer => TargetSqlDialect.SqlServer,
-        DatabaseDialect.Sqlite => TargetSqlDialect.Sqlite,
-        DatabaseDialect.Oracle => TargetSqlDialect.Oracle,
-        DatabaseDialect.Databricks => TargetSqlDialect.Databricks,
-        _ => null
-    };
 }
