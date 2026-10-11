@@ -10,7 +10,7 @@ public enum ColumnTypeClass
     Unknown,
     /// <summary>nvarchar, nchar, ntext, nvarchar2, nclob.</summary>
     UnicodeText,
-    /// <summary>varchar, char, text, varchar2, clob.</summary>
+    /// <summary>varchar, char, text, varchar2, clob, citext.</summary>
     AnsiText,
     /// <summary>int, bigint, decimal, number, float ...</summary>
     Numeric,
@@ -25,11 +25,13 @@ public enum ColumnBindStyle
     /// <summary>SQL Server: a string compared with a <c>varchar</c> column is bound as <c>varchar</c> (an <c>nvarchar</c> bind forces CONVERT_IMPLICIT on the column and turns the seek into a scan).</summary>
     SqlServer,
     /// <summary>Oracle: the bind follows the column (a numeric value against a VARCHAR2 column is bound as text, a numeric-looking string against a NUMBER column as a number), so the column is never converted (no ORA-01722 side channel).</summary>
-    Oracle
+    Oracle,
+    /// <summary>PostgreSQL: a string user literal compared with a non-text column is sent untyped, so the server types it from the column (the column is never cast and a text bind never fails with "operator does not exist").</summary>
+    PostgreSql
 }
 
 /// <summary>The bind shape of one parameter after the column type was taken into account.</summary>
-public readonly record struct AdaptedBind(SqlParameterType Type, object? Value, bool AnsiString, int DeclaredLength);
+public readonly record struct AdaptedBind(SqlParameterType Type, object? Value, bool AnsiString, int DeclaredLength, bool ServerInferredType = false);
 
 /// <summary>
 /// Maps the catalog data type of the column a gateway-bound value is compared with to a provider bind type (CR-ADG-09). Applies to
@@ -74,6 +76,13 @@ public static class ColumnBindAdapter
 
                 return unchanged;
 
+            case ColumnBindStyle.PostgreSql:
+                // The caller applies this style to user literals only: a tenant or policy value keeps its text bind (a citext column must
+                // be compared as text, an inferred citext bind would be case-insensitive).
+                return type == SqlParameterType.String && cls is ColumnTypeClass.Numeric or ColumnTypeClass.Other
+                    ? unchanged with { ServerInferredType = true }
+                    : unchanged;
+
             default:
                 return unchanged;
         }
@@ -92,7 +101,7 @@ public static class ColumnBindAdapter
         var cls = name switch
         {
             "nvarchar" or "nchar" or "ntext" or "nvarchar2" or "nclob" or "national character varying" or "national char" => ColumnTypeClass.UnicodeText,
-            "varchar" or "char" or "text" or "varchar2" or "clob" or "character varying" or "character" => ColumnTypeClass.AnsiText,
+            "varchar" or "char" or "text" or "varchar2" or "clob" or "character varying" or "character" or "citext" => ColumnTypeClass.AnsiText,
             "int" or "integer" or "bigint" or "smallint" or "tinyint" or "decimal" or "numeric" or "number" or "float" or "real"
                 or "double" or "double precision" or "money" or "smallmoney" or "binary_float" or "binary_double" => ColumnTypeClass.Numeric,
             _ => ColumnTypeClass.Other

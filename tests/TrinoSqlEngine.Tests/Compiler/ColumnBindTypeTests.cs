@@ -185,4 +185,45 @@ public class ColumnBindTypeTests
         new PostgreSqlCompiledSqlBinder().Bind(command, compiled, new Dictionary<string, object?>());
         Assert.All(command.Parameters.Cast<SqliteParameter>(), p => Assert.NotEqual(DbType.AnsiString, p.DbType));
     }
+
+    // ---- WP-X0-fix item 5: PostgreSQL leaves the type of a user literal to the server ----
+
+    [Theory]
+    [InlineData("integer")]
+    [InlineData("bigint")]
+    [InlineData("numeric(18,2)")]
+    [InlineData("timestamp")]
+    [InlineData("timestamp without time zone")]
+    [InlineData("date")]
+    [InlineData("uuid")]
+    [InlineData("boolean")]
+    public void PostgreSql_StringLiteralVsNonTextColumn_IsLeftToServerInference(string columnType)
+    {
+        var adapted = ColumnBindAdapter.Adapt(ColumnBindStyle.PostgreSql, SqlParameterType.String, "2", columnType);
+        Assert.True(adapted.ServerInferredType);
+        Assert.Equal("2", adapted.Value);
+    }
+
+    [Theory]
+    [InlineData("text")]
+    [InlineData("varchar(20)")]
+    [InlineData("character varying")]
+    [InlineData("citext")]   // a case-insensitive text type: the bind must keep text equality semantics
+    [InlineData(null)]
+    public void PostgreSql_StringLiteralVsTextOrUnknownColumn_KeepsTheTextBind(string? columnType) =>
+        Assert.False(ColumnBindAdapter.Adapt(ColumnBindStyle.PostgreSql, SqlParameterType.String, "x", columnType).ServerInferredType);
+
+    [Fact]
+    public void PostgreSql_NonStringValues_KeepTheirType() =>
+        Assert.False(ColumnBindAdapter.Adapt(ColumnBindStyle.PostgreSql, SqlParameterType.Int32, 2, "integer").ServerInferredType);
+
+    [Fact]
+    public void PostgreSql_TenantBindAgainstACitextColumn_IsNeverServerInferred()
+    {
+        // The tenant comparison on a citext column must stay a text comparison: an inferred citext bind would be case-insensitive.
+        var compiled = Compile("SELECT id FROM orders", Catalog("citext"), "acme", TargetSqlDialect.PostgreSql);
+        using var command = new SqliteCommand();
+        new PostgreSqlCompiledSqlBinder().Bind(command, compiled, new Dictionary<string, object?>());
+        Assert.All(command.Parameters.Cast<SqliteParameter>(), p => Assert.Equal(DbType.String, p.DbType));
+    }
 }

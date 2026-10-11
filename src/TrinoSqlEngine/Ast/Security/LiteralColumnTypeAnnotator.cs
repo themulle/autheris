@@ -167,6 +167,14 @@ internal sealed class LiteralColumnTypeAnnotator(ITableCatalog catalog) : SqlAst
         return ReferenceEquals(left, visited.Left) && ReferenceEquals(right, visited.Right) ? visited : visited with { Left = left, Right = right };
     }
 
+    public override SqlNode VisitIsDistinctFromExpression(IsDistinctFromExpression node)
+    {
+        var visited = (IsDistinctFromExpression)base.VisitIsDistinctFromExpression(node);
+        var left = Annotate(visited.Left, TypeOf(visited.Right));
+        var right = Annotate(visited.Right, TypeOf(visited.Left));
+        return ReferenceEquals(left, visited.Left) && ReferenceEquals(right, visited.Right) ? visited : visited with { Left = left, Right = right };
+    }
+
     public override SqlNode VisitInListExpression(InListExpression node)
     {
         var visited = (InListExpression)base.VisitInListExpression(node);

@@ -54,6 +54,9 @@ public sealed class AstCompilerPostgreSqlFixture : IAsyncLifetime
                 (4, 'ACME',  'US', 'closed', 40.00, 'upper.us@ACME.example'),
                 (5, 'other', 'EU', 'open',   50.00, 'carol@other.example'),
                 (6, 'acme',  'EU', 'closed', 60.00, NULL);
+            CREATE TABLE public.events (id integer PRIMARY KEY, tenantid citext NOT NULL, created_at timestamp NOT NULL, amount numeric(18,2) NOT NULL);
+            INSERT INTO public.events VALUES
+                (1, 'acme', '2019-06-01 10:00:00', 1.50), (2, 'acme', '2024-03-15 00:00:00', 2.50), (3, 'other', '2019-01-01 00:00:00', 3.50);
             INSERT INTO public.entitlements VALUES (1, 'acme', 1), (2, 'other', 2), (3, 'acme', 6), (4, 'ACME', 3);
             CREATE SCHEMA evil;
             CREATE TABLE evil.orders (id integer PRIMARY KEY, tenantid text, region text, status text, amount numeric(18,2), email text);
@@ -114,6 +117,9 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
         new TableCatalogEntry(Entitlements, ImmutableArray.Create(
             new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "citext"), new CatalogColumn("orderid", "integer")),
             "tenantid", 1),
+        new TableCatalogEntry(new TableIdentity("public", "events"), ImmutableArray.Create(
+            new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "citext"), new CatalogColumn("created_at", "timestamp"),
+            new CatalogColumn("amount", "numeric(18,2)")), "tenantid", 1),
         new TableCatalogEntry(OrdersIcu, ImmutableArray.Create(new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "text")), "tenantid", 1)
     }, "public");
 
@@ -522,5 +528,36 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     {
         var rows = await RunAsync($"SELECT id FROM orders WHERE id = 1 AND {predicate}", "acme", translateDates: true);
         Ids(rows).ShouldBe(new List<int> { 1 });
+    }
+
+    // ---- WP-X0-fix item 5: a string literal compared with a non-text column is typed by the server, like an unknown literal ----
+
+    [Theory]
+    [InlineData("SELECT id FROM orders WHERE id = '2'", "2")]
+    [InlineData("SELECT id FROM orders WHERE '2' = id", "2")]
+    [InlineData("SELECT id FROM orders WHERE id IN ('1', '2')", "1,2")]
+    [InlineData("SELECT id FROM orders WHERE id BETWEEN '1' AND '2'", "1,2")]
+    [InlineData("SELECT id FROM orders WHERE id <> '2'", "1,6")]
+    [InlineData("SELECT id FROM orders WHERE id IS NOT DISTINCT FROM '2'", "2")]
+    [InlineData("SELECT id FROM orders WHERE amount = '20.00'", "2")]
+    [InlineData("SELECT id FROM orders WHERE amount < '20'", "1")]
+    [InlineData("SELECT id FROM events WHERE created_at < '2020-01-01'", "1")]
+    [InlineData("SELECT id FROM events WHERE created_at >= '2020-01-01 00:00:00'", "2")]
+    [InlineData("SELECT id FROM events WHERE created_at IS NOT DISTINCT FROM '2024-03-15'", "2")]
+    [InlineData("SELECT id FROM orders WHERE status = 'open' AND id = '1'", "1")]
+    public async Task StringLiteralVsNonTextColumn_IsExecutable(string sql, string expectedIds) =>
+        string.Join(',', Ids(await RunAsync(sql, "acme"))).ShouldBe(expectedIds);
+
+    [Fact]
+    public async Task StringLiteralVsNonTextColumn_WithANonConvertibleValue_FailsInTheDatabaseNotAsALeak()
+    {
+        await Should.ThrowAsync<PostgresException>(() => RunAsync("SELECT id FROM orders WHERE id = 'abc'", "acme"));
+    }
+
+    [Fact]
+    public async Task StringLiteralVsCitextTenantColumn_KeepsTextEquality()
+    {
+        // The literal is compared with the citext column as text (case-sensitive), exactly as before the change.
+        Ids(await RunAsync("SELECT id FROM orders WHERE tenantid = 'ACME'", "acme")).ShouldBeEmpty();
     }
 }
