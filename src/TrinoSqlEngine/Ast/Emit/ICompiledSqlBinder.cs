@@ -40,6 +40,11 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
 {
     private const int DefaultStringSize = 4000;
 
+    /// <summary>SEC-X1-07: <c>private protected</c>, so no binder can be derived outside the engine (a subclass could drop the refusals).</summary>
+    private protected DbCommandCompiledSqlBinder()
+    {
+    }
+
     protected abstract TargetSqlDialect Dialect { get; }
 
     /// <summary>Fixed string and binary sizes keep one cached plan per statement (SQL Server).</summary>
@@ -354,4 +359,15 @@ public sealed class OracleCompiledSqlBinder : DbCommandCompiledSqlBinder
 public sealed class DatabricksCompiledSqlBinder : DbCommandCompiledSqlBinder
 {
     protected override TargetSqlDialect Dialect => TargetSqlDialect.Databricks;
+}
+
+/// <summary>
+/// SQLite binder (<c>Microsoft.Data.Sqlite</c>): markers are <c>?1</c>, <c>?2</c> ... and the parameters are bound by the same name.
+/// </summary>
+public sealed class SqliteCompiledSqlBinder : DbCommandCompiledSqlBinder
+{
+    protected override TargetSqlDialect Dialect => TargetSqlDialect.Sqlite;
+
+    /// <summary>The provider matches a numbered marker by its full text (<c>?1</c>), prefix included.</summary>
+    protected override string ParameterNameFor(BoundParameter parameter) => parameter.Marker;
 }

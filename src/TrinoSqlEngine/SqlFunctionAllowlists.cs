@@ -53,10 +53,11 @@ public static class SqlFunctionAllowlists
         "square", "pi", "degrees", "radians", "count_big", "stdev", "stdevp", "var", "varp", "translate",
     ];
 
+    // SEC-X1-10: closed list. printf/format (unbounded padding width) are excluded, like every name of SqlFunctionPolicy.DefaultDeniedFunctions.
     private static readonly string[] SqliteFunctions =
     [
-        "date", "time", "datetime", "julianday", "strftime", "unixepoch", "ifnull", "iif", "instr", "printf",
-        "format", "group_concat", "total", "unicode", "char", "trunc", "pi",
+        "date", "time", "datetime", "julianday", "strftime", "unixepoch", "ifnull", "iif", "instr",
+        "group_concat", "total", "unicode", "char", "trunc", "pi",
     ];
 
     private static readonly string[] OracleFunctions =

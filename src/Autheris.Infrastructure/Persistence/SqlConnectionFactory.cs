@@ -41,6 +41,9 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     /// <summary>RR-L5-01: Session settings required by the literal escaping in <c>DatabaseDialect.EscapeSqlLiteral</c>.</summary>
     public const string PostgreSqlSessionInitializationSql = "SET standard_conforming_strings = on";
 
+    /// <summary>WP-X0h (SEC-X1-10): executed on every SQLite connection right after it is opened.</summary>
+    public const string SqliteTrustedSchemaOffSql = "PRAGMA trusted_schema = OFF";
+
     /// <summary>Dirty read for SQL Server sessions of data sources with <c>ReadUncommitted</c> (reads take no shared locks).</summary>
     public const string SqlServerReadUncommittedSql = "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED";
 
@@ -108,6 +111,13 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
 
             if (connection is SqliteConnection sqliteConn)
             {
+                // WP-X0h (SEC-X1-10): extension loading stays off and the schema is untrusted, so a view, trigger or default in the
+                // database cannot call a function that is not marked innocuous.
+                sqliteConn.EnableExtensions(false);
+                await using var hardenCmd = connection.CreateCommand();
+                hardenCmd.CommandText = SqliteTrustedSchemaOffSql;
+                await hardenCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
                 sqliteConn.CreateFunction("gateway_hmac_sha256", (string? val, string? salt) =>
                 {
                     if (val == null) return null;

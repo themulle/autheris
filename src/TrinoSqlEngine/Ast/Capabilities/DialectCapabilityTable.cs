@@ -181,6 +181,42 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         SupportsSubqueryInDmlCondition: false,
         ReportsInsertRowCount: false);                              // Delta INSERT returns an empty result: no check-option row count (CR-ADG-35)                    // Delta: DELTA_UNSUPPORTED_SUBQUERY at analysis (CR-ADG-39)
 
+    private static readonly IReadOnlyDictionary<string, string> SqliteRewrites = new Dictionary<string, string> { ["strpos"] = "INSTR" };
+
+    // WP-X0h (SEC-X1-10). The closed function allowlist is SqlFunctionAllowlists.Sqlite (no load_extension, randomblob, zeroblob,
+    // printf, format, json_each, pragma_*, sqlite_*, gateway_hmac_sha256 from user SQL). The limits are the bundled library defaults.
+    private static readonly DialectCapabilities Sqlite = new(
+        Dialect: TargetSqlDialect.Sqlite,
+        Tier: DialectSupportTier.Production,
+        MaxBindParameters: 32766,                                  // SQLITE_MAX_VARIABLE_NUMBER since 3.32, probed in the execution tests
+        MaxInListItems: null,
+        MaxIdentifierLength: int.MaxValue,
+        IdentifierLengthUnit: IdentifierLengthUnit.Characters,
+        IdentifierOpenQuote: '"',
+        IdentifierCloseQuote: '"',
+        MarkerStyle: ParameterMarkerStyle.QuestionOrdinal,
+        SupportsMarkerReuse: true,
+        Pagination: PaginationStyle.LimitOffset,
+        SupportsWithTies: false,
+        SupportsNullsFirstLast: true,
+        Booleans: BooleanRepresentation.Integer01,
+        SupportsMerge: false,
+        SupportsLateral: false,
+        SupportsGroupingSets: false,
+        SupportsFilterClause: true,
+        SupportsTryCast: false,
+        LimitGuaranteed: true,
+        InDbHmac: true,                                            // gateway_hmac_sha256 UDF registered by SqlConnectionFactory
+        TenantComparison: TenantComparisonStyle.CastBlob,
+        BindExpressionTemplates: IdentityBindTemplates,
+        Functions: DialectFunctionMap.ForDialect(TargetSqlDialect.Sqlite, SqliteRewrites),
+        AllowedTableFunctions: FrozenSet<string>.Empty,
+        LimitSource: "SQLITE-LIMITS",
+        DmlStatements: StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete,
+        MaxCompoundSelectTerms: 500,                               // SQLITE_MAX_COMPOUND_SELECT (the check-option UNION ALL chain, CR-ADG-44)
+        MaxExpressionDepth: 1000,                                  // SQLITE_MAX_EXPR_DEPTH
+        LikeIsCaseInsensitive: true);                              // ASCII case-insensitive LIKE (SEC-ADG-18)
+
     // Declared after the static capability entries: static initializers run in textual order.
     public static DialectCapabilityTable Default { get; } = new();
 
@@ -194,7 +230,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
             [TargetSqlDialect.DuckDb] = DuckDb,
             [TargetSqlDialect.PostgreSql] = PostgreSql,
             [TargetSqlDialect.Oracle] = Oracle,
-            [TargetSqlDialect.Databricks] = Databricks
+            [TargetSqlDialect.Databricks] = Databricks,
+            [TargetSqlDialect.Sqlite] = Sqlite
         }.ToFrozenDictionary();
     }
 

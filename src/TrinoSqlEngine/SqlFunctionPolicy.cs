@@ -62,6 +62,8 @@ public static class SqlFunctionPolicy
         "decryptbypassphrase", "decryptbycert", "decryptbyasymkey", "decryptbykeyautocert",
         // SEC P-02 SQLite: extension loading, file access (fileio extension), memory DoS
         "load_extension", "readfile", "writefile", "edit", "zeroblob", "randomblob", "fts3_tokenizer",
+        // WP-X0h (SEC-X1-10) SQLite: table-valued JSON expanders and the gateway HMAC UDF, which only the mask emitter may produce
+        "json_each", "json_tree", "gateway_hmac_sha256",
         // CR-ADG-02 Databricks / Spark: JVM reflection (code execution), secret access, identity and environment disclosure
         "reflect", "java_method", "try_reflect", "secret", "current_user", "session_user", "current_catalog", "current_metastore",
         "current_version", "input_file_name", "input_file_block_start", "input_file_block_length", "assert_true", "raise_error",
@@ -79,7 +81,7 @@ public static class SqlFunctionPolicy
         "pg_advisory_", "pg_try_advisory_", "pg_sleep", "pg_get_", "pg_stat_", "pg_replication_",
         "lo_", "dblink", "xp_", "sp_", "dbms_", "utl_", "fn_dblog", "fn_xe_", "fn_get_audit_", "fn_trace_",
         // SEC P-02: all PostgreSQL system functions (pg_logical_slot_*, pg_*), regclass lookups, inet_*, SQLite internals
-        "pg_", "to_reg", "inet_", "sqlite_", "txid_",
+        "pg_", "to_reg", "inet_", "sqlite_", "pragma_", "txid_",
     };
 
     /// <summary>
