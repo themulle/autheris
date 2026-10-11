@@ -46,9 +46,16 @@ public sealed record ParameterReference(
     int? PositionalIndex = null,
     bool IsSynthetic = false) : Expression;
 
+/// <summary>
+/// A literal of the user's query. <paramref name="ColumnType"/> is the catalog data type of the column the literal is compared with
+/// (SEC-ADG-16 item 2); the generator and the binder follow it. <paramref name="ColumnTypeUnknown"/> marks a comparison with a
+/// catalog column whose type is missing or not understood. Both are set only by the governed compiler, never by the AST builder.
+/// </summary>
 public sealed record LiteralExpression(
     object? Value,
-    LiteralType Type) : Expression;
+    LiteralType Type,
+    string? ColumnType = null,
+    bool ColumnTypeUnknown = false) : Expression;
 
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1720:Identifiers should not contain type names")]
 public enum LiteralType

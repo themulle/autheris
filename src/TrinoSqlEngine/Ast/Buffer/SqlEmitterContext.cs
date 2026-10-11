@@ -98,8 +98,8 @@ public sealed class SqlEmitterContext
         _ranges?.Add(new EmittedRange(start, 1, EmittedRangeKind.StatementTerminator));
 
     /// <summary>Binds a value (deduplicated by type, origin and value) and returns its marker.</summary>
-    public string BindValue(object? value, SqlParameterType type, ParameterOrigin origin) =>
-        Bind($"{(int)type}|{(int)origin}|{ValueKey(value)}", value, type, origin, null);
+    public string BindValue(object? value, SqlParameterType type, ParameterOrigin origin, string? columnType = null) =>
+        Bind($"{(int)type}|{(int)origin}|{columnType}|{ValueKey(value)}", value, type, origin, null, columnType);
 
     /// <summary>Binds a gateway value for a policy parameter node; the value comes from the <see cref="ParameterSource"/>.</summary>
     public string BindPolicy(PolicyParameterExpression parameter, bool escapeLikePattern = false)
