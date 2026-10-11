@@ -81,10 +81,19 @@ jobs:
       - name: Architecture tests
         run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore --verbosity normal
 
+      # G8: legacy and AST are measured in the same job and compared by ratio (time) and by bytes (allocation).
+      - name: G8 performance benchmark
+        run: dotnet run -c Release --no-restore --project benchmarks/Autheris.Benchmarks -- --filter "*SqlCompiler*" --job short --inProcess --exporters json --artifacts benchmarks/results
+
+      - name: G8 thresholds
+        run: dotnet run -c Release --no-restore --project tools/SqlGate.BenchCheck -- benchmarks/results benchmarks/baselines
+
       - name: Upload gate report
         if: always()
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: sqlgate-report
-          path: sqlgate-report
+          path: |
+            sqlgate-report
+            benchmarks/results
           if-no-files-found: ignore

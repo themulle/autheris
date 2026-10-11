@@ -54,12 +54,31 @@ jobs:
       - name: Architecture tests
         run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore --verbosity normal
 
+      - name: G8 performance benchmark
+        run: dotnet run -c Release --no-restore --project benchmarks/Autheris.Benchmarks -- --filter "*SqlCompiler*" --job short --inProcess --exporters json --artifacts benchmarks/results
+
+      - name: G8 thresholds
+        run: dotnet run -c Release --no-restore --project tools/SqlGate.BenchCheck -- benchmarks/results benchmarks/baselines
+
+      # G7 mutation score (plan 9.3, M-12): the scope, the Debug configuration (the security mutant hooks exist only there) and the break
+      # threshold (85%) live in stryker-config.json. Run on the nightly head and, with the cutover profile, on the cutover PR head.
+      - name: Restore pinned tools
+        run: dotnet tool restore
+
+      # Stryker.NET 4.x runs from the test project directory; mutants outside the configured scope are reported as ignored.
+      - name: G7 mutation testing (Stryker.NET)
+        working-directory: tests/TrinoSqlEngine.Tests
+        run: dotnet tool run dotnet-stryker --config-file ../../stryker-config.json
+
       - name: Upload gate report
         if: always()
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: sqlgate-report-${{ github.run_id }}
-          path: sqlgate-report
+          path: |
+            sqlgate-report
+            benchmarks/results
+            tests/TrinoSqlEngine.Tests/StrykerOutput
           if-no-files-found: ignore
 
   # G9: the execution suites against a live Databricks SQL warehouse. Bound to the protected environment

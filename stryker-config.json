@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-net/master/src/Stryker.Core/Stryker.Core/stryker-config.schema.json",
+  "stryker-config": {
+    "configuration": "Debug",
+    "test-case-filter": "Category=SqlGate",
+    "mutate": [
+      "**/Ast/Visitors/AstSecurityVisitor*.cs",
+      "**/Ast/Visitors/AstSimplificationVisitor.cs",
+      "**/Ast/Security/*.cs",
+      "**/Ast/Emit/*.cs"
+    ],
+    "thresholds": {
+      "high": 90,
+      "low": 85,
+      "break": 85
+    },
+    "concurrency": 2,
+    "reporters": [
+      "progress",
+      "json",
+      "html"
+    ],
+    "project": "TrinoSqlEngine.csproj"
+  }
+}
