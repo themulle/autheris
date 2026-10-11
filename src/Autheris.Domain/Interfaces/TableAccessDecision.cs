@@ -17,6 +17,153 @@ public record TableAccessDecision(
     /// <summary>Error code of a Virtual Filter that is applied but not (provably) enforced (F-GOV-14).</summary>
     public const string VirtualFilterEnforcementIncompleteCode = "VF_ENFORCEMENT_INCOMPLETE";
 
+    /// <summary>
+    /// The typed row policy (SEC-ADG-02 item 3, SEC-ADG-25). When set, <see cref="CombinedRowFilterSql"/> is its text projection and
+    /// <see cref="RowFilterParameters"/> carries its values. It is only ever changed through the typed helpers below.
+    /// </summary>
+    public IRowPolicy? RowPolicy { get; init; }
+
+    /// <summary>The typed Virtual Filter policy behind <see cref="MandatoryRowPredicateSql"/> (null when it was added as text).</summary>
+    public IRowPolicy? MandatoryRowPolicy { get; init; }
+
+    /// <summary>The typed row policy before the Virtual Filter policy was added.</summary>
+    public IRowPolicy? RowPolicyBeforeVirtualFilters { get; init; }
+
+    /// <summary>Typed row policies added after the Virtual Filter policy, in order.</summary>
+    public IReadOnlyList<IRowPolicy>? RowPoliciesAfterVirtualFilters { get; init; }
+
+    /// <summary>
+    /// Typed variant of <see cref="WithAdditionalRowFilter"/>: AND-merges <paramref name="policy"/> into <see cref="RowPolicy"/> and
+    /// re-projects the text. On a decision that carries only a string filter the text is composed and the decision stays string-only
+    /// (and is therefore denied by <see cref="RequireTypedRowPolicy"/>).
+    /// </summary>
+    /// <exception cref="System.Security.SecurityException">The policies bind a parameter name to conflicting values.</exception>
+    public TableAccessDecision WithAdditionalRowPolicy(IRowPolicy policy)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        var projection = policy.Project();
+        if (RowPolicy == null && !string.IsNullOrWhiteSpace(CombinedRowFilterSql))
+        {
+            return WithAdditionalRowFilter(projection.Sql) with { RowFilterParameters = MergeStrict(RowFilterParameters, projection.Parameters) };
+        }
+
+        var next = RowPolicy == null ? policy : RowPolicy.And(policy);
+        var typed = WithPolicy(next);
+        return MandatoryRowPredicateSql == null
+            ? typed
+            : typed with
+            {
+                RowFiltersAfterVirtualFilters = [.. RowFiltersAfterVirtualFilters ?? [], projection.Sql],
+                RowPoliciesAfterVirtualFilters = [.. RowPoliciesAfterVirtualFilters ?? [], policy]
+            };
+    }
+
+    /// <summary>Typed variant of <see cref="WithMandatoryPredicate(string, IReadOnlyList{string}, IReadOnlyList{AppliedVirtualFilterBinding}?)"/>.</summary>
+    public TableAccessDecision WithMandatoryPredicate(
+        IRowPolicy policy,
+        IReadOnlyList<string> appliedFilters,
+        IReadOnlyList<AppliedVirtualFilterBinding>? appliedBindings = null)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        ArgumentNullException.ThrowIfNull(appliedFilters);
+        if (MandatoryRowPredicateSql != null)
+        {
+            throw new InvalidOperationException("The decision already carries a Virtual Filter predicate.");
+        }
+
+        var projection = policy.Project();
+        if (RowPolicy == null && !string.IsNullOrWhiteSpace(CombinedRowFilterSql))
+        {
+            return WithMandatoryPredicate(projection.Sql, appliedFilters, appliedBindings) with
+            {
+                RowFilterParameters = MergeStrict(RowFilterParameters, projection.Parameters)
+            };
+        }
+
+        var next = RowPolicy == null ? policy : RowPolicy.And(policy);
+        return WithPolicy(next) with
+        {
+            MandatoryRowPredicateSql = projection.Sql,
+            MandatoryRowPolicy = policy,
+            AppliedVirtualFilters = appliedFilters,
+            AppliedVirtualFilterBindings = appliedBindings,
+            RowFilterSqlBeforeVirtualFilters = CombinedRowFilterSql,
+            RowPolicyBeforeVirtualFilters = RowPolicy,
+            RowFiltersAfterVirtualFilters = null,
+            RowPoliciesAfterVirtualFilters = null
+        };
+    }
+
+    /// <summary>
+    /// SEC-ADG-02 item 3: the decision as the AST compiler may consume it. A decision whose row filter exists only as text, or whose text
+    /// no longer equals the projection of its typed policy, is denied (no drift by construction). A decision without any row filter,
+    /// and a denied decision, are returned unchanged.
+    /// </summary>
+    public TableAccessDecision RequireTypedRowPolicy()
+    {
+        if (!IsAllowed)
+        {
+            return this;
+        }
+
+        if (RowPolicy == null)
+        {
+            return string.IsNullOrWhiteSpace(CombinedRowFilterSql) && string.IsNullOrWhiteSpace(MandatoryRowPredicateSql)
+                ? this
+                : Denied(Table, TypedRowPolicyRequiredReason);
+        }
+
+        return string.Equals(CombinedRowFilterSql, RowPolicy.Project().Sql, StringComparison.Ordinal)
+            ? this
+            : Denied(Table, TypedRowPolicyRequiredReason);
+    }
+
+    /// <summary>Reason of a decision that the compiler path rejects because its row filter is not (consistently) typed.</summary>
+    public const string TypedRowPolicyRequiredReason = "The row-level policy is not available as a typed policy (fail-closed).";
+
+    private TableAccessDecision WithPolicy(IRowPolicy next)
+    {
+        var projection = next.Project();
+        var previous = RowPolicy?.Project().Parameters;
+        var parameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, value) in RowFilterParameters ?? new Dictionary<string, object?>())
+        {
+            if (previous == null || !previous.ContainsKey(name))
+            {
+                parameters[name] = value;
+            }
+        }
+
+        foreach (var (name, value) in projection.Parameters)
+        {
+            parameters[name] = value;
+        }
+
+        return this with
+        {
+            RowPolicy = next,
+            CombinedRowFilterSql = projection.Sql,
+            RowFilterParameters = parameters
+        };
+    }
+
+    private static IReadOnlyDictionary<string, object?> MergeStrict(
+        IReadOnlyDictionary<string, object?>? left, IReadOnlyDictionary<string, object?> right)
+    {
+        var merged = new Dictionary<string, object?>(left ?? new Dictionary<string, object?>(), StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, value) in right)
+        {
+            if (merged.TryGetValue(name, out var existing) && !Equals(existing, value))
+            {
+                throw new System.Security.SecurityException("Conflicting row-level security parameters.");
+            }
+
+            merged[name] = value;
+        }
+
+        return merged;
+    }
+
     /// <summary>F-GOV-14 (M1): the (filter, binding) pairs behind <see cref="MandatoryRowPredicateSql"/>.</summary>
     public IReadOnlyList<AppliedVirtualFilterBinding>? AppliedVirtualFilterBindings { get; init; }
 
@@ -100,6 +247,11 @@ public record TableAccessDecision(
             throw Incomplete("the enforcement does not cover exactly the applied Virtual Filters");
         }
 
+        if (RowPolicy != null)
+        {
+            return WithoutEnforcedTyped();
+        }
+
         var afters = RowFiltersAfterVirtualFilters ?? [];
         var expected = afters.Aggregate(Compose(RowFilterSqlBeforeVirtualFilters, MandatoryRowPredicateSql), Compose);
         if (!string.Equals(expected, CombinedRowFilterSql, StringComparison.Ordinal))
@@ -112,6 +264,71 @@ public record TableAccessDecision(
         {
             CombinedRowFilterSql = string.IsNullOrWhiteSpace(residual) ? null : residual,
             MandatoryRowPredicateSql = null,
+            AppliedVirtualFilters = [],
+            AppliedVirtualFilterBindings = [],
+            RowFilterSqlBeforeVirtualFilters = null,
+            RowFiltersAfterVirtualFilters = null
+        };
+    }
+
+    private TableAccessDecision WithoutEnforcedTyped()
+    {
+        if (MandatoryRowPolicy == null || RowPolicy == null)
+        {
+            throw Incomplete("the Virtual Filter predicate was not added as a typed policy");
+        }
+
+        var afters = RowPoliciesAfterVirtualFilters ?? [];
+        IRowPolicy? expected;
+        IRowPolicy? residual;
+        try
+        {
+            expected = RowPolicyBeforeVirtualFilters == null ? MandatoryRowPolicy : RowPolicyBeforeVirtualFilters.And(MandatoryRowPolicy);
+            residual = RowPolicyBeforeVirtualFilters;
+            foreach (var after in afters)
+            {
+                expected = expected.And(after);
+                residual = residual == null ? after : residual.And(after);
+            }
+        }
+        catch (System.Security.SecurityException)
+        {
+            throw Incomplete("the typed policies conflict");
+        }
+
+        if (!string.Equals(expected.Fingerprint, RowPolicy.Fingerprint, StringComparison.Ordinal) ||
+            !string.Equals(expected.Project().Sql, CombinedRowFilterSql, StringComparison.Ordinal))
+        {
+            throw Incomplete("the row filter was changed outside the decision helpers");
+        }
+
+        var parameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        var projected = RowPolicy.Project().Parameters;
+        foreach (var (name, value) in RowFilterParameters ?? new Dictionary<string, object?>())
+        {
+            if (!projected.ContainsKey(name))
+            {
+                parameters[name] = value;
+            }
+        }
+
+        if (residual != null)
+        {
+            foreach (var (name, value) in residual.Project().Parameters)
+            {
+                parameters[name] = value;
+            }
+        }
+
+        return this with
+        {
+            RowPolicy = residual,
+            CombinedRowFilterSql = residual?.Project().Sql,
+            RowFilterParameters = parameters.Count == 0 ? null : parameters,
+            MandatoryRowPredicateSql = null,
+            MandatoryRowPolicy = null,
+            RowPolicyBeforeVirtualFilters = null,
+            RowPoliciesAfterVirtualFilters = null,
             AppliedVirtualFilters = [],
             AppliedVirtualFilterBindings = [],
             RowFilterSqlBeforeVirtualFilters = null,

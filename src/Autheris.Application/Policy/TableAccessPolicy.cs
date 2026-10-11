@@ -97,6 +97,7 @@ public sealed class TableAccessPolicy
     private readonly IClientIpResolver? _clientIpResolver;
     private readonly GatewayOptions _options;
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
+    private readonly RowPolicyFactory? _rowPolicyFactory;
     private readonly ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
@@ -118,8 +119,10 @@ public sealed class TableAccessPolicy
         ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
-        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null,
+        RowPolicyFactory? rowPolicyFactory = null)
     {
+        _rowPolicyFactory = rowPolicyFactory;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
@@ -232,7 +235,22 @@ public sealed class TableAccessPolicy
         TableAccessDecision decision;
         if (profile != null)
         {
-            decision = CreateDecisionFromProfile(profile, table, query.Metadata);
+            IRowPolicy? profilePolicy = null;
+            if (_rowPolicyFactory is { CanParseAdminPredicates: true } && !string.IsNullOrWhiteSpace(profile.RowFilterPredicate))
+            {
+                // WP-X0e: the admin-authored predicate is parsed once into a typed policy; an invalid predicate denies the table
+                // (fail closed). The denial reason never echoes the predicate text.
+                try
+                {
+                    profilePolicy = _rowPolicyFactory.FromAccessProfile(profile.RowFilterPredicate, query.Metadata);
+                }
+                catch (Exception ex) when (ex is System.Security.SecurityException or ArgumentException)
+                {
+                    return TableAccessDecision.Denied(table, "Access profile row filter is invalid (fail-closed).");
+                }
+            }
+
+            decision = CreateDecisionFromProfile(profile, table, query.Metadata, profilePolicy);
         }
         else if (consentBypassed)
         {
@@ -362,21 +380,42 @@ public sealed class TableAccessPolicy
         }
 
 
+        // WP-X0e: a typed Casbin policy is AND-merged as a typed policy (one projection, one marker namespace). Parameter names bound
+        // to different values deny, exactly like the text path below.
+        if (policyDecision.RowPolicy is { } typedPolicy)
+        {
+            TableAccessDecision typed;
+            try
+            {
+                typed = consentDecision.WithAdditionalRowPolicy(typedPolicy);
+            }
+            catch (System.Security.SecurityException)
+            {
+                return TableAccessDecision.Denied(consentDecision.Table, "Conflicting row-level security parameters.");
+            }
+
+            var projected = typedPolicy.Project().Parameters;
+            var others = policyDecision.RowFilterParameters?.Where(p => !projected.ContainsKey(p.Key)).ToList();
+            var typedParameters = typed.RowFilterParameters;
+            if (others is { Count: > 0 })
+            {
+                if (!TryMergeParameters(out var mergedOthers, typedParameters, others.ToDictionary(p => p.Key, p => p.Value, StringComparer.OrdinalIgnoreCase)))
+                {
+                    return TableAccessDecision.Denied(consentDecision.Table, "Conflicting row-level security parameters.");
+                }
+
+                typedParameters = mergedOthers;
+            }
+
+            return typed with { ColumnAccess = mergedColumns, RowFilterParameters = typedParameters };
+        }
+
         var mergedParameters = consentDecision.RowFilterParameters;
         if (policyDecision.RowFilterParameters is { Count: > 0 })
         {
-            var merged = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            foreach (var source in new[] { consentDecision.RowFilterParameters, policyDecision.RowFilterParameters })
+            if (!TryMergeParameters(out var merged, consentDecision.RowFilterParameters, policyDecision.RowFilterParameters))
             {
-                foreach (var (name, value) in source ?? new Dictionary<string, object?>())
-                {
-                    if (merged.TryGetValue(name, out var existing) && !Equals(existing, value))
-                    {
-                        return TableAccessDecision.Denied(consentDecision.Table, "Conflicting row-level security parameters.");
-                    }
-
-                    merged[name] = value;
-                }
+                return TableAccessDecision.Denied(consentDecision.Table, "Conflicting row-level security parameters.");
             }
 
             mergedParameters = merged;
@@ -389,6 +428,29 @@ public sealed class TableAccessPolicy
             ColumnAccess = mergedColumns,
             RowFilterParameters = mergedParameters
         };
+    }
+
+    private static bool TryMergeParameters(
+        out IReadOnlyDictionary<string, object?>? merged,
+        params IReadOnlyDictionary<string, object?>?[] sources)
+    {
+        var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in sources)
+        {
+            foreach (var (name, value) in source ?? new Dictionary<string, object?>())
+            {
+                if (result.TryGetValue(name, out var existing) && !Equals(existing, value))
+                {
+                    merged = null;
+                    return false;
+                }
+
+                result[name] = value;
+            }
+        }
+
+        merged = result;
+        return true;
     }
 
     private async Task<bool> IsRebacDeniedAsync(TableAccessQuery query, CancellationToken ct)
@@ -490,7 +552,7 @@ public sealed class TableAccessPolicy
             TargetDialect: query.Metadata.Dialect);
     }
 
-    private static TableAccessDecision CreateDecisionFromProfile(AccessProfile profile, TableIdentifier table, TableMetadata metadata)
+    private static TableAccessDecision CreateDecisionFromProfile(AccessProfile profile, TableIdentifier table, TableMetadata metadata, IRowPolicy? rowPolicy = null)
     {
         var colAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
         if (profile.MaskingMode == MaskingPolicyMode.Unmasked)
@@ -527,6 +589,11 @@ public sealed class TableAccessPolicy
                     colAccess[col.ColumnName] = ColumnAccessLevel.Clear;
                 }
             }
+        }
+
+        if (rowPolicy != null)
+        {
+            return TableAccessDecision.Allowed(table, colAccess, hasUnconstrainedColumnAllow: true).WithAdditionalRowPolicy(rowPolicy);
         }
 
         return TableAccessDecision.Allowed(table, colAccess, rowFilterSql: profile.RowFilterPredicate, hasUnconstrainedColumnAllow: true);

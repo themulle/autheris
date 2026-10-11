@@ -3561,3 +3561,23 @@ The orchestrator accepted the fail-closed defaults written in §28.8. They are b
 - The typed correlated filter always uses the EXISTS form. The SQL Server `IN` strategy was a text-level optimisation and is dropped from the IR.
 - The string-returning legacy producers (`BuildCorrelatedSubquery`, `BuildCrossSourceSetFilter`, `RowFilterSqlBuilder.BuildCombinedRowFilter`/`FormatCondition`, the Casbin string path) still call `FormatSafeLiteral`, because the §7.3 consumers read a string without a parameter dictionary. `NoFormatSafeLiteral_OnPolicyValuePaths` therefore scans the typed producers; **X1 (or X0e/X0l when the consumers move to `PolicyPredicate`) must delete the inline producers and widen the scan to the legacy types.**
 - X0d was not split; X0d-2 is not needed. Wiring `TableAccessDecision` / `IRowPolicy` to the typed predicates and registering `IPolicyPredicateRenderer` in DI belong to X0e/X0l.
+
+### WP-X0e implementation log (`feat/ast-x1-access-decision`)
+
+**Built** (additive; legacy string consumers keep working until X1):
+
+- `Autheris.Domain/Interfaces/IRowPolicy.cs`: opaque `IRowPolicy { Fingerprint, IsDenyAll, And, Project() }` plus `RowPolicyText(Sql, Parameters)`. There is no factory from text; Domain has no `TrinoSqlEngine` reference.
+- `TableAccessDecision`: `RowPolicy`, `WithAdditionalRowPolicy(IRowPolicy)` and `WithMandatoryPredicate(IRowPolicy, ...)` (typed AND, text and parameters re-projected, `WithoutEnforcedVirtualFilters` has a typed branch that verifies the fingerprint and text), and `RequireTypedRowPolicy()`: a string-only filter, or a text that no longer equals the projection, is denied on the compiler path.
+- `Autheris.Application/Policy/PolicyPredicateRowPolicy.cs`: the adapter over `PolicyPredicate` (projection rendered once through `IPolicyPredicateRenderer`; `And` throws for foreign or different-dialect policies; deny-all is absorbing).
+- `Autheris.Application/Policy/RowPolicyFactory.cs`: `ForTenant` (tenant is a bound parameter) and `FromAccessProfile` (parse once through `IPolicyExpressionParser`, fail closed).
+- `TableAccessPolicy.Restrict` AND-merges typed Casbin policies; a typed profile policy is attached when a `RowPolicyFactory` with a parser is passed (optional constructor parameter).
+- DI (`GatewayGovernanceServiceExtensions`): `IPolicyPredicateRenderer`, `IPolicyExpressionParser`, `RowPolicyFactory` as singletons.
+
+**Tests**: `Policy/TypedAccessDecisionTests`, `Policy/AccessProfileRowPolicyTests`, `Policy/PolicyPredicateRegistrationTests` (unit); `TypedAccessDecisionArchitectureTests` (architecture, includes `Domain_HasNoTrinoSqlEngineReference`).
+
+**Deviations and open items:**
+
+- `CombinedRowFilterSql` stays a positional record member (many legacy producers and tests use it), so a "no setter" rule is not possible yet. Drift is caught by `RequireTypedRowPolicy()` instead. X1 removes the legacy members.
+- The live `TableAccessPolicy` construction sites (`UnifiedPolicyDecisionPoint`, cross-domain resolver, procedures) do not pass the `RowPolicyFactory`: a typed projection uses `@__gql_rls_N` markers that the legacy consumers do not all bind, and access-profile text becomes canonical Trino syntax. X0l/X1 switch them over.
+- Consent decisions and Casbin decisions are still string-only (the consent cache envelope stores text only). X0l assembles the typed policy; until then a consent row filter makes `RequireTypedRowPolicy()` deny, which is the intended fail-closed state for the not yet live compiler path.
+- `MandatoryRowPredicateSql` of a typed Virtual Filter is the projection of that predicate alone, so its markers can differ from those of the combined text.
