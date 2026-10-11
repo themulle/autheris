@@ -288,6 +288,37 @@ public class DmlCompileTests
     }
 
     [Theory]
+    [InlineData("char(10)")]
+    [InlineData("CHAR(2)")]
+    [InlineData("nchar(10)")]
+    public void Insert_CheckOption_OnSqlServer_WithACharPolicyColumn_IsRejectedWithATypedError(string type)
+    {
+        // CR-ADG-48: CHAR(n) is blank-padded by the cast, so the byte-exact check could never pass (a silent permanent rollback).
+        RegionPolicy();
+        WithOrdersColumnType(TargetSqlDialect.SqlServer, "Region", type);
+        var ex = Assert.Throws<SqlCompileNotSupportedException>(() =>
+            Compile(TargetSqlDialect.SqlServer, "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')"));
+        Assert.Equal(SqlCompileNotSupportedReason.Construct, ex.Reason);
+        Assert.Contains("CHAR policy columns are not supported for INSERT check option; use VARCHAR", ex.Message);
+    }
+
+    [Fact]
+    public void Insert_CheckOption_OnSqlServer_WithACharColumnThePolicyDoesNotReference_StillCompiles()
+    {
+        RegionPolicy();
+        WithOrdersColumnType(TargetSqlDialect.SqlServer, "Status", "char(10)");
+        Assert.True(Compile(TargetSqlDialect.SqlServer, "INSERT INTO orders (id, tenantid, region, status) VALUES (1, 'acme', 'EU', 's')").RequiresRowCountCheck);
+    }
+
+    [Fact]
+    public void Insert_CheckOption_OnSqlServer_WithAVarcharPolicyColumn_StillCompiles()
+    {
+        RegionPolicy();
+        WithOrdersColumnType(TargetSqlDialect.SqlServer, "Region", "varchar(20)");
+        Assert.True(Compile(TargetSqlDialect.SqlServer, "INSERT INTO orders (id, tenantid, region) VALUES (1, 'acme', 'EU')").RequiresRowCountCheck);
+    }
+
+    [Theory]
     [MemberData(nameof(CheckDialectData))]
     public void Insert_CheckOption_WithAnUnknownOrUnsupportedCatalogType_IsRejectedWithATypedError(TargetSqlDialect dialect)
     {

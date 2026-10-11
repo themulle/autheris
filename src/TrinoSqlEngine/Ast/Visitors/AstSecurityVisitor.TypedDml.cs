@@ -183,6 +183,14 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                     "INSERT check option needs a known catalog column type of a supported kind for every written column");
             }
 
+            if (dialect == TargetSqlDialect.SqlServer && policy.ReferencedColumns.Contains(column.Name, StringComparer.OrdinalIgnoreCase) &&
+                (native.StartsWith("char(", StringComparison.OrdinalIgnoreCase) || native.StartsWith("nchar(", StringComparison.OrdinalIgnoreCase)))
+            {
+                // CR-ADG-48: the cast pads CHAR(n) with blanks, so the byte-exact check could never pass and every insert would roll back.
+                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct,
+                    "CHAR policy columns are not supported for INSERT check option; use VARCHAR");
+            }
+
             nativeTypes[i] = native;
             if (isText) textColumns.Add(column.Name);
         }
