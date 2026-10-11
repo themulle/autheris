@@ -33,9 +33,15 @@ public sealed record MandatoryFilterOutcome(bool IsDenied, string? DenyReason, s
     /// <summary>F-GOV-14 (M1): the effective (filter, binding) pairs behind <see cref="PredicateSql"/>, one per identity.</summary>
     public IReadOnlyList<AppliedVirtualFilterBinding> AppliedBindings { get; init; } = Array.Empty<AppliedVirtualFilterBinding>();
 
+    /// <summary>
+    /// WP-X0g: the typed form of <see cref="PredicateSql"/> (every key value a bound policy parameter), or null when a predicate
+    /// builder has no typed form. The text stays for the legacy consumers until X1.
+    /// </summary>
+    public TrinoSqlEngine.Governance.PolicyPredicate? TypedPredicate { get; init; }
+
     public bool Equals(MandatoryFilterOutcome? other) =>
         other is not null && IsDenied == other.IsDenied && DenyReason == other.DenyReason &&
-        PredicateSql == other.PredicateSql && AppliedFilters.SequenceEqual(other.AppliedFilters) &&
+        PredicateSql == other.PredicateSql && TypedPredicate?.Fingerprint == other.TypedPredicate?.Fingerprint && AppliedFilters.SequenceEqual(other.AppliedFilters) &&
         AppliedBindings.SequenceEqual(other.AppliedBindings);
 
     public override int GetHashCode() => HashCode.Combine(IsDenied, DenyReason, PredicateSql);
@@ -73,6 +79,13 @@ public interface IVirtualFilterSnapshotProvider
 public interface IVirtualFilterPredicateBuilder
 {
     string Build(VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect);
+
+    /// <summary>
+    /// WP-X0g: typed form of <see cref="Build"/>; its policy parameters are named <paramref name="parameterPrefix"/> plus a counter so
+    /// that predicates of several filters merge. Null (the default) means the builder has no typed form and the resolver keeps the text only.
+    /// </summary>
+    TrinoSqlEngine.Governance.PolicyPredicate? BuildTyped(
+        VirtualFilter filter, FilterBinding binding, TableMetadata target, DatabaseDialect dialect, string parameterPrefix) => null;
 }
 
 /// <summary>Restrictive row predicates from virtual filters (design 3.3): never grants, only narrows.</summary>
@@ -354,14 +367,29 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                 .ToList();
 
             var parts = new List<string>(effective.Count);
+            var typedParts = new List<TrinoSqlEngine.Governance.PolicyPredicate>(effective.Count);
+            bool typedComplete = true;
             var distinctPredicates = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var (filter, binding, _) in effective)
+            for (int i = 0; i < effective.Count; i++)
             {
+                var (filter, binding, _) = effective[i];
                 currentFilter = filter.Name;
                 var pred = _predicates.Build(filter, binding, query.Metadata, query.Metadata.Dialect);
+
+                // The prefix carries the position in the effective order, so parameter names of different filters never collide;
+                // an exception here denies (fail closed), it never falls back to the text.
+                var typed = _predicates.BuildTyped(filter, binding, query.Metadata, query.Metadata.Dialect, $"{SqlFilterCompiler.DefaultTypedParameterPrefix}{i}_");
                 if (distinctPredicates.Add(pred))
                 {
                     parts.Add(pred);
+                    if (typed == null)
+                    {
+                        typedComplete = false;
+                    }
+                    else
+                    {
+                        typedParts.Add(typed);
+                    }
                 }
             }
 
@@ -372,7 +400,8 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                 .ToList();
             return new MandatoryFilterOutcome(false, null, predicate, effective.Select(a => a.Filter.Name).Distinct(StringComparer.Ordinal).ToList())
             {
-                AppliedBindings = appliedBindings
+                AppliedBindings = appliedBindings,
+                TypedPredicate = typedComplete && typedParts.Count > 0 ? typedParts.Aggregate((left, right) => left.And(right)) : null
             };
         }
         catch (TargetPatternEvaluationException ex)

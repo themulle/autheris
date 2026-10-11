@@ -76,4 +76,57 @@ public sealed class RowPolicyArchitectureTests
 
         violations.ShouldBeEmpty(string.Join(Environment.NewLine, violations));
     }
+
+    // ---- WP-X0g (F-4): the typed virtual filter compiler neither builds an engine nor edits SQL text ----
+
+    private static List<string> CallsInTypedVirtualFilterProducers(ModuleDefinition module, Func<MethodReference, bool> forbidden)
+    {
+        var found = new List<string>();
+        foreach (var type in module.GetTypes().Where(t =>
+                     t.FullName.StartsWith("Autheris.Application.VirtualFilters.SqlFilterCompiler", StringComparison.Ordinal) ||
+                     t.FullName.StartsWith("Autheris.Application.VirtualFilters.StructuredFilterSqlBuilder", StringComparison.Ordinal)))
+        {
+            foreach (var method in type.Methods.Where(m => m.HasBody && m.Name.Contains("Typed", StringComparison.Ordinal)))
+            {
+                foreach (var instruction in method.Body.Instructions)
+                {
+                    if (instruction.Operand is MethodReference called && forbidden(called))
+                    {
+                        found.Add($"{type.FullName}.{method.Name} -> {called.DeclaringType.Name}.{called.Name}");
+                    }
+                }
+            }
+        }
+
+        return found;
+    }
+
+    private static bool IsSqlTextEdit(MethodReference called) =>
+        (called.DeclaringType.FullName == "System.String" && called.Name is "Replace" or "Insert" or "Remove") ||
+        called.DeclaringType.Name == "FastSqlEngine" || called.Name == "GenerateGovernedSql";
+
+    [Fact]
+    public void TheScanner_FindsStringReplaceAndTheEngine_InTheLegacyCompile()
+    {
+        using var module = Application();
+        var legacy = module.GetTypes().Single(t => t.FullName == "Autheris.Application.VirtualFilters.SqlFilterCompiler")
+            .Methods.Single(m => m.Name == "Compile" && m.HasBody);
+
+        legacy.Body.Instructions.Select(i => i.Operand).OfType<MethodReference>().Any(IsSqlTextEdit).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void NoStringReplaceOnSql_InTheTypedVirtualFilterProducers()
+    {
+        using var module = Application();
+        var typedMethods = module.GetTypes()
+            .Where(t => t.FullName.StartsWith("Autheris.Application.VirtualFilters.SqlFilterCompiler", StringComparison.Ordinal) ||
+                        t.FullName.StartsWith("Autheris.Application.VirtualFilters.StructuredFilterSqlBuilder", StringComparison.Ordinal))
+            .SelectMany(t => t.Methods).Where(m => m.Name.Contains("Typed", StringComparison.Ordinal)).ToList();
+        typedMethods.ShouldNotBeEmpty("CompileTyped and BuildTyped must exist: they are scanned by name");
+
+        var violations = CallsInTypedVirtualFilterProducers(module, IsSqlTextEdit);
+
+        violations.ShouldBeEmpty(string.Join(Environment.NewLine, violations));
+    }
 }

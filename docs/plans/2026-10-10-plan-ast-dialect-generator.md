@@ -3620,3 +3620,22 @@ Base: `feat/ast-x1-access-decision` (X0e), because the typed masks are carried o
 - The SQLite legacy partial-mask string always used five mask characters; the typed emitter keeps the variable-length rule of PostgreSQL and SQL Server, so on SQLite the masked length is now visible (value content is not).
 - A column whose catalog type is missing or unsupported falls back to the default mask on the string facade (the emitter requires a type).
 - The live compiler assembly (X0l) must populate `ColumnMasks` and call `RequireTypedColumnMasks`; the decision producers do not yet.
+
+### WP-X0g implementation log (`feat/ast-x1-vf-typed`)
+
+**Built** (additive; the legacy string path of the virtual filters is untouched until X1):
+
+- `SqlFilterCompiler.CompileTyped(filter, dialect, ISqlEngine, parameterPrefix)`: the sql-defined filter as an `EXISTS` AST over `autheris_target`. The engine is injected and only parses. The reserved `target` qualifier is rebased by an AST rewriter (no `string.Replace`), time functions stay AST nodes, and every string, integer, decimal or boolean literal that is a direct operand of a comparison, IN list, BETWEEN or LIKE becomes a bound policy parameter (`__gql_vf_<n>_<k>`).
+- `StructuredFilterSqlBuilder.BuildTyped(...)`: the structured definition (joins, conditions, key correlations, validity window, column map) as an `EXISTS` AST. Condition values are bound parameters; numbers stay numbers (Int64 or Decimal). Identifiers are validated; an alias equal to the target alias is rejected.
+- `IVirtualFilterPredicateBuilder.BuildTyped` (default interface method returning null, so existing builders and fakes keep the text path). `MandatoryRowFilterResolver` builds each effective filter with the prefix `__gql_vf_<position>_`, deduplicates by the legacy text, and ANDs the typed parts into `MandatoryFilterOutcome.TypedPredicate`. A typed build exception denies with `VF_BINDING_MISCONFIGURED` (no fallback to text). `PredicateSql` is still produced.
+- `RowPolicyFactory.FromPredicate(PolicyPredicate, DatabaseDialect)`. `TableAccessPolicy` attaches the typed predicate through `WithMandatoryPredicate(IRowPolicy, ...)` when it has a `RowPolicyFactory` and the outcome is typed; otherwise it keeps the text overload. A typed VF decision passes `RequireTypedRowPolicy()` and its typed `WithoutEnforcedVirtualFilters` branch.
+
+**Tests**: `VirtualFilters/TypedVirtualFilterTests` (unit: `CompileTyped_ReturnsExistsCorrelatedToAutherisTarget`, legacy equivalence per dialect, bound literals, time functions, prefix, structured legacy equivalence, bound condition values, column map, invalid identifier, resolver merge/dedupe/fail-closed, decision typed/legacy, SQLite execution) and `RowPolicyArchitectureTests.NoStringReplaceOnSql_InTheTypedVirtualFilterProducers` (IL scan with a positive control on the legacy `Compile`).
+
+**Deviations and open items:**
+
+- The signature is `CompileTyped(VirtualFilter, DatabaseDialect, ISqlEngine, prefix)` rather than `CompileTyped(StructuredFilter)`: the sql definition is the one that needs compiling; the structured form has `BuildTyped`.
+- The typed structured form always uses `EXISTS`; the SQL Server IN strategy stays a legacy text optimisation (as in X0d).
+- Literals that are not direct comparison operands (function arguments, CASE results) stay literals in the AST; they are admin-authored and validated at store time.
+- The live consumers (`UnifiedPolicyDecisionPoint`, procedure and federated DuckDB channels) still attach the text overload: they do not pass a `RowPolicyFactory`, and their consumers do not bind the `@__gql_vf_N_K` markers. X0l/X1 switch them over. `MandatoryRowPredicateSql` of a typed VF is the projection of that predicate alone (markers differ from the combined text, as noted in X0e).
+- `StructuredFilterSqlBuilder` creates a parser-only `FastSqlEngine` when no `ISqlEngine` is injected (tests); DI injects the registered engine. `SqlFilterCompiler.Compile` (L-4, `GenerateGovernedSql`) is removed by X1.

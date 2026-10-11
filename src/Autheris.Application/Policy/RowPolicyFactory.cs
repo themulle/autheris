@@ -47,6 +47,16 @@ public sealed class RowPolicyFactory
     }
 
     /// <summary>
+    /// Wraps an already typed predicate (for example a Virtual Filter predicate, WP-X0g) in a policy for the dialect of the protected
+    /// table. The dialect mapping throws for an unknown dialect (no default).
+    /// </summary>
+    public IRowPolicy FromPredicate(PolicyPredicate predicate, DatabaseDialect dialect)
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        return new PolicyPredicateRowPolicy(predicate, PolicyParameterNamer.ToTargetDialect(dialect), _renderer);
+    }
+
+    /// <summary>
     /// Parses an access-profile row filter (canonical Trino syntax) once into a typed policy.
     /// </summary>
     /// <exception cref="PolicyParseException">The predicate is invalid (the caller denies; the message never echoes the text).</exception>
