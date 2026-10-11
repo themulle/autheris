@@ -36,3 +36,55 @@ jobs:
 
       - name: Test Autheris Solution
         run: dotnet test Autheris.sln -c Release --no-restore --verbosity normal
+
+  # SQL compiler evidence gate (plan 9.5, 16.5). It must run on the merge result: a pull_request run checks out
+  # refs/pull/N/merge by default, so no explicit `ref:` is set (a test in tests/Autheris.Tests.SqlCompilerGate asserts that).
+  # There is deliberately no path filter (policy producers live outside src/TrinoSqlEngine) and no retry of any kind
+  # (M-5: a retried security test could turn a real failure green).
+  # Making this job a required check is a repository-admin step (branch protection), see the WP-X0w log in the plan.
+  sql-compiler-gate:
+    name: SQL Compiler Gate
+    needs: build-and-test
+    runs-on: ubuntu-latest # Docker is available for Testcontainers
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      SQLGATE_PROFILE: pr
+      SQLGATE_REPORT_DIR: ${{ github.workspace }}/sqlgate-report
+    steps:
+      - name: Checkout repository (merge ref)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore with Locked Mode
+        run: dotnet restore Autheris.sln --locked-mode
+
+      # G2, G3, G5 in-memory, G7. Debug builds contain the security mutant hooks, so this is the run that kills the mutants.
+      - name: Gate tests, Debug (security mutants)
+        run: dotnet test tests/TrinoSqlEngine.Tests -c Debug --no-restore --filter "Category=SqlGate" --verbosity normal
+
+      # Release has the hooks compiled out; this run proves they are absent from shipped code.
+      - name: Gate tests, Release (mutant hooks absent)
+        run: dotnet test tests/TrinoSqlEngine.Tests -c Release --no-restore --filter "Category=SqlGate" --verbosity normal
+
+      # G4 differential, G6 execution on PostgreSQL, SQL Server and Oracle (CI=true makes a missing database fail).
+      - name: Differential and execution gate
+        run: dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore --verbosity normal
+
+      - name: Architecture tests
+        run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore --verbosity normal
+
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: sqlgate-report
+          path: sqlgate-report
+          if-no-files-found: ignore

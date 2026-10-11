@@ -1,0 +1,119 @@
+name: SQL Compiler Gate (nightly, cutover, G9)
+
+# Nightly profile, the manual cutover profile and the secret-gated live Databricks job (G9).
+# This file must never get a pull_request trigger: the G9 job holds workspace secrets (SEC-ADG-09, SEC-X1-11).
+# No retries anywhere (plan M-5).
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Gate profile'
+        type: choice
+        options:
+          - nightly
+          - cutover
+        default: cutover
+
+permissions: {}
+
+jobs:
+  sql-compiler-gate-nightly:
+    name: SQL Compiler Gate (${{ inputs.profile || 'nightly' }})
+    runs-on: ubuntu-latest # Docker is available for Testcontainers
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    env:
+      SQLGATE_PROFILE: ${{ inputs.profile || 'nightly' }}
+      SQLGATE_REPORT_DIR: ${{ github.workspace }}/sqlgate-report
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore with Locked Mode
+        run: dotnet restore Autheris.sln --locked-mode
+
+      - name: Gate tests, Debug (security mutants)
+        run: dotnet test tests/TrinoSqlEngine.Tests -c Debug --no-restore --filter "Category=SqlGate" --verbosity normal
+
+      - name: Gate tests, Release (mutant hooks absent)
+        run: dotnet test tests/TrinoSqlEngine.Tests -c Release --no-restore --filter "Category=SqlGate" --verbosity normal
+
+      - name: Differential and execution gate
+        run: dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore --verbosity normal
+
+      - name: Architecture tests
+        run: dotnet test tests/Autheris.Tests.Architecture -c Release --no-restore --verbosity normal
+
+      - name: Upload gate report
+        if: always()
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        with:
+          name: sqlgate-report-${{ github.run_id }}
+          path: sqlgate-report
+          if-no-files-found: ignore
+
+  # G9: the execution suites against a live Databricks SQL warehouse. Bound to the protected environment
+  # `databricks-g9` (required reviewers, deployment branches limited to main) so the secrets are only released after approval.
+  # It never runs for pull requests (this file has no such trigger) and a label does not release anything.
+  # Skipped, not failed, while the secrets do not exist (stakeholder item S-4: no workspace yet).
+  sql-compiler-gate-databricks-g9:
+    name: SQL Compiler Gate G9 (live Databricks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: databricks-g9
+    permissions:
+      contents: read
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_CLIENT_ID: ${{ secrets.DATABRICKS_CLIENT_ID }}
+      DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+      DATABRICKS_WAREHOUSE_ID: ${{ secrets.DATABRICKS_WAREHOUSE_ID }}
+      DATABRICKS_CATALOG: ${{ secrets.DATABRICKS_CATALOG }}
+    steps:
+      - name: Check for Databricks secrets
+        id: gate
+        run: |
+          if [ -n "$DATABRICKS_HOST" ] && [ -n "$DATABRICKS_CLIENT_ID" ] && [ -n "$DATABRICKS_CLIENT_SECRET" ] && [ -n "$DATABRICKS_WAREHOUSE_ID" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::G9 skipped: the Databricks secrets are not configured (S-4)."
+          fi
+
+      - name: Checkout repository
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET 10
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore with Locked Mode
+        if: steps.gate.outputs.enabled == 'true'
+        run: dotnet restore Autheris.sln --locked-mode
+
+      # The live suites (WP-X1-DBX / C5) carry Category=DatabricksLive. Until they exist the filter matches nothing,
+      # so the step fails closed on an empty selection instead of reporting a green G9.
+      - name: Live Databricks suites
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          set -o pipefail
+          dotnet test tests/Autheris.Tests.SqlCompilerGate -c Release --no-restore --filter "Category=DatabricksLive" --verbosity normal | tee g9.log
+          if grep -q "No test matches" g9.log; then
+            echo "::error::No Category=DatabricksLive test exists; G9 cannot be green."
+            exit 1
+          fi
