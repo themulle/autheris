@@ -3561,3 +3561,23 @@ The orchestrator accepted the fail-closed defaults written in §28.8. They are b
 - The typed correlated filter always uses the EXISTS form. The SQL Server `IN` strategy was a text-level optimisation and is dropped from the IR.
 - The string-returning legacy producers (`BuildCorrelatedSubquery`, `BuildCrossSourceSetFilter`, `RowFilterSqlBuilder.BuildCombinedRowFilter`/`FormatCondition`, the Casbin string path) still call `FormatSafeLiteral`, because the §7.3 consumers read a string without a parameter dictionary. `NoFormatSafeLiteral_OnPolicyValuePaths` therefore scans the typed producers; **X1 (or X0e/X0l when the consumers move to `PolicyPredicate`) must delete the inline producers and widen the scan to the legacy types.**
 - X0d was not split; X0d-2 is not needed. Wiring `TableAccessDecision` / `IRowPolicy` to the typed predicates and registering `IPolicyPredicateRenderer` in DI belong to X0e/X0l.
+
+### 29.7 WP-X0x implementation log (`feat/ast-x1-policy-lint`)
+
+**Built:**
+
+- `Autheris.Application/Policy/Lint/PolicyParserSetup.cs`: the one production configuration of `IPolicyExpressionParser` (SEC-X1-16): the function allowlist of the secured table's own dialect (`SqlFunctionAllowlists.Build`), catalog columns with their types, the catalog for correlated subqueries and the target dialect. A table whose dialect is unknown or has no target dialect is a finding (`UNKNOWN_DIALECT`). Enforcement (X0e/X1) must build its `PolicyParseContext` here so the lint and production cannot diverge.
+- `PolicyPredicateLinter`: access profile row filters (every catalog table a profile matches), virtual filters with an SQL definition (`SqlFilterCompiler.Validate`, which also covers the mandatory-filter profile bindings), Casbin text filters (`${...}` placeholders are replaced with a literal the way the interpolation does) and Casbin correlated row filters (typed builder; a failure is a finding). Findings carry kind, table id, policy id and a stable code only.
+- `PolicyLintCli`: exit 0 clean, 1 unparsable predicates, 2 usage or configuration error. No argument is accepted except `--help`; the governance connection string comes from `AUTHERIS_GOVERNANCE_CONNECTION` (a plain value or `keyvault:<ref>`), so it never appears in `argv`. Output never contains predicate text.
+- `Autheris.Infrastructure/Persistence/SqliteGovernanceLintSource.cs`: opens the SQLite governance database read-only (no migration) and loads catalog, access profiles, virtual filters and the correlated row filters of non-revoked consents.
+- `tools/PolicyPredicateLint` (assembly `policy-predicate-lint`, added to `Autheris.sln`): thin host. Run: `AUTHERIS_GOVERNANCE_CONNECTION="Data Source=/path/governance.db" dotnet run --project tools/PolicyPredicateLint`.
+
+**Tests** (`tests/Autheris.Tests.Unit/Policy/Lint`): `Lint_ReportsUnparsable_ExitCode1`, `Lint_OutputHasNoPolicyValues`, `Lint_AllValid_ExitCode0`, `Lint_UsesProductionFunctionAllowlist`, `Lint_CoversCasbinCorrelatedFilters`, `Lint_RejectsConnectionStringArgument`, `Lint_ChecksColumnsAgainstTheCatalog`, `Lint_WithoutConnectionVariable_ExitCode2`; `SqliteGovernanceLintSourceTests` was written after the code (a guard, not a Red step).
+
+**Deviations and open items:**
+
+- The startup listing of denied tables (`GatewayStartupValidator`) is assigned to X1, not X0x; it is not built here.
+- Only the SQLite governance store is supported by the loader. The PostgreSQL and SQL Server repositories do not implement `IAccessProfileRepository`, and a loader for them (virtual filters only) is not built; the tool exits 2 on an unreadable store. Ops must run the lint against a SQLite export of the production policy store, or X1 adds the other loaders.
+- Casbin text rls filters and programmatic correlated filters that are not stored as consents are not in the governance database; the lint API (`CasbinLintRule`) accepts them, but the tool loads only consent correlated filters.
+- Parameter declarations (`:name`) and catalog types from a data source connection (X0c) are not loaded: the context declares no named parameters, so a predicate using `:name` is reported until X0e declares them.
+- A profile or rule that matches no catalog table cannot be checked against a table; it is counted as `unchecked` and does not fail the lint.
