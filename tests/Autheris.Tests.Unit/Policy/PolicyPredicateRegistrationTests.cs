@@ -32,4 +32,18 @@ public sealed class PolicyPredicateRegistrationTests
         factory.CanParseAdminPredicates.ShouldBeTrue();
         provider.GetRequiredService<IPolicyPredicateRenderer>().ShouldBeOfType<PolicyPredicateRenderer>();
     }
+
+    [Fact]
+    public void GovernanceRegistration_RegistersTheGovernancePolicyFactoryOnce()
+    {
+        var services = new ServiceCollection();
+        services.AddAutherisGovernance(new GatewayOptions());
+        services.AddSingleton<ISqlEngine, FastSqlEngine>();
+        services.AddSingleton(NSubstitute.Substitute.For<Autheris.Application.Sql.Catalog.IGovernedCatalogProvider>());
+
+        services.Count(d => d.ServiceType == typeof(GovernancePolicyFactory)).ShouldBe(1);
+        services.Single(d => d.ServiceType == typeof(GovernancePolicyFactory)).Lifetime.ShouldBe(ServiceLifetime.Singleton);
+        using var provider = services.BuildServiceProvider();
+        provider.GetRequiredService<GovernancePolicyFactory>().ShouldNotBeNull();
+    }
 }

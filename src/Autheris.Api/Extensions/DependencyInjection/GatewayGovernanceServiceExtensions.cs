@@ -118,6 +118,8 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Sql.Policy.IPolicyPredicateRenderer, Autheris.Application.Sql.Policy.PolicyPredicateRenderer>();
         services.AddSingleton<TrinoSqlEngine.Governance.IPolicyExpressionParser, TrinoSqlEngine.Governance.PolicyExpressionParser>();
         services.AddSingleton<Autheris.Application.Policy.RowPolicyFactory>();
+        // WP-X0l: assembles the typed GovernancePolicy of a statement (no caller until X1). The catalog provider is registered with the storage.
+        services.AddSingleton<Autheris.Application.Sql.Policy.GovernancePolicyFactory>();
         services.AddSingleton<IRlsFilterGenerator, RlsFilterGenerator>();
         services.AddSingleton<IRowFilterSqlBuilder, RowFilterSqlBuilder>();
         services.AddSingleton<IConsentResolutionService, ConsentResolutionService>();
