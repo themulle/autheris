@@ -3541,3 +3541,13 @@ The orchestrator accepted the fail-closed defaults written in §28.8. They are b
   - A Phase 3 sign-off is given on the final `accepted-differences.json` and on the cutover PR itself.
 - **WP-X1-DBX:** blocked on X1, a green G9 (S-4) and the S-2 rule.
 - **WP-X4:** not scheduled (S-5).
+
+## WP-X0b implementation log
+
+Branch `feat/ast-x1-session-pinning`.
+
+- `DataSourceConnectionOptions.DefaultSchema` (validated by `DefaultSchemaPolicy`, `^[A-Za-z_][A-Za-z0-9_$#]{0,127}\z`; `\z` rather than `$` so a trailing line feed is rejected) and `RequireDefaultSchema`.
+- `SqlConnectionFactory` pins on every rental (new `SessionPinning`): PostgreSQL `set_config('search_path', format('pg_catalog, %I, pg_temp', @schema::text), false)` verified in the same statement; Oracle `ALTER SESSION SET CURRENT_SCHEMA` through `DBMS_ASSERT.ENQUOTE_NAME(DBMS_ASSERT.SCHEMA_NAME(:schema), FALSE)` with read-back of `USERENV.CURRENT_SCHEMA` (a missing schema raises and the connection is disposed); SQL Server ANSI options verified through `@@OPTIONS`.
+- A missing or invalid schema on a source with `RequireDefaultSchema`, or a pin that does not verify, throws `SqlSourceUnavailableException` (`SQL_SOURCE_UNAVAILABLE`) before or instead of handing out a connection. An invalid value fails regardless of the flag.
+- `GatewayStartupValidator.ValidateDefaultSchemas`: strict regex for every source; PostgreSQL/Oracle sources reachable by WebSQL need `DefaultSchema`.
+- Deviations / open: the request-time requirement is the explicit `RequireDefaultSchema` flag (the factory does not know which sources WebSQL reaches); X1 should flip it to the default or derive it. The `SQL_SOURCE_UNAVAILABLE` exception is not yet mapped to an HTTP response (X1 error mapping). SEC-X1-14 provider part was already fail-closed (`UnsupportedProvider`, `UnsupportedSessionDialect`) and is now covered by a test.

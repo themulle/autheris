@@ -1051,6 +1051,31 @@ public sealed class DataSourceConnectionOptions
     /// must not contain a plaintext <c>Password</c>; the factory injects the resolved secret when it opens the connection.
     /// </summary>
     public string? PasswordKeyVaultRef { get; init; }
+
+    /// <summary>
+    /// WP-X0b: default schema pinned on every connection rental. PostgreSQL: <c>search_path = pg_catalog, &lt;schema&gt;, pg_temp</c>;
+    /// Oracle: <c>CURRENT_SCHEMA</c>. SQL Server and SQLite ignore it. Validated against <see cref="DefaultSchemaPolicy"/>; the
+    /// value is only ever passed as a bound parameter and quoted by the database (<c>format('%I')</c>,
+    /// <c>DBMS_ASSERT.ENQUOTE_NAME</c>), never concatenated on the client.
+    /// </summary>
+    public string? DefaultSchema { get; init; }
+
+    /// <summary>
+    /// WP-X0b: when true the connection factory refuses to hand out a PostgreSQL or Oracle connection of this data source unless
+    /// <see cref="DefaultSchema"/> is set and valid (SQL_SOURCE_UNAVAILABLE, fail closed). Startup validation sets the same
+    /// requirement for every WebSQL-reachable PostgreSQL/Oracle source; this flag extends it to request time (options reload).
+    /// </summary>
+    public bool RequireDefaultSchema { get; init; }
+}
+
+/// <summary>WP-X0b, SEC-X1-08: strict identifier rule for <see cref="DataSourceConnectionOptions.DefaultSchema"/>.</summary>
+public static partial class DefaultSchemaPolicy
+{
+    // \z instead of $: in .NET "$" also matches before a trailing line feed.
+    [System.Text.RegularExpressions.GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_$#]{0,127}\z", System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex Pattern();
+
+    public static bool IsValid(string? schema) => schema is not null && Pattern().IsMatch(schema);
 }
 
 public sealed class ItsmOptions

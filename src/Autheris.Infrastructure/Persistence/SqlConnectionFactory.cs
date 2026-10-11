@@ -57,6 +57,19 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             throw UnsupportedProvider(options.Provider);
         }
 
+        // WP-X0b (SEC-X1-08): checked on every rental and before any network traffic, so a reloaded or incomplete data source never
+        // connects unpinned. A present value must always be valid, even when the source does not require one.
+        bool schemaPinned = dialect is DatabaseDialect.PostgreSql or DatabaseDialect.Oracle;
+        if (schemaPinned && options.DefaultSchema is not null && !DefaultSchemaPolicy.IsValid(options.DefaultSchema))
+        {
+            throw new SqlSourceUnavailableException("The data source default schema is invalid.");
+        }
+
+        if (schemaPinned && options.RequireDefaultSchema && string.IsNullOrWhiteSpace(options.DefaultSchema))
+        {
+            throw new SqlSourceUnavailableException("The data source requires a default schema and has none.");
+        }
+
         string connectionString = options.ConnectionString;
         if (dialect == DatabaseDialect.Oracle)
         {
@@ -88,6 +101,15 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
                 await using var initCmd = pgConn.CreateCommand();
                 initCmd.CommandText = PostgreSqlSessionInitializationSql;
                 await initCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+                if (options.DefaultSchema is not null)
+                {
+                    // WP-X0b: search_path = pg_catalog, <schema>, pg_temp; the schema is a bound value quoted by format('%I').
+                    await using var pinCmd = pgConn.CreateCommand();
+                    pinCmd.CommandText = SessionPinning.PostgreSqlSearchPathPinSql;
+                    AddParameter(pinCmd, "@schema", options.DefaultSchema);
+                    SessionPinning.EnsurePinned(await pinCmd.ExecuteScalarAsync(ct).ConfigureAwait(false) as bool?, "search_path");
+                }
             }
 
             if (connection is BindByNameOracleConnection)
@@ -96,6 +118,27 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
                 await using var pinCmd = connection.CreateCommand();
                 pinCmd.CommandText = OracleSessionInitialization.PinAndVerifyBlock;
                 await pinCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+                if (options.DefaultSchema is not null)
+                {
+                    // WP-X0b: the schema is bound; DBMS_ASSERT proves existence and quotes it inside the database.
+                    await using var schemaCmd = connection.CreateCommand();
+                    schemaCmd.CommandText = SessionPinning.OracleSchemaPinBlock;
+                    AddParameter(schemaCmd, "schema", options.DefaultSchema);
+                    await schemaCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+            }
+
+            if (connection is SqlConnection)
+            {
+                // WP-X0b: ANSI options are pinned on every rental; pooled sessions are reset to the login defaults.
+                await using var ansiCmd = connection.CreateCommand();
+                ansiCmd.CommandText = SessionPinning.SqlServerAnsiPinSql;
+                await ansiCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+
+                await using var verifyCmd = connection.CreateCommand();
+                verifyCmd.CommandText = SessionPinning.SqlServerAnsiVerifySql;
+                SessionPinning.EnsurePinned(Convert.ToInt32(await verifyCmd.ExecuteScalarAsync(ct).ConfigureAwait(false)) == 1, "ansi_options");
             }
 
             if (options.ReadUncommitted && connection is SqlConnection)
@@ -152,6 +195,14 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         string password = SecretReferenceResolver.Resolve(_secrets, options.PasswordKeyVaultRef, _environment, allowPlaintextInDevelopment: false, logger: null, "Oracle database password")
             ?? throw new System.Security.SecurityException("The Oracle database password could not be resolved (fail-closed).");
         return new OracleConnectionStringBuilder(connectionString) { Password = password }.ConnectionString;
+    }
+
+    private static void AddParameter(DbCommand cmd, string name, object value)
+    {
+        var p = cmd.CreateParameter();
+        p.ParameterName = name;
+        p.Value = value;
+        cmd.Parameters.Add(p);
     }
 
     private static NotSupportedException UnsupportedProvider(string? provider) =>
