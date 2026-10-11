@@ -336,7 +336,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 : maxResultRows;
 
             var duckDbResult = await _duckDbEngine.ExecuteGeneratedAsync(
-                new GeneratedOlapQuery(plan.GeneratedDuckDbSql),
+                new GeneratedOlapQuery(plan.GeneratedDuckDbSql, plan.Compiled.Parameters),
                 stagedSources,
                 effectiveMaxRows,
                 timeoutCts.Token).ConfigureAwait(false);

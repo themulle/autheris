@@ -81,6 +81,33 @@ public sealed class CrossSourcePlannerTests
     }
 
     [Fact]
+    public void FederatedPlan_BindsParameters()
+    {
+        var sql = "SELECT o.id, s.tracking FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.shipment_id = s.id WHERE o.id = 42 AND s.tracking = 'abc'' OR 1=1 --'";
+        var metadata = Engine.Analyze(sql.AsMemory());
+
+        var orderMeta = CreateTable("crm", "orders", DataSourceType.Sql, ["id", "shipment_id"]);
+        var shipMeta = CreateTable("logistics", "shipments", DataSourceType.HttpDeclarative, ["id", "tracking"]);
+        var tOrders = new ResolvedSourceTable(metadata.ReferencedTables[0], orderMeta.Identifier, orderMeta, "crm");
+        var tShipments = new ResolvedSourceTable(metadata.ReferencedTables[1], shipMeta.Identifier, shipMeta, "logistics");
+        var decisions = new Dictionary<TableIdentifier, TableAccessDecision>
+        {
+            [orderMeta.Identifier] = TableAccessDecision.Allowed(orderMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
+            [shipMeta.Identifier] = TableAccessDecision.Allowed(shipMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
+        };
+
+        var plan = new CrossSourcePlanner(Engine).Plan(sql, metadata, [tOrders, tShipments], decisions, new CrossSourceOptions { Enabled = true });
+
+        plan.Compiled.Dialect.ShouldBe(TrinoSqlEngine.TargetSqlDialect.DuckDb);
+        plan.Compiled.Parameters.Length.ShouldBe(2);
+        plan.Compiled.Parameters.Select(p => p.Value).ShouldContain("abc' OR 1=1 --");
+        plan.Compiled.Parameters.ShouldAllBe(p => p.Marker.StartsWith('$'));
+        plan.GeneratedDuckDbSql.ShouldContain("$1");
+        plan.GeneratedDuckDbSql.ShouldNotContain("abc");
+        plan.GeneratedDuckDbSql.ShouldNotContain("42");
+    }
+
+    [Fact]
     public void Plan_SEC_FILTER_01_Violation_ThrowsWebSqlPolicyException()
     {
         var sql = "SELECT o.id, s.tracking FROM crm.public.orders o JOIN logistics.v1.shipments s ON o.shipment_id = s.id WHERE o.secret_note = 'classified'";

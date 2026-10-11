@@ -3883,3 +3883,11 @@ Branch `feat/ast-x1-gate-ci` (based on X0s and merged with X0v so the retry scan
   2. Required check, only after the job is green on `main`: Settings > Branches > branch protection rule for `main` > "Require status checks to pass before merging" > add the check `SQL Compiler Gate` (the job `name`; the check context is the job name). Or via API: `gh api -X PATCH repos/{owner}/{repo}/branches/main/protection/required_status_checks -F strict=true -f 'contexts[]=SQL Compiler Gate'` (use `-X POST .../contexts` to add to an existing list).
   3. Evidence for the X1 PR (SEC-X1-18): attach the output of `gh api repos/{owner}/{repo}/branches/main/protection/required_status_checks`.
   4. Optionally require a merge queue so the gate runs on the merge-queue commit (add the `merge_group` trigger to `ci.yml` at that time).
+
+### WP-X3 implementation log
+
+- `CrossSourcePlanner` now calls `Generate(statement, ParameterSource.Empty)` for the DuckDB dialect. `CrossSourcePlan` carries the `CompiledSql` (`Compiled`); `GeneratedDuckDbSql` is a view of `Compiled.Sql` with `$n` markers.
+- `GeneratedOlapQuery` and `OlapQueryRequest` carry the bound parameters; `DuckDbOlapEngine` binds them as `DuckDBParameter` values. The dollar rule (SG-24) stays strict for user OLAP SQL. When parameters are supplied, only a `$n` marker outside quotes with an existing ordinal is accepted; `$$`, `$name`, `$0`, a marker beyond the parameter count and any `$` inside quotes are rejected.
+- `GenerateInlineForInternalPlan` did not exist on this base (the planner used `GenerateSql(statement)`), so there was nothing to delete and no architecture pin to remove. The inline `GenerateSql` call in the planner is gone.
+- Tests: `FederatedPlan_BindsParameters` (Red: `Parameters.Length` was 0 against the stub), `DuckDbBoundParameterTests` (bound filter and injection string as data: Red; the rejection cases were guard tests written after the code and do not count as Red). Federated suites (`CrossSource`, `Federat`, `VirtualFilter`, `DuckDb`, `WebSql`) are green.
+- Client-named parameters are not wired for federated queries (the planner has no values for them, same as before); a statement with a client parameter marker fails closed in `Generate`.
