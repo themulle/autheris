@@ -119,7 +119,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     public virtual SqlNode VisitInsertStatement(InsertStatement node)
     {
         var target = (NamedTableSource)Visit(node.TargetTable);
-        var cols = node.Columns != null ? RewriteList(node.Columns, id => (SqlIdentifier)Visit(id)) : null;
+        var cols = node.Columns != null ? RewriteNodes(node.Columns) : null;
         var source = (QueryBody)Visit(node.Source);
 
         if (target == node.TargetTable && cols == node.Columns && source == node.Source)
@@ -131,7 +131,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     public virtual SqlNode VisitUpdateStatement(UpdateStatement node)
     {
         var target = (NamedTableSource)Visit(node.TargetTable);
-        var assignments = RewriteList(node.Assignments, a => (UpdateAssignment)Visit(a));
+        var assignments = RewriteNodes(node.Assignments);
         var where = node.Where != null ? (Expression)Visit(node.Where) : null;
 
         if (target == node.TargetTable && assignments == node.Assignments && where == node.Where)
@@ -156,7 +156,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
         var target = (NamedTableSource)Visit(node.Target);
         var source = (TableSource)Visit(node.Source);
         var on = (Expression)Visit(node.On);
-        var clauses = RewriteList(node.Clauses, c => (MergeClause)Visit(c));
+        var clauses = RewriteNodes(node.Clauses);
 
         if (target == node.Target && source == node.Source && on == node.On && clauses == node.Clauses)
             return node;
@@ -167,7 +167,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     public virtual SqlNode VisitMergeUpdateClause(MergeUpdateClause node)
     {
         var condition = node.Condition != null ? (Expression)Visit(node.Condition) : null;
-        var assignments = RewriteList(node.Assignments, a => (UpdateAssignment)Visit(a));
+        var assignments = RewriteNodes(node.Assignments);
         if (condition == node.Condition && assignments == node.Assignments) return node;
         return node with { Condition = condition, Assignments = assignments };
     }
@@ -181,14 +181,14 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     public virtual SqlNode VisitMergeInsertClause(MergeInsertClause node)
     {
         var condition = node.Condition != null ? (Expression)Visit(node.Condition) : null;
-        var values = RewriteList(node.Values, v => (Expression)Visit(v));
+        var values = RewriteNodes(node.Values);
         if (condition == node.Condition && values == node.Values) return node;
         return node with { Condition = condition, Values = values };
     }
 
     public virtual SqlNode VisitQuerySpecification(QuerySpecification node)
     {
-        var projections = RewriteList(node.Projections, p => (SelectItem)Visit(p));
+        var projections = RewriteNodes(node.Projections);
         var from = node.From != null ? (TableSource)Visit(node.From) : null;
         var where = node.Where != null ? (Expression)Visit(node.Where) : null;
         var groupBy = node.GroupBy != null ? (GroupByClause)Visit(node.GroupBy) : null;
@@ -213,7 +213,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 
     public virtual SqlNode VisitValuesQueryBody(ValuesQueryBody node)
     {
-        var rows = RewriteList(node.Rows, r => (RowValueExpression)Visit(r));
+        var rows = RewriteNodes(node.Rows);
         if (rows == node.Rows) return node;
         return node with { Rows = rows };
     }
@@ -245,7 +245,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 
     public virtual SqlNode VisitWithClause(WithClause node)
     {
-        var ctes = RewriteList(node.Ctes, c => (CommonTableExpression)Visit(c));
+        var ctes = RewriteNodes(node.Ctes);
         if (ctes == node.Ctes) return node;
         return node with { Ctes = ctes };
     }
@@ -253,7 +253,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     public virtual SqlNode VisitCommonTableExpression(CommonTableExpression node)
     {
         var name = (SqlIdentifier)Visit(node.Name);
-        var aliases = node.ColumnAliases != null ? RewriteList(node.ColumnAliases, id => (SqlIdentifier)Visit(id)) : null;
+        var aliases = node.ColumnAliases != null ? RewriteNodes(node.ColumnAliases) : null;
         var query = (SelectStatement)Visit(node.Query);
 
         if (name == node.Name && aliases == node.ColumnAliases && query == node.Query)
@@ -277,7 +277,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     {
         var subquery = (SelectStatement)Visit(node.Subquery);
         var alias = (SqlIdentifier)Visit(node.Alias);
-        var colAliases = node.ColumnAliases != null ? RewriteList(node.ColumnAliases, id => (SqlIdentifier)Visit(id)) : null;
+        var colAliases = node.ColumnAliases != null ? RewriteNodes(node.ColumnAliases) : null;
 
         if (subquery == node.Subquery && alias == node.Alias && colAliases == node.ColumnAliases)
             return node;
@@ -301,7 +301,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     {
         var subquery = (SelectStatement)Visit(node.Subquery);
         var alias = (SqlIdentifier)Visit(node.Alias);
-        var colAliases = node.ColumnAliases != null ? RewriteList(node.ColumnAliases, id => (SqlIdentifier)Visit(id)) : null;
+        var colAliases = node.ColumnAliases != null ? RewriteNodes(node.ColumnAliases) : null;
 
         if (subquery == node.Subquery && alias == node.Alias && colAliases == node.ColumnAliases)
             return node;
@@ -318,7 +318,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 
     public virtual SqlNode VisitUsingJoinCondition(UsingJoinCondition node)
     {
-        var cols = RewriteList(node.Columns, id => (SqlIdentifier)Visit(id));
+        var cols = RewriteNodes(node.Columns);
         if (cols == node.Columns) return node;
         return node with { Columns = cols };
     }
@@ -374,7 +374,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     public virtual SqlNode VisitInListExpression(InListExpression node)
     {
         var operand = (Expression)Visit(node.Operand);
-        var items = RewriteList(node.Items, i => (Expression)Visit(i));
+        var items = RewriteNodes(node.Items);
 
         if (operand == node.Operand && items == node.Items)
             return node;
@@ -444,7 +444,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     public virtual SqlNode VisitCaseExpression(CaseExpression node)
     {
         var operand = node.Operand != null ? (Expression)Visit(node.Operand) : null;
-        var whens = RewriteList(node.WhenClauses, w => (WhenClause)Visit(w));
+        var whens = RewriteNodes(node.WhenClauses);
         var elseResult = node.ElseResult != null ? (Expression)Visit(node.ElseResult) : null;
 
         if (operand == node.Operand && whens == node.WhenClauses && elseResult == node.ElseResult)
@@ -467,7 +467,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
     public virtual SqlNode VisitFunctionCallExpression(FunctionCallExpression node)
     {
         var name = (SqlQualifiedName)Visit(node.Name);
-        var args = RewriteList(node.Arguments, a => (Expression)Visit(a));
+        var args = RewriteNodes(node.Arguments);
         var win = node.Window != null ? (WindowSpecification)Visit(node.Window) : null;
         var filter = node.Filter != null ? (Expression)Visit(node.Filter) : null;
         var orderWithin = node.OrderWithin != null ? (OrderByClause)Visit(node.OrderWithin) : null;
@@ -480,7 +480,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 
     public virtual SqlNode VisitWindowSpecification(WindowSpecification node)
     {
-        var partBy = node.PartitionBy != null ? RewriteList(node.PartitionBy, p => (Expression)Visit(p)) : null;
+        var partBy = node.PartitionBy != null ? RewriteNodes(node.PartitionBy) : null;
         var ord = node.OrderBy != null ? (OrderByClause)Visit(node.OrderBy) : null;
 
         if (partBy == node.PartitionBy && ord == node.OrderBy)
@@ -498,14 +498,14 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 
     public virtual SqlNode VisitRowValueExpression(RowValueExpression node)
     {
-        var elements = RewriteList(node.Elements, e => (Expression)Visit(e));
+        var elements = RewriteNodes(node.Elements);
         if (elements == node.Elements) return node;
         return node with { Elements = elements };
     }
 
     public virtual SqlNode VisitArrayConstructorExpression(ArrayConstructorExpression node)
     {
-        var elements = RewriteList(node.Elements, e => (Expression)Visit(e));
+        var elements = RewriteNodes(node.Elements);
         if (elements == node.Elements) return node;
         return node with { Elements = elements };
     }
@@ -530,7 +530,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 
     public virtual SqlNode VisitOrderByClause(OrderByClause node)
     {
-        var elements = RewriteList(node.Elements, e => (OrderByElement)Visit(e));
+        var elements = RewriteNodes(node.Elements);
         if (elements == node.Elements) return node;
         return node with { Elements = elements };
     }
@@ -555,9 +555,9 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 
     public virtual SqlNode VisitGroupByClause(GroupByClause node)
     {
-        var exprs = RewriteList(node.GroupingExpressions, e => (Expression)Visit(e));
+        var exprs = RewriteNodes(node.GroupingExpressions);
         var advanced = node.AdvancedElements != null
-            ? RewriteList(node.AdvancedElements, el => el with { Sets = RewriteList(el.Sets, set => RewriteList(set, e => (Expression)Visit(e))) })
+            ? RewriteList(node.AdvancedElements, el => el with { Sets = RewriteList(el.Sets, set => RewriteNodes(set)) })
             : null;
         if (exprs == node.GroupingExpressions && advanced == node.AdvancedElements) return node;
         return node with { GroupingExpressions = exprs, AdvancedElements = advanced };
@@ -595,7 +595,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 
     public virtual SqlNode VisitGroupingOperation(GroupingOperationExpression node)
     {
-        var columns = RewriteList(node.Columns, c => (ColumnReference)Visit(c));
+        var columns = RewriteNodes(node.Columns);
         return columns == node.Columns ? node : node with { Columns = columns };
     }
 
@@ -614,9 +614,33 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 
     public virtual SqlNode VisitSqlQualifiedName(SqlQualifiedName node)
     {
-        var parts = RewriteList(node.Parts, id => (SqlIdentifier)Visit(id));
+        var parts = RewriteNodes(node.Parts);
         if (parts == node.Parts) return node;
         return new SqlQualifiedName(parts);
+    }
+
+    /// <summary>Visits every item with <see cref="Visit"/> (no delegate per call); returns the same list when nothing changed.</summary>
+    protected IReadOnlyList<T> RewriteNodes<T>(IReadOnlyList<T> list)
+        where T : SqlNode
+    {
+        List<T>? newList = null;
+        for (int i = 0; i < list.Count; i++)
+        {
+            var item = list[i];
+            var transformed = (T)Visit(item);
+            if (newList == null && !ReferenceEquals(item, transformed) && !EqualityComparer<T>.Default.Equals(item, transformed))
+            {
+                newList = new List<T>(list.Count);
+                for (int j = 0; j < i; j++)
+                {
+                    newList.Add(list[j]);
+                }
+            }
+
+            newList?.Add(transformed);
+        }
+
+        return newList != null ? newList.AsReadOnly() : list;
     }
 
     protected static IReadOnlyList<T> RewriteList<T>(IReadOnlyList<T> list, Func<T, T> visitItem)

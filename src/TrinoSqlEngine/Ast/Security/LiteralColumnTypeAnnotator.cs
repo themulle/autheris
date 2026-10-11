@@ -116,14 +116,33 @@ internal sealed class LiteralColumnTypeAnnotator(ITableCatalog catalog) : SqlAst
 
         if (parts.Count >= 2)
         {
-            var matches = sources.Where(s => string.Equals(s.Key, parts[^2].Value, StringComparison.OrdinalIgnoreCase)).Take(2).ToList();
-            return matches.Count == 1 && matches[0].Entry is { } qualified ? Lookup(qualified, name) : (false, null);
+            // Exactly one source with this alias, and it is a catalog table.
+            string qualifier = parts[^2].Value;
+            TableCatalogEntry? only = null;
+            int found = 0;
+            for (int i = 0; i < sources.Count; i++)
+            {
+                var source = sources[i];
+                if (!string.Equals(source.Key, qualifier, StringComparison.OrdinalIgnoreCase)) continue;
+                if (++found > 1) break;
+                only = source.Entry;
+            }
+
+            return found == 1 && only is { } qualified ? Lookup(qualified, name) : (false, null);
         }
 
         // Unqualified: only decidable when every source is a catalog table and exactly one of them has the column.
-        if (sources.Any(s => s.Entry is null)) return (false, null);
-        var owners = sources.Where(s => HasColumn(s.Entry!, name)).Take(2).ToList();
-        return owners.Count == 1 ? Lookup(owners[0].Entry!, name) : (false, null);
+        TableCatalogEntry? owner = null;
+        int owners = 0;
+        for (int i = 0; i < sources.Count; i++)
+        {
+            var source = sources[i];
+            if (source.Entry is null) return (false, null);
+            if (!HasColumn(source.Entry, name)) continue;
+            if (++owners == 1) owner = source.Entry;
+        }
+
+        return owners == 1 ? Lookup(owner!, name) : (false, null);
     }
 
     private static bool HasColumn(TableCatalogEntry entry, string name) =>

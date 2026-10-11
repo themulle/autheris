@@ -89,7 +89,9 @@ public static class DialectCapabilityValidator
     {
         try
         {
-            int deepest = DeepestExpression(statement, 0);
+            var deepestSeen = new DepthHolder();
+            DeepestExpression(statement, 0, deepestSeen);
+            int deepest = deepestSeen.Value;
             if (deepest > maxDepth)
             {
                 throw new SqlLimitExceededException(SqlLimitKind.ExpressionDepth, dialect, deepest, maxDepth);
@@ -101,14 +103,18 @@ public static class DialectCapabilityValidator
         }
     }
 
-    private static int DeepestExpression(object? node, int depth)
+    private sealed class DepthHolder
     {
-        if (node is null or string) return depth;
+        public int Value { get; set; }
+    }
+
+    private static void DeepestExpression(object? node, int depth, DepthHolder seen)
+    {
+        if (node is null or string) return;
         RuntimeHelpers.EnsureSufficientExecutionStack();
         if (node is Expression) depth++;
-        int deepest = depth;
-        AstReflection.Children(node, child => deepest = Math.Max(deepest, DeepestExpression(child, depth)));
-        return deepest;
+        if (depth > seen.Value) seen.Value = depth;
+        AstReflection.Children(node, (depth, seen), static (child, state) => DeepestExpression(child, state.depth, state.seen));
     }
 
     private static void ValidateSingleClauseMerge(MergeStatement merge)

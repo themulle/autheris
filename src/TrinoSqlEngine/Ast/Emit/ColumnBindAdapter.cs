@@ -88,9 +88,16 @@ public static class ColumnBindAdapter
         }
     }
 
+    private static readonly TrinoSqlEngine.Ast.BoundedMemo<(ColumnTypeClass Class, int Length)> ParseMemo = new();
+
     private static (ColumnTypeClass Class, int Length) Parse(string? dataType)
     {
         if (string.IsNullOrWhiteSpace(dataType)) return (ColumnTypeClass.Unknown, 0);
+        return ParseMemo.GetOrCompute(dataType, static t => ParseCore(t));
+    }
+
+    private static (ColumnTypeClass Class, int Length) ParseCore(string dataType)
+    {
         var match = TypeRegex.Match(dataType);
         if (!match.Success) return (ColumnTypeClass.Unknown, 0);
 

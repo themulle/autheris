@@ -25,7 +25,11 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     private static readonly Regex TypeNameParts = new(@"^(?<name>[a-z][a-z0-9_]*(?: [a-z][a-z0-9_]*)*?)(?<args>\([0-9, ]+\))?(?<tz> with time zone)?$", RegexOptions.CultureInvariant);
 
-    protected static TrinoType ParseTypeName(string type)
+    private static readonly TrinoSqlEngine.Ast.BoundedMemo<TrinoType> TypeNameMemo = new();
+
+    protected static TrinoType ParseTypeName(string type) => TypeNameMemo.GetOrCompute(type, static t => ParseTypeNameCore(t));
+
+    private static TrinoType ParseTypeNameCore(string type)
     {
         // SQL-3: only plain tokens reach the target database.
         string normalized = TrinoSqlEngine.Ast.SqlSafeTokens.EnsureTypeName(type);

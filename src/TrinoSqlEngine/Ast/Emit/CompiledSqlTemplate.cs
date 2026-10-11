@@ -43,15 +43,26 @@ public sealed record CompiledSqlTemplate(
         new(
             keyMaterial,
             compiled.Sql,
-            compiled.Parameters.Select(p => new SqlSlot(
-                p.Marker, p.Name, p.Ordinal, p.Type, p.Origin, p.SourceName,
-                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null, p.ColumnType)).ToImmutableArray(),
+            ToSlots(compiled.Parameters),
             compiled.Dialect,
             compiled.StatementClass,
             compiled.AppliedPredicates,
             compiled.CompilerVersion,
             dependencies,
             compiled.ExpectedAffectedRows);
+
+    private static ImmutableArray<SqlSlot> ToSlots(ImmutableArray<BoundParameter> parameters)
+    {
+        var slots = ImmutableArray.CreateBuilder<SqlSlot>(parameters.Length);
+        foreach (var p in parameters)
+        {
+            slots.Add(new SqlSlot(
+                p.Marker, p.Name, p.Ordinal, p.Type, p.Origin, p.SourceName,
+                p.Origin == ParameterOrigin.QueryLiteral ? p.Value : null, p.ColumnType));
+        }
+
+        return slots.MoveToImmutable();
+    }
 
     /// <summary>Rebinds the slots with the values of the current request.</summary>
     public CompiledSql Rebind(IReadOnlyDictionary<string, PolicyValue> policyValues)
@@ -117,11 +128,39 @@ public sealed class CompiledSqlTemplateCache
         }
     }
 
-    public static string HashOf(string keyMaterial) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(keyMaterial)));
-
-    public CompiledSqlTemplate? Find(string keyMaterial)
+    public static string HashOf(string keyMaterial)
     {
-        string hash = HashOf(keyMaterial);   // outside the lock: the hash covers the whole key material (CR-ADG-12)
+        // G8: hash from a pooled/stack buffer instead of allocating the UTF-8 bytes of the whole key material.
+        int max = Encoding.UTF8.GetMaxByteCount(keyMaterial.Length);
+        Span<byte> digest = stackalloc byte[32];
+        if (max <= 1024)
+        {
+            Span<byte> small = stackalloc byte[max];
+            int n = Encoding.UTF8.GetBytes(keyMaterial, small);
+            SHA256.HashData(small[..n], digest);
+        }
+        else
+        {
+            byte[] rented = System.Buffers.ArrayPool<byte>.Shared.Rent(max);
+            try
+            {
+                int n = Encoding.UTF8.GetBytes(keyMaterial, rented);
+                SHA256.HashData(rented.AsSpan(0, n), digest);
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+
+        return Convert.ToHexString(digest);
+    }
+
+    public CompiledSqlTemplate? Find(string keyMaterial) => Find(keyMaterial, HashOf(keyMaterial));
+
+    /// <summary>Lookup with a hash the caller computed once (<see cref="HashOf"/>); the full key material is still compared on a hit.</summary>
+    public CompiledSqlTemplate? Find(string keyMaterial, string hash)
+    {
         lock (_gate)
         {
             if (_entries.TryGetValue(hash, out var t) && string.Equals(t.KeyMaterial, keyMaterial, StringComparison.Ordinal))
@@ -143,9 +182,10 @@ public sealed class CompiledSqlTemplateCache
         lock (_gate) { _misses++; }
     }
 
-    public void Add(CompiledSqlTemplate template)
+    public void Add(CompiledSqlTemplate template) => Add(template, HashOf(template.KeyMaterial));
+
+    public void Add(CompiledSqlTemplate template, string key)
     {
-        string key = HashOf(template.KeyMaterial);
         lock (_gate)
         {
             if (!_entries.ContainsKey(key)) _order.Enqueue(key);
@@ -174,7 +214,9 @@ public sealed class CompiledSqlTemplateCache
 public static class CompileCacheKey
 {
     // CR-ADG-12: reflection and sorting once per type, not on every compile.
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, PropertyInfo[]> OrderedProperties = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, KeyProperty[]> OrderedProperties = new();
+
+    private sealed record KeyProperty(string Name, Func<object, object?> Get);
 
     private static readonly HashSet<string> ValidatedPerTable = new(StringComparer.Ordinal)
     {
@@ -187,7 +229,8 @@ public static class CompileCacheKey
         ArgumentNullException.ThrowIfNull(rawSql);
         ArgumentNullException.ThrowIfNull(capabilities);
 
-        var sb = new StringBuilder(512);
+        var sb = _keyBuilder ??= new StringBuilder(4096);
+        sb.Clear();
 #if DEBUG
         if (CompilerTestSeams.Current?.OmittedCacheKeyFields?.Contains("Versions") != true)
 #endif
@@ -198,9 +241,21 @@ public static class CompileCacheKey
         Write(sb, request, skipValue: false);
         // CR-ADG-41: the engine's input limit is checked while parsing, which a cache hit skips; it is part of the key instead.
         sb.Append(";maxq=").Append(engineMaxQueryLength.ToString(CultureInfo.InvariantCulture));
-        sb.Append(";sql=").Append(rawSql.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(rawSql);
-        return sb.ToString();
+        sb.Append(";sql=").Append(rawSql.Length).Append(':').Append(rawSql);
+        string material = sb.ToString();
+        if (sb.Capacity > MaxRetainedBuilderCapacity)
+        {
+            _keyBuilder = null;   // do not pin a builder that a very large statement grew
+        }
+
+        return material;
     }
+
+    // One builder per thread: the key is built on every compile, hit or miss.
+    [ThreadStatic]
+    private static StringBuilder? _keyBuilder;
+
+    private const int MaxRetainedBuilderCapacity = 64 * 1024;
 
     private static void Write(StringBuilder sb, object? value, bool skipValue)
     {
@@ -210,9 +265,16 @@ public static class CompileCacheKey
                 sb.Append('~');
                 return;
             case string s:
-                sb.Append('"').Append(s.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(s).Append('"');
+                sb.Append('"').Append(s.Length).Append(':').Append(s).Append('"');
                 return;
-            case bool or Enum:
+            case bool flag:
+                sb.Append(flag ? "True" : "False");
+                return;
+            case Enum when Enum.GetUnderlyingType(value.GetType()) == typeof(int):
+                // The numeric value distinguishes the members as well as the name did; no string per member.
+                sb.Append(Convert.ToInt32(value, CultureInfo.InvariantCulture));
+                return;
+            case Enum:
                 sb.Append(Convert.ToString(value, CultureInfo.InvariantCulture));
                 return;
             case TimeSpan ts:
@@ -220,6 +282,9 @@ public static class CompileCacheKey
                 return;
             case IFormattable f when value.GetType().IsPrimitive:
                 sb.Append(f.ToString(null, CultureInfo.InvariantCulture));
+                return;
+            case IReadOnlyCollection<string> { Count: 0 }:
+                sb.Append("{}");
                 return;
             case IEnumerable<string> strings:
                 sb.Append('{');
@@ -243,6 +308,7 @@ public static class CompileCacheKey
                      t.GetProperties(BindingFlags.Public | BindingFlags.Instance)
                          .Where(p => p.GetIndexParameters().Length == 0)
                          .OrderBy(p => p.Name, StringComparer.Ordinal)
+                         .Select(p => new KeyProperty(p.Name, TrinoSqlEngine.Ast.Security.PropertyGetters.Create(p)))
                          .ToArray()))
         {
             if (value is GovernancePolicy && ValidatedPerTable.Contains(property.Name)) continue;
@@ -250,7 +316,7 @@ public static class CompileCacheKey
             if (value is CompileRequest && CompilerTestSeams.Current?.OmittedCacheKeyFields?.Contains(property.Name) == true) continue;
 #endif
             sb.Append(property.Name).Append('=');
-            Write(sb, property.GetValue(value), false);
+            Write(sb, property.Get(value), false);
             sb.Append(',');
         }
 

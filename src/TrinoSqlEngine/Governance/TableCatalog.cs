@@ -95,7 +95,13 @@ public sealed class InMemoryTableCatalog : ITableCatalog
                 return null;
         }
 
-        if (!_bySchemaTable.TryGetValue(Key(schema, table), out var candidates))
+        // Same key as Key(schema, table), built in a stack buffer: no three strings per lookup (one lookup per table reference).
+        int keyLength = schema.Length + 1 + table.Length;
+        Span<char> keyBuffer = keyLength <= 256 ? stackalloc char[keyLength] : new char[keyLength];
+        schema.AsSpan().ToLowerInvariant(keyBuffer);
+        keyBuffer[schema.Length] = '\u0001';
+        table.AsSpan().ToLowerInvariant(keyBuffer[(schema.Length + 1)..]);
+        if (!_bySchemaTable.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(keyBuffer, out var candidates))
         {
             return null;
         }

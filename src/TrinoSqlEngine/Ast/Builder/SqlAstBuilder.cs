@@ -84,25 +84,46 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         return (Expression)Visit(context.expression());
     }
 
+    // The depth check walks the whole tree once per compile; the work stack is reused per thread instead of growing a new one each time.
+    [ThreadStatic]
+    private static Stack<(IParseTree Node, int Depth)>? _depthStack;
+
+    private const int MaxRetainedDepthStack = 4096;
+
     private static void EnsureParseTreeDepthWithinLimit(IParseTree root, int maxDepth)
     {
         if (maxDepth <= 0) return;
-        var stack = new Stack<(IParseTree node, int depth)>();
-        stack.Push((root, 1));
-        while (stack.Count > 0)
+        var stack = _depthStack ??= new Stack<(IParseTree Node, int Depth)>(256);
+        stack.Clear();
+        int peak = 0;
+        try
         {
-            var (node, depth) = stack.Pop();
-            if (depth > maxDepth)
+            stack.Push((root, 1));
+            while (stack.Count > 0)
             {
-                throw new SecurityException($"SQL parse tree depth exceeds the maximum allowed limit of {maxDepth}.");
-            }
-            for (int i = 0; i < node.ChildCount; i++)
-            {
-                var child = node.GetChild(i);
-                if (child.ChildCount > 0)
+                peak = Math.Max(peak, stack.Count);
+                var (node, depth) = stack.Pop();
+                if (depth > maxDepth)
                 {
-                    stack.Push((child, depth + 1));
+                    throw new SecurityException($"SQL parse tree depth exceeds the maximum allowed limit of {maxDepth}.");
                 }
+
+                for (int i = 0; i < node.ChildCount; i++)
+                {
+                    var child = node.GetChild(i);
+                    if (child.ChildCount > 0)
+                    {
+                        stack.Push((child, depth + 1));
+                    }
+                }
+            }
+        }
+        finally
+        {
+            stack.Clear();
+            if (peak > MaxRetainedDepthStack)
+            {
+                _depthStack = null;
             }
         }
     }
@@ -988,6 +1009,18 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitDereference(SqlBaseParser.DereferenceContext context)
     {
         using var _ = EnterScope();
+
+        // Fast path for the common "alias.column": build the two-part name directly instead of a one-part ColumnReference that is
+        // immediately copied into a longer list (same node as the generic path below).
+        if (context.baseExpression is SqlBaseParser.ColumnReferenceContext columnBase)
+        {
+            var baseId = ToSqlIdentifier(columnBase.identifier());
+            if (baseId.IsQuoted || !baseId.Value.StartsWith("__param_", StringComparison.OrdinalIgnoreCase))
+            {
+                return new ColumnReference(new SqlQualifiedName(new[] { baseId, ToSqlIdentifier(context.fieldName) }));
+            }
+        }
+
         var baseExpr = (Expression)Visit(context.baseExpression);
         var field = ToSqlIdentifier(context.fieldName);
 
@@ -1015,7 +1048,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             case SqlBaseParser.NumericLiteralContext num:
                 {
-                    string text = num.GetText();
+                    string text = SingleTokenText(num);
                     if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long intVal))
                     {
                         return new LiteralExpression(intVal, LiteralType.Integer);
@@ -1028,7 +1061,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
                 }
             case SqlBaseParser.StringLiteralContext str:
                 {
-                    string unquoted = SqlIdentifierHelper.UnquoteStringLiteral(str.GetText());
+                    string unquoted = SqlIdentifierHelper.UnquoteStringLiteral(SingleTokenText(str));
                     return new LiteralExpression(unquoted, LiteralType.String);
                 }
             case SqlBaseParser.BooleanLiteralContext boolLit:
@@ -1386,9 +1419,16 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         return new ExtractExpression(field, source);
     }
 
+    /// <summary>
+    /// The text of a rule that is a single token (every <c>identifier</c> alternative): the token text itself, without the
+    /// <c>StringBuilder</c> walk of <c>RuleContext.GetText()</c>. Anything else falls back to <c>GetText()</c>.
+    /// </summary>
+    private static string SingleTokenText(ParserRuleContext context) =>
+        context.Start is { } start && ReferenceEquals(start, context.Stop) ? start.Text : context.GetText();
+
     private static SqlIdentifier ToSqlIdentifier(SqlBaseParser.IdentifierContext context)
     {
-        string text = context.GetText();
+        string text = SingleTokenText(context);
         bool isQuoted = IsQuotedIdentifier(text);
         string normalized = UnquoteIdentifier(text, isQuoted);
         return new SqlIdentifier(normalized, isQuoted);

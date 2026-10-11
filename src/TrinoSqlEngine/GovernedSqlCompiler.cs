@@ -146,7 +146,8 @@ internal sealed class GovernedSqlCompiler
         var guards = EffectiveDmlGuards(policy.Dml);
         var typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards };
 
-        var template = _cache.Find(keyMaterial);
+        string keyHash = CompiledSqlTemplateCache.HashOf(keyMaterial);
+        var template = _cache.Find(keyMaterial, keyHash);
         if (template is not null && TryRehydrate(template, typed))
         {
             _cache.CountHit();
@@ -233,7 +234,7 @@ internal sealed class GovernedSqlCompiler
         CheckBudget(request, clock, token);
 
         // 11. only verified output is cached, value-free
-        _cache.Add(CompiledSqlTemplate.From(keyMaterial, compiled, typed.Dependencies));
+        _cache.Add(CompiledSqlTemplate.From(keyMaterial, compiled, typed.Dependencies), keyHash);
         return compiled;
     }
 
@@ -340,8 +341,26 @@ internal sealed class GovernedSqlCompiler
         };
     }
 
-    private static SqlQualifiedName ParseName(string normalized) =>
-        new(normalized.Split('.').Select(p => new SqlIdentifier(p)).ToList());
+    private static SqlQualifiedName ParseName(string normalized)
+    {
+        int parts = 1;
+        foreach (char c in normalized)
+        {
+            if (c == '.') parts++;
+        }
+
+        // The same parts as normalized.Split('.'), without the intermediate array, iterator and list.
+        var identifiers = new SqlIdentifier[parts];
+        int start = 0;
+        for (int i = 0; i < parts; i++)
+        {
+            int end = i == parts - 1 ? normalized.Length : normalized.IndexOf('.', start);
+            identifiers[i] = new SqlIdentifier(normalized.Substring(start, end - start));
+            start = end + 1;
+        }
+
+        return new SqlQualifiedName(identifiers);
+    }
 
     private sealed class UnusedPolicyProvider : IRlsPolicyProvider
     {
@@ -354,6 +373,7 @@ internal sealed class GovernedSqlCompiler
     {
         private readonly ITableCatalog _catalog;
         private readonly IColumnMaskProvider _masks;
+        private Dictionary<string, SqlQualifiedName>? _names;   // one guard per compile: parsed table names are reused for every column check
 
         public CatalogMaskGuard(ITableCatalog catalog, IColumnMaskProvider masks)
         {
@@ -363,7 +383,14 @@ internal sealed class GovernedSqlCompiler
 
         public bool HasMask(string tableName, string columnName)
         {
-            var entry = _catalog.Resolve(ParseName(tableName));
+            _names ??= new Dictionary<string, SqlQualifiedName>(StringComparer.Ordinal);
+            if (!_names.TryGetValue(tableName, out var name))
+            {
+                name = ParseName(tableName);
+                _names[tableName] = name;
+            }
+
+            var entry = _catalog.Resolve(name);
             return entry is not null && _masks.HasMask(entry.Identity, columnName);
         }
 

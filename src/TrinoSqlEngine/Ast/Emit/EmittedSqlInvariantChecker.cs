@@ -69,6 +69,7 @@ public static class EmittedSqlInvariantChecker
         Array.Sort(sorted, static (a, b) => a.Start.CompareTo(b.Start));
 
         var markersInText = new HashSet<string>(StringComparer.Ordinal);
+        var markerLookup = markersInText.GetAlternateLookup<ReadOnlySpan<char>>();   // no substring for a marker that was seen already
         int i = 0;
         while (i < sql.Length)
         {
@@ -87,7 +88,12 @@ public static class EmittedSqlInvariantChecker
 
             if (TryReadMarker(sql, i, style, out int markerEnd))
             {
-                markersInText.Add(sql.Substring(i, markerEnd - i));
+                var markerSpan = sql.AsSpan(i, markerEnd - i);
+                if (!markerLookup.Contains(markerSpan))
+                {
+                    markersInText.Add(markerSpan.ToString());
+                }
+
                 i = markerEnd;
                 continue;
             }

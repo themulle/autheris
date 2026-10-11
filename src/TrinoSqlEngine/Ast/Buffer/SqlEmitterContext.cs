@@ -29,7 +29,7 @@ public sealed class SqlEmitterContext
         @"\A(p[0-9]|__|gql_|autheris)", RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
 
     private readonly List<BoundParameter>? _bound;
-    private readonly Dictionary<string, int>? _dedup;
+    private readonly Dictionary<DedupKey, int>? _dedup;
     private readonly List<EmittedRange>? _ranges;
     private int _ticks;
 
@@ -64,9 +64,9 @@ public sealed class SqlEmitterContext
         Capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
         Values = values ?? throw new ArgumentNullException(nameof(values));
         CancellationToken = cancellationToken;
-        _bound = new List<BoundParameter>();
-        _dedup = new Dictionary<string, int>(StringComparer.Ordinal); // default randomized comparer (SEC-ADG-05)
-        _ranges = new List<EmittedRange>();
+        _bound = new List<BoundParameter>(8);
+        _dedup = new Dictionary<DedupKey, int>(8); // string fields hash with the randomized default string comparer (SEC-ADG-05)
+        _ranges = new List<EmittedRange>(4);
     }
 
     public ImmutableArray<BoundParameter> Parameters => _bound is null ? ImmutableArray<BoundParameter>.Empty : _bound.ToImmutableArray();
@@ -98,8 +98,23 @@ public sealed class SqlEmitterContext
         _ranges?.Add(new EmittedRange(start, 1, EmittedRangeKind.StatementTerminator));
 
     /// <summary>Binds a value (deduplicated by type, origin and value) and returns its marker.</summary>
-    public string BindValue(object? value, SqlParameterType type, ParameterOrigin origin, string? columnType = null) =>
-        Bind($"{(int)type}|{(int)origin}|{columnType}|{ValueKey(value)}", value, type, origin, null, columnType);
+    public string BindValue(object? value, SqlParameterType type, ParameterOrigin origin, string? columnType = null)
+    {
+        // The identity of a value is its CLR type plus a lossless value text (see ValueKey). Integers, the common literal, are keyed by
+        // their number: no key string per literal.
+        var key = value switch
+        {
+            long l => new DedupKey(DedupKind.Int64, (int)type, (int)origin, null, columnType, l, null),
+            int n => new DedupKey(DedupKind.Int32, (int)type, (int)origin, null, columnType, n, null),
+            _ => new DedupKey(DedupKind.Value, (int)type, (int)origin, null, columnType, 0, ValueKey(value))
+        };
+        return Bind(key, value, type, origin, null, columnType);
+    }
+
+    private enum DedupKind { Value, Int64, Int32, Policy, PolicyLike, Client }
+
+    /// <summary>Identity of one bound value: a struct instead of a concatenated string (compared by every field, ordinal).</summary>
+    private readonly record struct DedupKey(DedupKind Kind, int Type, int Origin, string? Name, string? ColumnType, long Number, string? Text);
 
     /// <summary>Binds a gateway value for a policy parameter node; the value comes from the <see cref="ParameterSource"/>.</summary>
     public string BindPolicy(PolicyParameterExpression parameter, bool escapeLikePattern = false)
@@ -119,11 +134,11 @@ public sealed class SqlEmitterContext
                 throw new SecurityException("A LIKE pattern parameter must be a string.");
             }
 
-            return Bind($"PL|{parameter.Name}|{parameter.ColumnType}", EscapeLike(text), policyValue.Type, parameter.Origin, parameter.Name, parameter.ColumnType);
+            return Bind(new DedupKey(DedupKind.PolicyLike, 0, 0, parameter.Name, parameter.ColumnType, 0, null), EscapeLike(text), policyValue.Type, parameter.Origin, parameter.Name, parameter.ColumnType);
         }
 
         // The compared column's type is part of the identity: one tenant value is bound once per distinct column type.
-        return Bind($"P|{parameter.Name}|{parameter.ColumnType}", policyValue.Value, policyValue.Type, parameter.Origin, parameter.Name, parameter.ColumnType);
+        return Bind(new DedupKey(DedupKind.Policy, 0, 0, parameter.Name, parameter.ColumnType, 0, null), policyValue.Value, policyValue.Type, parameter.Origin, parameter.Name, parameter.ColumnType);
     }
 
     private static string EscapeLike(string text)
@@ -152,10 +167,10 @@ public sealed class SqlEmitterContext
             throw new SecurityException("The client parameter name is invalid or uses a reserved prefix.");
         }
 
-        return Bind($"C|{parameter.Name}", null, SqlParameterType.String, ParameterOrigin.ClientNamed, parameter.Name);
+        return Bind(new DedupKey(DedupKind.Client, 0, 0, parameter.Name, null, 0, null), null, SqlParameterType.String, ParameterOrigin.ClientNamed, parameter.Name);
     }
 
-    private string Bind(string key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName, string? columnType = null)
+    private string Bind(DedupKey key, object? value, SqlParameterType type, ParameterOrigin origin, string? sourceName, string? columnType = null)
     {
         if (_bound is null || _dedup is null || Capabilities is null)
         {
@@ -173,18 +188,50 @@ public sealed class SqlEmitterContext
             throw new SqlLimitExceededException(SqlLimitKind.BindParameters, Dialect, ordinal + 1, MaxParameterBudget);
         }
 
-        string marker = FormatMarker(Capabilities.MarkerStyle, ordinal);
-        string name = Capabilities.MarkerStyle switch
-        {
-            ParameterMarkerStyle.AtNamedOrdinal => marker,
-            ParameterMarkerStyle.DollarOrdinal => marker.TrimStart('$'),
-            ParameterMarkerStyle.QuestionOrdinal => marker.TrimStart('?'),
-            _ => marker.TrimStart(':')
-        };
+        var (marker, name) = MarkerAndName(Capabilities.MarkerStyle, ordinal);
         _bound.Add(new BoundParameter(marker, name, ordinal, value, type, origin, sourceName, columnType));
         _dedup[key] = ordinal;
         ParameterCount = _bound.Count;
         return marker;
+    }
+
+    // G8: markers and names are a pure function of (style, ordinal); the first 256 ordinals of every style are formatted once per process.
+    private const int CachedMarkerOrdinals = 256;
+    private static readonly MarkerPair?[][] MarkerCache = new MarkerPair?[6][];
+
+    // A class (not a tuple) so that a racing writer can never expose a torn value: a reference write is atomic.
+    private sealed record MarkerPair(string Marker, string Name);
+
+    private static (string Marker, string Name) MarkerAndName(ParameterMarkerStyle style, int ordinal)
+    {
+        if ((uint)ordinal < CachedMarkerOrdinals && (int)style is >= 0 and < 6)
+        {
+            var perStyle = MarkerCache[(int)style] ??= new MarkerPair?[CachedMarkerOrdinals];
+            var known = perStyle[ordinal];
+            if (known is null)
+            {
+                var (m, n) = Compute(style, ordinal);
+                known = new MarkerPair(m, n);
+                perStyle[ordinal] = known;   // a racing writer stores an equal value
+            }
+
+            return (known.Marker, known.Name);
+        }
+
+        return Compute(style, ordinal);
+
+        static (string, string) Compute(ParameterMarkerStyle style, int ordinal)
+        {
+            string marker = FormatMarker(style, ordinal);
+            string name = style switch
+            {
+                ParameterMarkerStyle.AtNamedOrdinal => marker,
+                ParameterMarkerStyle.DollarOrdinal => marker.TrimStart('$'),
+                ParameterMarkerStyle.QuestionOrdinal => marker.TrimStart('?'),
+                _ => marker.TrimStart(':')
+            };
+            return (marker, name);
+        }
     }
 
     private static string FormatMarker(ParameterMarkerStyle style, int ordinal) => style switch

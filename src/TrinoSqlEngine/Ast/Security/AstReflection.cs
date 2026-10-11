@@ -24,6 +24,20 @@ internal static class AstReflection
         Array.FindAll(t.GetProperties(BindingFlags.Public | BindingFlags.Instance), static p =>
             p.GetIndexParameters().Length == 0 && p.GetMethod != null));
 
+    /// <summary>One readable property of an AST type: a typed getter delegate (no <c>PropertyInfo.GetValue</c> reflection call per read).</summary>
+    private sealed record Accessor(string Name, Func<object, object?> Get, bool Descend);
+
+    private static readonly ConcurrentDictionary<Type, Accessor[]> Accessors = new();
+
+    // Property order, filter and values are exactly those of PropertiesOf/GetValue; only the way a value is read changes.
+    private static Accessor[] AccessorsOf(Type type) => Accessors.GetOrAdd(type, static t =>
+        Array.ConvertAll(PropertiesOf(t), static p => new Accessor(
+            p.Name,
+            MakeGetter(p),
+            Descend: !(p.PropertyType.IsPrimitive || p.PropertyType.IsEnum || p.PropertyType == typeof(string)))));
+
+    private static Func<object, object?> MakeGetter(PropertyInfo property) => PropertyGetters.Create(property);
+
     /// <summary>Structural equality of two AST values (records, lists, primitives); list elements are compared in order.</summary>
     public static bool StructurallyEqual(object? a, object? b)
     {
@@ -43,11 +57,11 @@ internal static class AstReflection
             return !right.MoveNext();
         }
 
-        var properties = PropertiesOf(type);
+        var properties = AccessorsOf(type);
         if (properties.Length == 0) return a.Equals(b);
         foreach (var property in properties)
         {
-            if (!StructurallyEqual(property.GetValue(a), property.GetValue(b))) return false;
+            if (!StructurallyEqual(property.Get(a), property.Get(b))) return false;
         }
 
         return true;
@@ -70,6 +84,12 @@ internal static class AstReflection
         if (node is null || node is string) return;
         ExecutionStackGuard.Ensure();
 
+        if (node is IList indexed)
+        {
+            for (int i = 0; i < indexed.Count; i++) Walk(indexed[i], visit);
+            return;
+        }
+
         if (node is IEnumerable list)
         {
             foreach (var item in list) Walk(item, visit);
@@ -82,11 +102,36 @@ internal static class AstReflection
         }
 
         if (!visit(node)) return;
-        foreach (var property in PropertiesOf(node.GetType()))
+        foreach (var property in AccessorsOf(node.GetType()))
         {
-            var type = property.PropertyType;
-            if (type.IsPrimitive || type.IsEnum || type == typeof(string)) continue;
-            Walk(property.GetValue(node), visit);
+            if (!property.Descend) continue;
+            Walk(property.Get(node), visit);
+        }
+    }
+
+    /// <summary>
+    /// <see cref="Children(object, Action{object})"/> with a caller state, so a <c>static</c> lambda can be used and no closure is
+    /// allocated per visited node.
+    /// </summary>
+    public static void Children<TState>(object node, TState state, Action<object, TState> visit)
+    {
+        if (node is IList indexed && node is not string)
+        {
+            for (int i = 0; i < indexed.Count; i++) if (indexed[i] is { } item) visit(item, state);
+            return;
+        }
+
+        if (node is IEnumerable list && node is not string)
+        {
+            foreach (var item in list) if (item is not null) visit(item, state);
+            return;
+        }
+
+        if (node is not SqlNode) return;
+        foreach (var property in AccessorsOf(node.GetType()))
+        {
+            if (!property.Descend) continue;
+            if (property.Get(node) is { } value) visit(value, state);
         }
     }
 
@@ -100,11 +145,10 @@ internal static class AstReflection
         }
 
         if (node is not SqlNode) return;
-        foreach (var property in PropertiesOf(node.GetType()))
+        foreach (var property in AccessorsOf(node.GetType()))
         {
-            var type = property.PropertyType;
-            if (type.IsPrimitive || type.IsEnum || type == typeof(string)) continue;
-            if (property.GetValue(node) is { } value) visit(value);
+            if (!property.Descend) continue;
+            if (property.Get(node) is { } value) visit(value);
         }
     }
 
@@ -120,6 +164,12 @@ internal static class AstReflection
     {
         if (node is null || node is string) return;
         ExecutionStackGuard.Ensure();
+        if (node is IList indexed)
+        {
+            for (int i = 0; i < indexed.Count; i++) Referenced(indexed[i], insideSubquery, columns);
+            return;
+        }
+
         if (node is IEnumerable list)
         {
             foreach (var item in list) Referenced(item, insideSubquery, columns);
@@ -143,11 +193,10 @@ internal static class AstReflection
         }
 
         bool nowInside = insideSubquery || node is SelectStatement;
-        foreach (var property in PropertiesOf(node.GetType()))
+        foreach (var property in AccessorsOf(node.GetType()))
         {
-            var type = property.PropertyType;
-            if (type.IsPrimitive || type.IsEnum || type == typeof(string)) continue;
-            Referenced(property.GetValue(node), nowInside, columns);
+            if (!property.Descend) continue;
+            Referenced(property.Get(node), nowInside, columns);
         }
     }
 
@@ -194,10 +243,10 @@ internal static class AstReflection
 
         var type = value.GetType();
         sb.Append(type.Name).Append('{');
-        foreach (var property in PropertiesOf(type))
+        foreach (var property in AccessorsOf(type))
         {
             sb.Append(property.Name).Append('=');
-            Serialize(property.GetValue(value), sb);
+            Serialize(property.Get(value), sb);
         }
 
         sb.Append('}');
@@ -211,5 +260,41 @@ public static class AstFingerprint
     {
         ArgumentNullException.ThrowIfNull(node);
         return AstReflection.Fingerprint(node);
+    }
+}
+
+
+/// <summary>
+/// Typed getter delegates for public properties (instead of <c>PropertyInfo.GetValue</c> on every read). A <c>bool</c> result reuses two
+/// shared boxes; other value types are boxed per read, exactly like <c>GetValue</c> does.
+/// </summary>
+internal static class PropertyGetters
+{
+    private static readonly object True = true;
+    private static readonly object False = false;
+
+    public static Func<object, object?> Create(PropertyInfo property)
+    {
+        if (property.DeclaringType!.IsValueType)
+        {
+            return property.GetValue;   // an open instance delegate over a struct getter needs a by-ref receiver; structs stay on reflection
+        }
+
+        var adapt = typeof(PropertyGetters).GetMethod(nameof(Adapt), BindingFlags.NonPublic | BindingFlags.Static)!
+            .MakeGenericMethod(property.DeclaringType!, property.PropertyType);
+        return (Func<object, object?>)adapt.Invoke(null, [property.GetMethod!])!;
+    }
+
+    private static Func<object, object?> Adapt<TTarget, TValue>(MethodInfo getter)
+        where TTarget : class
+    {
+        var typed = (Func<TTarget, TValue>)Delegate.CreateDelegate(typeof(Func<TTarget, TValue>), getter);
+        if (typeof(TValue) == typeof(bool))
+        {
+            var flag = (Func<TTarget, bool>)(object)typed;
+            return target => flag((TTarget)target) ? True : False;
+        }
+
+        return target => typed((TTarget)target);
     }
 }

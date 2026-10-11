@@ -26,6 +26,10 @@ public sealed class TypedPolicyContext
     private readonly Dictionary<string, PolicyValue> _values = new(StringComparer.Ordinal);
     private readonly List<TableDependency> _dependencies = new();
 
+    // G8: one compile references the same table several times; the fingerprint is computed once per catalog entry instance and compile.
+    // The context lives for one compile only, so nothing request dependent outlives it (SEC-ADG-01).
+    private Dictionary<TableCatalogEntry, string>? _fingerprints;
+
     public TypedPolicyContext(
         ITableCatalog catalog,
         IPolicyPredicateProvider rowFilters,
@@ -117,21 +121,35 @@ public sealed class TypedPolicyContext
     /// <summary>Fingerprint of everything that decides how <paramref name="entry"/> is injected: catalog entry, policy, masks.</summary>
     public string Fingerprint(TableCatalogEntry entry)
     {
+        _fingerprints ??= new Dictionary<TableCatalogEntry, string>(ReferenceEqualityComparer.Instance);
+        if (!_fingerprints.TryGetValue(entry, out string? known))
+        {
+            known = ComputeFingerprint(entry);
+            _fingerprints[entry] = known;
+        }
+
+        return known;
+    }
+
+    private string ComputeFingerprint(TableCatalogEntry entry)
+    {
         var id = entry.Identity;
         bool applies = RowFilters.ShouldApplyPolicy(id);
         string predicate = applies ? RowFilters.GetPredicate(id).Fingerprint : "-";
-        var masks = entry.Columns
-            .Where(c => Masks.HasMask(id, c.Name))
-            .Select(c =>
-            {
-                var spec = GetMaskSpec(id, c.Name);
-                return $"{c.Name}:{spec.Kind}:{AstReflection.FingerprintMemoized(spec.Arguments)}";
-            })
-            .ToList();
-        return AstReflection.Fingerprint(new object[]
+
+        // The mask part is a list of strings only for a table that has masks; the common table without masks needs no list.
+        List<string>? masks = null;
+        foreach (var column in entry.Columns)
         {
-            AstReflection.FingerprintMemoized(entry), applies, predicate, masks.Count == 0 ? "-" : AstReflection.Fingerprint(masks)
-        });
+            if (!Masks.HasMask(id, column.Name)) continue;
+            var spec = GetMaskSpec(id, column.Name);
+            (masks ??= new List<string>()).Add($"{column.Name}:{spec.Kind}:{AstReflection.FingerprintMemoized(spec.Arguments)}");
+        }
+
+        // Every part is a fixed-format token (hex digest, flag, "-" or a digest) joined by a separator that none of them contains,
+        // so the concatenation identifies the same state as the former digest of the serialized parts did.
+        string maskPart = masks is null ? "-" : AstReflection.Fingerprint(masks);
+        return string.Concat(AstReflection.FingerprintMemoized(entry), applies ? "|1|" : "|0|", predicate, "|", maskPart);
     }
 
     /// <summary>
@@ -164,8 +182,13 @@ public sealed class TypedPolicyContext
     /// A verifier whose expectations come from the providers, independent of the injector (plan 3.2): every table needs its
     /// tenant predicate (when it has a tenant column) and its policy predicate (when the provider says one applies).
     /// </summary>
-    public SecurityCoverageVerifier CreateVerifier(TargetSqlDialect dialect = TargetSqlDialect.SqlServer, int maxSecuredTableReferences = 256) =>
-        new(name => RequirementOf(name), dialect, maxSecuredTableReferences, dml: Dml, tenantParameterName: Tenant.ParameterName, capabilities: Capabilities);
+    public SecurityCoverageVerifier CreateVerifier(TargetSqlDialect dialect = TargetSqlDialect.SqlServer, int maxSecuredTableReferences = 256)
+    {
+        // The verifier keeps its own per-entry cache (never shared with the injector, so it stays an independent check): the requirement of
+        // a catalog entry is derived from the providers once per verification instead of once per table reference.
+        var requirements = new Dictionary<TableCatalogEntry, TableCoverageRequirement>(ReferenceEqualityComparer.Instance);
+        return new SecurityCoverageVerifier(name => RequirementOf(name, requirements), dialect, maxSecuredTableReferences, dml: Dml, tenantParameterName: Tenant.ParameterName, capabilities: Capabilities);
+    }
 
     /// <summary>Catalog type by canonical column name; an ambiguous (duplicate) name has no type, so a check that needs it fails closed.</summary>
     private static ImmutableDictionary<string, string> ColumnTypesOf(TableCatalogEntry entry)
@@ -182,10 +205,18 @@ public sealed class TypedPolicyContext
         return types.ToImmutable();
     }
 
-    private TableCoverageRequirement? RequirementOf(SqlQualifiedName name)
+    private TableCoverageRequirement? RequirementOf(SqlQualifiedName name, Dictionary<TableCatalogEntry, TableCoverageRequirement> known)
     {
         var entry = Catalog.Resolve(name);
         if (entry is null) return null;
+        if (known.TryGetValue(entry, out var cached)) return cached;
+        var requirement = BuildRequirement(entry);
+        known[entry] = requirement;
+        return requirement;
+    }
+
+    private TableCoverageRequirement BuildRequirement(TableCatalogEntry entry)
+    {
         var id = entry.Identity;
         var tenant = entry.TenantColumn is null
             ? ImmutableArray<SecurityPredicateId>.Empty

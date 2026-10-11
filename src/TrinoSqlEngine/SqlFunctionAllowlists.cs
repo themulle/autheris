@@ -133,6 +133,15 @@ public static class SqlFunctionAllowlists
     /// </summary>
     internal static IReadOnlySet<string> WithoutDateTranslation(TargetSqlDialect dialect, IReadOnlySet<string> names)
     {
+        // G8: the result is a pure function of the (immutable) name set and the dialect, so it is computed once per name set
+        // instead of building a new frozen set on every compile. It contains no request value (SEC-ADG-01).
+        var entry = WithoutDateCache.GetValue(names, static _ => new WithoutDateEntry());
+        var cached = entry.Value;
+        if (cached is not null && cached.Dialect == dialect)
+        {
+            return cached.Names;
+        }
+
         var native = GetDefault(dialect);
         var result = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
         foreach (var name in TrinoDateFunctions)
@@ -140,7 +149,19 @@ public static class SqlFunctionAllowlists
             if (!native.Contains(name)) result.Remove(name);
         }
 
-        return result.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        var frozen = result.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        entry.Value = new WithoutDateResult(dialect, frozen);
+        return frozen;
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<IReadOnlySet<string>, WithoutDateEntry> WithoutDateCache = new();
+
+    private sealed record WithoutDateResult(TargetSqlDialect Dialect, IReadOnlySet<string> Names);
+
+    private sealed class WithoutDateEntry
+    {
+        // A reference write is atomic; a lost race only recomputes the same value.
+        public volatile WithoutDateResult? Value;
     }
 
     /// <summary>Databricks allowlist (ANSI + the reviewed safe Spark SQL functions; no reflection, secrets or UDF calls).</summary>

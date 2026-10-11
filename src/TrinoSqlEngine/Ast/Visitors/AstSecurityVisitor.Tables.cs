@@ -108,23 +108,23 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             where = where is null ? conjunct : new BinaryExpression(where, BinaryOperator.And, conjunct);
         }
 
+        var plain = CatalogProjectionNodes.For(entry);
         var projections = new List<SelectItem>(entry.Columns.Length);
-        foreach (var column in entry.Columns)
+        for (int i = 0; i < entry.Columns.Length; i++)
         {
-            var colId = new SqlIdentifier(column.Name, IsQuoted: true);
-            var columnRef = new ColumnReference(new SqlQualifiedName(new[] { colId }));
+            var column = entry.Columns[i];
+            var nodes = plain[i];
             if (typed.Masks.HasMask(tid, column.Name))
             {
                 var spec = typed.GetMaskSpec(tid, column.Name);
                 typed.AddValues(spec.Parameters);
-                projections.Add(new ColumnSelectItem(new MaskExpression(spec.Kind, columnRef, spec.Arguments, column.DataType), colId));
+                projections.Add(new ColumnSelectItem(new MaskExpression(spec.Kind, nodes.ColumnRef, spec.Arguments, column.DataType), nodes.Identifier));
             }
             else
             {
-                projections.Add(new ColumnSelectItem(columnRef, colId));
+                projections.Add(nodes.Item);
             }
         }
-
 
         var canonical = tid.ToQualifiedName();
         var innerAlias = referencesTarget ? new SqlIdentifier(RowFilterAliases.Target) : null;
@@ -219,4 +219,29 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
         return new SubqueryTableSource(subqueryStatement, subqueryAlias);
     }
+}
+
+/// <summary>
+/// The unmasked projection nodes of a catalog entry (<c>"column"</c> as a reference and as a select item). They depend on the
+/// immutable entry only (never on a request value, a policy or a mask), so they are built once per entry and shared between
+/// compiles; AST nodes are immutable. A mask is still looked up per request and per column by the caller.
+/// </summary>
+internal static class CatalogProjectionNodes
+{
+    internal sealed record Column(SqlIdentifier Identifier, ColumnReference ColumnRef, ColumnSelectItem Item);
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<TableCatalogEntry, Column[]> Cache = new();
+
+    public static Column[] For(TableCatalogEntry entry) => Cache.GetValue(entry, static e =>
+    {
+        var nodes = new Column[e.Columns.Length];
+        for (int i = 0; i < nodes.Length; i++)
+        {
+            var id = new SqlIdentifier(e.Columns[i].Name, IsQuoted: true);
+            var reference = new ColumnReference(new SqlQualifiedName(new[] { id }));
+            nodes[i] = new Column(id, reference, new ColumnSelectItem(reference, id));
+        }
+
+        return nodes;
+    });
 }
