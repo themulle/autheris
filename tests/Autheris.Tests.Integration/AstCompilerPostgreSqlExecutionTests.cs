@@ -54,6 +54,9 @@ public sealed class AstCompilerPostgreSqlFixture : IAsyncLifetime
                 (4, 'ACME',  'US', 'closed', 40.00, 'upper.us@ACME.example'),
                 (5, 'other', 'EU', 'open',   50.00, 'carol@other.example'),
                 (6, 'acme',  'EU', 'closed', 60.00, NULL);
+            CREATE TABLE public.events (id integer PRIMARY KEY, tenantid citext NOT NULL, created_at timestamp NOT NULL, amount numeric(18,2) NOT NULL);
+            INSERT INTO public.events VALUES
+                (1, 'acme', '2019-06-01 10:00:00', 1.50), (2, 'acme', '2024-03-15 00:00:00', 2.50), (3, 'other', '2019-01-01 00:00:00', 3.50);
             INSERT INTO public.entitlements VALUES (1, 'acme', 1), (2, 'other', 2), (3, 'acme', 6), (4, 'ACME', 3);
             CREATE SCHEMA evil;
             CREATE TABLE evil.orders (id integer PRIMARY KEY, tenantid text, region text, status text, amount numeric(18,2), email text);
@@ -114,6 +117,9 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
         new TableCatalogEntry(Entitlements, ImmutableArray.Create(
             new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "citext"), new CatalogColumn("orderid", "integer")),
             "tenantid", 1),
+        new TableCatalogEntry(new TableIdentity("public", "events"), ImmutableArray.Create(
+            new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "citext"), new CatalogColumn("created_at", "timestamp"),
+            new CatalogColumn("amount", "numeric(18,2)")), "tenantid", 1),
         new TableCatalogEntry(OrdersIcu, ImmutableArray.Create(new CatalogColumn("id", "integer"), new CatalogColumn("tenantid", "text")), "tenantid", 1)
     }, "public");
 
@@ -148,9 +154,9 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     };
 
     private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null,
-        Func<NpgsqlConnection, Task>? prepare = null)
+        Func<NpgsqlConnection, Task>? prepare = null, bool translateDates = false)
     {
-        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant), CancellationToken.None);
+        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { TranslateTrinoDateFunctions = translateDates }, CancellationToken.None);
         await using var conn = new NpgsqlConnection(_fx.ConnectionString);
         await conn.OpenAsync();
         if (prepare != null) await prepare(conn);
@@ -491,5 +497,67 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
         cmd.CommandText = sql.ToString();
         for (int i = 1; i <= max; i++) cmd.Parameters.Add(new NpgsqlParameter { Value = i });
         Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBe(10);
+    }
+
+    // ---- WP-X0-fix: function mappings executed against the real engine, compared with Trino semantics ----
+
+    private async Task<object?> ScalarAsync(string expression, bool translateDates = false)
+    {
+        var rows = await RunAsync($"SELECT {expression} AS r FROM orders WHERE id = 1", "acme", translateDates: translateDates);
+        rows.Count.ShouldBe(1);
+        return rows[0][0];
+    }
+
+    [Theory]
+    [InlineData("replace(email, '@acme.example')", "alice.smith")]
+    [InlineData("replace(email, 'zzz')", "alice.smith@acme.example")]
+    [InlineData("replace(email, '')", "alice.smith@acme.example")]
+    [InlineData("replace(email, '@acme.example', '@x')", "alice.smith@x")]
+    public async Task FunctionMapping_MatchesTrinoSemantics(string expression, string expected) =>
+        ((string?)await ScalarAsync(expression)).ShouldBe(expected);
+
+    [Theory]
+    [InlineData("date_add('day', 1, current_timestamp) > current_timestamp")]
+    [InlineData("date_add('day', -1, current_timestamp) < current_timestamp")]
+    [InlineData("date_add('month', 1, current_timestamp) > date_add('day', 27, current_timestamp)")]
+    [InlineData("date_add('month', 1, current_timestamp) < date_add('day', 32, current_timestamp)")]
+    [InlineData("date_add('hour', 2, current_timestamp) > date_add('minute', 119, current_timestamp)")]
+    [InlineData("date_add('week', 1, current_timestamp) > date_add('day', 6, current_timestamp)")]
+    [InlineData("date_add('week', 1, current_timestamp) < date_add('day', 8, current_timestamp)")]
+    public async Task DateAdd_TranslatedAndExecuted(string predicate)
+    {
+        var rows = await RunAsync($"SELECT id FROM orders WHERE id = 1 AND {predicate}", "acme", translateDates: true);
+        Ids(rows).ShouldBe(new List<int> { 1 });
+    }
+
+    // ---- WP-X0-fix item 5: a string literal compared with a non-text column is typed by the server, like an unknown literal ----
+
+    [Theory]
+    [InlineData("SELECT id FROM orders WHERE id = '2'", "2")]
+    [InlineData("SELECT id FROM orders WHERE '2' = id", "2")]
+    [InlineData("SELECT id FROM orders WHERE id IN ('1', '2')", "1,2")]
+    [InlineData("SELECT id FROM orders WHERE id BETWEEN '1' AND '2'", "1,2")]
+    [InlineData("SELECT id FROM orders WHERE id <> '2'", "1,6")]
+    [InlineData("SELECT id FROM orders WHERE id IS NOT DISTINCT FROM '2'", "2")]
+    [InlineData("SELECT id FROM orders WHERE amount = '20.00'", "2")]
+    [InlineData("SELECT id FROM orders WHERE amount < '20'", "1")]
+    [InlineData("SELECT id FROM events WHERE created_at < '2020-01-01'", "1")]
+    [InlineData("SELECT id FROM events WHERE created_at >= '2020-01-01 00:00:00'", "2")]
+    [InlineData("SELECT id FROM events WHERE created_at IS NOT DISTINCT FROM '2024-03-15'", "2")]
+    [InlineData("SELECT id FROM orders WHERE status = 'open' AND id = '1'", "1")]
+    public async Task StringLiteralVsNonTextColumn_IsExecutable(string sql, string expectedIds) =>
+        string.Join(',', Ids(await RunAsync(sql, "acme"))).ShouldBe(expectedIds);
+
+    [Fact]
+    public async Task StringLiteralVsNonTextColumn_WithANonConvertibleValue_FailsInTheDatabaseNotAsALeak()
+    {
+        await Should.ThrowAsync<PostgresException>(() => RunAsync("SELECT id FROM orders WHERE id = 'abc'", "acme"));
+    }
+
+    [Fact]
+    public async Task StringLiteralVsCitextTenantColumn_KeepsTextEquality()
+    {
+        // The literal is compared with the citext column as text (case-sensitive), exactly as before the change.
+        Ids(await RunAsync("SELECT id FROM orders WHERE tenantid = 'ACME'", "acme")).ShouldBeEmpty();
     }
 }

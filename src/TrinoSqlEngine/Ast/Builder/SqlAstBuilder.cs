@@ -384,11 +384,13 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         return new ValuesQueryBody(rows);
     }
 
-    public override SqlNode VisitSubquery(SqlBaseParser.SubqueryContext context)
-    {
-        using var _ = EnterScope();
-        return BuildQueryNoWith(context.queryNoWith(), null);
-    }
+    /// <summary>
+    /// A parenthesized query primary (KD-1). The AST has no query body that wraps a <see cref="SelectStatement"/> (with its own
+    /// ORDER BY / LIMIT), and the generators do not parenthesize set-operation operands, so unwrapping it could change the
+    /// precedence of the emitted statement. It is rejected with a typed exception instead of an unhandled cast failure.
+    /// </summary>
+    public override SqlNode VisitSubquery(SqlBaseParser.SubqueryContext context) =>
+        throw Unsupported("parenthesized query primary");
 
     public override SqlNode VisitQuerySpecification(SqlBaseParser.QuerySpecificationContext context)
     {

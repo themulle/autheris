@@ -282,9 +282,23 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             if (i > 0) builder.Append(", ");
             GenerateSelectItem(spec.Projections[i], ref builder, context);
         }
-        context.InProjectionContext = prevProjection;
         context.InPredicateContext = prevPred;
 
+        // FROM, WHERE and HAVING of this query block are never projections, even when the block is a scalar subquery inside the
+        // projection of an outer query (its injected predicate must stay a condition, not a CASE value).
+        context.InProjectionContext = false;
+        try
+        {
+            GenerateQuerySpecificationTail(spec, ref builder, context);
+        }
+        finally
+        {
+            context.InProjectionContext = prevProjection;
+        }
+    }
+
+    private void GenerateQuerySpecificationTail(QuerySpecification spec, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
         if (spec.From != null)
         {
             builder.Append(" FROM ");

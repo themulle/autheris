@@ -76,6 +76,18 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
 
     public bool CanBind(TargetSqlDialect dialect) => dialect == Dialect;
 
+    /// <summary>Provider enum name (for example Npgsql <c>NpgsqlDbType.Unknown</c>) that leaves the type of a text-valued parameter to the server.</summary>
+    protected virtual string? ServerInferredTypeName => null;
+
+    private void ConfigureServerInferredType(DbParameter parameter)
+    {
+        // Fail closed to the plain text bind when the provider has no such type: the database then rejects the comparison.
+        string? enumName = ServerInferredTypeName;
+        var property = enumName is null ? null : parameter.GetType().GetProperty("NpgsqlDbType");
+        if (property is null || !property.PropertyType.IsEnum || !Enum.TryParse(property.PropertyType, enumName, out var value)) return;
+        property.SetValue(parameter, value);
+    }
+
     /// <summary>How tenant and policy binds follow the catalog type of the compared column (CR-ADG-09).</summary>
     protected virtual ColumnBindStyle ColumnStyle => ColumnBindStyle.None;
 
@@ -179,11 +191,18 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
             parameter.ParameterName = ParameterNameFor(bound);
 
             // CR-ADG-09: tenant and policy values follow the catalog type of the column they are compared with.
-            var adapted = ColumnBindAdapter.Adapt(ColumnStyle, type, value, bound.ColumnType);
+            // The PostgreSQL style (server-inferred type) is for user literals only.
+            var style = ColumnStyle == ColumnBindStyle.PostgreSql && bound.Origin != ParameterOrigin.QueryLiteral ? ColumnBindStyle.None : ColumnStyle;
+            var adapted = ColumnBindAdapter.Adapt(style, type, value, bound.ColumnType);
             Configure(parameter, adapted.Type, adapted.Value);
             if (adapted.AnsiString)
             {
                 ConfigureAnsiString(parameter, adapted);
+            }
+
+            if (adapted.ServerInferredType)
+            {
+                ConfigureServerInferredType(parameter);
             }
 
             command.Parameters.Add(parameter);
@@ -328,6 +347,8 @@ public sealed class PostgreSqlCompiledSqlBinder : DbCommandCompiledSqlBinder
     protected override bool RejectsEmbeddedNul => true;
     protected override DbType TimestampDbType => DbType.DateTime2;   // Npgsql: timestamp without time zone (DbType.DateTime is timestamptz)
     protected override string ParameterNameFor(BoundParameter parameter) => string.Empty;
+    protected override ColumnBindStyle ColumnStyle => ColumnBindStyle.PostgreSql;
+    protected override string? ServerInferredTypeName => "Unknown";
 }
 
 /// <summary>

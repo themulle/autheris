@@ -133,6 +133,12 @@ internal sealed class GovernedSqlCompiler
 
         CheckBudget(request, clock, token);
 
+        // The engine limit is a typed rejection of the governed path (the parser's own guard throws ArgumentOutOfRangeException).
+        if (sql.Length > _engine.MaxQueryLength)
+        {
+            throw new SqlLimitExceededException(SqlLimitKind.QueryLength, request.TargetDialect, sql.Length, _engine.MaxQueryLength);
+        }
+
         // 2. cache: a hit still validates every table dependency and rebinds the current values (INV-12)
         string rawSql = sql.ToString();
         string keyMaterial = CompileCacheKey.Material(request, rawSql, caps, _engine.MaxQueryLength);
@@ -237,7 +243,7 @@ internal sealed class GovernedSqlCompiler
     /// </summary>
     private static IReadOnlySet<string> EffectiveFunctions(CompileRequest request, DialectCapabilities caps)
     {
-        var map = caps.Functions.Names;
+        var map = request.TranslateTrinoDateFunctions ? caps.Functions.Names : SqlFunctionAllowlists.WithoutDateTranslation(caps.Dialect, caps.Functions.Names);
         if (request.AllowedFunctions is null)
         {
             return map;

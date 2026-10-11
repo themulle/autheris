@@ -74,14 +74,49 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
         GenerateMergePredicate(condition, ref builder, context);
     }
 
-    /// <summary>Trino <c>strpos(s, t)</c> is Oracle <c>INSTR(s, t)</c> (same argument order); other functions pass through.</summary>
+    /// <summary>
+    /// Trino function names with a different Oracle name or arity: <c>strpos(s, t)</c> is <c>INSTR(s, t)</c> (same argument order),
+    /// <c>concat</c> with three or more arguments nests the two-argument <c>CONCAT</c>, <c>substring</c> is <c>SUBSTR</c>,
+    /// <c>octet_length</c> is <c>LENGTHB</c>, <c>char_length</c> and <c>character_length</c> are <c>LENGTH</c> and
+    /// <c>log10(x)</c> is <c>LOG(10, x)</c>. Other functions pass through. NULL handling of <c>CONCAT</c> is backend semantics
+    /// (Oracle treats NULL as the empty string).
+    /// </summary>
     protected override void GenerateFunctionCall(FunctionCallExpression fn, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
-        if (fn.Name.Parts.Count == 1 && !fn.Name.Parts[0].IsQuoted && fn.Window == null && fn.Arguments.Count == 2 &&
-            fn.Name.Parts[0].Value.Equals("strpos", StringComparison.OrdinalIgnoreCase))
+        if (fn.Name.Parts.Count == 1 && !fn.Name.Parts[0].IsQuoted && fn.Window == null && fn.Filter == null && !fn.Distinct && !fn.IsStar)
         {
-            base.GenerateFunctionCall(fn with { Name = new SqlQualifiedName("INSTR") }, ref builder, context);
-            return;
+            int count = fn.Arguments.Count;
+            switch (fn.Name.Parts[0].Value.ToLowerInvariant())
+            {
+                case "strpos" when count == 2:
+                    base.GenerateFunctionCall(fn with { Name = new SqlQualifiedName("INSTR") }, ref builder, context);
+                    return;
+                case "concat" when count > 2:
+                    Expression nested = fn.Arguments[0];
+                    for (int i = 1; i < count; i++)
+                    {
+                        nested = new FunctionCallExpression(new SqlQualifiedName("CONCAT"), new[] { nested, fn.Arguments[i] }, false, null, false, null, null);
+                    }
+
+                    GenerateExpression(nested, ref builder, context);
+                    return;
+                case "substring" when count is 2 or 3:
+                    base.GenerateFunctionCall(fn with { Name = new SqlQualifiedName("SUBSTR") }, ref builder, context);
+                    return;
+                case "octet_length" when count == 1:
+                    base.GenerateFunctionCall(fn with { Name = new SqlQualifiedName("LENGTHB") }, ref builder, context);
+                    return;
+                case "char_length" or "character_length" when count == 1:
+                    base.GenerateFunctionCall(fn with { Name = new SqlQualifiedName("LENGTH") }, ref builder, context);
+                    return;
+                case "log10" when count == 1:
+                    builder.Append("LOG(");
+                    AppendStructural(ref builder, context, "10");
+                    builder.Append(", ");
+                    GenerateExpression(fn.Arguments[0], ref builder, context);
+                    builder.Append(')');
+                    return;
+            }
         }
 
         base.GenerateFunctionCall(fn, ref builder, context);
@@ -191,11 +226,9 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
             return;
         }
 
-        builder.Append("NUMTODSINTERVAL(CAST(");
-        builder.Append(BindInteger(long.Parse(interval.Value, System.Globalization.CultureInfo.InvariantCulture), context));
-        builder.Append(" AS NUMBER(19)), ");
-        AppendConstantFragment(ref builder, context, "'" + interval.Field.ToUpperInvariant() + "'");
-        builder.Append(')');
+        // NUMTODSINTERVAL has no MONTH or YEAR field and an interval value cannot be emitted as a literal: no bound form.
+        // (x +/- INTERVAL with TranslateTrinoDateFunctions never reaches this method; it becomes a date_add node.)
+        throw NoBoundForm("INTERVAL literal", TargetDialect);
     }
 
     public override int MaxParameterBudget => 1000;

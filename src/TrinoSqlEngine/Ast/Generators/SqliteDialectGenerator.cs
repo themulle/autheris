@@ -37,6 +37,11 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
 
     protected override void FormatCurrentDateTime(ref ValueStringBuilder builder, CurrentDateTimeKind kind, SqlEmitterContext context)
     {
+        if (context.IsBound && kind is CurrentDateTimeKind.LocalTime or CurrentDateTimeKind.LocalTimestamp)
+        {
+            throw NoBoundForm("LOCALTIME and LOCALTIMESTAMP", TargetDialect);
+        }
+
         builder.Append(kind switch
         {
             CurrentDateTimeKind.CurrentDate => "CURRENT_DATE",
@@ -71,6 +76,12 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     /// <summary>Wunsch 4: SQLite has no EXTRACT; strftime on ISO text, with the ISO day of week (%w counts Sunday = 0).</summary>
     protected override void FormatExtract(ref ValueStringBuilder builder, string field, Expression source, SqlEmitterContext context)
     {
+        if (context.IsBound)
+        {
+            // strftime needs a format literal, which the bind-everything rule does not allow inline.
+            throw NoBoundForm("EXTRACT", TargetDialect);
+        }
+
         (string format, string prefix, string suffix) = field switch
         {
             "YEAR" => ("%Y", "", ""),
@@ -94,8 +105,16 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     }
 
     /// <summary>Wunsch 4: SQLite stores dates as ISO text and has no typed literals; the ISO string compares correctly.</summary>
-    protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context) =>
+    protected override void FormatTypedLiteral(ref ValueStringBuilder builder, TypedLiteralExpression literal, SqlEmitterContext context)
+    {
+        if (context.IsBound)
+        {
+            // The value would be an inline string literal; SQLite has no typed literal that could carry it as a bind.
+            throw NoBoundForm("DATE, TIME and TIMESTAMP literals", TargetDialect);
+        }
+
         FormatStringLiteral(ref builder, literal.Value, context);
+    }
 
     protected override void FormatIntervalLiteral(ref ValueStringBuilder builder, IntervalLiteralExpression interval, SqlEmitterContext context) =>
         throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"SQL construct INTERVAL literal is not supported for {TargetDialect} (no interval type).");
@@ -105,6 +124,12 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     /// <summary>Virtual filters (phase 7b): <c>datetime(x, '±n units')</c>; a week is seven days.</summary>
     protected override void FormatDateAdd(ref ValueStringBuilder builder, DateUnit unit, long amount, Expression source, SqlEmitterContext context)
     {
+        if (context.IsBound)
+        {
+            // The datetime modifier ('+1 day') is an inline string literal.
+            throw NoBoundForm("date_add and INTERVAL arithmetic", TargetDialect);
+        }
+
         (long value, string name) = unit == DateUnit.Week ? (amount * 7, "day") : (amount, DateUnitName(unit));
         builder.Append("datetime(");
         GenerateExpression(source, ref builder, context);
@@ -123,6 +148,12 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
     /// </summary>
     protected override void FormatDateTrunc(ref ValueStringBuilder builder, DateUnit unit, Expression source, SqlEmitterContext context)
     {
+        if (context.IsBound)
+        {
+            // The start-of-unit modifier and the strftime format are inline string literals.
+            throw NoBoundForm("date_trunc", TargetDialect);
+        }
+
         string? start = unit switch
         {
             DateUnit.Day => "start of day",
@@ -321,6 +352,12 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
         }
         else if (pagination.Offset != null)
         {
+            if (context.IsBound)
+            {
+                // SQLite needs LIMIT -1 for an OFFSET without LIMIT; the -1 is an inline numeric token.
+                throw NoBoundForm("OFFSET without LIMIT", TargetDialect);
+            }
+
             builder.Append("LIMIT -1");
         }
 

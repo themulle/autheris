@@ -269,6 +269,20 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
                 case "ceil" when fn.Arguments.Count == 1:
                     base.GenerateFunctionCall(fn with { Name = new SqlQualifiedName("CEILING") }, ref builder, context);
                     return;
+                case "substr" or "substring" when fn.Arguments.Count is 2 or 3 && !fn.Distinct:
+                    // T-SQL has no SUBSTR and needs the length; FormatSubstring supplies the maximum length for the two-argument form.
+                    FormatSubstring(ref builder, new SubstringExpression(fn.Arguments[0], fn.Arguments[1], fn.Arguments.Count == 3 ? fn.Arguments[2] : null), context);
+                    return;
+                case "replace" when fn.Arguments.Count == 2 && !fn.Distinct:
+                    // Trino replace(s, search) removes the search string; T-SQL REPLACE needs the replacement (an empty bound string).
+                    base.GenerateFunctionCall(fn with
+                    {
+                        Arguments = new[] { fn.Arguments[0], fn.Arguments[1], new LiteralExpression(string.Empty, LiteralType.String) }
+                    }, ref builder, context);
+                    return;
+                case "lpad" or "rpad" or "octet_length":
+                    // No exact T-SQL equivalent: LPAD/RPAD truncate and repeat the pad string, DATALENGTH counts UTF-16 bytes of nvarchar.
+                    throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, $"{fn.Name.Parts[0].Value.ToLowerInvariant()} on SQL Server");
                 case "strpos" when fn.Arguments.Count == 2:
                     base.GenerateFunctionCall(fn with
                     {
@@ -419,6 +433,12 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 
     public override void GenerateExpression(Expression expression, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        // T-SQL has no array type: ARRAY[...] and x[i] would be emitted as bracketed identifiers.
+        if (expression is SubscriptExpression or ArrayConstructorExpression)
+        {
+            throw NoBoundForm("array constructors and subscripts", TargetDialect);
+        }
+
         if (context.InProjectionContext && IsPredicateExpression(expression))
         {
             builder.Append("CASE WHEN ");

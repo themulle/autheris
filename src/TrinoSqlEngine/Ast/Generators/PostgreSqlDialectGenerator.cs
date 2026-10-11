@@ -29,6 +29,22 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
     };
     public override int MaxParameterBudget => 65535;
 
+    /// <summary>Trino <c>replace(s, search)</c> removes the search string; PostgreSQL <c>replace</c> needs the replacement (an empty bound string).</summary>
+    protected override void GenerateFunctionCall(FunctionCallExpression fn, ref ValueStringBuilder builder, SqlEmitterContext context)
+    {
+        if (fn.Name.Parts.Count == 1 && !fn.Name.Parts[0].IsQuoted && fn.Window == null && fn.Filter == null && !fn.Distinct && fn.Arguments.Count == 2 &&
+            fn.Name.Parts[0].Value.Equals("replace", StringComparison.OrdinalIgnoreCase))
+        {
+            base.GenerateFunctionCall(fn with
+            {
+                Arguments = new[] { fn.Arguments[0], fn.Arguments[1], new LiteralExpression(string.Empty, LiteralType.String) }
+            }, ref builder, context);
+            return;
+        }
+
+        base.GenerateFunctionCall(fn, ref builder, context);
+    }
+
     // The inline structural positions of this generator are registered with the emitter context.
     protected override bool BindLiterals => true;
 

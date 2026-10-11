@@ -101,9 +101,9 @@ public sealed class AstCompilerOracleExecutionTests
         }
     };
 
-    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null)
+    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null, bool translateDates = false)
     {
-        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant), CancellationToken.None);
+        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { TranslateTrinoDateFunctions = translateDates }, CancellationToken.None);
         await using var conn = await _factory.CreateOpenConnectionAsync(Options());
         await _sessions.InitializeSessionAsync(conn, "Oracle", new TenantId("tenant-" + Guid.NewGuid().ToString("N")[..8]), requireTransaction: false);
         await using var cmd = conn.CreateCommand();
@@ -443,5 +443,61 @@ public sealed class AstCompilerOracleExecutionTests
         }
 
         Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBe(0);
+    }
+
+    // ---- WP-X0-fix: function mappings executed against the real engine, compared with Trino semantics ----
+
+    private async Task<object?> ScalarAsync(string expression, bool translateDates = false)
+    {
+        var rows = await RunAsync($"SELECT {expression} AS r FROM orders WHERE id = 1", "acme", translateDates: translateDates);
+        rows.Count.ShouldBe(1);
+        return rows[0][0];
+    }
+
+    [Theory]
+    [InlineData("concat(region, status)", "EUopen")]
+    [InlineData("concat(region, '-', status)", "EU-open")]
+    [InlineData("concat(region, '-', status, '!')", "EU-open!")]
+    [InlineData("substring(email, 7)", "smith@acme.example")]
+    [InlineData("substring(email, 7, 5)", "smith")]
+    [InlineData("substr(email, 7, 5)", "smith")]
+    [InlineData("octet_length(email)", "24")]
+    [InlineData("char_length(email)", "24")]
+    [InlineData("character_length(region)", "2")]
+    [InlineData("round(log10(amount * 10), 6)", "2.021189")]
+    [InlineData("log10(id * 100)", "2")]
+    public async Task FunctionMapping_MatchesTrinoSemantics(string expression, string expected)
+    {
+        object? value = await ScalarAsync(expression);
+        if (double.TryParse(expected, System.Globalization.CultureInfo.InvariantCulture, out double number) && expression.Contains("log10", StringComparison.Ordinal))
+        {
+            Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture).ShouldBe(number, 1e-6);
+        }
+        else
+        {
+            Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture).ShouldBe(expected);
+        }
+    }
+
+    [Theory]
+    [InlineData("date_add('day', 1, current_timestamp) > current_timestamp")]
+    [InlineData("date_add('day', -1, current_timestamp) < current_timestamp")]
+    [InlineData("date_add('month', 1, current_timestamp) > date_add('day', 27, current_timestamp)")]
+    [InlineData("date_add('month', 1, current_timestamp) < date_add('day', 32, current_timestamp)")]
+    [InlineData("date_add('hour', 2, current_timestamp) > date_add('minute', 119, current_timestamp)")]
+    [InlineData("date_add('week', 1, current_timestamp) > date_add('day', 6, current_timestamp)")]
+    [InlineData("date_add('week', 1, current_timestamp) < date_add('day', 8, current_timestamp)")]
+    public async Task DateAdd_TranslatedAndExecuted(string predicate)
+    {
+        var rows = await RunAsync($"SELECT id FROM orders WHERE id = 1 AND {predicate}", "acme", translateDates: true);
+        Ids(rows).ShouldBe(new List<int> { 1 });
+    }
+
+    [Fact]
+    public async Task ScalarSubqueryInTheSelectList_IsExecutedWithTheTenantCondition()
+    {
+        var rows = await RunAsync("SELECT (SELECT count(*) FROM orders) AS n FROM orders WHERE id = 1", "acme");
+        rows.Count.ShouldBe(1);
+        Convert.ToInt32(rows[0][0]).ShouldBe(3);   // the subquery sees the three rows of tenant acme only
     }
 }
