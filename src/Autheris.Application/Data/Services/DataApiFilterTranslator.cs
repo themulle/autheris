@@ -111,6 +111,83 @@ public static partial class DataApiFilterTranslator
         return sb.ToString().Trim();
     }
 
+    /// <summary>Quotes one identifier as a Trino delimited identifier (embedded quotes doubled).</summary>
+    public static string QuoteIdentifier(string identifier)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(identifier);
+        return "\"" + identifier.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
+    }
+
+    /// <summary>
+    /// Like <see cref="TranslateFilterToSql"/>, but every word that names a catalog column is emitted as a quoted
+    /// identifier of the catalog spelling (WP-X0n). String literals and operator words are left untouched.
+    /// </summary>
+    public static string TranslateFilterToTrino(string filterExpression, TableMetadata metadata)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        var translated = TranslateFilterToSql(filterExpression);
+        if (translated.Length == 0)
+        {
+            return translated;
+        }
+
+        var sb = new StringBuilder(translated.Length + 16);
+        int lastIndex = 0;
+        foreach (Match literal in StringLiteralRegex().Matches(translated))
+        {
+            sb.Append(QuoteColumnWords(translated[lastIndex..literal.Index], metadata));
+            sb.Append(literal.Value);
+            lastIndex = literal.Index + literal.Length;
+        }
+
+        sb.Append(QuoteColumnWords(translated[lastIndex..], metadata));
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Builds the ORDER BY item list from the request text. Each item is <c>column [ASC|DESC]</c> over a catalog column;
+    /// anything else is rejected, so no request text reaches the SQL unquoted.
+    /// </summary>
+    public static string BuildOrderByClause(string orderBy, TableMetadata metadata)
+    {
+        ArgumentNullException.ThrowIfNull(metadata);
+        var items = new List<string>();
+        foreach (var part in orderBy.Split(',', StringSplitOptions.TrimEntries))
+        {
+            var tokens = part.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var column = tokens.Length is 1 or 2 ? metadata.GetColumn(tokens[0]) : null;
+            string? direction = null;
+            var directionValid = tokens.Length != 2
+                || (direction = tokens[1].ToUpperInvariant()) is "ASC" or "DESC";
+            if (column == null || !directionValid)
+            {
+                throw new ArgumentException($"Invalid orderBy item '{part}'. Use '<column> [asc|desc]' over the columns of the dataset.", nameof(orderBy));
+            }
+
+            items.Add(direction == null ? QuoteIdentifier(column.ColumnName) : QuoteIdentifier(column.ColumnName) + " " + direction);
+        }
+
+        return string.Join(", ", items);
+    }
+
+    private static string QuoteColumnWords(string text, TableMetadata metadata) =>
+        IdentifierRegex().Replace(text, m =>
+        {
+            // Not a word inside a number (1e5) or a qualified name.
+            if (m.Index > 0 && (char.IsLetterOrDigit(text[m.Index - 1]) || text[m.Index - 1] is '_' or '.' or '"'))
+            {
+                return m.Value;
+            }
+
+            if (ReservedKeywords.Contains(m.Value))
+            {
+                return m.Value;
+            }
+
+            var column = metadata.GetColumn(m.Value);
+            return column == null ? m.Value : QuoteIdentifier(column.ColumnName);
+        });
+
     private static string ReplaceOperators(string text)
     {
         // Safe word-boundary operator replacements

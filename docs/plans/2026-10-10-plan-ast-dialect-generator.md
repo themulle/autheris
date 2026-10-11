@@ -3620,3 +3620,21 @@ Base: `feat/ast-x1-access-decision` (X0e), because the typed masks are carried o
 - The SQLite legacy partial-mask string always used five mask characters; the typed emitter keeps the variable-length rule of PostgreSQL and SQL Server, so on SQLite the masked length is now visible (value content is not).
 - A column whose catalog type is missing or unsupported falls back to the default mask on the string facade (the emitter requires a type).
 - The live compiler assembly (X0l) must populate `ColumnMasks` and call `RequireTypedColumnMasks`; the decision producers do not yet.
+
+### WP-X0n implementation log (`feat/ast-x1-rest-dataset`)
+
+Base: `feat/ast-x1-masks` (X0f). X0g (typed Virtual Filters) is not needed: the package only removes text from the REST and MCP dataset SQL.
+
+**Built:**
+
+- `GovernedDataQueryService` no longer appends `decision.CombinedRowFilterSql`. The decision authorizes the request and drives column access; the row policy is applied once by the rewriter (single source) or by the staging service from its own `req.Decision` (cross-source).
+- `DataApiFilterTranslator`: `QuoteIdentifier`, `TranslateFilterToTrino` (catalog column words become quoted identifiers, string literals untouched) and `BuildOrderByClause` (`column [ASC|DESC]` over catalog columns, anything else is an `ArgumentException`). The select list, filter, `ORDER BY` and primary-key ordering are emitted as quoted identifiers.
+- Fail-closed input guard: the unified PDP drops a `ClusterAdmin` role claim of a non-canonical principal (for example ForwardAuth) while the rewriter keeps every role claim. Because the splice used to AND both decisions, that case is now denied.
+
+**Tests** (`Autheris.Tests.Unit/DataApi/RestDatasetPolicySpliceTests`): `RestDataset_SqlServerPolicy_NoBracketTextInInput`, `RestDataset_ColumnsFilterAndOrderBy_AreQuotedIdentifiers`, `RestDataset_MalformedOrderBy_IsRejected`, `RestDataset_NonCanonicalClusterAdminRole_IsDeniedBecauseDecisionInputsDiffer`, `RestDataset_ResultEqualsSplicedResult_OnFixture` (real rewriter, predicate present once), `RestDataset_DecisionInputsEqualRewriterInputs` (real PDP and real rewriter over recording consent and Casbin stubs, purpose-bound), `McpDatasetTool_SameRows`, `CrossSourceDataset_RowFilterStillApplied_AfterSpliceRemoval`, `RestDataset_TenantBRowsAbsent_OnEveryBranch`, `TranslateFilterToTrino_*`.
+
+**Deviations and open items:**
+
+- Filter literals stay inline in the translated filter text (the plan's change line asks only for quoted identifiers); binding them is left to X1, when the dataset query becomes an AST. Limit and offset are numeric values computed in code, not request text.
+- The rewriter's decision still differs from the PDP's in inputs that only add information on the rewriter side: `gql.action` attribute, `RebacEnforcement.QueryPaths` versus `WhenEnabled`, all catalog columns as requested columns, and the access-profile repository. The PDP check remains an authorization gate, so the rewriter applies the superset of row restrictions.
+- `RestDataset_ResultEqualsSplicedResult_OnFixture` compares rewritten SQL text on a mocked rewriter fixture; it does not execute against SQLite (the filtered integration suite covers the end-to-end path).
