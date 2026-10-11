@@ -86,12 +86,16 @@ public sealed class DataSourceProviderArch5Tests
         ex.ShouldNotBeOfType<NotSupportedException>();
     }
 
-    [Theory]
-    [InlineData("Databricks")]
-    public async Task ConnectionFactory_DialectsWithoutDriver_AreNotSupported(string provider)
+    [Fact]
+    public async Task ConnectionFactory_Databricks_WithoutRestClient_IsNotSupported()
     {
+        // WP-X0j: Databricks has no ADO.NET driver; it opens only through the REST facade, which needs the registered client (fail closed).
         var factory = new SqlConnectionFactory();
-        var options = new DataSourceConnectionOptions { Provider = provider, ConnectionString = "x" };
+        var options = new DataSourceConnectionOptions
+        {
+            Provider = "Databricks",
+            Databricks = new DatabricksDataSourceOptions { Host = "adb-123.azuredatabricks.net", WarehouseId = "wh-1" }
+        };
 
         await Should.ThrowAsync<NotSupportedException>(() => factory.CreateOpenConnectionAsync(options));
     }

@@ -22,6 +22,9 @@ public static class SqlDialectMapper
             case DatabaseDialect.Oracle:
                 target = TargetSqlDialect.Oracle;
                 return true;
+            case DatabaseDialect.Databricks:
+                target = TargetSqlDialect.Databricks;
+                return true;
             default:
                 target = default;
                 return false;
@@ -34,9 +37,14 @@ public static class SqlDialectMapper
         DatabaseDialect.PostgreSql => TargetSqlDialect.PostgreSql,
         DatabaseDialect.Sqlite => TargetSqlDialect.Sqlite,
         DatabaseDialect.Oracle => TargetSqlDialect.Oracle,
+        DatabaseDialect.Databricks => TargetSqlDialect.Databricks,
         _ => throw new NotSupportedException($"Target AST generation not supported for dialect '{dialect}'.")
     };
 
+    /// <summary>
+    /// WebSQL admission. Databricks maps to an AST dialect (WP-X0j) but is deliberately not admitted: it ships wired but
+    /// Experimental until a green G9 run (S-4, X1-DBX).
+    /// </summary>
     public static bool IsExecutable(DatabaseDialect dialect) =>
         dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite or DatabaseDialect.Oracle;
 }
