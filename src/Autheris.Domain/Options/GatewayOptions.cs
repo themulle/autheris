@@ -1051,6 +1051,57 @@ public sealed class DataSourceConnectionOptions
     /// must not contain a plaintext <c>Password</c>; the factory injects the resolved secret when it opens the connection.
     /// </summary>
     public string? PasswordKeyVaultRef { get; init; }
+
+    /// <summary>Databricks only (WP-X0i, SEC-ADG-09): Statement Execution API settings. Required when <c>Provider</c> is databricks.</summary>
+    public DatabricksDataSourceOptions? Databricks { get; init; }
+}
+
+/// <summary>Authentication modes of the Databricks Statement Execution client.</summary>
+public enum DatabricksAuthMode
+{
+    /// <summary>OAuth machine-to-machine (service principal client credentials). Default and the only mode outside Development.</summary>
+    OAuthM2M = 0,
+
+    /// <summary>Personal access token. Development only (SEC-ADG-09 item 4).</summary>
+    Pat = 1
+}
+
+public sealed class DatabricksAuthOptions
+{
+    public DatabricksAuthMode Mode { get; init; } = DatabricksAuthMode.OAuthM2M;
+
+    /// <summary>OAuth M2M: service principal application id.</summary>
+    public string? ClientId { get; init; }
+
+    /// <summary>OAuth M2M: Key Vault reference of the service principal secret (plaintext only in Development).</summary>
+    public string? ClientSecretRef { get; init; }
+
+    /// <summary>PAT mode (Development only): Key Vault reference or plaintext token.</summary>
+    public string? PatRef { get; init; }
+}
+
+/// <summary>
+/// Settings of one Databricks SQL warehouse data source (design §6.3). The OAuth token endpoint is NOT configurable: it is
+/// always <c>https://{Host}/oidc/v1/token</c> (SEC-ADG-09 item 3).
+/// </summary>
+public sealed class DatabricksDataSourceOptions
+{
+    /// <summary>Exact workspace host name (no scheme, port, path or wildcard), for example <c>adb-123.azuredatabricks.net</c>.</summary>
+    public string Host { get; init; } = string.Empty;
+
+    public string WarehouseId { get; init; } = string.Empty;
+    public string Catalog { get; init; } = "main";
+    public string Schema { get; init; } = "default";
+    public DatabricksAuthOptions Auth { get; init; } = new();
+
+    /// <summary>Server-side wait per call; clamped to 5-50 seconds (SEC-ADG-09 item 6).</summary>
+    public int WaitTimeoutSeconds { get; init; } = 30;
+
+    /// <summary>Maximum inline result size in bytes (also bounds the response buffer).</summary>
+    [Range(1024, 104857600)] public long ByteLimit { get; init; } = 26214400;
+
+    /// <summary>Delay between status polls in milliseconds.</summary>
+    [Range(10, 10000)] public int PollIntervalMilliseconds { get; init; } = 500;
 }
 
 public sealed class ItsmOptions
