@@ -202,7 +202,9 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
 
         if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
         {
-            predicates.Add($"({decision.CombinedRowFilterSql})");
+            // WP-X0l: the text of a typed row policy carries markers. The dataset text is parsed as user SQL, so the bound values
+            // are inlined here (legacy splice, removed by WP-X0n).
+            predicates.Add($"({Autheris.Application.Services.PolicyMarkerInliner.Inline(decision.CombinedRowFilterSql, decision.RowFilterParameters)})");
         }
 
         if (predicates.Count > 0)

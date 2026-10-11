@@ -48,14 +48,26 @@ public static partial class InMemoryRowFilterEvaluator
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
         List<IReadOnlyDictionary<string, object?>> rows,
         string rowFilterSql,
-        TableMetadata metadata)
+        TableMetadata metadata,
+        IReadOnlyDictionary<string, object?>? parameters = null)
     {
         if (rows.Count == 0 || string.IsNullOrWhiteSpace(rowFilterSql))
         {
             return rows;
         }
 
-        var normalizedSql = NormalizeRowFilterForInMemoryEvaluation(rowFilterSql);
+        // WP-X0l: the text of a typed row policy carries markers; its values are inlined here, in memory only (fail closed).
+        string inlined;
+        try
+        {
+            inlined = PolicyMarkerInliner.Inline(rowFilterSql, parameters);
+        }
+        catch (System.Security.SecurityException)
+        {
+            return new List<IReadOnlyDictionary<string, object?>>();
+        }
+
+        var normalizedSql = NormalizeRowFilterForInMemoryEvaluation(inlined);
         if (string.IsNullOrWhiteSpace(normalizedSql))
         {
             // Zero Trust: When a row filter is defined but cannot be safely evaluated in-memory, fail closed

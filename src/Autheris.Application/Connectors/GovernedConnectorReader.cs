@@ -184,7 +184,7 @@ public static class GovernedConnectorReader
         if (!rlsPushdownExecuted && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
         {
             GatewayExecutionService.EnsureInMemoryFilterIsEnforceable(decision);
-            filtered = GatewayExecutionService.FilterRows(filtered, decision.CombinedRowFilterSql, metadata);
+            filtered = GatewayExecutionService.FilterRows(filtered, decision.CombinedRowFilterSql, metadata, decision.RowFilterParameters);
         }
 
         var projected = new List<IReadOnlyDictionary<string, object?>>(filtered.Count);

@@ -596,8 +596,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     public static List<IReadOnlyDictionary<string, object?>> FilterRows(
         List<IReadOnlyDictionary<string, object?>> rows,
         string rowFilterSql,
-        TableMetadata metadata) =>
-        InMemoryRowFilterEvaluator.FilterRows(rows, rowFilterSql, metadata);
+        TableMetadata metadata,
+        IReadOnlyDictionary<string, object?>? parameters = null) =>
+        InMemoryRowFilterEvaluator.FilterRows(rows, rowFilterSql, metadata, parameters);
 
     internal static bool IsTypeStrictRowFilter(string normalizedSql, System.Data.DataTable table) =>
         InMemoryRowFilterEvaluator.IsTypeStrictRowFilter(normalizedSql, table);
