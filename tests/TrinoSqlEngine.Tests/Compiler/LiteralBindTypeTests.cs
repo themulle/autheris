@@ -11,6 +11,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// WP-X0q / SEC-ADG-16 item 2: a user literal compared with a catalog column binds with the column's type family and size, and
 /// a comparison across families is rejected instead of letting the database convert the column (ORA-01722 side channel).
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class LiteralBindTypeTests
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");

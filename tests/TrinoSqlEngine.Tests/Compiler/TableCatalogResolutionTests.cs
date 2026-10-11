@@ -6,6 +6,7 @@ using Xunit;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>CR-ADG-17: the Unity Catalog part takes part in the catalog key; two catalogs with one schema.table are never confused.</summary>
+[Trait("Category", "SqlGate")]
 public class TableCatalogResolutionTests
 {
     private static TableCatalogEntry Entry(string? catalog, string schema, string table, long version = 1) => new(

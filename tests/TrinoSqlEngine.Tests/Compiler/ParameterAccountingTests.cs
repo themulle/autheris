@@ -7,6 +7,7 @@ using Xunit;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class ParameterAccountingTests
 {
     private static string InListQuery(int count)

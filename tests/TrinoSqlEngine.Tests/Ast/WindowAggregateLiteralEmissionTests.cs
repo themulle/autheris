@@ -9,6 +9,7 @@ using Xunit;
 /// Wunsch 4, Phase 4: constructs the AST compiler used to drop silently (window ORDER BY and frames, FILTER, ORDER BY inside
 /// aggregates, typed literals). Each is now emitted per dialect or rejected with <see cref="AstBuildException"/>.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class WindowAggregateLiteralEmissionTests
 {
     private readonly FastSqlEngine _engine = new();

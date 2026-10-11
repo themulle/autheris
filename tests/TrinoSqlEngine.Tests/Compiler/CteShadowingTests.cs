@@ -8,6 +8,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>CR-ADG-01: a CTE name must never shadow a physical table differently in the gateway and in the database.</summary>
+[Trait("Category", "SqlGate")]
 public class CteShadowingTests
 {
     private readonly FastSqlEngine _engine = new();

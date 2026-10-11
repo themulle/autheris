@@ -9,6 +9,7 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public class SecurityReview20261002SqTests
 {
     private readonly FastSqlEngine _engine = new();

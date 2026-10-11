@@ -4,6 +4,7 @@ using Xunit;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class EmittedSqlInvariantCheckerTests
 {
     private static readonly ImmutableArray<BoundParameter> NoParams = ImmutableArray<BoundParameter>.Empty;

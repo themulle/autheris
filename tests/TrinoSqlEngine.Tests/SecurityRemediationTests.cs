@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Antlr4.Runtime.Misc;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public class SecurityRemediationTests
 {
     private readonly FastSqlEngine _engine = new();

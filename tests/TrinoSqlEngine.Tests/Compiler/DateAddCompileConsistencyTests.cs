@@ -10,6 +10,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// <c>date_add</c> has a native translation on every governed dialect, so the compiler must accept it everywhere (the conformance
 /// runner used the legacy per-dialect allowlist and reported a rejection that the production path never produced).
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class DateAddCompileConsistencyTests
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");

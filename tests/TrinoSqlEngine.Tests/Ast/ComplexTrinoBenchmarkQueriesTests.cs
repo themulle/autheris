@@ -5,6 +5,7 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Generators;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class ComplexTrinoBenchmarkQueriesTests
 {
     private readonly FastSqlEngine _engine = new();

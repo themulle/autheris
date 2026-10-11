@@ -7,6 +7,7 @@ using Xunit;
 /// SQL-7: the enforced row limit must not end up in a subquery of a DML statement (it would change which rows are
 /// written). SQL-8: the alias of a rewritten table keeps the quoting of the written name.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class DmlLimitAndAliasSql78Tests
 {
     private static RlsOptions Options(TargetSqlDialect dialect) => new()

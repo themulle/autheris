@@ -5,6 +5,7 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Builder;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class PaginationWithTiesTests
 {
     private readonly FastSqlEngine _engine = new();

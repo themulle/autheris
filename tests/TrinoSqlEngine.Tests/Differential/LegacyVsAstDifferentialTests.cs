@@ -4,6 +4,7 @@ using System;
 using TrinoSqlEngine;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class LegacyVsAstDifferentialTests
 {
     private readonly FastSqlEngine _engine = new();

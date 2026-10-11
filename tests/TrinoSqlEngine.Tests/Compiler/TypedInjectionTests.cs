@@ -12,6 +12,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class TypedInjectionTests
 {
     private readonly DictPolicyProvider _rowFilters = new();
@@ -261,6 +262,7 @@ public class TypedInjectionTests
     }
 }
 
+[Trait("Category", "SqlGate")]
 internal static class FrozenTestExtensions
 {
     public static System.Collections.Frozen.FrozenDictionary<string, PolicyValue> ToFrozenDictionaryForTest(

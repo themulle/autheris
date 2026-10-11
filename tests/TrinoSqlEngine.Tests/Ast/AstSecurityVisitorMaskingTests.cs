@@ -10,6 +10,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Ast.Visitors;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class AstSecurityVisitorMaskingTests
 {
     private readonly FastSqlEngine _engine = new();

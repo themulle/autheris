@@ -6,6 +6,7 @@ using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class AnalyticalDialectTests
 {
     private readonly DuckDbDialectGenerator _duckDbGenerator = new();

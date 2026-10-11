@@ -7,6 +7,7 @@ using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class OracleDialectTests
 {
     private readonly OracleDialectGenerator _generator = new();

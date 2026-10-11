@@ -10,6 +10,7 @@ using Xunit;
 /// <c>@</c> (WebSQL 400). With <see cref="RlsOptions.PolicyFiltersAreTargetDialectSql"/> they are spliced in verbatim,
 /// parenthesized, like the legacy rewriter does; client SQL is still parsed and validated as before.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class TargetDialectRowFilterTests
 {
     private readonly FastSqlEngine _engine = new();

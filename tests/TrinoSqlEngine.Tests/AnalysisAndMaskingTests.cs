@@ -6,6 +6,7 @@ using System.Linq;
 using TrinoSqlEngine.Analysis;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public class AnalysisAndMaskingTests
 {
     private readonly FastSqlEngine _engine = new();

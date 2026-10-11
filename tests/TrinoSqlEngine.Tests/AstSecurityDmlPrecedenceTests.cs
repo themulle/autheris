@@ -3,6 +3,7 @@ namespace TrinoSqlEngine.Tests;
 using System;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class AstSecurityDmlPrecedenceTests
 {
     private static RlsOptions Options(TargetSqlDialect dialect) => new()

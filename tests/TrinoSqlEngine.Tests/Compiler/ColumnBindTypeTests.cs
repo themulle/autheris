@@ -9,6 +9,7 @@ using Xunit;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>CR-ADG-09 / SEC-ADG-16 item 2: tenant and policy binds take their type from the catalog type of the compared column.</summary>
+[Trait("Category", "SqlGate")]
 public class ColumnBindTypeTests
 {
     private static readonly TableIdentity Orders = new("dbo", "Orders");

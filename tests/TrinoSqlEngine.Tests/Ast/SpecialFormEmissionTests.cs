@@ -11,6 +11,7 @@ using Xunit;
 /// Wunsch 4, Phase 6b: SQL special forms without a builder visitor (current_date …, substring … FROM, trim, position)
 /// failed with an ArgumentNullException (500). They are now translated per dialect.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class SpecialFormEmissionTests
 {
     private readonly FastSqlEngine _engine = new();

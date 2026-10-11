@@ -9,6 +9,7 @@ using Xunit;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>WP-X0h: typed column masks rendered by the SQLite generator and executed on in-process SQLite.</summary>
+[Trait("Category", "SqlGate")]
 public class SqliteMaskTests
 {
     private static ColumnReference Col(string name) => new(new SqlQualifiedName(new[] { new SqlIdentifier(name, true) }));
