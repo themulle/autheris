@@ -51,3 +51,4 @@ scratch/
 dist/
 libpod/
 .claude/
+benchmarks/results/
