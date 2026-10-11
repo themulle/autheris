@@ -89,7 +89,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
     public void Bind(DbCommand command, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues)
     {
         ArgumentNullException.ThrowIfNull(compiled);
-        if (compiled.RequiresRowCountCheck || ContainsCheckAlias(compiled.Sql))
+        if (RefusesUncheckedBinding(compiled))
         {
             // CR-ADG-45: the reserved alias marks a check-option INSERT even when the flag was lost.
             // CR-ADG-43: fail closed by construction; the checked path is the only way to bind (and so to run) this statement.
@@ -97,6 +97,22 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
         }
 
         BindCore(command, compiled, clientParameterValues);
+    }
+
+    private static bool RefusesUncheckedBinding(CompiledSql compiled)
+    {
+#if DEBUG
+        if (CompilerTestSeams.IsDisabled(SecurityControl.BinderRefusal))
+        {
+            return false;
+        }
+
+        if (CompilerTestSeams.IsDisabled(SecurityControl.BinderAliasMarker))
+        {
+            return compiled.RequiresRowCountCheck;
+        }
+#endif
+        return compiled.RequiresRowCountCheck || ContainsCheckAlias(compiled.Sql);
     }
 
     private static bool ContainsCheckAlias(string sql) =>
@@ -325,6 +341,12 @@ public sealed class OracleCompiledSqlBinder : DbCommandCompiledSqlBinder
 
     protected override void PrepareCommand(DbCommand command)
     {
+#if DEBUG
+        if (CompilerTestSeams.IsDisabled(SecurityControl.OracleBindByName))
+        {
+            return;
+        }
+#endif
         var property = command.GetType().GetProperty("BindByName");
         if (property is null || property.PropertyType != typeof(bool) || !property.CanWrite || !property.CanRead)
         {

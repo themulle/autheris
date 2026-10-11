@@ -69,6 +69,12 @@ public sealed record CompiledSqlTemplate(
                 }
 
                 value = current.Value;
+#if DEBUG
+                if (CompilerTestSeams.IsDisabled(SecurityControl.CacheRebindPolicyValues))
+                {
+                    value = slot.LiteralValue;   // mutant: the template keeps the value of the request that created it
+                }
+#endif
             }
 
             parameters.Add(new BoundParameter(slot.Marker, slot.Name, slot.Ordinal, value, type, slot.Origin, slot.SourceName, slot.ColumnType));
@@ -182,7 +188,13 @@ public static class CompileCacheKey
         ArgumentNullException.ThrowIfNull(capabilities);
 
         var sb = new StringBuilder(512);
-        sb.Append("v=").Append(CompilerInfo.Version).Append(";cap=").Append(DialectCapabilities.TableVersion).Append(';');
+#if DEBUG
+        if (CompilerTestSeams.Current?.OmittedCacheKeyFields?.Contains("Versions") != true)
+#endif
+        {
+            sb.Append("v=").Append(CompilerInfo.Version).Append(";cap=").Append(DialectCapabilities.TableVersion).Append(';');
+        }
+
         Write(sb, request, skipValue: false);
         // CR-ADG-41: the engine's input limit is checked while parsing, which a cache hit skips; it is part of the key instead.
         sb.Append(";maxq=").Append(engineMaxQueryLength.ToString(CultureInfo.InvariantCulture));
@@ -234,6 +246,9 @@ public static class CompileCacheKey
                          .ToArray()))
         {
             if (value is GovernancePolicy && ValidatedPerTable.Contains(property.Name)) continue;
+#if DEBUG
+            if (value is CompileRequest && CompilerTestSeams.Current?.OmittedCacheKeyFields?.Contains(property.Name) == true) continue;
+#endif
             sb.Append(property.Name).Append('=');
             Write(sb, property.GetValue(value), false);
             sb.Append(',');

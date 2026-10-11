@@ -311,7 +311,7 @@ public sealed partial class FastSqlEngine : ISqlEngine
         Func<SqlBaseParser, TTree> entryRule)
         where TTree : ParserRuleContext
     {
-        System.Runtime.CompilerServices.RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
 
         var charStream = new ZeroCopyCaseInsensitiveStream(sql);
         var lexer = new SqlBaseLexer(charStream);
@@ -408,7 +408,11 @@ public sealed partial class FastSqlEngine : ISqlEngine
                 continue;
 
             // SEC-ADG-10: ${...} variable substitution sequences (Spark / Databricks)
-            if (options.RejectVariableSubstitutionSequences && text != null && text.Contains("${", StringComparison.Ordinal))
+            if (options.RejectVariableSubstitutionSequences && text != null && text.Contains("${", StringComparison.Ordinal)
+#if DEBUG
+                && !CompilerTestSeams.IsDisabled(SecurityControl.VariableSubstitution)
+#endif
+                )
             {
                 throw new ParseCanceledException(
                     $"line {token.Line}:{token.Column}: Variable substitution sequences ('${{') are not permitted.");

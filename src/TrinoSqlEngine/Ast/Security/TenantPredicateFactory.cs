@@ -36,6 +36,13 @@ public static class TenantPredicateFactory
         Expression Column() => column;
         Expression Param() => value;
 
+#if DEBUG
+        if (CompilerTestSeams.IsDisabled(SecurityControl.TenantByteExactCompare))
+        {
+            return new BinaryExpression(Column(), BinaryOperator.Equal, Param());
+        }
+#endif
+
         switch (capabilities.TenantComparison)
         {
             case TenantComparisonStyle.Utf16BinaryCast:
@@ -51,11 +58,18 @@ public static class TenantPredicateFactory
                 static Expression Length(Expression operand) =>
                     new FunctionCallExpression(new SqlQualifiedName("DATALENGTH"), new[] { (Expression)new CastExpression(operand, "varchar") });
 
+                var binaryEquality = new BinaryExpression(
+                    new BinaryExpression(Column(), BinaryOperator.Equal, Param()),
+                    BinaryOperator.And,
+                    new BinaryExpression(Binary(Column()), BinaryOperator.Equal, Binary(Param())));
+#if DEBUG
+                if (CompilerTestSeams.IsDisabled(SecurityControl.TenantBinaryLengthConjunct))
+                {
+                    return binaryEquality;
+                }
+#endif
                 return new BinaryExpression(
-                    new BinaryExpression(
-                        new BinaryExpression(Column(), BinaryOperator.Equal, Param()),
-                        BinaryOperator.And,
-                        new BinaryExpression(Binary(Column()), BinaryOperator.Equal, Binary(Param()))),
+                    binaryEquality,
                     BinaryOperator.And,
                     new BinaryExpression(Length(Column()), BinaryOperator.Equal, Length(Param())));
             }

@@ -29,7 +29,7 @@ internal static class AstReflection
     {
         if (ReferenceEquals(a, b)) return true;
         if (a is null || b is null || a.GetType() != b.GetType()) return false;
-        RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
         var type = a.GetType();
         if (type.IsPrimitive || type.IsEnum || a is string || a is decimal) return a.Equals(b);
         if (a is IEnumerable left)
@@ -68,7 +68,7 @@ internal static class AstReflection
     public static void Walk(object? node, Func<object, bool> visit)
     {
         if (node is null || node is string) return;
-        RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
 
         if (node is IEnumerable list)
         {
@@ -101,7 +101,7 @@ internal static class AstReflection
     private static void Referenced(object? node, bool insideSubquery, ImmutableHashSet<string>.Builder columns)
     {
         if (node is null || node is string) return;
-        RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
         if (node is IEnumerable list)
         {
             foreach (var item in list) Referenced(item, insideSubquery, columns);
@@ -155,7 +155,7 @@ internal static class AstReflection
 
     private static void Serialize(object? value, StringBuilder sb)
     {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
         switch (value)
         {
             case null:
