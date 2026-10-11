@@ -32,7 +32,7 @@ public sealed class GovernedDataQueryServiceTypedPolicyTests
     private static readonly TableIdentifier Table = new("sales", "main", "orders");
 
     [Fact]
-    public async Task TypedRowPolicy_IsSplicedAsLiteral_NeverAsMarker()
+    public async Task TypedRowPolicy_IsNotSplicedIntoDatasetSql_NeitherAsLiteralNorAsMarker()
     {
         var metadata = new TableMetadata
         {
@@ -65,7 +65,8 @@ public sealed class GovernedDataQueryServiceTypedPolicyTests
         await service.ExecuteQueryAsync(new DatasetQueryRequest(Table, Limit: 10), new RequestContext(user, new TenantId("default")));
 
         sent.ShouldNotBeNull();
-        sent!.Sql.ShouldContain("'O''Brien'");
+        // WP-X0n: the dataset service no longer splices policy text; the rewriter applies the row policy exactly once.
+        sent!.Sql.ShouldNotContain("O'Brien");
         sent.Sql.ShouldNotContain("@__gql");
     }
 }

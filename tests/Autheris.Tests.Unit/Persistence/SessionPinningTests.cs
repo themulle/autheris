@@ -132,7 +132,6 @@ public sealed class SessionPinningTests
     }
 
     [Theory]
-    [InlineData("Databricks")]
     [InlineData("MySql")]
     public async Task UnmappedProvider_FailsClosed_InsteadOfSkippingSessionSetup(string provider)
     {
@@ -140,5 +139,15 @@ public sealed class SessionPinningTests
 
         await Should.ThrowAsync<NotSupportedException>(() =>
             factory.CreateOpenConnectionAsync(new DataSourceConnectionOptions { Provider = provider, ConnectionString = "x" }));
+    }
+
+    [Fact]
+    public async Task Databricks_WithoutItsSection_FailsClosed()
+    {
+        // WP-X0j maps Databricks to the REST client; a data source without the Databricks section is refused.
+        var factory = new SqlConnectionFactory(Dev());
+
+        await Should.ThrowAsync<ArgumentException>(() =>
+            factory.CreateOpenConnectionAsync(new DataSourceConnectionOptions { Provider = "Databricks", ConnectionString = "x" }));
     }
 }
