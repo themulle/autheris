@@ -433,6 +433,12 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 
     public override void GenerateExpression(Expression expression, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        // T-SQL has no array type: ARRAY[...] and x[i] would be emitted as bracketed identifiers.
+        if (expression is SubscriptExpression or ArrayConstructorExpression)
+        {
+            throw NoBoundForm("array constructors and subscripts", TargetDialect);
+        }
+
         if (context.InProjectionContext && IsPredicateExpression(expression))
         {
             builder.Append("CASE WHEN ");

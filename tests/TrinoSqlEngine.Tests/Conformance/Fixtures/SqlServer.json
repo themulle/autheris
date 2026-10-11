@@ -1523,7 +1523,7 @@
       "Sql": "SELECT a[1] AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "operator-041",
@@ -1531,7 +1531,7 @@
       "Sql": "SELECT ARRAY[1, 2, 3] AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "operator-042",

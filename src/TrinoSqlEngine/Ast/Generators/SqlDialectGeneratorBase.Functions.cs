@@ -74,6 +74,13 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         _ => throw UnsupportedConstruct($"CAST(… AS {type.Normalized})", TargetDialect)
     };
 
+    /// <summary>
+    /// A construct that has no form under the bind-everything rule of the dialect (typed fail-closed rejection of the governed path;
+    /// the unbound emission of the legacy path is unaffected).
+    /// </summary>
+    protected static SqlCompileNotSupportedException NoBoundForm(string construct, TargetSqlDialect dialect) =>
+        new(SqlCompileNotSupportedReason.Construct, $"{construct} on {dialect}");
+
     protected static TrinoSqlEngine.Ast.Builder.AstBuildException UnsupportedConstruct(string construct, TargetSqlDialect dialect) =>
         new($"SQL construct {construct} is not supported for {dialect}.");
 

@@ -869,7 +869,7 @@
       "Sql": "SELECT DATE '2024-01-15' FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "literal-026",
@@ -877,7 +877,7 @@
       "Sql": "SELECT TIMESTAMP '2024-01-15 10:30:00' FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "literal-027",
@@ -885,7 +885,7 @@
       "Sql": "SELECT TIMESTAMP '2024-01-15 10:30:00.123' FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "literal-028",
@@ -893,7 +893,7 @@
       "Sql": "SELECT TIME '10:30:00' FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "literal-029",
@@ -997,7 +997,7 @@
       "Sql": "SELECT a FROM t WHERE d = DATE '2024-01-15'",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "literal-039",
@@ -1005,7 +1005,7 @@
       "Sql": "SELECT a FROM t WHERE ts > TIMESTAMP '2024-01-15 10:30:00'",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "operator-001",
@@ -2875,7 +2875,7 @@
       "Sql": "SELECT localtime AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-005",
@@ -2883,7 +2883,7 @@
       "Sql": "SELECT localtimestamp AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-006",
@@ -3099,7 +3099,7 @@
       "Sql": "SELECT EXTRACT(year FROM d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-033",
@@ -3107,7 +3107,7 @@
       "Sql": "SELECT EXTRACT(month FROM d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-034",
@@ -3115,7 +3115,7 @@
       "Sql": "SELECT EXTRACT(day FROM d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-035",
@@ -3123,7 +3123,7 @@
       "Sql": "SELECT EXTRACT(hour FROM ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-036",
@@ -3131,7 +3131,7 @@
       "Sql": "SELECT EXTRACT(minute FROM ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-037",
@@ -3139,7 +3139,7 @@
       "Sql": "SELECT EXTRACT(second FROM ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-038",
@@ -3147,7 +3147,7 @@
       "Sql": "SELECT EXTRACT(dow FROM d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-039",
@@ -3155,7 +3155,7 @@
       "Sql": "SELECT EXTRACT(doy FROM d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-040",
@@ -3163,7 +3163,7 @@
       "Sql": "SELECT EXTRACT(quarter FROM d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-041",
@@ -3171,7 +3171,7 @@
       "Sql": "SELECT EXTRACT(week FROM d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "AstBuildException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-042",
@@ -3179,7 +3179,7 @@
       "Sql": "SELECT EXTRACT(epoch FROM ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "AstBuildException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "fn-date-043",
@@ -3235,7 +3235,7 @@
       "Sql": "SELECT date_trunc('day', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-002",
@@ -3243,7 +3243,7 @@
       "Sql": "SELECT date_trunc('month', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-003",
@@ -3251,7 +3251,7 @@
       "Sql": "SELECT date_trunc('year', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-004",
@@ -3259,7 +3259,7 @@
       "Sql": "SELECT date_trunc('hour', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-005",
@@ -3267,7 +3267,7 @@
       "Sql": "SELECT date_trunc('week', d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "AstBuildException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-006",
@@ -3275,7 +3275,7 @@
       "Sql": "SELECT date_trunc('minute', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-007",
@@ -3283,7 +3283,7 @@
       "Sql": "SELECT date_trunc('second', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-008",
@@ -3291,7 +3291,7 @@
       "Sql": "SELECT date_add('day', 1, d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-009",
@@ -3299,7 +3299,7 @@
       "Sql": "SELECT date_add('month', 2, d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-010",
@@ -3307,7 +3307,7 @@
       "Sql": "SELECT date_add('hour', 3, ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-011",
@@ -3315,7 +3315,7 @@
       "Sql": "SELECT date_add('year', -1, d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-012",
@@ -3323,7 +3323,7 @@
       "Sql": "SELECT date_add('week', 2, d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-013",
@@ -3331,7 +3331,7 @@
       "Sql": "SELECT date_add('minute', 5, ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-014",
@@ -3339,7 +3339,7 @@
       "Sql": "SELECT date_add('second', 30, ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-015",
@@ -3347,7 +3347,7 @@
       "Sql": "SELECT d + INTERVAL '1' DAY AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-016",
@@ -3355,7 +3355,7 @@
       "Sql": "SELECT d - INTERVAL '1' MONTH AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-017",
@@ -3363,7 +3363,7 @@
       "Sql": "SELECT ts + INTERVAL '2' HOUR AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-018",
@@ -3371,7 +3371,7 @@
       "Sql": "SELECT INTERVAL '3' DAY + d AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-019",
@@ -3379,7 +3379,7 @@
       "Sql": "SELECT ts - INTERVAL '15' MINUTE AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-020",
@@ -3387,7 +3387,7 @@
       "Sql": "SELECT d + INTERVAL '2' YEAR AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "date-translated-021",
@@ -5351,7 +5351,7 @@
       "Sql": "SELECT a FROM t ORDER BY a OFFSET 5",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "order-page-013",
@@ -5359,7 +5359,7 @@
       "Sql": "SELECT a FROM t ORDER BY a OFFSET 5 ROWS",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "order-page-014",
@@ -5477,7 +5477,7 @@
       "Sql": "SELECT a FROM t OFFSET 0 ROWS",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "order-page-022",

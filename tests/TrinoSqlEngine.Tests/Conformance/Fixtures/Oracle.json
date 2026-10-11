@@ -934,7 +934,7 @@
       "Sql": "SELECT INTERVAL '1' DAY FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "literal-031",
@@ -942,7 +942,7 @@
       "Sql": "SELECT INTERVAL '2' MONTH FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "literal-032",
@@ -950,7 +950,7 @@
       "Sql": "SELECT INTERVAL '3' YEAR FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "literal-033",
@@ -958,7 +958,7 @@
       "Sql": "SELECT INTERVAL '4' HOUR FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "literal-034",
@@ -966,7 +966,7 @@
       "Sql": "SELECT INTERVAL '30' SECOND FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "EmittedSqlInvariantViolationException"
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "literal-035",

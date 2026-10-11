@@ -226,11 +226,9 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
             return;
         }
 
-        builder.Append("NUMTODSINTERVAL(CAST(");
-        builder.Append(BindInteger(long.Parse(interval.Value, System.Globalization.CultureInfo.InvariantCulture), context));
-        builder.Append(" AS NUMBER(19)), ");
-        AppendConstantFragment(ref builder, context, "'" + interval.Field.ToUpperInvariant() + "'");
-        builder.Append(')');
+        // NUMTODSINTERVAL has no MONTH or YEAR field and an interval value cannot be emitted as a literal: no bound form.
+        // (x +/- INTERVAL with TranslateTrinoDateFunctions never reaches this method; it becomes a date_add node.)
+        throw NoBoundForm("INTERVAL literal", TargetDialect);
     }
 
     public override int MaxParameterBudget => 1000;
