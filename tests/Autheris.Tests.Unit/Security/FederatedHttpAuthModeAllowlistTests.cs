@@ -130,12 +130,16 @@ public sealed class FederatedHttpAuthModeAllowlistTests
         }
     }
 
-    [Fact]
-    public async Task ForwardBearerToken_RemainsDenied_EvenIfListed()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ForwardBearerToken_IsAlwaysUnsupported_WhetherListedOrNot(bool listed)
     {
-        var (service, _) = Create(["ForwardBearerToken"]);
+        var (service, _) = listed ? Create(["ForwardBearerToken"]) : Create(null);
 
-        await Should.ThrowAsync<GatewaySecurityException>(async () =>
+        var ex = await Should.ThrowAsync<GatewaySecurityException>(async () =>
             await service.StageAsync([HttpRequest(HttpAuthMode.ForwardBearerToken)], User(), new TenantId(Tenant), Budget()));
+
+        ex.ErrorCode.ShouldBe("AUTH_MODE_UNSUPPORTED");
     }
 }
