@@ -275,7 +275,11 @@ public sealed class TableAccessPolicy
 
             if (mandatory.PredicateSql != null)
             {
-                decision = decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
+                // WP-X0g: with a RowPolicyFactory the typed predicate is attached (values bound, passes RequireTypedRowPolicy);
+                // without one, or when a builder has no typed form, the legacy text path stays until X1.
+                decision = _rowPolicyFactory != null && mandatory.TypedPredicate != null
+                    ? decision.WithMandatoryPredicate(_rowPolicyFactory.FromPredicate(mandatory.TypedPredicate, query.Metadata.Dialect), mandatory.AppliedFilters, mandatory.AppliedBindings)
+                    : decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
             }
         }
 
