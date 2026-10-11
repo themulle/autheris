@@ -129,10 +129,10 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     }
 
     /// <summary>Binds an integer value with the narrowest fitting integer type.</summary>
-    protected static string BindInteger(long value, SqlEmitterContext context) =>
+    protected static string BindInteger(long value, SqlEmitterContext context, string? columnType = null) =>
         context.BindValue(value is >= int.MinValue and <= int.MaxValue ? (int)value : value,
             value is >= int.MinValue and <= int.MaxValue ? SqlParameterType.Int32 : SqlParameterType.Int64,
-            ParameterOrigin.QueryLiteral);
+            ParameterOrigin.QueryLiteral, columnType);
 
     public virtual string GenerateSql(SqlStatement statement)
     {

@@ -33,8 +33,8 @@ public readonly record struct AdaptedBind(SqlParameterType Type, object? Value, 
 
 /// <summary>
 /// Maps the catalog data type of the column a gateway-bound value is compared with to a provider bind type (CR-ADG-09). Applies to
-/// tenant and policy binds, whose column is known from the catalog. Query literals follow their literal type: taking the type of
-/// the compared column for user literals is a tracked precondition of X1.
+/// tenant and policy binds and, since WP-X0q, to user literals compared with a catalog column (annotated by
+/// <c>LiteralColumnTypeAnnotator</c>; a numeric literal against a text column is rejected by the generator before it gets here).
 /// </summary>
 public static class ColumnBindAdapter
 {
