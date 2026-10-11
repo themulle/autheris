@@ -435,7 +435,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             if (!consentBypassed && (_consentRepository == null || _consentResolution == null))
             {
                 _logger?.LogError("WebSQL cannot evaluate consents (consent services not available); denying access (fail-closed).");
-                throw new WebSqlPolicyException($"WebSQL access denied to table '{resolved.Target.FullName}'.");
+                throw new WebSqlTableDeniedException($"WebSQL access denied to table '{resolved.Target.FullName}'.");
             }
 
             var colList = resolved.Metadata.Columns.Select(c => c.ColumnName).ToList();
@@ -460,7 +460,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                     }
                 }
 
-                throw new WebSqlPolicyException($"WebSQL access denied to table '{resolved.Target.FullName}'.");
+                throw new WebSqlTableDeniedException($"WebSQL access denied to table '{resolved.Target.FullName}'.");
             }
 
             // Tenant column check (INV-9)

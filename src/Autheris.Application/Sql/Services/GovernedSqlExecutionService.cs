@@ -300,7 +300,7 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
                         ? mRule.RuleType ?? "REDACT"
                         : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
 
-                    throw new WebSqlPolicyException(
+                    throw ColumnPolicyViolation(lvl,
                         $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction ('{ruleDesc}') and cannot be used in a relational JOIN predicate. Joining on static constants produces false Cartesian cross-products and enables side-channel join inference attacks. Configure deterministic HMAC pseudonymization (RuleType = 'HMAC') or join on surrogate foreign keys (e.g. ID).");
                 }
 
@@ -316,12 +316,16 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
                         ? mRule.RuleType ?? "REDACT"
                         : (lvl == ColumnAccessLevel.Deny ? "DENY" : "ABAC_MASK");
 
-                    throw new WebSqlPolicyException(
+                    throw ColumnPolicyViolation(lvl,
                         $"Security Policy Violation: Column '{col.ColumnName}' in table '{target.FullName}' is protected by static redaction or access policy ('{ruleDesc}') and cannot be used in a filter predicate (WHERE/HAVING/ORDER BY). Filtering or sorting on masked or denied columns would run against the redacted value and is forbidden to prevent oracle inference attacks.");
                 }
             }
         }
     }
+
+    // SEC-X1-05: a denied (hidden) column answers like a column that does not exist (SQL_POLICY_DENIED); a masked column keeps the statement-level code.
+    private static WebSqlPolicyException ColumnPolicyViolation(ColumnAccessLevel level, string message) =>
+        level == ColumnAccessLevel.Deny ? new WebSqlTableDeniedException(message) : new WebSqlPolicyException(message);
 
     internal static bool MatchesPostgreSqlCatalogName(TableAccessTarget target, TableIdentifier catalogTable)
     {

@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Application.Sql.Errors;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
@@ -126,7 +127,15 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         // Hybrid tools: SQL, dataset REST, catalog discovery, permissions, datasources, lineage, dynamic API
         if (_toolExecutionHandler != null && _toolExecutionHandler.CanHandle(tool.Name))
         {
-            return await _toolExecutionHandler.ExecuteToolAsync(tool, argumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                return await _toolExecutionHandler.ExecuteToolAsync(tool, argumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException && SqlCompilerErrorMapper.TryMap(ex, out _))
+            {
+                // WP-X0a: a governed SQL error answers with its stable code and fixed message, never Exception.Message.
+                return CreateMappedErrorResult(sessionContext.TenantId, tool.Name, ex);
+            }
         }
 
         // Dataset tools: catalog discovery and governed sample rows
@@ -293,7 +302,9 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         }
         catch (ArgumentException ex)
         {
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, ex.Message);
+            // SEC-X1-01: the argument message may quote a request value or an object name; it stays in the log.
+            _logger.LogWarning(ex, "Dataset tool '{ToolName}' rejected its arguments.", tool.Name);
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "The tool arguments are invalid.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -302,6 +313,11 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Dataset tool '{ToolName}' failed.", tool.Name);
+            if (SqlCompilerErrorMapper.TryMap(ex, out _))
+            {
+                return CreateMappedErrorResult(sessionContext.TenantId, tool.Name, ex);
+            }
+
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "Tool execution failed.");
         }
     }
@@ -473,6 +489,14 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         }
 
         return json;
+    }
+
+    /// <summary>The error result of a governed SQL error: the stable code and the fixed message of that code (plan section 28.4.3).</summary>
+    internal static string CreateMappedErrorResult(string tenantId, string toolName, Exception exception)
+    {
+        SqlCompilerErrorMapper.TryMap(exception, out var mapped);
+        SqlCompilerErrorMapper.RecordOutcome(mapped);
+        return CreateErrorResult(tenantId, toolName, mapped.Code, mapped.Title);
     }
 
     /// <summary>

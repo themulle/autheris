@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using Autheris.Application.Common;
+using Autheris.Application.Sql.Errors;
 using Autheris.Domain.Exceptions;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
@@ -42,7 +43,22 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             return true;
         }
 
-        var (status, title, retryAfter) = Map(exception);
+        // WP-X0a: compiler, policy and DML errors carry a stable `code` and the fixed message of that code.
+        string? code = null;
+        string? limit = null;
+        (int status, string title, int? retryAfter) = (0, string.Empty, null);
+        if (SqlCompilerErrorMapper.TryMap(exception, out var mapped))
+        {
+            SqlCompilerErrorMapper.RecordOutcome(mapped);
+            (status, title, retryAfter) = (mapped.Status, mapped.Title, mapped.Status == StatusCodes.Status503ServiceUnavailable ? UnavailableRetryAfterSeconds : null);
+            code = mapped.Code;
+            limit = mapped.Limit;
+        }
+        else
+        {
+            (status, title, retryAfter) = Map(exception);
+        }
+
         if (status >= StatusCodes.Status500InternalServerError)
         {
             logger.LogError(exception, "Unhandled exception for {Path} mapped to {Status}. TraceId={TraceId}", httpContext.Request.Path, status, traceId);
@@ -65,6 +81,16 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             Title = title,
             Type = $"https://httpwg.org/specs/rfc9110.html#status.{status}"
         };
+        if (code is not null)
+        {
+            problem.Extensions["code"] = code;
+        }
+
+        if (limit is not null)
+        {
+            problem.Extensions["limit"] = limit;
+        }
+
         problem.Extensions["traceId"] = traceId;
 
         await httpContext.Response.WriteAsJsonAsync(problem, (System.Text.Json.JsonSerializerOptions?)null, "application/problem+json", cancellationToken).ConfigureAwait(false);
