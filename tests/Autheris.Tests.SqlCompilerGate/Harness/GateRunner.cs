@@ -142,7 +142,7 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
             {
                 try
                 {
-                    await new CheckedDmlExecutor(binder).ExecuteAsync(conn, compiled, new Dictionary<string, object?>(), cancellationToken: token);
+                    await CompiledSqlBinders.CheckedExecutorFor(compiled.Dialect).ExecuteAsync(conn, compiled, new Dictionary<string, object?>(), cancellationToken: token);
                 }
                 catch (GovernedSqlException ex)
                 {
