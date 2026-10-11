@@ -438,15 +438,20 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             return "Statement execution failed.";
         }
 
+        // WP-X0a (SEC-X1-01): a governed SQL error is stored as the fixed message of its stable code, never as Exception.Message.
+        if (Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped))
+        {
+            return mapped.Title;
+        }
+
         if (ex is OperationCanceledException or TimeoutException)
         {
             return "Query execution timed out or was canceled.";
         }
 
-        if (ex is Autheris.Domain.Exceptions.GatewayInvalidQueryException or
-                  Antlr4.Runtime.Misc.ParseCanceledException)
+        if (ex is Autheris.Domain.Exceptions.GatewayInvalidQueryException)
         {
-            return ex.Message;
+            return "The SQL request is invalid.";
         }
 
         if (ex is Autheris.Domain.Exceptions.GatewaySecurityException or

@@ -14,6 +14,7 @@ using Autheris.Api.Extensions;
 using Autheris.Api.Serialization;
 using Autheris.Application.Serialization;
 using Autheris.Application.Sql;
+using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -451,6 +452,13 @@ public static class WebSqlEndpoints
             return;
         }
 
+        // WP-X0a: compiler, policy and DML errors answer with a stable code and the fixed message of that code, never Exception.Message.
+        if (SqlCompilerErrorMapper.TryMap(ex, out var mapped))
+        {
+            await WriteMappedErrorAsync(httpContext, ex, mapped, logger, ct);
+            return;
+        }
+
         switch (ex)
         {
             case GatewayThrottledException throttledEx:
@@ -479,42 +487,6 @@ public static class WebSqlEndpoints
                 }, ct);
                 break;
 
-            case Antlr4.Runtime.Misc.ParseCanceledException parseEx:
-                logger.LogWarning(parseEx, "WebSQL SQL Syntax Error. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                httpContext.Response.ContentType = "application/json; charset=utf-8";
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = "BadRequest",
-                    message = "Invalid SQL syntax.",
-                    traceId = httpContext.TraceIdentifier
-                }, ct);
-                break;
-
-            case Antlr4.Runtime.RecognitionException recogEx:
-                logger.LogWarning(recogEx, "WebSQL SQL Syntax Error. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                httpContext.Response.ContentType = "application/json; charset=utf-8";
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = "BadRequest",
-                    message = "Invalid SQL syntax.",
-                    traceId = httpContext.TraceIdentifier
-                }, ct);
-                break;
-
-            case Exception exWithParse when exWithParse.InnerException is Antlr4.Runtime.Misc.ParseCanceledException or Antlr4.Runtime.RecognitionException:
-                logger.LogWarning(exWithParse, "WebSQL SQL Syntax Error. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.StatusCode = StatusCodes.Status400BadRequest;
-                httpContext.Response.ContentType = "application/json; charset=utf-8";
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = "BadRequest",
-                    message = "Invalid SQL syntax.",
-                    traceId = httpContext.TraceIdentifier
-                }, ct);
-                break;
-
             case NotSupportedException notSuppEx:
                 logger.LogWarning(notSuppEx, "WebSQL Not Supported. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status501NotImplemented;
@@ -529,19 +501,6 @@ public static class WebSqlEndpoints
 
             case Autheris.Domain.Exceptions.GatewaySecurityException gatewayDenied:
                 await Middleware.GatewayDenialStatusMapper.WriteWebSqlResponseAsync(httpContext, gatewayDenied, logger, GenericForbiddenMessage, ct);
-                break;
-
-            case SecurityException secEx:
-                logger.LogWarning(secEx, "WebSQL Security Violation. TraceId={TraceId}", httpContext.TraceIdentifier);
-                httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
-                httpContext.Response.ContentType = "application/json; charset=utf-8";
-                var isProduction = httpContext.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
-                await httpContext.Response.WriteAsJsonAsync(new
-                {
-                    error = "Forbidden",
-                    message = (!isProduction && secEx is WebSqlPolicyException) ? secEx.Message : GenericForbiddenMessage,
-                    traceId = httpContext.TraceIdentifier
-                }, ct);
                 break;
 
             case Exception timeoutEx when IsExecutionTimeout(timeoutEx):
@@ -582,6 +541,55 @@ public static class WebSqlEndpoints
                 break;
         }
     }
+
+    private static async Task WriteMappedErrorAsync(
+        HttpContext httpContext, Exception ex, SqlErrorMapping mapped, ILogger logger, CancellationToken ct)
+    {
+        SqlCompilerErrorMapper.RecordOutcome(mapped);
+        if (mapped.Status >= StatusCodes.Status500InternalServerError)
+        {
+            logger.LogError(ex, "WebSQL failed with {Code}. TraceId={TraceId}", mapped.Code, httpContext.TraceIdentifier);
+        }
+        else
+        {
+            logger.LogWarning(ex, "WebSQL rejected with {Code}. TraceId={TraceId}", mapped.Code, httpContext.TraceIdentifier);
+        }
+
+        httpContext.Response.StatusCode = mapped.Status;
+        httpContext.Response.ContentType = "application/json; charset=utf-8";
+        if (mapped.Status == StatusCodes.Status503ServiceUnavailable)
+        {
+            httpContext.Response.Headers.RetryAfter = "5";
+        }
+
+        // `limit` carries the limit kind only, never a count.
+        var body = new Dictionary<string, object?>
+        {
+            ["error"] = ErrorName(mapped.Status),
+            ["code"] = mapped.Code,
+            ["message"] = mapped.Title
+        };
+        if (mapped.Limit is not null)
+        {
+            body["limit"] = mapped.Limit;
+        }
+
+        body["traceId"] = httpContext.TraceIdentifier;
+        await httpContext.Response.WriteAsJsonAsync(body, ct);
+    }
+
+    private static string ErrorName(int status) => status switch
+    {
+        StatusCodes.Status400BadRequest => "BadRequest",
+        StatusCodes.Status403Forbidden => "Forbidden",
+        StatusCodes.Status409Conflict => "Conflict",
+        StatusCodes.Status422UnprocessableEntity => "UnprocessableEntity",
+        StatusCodes.Status501NotImplemented => "NotImplemented",
+        StatusCodes.Status502BadGateway => "BadGateway",
+        StatusCodes.Status503ServiceUnavailable => "ServiceUnavailable",
+        StatusCodes.Status504GatewayTimeout => "GatewayTimeout",
+        _ => "InternalServerError"
+    };
 
     /// <summary>Database command timeouts (e.g. SqlException "Execution Timeout Expired") and TimeoutExceptions.</summary>
     private static bool IsExecutionTimeout(Exception ex)

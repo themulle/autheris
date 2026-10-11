@@ -2,11 +2,12 @@ namespace Autheris.Api.Endpoints;
 
 using System;
 using System.IO;
-using System.Security;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Apache.Arrow.Ipc;
 using Autheris.Api.Extensions;
 using Autheris.Application.Serialization;
+using Autheris.Application.Sql.Errors;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
@@ -33,9 +34,9 @@ public static class ArrowFlightSqlEndpoints
                 var info = await server.GetFlightInfoAsync(request.Query, context.User, tenant, context.RequestAborted);
                 return Results.Ok(info);
             }
-            catch (SecurityException ex)
+            catch (Exception ex) when (SqlCompilerErrorMapper.TryMap(ex, out _))
             {
-                return ForbidResult(context, ex);
+                return ErrorResult(context, ex);
             }
             catch (ArgumentException)
             {
@@ -54,9 +55,9 @@ public static class ArrowFlightSqlEndpoints
                 var tables = await server.GetTablesAsync(context.User, tenant, schema, context.RequestAborted);
                 return Results.Ok(tables);
             }
-            catch (SecurityException ex)
+            catch (Exception ex) when (SqlCompilerErrorMapper.TryMap(ex, out _))
             {
-                return ForbidResult(context, ex);
+                return ErrorResult(context, ex);
             }
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
@@ -71,7 +72,8 @@ public static class ArrowFlightSqlEndpoints
         try
         {
             context.Response.ContentType = "application/vnd.apache.arrow.stream";
-            await using var stream = context.Response.BodyWriter.AsStream();
+            // leaveOpen: disposing the stream would complete the body writer before an error answer could be written.
+            var stream = context.Response.BodyWriter.AsStream(leaveOpen: true);
 
             ArrowStreamWriter? writer = null;
             long totalRows = 0;
@@ -102,9 +104,9 @@ public static class ArrowFlightSqlEndpoints
             auditContext?.Error("CLIENT_ABORTED", AuditEventTypes.QueryExecutionError);
             throw;
         }
-        catch (SecurityException ex)
+        catch (Exception ex) when (SqlCompilerErrorMapper.TryMap(ex, out _))
         {
-            return ForbidResult(context, ex);
+            return ErrorResult(context, ex);
         }
         catch (ArgumentException)
         {
@@ -116,9 +118,17 @@ public static class ArrowFlightSqlEndpoints
     private static IResult BadRequestResult() =>
         Results.Problem(detail: WebSqlEndpoints.GenericBadRequestMessage, statusCode: StatusCodes.Status400BadRequest);
 
-    private static IResult ForbidResult(HttpContext context, SecurityException ex)
+    // WP-X0a (SEC-X1-01): Flight is HTTP. The response carries the mapped status, the fixed message and the stable `code`; never Exception.Message, in any environment.
+    private static IResult ErrorResult(HttpContext context, Exception ex)
     {
-        var isProduction = context.RequestServices?.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.IsProduction() ?? false;
-        return Results.Problem(detail: isProduction ? "Access denied." : ex.Message, statusCode: StatusCodes.Status403Forbidden);
+        SqlCompilerErrorMapper.TryMap(ex, out var mapped);
+        SqlCompilerErrorMapper.RecordOutcome(mapped);
+        var extensions = new Dictionary<string, object?> { ["code"] = mapped.Code };
+        if (mapped.Limit is not null)
+        {
+            extensions["limit"] = mapped.Limit;
+        }
+
+        return Results.Problem(detail: mapped.Title, statusCode: mapped.Status, extensions: extensions);
     }
 }

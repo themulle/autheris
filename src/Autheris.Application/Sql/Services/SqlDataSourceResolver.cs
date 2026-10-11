@@ -144,7 +144,7 @@ public sealed class SqlDataSourceResolver
                string.Equals(tableOrAlias, target.FullName, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static WebSqlPolicyException TableDenied(TableAccessTarget target) =>
+    public static WebSqlTableDeniedException TableDenied(TableAccessTarget target) =>
         new($"Access to table '{target.FullName}' is denied or the table is not registered in the governance catalog.");
 
     public static void AddInternalRowFilterParameters(IReadOnlyDictionary<string, object?>? source, Dictionary<string, object?> target)

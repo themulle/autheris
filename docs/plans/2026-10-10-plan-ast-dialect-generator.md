@@ -3541,3 +3541,24 @@ The orchestrator accepted the fail-closed defaults written in §28.8. They are b
   - A Phase 3 sign-off is given on the final `accepted-differences.json` and on the cutover PR itself.
 - **WP-X1-DBX:** blocked on X1, a green G9 (S-4) and the S-2 rule.
 - **WP-X4:** not scheduled (S-5).
+
+### 30.1 WP-X0a implementation log (`feat/ast-x1-errors`, Phase 4)
+
+**Built.**
+
+- `SqlCompilerErrorMapper` (public static) and `SqlErrorMapping` in `src/Autheris.Application/Sql/Errors/`. `TryMap` walks the inner chain to depth 8; the first rule (plan table order) that matches any exception of the chain wins, then `DataAccessErrorClassifier` (504 `SQL_TIMEOUT`, 503 `SQL_SOURCE_UNAVAILABLE`). `Title` is always `GovernedSqlErrorCodes.FixedMessage(code)`; `Limit` carries the `SqlLimitKind` name only. Counter `autheris_sql_compiler_invariant_failures_total` via `RecordOutcome`.
+- `GovernedSqlErrorCodes` gained the compiler codes and fixed messages (`GovernedSqlException.cs`). `DML_AFFECTED_ROWS_LIMIT` is a code only; X0k adds the exception, which the mapper already handles as a `GovernedSqlException` with that code.
+- `WebSqlTableDeniedException` (new, derives from the now unsealed `WebSqlPolicyException`): `SqlDataSourceResolver.TableDenied`, the two "WebSQL access denied to table" throws (`CrossSourceQueryRouter`, `FederatedDuckDbExecutionService`) and denied-column join/filter rejections use it, so all "table or column not usable" causes map to `SQL_POLICY_DENIED`. Plain `WebSqlPolicyException` stays `SQL_POLICY_VIOLATION`.
+- Surfaces: `WebSqlEndpoints.WriteWebSqlErrorAsync` (`{ error, code, message, [limit], traceId }`), `GatewayExceptionHandler` (ProblemDetails extensions `code`, `limit`), `ArrowFlightSqlEndpoints` (ProblemDetails with `code`, no `ex.Message` in any environment), `GatewayMcpQueryExecutor` (tool-handler errors, dataset tool errors carry the stable `code`; `ArgumentException` no longer echoed), `WebSqlStatementManager.SanitizeErrorMessage`, `AsyncQueryJobBackgroundWorker` (persisted message is the fixed message of the code, or a generic text).
+
+**Tests** (`tests/Autheris.Tests.Unit/Sql/Errors/`): `Map_EveryRowOfTable28_4_3` (24 rows), `Map_WrappedInWebSqlPolicyException_UsesInnerCode`, `Map_SecurityExceptionWrappingDataError_IsNeverDowngradedToA4xxDataCode`, `Map_DepthBeyondEight_IsNotWalked`, `Map_UnregisteredAndDeniedTable_AreByteIdentical`, `LimitResponse_CarriesKindOnly_NoCounts`, `TimeoutBeforeSanitizer_Stays504`, `Response_NeverContainsExceptionMessage_ForHostileMarker` (Development, Staging, Production), `Response_NeverContainsExceptionMessage_InStaging`, `Flight_MapsStatusAndCode_WithoutMessage`, `Mcp_ToolError_CarriesCode`, `McpExecutor_ArgumentException_DoesNotEchoMessage`, `AsyncStatement_ErrorMessage_IsFixedMessageOfCode`, `AsyncJob_PersistedError_IsFixedMessageOfCode`, plus WebSQL and global-handler code/limit tests. Three legacy tests that asserted the echoed message were updated (`M10_CuratedPolicyException_IsReturnedWith403`, `PARQ_WebSql_PolicyError_StaysJson403`, `Executor_InvalidDatasetId_IsAnInvalidParamsError`).
+
+**Deviations and open points.**
+
+- The defect rows (`SQL_COMPILER_INVARIANT`) are evaluated before the generic `SecurityException` row, because `SecurityCoverageException`, `EmittedSqlInvariantViolationException` and `SqlCompileConfigurationException` derive from `SecurityException` and would otherwise map to 403.
+- An unknown `GovernedSqlException` code maps to 500 `SQL_COMPILER_INVARIANT` (fail closed).
+- `TENANT_ID_COLLISION` is matched as `GatewaySecurityException { ErrorCode }`; the existing middleware response is unchanged.
+- `McpToolExecutionHandler.cs` is not edited: it does not catch; the executor maps its exceptions. The MCP `error.code` is the stable SQL code for governed SQL errors (other MCP errors keep `FORBIDDEN`, `INVALID_PARAMS`, ...).
+- Flight stream: the body-writer stream is no longer disposed before an error answer (`AsStream(leaveOpen: true)`), otherwise the ProblemDetails write failed.
+- Pre-existing, not changed: Antlr `ParseCanceledException` derives from `OperationCanceledException`, so an async statement that fails to parse reports state `CANCELED` (the faulted exception is not recoverable). `GatewayInvalidQueryException` in the global handler still uses its curated message as title (OData surface, not a compiler error).
+- Masked (not denied) columns used in a filter or join keep `SQL_POLICY_VIOLATION`.

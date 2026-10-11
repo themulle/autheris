@@ -8,7 +8,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Jobs.Interfaces;
-using Autheris.Application.Security;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
@@ -142,7 +141,8 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         }
         catch (Exception ex)
         {
-            var sanitized = SecretScrubber.Scrub(ex.Message);
+            // WP-X0a (SEC-X1-01): the persisted message is the fixed message of the stable code, never Exception.Message (driver text, values).
+            var sanitized = Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.FixedMessageOrDefault(ex, "The job could not be executed. Contact support with the trace id.");
             var failed = runningJob with
             {
                 State = AsyncJobState.Failed,

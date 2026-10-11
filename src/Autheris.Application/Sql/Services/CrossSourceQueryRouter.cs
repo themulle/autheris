@@ -101,7 +101,7 @@ public sealed class CrossSourceQueryRouter : ICrossSourceQueryRouter
 
             if (meta == null || !meta.Table.IsActive)
             {
-                throw new WebSqlPolicyException($"WebSQL access denied to table '{target.FullName}'.");
+                throw new WebSqlTableDeniedException($"WebSQL access denied to table '{target.FullName}'.");
             }
 
             // Check unsupported types (Phase 0 / 2)

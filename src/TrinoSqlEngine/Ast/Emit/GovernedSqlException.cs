@@ -11,6 +11,26 @@ public static class GovernedSqlErrorCodes
     public const string CheckOptionViolation = "DML_CHECK_OPTION_VIOLATION";
     public const string CheckedExecutionRequired = "DML_CHECKED_EXECUTION_REQUIRED";
 
+    // WP-X0a (plan section 28.4.3): codes of the compiler and execution error mapping.
+    public const string SyntaxError = "SQL_SYNTAX_ERROR";
+    public const string ParameterMissing = "SQL_PARAMETER_MISSING";
+    public const string ConstructNotSupported = "SQL_CONSTRUCT_NOT_SUPPORTED";
+    public const string StatementNotPermitted = "SQL_STATEMENT_NOT_PERMITTED";
+    public const string DialectNotSupported = "SQL_DIALECT_NOT_SUPPORTED";
+    public const string LimitExceeded = "SQL_LIMIT_EXCEEDED";
+    public const string UnfilteredDml = "SQL_UNFILTERED_DML";
+
+    /// <summary>One code for every "table not usable" cause (not registered, inactive, no columns, denied, hidden column, load failure; SEC-X1-05).</summary>
+    public const string PolicyDenied = "SQL_POLICY_DENIED";
+
+    /// <summary>Statement-level rules that do not depend on whether a table exists (DDL, function not permitted, read-only token, missing writer role).</summary>
+    public const string PolicyViolation = "SQL_POLICY_VIOLATION";
+    public const string TenantIdCollision = "TENANT_ID_COLLISION";
+    public const string AffectedRowsLimit = "DML_AFFECTED_ROWS_LIMIT";
+    public const string CompilerInvariant = "SQL_COMPILER_INVARIANT";
+    public const string Timeout = "SQL_TIMEOUT";
+    public const string SourceUnavailable = "SQL_SOURCE_UNAVAILABLE";
+
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
     {
@@ -18,6 +38,21 @@ public static class GovernedSqlErrorCodes
         DataError => "The statement contained a value that could not be stored or converted.",
         CheckOptionViolation => "The statement wrote a row that the row policy does not permit.",
         CheckedExecutionRequired => "The statement must run through the checked DML executor.",
+        ProviderError => "The data source could not execute the statement.",
+        SyntaxError => "Invalid SQL syntax.",
+        ParameterMissing => "A required statement parameter was not supplied.",
+        ConstructNotSupported => "The statement uses a construct that is not supported.",
+        StatementNotPermitted => "This kind of statement is not permitted.",
+        DialectNotSupported => "The statement is not supported for this data source dialect.",
+        LimitExceeded => "The statement exceeds a resource limit.",
+        UnfilteredDml => "UPDATE and DELETE statements require a restricting WHERE clause.",
+        PolicyDenied => "Access to a referenced table or column is denied.",
+        PolicyViolation => "The SQL statement was rejected by the gateway security policy.",
+        TenantIdCollision => "Access denied.",
+        AffectedRowsLimit => "The statement would change more rows than permitted.",
+        CompilerInvariant => "The statement could not be processed.",
+        Timeout => "The SQL statement exceeded the execution time limit. Narrow the query (filter, fewer columns, LIMIT) or contact support with the trace id.",
+        SourceUnavailable => "The data source is temporarily unavailable. Retry later.",
         _ => "The statement could not be executed."
     };
 }
