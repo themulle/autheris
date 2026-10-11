@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "accepted-differences.schema.json",
+  "title": "Accepted legacy-vs-AST differences of the SQL compiler gate (G4)",
+  "description": "Only ast-stricter and ast-error can be accepted. An ast-looser-* class (or any other class) is not in the enum, so such an entry fails validation. The file is owned by the security reviewers (CODEOWNERS). The C# validator AcceptedDifferences.Parse enforces the same rules, and a gate test keeps the class enum of this schema equal to the validator's.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "entries"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["dialects", "class", "reason", "statements", "justification", "approval"],
+        "properties": {
+          "dialects": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "enum": ["Sqlite", "PostgreSql", "SqlServer", "Oracle"] }
+          },
+          "class": { "enum": ["ast-stricter", "ast-error"] },
+          "reason": { "type": "string", "minLength": 1, "description": "Exception type name or FewerRows/FewerWrites; never a message." },
+          "statements": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^[0-9a-f]{12}$" }
+          },
+          "justification": { "type": "string", "minLength": 20 },
+          "issue": { "type": ["string", "null"], "pattern": "^(https://\\S+|[A-Z][A-Z0-9]+-[0-9]+|#[0-9]+)$" },
+          "reviewer": { "type": ["string", "null"], "pattern": "^@[A-Za-z0-9][A-Za-z0-9-]*$" },
+          "approval": { "enum": ["pending", "approved"] }
+        },
+        "if": { "properties": { "approval": { "const": "approved" } } },
+        "then": {
+          "required": ["issue", "reviewer"],
+          "properties": { "issue": { "type": "string" }, "reviewer": { "type": "string" } }
+        }
+      }
+    }
+  }
+}
