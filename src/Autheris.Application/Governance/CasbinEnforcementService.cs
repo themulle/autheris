@@ -22,6 +22,7 @@ using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
+using TrinoSqlEngine.Governance;
 
 public sealed record CasbinRuleInput(
     string Sub,
@@ -925,6 +926,31 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         return false;
     }
 
+    /// <summary>
+    /// SEC-X1-02: the target dialect is mandatory for a correlated row filter. There is no default (the former SQL Server default
+    /// rendered the wrong quoting and strategy for every other source); an unknown dialect fails closed.
+    /// </summary>
+    private static Autheris.Domain.Common.DatabaseDialect RequireTargetDialect(Autheris.Domain.Common.DatabaseDialect? dialect)
+    {
+        if (dialect is { } known && Enum.IsDefined(known))
+        {
+            return known;
+        }
+
+        throw new SecurityException("Security error: the target dialect of a correlated row filter is unknown.");
+    }
+
+    /// <summary>
+    /// Typed form of the correlated row filter (SEC-X1-02): an EXISTS predicate whose values are policy parameters.
+    /// <paramref name="ruleOrdinal"/> gives every rule distinct parameter names, so the predicates of several matched allow rules merge.
+    /// </summary>
+    /// <exception cref="SecurityException">The target dialect is unknown.</exception>
+    internal PolicyPredicate BuildCorrelatedRowFilterPredicate(ConsentRowFilter filter, Autheris.Domain.Common.DatabaseDialect? targetDialect, int ruleOrdinal)
+    {
+        RequireTargetDialect(targetDialect);
+        return _rlsFilterGenerator.BuildCorrelatedPredicate(filter, $"__gql_rls_c{ruleOrdinal}_");
+    }
+
     private List<string> CollectActiveRlsFilters(IReadOnlyList<CasbinRuleMetadata> matchedAllowRules, SecurityEvaluationContext context, string tableStr)
     {
         var result = new List<string>();
@@ -936,7 +962,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             {
                 var subquery = _rlsFilterGenerator.BuildCorrelatedSubquery(
                     rule.CorrelatedRowFilter,
-                    context.TargetDialect ?? Autheris.Domain.Common.DatabaseDialect.SqlServer,
+                    RequireTargetDialect(context.TargetDialect),
                     RowFilterSubqueryStrategy.Exists,
                     isDeny: false);
                 if (!string.IsNullOrWhiteSpace(subquery))

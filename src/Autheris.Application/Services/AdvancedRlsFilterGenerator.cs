@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Application.Sql.Policy;
 using TrinoSqlEngine;
+using TrinoSqlEngine.Governance;
 
 namespace Autheris.Application.Services;
 
@@ -153,6 +155,17 @@ public static partial class AdvancedRlsFilterGenerator
         };
     }
 
+    /// <summary>
+    /// Typed form of <see cref="BuildCorrelatedSubquery"/> (SEC-X1-02): an EXISTS over the reserved target alias whose values are
+    /// policy parameters. <paramref name="parameterPrefix"/> keeps the names of independently built predicates distinct.
+    /// </summary>
+    public static PolicyPredicate BuildCorrelatedPredicate(ConsentRowFilter filter, string parameterPrefix = "__gql_rls_") =>
+        AdvancedRlsPredicateBuilder.BuildCorrelated(filter, parameterPrefix);
+
+    /// <summary>Typed form of <see cref="BuildCrossSourceSetFilter"/>: one parameter per value; an unknown dialect throws.</summary>
+    public static PolicyPredicate BuildCrossSourceSetPredicate(ConsentRowFilter filter, DatabaseDialect dialect, string parameterPrefix = "__gql_rls_") =>
+        AdvancedRlsPredicateBuilder.BuildCrossSourceSet(filter, PolicyParameterNamer.ToTargetDialect(dialect), parameterPrefix);
+
     public static string BuildCrossSourceSetFilter(ConsentRowFilter filter, int maxBatchSize = 500, DatabaseDialect dialect = DatabaseDialect.SqlServer)
     {
         var col = filter.ColumnName;
@@ -207,7 +220,7 @@ public static partial class AdvancedRlsFilterGenerator
         return $"({string.Join(" OR ", orClauses)})";
     }
 
-    private static readonly HashSet<string> AllowedSubqueryOperators = new(StringComparer.OrdinalIgnoreCase)
+    internal static readonly HashSet<string> AllowedSubqueryOperators = new(StringComparer.OrdinalIgnoreCase)
     {
         "EQ", "NEQ", "LT", "GT", "LTE", "GTE", "LIKE"
     };
@@ -334,7 +347,7 @@ public static partial class AdvancedRlsFilterGenerator
         };
     }
 
-    private static void EnsureDistinctInnerAlias(string alias, string configuredTargetAlias, HashSet<string> seen)
+    internal static void EnsureDistinctInnerAlias(string alias, string configuredTargetAlias, HashSet<string> seen)
     {
         if (string.Equals(alias, configuredTargetAlias, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(alias, RowFilterAliases.Target, StringComparison.OrdinalIgnoreCase) ||
@@ -345,7 +358,7 @@ public static partial class AdvancedRlsFilterGenerator
     }
 
     /// <summary>Rebases "configuredTargetAlias.column" onto the reserved target alias; other qualifiers stay.</summary>
-    private static string RebaseTargetQualifier(string qualifiedColumn, string configuredTargetAlias)
+    internal static string RebaseTargetQualifier(string qualifiedColumn, string configuredTargetAlias)
     {
         int dot = qualifiedColumn.IndexOf('.');
         if (dot > 0 && string.Equals(qualifiedColumn[..dot], configuredTargetAlias, StringComparison.OrdinalIgnoreCase))
@@ -356,7 +369,7 @@ public static partial class AdvancedRlsFilterGenerator
         return qualifiedColumn;
     }
 
-    private static void ValidateIdentifier(string id, string context)
+    internal static void ValidateIdentifier(string id, string context)
     {
         if (string.IsNullOrWhiteSpace(id) || !SafeSimpleIdentifierRegex().IsMatch(id))
         {
@@ -364,7 +377,7 @@ public static partial class AdvancedRlsFilterGenerator
         }
     }
 
-    private static void ValidateQualifiedIdentifier(string id, string context)
+    internal static void ValidateQualifiedIdentifier(string id, string context)
     {
         if (string.IsNullOrWhiteSpace(id) || !SafeQualifiedIdentifierRegex().IsMatch(id))
         {

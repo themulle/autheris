@@ -3541,3 +3541,23 @@ The orchestrator accepted the fail-closed defaults written in §28.8. They are b
   - A Phase 3 sign-off is given on the final `accepted-differences.json` and on the cutover PR itself.
 - **WP-X1-DBX:** blocked on X1, a green G9 (S-4) and the S-2 rule.
 - **WP-X4:** not scheduled (S-5).
+
+### 29.6 WP-X0d implementation log (`feat/ast-x1-row-policy`)
+
+**Built** (all under `src/Autheris.Application`, additive; the legacy string producers are untouched until X1):
+
+- `Sql/Policy/IPolicyPredicateRenderer.cs`, `PolicyPredicateRenderer.cs`: renders a `PolicyPredicate` through the dialect generator. Each policy parameter becomes the marker `@__gql_rls_N`, the values are returned keyed by marker, and the reserved `autheris_target` qualifier is rebased onto the caller's alias.
+- `Sql/Policy/TypedRowFilterBuilder.cs`: `Build(filters, table, dialect?)` and `BuildCombined(aConsents, dConsents, table, dialect?)` with the §7.3 semantics (group OR, condition AND, allow OR, deny `NOT (...)`, USER_ATTRIBUTE polarity).
+- `Sql/Policy/AdvancedRlsPredicateBuilder.cs` (internal): typed correlated EXISTS (multi-hop, temporal, object and array predicate JSON) and typed cross-source set filter. `AdvancedRlsFilterGenerator.BuildCorrelatedPredicate` / `BuildCrossSourceSetPredicate`, `IRlsFilterGenerator` and `RlsFilterGenerator` expose them.
+- `Sql/Policy/PolicyParameterNamer.cs` (internal): per-predicate parameter names, JSON to `PolicyValue`, dialect mapping that throws for an unknown dialect, IN-list limit from the capability table.
+- `RowFilterSqlBuilder.BuildCombinedRowFilterParameterized` now renders from the IR.
+- `CasbinEnforcementService`: the `?? DatabaseDialect.SqlServer` default is removed (unknown target dialect throws `SecurityException`); `BuildCorrelatedRowFilterPredicate(filter, dialect, ruleOrdinal)` builds the typed filter with per-rule parameter names.
+
+**Tests** (`tests/Autheris.Tests.Unit/Sql/Policy/*`, `tests/Autheris.Tests.Architecture/RowPolicyArchitectureTests.cs`): `BuildsTypedPredicate_ForEveryOperator`, `EveryValue_IsPolicyParameter`, `InList_OneParameterPerItem`, `InList_RespectsDialectLimit_OracleChunks`, `RenderedString_EqualsLegacyString_Semantically` (SQLite execution), `HostileValue_RoundTripsExactly`, `CorrelatedSubquery_ValuesAreParameters`, `CrossSourceSetFilter_ValuesAreParameters`, `Casbin_UnknownTargetDialect_Throws`, `NoFormatSafeLiteral_OnPolicyValuePaths` (IL scan with a positive control), plus operator, alias, injection and Oracle-chunk cases.
+
+**Deviations and open items:**
+
+- `Render` returns `RenderedPolicyPredicate(Sql, Parameters)` instead of a bare `string`, because the markers need their values (matches the §4.4 tuple shape).
+- The typed correlated filter always uses the EXISTS form. The SQL Server `IN` strategy was a text-level optimisation and is dropped from the IR.
+- The string-returning legacy producers (`BuildCorrelatedSubquery`, `BuildCrossSourceSetFilter`, `RowFilterSqlBuilder.BuildCombinedRowFilter`/`FormatCondition`, the Casbin string path) still call `FormatSafeLiteral`, because the §7.3 consumers read a string without a parameter dictionary. `NoFormatSafeLiteral_OnPolicyValuePaths` therefore scans the typed producers; **X1 (or X0e/X0l when the consumers move to `PolicyPredicate`) must delete the inline producers and widen the scan to the legacy types.**
+- X0d was not split; X0d-2 is not needed. Wiring `TableAccessDecision` / `IRowPolicy` to the typed predicates and registering `IPolicyPredicateRenderer` in DI belong to X0e/X0l.
