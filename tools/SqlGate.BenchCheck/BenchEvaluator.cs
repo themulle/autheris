@@ -32,10 +32,7 @@ public static class BenchEvaluator
                 continue;
             }
 
-            if (ast.Gen2CollectionsPerThousandOps > 0)
-            {
-                violations.Add(new BenchViolation("gen2-loh", bucket, $"AST triggered {ast.Gen2CollectionsPerThousandOps:G4} Gen2 collections per 1000 operations (limit 0)."));
-            }
+            CheckGen2(bucket, ast, samples, baseline, compareMode, thresholds, violations);
 
             if (thresholds.AbsoluteP99Buckets.Contains(bucket) && ast.P99Ns > thresholds.MaxAbsoluteP99Ns)
             {
@@ -53,6 +50,39 @@ public static class BenchEvaluator
         }
 
         return new BenchVerdict(violations);
+    }
+
+    private static void CheckGen2(string bucket, BenchSample ast, IReadOnlyList<BenchSample> samples, BenchBaseline? baseline, bool compareMode, BenchThresholds thresholds, List<BenchViolation> violations)
+    {
+        double astGen2 = ast.Gen2CollectionsPerThousandOps;
+        if (thresholds.ZeroGen2Buckets.Contains(bucket))
+        {
+            if (astGen2 > 0)
+            {
+                violations.Add(new BenchViolation("gen2-loh", bucket, $"AST triggered {astGen2:G4} Gen2 collections per 1000 operations (limit 0)."));
+            }
+
+            return;
+        }
+
+        // Larger buckets: the legacy count is the reference. No reference at all (and any Gen2) fails closed.
+        double? reference = compareMode
+            ? samples.FirstOrDefault(s => s.Bucket == bucket && s.Engine == BenchEngine.Legacy)?.Gen2CollectionsPerThousandOps
+            : baseline?.Buckets.GetValueOrDefault(bucket)?.LegacyGen2CollectionsPerThousandOps;
+        if (reference is not { } legacyGen2 || !double.IsFinite(legacyGen2) || legacyGen2 < 0)
+        {
+            if (astGen2 > 0)
+            {
+                violations.Add(new BenchViolation("gen2-loh", bucket, $"AST triggered {astGen2:G4} Gen2 collections per 1000 operations and there is no legacy Gen2 reference to compare with."));
+            }
+
+            return;
+        }
+
+        if (astGen2 > legacyGen2 * thresholds.MaxGen2Ratio)
+        {
+            violations.Add(new BenchViolation("gen2-loh", bucket, $"AST triggered {astGen2:G4} Gen2 collections per 1000 operations, legacy {legacyGen2:G4} (limit {thresholds.MaxGen2Ratio:F2}x)."));
+        }
     }
 
     private static void CompareWithLegacy(string bucket, BenchSample ast, IReadOnlyList<BenchSample> samples, BenchThresholds thresholds, List<BenchViolation> violations)

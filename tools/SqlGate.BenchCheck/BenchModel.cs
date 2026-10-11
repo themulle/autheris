@@ -18,7 +18,7 @@ public sealed record BenchSample(
     double Gen2CollectionsPerThousandOps);
 
 /// <summary>Frozen allocation numbers of one bucket (hardware independent, so they can be compared across machines).</summary>
-public sealed record BaselineBucket(double LegacyAllocatedBytesPerOp, double AstAllocatedBytesPerOp);
+public sealed record BaselineBucket(double LegacyAllocatedBytesPerOp, double AstAllocatedBytesPerOp, double? LegacyGen2CollectionsPerThousandOps = null);
 
 /// <summary>The content of <c>benchmarks/baselines/sql-compiler-legacy.json</c>.</summary>
 public sealed record BenchBaseline(IReadOnlyDictionary<string, BaselineBucket> Buckets);
@@ -36,6 +36,14 @@ public sealed record BenchThresholds
 
     /// <summary>Buckets that must stay under <see cref="MaxAbsoluteP99Ns"/> (plan: up to 4 KB).</summary>
     public IReadOnlySet<string> AbsoluteP99Buckets { get; init; } = new HashSet<string>(StringComparer.Ordinal) { "0.5KB", "4KB" };
+
+    /// <summary>
+    /// Buckets that must not trigger any Gen2 collection (plan 9.3, amended by the orchestrator decision 2026-10-11). In the other buckets a query
+    /// is already on the large object heap as UTF-16, so the AST Gen2 count is compared with legacy (at most <see cref="MaxAllocationRatio"/>).
+    /// </summary>
+    public IReadOnlySet<string> ZeroGen2Buckets { get; init; } = new HashSet<string>(StringComparer.Ordinal) { "0.5KB", "4KB" };
+
+    public double MaxGen2Ratio { get; init; } = 1.25;
 
     /// <summary>Buckets that must be present; a missing bucket fails the gate (fail closed).</summary>
     public IReadOnlyList<string> RequiredBuckets { get; init; } = ["0.5KB", "4KB", "64KB"];

@@ -69,7 +69,8 @@ public static class BenchResultReader
             {
                 buckets[bucket.Name] = new BaselineBucket(
                     Member(bucket.Value, "legacyAllocatedBytesPerOp").GetDouble(),
-                    Member(bucket.Value, "astAllocatedBytesPerOp").GetDouble());
+                    Member(bucket.Value, "astAllocatedBytesPerOp").GetDouble(),
+                    bucket.Value.TryGetProperty("legacyGen2PerThousandOps", out var gen2) && gen2.ValueKind == JsonValueKind.Number ? gen2.GetDouble() : null);
             }
         }
 
@@ -97,7 +98,8 @@ public static class BenchResultReader
             buckets[group.Key] = new
             {
                 legacyAllocatedBytesPerOp = Math.Round(legacy.AllocatedBytesPerOp),
-                astAllocatedBytesPerOp = Math.Round(ast.AllocatedBytesPerOp)
+                astAllocatedBytesPerOp = Math.Round(ast.AllocatedBytesPerOp),
+                legacyGen2PerThousandOps = Math.Round(legacy.Gen2CollectionsPerThousandOps, 1)
             };
         }
 

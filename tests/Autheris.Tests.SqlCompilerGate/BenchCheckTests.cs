@@ -54,14 +54,53 @@ public sealed class BenchCheckTests
         verdict.Violations.ShouldContain(v => v.Rule == "allocation-ratio" && v.Bucket == "4KB");
     }
 
-    [Fact]
-    public void BenchCheck_ThresholdEvaluation_Gen2Collections_Fail_ForEveryBucket()
+    [Theory]
+    [InlineData("0.5KB")]
+    [InlineData("4KB")]
+    public void BenchCheck_ThresholdEvaluation_Gen2Collections_Fail_UpTo4Kb(string bucket)
     {
-        foreach (string bucket in Buckets)
-        {
-            var samples = Buckets.SelectMany(b => new[] { Legacy(b), b == bucket ? Ast(b, gen2: 0.5) : Ast(b) }).ToList();
-            BenchEvaluator.Evaluate(samples, null, Defaults).Violations.ShouldContain(v => v.Rule == "gen2-loh" && v.Bucket == bucket);
-        }
+        var samples = Buckets.SelectMany(b => new[] { Legacy(b), b == bucket ? Ast(b, gen2: 0.5) : Ast(b) }).ToList();
+        BenchEvaluator.Evaluate(samples, null, Defaults).Violations.ShouldContain(v => v.Rule == "gen2-loh" && v.Bucket == bucket);
+    }
+
+    // Orchestrator decision 2026-10-11: at 64 KB a query is already ~128 KB as UTF-16 (LOH), so the AST Gen2 count is compared with legacy.
+    private static List<BenchSample> With64KbGen2(double legacyGen2, double astGen2) =>
+        [.. Buckets.SelectMany(b => b == "64KB"
+            ? new[] { new BenchSample(b, BenchEngine.Legacy, 80_000, 100_000, 120_000, 10_000, legacyGen2), Ast(b, gen2: astGen2) }
+            : new[] { Legacy(b), Ast(b) })];
+
+    [Theory]
+    [InlineData(250, 300)]
+    [InlineData(250, 312.5)]   // exactly 1.25x
+    [InlineData(250, 100)]
+    public void BenchCheck_ThresholdEvaluation_Gen2At64Kb_WithinLegacyRatio_Passes(double legacy, double ast)
+    {
+        BenchEvaluator.Evaluate(With64KbGen2(legacy, ast), null, Defaults).Passed.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData(250, 313)]
+    [InlineData(0, 0.5)]
+    public void BenchCheck_ThresholdEvaluation_Gen2At64Kb_AboveLegacyRatio_Fails(double legacy, double ast)
+    {
+        BenchEvaluator.Evaluate(With64KbGen2(legacy, ast), null, Defaults).Violations.ShouldContain(v => v.Rule == "gen2-loh" && v.Bucket == "64KB");
+    }
+
+    [Fact]
+    public void BenchCheck_ThresholdEvaluation_Gen2At64Kb_PostCutover_UsesFrozenLegacyGen2()
+    {
+        var withGen2 = new BenchBaseline(Buckets.ToDictionary(b => b, _ => new BaselineBucket(10_000, 11_000, 250)));
+        var samples = Buckets.Select(b => b == "64KB" ? Ast(b, gen2: 300) : Ast(b)).ToList();
+        BenchEvaluator.Evaluate(samples, withGen2, Defaults).Passed.ShouldBeTrue();
+        BenchEvaluator.Evaluate(samples.Select(s => s.Bucket == "64KB" ? s with { Gen2CollectionsPerThousandOps = 400 } : s).ToList(), withGen2, Defaults)
+            .Violations.ShouldContain(v => v.Rule == "gen2-loh" && v.Bucket == "64KB");
+    }
+
+    [Fact]
+    public void BenchCheck_ThresholdEvaluation_Gen2At64Kb_PostCutover_WithoutFrozenGen2_FailsClosed()
+    {
+        var samples = Buckets.Select(b => b == "64KB" ? Ast(b, gen2: 1) : Ast(b)).ToList();
+        BenchEvaluator.Evaluate(samples, Baseline(), Defaults).Violations.ShouldContain(v => v.Rule == "gen2-loh" && v.Bucket == "64KB");
     }
 
     [Theory]
