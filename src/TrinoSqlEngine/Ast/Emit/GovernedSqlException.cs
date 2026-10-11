@@ -10,6 +10,7 @@ public static class GovernedSqlErrorCodes
     public const string ProviderError = "SQL_PROVIDER_ERROR";
     public const string CheckOptionViolation = "DML_CHECK_OPTION_VIOLATION";
     public const string CheckedExecutionRequired = "DML_CHECKED_EXECUTION_REQUIRED";
+    public const string AffectedRowsLimit = "DML_AFFECTED_ROWS_LIMIT";
 
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
@@ -18,6 +19,7 @@ public static class GovernedSqlErrorCodes
         DataError => "The statement contained a value that could not be stored or converted.",
         CheckOptionViolation => "The statement wrote a row that the row policy does not permit.",
         CheckedExecutionRequired => "The statement must run through the checked DML executor.",
+        AffectedRowsLimit => "The statement affected more rows than the configured limit allows.",
         _ => "The statement could not be executed."
     };
 }

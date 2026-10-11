@@ -96,8 +96,15 @@ public sealed class AstCompilerSqlServerDmlExecutionTests : AstCompilerDmlContra
         return await cmd.ExecuteNonQueryAsync();
     }
 
+    protected override async Task<System.Data.Common.DbConnection?> OpenSessionConnectionAsync()
+    {
+        var conn = new SqlConnection(_db.ConnectionString);
+        await conn.OpenAsync();
+        return conn;
+    }
+
     protected override Task<int> ExecuteInTransactionAsync(CompiledSql compiled) =>
-        RunCheckedAsync(new SqlConnection(_db.ConnectionString), true, _binder, compiled);
+        RunCheckedAsync(new SqlConnection(_db.ConnectionString), true, compiled);
 
     protected override async Task<List<object?[]>> QueryAsync(string sql)
     {

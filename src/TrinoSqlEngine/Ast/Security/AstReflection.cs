@@ -90,6 +90,24 @@ internal static class AstReflection
         }
     }
 
+    /// <summary>The direct AST children of <paramref name="node"/> (list elements are flattened; non-node values are skipped).</summary>
+    public static void Children(object node, Action<object> visit)
+    {
+        if (node is IEnumerable list && node is not string)
+        {
+            foreach (var item in list) if (item is not null) visit(item);
+            return;
+        }
+
+        if (node is not SqlNode) return;
+        foreach (var property in PropertiesOf(node.GetType()))
+        {
+            var type = property.PropertyType;
+            if (type.IsPrimitive || type.IsEnum || type == typeof(string)) continue;
+            if (property.GetValue(node) is { } value) visit(value);
+        }
+    }
+
     /// <summary>Lower-case names of columns of the secured (target) table that <paramref name="expression"/> references.</summary>
     public static ImmutableHashSet<string> ReferencedTargetColumns(Expression expression)
     {

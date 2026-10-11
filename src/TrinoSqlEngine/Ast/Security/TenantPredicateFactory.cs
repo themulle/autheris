@@ -1,6 +1,7 @@
 namespace TrinoSqlEngine.Ast.Security;
 
 using System;
+using System.Security;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
@@ -17,6 +18,12 @@ public static class TenantPredicateFactory
         ArgumentNullException.ThrowIfNull(capabilities);
         ArgumentException.ThrowIfNullOrEmpty(tenantColumn);
         ArgumentException.ThrowIfNullOrEmpty(parameterName);
+
+        if (capabilities.TenantComparison == TenantComparisonStyle.CastBlob && !SqliteTypeAffinity.IsText(columnType))
+        {
+            // SEC-X1-09: fail closed. A NUMERIC, INTEGER, REAL or BLOB affinity column no longer holds the text that was written.
+            throw new SecurityException("The tenant column of a SQLite table must have TEXT affinity.");
+        }
 
         Expression column = new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier(tenantColumn, true) }));
         Expression param = new PolicyParameterExpression(parameterName, parameterType, ParameterOrigin.Tenant, ColumnType: columnType);
@@ -106,6 +113,16 @@ public static class TenantPredicateFactory
                 static Expression Raw(Expression operand) => new CastExpression(operand, "varbinary");
 
                 return new BinaryExpression(Raw(Column()), BinaryOperator.Equal, Raw(Param()));
+            }
+            case TenantComparisonStyle.CastBlob:
+            {
+                // col = t AND CAST(col AS BLOB) = CAST(t AS BLOB); BLOB comparison is memcmp, whatever the column collation (NOCASE, RTRIM).
+                static Expression Raw(Expression operand) => new CastExpression(operand, "blob");
+
+                return new BinaryExpression(
+                    new BinaryExpression(Column(), BinaryOperator.Equal, Param()),
+                    BinaryOperator.And,
+                    new BinaryExpression(Raw(Column()), BinaryOperator.Equal, Raw(Param())));
             }
             default:
                 throw new NotSupportedException($"No binary-exact tenant comparison is defined for {capabilities.Dialect}.");

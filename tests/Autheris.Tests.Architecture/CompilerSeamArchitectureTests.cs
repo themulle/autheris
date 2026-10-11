@@ -182,4 +182,45 @@ public sealed class CompilerSeamArchitectureTests
 
         violations.ShouldBeEmpty("A binder must derive from DbCommandCompiledSqlBinder (CR-ADG-43): " + string.Join(", ", violations));
     }
+
+    // SEC-X1-07: the binder hierarchy and the checked executor cannot be extended or forged outside the engine.
+    [Fact]
+    public void NoBinderSubclassOutsideEngine()
+    {
+        var violations = new List<string>();
+        int insideEngine = 0;
+        foreach (var assembly in ProductionAssemblies)
+        {
+            using var module = ModuleDefinition.ReadModule(assembly.Location);
+            foreach (var type in module.GetTypes())
+            {
+                for (var b = type.BaseType; b is not null; b = b.Resolve()?.BaseType)
+                {
+                    if (b.FullName != "TrinoSqlEngine.Ast.Emit.DbCommandCompiledSqlBinder") continue;
+                    if (assembly == typeof(TrinoSqlEngine.FastSqlEngine).Assembly) insideEngine++;
+                    else violations.Add($"{assembly.GetName().Name}: {type.FullName}");
+                }
+            }
+        }
+
+        insideEngine.ShouldBeGreaterThan(0, "positive control: the scanner sees the engine's own binders");
+        violations.ShouldBeEmpty("No binder subclass outside TrinoSqlEngine (SEC-X1-07): " + string.Join(", ", violations));
+    }
+
+    [Fact]
+    public void TheBinderBaseConstructor_IsPrivateProtected()
+    {
+        var constructors = typeof(TrinoSqlEngine.Ast.Emit.DbCommandCompiledSqlBinder)
+            .GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        constructors.ShouldNotBeEmpty();
+        constructors.ShouldAllBe(c => c.IsFamilyAndAssembly, "the constructor must be private protected");
+    }
+
+    [Fact]
+    public void CheckedDmlExecutor_HasNoPublicConstructor()
+    {
+        var type = typeof(TrinoSqlEngine.Ast.Emit.CheckedDmlExecutor);
+        type.GetConstructors(BindingFlags.Instance | BindingFlags.Public).ShouldBeEmpty();
+        type.GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic).ShouldNotBeEmpty();
+    }
 }

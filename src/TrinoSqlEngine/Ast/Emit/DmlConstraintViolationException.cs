@@ -79,6 +79,8 @@ public static class DmlErrorSanitizer
         // SQLSTATE class 22: data exception
         TargetSqlDialect.PostgreSql => (error is DbException db ? db.SqlState : StringProperty(error, "SqlState")) is { Length: 5 } state &&
                                        state.StartsWith("22", StringComparison.Ordinal),
+        // SQLITE_TOOBIG, SQLITE_MISMATCH
+        TargetSqlDialect.Sqlite => IntProperty(error, "SqliteErrorCode") is 18 or 20,
         TargetSqlDialect.DuckDb => error.Message.Contains("Conversion Error", StringComparison.OrdinalIgnoreCase) ||
                                    error.Message.Contains("Out of Range", StringComparison.OrdinalIgnoreCase) ||
                                    error.Message.Contains("Could not convert", StringComparison.OrdinalIgnoreCase),
@@ -120,6 +122,15 @@ public static class DmlErrorSanitizer
             _ => null
         },
         TargetSqlDialect.DuckDb => ClassifyMessage(error.Message),
+        // SQLITE_CONSTRAINT_* extended result codes (the provider exposes them without driver text)
+        TargetSqlDialect.Sqlite => IntProperty(error, "SqliteExtendedErrorCode") switch
+        {
+            1555 or 2067 => DmlConstraintKind.Unique,       // PRIMARYKEY, UNIQUE
+            787 => DmlConstraintKind.ForeignKey,
+            1299 => DmlConstraintKind.NotNull,
+            275 => DmlConstraintKind.Check,
+            _ => null
+        },
         TargetSqlDialect.Databricks => ClassifyDelta(error.Message),
         _ => null
     };
@@ -162,6 +173,9 @@ public static class DmlErrorSanitizer
 
     private static int? Number(Exception error) =>
         error.GetType().GetProperty("Number", BindingFlags.Public | BindingFlags.Instance)?.GetValue(error) is int n ? n : null;
+
+    private static int? IntProperty(Exception error, string name) =>
+        error.GetType().GetProperty(name, BindingFlags.Public | BindingFlags.Instance)?.GetValue(error) is int n ? n : null;
 
     private static string? StringProperty(Exception error, string name) =>
         error.GetType().GetProperty(name, BindingFlags.Public | BindingFlags.Instance)?.GetValue(error) as string;

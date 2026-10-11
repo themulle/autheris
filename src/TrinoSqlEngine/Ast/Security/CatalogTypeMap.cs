@@ -98,6 +98,7 @@ internal static class CatalogTypeMap
     {
         native = string.Empty;
         isText = false;
+        if (dialect == TargetSqlDialect.Sqlite) return TryResolveSqlite(catalogType, out native, out isText);
         var table = TableOf(dialect);
         if (table is null || string.IsNullOrWhiteSpace(catalogType)) return false;
 
@@ -146,6 +147,44 @@ internal static class CatalogTypeMap
         if (tz.Length > 0) sb.Append(' ').Append(dialect == TargetSqlDialect.Oracle ? tz.ToUpperInvariant() : tz);
         native = sb.ToString();
         isText = entry.IsText;
+        return true;
+    }
+
+    /// <summary>
+    /// SQLite declared types are free text and the database stores by type affinity, so the cast target is the affinity keyword (a closed
+    /// set, idempotent: resolving <c>TEXT</c> gives <c>TEXT</c>). A column with BLOB affinity (no type or <c>BLOB</c>) has no cast and the
+    /// INSERT is rejected. SQLite ignores length and precision, so no argument is carried over.
+    /// </summary>
+    private static bool TryResolveSqlite(string? catalogType, out string native, out bool isText)
+    {
+        native = string.Empty;
+        isText = false;
+        if (string.IsNullOrWhiteSpace(catalogType)) return false;
+
+        try
+        {
+            if (!TypeRegex.IsMatch(catalogType)) return false;
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
+
+        var affinity = SqliteTypeAffinity.Of(catalogType);
+        if (affinity == SqliteTypeAffinity.Kind.Blob) return false;
+
+        // DATE, DATETIME, TIMESTAMP and TIME columns hold ISO text by SQLite convention (the generator emits typed literals as ISO text);
+        // their declared name would give NUMERIC affinity, whose cast turns '2026-01-02' into 2026.
+        if (affinity == SqliteTypeAffinity.Kind.Numeric &&
+            (catalogType.Contains("DATE", StringComparison.OrdinalIgnoreCase) || catalogType.Contains("TIME", StringComparison.OrdinalIgnoreCase)))
+        {
+            native = SqliteTypeAffinity.Keyword(SqliteTypeAffinity.Kind.Text);
+            isText = true;
+            return true;
+        }
+
+        native = SqliteTypeAffinity.Keyword(affinity);
+        isText = affinity == SqliteTypeAffinity.Kind.Text;
         return true;
     }
 }

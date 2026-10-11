@@ -53,7 +53,14 @@ public enum TenantComparisonStyle
     /// is exact regardless of any column collation (for example <c>UTF8_LCASE</c>). There is deliberately no plain <c>col = t</c>
     /// conjunct: Spark's constant propagation would turn the pair into a tautology on collated columns.
     /// </summary>
-    CastBinary
+    CastBinary,
+
+    /// <summary>
+    /// SQLite: <c>col = t AND CAST(col AS BLOB) = CAST(t AS BLOB)</c>. A BLOB comparison is a plain <c>memcmp</c> and ignores the
+    /// column collation (<c>NOCASE</c>, <c>RTRIM</c>). The tenant column must have TEXT affinity (SEC-X1-09), otherwise the stored
+    /// value was already converted (a NUMERIC column stores <c>'007'</c> as <c>7</c>).
+    /// </summary>
+    CastBlob
 }
 
 /// <summary>Declarative Trino-function to dialect rule. No matching rule means the function is rejected (INV-1).</summary>
@@ -124,10 +131,13 @@ public sealed record DialectCapabilities(
     StatementPermissions DmlStatements = StatementPermissions.ReadOnly,
     MergeClauseShape MergeShape = MergeClauseShape.Ansi,
     bool SupportsSubqueryInDmlCondition = true,
-    bool ReportsInsertRowCount = true)
+    bool ReportsInsertRowCount = true,
+    int? MaxCompoundSelectTerms = null,
+    int? MaxExpressionDepth = null,
+    bool LikeIsCaseInsensitive = false)
 {
     /// <summary>Version of the capability data. Part of the compile cache key (SEC-ADG-01).</summary>
-    public const string TableVersion = "cap-5";
+    public const string TableVersion = "cap-6";
 }
 
 /// <summary>

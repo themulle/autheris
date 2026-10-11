@@ -15,7 +15,9 @@ public enum SqlLimitKind
     SecuredTableReferences,
     EmittedSqlLength,
     PolicyExpansionFactor,
-    CompileTime
+    CompileTime,
+    CompoundSelectTerms,
+    ExpressionDepth
 }
 
 /// <summary>
