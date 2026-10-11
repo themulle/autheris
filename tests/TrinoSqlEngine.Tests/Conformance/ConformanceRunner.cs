@@ -61,7 +61,9 @@ internal static class ConformanceRunner
         {
             EnforceReadOnlyQueries = !IsDml(group),
             EnforceFunctionPolicy = true,
-            AllowedFunctions = SqlFunctionAllowlists.CompilerNames(dialect),
+            AllowedFunctions = group == "date-translated"
+                ? SqlFunctionAllowlists.CompilerNames(dialect)
+                : SqlFunctionAllowlists.WithoutDateTranslation(dialect, SqlFunctionAllowlists.CompilerNames(dialect)),
             TranslateTrinoDateFunctions = group == "date-translated"
         }).BuildStatement(tree);
         new AstValidationVisitor().Validate(ast);

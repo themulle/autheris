@@ -2865,9 +2865,9 @@
       "Id": "fn-date-003",
       "Group": "fn-date",
       "Sql": "SELECT current_time AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT CURRENT_TIME AS \"r\" FROM \"t\"",
+      "Parameters": []
     },
     {
       "Id": "fn-date-004",
@@ -2875,7 +2875,7 @@
       "Sql": "SELECT localtime AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "fn-date-005",
@@ -2883,7 +2883,7 @@
       "Sql": "SELECT localtimestamp AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "fn-date-006",
@@ -3235,7 +3235,7 @@
       "Sql": "SELECT date_trunc('day', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-002",
@@ -3243,7 +3243,7 @@
       "Sql": "SELECT date_trunc('month', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-003",
@@ -3251,7 +3251,7 @@
       "Sql": "SELECT date_trunc('year', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-004",
@@ -3259,7 +3259,7 @@
       "Sql": "SELECT date_trunc('hour', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-005",
@@ -3267,7 +3267,7 @@
       "Sql": "SELECT date_trunc('week', d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "date-translated-006",
@@ -3275,7 +3275,7 @@
       "Sql": "SELECT date_trunc('minute', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-007",
@@ -3283,7 +3283,7 @@
       "Sql": "SELECT date_trunc('second', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-008",
@@ -3291,7 +3291,7 @@
       "Sql": "SELECT date_add('day', 1, d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-009",
@@ -3299,7 +3299,7 @@
       "Sql": "SELECT date_add('month', 2, d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-010",
@@ -3307,7 +3307,7 @@
       "Sql": "SELECT date_add('hour', 3, ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-011",
@@ -3315,7 +3315,7 @@
       "Sql": "SELECT date_add('year', -1, d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-012",
@@ -3323,7 +3323,7 @@
       "Sql": "SELECT date_add('week', 2, d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-013",
@@ -3331,7 +3331,7 @@
       "Sql": "SELECT date_add('minute', 5, ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-014",
@@ -3339,7 +3339,7 @@
       "Sql": "SELECT date_add('second', 30, ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "EmittedSqlInvariantViolationException"
     },
     {
       "Id": "date-translated-015",
@@ -4943,8 +4943,8 @@
       "Sql": "(SELECT a FROM t) UNION ALL (SELECT a FROM u)",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "InvalidCastException",
-      "SemanticNote": "KNOWN-DEFECT: parenthesized query terms in a set operation make the AST builder throw InvalidCastException instead of a typed rejection (fail closed, wrong error type)."
+      "ExceptionType": "AstBuildException",
+      "SemanticNote": "semantic-note: a parenthesized query primary is rejected with AstBuildException (KD-1); the AST has no node that keeps the ORDER BY and LIMIT of a parenthesized query."
     },
     {
       "Id": "setop-011",

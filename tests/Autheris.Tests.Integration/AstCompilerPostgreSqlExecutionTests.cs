@@ -148,9 +148,9 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     };
 
     private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null,
-        Func<NpgsqlConnection, Task>? prepare = null)
+        Func<NpgsqlConnection, Task>? prepare = null, bool translateDates = false)
     {
-        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant), CancellationToken.None);
+        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { TranslateTrinoDateFunctions = translateDates }, CancellationToken.None);
         await using var conn = new NpgsqlConnection(_fx.ConnectionString);
         await conn.OpenAsync();
         if (prepare != null) await prepare(conn);
@@ -491,5 +491,36 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
         cmd.CommandText = sql.ToString();
         for (int i = 1; i <= max; i++) cmd.Parameters.Add(new NpgsqlParameter { Value = i });
         Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBe(10);
+    }
+
+    // ---- WP-X0-fix: function mappings executed against the real engine, compared with Trino semantics ----
+
+    private async Task<object?> ScalarAsync(string expression, bool translateDates = false)
+    {
+        var rows = await RunAsync($"SELECT {expression} AS r FROM orders WHERE id = 1", "acme", translateDates: translateDates);
+        rows.Count.ShouldBe(1);
+        return rows[0][0];
+    }
+
+    [Theory]
+    [InlineData("replace(email, '@acme.example')", "alice.smith")]
+    [InlineData("replace(email, 'zzz')", "alice.smith@acme.example")]
+    [InlineData("replace(email, '')", "alice.smith@acme.example")]
+    [InlineData("replace(email, '@acme.example', '@x')", "alice.smith@x")]
+    public async Task FunctionMapping_MatchesTrinoSemantics(string expression, string expected) =>
+        ((string?)await ScalarAsync(expression)).ShouldBe(expected);
+
+    [Theory]
+    [InlineData("date_add('day', 1, current_timestamp) > current_timestamp")]
+    [InlineData("date_add('day', -1, current_timestamp) < current_timestamp")]
+    [InlineData("date_add('month', 1, current_timestamp) > date_add('day', 27, current_timestamp)")]
+    [InlineData("date_add('month', 1, current_timestamp) < date_add('day', 32, current_timestamp)")]
+    [InlineData("date_add('hour', 2, current_timestamp) > date_add('minute', 119, current_timestamp)")]
+    [InlineData("date_add('week', 1, current_timestamp) > date_add('day', 6, current_timestamp)")]
+    [InlineData("date_add('week', 1, current_timestamp) < date_add('day', 8, current_timestamp)")]
+    public async Task DateAdd_TranslatedAndExecuted(string predicate)
+    {
+        var rows = await RunAsync($"SELECT id FROM orders WHERE id = 1 AND {predicate}", "acme", translateDates: true);
+        Ids(rows).ShouldBe(new List<int> { 1 });
     }
 }

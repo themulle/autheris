@@ -34,42 +34,42 @@
     "Oracle": "semantic-note: the boolean literal is emitted as the integer 1 (no SQL boolean in SELECT lists)."
   },
   "fn-string-009": {
-    "Oracle": "KNOWN-GAP: Oracle CONCAT takes exactly two arguments; the three-argument form is emitted unchanged and fails at execution."
+    "Oracle": "semantic-note: the three-argument CONCAT is emitted as nested two-argument CONCAT calls; Oracle treats NULL as the empty string (Trino returns NULL)."
   },
   "fn-string-010": {
-    "SqlServer": "KNOWN-GAP: SUBSTR is not a T-SQL function; the call is emitted unchanged and fails at execution."
+    "SqlServer": "semantic-note: SUBSTR is emitted as SUBSTRING and the missing length as 2147483647; a start below 1 is backend semantics (Trino counts a negative start from the end)."
   },
   "fn-string-011": {
-    "SqlServer": "KNOWN-GAP: SUBSTR is not a T-SQL function; the call is emitted unchanged and fails at execution."
+    "SqlServer": "semantic-note: SUBSTR is emitted as SUBSTRING and the missing length as 2147483647; a start below 1 is backend semantics (Trino counts a negative start from the end)."
   },
   "fn-string-012": {
-    "SqlServer": "KNOWN-GAP: SUBSTRING needs three arguments in T-SQL; the two-argument form fails at execution.",
-    "Oracle": "KNOWN-GAP: Oracle has no SUBSTRING function (SUBSTR); the call is emitted unchanged and fails at execution."
+    "SqlServer": "semantic-note: the two-argument SUBSTRING gets the missing length as 2147483647; a start below 1 is backend semantics (Trino counts a negative start from the end).",
+    "Oracle": "semantic-note: SUBSTRING is emitted as SUBSTR; a start of 0 is treated as 1 (Trino returns the empty string)."
   },
   "fn-string-017": {
-    "PostgreSql": "KNOWN-GAP: the two-argument REPLACE does not exist on PostgreSQL; it fails at execution.",
-    "SqlServer": "KNOWN-GAP: the two-argument REPLACE does not exist in T-SQL; it fails at execution."
+    "PostgreSql": "semantic-note: the two-argument REPLACE is emitted with an empty bound string as the replacement.",
+    "SqlServer": "semantic-note: the two-argument REPLACE is emitted with an empty bound string as the replacement."
   },
   "fn-string-018": {
-    "SqlServer": "KNOWN-GAP: LPAD does not exist in T-SQL; the call is emitted unchanged and fails at execution."
+    "SqlServer": "semantic-note: rejected (SqlCompileNotSupportedException); T-SQL has no LPAD and no exact equivalent exists (truncation and a repeated pad string)."
   },
   "fn-string-019": {
-    "SqlServer": "KNOWN-GAP: RPAD does not exist in T-SQL; the call is emitted unchanged and fails at execution."
+    "SqlServer": "semantic-note: rejected (SqlCompileNotSupportedException); T-SQL has no RPAD and no exact equivalent exists (truncation and a repeated pad string)."
   },
   "fn-string-051": {
-    "SqlServer": "KNOWN-GAP: OCTET_LENGTH does not exist in T-SQL (DATALENGTH); it fails at execution.",
-    "Oracle": "KNOWN-GAP: OCTET_LENGTH does not exist in Oracle (LENGTHB); it fails at execution."
+    "SqlServer": "semantic-note: rejected (SqlCompileNotSupportedException); DATALENGTH counts UTF-16 bytes of nvarchar, Trino counts UTF-8 bytes.",
+    "Oracle": "semantic-note: OCTET_LENGTH is emitted as LENGTHB (bytes of the database character set, UTF-8 on AL32UTF8)."
   },
   "fn-string-052": {
-    "Oracle": "KNOWN-GAP: CHAR_LENGTH does not exist in Oracle (LENGTH); it fails at execution."
+    "Oracle": "semantic-note: CHAR_LENGTH is emitted as LENGTH (characters)."
   },
   "fn-string-053": {
-    "Oracle": "KNOWN-GAP: CHARACTER_LENGTH does not exist in Oracle (LENGTH); it fails at execution."
+    "Oracle": "semantic-note: CHARACTER_LENGTH is emitted as LENGTH (characters)."
   },
   "fn-math-013": {
-    "Oracle": "KNOWN-GAP: Oracle has no LOG10 function (LOG(10, x)); it fails at execution."
+    "Oracle": "semantic-note: LOG10(x) is emitted as LOG(10, x); a non-positive argument raises ORA-01428 where Trino returns NaN or -Infinity."
   },
   "setop-010": {
-    "*": "KNOWN-DEFECT: parenthesized query terms in a set operation make the AST builder throw InvalidCastException instead of a typed rejection (fail closed, wrong error type)."
+    "*": "semantic-note: a parenthesized query primary is rejected with AstBuildException (KD-1); the AST has no node that keeps the ORDER BY and LIMIT of a parenthesized query."
   }
 }

@@ -2147,7 +2147,7 @@
       "Group": "fn-string",
       "Sql": "SELECT replace(a, 'x') AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT REPLACE(\"a\", $1) AS \"r\" FROM \"t\"",
+      "Expected": "SELECT REPLACE(\"a\", $1, $2) AS \"r\" FROM \"t\"",
       "Parameters": [
         {
           "Marker": "$1",
@@ -2155,9 +2155,16 @@
           "Origin": "QueryLiteral",
           "ValueType": "String",
           "Value": "x"
+        },
+        {
+          "Marker": "$2",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": ""
         }
       ],
-      "SemanticNote": "KNOWN-GAP: the two-argument REPLACE does not exist on PostgreSQL; it fails at execution."
+      "SemanticNote": "semantic-note: the two-argument REPLACE is emitted with an empty bound string as the replacement."
     },
     {
       "Id": "fn-string-018",
@@ -3036,17 +3043,17 @@
       "Id": "fn-date-003",
       "Group": "fn-date",
       "Sql": "SELECT current_time AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT CURRENT_TIME AS \"r\" FROM \"t\"",
+      "Parameters": []
     },
     {
       "Id": "fn-date-004",
       "Group": "fn-date",
       "Sql": "SELECT localtime AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT LOCALTIME AS \"r\" FROM \"t\"",
+      "Parameters": []
     },
     {
       "Id": "fn-date-005",
@@ -3460,57 +3467,113 @@
       "Id": "date-translated-008",
       "Group": "date-translated",
       "Sql": "SELECT date_add('day', 1, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"d\" + CAST($1 AS bigint) * INTERVAL '1 day') AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "$1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "1"
+        }
+      ]
     },
     {
       "Id": "date-translated-009",
       "Group": "date-translated",
       "Sql": "SELECT date_add('month', 2, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"d\" + CAST($1 AS bigint) * INTERVAL '1 month') AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "$1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "2"
+        }
+      ]
     },
     {
       "Id": "date-translated-010",
       "Group": "date-translated",
       "Sql": "SELECT date_add('hour', 3, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"ts\" + CAST($1 AS bigint) * INTERVAL '1 hour') AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "$1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "3"
+        }
+      ]
     },
     {
       "Id": "date-translated-011",
       "Group": "date-translated",
       "Sql": "SELECT date_add('year', -1, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"d\" + CAST($1 AS bigint) * INTERVAL '1 year') AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "$1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "-1"
+        }
+      ]
     },
     {
       "Id": "date-translated-012",
       "Group": "date-translated",
       "Sql": "SELECT date_add('week', 2, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"d\" + CAST($1 AS bigint) * INTERVAL '1 week') AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "$1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "2"
+        }
+      ]
     },
     {
       "Id": "date-translated-013",
       "Group": "date-translated",
       "Sql": "SELECT date_add('minute', 5, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"ts\" + CAST($1 AS bigint) * INTERVAL '1 minute') AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "$1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "5"
+        }
+      ]
     },
     {
       "Id": "date-translated-014",
       "Group": "date-translated",
       "Sql": "SELECT date_add('second', 30, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"ts\" + CAST($1 AS bigint) * INTERVAL '1 second') AS \"r\" FROM \"t\"",
+      "Parameters": [
+        {
+          "Marker": "$1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "30"
+        }
+      ]
     },
     {
       "Id": "date-translated-015",
@@ -5162,8 +5225,8 @@
       "Sql": "(SELECT a FROM t) UNION ALL (SELECT a FROM u)",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "InvalidCastException",
-      "SemanticNote": "KNOWN-DEFECT: parenthesized query terms in a set operation make the AST builder throw InvalidCastException instead of a typed rejection (fail closed, wrong error type)."
+      "ExceptionType": "AstBuildException",
+      "SemanticNote": "semantic-note: a parenthesized query primary is rejected with AstBuildException (KD-1); the AST has no node that keeps the ORDER BY and LIMIT of a parenthesized query."
     },
     {
       "Id": "setop-011",

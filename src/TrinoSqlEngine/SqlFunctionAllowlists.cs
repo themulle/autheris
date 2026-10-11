@@ -77,27 +77,70 @@ public static class SqlFunctionAllowlists
         "localtimestamp", "current_timestamp", "current_date",
     ];
 
-    // Trino function names the AST builder or a dialect generator rewrites (the rewrite is the dialect's rule, see
-    // SqlDialectGeneratorBase subclasses), plus the SQL special forms that the builder checks under their function name.
-    private static readonly string[] TrinoMappedFunctions =
+    // SQL special forms and ANSI niladic functions that the builder checks under their function name; every dialect has a rule.
+    private static readonly string[] TrinoSpecialForms =
     [
-        "strpos", "approx_distinct", "arbitrary", "date_add", "date_trunc", "now", "current_time", "localtime", "localtimestamp",
-        "substring", "trim", "position", "extract", "cast", "current_date", "current_timestamp",
+        "substring", "trim", "position", "extract", "cast", "current_date", "current_timestamp", "current_time", "localtime",
+        "localtimestamp",
     ];
+
+    // Trino functions that only exist with TranslateTrinoDateFunctions (the builder turns them into date nodes); without the
+    // option they are only listed where the dialect has the native function of the same name (its default allowlist).
+    private static readonly string[] TrinoDateFunctions = ["date_add", "date_trunc", "now"];
+
+    /// <summary>
+    /// Trino function names that a dialect generator rewrites to a native form (CR-ADG-02: a name is listed only where the dialect
+    /// has a rule, otherwise the call would reach the database unchanged and fail at execution).
+    /// </summary>
+    private static IEnumerable<string> RewrittenFunctions(TargetSqlDialect dialect)
+    {
+        if (dialect is TargetSqlDialect.PostgreSql or TargetSqlDialect.DuckDb or TargetSqlDialect.SqlServer or TargetSqlDialect.Oracle
+            or TargetSqlDialect.Databricks)
+        {
+            yield return "strpos";
+        }
+
+        if (dialect is TargetSqlDialect.Databricks)
+        {
+            yield return "approx_distinct";
+        }
+
+        if (dialect is TargetSqlDialect.Databricks or TargetSqlDialect.DuckDb)
+        {
+            yield return "arbitrary";
+        }
+    }
 
     /// <summary>
     /// Names that have a rule in the per-dialect function map of the governed compiler (CR-ADG-02): the legacy allowlist of the
-    /// dialect plus the Trino functions that the compiler rewrites. Anything else is rejected (INV-1, plan 3.6).
+    /// dialect plus the Trino functions that the compiler rewrites for that dialect. Anything else is rejected (INV-1, plan 3.6).
+    /// The date functions are included for <c>TranslateTrinoDateFunctions</c>; <see cref="WithoutDateTranslation"/> removes them again.
     /// </summary>
     internal static IReadOnlySet<string> CompilerNames(TargetSqlDialect dialect)
     {
         var names = new HashSet<string>(GetDefault(dialect), StringComparer.OrdinalIgnoreCase);
-        foreach (var name in TrinoMappedFunctions)
+        foreach (var name in TrinoSpecialForms.Concat(TrinoDateFunctions).Concat(RewrittenFunctions(dialect)))
         {
             if (!SqlFunctionPolicy.IsDeniedByDefault(name)) names.Add(name);
         }
 
         return names.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The function map of a request without <c>TranslateTrinoDateFunctions</c>: <c>date_add</c>, <c>date_trunc</c> and <c>now</c>
+    /// stay only where the dialect has the native function of that name, otherwise the call would reach the database unchanged.
+    /// </summary>
+    internal static IReadOnlySet<string> WithoutDateTranslation(TargetSqlDialect dialect, IReadOnlySet<string> names)
+    {
+        var native = GetDefault(dialect);
+        var result = new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
+        foreach (var name in TrinoDateFunctions)
+        {
+            if (!native.Contains(name)) result.Remove(name);
+        }
+
+        return result.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Databricks allowlist (ANSI + the reviewed safe Spark SQL functions; no reflection, secrets or UDF calls).</summary>

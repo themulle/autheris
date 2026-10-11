@@ -159,9 +159,9 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
         }
     };
 
-    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null, string? connectionString = null)
+    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null, string? connectionString = null, bool translateDates = false)
     {
-        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant), CancellationToken.None);
+        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { TranslateTrinoDateFunctions = translateDates }, CancellationToken.None);
         await using var conn = new SqlConnection(connectionString ?? _db.ConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
@@ -545,5 +545,53 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
         _policies.Masks[(Orders, "email")] = new MaskSpec(MaskKind.Nullify, new MaskArguments(), FrozenDictionary<string, PolicyValue>.Empty);
         await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync("SELECT id FROM orders WHERE email = 'x'", "acme"));
         await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync("SELECT id FROM orders ORDER BY email", "acme"));
+    }
+
+    // ---- WP-X0-fix: function mappings executed against the real engine, compared with Trino semantics ----
+
+    private async Task<object?> ScalarAsync(string expression, bool translateDates = false)
+    {
+        var rows = await RunAsync($"SELECT {expression} AS r FROM orders WHERE id = 1", "acme", translateDates: translateDates);
+        rows.Count.ShouldBe(1);
+        return rows[0][0];
+    }
+
+    [Theory]
+    [InlineData("substr(email, 7)", "smith@acme.example")]
+    [InlineData("substr(email, 7, 5)", "smith")]
+    [InlineData("substring(email, 7)", "smith@acme.example")]
+    [InlineData("substring(email, 7, 5)", "smith")]
+    [InlineData("replace(email, '@acme.example')", "alice.smith")]
+    [InlineData("replace(email, 'zzz')", "alice.smith@acme.example")]
+    [InlineData("replace(email, '')", "alice.smith@acme.example")]
+    public async Task FunctionMapping_MatchesTrinoSemantics(string expression, string expected)
+    {
+        if (!_db.IsAvailable) return;
+        ((string?)await ScalarAsync(expression)).ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData("lpad(email, 5, '0')")]
+    [InlineData("rpad(email, 5, '0')")]
+    [InlineData("octet_length(email)")]
+    public async Task FunctionMapping_WithoutAnExactEquivalent_IsRejectedBeforeTheDatabase(string expression)
+    {
+        if (!_db.IsAvailable) return;
+        await Should.ThrowAsync<SqlCompileNotSupportedException>(() => ScalarAsync(expression));
+    }
+
+    [Theory]
+    [InlineData("date_add('day', 1, current_timestamp) > current_timestamp")]
+    [InlineData("date_add('day', -1, current_timestamp) < current_timestamp")]
+    [InlineData("date_add('month', 1, current_timestamp) > date_add('day', 27, current_timestamp)")]
+    [InlineData("date_add('month', 1, current_timestamp) < date_add('day', 32, current_timestamp)")]
+    [InlineData("date_add('hour', 2, current_timestamp) > date_add('minute', 119, current_timestamp)")]
+    [InlineData("date_add('week', 1, current_timestamp) > date_add('day', 6, current_timestamp)")]
+    [InlineData("date_add('week', 1, current_timestamp) < date_add('day', 8, current_timestamp)")]
+    public async Task DateAdd_TranslatedAndExecuted(string predicate)
+    {
+        if (!_db.IsAvailable) return;
+        var rows = await RunAsync($"SELECT id FROM orders WHERE id = 1 AND {predicate}", "acme", translateDates: true);
+        Ids(rows).ShouldBe(new List<int> { 1 });
     }
 }

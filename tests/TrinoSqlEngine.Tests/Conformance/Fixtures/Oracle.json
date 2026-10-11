@@ -1960,9 +1960,9 @@
       "Group": "fn-string",
       "Sql": "SELECT concat(a, b, c) AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CONCAT(\"A\", \"B\", \"C\") AS \"R\" FROM \"T\"",
+      "Expected": "SELECT CONCAT(CONCAT(\"A\", \"B\"), \"C\") AS \"R\" FROM \"T\"",
       "Parameters": [],
-      "SemanticNote": "KNOWN-GAP: Oracle CONCAT takes exactly two arguments; the three-argument form is emitted unchanged and fails at execution."
+      "SemanticNote": "semantic-note: the three-argument CONCAT is emitted as nested two-argument CONCAT calls; Oracle treats NULL as the empty string (Trino returns NULL)."
     },
     {
       "Id": "fn-string-010",
@@ -2008,7 +2008,7 @@
       "Group": "fn-string",
       "Sql": "SELECT substring(a, 2) AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT SUBSTRING(\"A\", :p1) AS \"R\" FROM \"T\"",
+      "Expected": "SELECT SUBSTR(\"A\", :p1) AS \"R\" FROM \"T\"",
       "Parameters": [
         {
           "Marker": ":p1",
@@ -2018,7 +2018,7 @@
           "Value": "2"
         }
       ],
-      "SemanticNote": "KNOWN-GAP: Oracle has no SUBSTRING function (SUBSTR); the call is emitted unchanged and fails at execution."
+      "SemanticNote": "semantic-note: SUBSTRING is emitted as SUBSTR; a start of 0 is treated as 1 (Trino returns the empty string)."
     },
     {
       "Id": "fn-string-013",
@@ -2047,9 +2047,17 @@
       "Id": "fn-string-014",
       "Group": "fn-string",
       "Sql": "SELECT strpos(a, 'x') AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT INSTR(\"A\", :p1) AS \"R\" FROM \"T\"",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "x"
+        }
+      ]
     },
     {
       "Id": "fn-string-015",
@@ -2444,27 +2452,27 @@
       "Group": "fn-string",
       "Sql": "SELECT octet_length(a) AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT OCTET_LENGTH(\"A\") AS \"R\" FROM \"T\"",
+      "Expected": "SELECT LENGTHB(\"A\") AS \"R\" FROM \"T\"",
       "Parameters": [],
-      "SemanticNote": "KNOWN-GAP: OCTET_LENGTH does not exist in Oracle (LENGTHB); it fails at execution."
+      "SemanticNote": "semantic-note: OCTET_LENGTH is emitted as LENGTHB (bytes of the database character set, UTF-8 on AL32UTF8)."
     },
     {
       "Id": "fn-string-052",
       "Group": "fn-string",
       "Sql": "SELECT char_length(a) AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CHAR_LENGTH(\"A\") AS \"R\" FROM \"T\"",
+      "Expected": "SELECT LENGTH(\"A\") AS \"R\" FROM \"T\"",
       "Parameters": [],
-      "SemanticNote": "KNOWN-GAP: CHAR_LENGTH does not exist in Oracle (LENGTH); it fails at execution."
+      "SemanticNote": "semantic-note: CHAR_LENGTH is emitted as LENGTH (characters)."
     },
     {
       "Id": "fn-string-053",
       "Group": "fn-string",
       "Sql": "SELECT character_length(a) AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT CHARACTER_LENGTH(\"A\") AS \"R\" FROM \"T\"",
+      "Expected": "SELECT LENGTH(\"A\") AS \"R\" FROM \"T\"",
       "Parameters": [],
-      "SemanticNote": "KNOWN-GAP: CHARACTER_LENGTH does not exist in Oracle (LENGTH); it fails at execution."
+      "SemanticNote": "semantic-note: CHARACTER_LENGTH is emitted as LENGTH (characters)."
     },
     {
       "Id": "fn-string-054",
@@ -2583,9 +2591,9 @@
       "Group": "fn-math",
       "Sql": "SELECT log10(a) AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT LOG10(\"A\") AS \"R\" FROM \"T\"",
+      "Expected": "SELECT LOG(10, \"A\") AS \"R\" FROM \"T\"",
       "Parameters": [],
-      "SemanticNote": "KNOWN-GAP: Oracle has no LOG10 function (LOG(10, x)); it fails at execution."
+      "SemanticNote": "semantic-note: LOG10(x) is emitted as LOG(10, x); a non-positive argument raises ORA-01428 where Trino returns NaN or -Infinity."
     },
     {
       "Id": "fn-math-014",
@@ -2929,7 +2937,7 @@
       "Sql": "SELECT current_time AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "fn-date-004",
@@ -2937,15 +2945,15 @@
       "Sql": "SELECT localtime AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "fn-date-005",
       "Group": "fn-date",
       "Sql": "SELECT localtimestamp AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT LOCALTIMESTAMP AS \"R\" FROM \"T\"",
+      "Parameters": []
     },
     {
       "Id": "fn-date-006",
@@ -3295,49 +3303,49 @@
       "Id": "date-translated-001",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('day', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT TRUNC(\"TS\", 'DD') AS \"R\" FROM \"T\"",
+      "Parameters": []
     },
     {
       "Id": "date-translated-002",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('month', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT TRUNC(\"TS\", 'MM') AS \"R\" FROM \"T\"",
+      "Parameters": []
     },
     {
       "Id": "date-translated-003",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('year', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT TRUNC(\"TS\", 'YYYY') AS \"R\" FROM \"T\"",
+      "Parameters": []
     },
     {
       "Id": "date-translated-004",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('hour', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT TRUNC(\"TS\", 'HH24') AS \"R\" FROM \"T\"",
+      "Parameters": []
     },
     {
       "Id": "date-translated-005",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('week', d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT TRUNC(\"D\", 'IW') AS \"R\" FROM \"T\"",
+      "Parameters": []
     },
     {
       "Id": "date-translated-006",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('minute', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT TRUNC(\"TS\", 'MI') AS \"R\" FROM \"T\"",
+      "Parameters": []
     },
     {
       "Id": "date-translated-007",
@@ -3345,63 +3353,119 @@
       "Sql": "SELECT date_trunc('second', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "date-translated-008",
       "Group": "date-translated",
       "Sql": "SELECT date_add('day', 1, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"D\" + NUMTODSINTERVAL(:p1, 'DAY')) AS \"R\" FROM \"T\"",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "1"
+        }
+      ]
     },
     {
       "Id": "date-translated-009",
       "Group": "date-translated",
       "Sql": "SELECT date_add('month', 2, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT ADD_MONTHS(\"D\", :p1) AS \"R\" FROM \"T\"",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "2"
+        }
+      ]
     },
     {
       "Id": "date-translated-010",
       "Group": "date-translated",
       "Sql": "SELECT date_add('hour', 3, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"TS\" + NUMTODSINTERVAL(:p1, 'HOUR')) AS \"R\" FROM \"T\"",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "3"
+        }
+      ]
     },
     {
       "Id": "date-translated-011",
       "Group": "date-translated",
       "Sql": "SELECT date_add('year', -1, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT ADD_MONTHS(\"D\", :p1) AS \"R\" FROM \"T\"",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "-12"
+        }
+      ]
     },
     {
       "Id": "date-translated-012",
       "Group": "date-translated",
       "Sql": "SELECT date_add('week', 2, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"D\" + NUMTODSINTERVAL(:p1, 'DAY')) AS \"R\" FROM \"T\"",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "14"
+        }
+      ]
     },
     {
       "Id": "date-translated-013",
       "Group": "date-translated",
       "Sql": "SELECT date_add('minute', 5, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"TS\" + NUMTODSINTERVAL(:p1, 'MINUTE')) AS \"R\" FROM \"T\"",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "5"
+        }
+      ]
     },
     {
       "Id": "date-translated-014",
       "Group": "date-translated",
       "Sql": "SELECT date_add('second', 30, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT (\"TS\" + NUMTODSINTERVAL(:p1, 'SECOND')) AS \"R\" FROM \"T\"",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "30"
+        }
+      ]
     },
     {
       "Id": "date-translated-015",
@@ -5045,8 +5109,8 @@
       "Sql": "(SELECT a FROM t) UNION ALL (SELECT a FROM u)",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "InvalidCastException",
-      "SemanticNote": "KNOWN-DEFECT: parenthesized query terms in a set operation make the AST builder throw InvalidCastException instead of a typed rejection (fail closed, wrong error type)."
+      "ExceptionType": "AstBuildException",
+      "SemanticNote": "semantic-note: a parenthesized query primary is rejected with AstBuildException (KD-1); the AST has no node that keeps the ORDER BY and LIMIT of a parenthesized query."
     },
     {
       "Id": "setop-011",

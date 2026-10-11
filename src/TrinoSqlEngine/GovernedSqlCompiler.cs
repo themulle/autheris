@@ -218,7 +218,7 @@ internal sealed class GovernedSqlCompiler
     /// </summary>
     private static IReadOnlySet<string> EffectiveFunctions(CompileRequest request, DialectCapabilities caps)
     {
-        var map = caps.Functions.Names;
+        var map = request.TranslateTrinoDateFunctions ? caps.Functions.Names : SqlFunctionAllowlists.WithoutDateTranslation(caps.Dialect, caps.Functions.Names);
         if (request.AllowedFunctions is null)
         {
             return map;

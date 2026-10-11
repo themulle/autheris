@@ -2053,9 +2053,17 @@
       "Id": "fn-string-014",
       "Group": "fn-string",
       "Sql": "SELECT strpos(a, 'x') AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT INSTR(`a`, :p1) AS `r` FROM `t`",
+      "Parameters": [
+        {
+          "Marker": ":p1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "x"
+        }
+      ]
     },
     {
       "Id": "fn-string-015",
@@ -2954,7 +2962,7 @@
       "Sql": "SELECT current_time AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "fn-date-004",
@@ -2962,7 +2970,7 @@
       "Sql": "SELECT localtime AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "fn-date-005",
@@ -4096,9 +4104,9 @@
       "Id": "agg-020",
       "Group": "agg",
       "Sql": "SELECT arbitrary(a) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT ANY_VALUE(`a`) AS `r` FROM `t`",
+      "Parameters": []
     },
     {
       "Id": "agg-021",
@@ -4168,9 +4176,9 @@
       "Id": "agg-028",
       "Group": "agg",
       "Sql": "SELECT approx_distinct(a) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT APPROX_COUNT_DISTINCT(`a`) AS `r` FROM `t`",
+      "Parameters": []
     },
     {
       "Id": "agg-029",
@@ -5150,8 +5158,8 @@
       "Sql": "(SELECT a FROM t) UNION ALL (SELECT a FROM u)",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "InvalidCastException",
-      "SemanticNote": "KNOWN-DEFECT: parenthesized query terms in a set operation make the AST builder throw InvalidCastException instead of a typed rejection (fail closed, wrong error type)."
+      "ExceptionType": "AstBuildException",
+      "SemanticNote": "semantic-note: a parenthesized query primary is rejected with AstBuildException (KD-1); the AST has no node that keeps the ORDER BY and LIMIT of a parenthesized query."
     },
     {
       "Id": "setop-011",

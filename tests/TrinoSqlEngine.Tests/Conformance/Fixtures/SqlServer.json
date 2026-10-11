@@ -1946,7 +1946,7 @@
       "Group": "fn-string",
       "Sql": "SELECT substr(a, 2) AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT SUBSTR([a], @p0) AS [r] FROM [t]",
+      "Expected": "SELECT SUBSTRING([a], @p0, @p1) AS [r] FROM [t]",
       "Parameters": [
         {
           "Marker": "@p0",
@@ -1954,16 +1954,23 @@
           "Origin": "QueryLiteral",
           "ValueType": "Int64",
           "Value": "2"
+        },
+        {
+          "Marker": "@p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "2147483647"
         }
       ],
-      "SemanticNote": "KNOWN-GAP: SUBSTR is not a T-SQL function; the call is emitted unchanged and fails at execution."
+      "SemanticNote": "semantic-note: SUBSTR is emitted as SUBSTRING and the missing length as 2147483647; a start below 1 is backend semantics (Trino counts a negative start from the end)."
     },
     {
       "Id": "fn-string-011",
       "Group": "fn-string",
       "Sql": "SELECT substr(a, 2, 3) AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT SUBSTR([a], @p0, @p1) AS [r] FROM [t]",
+      "Expected": "SELECT SUBSTRING([a], @p0, @p1) AS [r] FROM [t]",
       "Parameters": [
         {
           "Marker": "@p0",
@@ -1980,14 +1987,14 @@
           "Value": "3"
         }
       ],
-      "SemanticNote": "KNOWN-GAP: SUBSTR is not a T-SQL function; the call is emitted unchanged and fails at execution."
+      "SemanticNote": "semantic-note: SUBSTR is emitted as SUBSTRING and the missing length as 2147483647; a start below 1 is backend semantics (Trino counts a negative start from the end)."
     },
     {
       "Id": "fn-string-012",
       "Group": "fn-string",
       "Sql": "SELECT substring(a, 2) AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT SUBSTRING([a], @p0) AS [r] FROM [t]",
+      "Expected": "SELECT SUBSTRING([a], @p0, @p1) AS [r] FROM [t]",
       "Parameters": [
         {
           "Marker": "@p0",
@@ -1995,9 +2002,16 @@
           "Origin": "QueryLiteral",
           "ValueType": "Int64",
           "Value": "2"
+        },
+        {
+          "Marker": "@p1",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "2147483647"
         }
       ],
-      "SemanticNote": "KNOWN-GAP: SUBSTRING needs three arguments in T-SQL; the two-argument form fails at execution."
+      "SemanticNote": "semantic-note: the two-argument SUBSTRING gets the missing length as 2147483647; a start below 1 is backend semantics (Trino counts a negative start from the end)."
     },
     {
       "Id": "fn-string-013",
@@ -2026,9 +2040,17 @@
       "Id": "fn-string-014",
       "Group": "fn-string",
       "Sql": "SELECT strpos(a, 'x') AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT CHARINDEX(@p0, [a]) AS [r] FROM [t]",
+      "Parameters": [
+        {
+          "Marker": "@p0",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": "x"
+        }
+      ]
     },
     {
       "Id": "fn-string-015",
@@ -2074,7 +2096,7 @@
       "Group": "fn-string",
       "Sql": "SELECT replace(a, 'x') AS r FROM t",
       "Outcome": "ok",
-      "Expected": "SELECT REPLACE([a], @p0) AS [r] FROM [t]",
+      "Expected": "SELECT REPLACE([a], @p0, @p1) AS [r] FROM [t]",
       "Parameters": [
         {
           "Marker": "@p0",
@@ -2082,57 +2104,34 @@
           "Origin": "QueryLiteral",
           "ValueType": "String",
           "Value": "x"
+        },
+        {
+          "Marker": "@p1",
+          "Type": "String",
+          "Origin": "QueryLiteral",
+          "ValueType": "String",
+          "Value": ""
         }
       ],
-      "SemanticNote": "KNOWN-GAP: the two-argument REPLACE does not exist in T-SQL; it fails at execution."
+      "SemanticNote": "semantic-note: the two-argument REPLACE is emitted with an empty bound string as the replacement."
     },
     {
       "Id": "fn-string-018",
       "Group": "fn-string",
       "Sql": "SELECT lpad(a, 5, '0') AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT LPAD([a], @p0, @p1) AS [r] FROM [t]",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "5"
-        },
-        {
-          "Marker": "@p1",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "0"
-        }
-      ],
-      "SemanticNote": "KNOWN-GAP: LPAD does not exist in T-SQL; the call is emitted unchanged and fails at execution."
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SqlCompileNotSupportedException",
+      "SemanticNote": "semantic-note: rejected (SqlCompileNotSupportedException); T-SQL has no LPAD and no exact equivalent exists (truncation and a repeated pad string)."
     },
     {
       "Id": "fn-string-019",
       "Group": "fn-string",
       "Sql": "SELECT rpad(a, 5, '0') AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT RPAD([a], @p0, @p1) AS [r] FROM [t]",
-      "Parameters": [
-        {
-          "Marker": "@p0",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "5"
-        },
-        {
-          "Marker": "@p1",
-          "Type": "String",
-          "Origin": "QueryLiteral",
-          "ValueType": "String",
-          "Value": "0"
-        }
-      ],
-      "SemanticNote": "KNOWN-GAP: RPAD does not exist in T-SQL; the call is emitted unchanged and fails at execution."
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SqlCompileNotSupportedException",
+      "SemanticNote": "semantic-note: rejected (SqlCompileNotSupportedException); T-SQL has no RPAD and no exact equivalent exists (truncation and a repeated pad string)."
     },
     {
       "Id": "fn-string-020",
@@ -2417,10 +2416,10 @@
       "Id": "fn-string-051",
       "Group": "fn-string",
       "Sql": "SELECT octet_length(a) AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT OCTET_LENGTH([a]) AS [r] FROM [t]",
+      "Outcome": "rejected",
       "Parameters": [],
-      "SemanticNote": "KNOWN-GAP: OCTET_LENGTH does not exist in T-SQL (DATALENGTH); it fails at execution."
+      "ExceptionType": "SqlCompileNotSupportedException",
+      "SemanticNote": "semantic-note: rejected (SqlCompileNotSupportedException); DATALENGTH counts UTF-16 bytes of nvarchar, Trino counts UTF-8 bytes."
     },
     {
       "Id": "fn-string-052",
@@ -2898,25 +2897,25 @@
       "Id": "fn-date-003",
       "Group": "fn-date",
       "Sql": "SELECT current_time AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(SYSDATETIME() AS time) AS [r] FROM [t]",
+      "Parameters": []
     },
     {
       "Id": "fn-date-004",
       "Group": "fn-date",
       "Sql": "SELECT localtime AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(SYSDATETIME() AS time) AS [r] FROM [t]",
+      "Parameters": []
     },
     {
       "Id": "fn-date-005",
       "Group": "fn-date",
       "Sql": "SELECT localtimestamp AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT SYSDATETIME() AS [r] FROM [t]",
+      "Parameters": []
     },
     {
       "Id": "fn-date-006",
@@ -3266,25 +3265,25 @@
       "Id": "date-translated-001",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('day', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(CAST([ts] AS date) AS datetimeoffset) AS [r] FROM [t]",
+      "Parameters": []
     },
     {
       "Id": "date-translated-002",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('month', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(DATEFROMPARTS(YEAR([ts]), MONTH([ts]), 1) AS datetimeoffset) AS [r] FROM [t]",
+      "Parameters": []
     },
     {
       "Id": "date-translated-003",
       "Group": "date-translated",
       "Sql": "SELECT date_trunc('year', ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT CAST(DATEFROMPARTS(YEAR([ts]), 1, 1) AS datetimeoffset) AS [r] FROM [t]",
+      "Parameters": []
     },
     {
       "Id": "date-translated-004",
@@ -3292,7 +3291,7 @@
       "Sql": "SELECT date_trunc('hour', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "date-translated-005",
@@ -3300,7 +3299,7 @@
       "Sql": "SELECT date_trunc('week', d) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "date-translated-006",
@@ -3308,7 +3307,7 @@
       "Sql": "SELECT date_trunc('minute', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "date-translated-007",
@@ -3316,63 +3315,119 @@
       "Sql": "SELECT date_trunc('second', ts) AS r FROM t",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "ExceptionType": "AstBuildException"
     },
     {
       "Id": "date-translated-008",
       "Group": "date-translated",
       "Sql": "SELECT date_add('day', 1, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT DATEADD(day, @p0, [d]) AS [r] FROM [t]",
+      "Parameters": [
+        {
+          "Marker": "@p0",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "1"
+        }
+      ]
     },
     {
       "Id": "date-translated-009",
       "Group": "date-translated",
       "Sql": "SELECT date_add('month', 2, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT DATEADD(month, @p0, [d]) AS [r] FROM [t]",
+      "Parameters": [
+        {
+          "Marker": "@p0",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "2"
+        }
+      ]
     },
     {
       "Id": "date-translated-010",
       "Group": "date-translated",
       "Sql": "SELECT date_add('hour', 3, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT DATEADD(hour, @p0, [ts]) AS [r] FROM [t]",
+      "Parameters": [
+        {
+          "Marker": "@p0",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "3"
+        }
+      ]
     },
     {
       "Id": "date-translated-011",
       "Group": "date-translated",
       "Sql": "SELECT date_add('year', -1, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT DATEADD(year, @p0, [d]) AS [r] FROM [t]",
+      "Parameters": [
+        {
+          "Marker": "@p0",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "-1"
+        }
+      ]
     },
     {
       "Id": "date-translated-012",
       "Group": "date-translated",
       "Sql": "SELECT date_add('week', 2, d) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT DATEADD(week, @p0, [d]) AS [r] FROM [t]",
+      "Parameters": [
+        {
+          "Marker": "@p0",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "2"
+        }
+      ]
     },
     {
       "Id": "date-translated-013",
       "Group": "date-translated",
       "Sql": "SELECT date_add('minute', 5, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT DATEADD(minute, @p0, [ts]) AS [r] FROM [t]",
+      "Parameters": [
+        {
+          "Marker": "@p0",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "5"
+        }
+      ]
     },
     {
       "Id": "date-translated-014",
       "Group": "date-translated",
       "Sql": "SELECT date_add('second', 30, ts) AS r FROM t",
-      "Outcome": "rejected",
-      "Parameters": [],
-      "ExceptionType": "SecurityException"
+      "Outcome": "ok",
+      "Expected": "SELECT DATEADD(second, @p0, [ts]) AS [r] FROM [t]",
+      "Parameters": [
+        {
+          "Marker": "@p0",
+          "Type": "Int32",
+          "Origin": "QueryLiteral",
+          "ValueType": "Int64",
+          "Value": "30"
+        }
+      ]
     },
     {
       "Id": "date-translated-015",
@@ -5024,8 +5079,8 @@
       "Sql": "(SELECT a FROM t) UNION ALL (SELECT a FROM u)",
       "Outcome": "rejected",
       "Parameters": [],
-      "ExceptionType": "InvalidCastException",
-      "SemanticNote": "KNOWN-DEFECT: parenthesized query terms in a set operation make the AST builder throw InvalidCastException instead of a typed rejection (fail closed, wrong error type)."
+      "ExceptionType": "AstBuildException",
+      "SemanticNote": "semantic-note: a parenthesized query primary is rejected with AstBuildException (KD-1); the AST has no node that keeps the ORDER BY and LIMIT of a parenthesized query."
     },
     {
       "Id": "setop-011",
