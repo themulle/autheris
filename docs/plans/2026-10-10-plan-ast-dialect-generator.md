@@ -2,7 +2,7 @@
 
 **Document ID:** `PLAN-AST-DIALECT-GEN-16` (implementation plan, Phase 2 of the 6-phase lifecycle)
 **Date:** 2026-10-10
-**Status:** IN PROGRESS - DQL and DML approved (§19.9, §19.12) and documented (Phase 6, §27); next: the X1 cutover preconditions (§20.3, §24.3, §25.4, §26)
+**Status:** IN PROGRESS - DQL and DML approved (§19.9, §19.12) and documented (Phase 6, §27); X1 cutover execution plan written (Phase 2, §28: work packages X0a..X0y and X1); next: Phase 3 review of §28, then Wave 1 of §28.5
 **Author:** Solution Architect (`csharp-architect`); Phase 3 review (§16) by Security Expert (`csharp-security-expert`)
 **Parent plan:** [00-master-plan-overview.md](00-master-plan-overview.md)
 **Requirements baseline:** [2026-10-10-req-ast-dialect-generator.md](2026-10-10-req-ast-dialect-generator.md) (PRD, Phase 1)
@@ -10,7 +10,7 @@
 **Amends:** [ADR-017 §2](../adr/ADR-017-distributed-state-ast-generator-and-rbac.md) (amendment text in §13; Phase 6 writes it)
 **Branch base:** `feat/ast-target-dialect-generator` (commit `6985be1`)
 
-**Index:** DQL review loop 3 (CR-ADG-30..32 fixes, CR-ADG-31 X1 precondition, OQ-GQL) is in [§22](#22-implementation-log--dql-review-loop-3); open question OQ-GQL is in §15.
+**Index:** DQL review loop 3 (CR-ADG-30..32 fixes, CR-ADG-31 X1 precondition, OQ-GQL) is in [§22](#22-implementation-log--dql-review-loop-3); open question OQ-GQL is in §15. The X1 cutover execution plan (verified preconditions, entry points, SQLite/Snowflake decision, work packages, error mapping, rollback) is in [§28](#28-x1-cutover-execution-plan-phase-2); it supersedes the open-item lists of §20.3, §24.3, §25.4, §26 and §27.3.
 
 ---
 
@@ -1576,6 +1576,7 @@ Affected work packages and test criteria (additions to §11 and §16.8):
 
 ## 17. Changelog
 
+- 2026-10-11: Added §28 "X1 Cutover Execution Plan (Phase 2)" (`csharp-architect`): the Phase 6 open items verified against `27ab54c` (two corrected: the provider binders and the Oracle `BindByName` wrapper are already production code; a generic but wrong 403/500 error mapping exists), eleven further gaps G-1..G-11 (Stream D not implemented, WebSQL dialect gate excludes Oracle/Databricks, checked executor cannot join the session transaction, Application string plan cache, REST dataset policy splice, string rewrite API, no gate infrastructure, no default schema, `RlsOptions` function policy, Databricks DML without transactions, synthetic fallback), the governed entry-point inventory, the decision SQLite = AST support and Snowflake = fail closed, the runtime design (static closed binder set, `ExecuteInTransactionAsync`, DI), the HTTP/gRPC error-code table, work packages X0a..X0y plus X1 and X1-DBX with branches, tests, dependencies and a file-conflict matrix, the refreshed removal list (L-16, L-17), the revert set {X1, X0g, X0f, X0e, X0d}, code-versus-ops preconditions and stakeholder items S-1..S-5.
 - 2026-10-11: Added §27 "Phase 6 Documentation": feature doc F-DIALECT-02 (supersedes F-DIALECT-01), ADR-017 amendment, master plan row, and the list of plan-versus-code differences found while documenting.
 - 2026-10-11: Added §19.12 "Re-review (DML loop 2)" (`csharp-code-reviewer`) of `feat/ast-dml` at `f90677c`: CR-ADG-42 closed on SQL Server, PostgreSQL, Oracle Free and DuckDB (coercion and string variants rejected), CR-ADG-43/44 verified; verdict approved; CR-ADG-45 (row-count flag forgeable through a `with` copy) and CR-ADG-47 (catalog types from metadata) added as X1 preconditions, CR-ADG-46/-48 Minor; DQL and DML ready for Phase 6.
 - 2026-10-10: Added §25 "Implementation Log — DML review loop 2": CR-ADG-42 (Blocker: the INSERT check option now evaluates the policy on the stored value through native catalog casts and compares string columns byte-exact), CR-ADG-43 (binders refuse a row-count-checked statement; `CheckedDmlExecutor` is the only way to run it) and CR-ADG-44 (balanced row tree) fixed on `feat/ast-dml`; the §24.2 "known limit" text corrected; X1 preconditions updated.
@@ -2518,3 +2519,697 @@ Track `PLAN-AST-DIALECT-GEN-16`, branch `feat/ast-dml` (from `a4ce0e4`), Phase 6
 ### 27.3 Open items carried to X1
 
 Unchanged from §20.3, §24.3, §25.4 and §26: runtime wiring of `DmlErrorSanitizer` and `CheckedDmlExecutor`, catalog types and collation from database metadata (CR-ADG-47), the tenant registry (CR-ADG-31), literal bind types (SEC-ADG-16 item 2), the Oracle driver license review and package signing, a Databricks G9 run, and the OQ-GQL / OQ-4 text consumers.
+
+## 28. X1 Cutover Execution Plan (Phase 2)
+
+Track `PLAN-AST-DIALECT-GEN-16`, Phase 2 (`csharp-architect`), written on `feat/ast-x1-plan` from `integration/x0-all-approved` at `27ab54c` (DQL + DML, the VF federation track and the fix branches merged). This section replaces the open-item lists of §20.3, §24.3, §25.4, §26 and §27.3 as the single source for the cutover. The X1 shape of §11.7 and §12.2 stays: one squash-merged cutover commit, no runtime flag, rollback by `git revert`. Binding stakeholder decisions applied here: one code path in the end (AST only; `RlsListener` and `TokenStreamRewriter` are deleted at X1); a pre-merge CI gate and no production observation window; DML in scope; Snowflake experimental; Databricks and Oracle (with a driver) supported; one branch per area; GraphQL-to-AST (OQ-GQL) is out of scope.
+
+All file:line references were checked on `27ab54c`.
+
+### 28.1 Verification of the open X1 preconditions
+
+| # | Phase 6 statement | Verdict | Evidence on `27ab54c` |
+|---|---|---|---|
+| 1 | No production service calls `ISqlEngine.Compile`; `SqlRewriterEngine=AstCompiler` routes to the string path `GenerateGovernedSql` | **Confirmed** | `Compile` is only defined (`FastSqlEngine.cs:636-637`). The governed path calls `_sqlEngine.RewriteRls` (`GovernedSqlRewriter.cs:740`), which dispatches on `RlsOptions.RewriterEngine` (`FastSqlEngine.cs:649-672`) to `GenerateGovernedSql` (`FastSqlEngine.cs:699-720`: `RlsOptions`, string policies, no bind-everything, no coverage verifier, no value-free template cache) or to `RlsListener` (`FastSqlEngine.cs:674-683`). The engine name comes from `GatewayOptions.cs:1517` through `GovernedSqlRewriter.cs:703`. |
+| 2 | Concrete `ICompiledSqlBinder` implementations, including the Oracle `BindByName` wrapper, exist only in test projects and must move to `Autheris.Infrastructure` | **Corrected** | The five concrete binders are production code in `src/TrinoSqlEngine/Ast/Emit/ICompiledSqlBinder.cs:283` (SQL Server), `:294` (DuckDB), `:304` (PostgreSQL), `:318` (Oracle, `BindByName` set and verified by reflection), `:354` (Databricks). The Oracle wrappers `BindByNameOracleConnection`/`Command`/`Transaction` are production code in `src/Autheris.Infrastructure/Persistence/BindByNameOracleConnection.cs:17,79` and are already used by `SqlConnectionFactory.cs:75`. What is missing: no production caller, no SQLite binder, and no lookup from dialect to binder. **Decision:** the binders stay in `TrinoSqlEngine`. Moving them would require making `DbCommandCompiledSqlBinder.BindForCheckedExecution` public or adding `InternalsVisibleTo`, which would weaken CR-ADG-43 (`CompilerSeamArchitectureTests.cs:153-163` pins `CheckedDmlExecutor` as the only caller). They are provider-agnostic (`DbCommand` plus reflection), so the engine needs no provider package. |
+| 3 | `CheckedDmlExecutor` and `DmlErrorSanitizer` are not wired at runtime | **Confirmed, plus a design gap** | No reference outside `src/TrinoSqlEngine/Ast/Emit/`. **New gap G-3:** `CheckedDmlExecutor.ExecuteAsync` opens its own transaction (`CheckedDmlExecutor.cs:60`), but `GovernedSqlExecutor` already holds the session transaction from `DbSessionContextInitializer` (`GovernedSqlExecutor.cs:294`). PostgreSQL pins the tenant with `set_config(..., true)`, which is local to the transaction. A second `BeginTransaction` fails on Npgsql. Running outside that transaction would lose the session context. `WebSql:MaxAffectedRows` (`GovernedSqlExecutor.cs:462-500`) and the command timeout are not part of the checked executor. |
+| 4 | Compiler exceptions have no HTTP mapping except `TENANT_ID_COLLISION` (403) | **Corrected** | A generic mapping exists, but its statuses are wrong and it has no stable codes. Every `SecurityException` from the engine becomes `WebSqlPolicyException` and then 403 (`GovernedSqlRewriter.cs:760-764`, `WebSqlEndpoints.cs:534-545`). This includes `SqlLimitExceededException`, `SqlCompileNotSupportedException(Dialect)` and the internal invariant failures. `AstBuildException` becomes `ArgumentException` and then 400 (`GovernedSqlRewriter.cs:756-758`). `GovernedSqlException` (the constraint and data errors) is not a `SecurityException`, so it falls through to 500 (`WebSqlEndpoints.cs` default branch). `GatewayExceptionHandler.cs:80-97` has no compiler cases. Only `TENANT_ID_COLLISION` (`SecurityContextResolutionMiddleware.cs:24`) carries a code. |
+| 5a | Catalog column types and collation from DB metadata (CR-ADG-47) | **Confirmed** | `CatalogColumn(Name, DataType, Collation)` (`Governance/TableCatalog.cs:25`) has only `InMemoryTableCatalog` (`:48`). The governance model `TableColumn.DataType` is admin-entered, defaults to `"varchar"` and has no collation (`Autheris.Domain/Model/TableModels.cs:79-90`). |
+| 5b | Tenant registry (CR-ADG-31) | **Confirmed** | Only the configured-tenant collision check exists (`GatewayStartupValidator.cs:619-648`, `SecurityContextResolutionMiddleware.cs:24`). |
+| 5c | Bind types for literals (SEC-ADG-16 item 2) | **Confirmed** | Literal binds take the literal type. Tenant and policy binds follow the column (`ColumnBindStyle`, `ICompiledSqlBinder.cs`), user literals do not. |
+| 6 | Session pinning: PostgreSQL `search_path`, Oracle `CURRENT_SCHEMA`, SQL Server `ANSI_WARNINGS` | **Confirmed, plus a gap** | PostgreSQL pins only `standard_conforming_strings` and `TimeZone` (`DbSessionContextInitializer.cs:154-166`). Oracle sets only the identifier and module (`:182`); its NLS pin is in `OracleConnectionSupport.cs:100-110`. SQL Server sets only `sp_set_session_context` (`:199-201`). **New gap G-8:** `DataSourceConnectionOptions` (`GatewayOptions.cs:1035-1053`) has no default-schema setting, which the pin needs. |
+| 7 | No production Databricks connector, no branch in `SqlConnectionFactory`, no G9 run | **Confirmed, plus a gap** | `SqlConnectionFactory.cs:68-76` ("Databricks is a dialect without a driver"). `SqlDialectMapper.cs:31-41` neither maps nor executes Databricks. Databricks is `Experimental` (`DialectCapabilityTable.cs:155`). The session initializer treats it as stateless (`DbSessionContextInitializer.cs:137-138`). **New gap G-10:** Delta has no rollback for a governed DML statement, so `MaxAffectedRows` cannot be enforced atomically on Databricks (stakeholder item S-2). |
+| 8 | Oracle: `trustedSigners` not set; license open | **Confirmed** | `NuGet.config` (the only tracked variant) has `packageSourceMapping` and no `<trustedSigners>`. The license review is a stakeholder item (S-1) and does not block code. |
+| 9 | `Compile` rejects SQLite and Snowflake although the legacy generators serve them | **Confirmed, decided in §28.3** | `GovernedSqlCompiler.cs:94-106` rejects any dialect that has no capability entry (`DialectCapabilityTable.cs:191-197`: SQL Server, DuckDB, PostgreSQL, Oracle, Databricks). The generators are registered (`SqlDialectGeneratorFactory.cs:19,21`). |
+| 10 | WP-X1 (§11.7), L-1..L-15 (§10), the §9.5/§16.5 gate, rollback {X1, D3, D2, D1} | **Confirmed, with stale line numbers and an unbuilt gate** | Line numbers in §10 have drifted (for example `SqlRewriterEngine` is now `FastSqlEngine.cs:106` and `GatewayOptions.cs:1517`); §28.6 refreshes them. **New gap G-7:** none of the gate infrastructure exists. There is no `tests/Autheris.Tests.SqlCompilerGate`, no `sql-compiler-gate` job in `.github/workflows/ci.yml`, no conformance matrix, no property tests, no corpus, no `SecurityRegressionCatalog`, no Stryker configuration, and no `tools/PolicyPredicateLint` or `tools/SqlGate.BenchCheck` (`tools/` holds only `autheris-schema-check` and `casbin-policy-lint`). Existing evidence: the `AstCompiler*ExecutionTests` / `*DmlExecutionTests` Testcontainers suites (including the Spark/Delta proxy, so C4 is done) and `TrinoSqlEngine.Tests/Differential/LegacyVsAstDifferentialTests.cs` (4 tests). |
+
+**Additional gaps that block deleting the legacy path:**
+
+| ID | Gap | Evidence | Closed by |
+|---|---|---|---|
+| G-1 | **Stream D (typed policy producers) is not implemented.** The Application layer has no reference to `PolicyPredicate`, `MaskSpec`, `IPolicyPredicateProvider`, `IColumnMaskProvider` or `ITableCatalog`. Row filters and masks are target-dialect SQL strings (`PolicyFiltersAreTargetDialectSql = true`, `GovernedSqlRewriter.cs:702`; `DefaultRlsPolicyProvider`/`DefaultColumnMaskingPolicyProvider`, `:656-669`). | grep over `src/Autheris.*` | X0d, X0e, X0f, X0g, X0l |
+| G-2 | **The WebSQL dialect gate excludes Oracle and Databricks.** `IsWebSqlSupportedDialect` allows only PostgreSQL, SQL Server and SQLite (`GovernedSqlExecutionService.cs:262-263`, used by `SqlDataSourceResolver.cs:90-93`, message at `GovernedSqlRewriter.cs:637-639`). `SqlDialectMapper.IsExecutable` includes Oracle (`SqlDialectMapper.cs:40-41`), so the two gates disagree. | code | X1 (admission derived from the capability tier) |
+| G-3 | Checked execution cannot join the session transaction (row 3). | code | X0k |
+| G-4 | **The Application string plan cache duplicates the engine cache.** `ICompiledSqlQueryPlanCache`/`CompiledSqlQueryPlanCache` (`Autheris.Application/Sql/CompiledSqlQueryPlanCache.cs:28`) caches the secured SQL text with inlined values per tenant. The engine's value-free `CompiledSqlTemplateCache` (`Ast/Emit/CompiledSqlTemplate.cs:90`, SEC-ADG-01) supersedes it. | code | X1 (deleted, L-16) |
+| G-5 | **REST datasets and MCP dataset tools splice policy text into the user SQL.** `GovernedDataQueryService.cs:193-210` appends `decision.CombinedRowFilterSql` (target-dialect text) and the translated filter to the Trino input, and the rewriter then injects the same policy again. On the AST path, a SQL Server bracket identifier in that text is rejected by the token guards, and policy values become user literals. | code | X0n |
+| G-6 | **String-returning rewrite API.** `RewriteSqlAsync` returns secured SQL text (`IGovernedSqlExecutionService.cs:60`, `ISqlRewritePipeline.cs:17`, `GovernedSqlRewriter.cs:112`, `FederatedDuckDbExecutionService.cs:192`). Arrow Flight `GetFlightInfo` uses it for validation (`ArrowFlightSqlServer.cs:95`). | code | X1 |
+| G-7 | No gate infrastructure (row 10). | repo | X0s..X0y, X0w |
+| G-8 | No default schema on the data source (row 6). | code | X0b |
+| G-9 | **The function policy depends on `RlsOptions`** (`GovernedSqlRewriter.cs:242,646`, `FederatedDuckDbExecutionService.cs:258`). The three-argument overload `SqlFunctionPolicy.cs:139` already exists. | code | X1 |
+| G-10 | Databricks DML has no transaction (row 7). | design | X0j, S-2 |
+| G-11 | **The Development synthetic fallback reads the secured text** (`GovernedSqlExecutor.cs:250`). | code | X1 |
+
+### 28.2 Governed entry points
+
+Every SQL-text entry point converges on `GovernedSqlRewriter.RewriteCoreAsync`, which calls `RewriteRls` (`GovernedSqlRewriter.cs:740`), and then on `GovernedSqlExecutor`, which sets `CommandText` (`GovernedSqlExecutor.cs:309`) and adds the parameters (`:311-345`). Migrating those two classes moves all of them. **"Compile + binder today"** is No for every entry point.
+
+| Entry point | Call site | Reaches the shared pipeline | Compile + binder today | X1 action |
+|---|---|---|---|---|
+| WebSQL JSON / NDJSON / Parquet | `WebSqlEndpoints.cs:273,408` -> `IGovernedSqlExecutionService.ExecuteGovernedQueryAsync` | yes | No | via X1 |
+| WebSQL async statements | `WebSqlStatementManager.cs:159-160` | yes | No | via X1 |
+| SQL endpoints | `SqlEndpointExecutionService.cs:90` (loader parses only, `SqlEndpointLoader.cs:184`) | yes | No | via X1 |
+| Async query jobs | `AsyncQueryJobBackgroundWorker.cs:89-98` | yes | No | via X1 |
+| Arrow export | `ArrowExportEndpoints.cs:185` | yes | No | via X1 |
+| Arrow Flight SQL | `ArrowFlightSqlServer.cs:95` (`RewriteSqlAsync`, G-6), `:197-199` | yes | No | X1 (validate-only API) |
+| MCP SQL tool | `McpToolExecutionHandler.cs:98`, `ApiDispatcherService.cs:207` | yes | No | via X1 |
+| MCP dataset tools / REST datasets | `McpToolExecutionHandler.cs:127`, `ApiDispatcherService.cs:99` -> `GovernedDataQueryService.cs:242` | yes, after splicing policy text (G-5) | No | X0n, then X1 |
+| Federated (cross-source) WebSQL / datasets | `GovernedDataQueryService.cs:232,250` -> `FederatedDuckDbExecutionService` | own path: staging via `FederatedStagingService.cs:185` -> `SqlConnector` (`Infrastructure/Connectors/SqlConnector.cs:126`) -> `SqlDataSourceExecutor` string builder (`SqlDataSourceExecutor.cs:226-229,384`; masks `SqlDataSourceExecutor.Projection.cs:49,58`); DuckDB plan `CrossSourcePlanner.cs:275-276` (`GenerateSql`, inline) | No | Staging reads stay a §7.3 text consumer, rendered from the IR after X0d/X0f (OQ-4). The DuckDB plan moves in X3. Neither blocks the legacy deletion once X0f is in. |
+| Virtual filters (mandatory predicates) | `StructuredFilterSqlBuilder.cs:43` -> `SqlFilterCompiler.cs:353-365` (`new FastSqlEngine().GenerateGovernedSql`) | n/a (policy producer) | No (legacy API L-4) | X0g |
+| GraphQL tree queries | `GovernedTreeQueryService.cs:264` (`TreeSqlCompiler`) | no | No | Out of scope (OQ-GQL). Uses no legacy API, so it does not block X1. |
+| GraphQL / OLAP table reads | `GatewayExecutionService` / `DuckDbOlapEndpoints` -> `SqlConnector` -> `SqlDataSourceExecutor` | no | No | §7.3 text consumer (OQ-4). Blocks X1 only through `BuildDialectMaskExpression` (L-9), which X0f removes. |
+
+M-7 (§16.5) is implemented as the architecture test `GovernedEntryPoints_ReachCompileAndBinder` in X1. Its allowlist is the rows above that are marked "via X1".
+
+### 28.3 Decision: SQLite and Snowflake at X1
+
+**SQLite gets AST support (capability entry and binder, tier Production).** Reasons:
+
+1. SQLite is an executable WebSQL provider today (`GovernedSqlExecutionService.cs:262-263`). It is also the default `Provider` value (`GatewayOptions.cs:1037`) and the backend of the whole WebApplicationFactory integration suite and of the Development setup.
+2. With one code path, failing closed would remove a working, supported feature and break those suites.
+3. The generator already exists. `Microsoft.Data.Sqlite` binds by name, so the binder is a small `DbCommandCompiledSqlBinder` subclass.
+4. SQLite is a G4/G10 differential engine in §9.3, so its conformance evidence is required anyway.
+
+SQLite-specific rules:
+
+- `Collation` stays null (no ADO.NET metadata), which the compiler treats as "not binary" (fail safe).
+- HMAC masks use the `gateway_hmac_sha256` UDF registered by `SqlConnectionFactory.cs:111`.
+- There is no session state, so no pinning is needed.
+
+**Snowflake fails closed on the governed path (no capability entry).** Reasons:
+
+1. There is no `DatabaseDialect.Snowflake`, no driver and no `SqlConnectionFactory` branch. No governed entry point can target it today, so failing closed removes no feature.
+2. The stakeholder classifies it as experimental: "generator only, never executable in production".
+3. An `Experimental` capability entry would add the §9.3 G2 obligation (100 fixtures) to the X1 critical path without any user.
+
+Consequences:
+
+- `Compile(TargetSqlDialect.Snowflake)` keeps throwing `SqlCompileNotSupportedException(Dialect)` (HTTP 501 `SQL_DIALECT_NOT_SUPPORTED`).
+- `SnowflakeDialectGenerator` stays in the tree and is reachable only from tests. X1's L-12/L-13 edits must keep it compiling.
+- The Snowflake G2 threshold is removed from the X1 gate.
+- An `Experimental` entry, reachable only with the test-only `AllowExperimentalDialect`, is a post-X1 follow-up (X4) if the stakeholder asks for it.
+- `TargetSqlDialect.Ansi` is treated the same way.
+
+### 28.4 Target runtime design
+
+#### 28.4.1 Execution path (after X1)
+
+```
+GovernedSqlRewriter.RewriteCoreAsync
+  Stage 3: TableAccessDecision (IRowPolicy, MaskSpec)                     (X0d/X0e/X0f/X0g)
+  Stage 4: GovernancePolicyFactory.Create(...) -> CompileRequest          (X0l; catalog from X0c, tenant from X0p)
+  Stage 5: ISqlEngine.Compile(sql, request, ct) -> CompiledSql            (value-free template cache inside the engine)
+  -> GovernedRewrite(CompiledSql Compiled, AccessedTables, DataSourceName, DeliveredRowLimit, VirtualFilters)
+GovernedSqlExecutor
+  connection = ISqlConnectionFactory.CreateOpenConnectionAsync(...)       (Oracle BindByName wrapper, Databricks facade)
+  tx = DbSessionContextInitializer.InitializeSessionAsync(...)            (tenant context + X0b pinning)
+  SELECT: CompiledSqlBinders.For(dialect).Bind(command, compiled, clientValues); ExecuteReader
+  DML:    CompiledSqlBinders.CheckedExecutorFor(dialect).ExecuteInTransactionAsync(tx, compiled, clientValues, limits, ct)
+  catch DbException (after the timeout/unavailable classification): log the original server-side; throw DmlErrorSanitizer.Map(dialect, ex)
+```
+
+`DbCommand.CommandText` on the governed path is assigned only inside `DbCommandCompiledSqlBinder`. The architecture test `NoCommandTextAssignmentOnGovernedPath` (IL scan of `GovernedSqlExecutor`) enforces this.
+
+#### 28.4.2 Binders, checked executor and DI
+
+```csharp
+namespace TrinoSqlEngine.Ast.Emit;
+
+/// <summary>Closed set of production binders (stateless singletons). Not resolved through DI, so no non-refusing binder can be swapped in.</summary>
+public static class CompiledSqlBinders
+{
+    /// <exception cref="SqlCompileNotSupportedException">Reason Dialect, for Snowflake, Ansi and any dialect without a binder.</exception>
+    public static DbCommandCompiledSqlBinder For(TargetSqlDialect dialect);
+
+    public static ICheckedDmlExecutor CheckedExecutorFor(TargetSqlDialect dialect);
+}
+
+public sealed class SqliteCompiledSqlBinder : DbCommandCompiledSqlBinder;            // X0h, markers as emitted by SqliteDialectGenerator
+
+/// <param name="MaxAffectedRows">0 = no limit; with a limit, an unreported count (-1) fails closed.</param>
+public sealed record CheckedDmlLimits(int CommandTimeoutSeconds, long MaxAffectedRows);
+
+public interface ICheckedDmlExecutor
+{
+    // existing overload (owns the transaction) is kept for the contract harness
+    Task<int> ExecuteAsync(DbConnection connection, CompiledSql compiled, IReadOnlyDictionary<string, object?> clientParameterValues,
+        IsolationLevel isolationLevel = IsolationLevel.ReadCommitted, CancellationToken cancellationToken = default);
+
+    /// <summary>X0k: runs inside the caller's (session) transaction; binds, executes, enforces the check option, then MaxAffectedRows;
+    /// commits on success, rolls back on any failure. A transaction of another connection is rejected.</summary>
+    Task<int> ExecuteInTransactionAsync(DbTransaction transaction, CompiledSql compiled,
+        IReadOnlyDictionary<string, object?> clientParameterValues, CheckedDmlLimits limits, CancellationToken cancellationToken = default);
+}
+
+/// <summary>X0k: code DML_AFFECTED_ROWS_LIMIT; fixed message, no counts.</summary>
+public sealed class DmlAffectedRowsLimitException(TargetSqlDialect dialect) : GovernedSqlException("DML_AFFECTED_ROWS_LIMIT", dialect);
+```
+
+Databricks has no transaction. `CheckedExecutorFor(Databricks)` returns a non-transactional executor with these rules:
+
+- It refuses `RequiresRowCountCheck` (the compiler never emits it for Databricks).
+- It refuses any DML while `MaxAffectedRows > 0`, until S-2 is decided (fail closed).
+
+DI (`src/Autheris.Api/Extensions/DependencyInjection/GatewaySqlEngineServiceExtensions.cs`; the implementations live in `Autheris.Infrastructure` unless noted):
+
+```csharp
+services.AddSingleton<ISqlEngine, FastSqlEngine>();                                     // unchanged; Compile + template cache
+services.AddSingleton<IPolicyExpressionParser>(sp => new PolicyExpressionParser(/* WebSql:PolicyParseCache */));
+services.AddSingleton<IPolicyPredicateRenderer, PolicyPredicateRenderer>();             // Application (X0d)
+services.AddSingleton<IGovernedCatalogProvider, DatabaseTableCatalogProvider>();        // X0c
+services.AddSingleton<IColumnMetadataReader, PostgreSqlColumnMetadataReader>();         // X0c, one per dialect
+services.AddSingleton<IColumnMetadataReader, SqlServerColumnMetadataReader>();
+services.AddSingleton<IColumnMetadataReader, OracleColumnMetadataReader>();
+services.AddSingleton<IColumnMetadataReader, SqliteColumnMetadataReader>();
+services.AddSingleton<IColumnMetadataReader, DatabricksColumnMetadataReader>();         // X0j
+services.AddSingleton<GovernancePolicyFactory>();                                        // Application (X0l)
+services.AddSingleton<ITenantRegistry, GovernanceDbTenantRegistry>();                   // X0p
+services.AddDatabricksStatementExecution();                                             // X0i: typed HttpClient + SSRF handler
+// X1 removes: ICompiledSqlQueryPlanCache (L-16). WebSql:PlanCache:MaxEntries then sizes the engine template cache.
+```
+
+Lifetimes:
+
+- Every registration above is a stateless singleton or a singleton with a bounded cache.
+- `IGovernedSqlExecutionService` stays scoped.
+- `ValidateScopes` stays on.
+- No scoped service is captured.
+
+#### 28.4.3 HTTP error mapping
+
+**Single source of codes.** `GovernedSqlErrorCodes` (`Ast/Emit/GovernedSqlException.cs`) gains the compiler codes below. One Api mapper `SqlCompilerErrorMapper.TryMap(Exception, out SqlErrorMapping)` (new, `src/Autheris.Api/Middleware/`) is used by four callers:
+
+- `GatewayExceptionHandler` (ProblemDetails extension `code`)
+- `WebSqlEndpoints.WriteWebSqlErrorAsync` (`{ error, code, traceId }`, plus `limit` for limit errors)
+- the MCP tool error result (`code`)
+- Arrow Flight (gRPC status plus the trailer `autheris-error-code`)
+
+The mapper walks the `InnerException` chain to a depth of 8, because `GovernedSqlRewriter` wraps engine exceptions.
+
+**Response rules.**
+
+- The response message is always `FixedMessage(code)`. It never contains `Exception.Message`, driver text, values, object names or counts.
+- `limit` carries only the `SqlLimitKind` name.
+- The original exception is logged server-side with the trace id.
+- Timeout and unavailable are classified before the sanitizer runs (`DataAccessErrorClassifier`), so they keep 504 and 503.
+
+| Exception (condition) | HTTP | Stable code | gRPC |
+|---|---|---|---|
+| ANTLR `RecognitionException` / `ParseCanceledException` (directly or as inner) | 400 | `SQL_SYNTAX_ERROR` | InvalidArgument |
+| `MissingClientParameterException` | 400 | `SQL_PARAMETER_MISSING` | InvalidArgument |
+| `SqlCompileNotSupportedException` (Reason `Construct`), `AstBuildException` | 422 | `SQL_CONSTRUCT_NOT_SUPPORTED` | InvalidArgument |
+| `SqlCompileNotSupportedException` (Reason `StatementClass`) | 403 | `SQL_STATEMENT_NOT_PERMITTED` | PermissionDenied |
+| `SqlCompileNotSupportedException` (Reason `Dialect`) | 501 | `SQL_DIALECT_NOT_SUPPORTED` | Unimplemented |
+| `SqlLimitExceededException` (any `SqlLimitKind`), parser time budget (`OperationCanceledException` with inner `TimeoutException`) | 422 | `SQL_LIMIT_EXCEEDED` (+ `limit`) | ResourceExhausted |
+| `UnfilteredDmlException` | 403 | `SQL_UNFILTERED_DML` | PermissionDenied |
+| `PolicyParseException`, `PolicyConflictException` (table denied by policy) | 403 | `SQL_POLICY_DENIED` | PermissionDenied |
+| `WebSqlPolicyException` and any other `SecurityException` | 403 | `SQL_POLICY_VIOLATION` | PermissionDenied |
+| `TENANT_ID_COLLISION` (unchanged, also from the X0p registry) | 403 | `TENANT_ID_COLLISION` | PermissionDenied |
+| `DmlCheckOptionViolationException` | 403 | `DML_CHECK_OPTION_VIOLATION` | PermissionDenied |
+| `DmlConstraintViolationException` | 409 | `DML_CONSTRAINT_VIOLATION` | FailedPrecondition |
+| `DmlAffectedRowsLimitException` (X0k; replaces the 403 message with counts at `GovernedSqlExecutor.cs:498-500`) | 422 | `DML_AFFECTED_ROWS_LIMIT` | FailedPrecondition |
+| `GovernedSqlException` `SQL_DATA_ERROR` | 422 | `SQL_DATA_ERROR` | InvalidArgument |
+| `GovernedSqlException` `SQL_PROVIDER_ERROR` | 502 | `SQL_PROVIDER_ERROR` | Unavailable |
+| `SecurityCoverageException`, `EmittedSqlInvariantViolationException`, `SqlCompileConfigurationException` (gateway defect, fail closed; error log and metric `autheris_sql_compiler_invariant_failures_total`) | 500 | `SQL_COMPILER_INVARIANT` | Internal |
+| `CheckedExecutionRequiredException` (gateway defect) | 500 | `DML_CHECKED_EXECUTION_REQUIRED` | Internal |
+| Execution timeout / source unavailable (existing classifier) | 504 / 503 | `SQL_TIMEOUT` / `SQL_SOURCE_UNAVAILABLE` | DeadlineExceeded / Unavailable |
+
+Precedence: the first matching row in the order above. A security exception is never downgraded to a 4xx data code.
+
+### 28.5 Work packages
+
+Each package has one branch, one PR, is test-first and sized for one Sonnet TDD developer. "Files" lists the primary write set. Every package must leave the legacy path working, because X1 is the only package that switches or deletes. Done means `dotnet build Autheris.sln -warnaserror` is green, the full suite is green, and the gate parts that already exist are green.
+
+#### Wave 1 (no dependencies, parallel)
+
+**WP-X0a Error mapping** (`feat/ast-x1-errors`)
+
+- Files:
+  - `src/Autheris.Api/Middleware/SqlCompilerErrorMapper.cs` (new)
+  - `GatewayExceptionHandler.cs`
+  - `WebSqlEndpoints.cs` (`WriteWebSqlErrorAsync` only)
+  - `Mcp/Services/McpToolExecutionHandler.cs` (error result)
+  - `ArrowFlightSqlServer.cs` (error translation only)
+  - `src/TrinoSqlEngine/Ast/Emit/GovernedSqlException.cs` (code constants and fixed messages)
+- Types: `internal readonly record struct SqlErrorMapping(int Status, string Code, string Title, string? Limit = null)`; `internal static bool TryMap(Exception exception, out SqlErrorMapping mapping)`.
+- Tests first:
+  - `Map_EveryRowOfTable28_4_3` (theory)
+  - `Map_WrappedInWebSqlPolicyException_UsesInnerCode`
+  - `Response_NeverContainsExceptionMessage_ForHostileMarker` (an exception message carrying `A-17'--` is absent from the body in Development and in Production)
+  - `LimitResponse_CarriesKindOnly_NoCounts`
+  - `TimeoutBeforeSanitizer_Stays504`
+  - `Flight_MapsStatusAndTrailer`
+  - `Mcp_ToolError_CarriesCode`
+- Acceptance: §28.4.3 implemented; no compiler exception reaches a default 500 branch except the two defect rows.
+
+**WP-X0b Session pinning** (`feat/ast-x1-session-pinning`)
+
+- Files:
+  - `Autheris.Application/Services/DbSessionContextInitializer.cs`
+  - `Autheris.Infrastructure/Persistence/OracleConnectionSupport.cs`
+  - `GatewayOptions.cs` (`DataSourceConnectionOptions.DefaultSchema`)
+  - `GatewayStartupValidator.cs` (data-source section)
+- Pins:
+  - PostgreSQL: `set_config('search_path', 'pg_catalog, "<schema>", pg_temp', <local>)`.
+  - Oracle: `ALTER SESSION SET CURRENT_SCHEMA` inside the pin-and-verify block, with the identifier passed through `DBMS_ASSERT.SIMPLE_SQL_NAME`.
+  - SQL Server: `SET ANSI_WARNINGS, ANSI_NULLS, ANSI_PADDING, CONCAT_NULL_YIELDS_NULL, ARITHABORT, QUOTED_IDENTIFIER ON; SET NUMERIC_ROUNDABORT OFF`.
+  - Each pin is verified by reading it back (`current_setting`, `SYS_CONTEXT('USERENV','CURRENT_SCHEMA')`, `@@OPTIONS`); a mismatch fails closed.
+- Tests first:
+  - `PostgreSql_PinsSearchPath_PgCatalogFirstPgTempLast`
+  - `PostgreSql_SearchPathMismatch_FailsClosed`
+  - `Oracle_PinsCurrentSchema_AndVerifies`
+  - `Oracle_InvalidSchemaIdentifier_Rejected`
+  - `SqlServer_PinsAnsiOptions_AndVerifies`
+  - `PooledConnection_HostileSessionState_RepinnedOnRental` (PostgreSQL, SQL Server, Oracle containers)
+  - `Startup_PostgreSqlOrOracleWebSqlSourceWithoutDefaultSchema_Fails`
+- Acceptance: INV-14 deviation (§20.2) closed. The legacy path is unaffected (unqualified names still resolve through the pinned default schema).
+- Ops: every PostgreSQL and Oracle WebSQL data source sets `DefaultSchema`.
+
+**WP-X0c Catalog from database metadata** (`feat/ast-x1-catalog`; CR-ADG-47, CR-ADG-10)
+
+- Files:
+  - `Autheris.Application/Sql/Catalog/IGovernedCatalogProvider.cs` (new)
+  - `Autheris.Infrastructure/Persistence/Catalog/**` (new: provider and four readers)
+  - DI lines
+- Types:
+  ```csharp
+  public interface IGovernedCatalogProvider
+  { ValueTask<ITableCatalog> GetCatalogAsync(string dataSourceName, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct); }
+  public interface IColumnMetadataReader
+  { DatabaseDialect Dialect { get; } IAsyncEnumerable<DbColumnMetadata> ReadAsync(DbConnection connection, TableIdentity table, CancellationToken ct); }
+  public readonly record struct DbColumnMetadata(string Name, string NativeType, string? Collation);
+  ```
+- Rules:
+  - Exposed columns are the governance columns intersected with the database columns; the native type and collation come from the database.
+  - A governance column missing in the database denies the table.
+  - `TableCatalogEntry.Version` is a hash of the column list.
+  - The cache is per data source and table, with a TTL and invalidation on metadata reload.
+  - A load failure denies the table (fail closed).
+- Tests first:
+  - `PostgreSql_ReadsNativeTypeAndCollation`
+  - `SqlServer_ReadsPerColumnCollation`
+  - `Oracle_ReadsCharUsedAndCollation`
+  - `Sqlite_DeclaredType_NullCollation`
+  - `GovernanceColumnMissingInDatabase_DeniesTable`
+  - `ColumnTypeChange_ChangesVersion`
+  - `LoadFailure_FailsClosed`
+  - `CacheExpiry_Reloads`
+
+**WP-X0d Typed row filters and IR renderer** (`feat/ast-x1-row-policy`; D1 part 1)
+
+- Files:
+  - `Autheris.Application/Services/RowFilterSqlBuilder.cs`
+  - `Autheris.Application/Sql/Policy/PolicyPredicateRenderer.cs` (new)
+  - `Autheris.Application/Sql/Policy/TypedRowFilterBuilder.cs` (new)
+- Types: `public PolicyPredicate Build(IReadOnlyList<ConsentRowFilter> filters, TableIdentity table)`; `public interface IPolicyPredicateRenderer { string Render(PolicyPredicate predicate, TargetSqlDialect dialect, string targetAlias); }`.
+- Tests first:
+  - `BuildsTypedPredicate_ForEveryOperator`
+  - `EveryValue_IsPolicyParameter`
+  - `InList_OneParameterPerItem_RespectsDialectLimit`
+  - `RenderedString_EqualsLegacyString_Semantically` (SQLite execution)
+  - `HostileValue_RoundTripsExactly`
+- Acceptance: the string API renders from the IR, with no behavior change for §7.3 consumers.
+
+**WP-X0f Typed masks** (`feat/ast-x1-masks`; D2, L-9 call sites)
+
+- Files:
+  - `Autheris.Application/Sql/Masking/SqlDataMaskingProvider.cs`
+  - `SqlDataSourceExecutor.Projection.cs`
+- Types: `MaskSpec GetMaskSpec(MaskingRule rule, string column, string? hmacKeyId)`; the string facade renders the `MaskSpec` through the dialect generator.
+- Tests first:
+  - `MaskSpec_ForEveryRuleType`
+  - `HmacKey_IsParameter`
+  - `RenderedMask_MatchesPreviousOutput` (SQLite, PostgreSQL, SQL Server execution)
+  - `NoCallerOf_BuildDialectMaskExpression` (architecture)
+- Acceptance: `AstSecurityVisitor.BuildDialectMaskExpression` (`AstSecurityVisitor.MaskGuards.cs:202`) has no caller outside the engine.
+
+**WP-X0h SQLite on the AST path** (`feat/ast-x1-sqlite`)
+
+- Files:
+  - `Ast/Capabilities/DialectCapabilityTable.cs` (SQLite entry)
+  - `Ast/Emit/SqliteCompiledSqlBinder.cs` (new file)
+  - `Ast/Generators/SqliteDialectGenerator.cs`
+  - `SqlFunctionAllowlists.cs` (SQLite set if missing)
+  - `tests/Autheris.Tests.Integration/AstCompilerSqlite*Tests.cs` (new)
+- Tests first:
+  - `Compile_Sqlite_Production`
+  - `SqliteBinder_RefusesCheckedStatement`
+  - `AstCompilerSqliteExecutionTests` (DQL contract)
+  - `AstCompilerSqliteDmlExecutionTests : AstCompilerDmlContract`
+  - `Sqlite_HmacMask_UsesGatewayUdf`
+  - `Sqlite_TenantCompare_Binary` (a `COLLATE NOCASE` column does not match a case variant)
+- Acceptance: SQLite passes the same contract as the container dialects.
+
+**WP-X0i Databricks Statement Execution client** (`feat/ast-x1-databricks-client`; C3 part 1)
+
+- Files:
+  - `src/Autheris.Infrastructure/Databricks/**` (new)
+  - `GatewayOptions.cs` (`DatabricksDataSourceOptions`)
+  - `GatewayStartupValidator.cs` (Databricks section)
+  - DI extension `AddDatabricksStatementExecution`
+- Types:
+  ```csharp
+  public sealed record DatabricksStatementRequest(string Statement, ImmutableArray<DatabricksParameter> Parameters, string Catalog, string Schema, TimeSpan WaitTimeout);
+  public readonly record struct DatabricksParameter(string Name, string? Value, string Type);
+  public sealed class DatabricksStatementExecutionClient(HttpClient http, IOptions<GatewayOptions> options)
+  {
+      public Task<DatabricksStatementResult> ExecuteAsync(DatabricksStatementRequest request, CancellationToken ct);
+      public Task CancelAsync(string statementId, CancellationToken ct);
+  }
+  ```
+- Tests first (stub `HttpMessageHandler`):
+  - `SendsNamedTypedParameters_NeverInlinesValues`
+  - `PollsUntilSucceeded_ReadsInlineChunks`
+  - `FailedState_MapsToProviderError_WithoutDriverText`
+  - `Cancellation_CallsCancelEndpoint`
+  - `ResultOverByteLimit_FailsClosed`
+  - `Token_OnlyViaKeyVaultOutsideDevelopment`
+  - `Host_HttpsOnly_PassesSsrfPolicy`
+
+**WP-X0k Checked execution in the session transaction** (`feat/ast-x1-checked-exec`; G-3)
+
+- Files:
+  - `Ast/Emit/CheckedDmlExecutor.cs`
+  - `Ast/Emit/CompiledSqlBinders.cs` (new)
+  - `Ast/Emit/DmlAffectedRowsLimitException.cs` (new)
+- Types: §28.4.2.
+- Tests first:
+  - `ExecuteInTransaction_UsesCallerTransaction_NoNestedBegin` (SQLite in-memory, PostgreSQL, SQL Server)
+  - `ExecuteInTransaction_CheckOptionViolation_RollsBack`
+  - `ExecuteInTransaction_MaxAffectedRowsExceeded_RollsBack`
+  - `ExecuteInTransaction_UnreportedCountWithLimit_RollsBack`
+  - `ExecuteInTransaction_ForeignTransaction_Rejected`
+  - `CompiledSqlBinders_EveryProductionDialect_ReturnsRefusingBinder`
+  - `CompiledSqlBinders_Snowflake_Throws`
+  - `DatabricksExecutor_RefusesDmlWhileLimitConfigured`
+  - existing `OnlyTheCheckedDmlExecutor_BindsAStatementWithARowCountCheck` stays green
+- Acceptance: no new caller of `BindForCheckedExecution`.
+
+**WP-X0n REST dataset and MCP dataset policy splice removal** (`feat/ast-x1-rest-dataset`; G-5)
+
+- Files: `Autheris.Application/Data/Services/GovernedDataQueryService.cs`.
+- Change: stop appending `decision.CombinedRowFilterSql`, because the rewriter injects the same decision. The translated filter and `ORDER BY` are emitted as Trino-quoted identifiers.
+- Tests first:
+  - `RestDataset_ResultEqualsSplicedResult_OnFixture` (SQLite, two tenants, consent filter)
+  - `RestDataset_SqlServerPolicy_NoBracketTextInInput`
+  - `McpDatasetTool_SameRows`
+- Acceptance: identical results on legacy; the policy is applied once.
+
+**WP-X0o Oracle package signing** (`feat/ast-x1-oracle-signing`; CR-ADG-18)
+
+- Files: `NuGet.config`, `tests/Autheris.Tests.Architecture/OracleDriverArchitectureTests.cs`.
+- Change: `<config><add key="signatureValidationMode" value="require" /></config>`, with `<trustedSigners>` for the nuget.org repository certificate and the Oracle author certificate scoped to the `Oracle.*` owners.
+- Tests first: `NuGetConfig_RequiresSignatures_TrustsOracleAuthor`; CI `restore --locked-mode` succeeds.
+- Ops: verify the fingerprints out of band.
+
+**WP-X0p Tenant registry** (`feat/ast-x1-tenant-registry`; CR-ADG-31)
+
+- Files:
+  - `Autheris.Domain/Interfaces/ITenantRegistry.cs` (new)
+  - `Autheris.Infrastructure/Persistence/GovernanceDbTenantRegistry.cs` (new) plus a migration for table `tenant_registry(normalized_key PK, tenant_id)`
+  - `SecurityContextResolutionMiddleware.cs`
+- Types: `ValueTask<TenantRegistration> RegisterOrGetAsync(TenantId tenant, CancellationToken ct)`; `enum TenantRegistration { Registered, Existing, Collision }`. The normalized key is NFKC plus invariant upper case.
+- Tests first:
+  - `FirstSeenTenant_Registered`
+  - `CaseVariantOfIdpOnlyTenant_Denied403Collision`
+  - `ConcurrentRegistration_OneWins`
+  - `RegistryUnavailable_FailsClosed503`
+  - `ConfiguredTenants_Preseeded`
+
+**WP-X0q Literal bind types** (`feat/ast-x1-literal-types`; SEC-ADG-16 item 2)
+
+- Files: `Ast/Generators/SqlDialectGeneratorBase*.cs` (literal parameter typing), `Ast/Emit/ICompiledSqlBinder.cs` (`ColumnType` for `QueryLiteral`).
+- Rule: a literal compared with a catalog column binds with the column's type family and size. A cross-family comparison (a numeric literal against a string column) is rejected with `SqlCompileNotSupportedException(Construct)`, instead of letting the database coerce it (`ORA-01722` side channel).
+- Tests first:
+  - `Oracle_NumericLiteralVsVarchar2_Rejected`
+  - `SqlServer_StringLiteralVsVarchar_BoundAsAnsiStringWithColumnSize`
+  - `PostgreSql_IntLiteralVsText_Rejected`
+  - `InList_FollowsColumnType`
+  - `UnknownColumnType_KeepsLiteralType`
+- Execution: the existing container contracts.
+
+**WP-X0s Gate project and differential corpus** (`feat/ast-x1-gate-differential`; B1 + B3 + M-1, M-2, M-6)
+
+- Files:
+  - `tests/Autheris.Tests.SqlCompilerGate/**` (new)
+  - `tools/SqlCorpusExtractor/` (new)
+  - `Autheris.sln`
+- Content:
+  - harness `EngineKind { Legacy, Ast }`
+  - fixture model and per-dialect DDL
+  - extracted seed corpus (at least 1,000 DQL and 200 DML statements)
+  - directional classification
+  - the independent policy oracle
+  - `accepted-differences.json` and its schema
+- Tests first:
+  - `Classifier_FlagsAstLooserRows_MaskWrite`
+  - `Oracle_FlagsForeignTenantMarker`
+  - `AcceptedDifferencesSchema_RejectsAstLooser`
+- Acceptance: G4 runs on SQLite, PostgreSQL, SQL Server and Oracle with 0 `ast-looser-*`.
+
+**WP-X0t Conformance matrix** (`feat/ast-x1-gate-conformance`; B2, G2)
+
+- Files: `tests/TrinoSqlEngine.Tests/Conformance/**` (new).
+- Content: at least 300 cases per production dialect (PostgreSQL, SQL Server, SQLite, Oracle, DuckDB, Databricks), plus the reflection node-coverage test `EveryNode_HasFixtureOrRejection_PerDialect`.
+- This package may be split per dialect pair if a developer needs it. Fixtures only, no conflicts.
+
+**WP-X0u Property and fuzz** (`feat/ast-x1-gate-properties`; B4, G3/G5)
+
+- Files: `tests/TrinoSqlEngine.Tests/Properties/**`, `tests/Autheris.Tests.SqlCompilerGate/Properties/**`.
+- Tests: the G3 round trip, the G5 oracles (a)-(g), and grammar fuzzing. Failing seeds go to `Corpus/regressions/`.
+
+**WP-X0v Security regression and mutant suite** (`feat/ast-x1-gate-security`; B6, G7, M-3)
+
+- Files: `tests/TrinoSqlEngine.Tests/Security/SecurityRegressionCatalog.cs` (new), ported suites, and `CompilerTestSeams.cs` (mutant hooks, compiled out of Release).
+- Tests:
+  - `EveryLegacyId_HasSameOrStricterAstTest`
+  - the M-3 named mutants, each killed
+- Acceptance: 100% traceability.
+
+**WP-X0x PolicyPredicateLint** (`feat/ast-x1-policy-lint`; SEC-ADG-26)
+
+- Files: `tools/PolicyPredicateLint/**` (new), `Autheris.sln`.
+- Behavior: reads every profile row filter, mandatory filter and virtual filter from a governance DB connection string, then parses each through `IPolicyExpressionParser`. Exit code 1 when any filter is unparsable; the output lists only the table and policy ids, never values.
+- Tests first:
+  - `Lint_ReportsUnparsable_ExitCode1`
+  - `Lint_OutputHasNoPolicyValues`
+  - `Lint_AllValid_ExitCode0`
+
+#### Wave 2
+
+**WP-X0e Typed access decision** (`feat/ast-x1-access-decision`; D1 part 2; depends X0d)
+
+- Files: `Autheris.Domain/Interfaces/TableAccessDecision.cs`, `Autheris.Application/Policy/TableAccessPolicy.cs`, `IRowPolicy` adapter (Application).
+- Types: `public interface IRowPolicy { string Fingerprint { get; } bool IsDenyAll { get; } IRowPolicy And(IRowPolicy other); }`; `TableAccessDecision.RowPolicy { get; init; }`. `CombinedRowFilterSql` is rendered from `RowPolicy`.
+- Tests first:
+  - `Restrict_TypedAnd_ConflictDenies`
+  - `AccessProfilePredicate_ParsedOnce_FailClosedOnInvalid`
+  - `TenantPredicate_IsBoundParameter`
+  - `Domain_HasNoTrinoSqlEngineReference` (architecture)
+
+**WP-X0g Virtual filters typed** (`feat/ast-x1-vf-typed`; D3; depends X0d)
+
+- Files: `Autheris.Application/VirtualFilters/SqlFilterCompiler.cs`, `StructuredFilterSqlBuilder.cs`.
+- Types: `PolicyPredicate CompileTyped(StructuredFilter filter)`. The string facade renders through `IPolicyPredicateRenderer`. No `FastSqlEngine` instance and no `string.Replace` on SQL (F-4).
+- Tests first:
+  - `CompileTyped_ReturnsExistsCorrelatedToAutherisTarget`
+  - `NoStringReplaceOnSql` (architecture)
+  - the existing VF and federated-VF suites
+
+**WP-X0j Databricks wiring** (`feat/ast-x1-databricks-wiring`; C2 + C3 part 2; depends X0i, X0c, X0k)
+
+- Files:
+  - `Autheris.Infrastructure/Databricks/DatabricksDbConnection.cs` and `DatabricksDbCommand.cs` (new ADO.NET facade over the client; `BeginTransaction` throws `NotSupportedException`)
+  - `SqlConnectionFactory.cs`
+  - `SqlDialectMapper.cs` (Databricks mapping; `IsExecutable` unchanged until X1)
+  - `DatabricksColumnMetadataReader` (Unity Catalog `information_schema.columns`: `full_data_type`, `collation_name`)
+- Tests first:
+  - `Factory_Databricks_ReturnsFacade`
+  - `DatabricksBinder_OnFacade_SendsNamedParameters`
+  - `Facade_BeginTransaction_Throws`
+  - `Mapper_Databricks_RoundTrip`
+  - `DatabricksCatalog_ReadsFullDataTypeAndCollation`
+
+**WP-X0y Consumer parity G10** (`feat/ast-x1-gate-parity`; M-9; depends X0d, X0f, X0g, X0s)
+
+- Files: `tests/Autheris.Tests.SqlCompilerGate/Parity/**`.
+- Tests: each §7.3 consumer, legacy string versus IR renderer, on SQLite, PostgreSQL, SQL Server and the in-memory evaluators. Result: 0 `looser`.
+
+**WP-X0w CI gate** (`feat/ast-x1-gate-ci`; E1-E3 + C5 + M-4, M-5, M-12; depends X0s)
+
+- Files:
+  - `.github/workflows/ci.yml` (`sql-compiler-gate` plus nightly, including the secret-gated G9 job)
+  - `stryker-config.json`
+  - `tools/SqlGate.BenchCheck/**`
+  - `benchmarks/Autheris.Benchmarks/SqlCompilerBenchmarks.cs`
+  - `benchmarks/baselines/`
+  - `.config/dotnet-tools.json`
+- Tests first: `BenchCheck_ThresholdEvaluation`.
+- Acceptance: the job runs G1-G8 and G10 on the merge ref; security-tagged tests are never retried.
+- Ops: branch protection makes the job required (repository owner).
+
+#### Wave 3
+
+**WP-X0l Governance policy assembly** (`feat/ast-x1-policy-assembly`; depends X0c, X0e, X0f, X0g, X0p)
+
+- Files: `Autheris.Application/Sql/Policy/GovernancePolicyFactory.cs` and `CompileRequestFactory.cs` (new, additive; no caller until X1).
+- Types:
+  ```csharp
+  public sealed class GovernancePolicyFactory(IGovernedCatalogProvider catalogs, IPolicyExpressionParser parser)
+  {
+      public ValueTask<GovernancePolicy> CreateAsync(GovernedPolicyInput input, CancellationToken ct);
+  }
+  public sealed record GovernedPolicyInput(string DataSourceName, TenantId Tenant, IReadOnlyDictionary<TableIdentity, TableAccessDecision> Decisions,
+      IReadOnlySet<TableIdentity> TablesWithoutRls, GovernedSubqueryStrategy SubqueryStrategy);
+  public static class CompileRequestFactory
+  {
+      public static CompileRequest Create(GovernancePolicy policy, TargetSqlDialect dialect, WebSqlOptions options, bool isDml, long enforcedMaxRows, IReadOnlySet<string> allowedFunctions);
+  }
+  ```
+- Tests first:
+  - `Create_MapsEveryLegacyRlsOptionsSwitch_ToCompileRequest` (one assertion per `GovernedSqlRewriter.cs:671-704` property)
+  - `DmlGuards_AlwaysStrict`
+  - `MissingDecision_DeniesTable`
+  - `TenantBinding_UsesCatalogTenantColumnType`
+
+#### Wave 4: the cutover
+
+**WP-X1 Cutover** (`feat/ast-x1-cutover`; depends on every X0 package; reviewable commits, merged as **one squash commit**)
+
+| Step | Content |
+|---|---|
+| X1.1 | `GovernedSqlRewriter` Stage 4/5 switch to `GovernancePolicyFactory` and `Compile`. `GovernedRewrite.Compiled` (`CompiledSql`). Function policy uses the three-argument overload (G-9). `RewriteSqlAsync` becomes `Task ValidateAsync(...)` (G-6) in `IGovernedSqlExecutionService`, `ISqlRewritePipeline`, `IFederatedQueryExecutionService` and Arrow Flight. |
+| X1.2 | `GovernedSqlExecutor`: reads bind through `CompiledSqlBinders.For`; DML runs through `ExecuteInTransactionAsync`; `DmlErrorSanitizer.Map` after the timeout/unavailable classification, with the original logged server-side; audit fields `compiler_version`, `dialect`, `bind_count` and the redacted `CompiledSql.Sql`; synthetic fallback on `Compiled.Sql` (G-11). |
+| X1.3 | Dialect admission: `IsWebSqlSupportedDialect(d)` is true when `DialectCapabilityTable.Default.Get(ToTargetDialect(d)).Tier == Production` and `SqlConnectionFactory` supports `d`. That admits PostgreSQL, SQL Server, SQLite and Oracle; Databricks joins only after its tier flip (WP-X1-DBX). `SqlDialectMapper.IsExecutable` delegates to this check. Messages list the admitted dialects from the table. |
+| X1.4 | Delete L-1..L-17 (§28.6). Activate the startup failure for `WebSql:SqlRewriterEngine`. The harness drops `EngineKind.Legacy`. Freeze `golden-results/*.json` and `benchmarks/baselines/sql-compiler-legacy.json` from the pre-cutover head. |
+| X1.5 | Rewrite `src/TrinoSqlEngine/README.md` (L-15). |
+| X1.6 | Architecture tests: `NoLegacyRewriterTypes`, `NoTrustedSqlExpression`, `GovernedEntryPoints_ReachCompileAndBinder` (M-7, §28.2), `NoCommandTextAssignmentOnGovernedPath`, `DeletedPathsNotReintroduced` (revert safety, §12.2). |
+
+- Tests first (red on the branch before X1.1):
+  - `StartupFails_WhenSqlRewriterEngineConfigured`
+  - `AstCompilerWebSqlTests` and `AstCompilerHmacSql4Tests` without the engine parameter
+  - M-7 end-to-end per entry point and per admitted dialect through the real DI container
+  - M-8 `CachePoisoning_*` (two principals with different consent, writer then reader, `acme`/`ACME`, version change, cancelled compile) against the engine template cache
+  - `WebSqlDml_RunsThroughCheckedExecutor_InSessionTransaction` (PostgreSQL, SQL Server, Oracle, SQLite)
+  - `ProviderError_Sanitized_OriginalLoggedOnly`
+- Acceptance: the §16.5 cutover precondition (§28.7).
+
+#### After X1
+
+- **WP-X1-DBX Databricks to Production** (`feat/ast-x1-databricks-production`; depends X1, a green G9 run, S-2). A one-line tier flip in `DialectCapabilityTable.cs:155`, plus raising the bind budget from the G9 probe (X2 item). Admission follows automatically (X1.3).
+- **WP-X2** stays as in §11.7.
+- **WP-X3** (`CrossSourcePlanner` binds DuckDB `$n`; `CrossSourcePlanner.cs:275-276`) is now unblocked, because PLAN-15 is merged. It may run in parallel with Wave 1 because it touches no X1 file. It is not a cutover precondition, because the DuckDB plan runs over staged, already governed rows and uses no legacy API.
+- **WP-X4** (optional, S-5): Snowflake `Experimental` capability entry.
+
+#### Dependency order
+
+```
+Wave 1 (parallel): X0a X0b X0c X0d X0f X0h X0i X0k X0n X0o X0p X0q X0s X0t X0u X0v X0x   [+ X3 any time]
+Wave 2: X0e(X0d)  X0g(X0d)  X0j(X0i,X0c,X0k)  X0y(X0d,X0f,X0g,X0s)  X0w(X0s)
+Wave 3: X0l(X0c,X0e,X0f,X0g,X0p)
+Wave 4: X1(all)  ->  X1-DBX(X1, G9, S-2)  ->  X2
+```
+
+### 28.5.1 File-conflict matrix
+
+| Shared file | Packages | Rule |
+|---|---|---|
+| `GatewayOptions.cs` | X0b (`DataSourceConnectionOptions`), X0i (new `DatabricksDataSourceOptions` class), X1 (delete `SqlRewriterEngine`) | Disjoint sections; merge order X0b, X0i, then X1 rebases |
+| `GatewayStartupValidator.cs` | X0b, X0i, X1 | Disjoint sections; X1 last |
+| `GatewaySqlEngineServiceExtensions.cs` (DI) | X0c, X0i, X0j, X0l, X0p, X1 | Append-only lines; merge order X0c, X0p, X0i, X0j, X0l, then X1 |
+| `src/TrinoSqlEngine/Ast/Emit/ICompiledSqlBinder.cs` | X0q (literal `ColumnType`) | X0h and X0k use new files (`SqliteCompiledSqlBinder.cs`, `CompiledSqlBinders.cs`) to stay parallel |
+| `GovernedSqlException.cs` | X0a | X0k defines its code in its own file |
+| `SqlDialectGeneratorBase*.cs` | X0q, X1 (L-12/L-13) | X0h touches `SqliteDialectGenerator.cs` only; if it needs the base, it rebases after X0q |
+| `DialectCapabilityTable.cs` | X0h, X1-DBX | Sequential (X1-DBX is after X1) |
+| `DbSessionContextInitializer.cs`, `OracleConnectionSupport.cs` | X0b | Single owner |
+| `SqlConnectionFactory.cs`, `SqlDialectMapper.cs` | X0j, X1 (X1.3) | X1 rebases |
+| `RowFilterSqlBuilder.cs` | X0d | Single owner |
+| `TableAccessDecision.cs`, `TableAccessPolicy.cs` | X0e | Single owner |
+| `SqlFilterCompiler.cs`, `StructuredFilterSqlBuilder.cs` | X0g | Single owner (PLAN-15 is merged) |
+| `SqlDataMaskingProvider.cs`, `SqlDataSourceExecutor.Projection.cs` | X0f | Single owner |
+| `GovernedDataQueryService.cs` | X0n | Single owner |
+| `WebSqlEndpoints.cs`, `GatewayExceptionHandler.cs`, `McpToolExecutionHandler.cs` | X0a | Single owner before X1 |
+| `ArrowFlightSqlServer.cs` | X0a (error translation), X1 (`ValidateAsync`) | X1 rebases |
+| `SecurityContextResolutionMiddleware.cs` | X0p | Single owner |
+| `GovernedSqlRewriter.cs`, `GovernedSqlExecutor.cs`, `GovernedSqlExecutionService.cs`, `CompiledSqlQueryPlanCache.cs` | X1 only | No X0 package edits them |
+| `Autheris.sln` | X0s, X0x, X0w | Trivial conflicts; merge in that order |
+| `.github/workflows/ci.yml` | X0w | Single owner (§11.7 rule for E2/E3/C5 merged into one package) |
+| `NuGet.config` | X0o | Single owner |
+
+### 28.6 Legacy removal list (refreshed for X1.4)
+
+L-1..L-15 as in §10, with current locations:
+
+- L-1 `RlsListener.cs` (980 lines)
+- L-2 `FastSqlEngine.cs:106`
+- L-3 `FastSqlEngine.cs:644-683` and `ISqlEngine.cs:24-32`
+- L-4 `FastSqlEngine.cs:690-726` and `ISqlEngine.cs:38-48`; call site `SqlFilterCompiler.cs:365`, removed by X0g
+- L-5 `FastSqlEngine.Rewrite.cs`
+- L-6 `IRlsPolicyProvider.cs:117-119, 155`
+- L-7 `IRlsPolicyProvider.cs:6-106` (interfaces at `:6, :12, :55, :61`)
+- L-8 `TrustedSqlExpression` at `Ast/Nodes/Expressions.cs:17`, `SqlDialectGeneratorBase.Expressions.cs:222`, `SqlAstRewriter.cs:86`, `AstSecurityVisitor.cs:100`, `AstSecurityVisitor.Tables.cs:161`, `SecurityCoverageVerifier.cs:480`, `PolicyExpressionParser.cs:418`
+- L-9 `AstSecurityVisitor.MaskGuards.cs:202`; callers removed by X0f
+- L-10 `GatewayOptions.cs:1517`
+- L-11 `GovernedSqlRewriter.cs:714, 725`
+- L-12 `GovernedSqlExecutionService.cs:417-429` and `SqlDialectGeneratorBase.Expressions.cs:274-284`
+- L-13 `DialectLimitExceededException.cs` plus 11 `MaxParameterBudget` sites in `Ast/Generators`
+- L-14 `Differential/LegacyVsAstDifferentialTests.cs`
+- L-15 `src/TrinoSqlEngine/README.md`
+
+New:
+
+- **L-16** `ICompiledSqlQueryPlanCache.cs`, `CompiledSqlQueryPlanCache.cs`, `NullCompiledSqlQueryPlanCache` and their DI registration (G-4); tests `GovernedSqlPlanCacheTests` and `BoundedPlanCacheTests` move to the engine template cache.
+- **L-17** `RlsOptions` itself, once G-9 is done and `AstSecurityVisitor`/`AstBuilderOptions.FromRlsOptions`/`SqlTokenSecurityOptions.FromRlsOptions` take `CompileRequest`-derived options. If an analyzer use remains, `RlsOptions` is reduced to the token guards and documented as analyzer-only.
+
+The "Kept" list of §10 is unchanged.
+
+### 28.7 Cutover precondition, rollback, and code versus ops
+
+The §16.5 precondition stands, with these amendments:
+
+- G2 excludes Snowflake (§28.3).
+- Databricks counts as Production only after X1-DBX.
+- Every X0 package is merged.
+
+**Rollback.** X1 is one squash commit, with no runtime flag (SD-1). The revert set becomes **{X1, X0g (D3), X0f (D2), X0e + X0d (D1)}**. These are the packages that change policy producers that legacy consumes through rendered text (SEC-ADG-02). M-11 rehearses them as one combined revert on a scratch branch (G1 + G7 green). The other X0 packages are additive or legacy-neutral and stay in place after a revert:
+
+- X0a (error mapping)
+- X0b (pinning; legacy names resolve through the pinned default schema)
+- X0c, X0l (no caller without X1)
+- X0h, X0i, X0j, X0k, X0q (engine and Infrastructure; not admitted without X1)
+- X0n (the rewriter still applies the policy)
+- X0o, X0p, and the gate packages
+
+The revert procedure goes into the X1 commit message, as in §12.2.
+
+| Precondition | Type | Owner / package |
+|---|---|---|
+| Compile, binder, checked executor, sanitizer wiring | Code | X0k, X1 |
+| HTTP mapping | Code | X0a |
+| Catalog types and collation | Code | X0c, X0j |
+| Tenant registry | Code | X0p |
+| Literal bind types | Code | X0q |
+| Session pinning | Code + ops | X0b; ops sets `DefaultSchema` per PostgreSQL/Oracle source |
+| SQLite on the AST path | Code | X0h |
+| Typed policy producers | Code | X0d, X0e, X0f, X0g, X0l |
+| Gate G1-G10, M-1..M-12 | Code | X0s, X0t, X0u, X0v, X0w, X0y, X1 |
+| `sql-compiler-gate` as a required check | Ops | Repository owner (branch protection) |
+| `tools/PolicyPredicateLint` reports 0 unparsable production predicates | Code (X0x) + **ops** | Run against the production governance DB before deploying X1 |
+| DBA guidance CR-ADG-42 (no triggers changing policy columns) | Ops | DBAs of governed sources |
+| Oracle `trustedSigners` | Code + ops | X0o; fingerprints verified out of band |
+| Oracle driver license review | **Stakeholder / legal** (S-1) | Does not block code; blocks listing Oracle as supported in the release notes |
+| G9 run on a real Databricks SQL warehouse | **Ops** (S-4) | Workspace, warehouse and secrets `DATABRICKS_HOST`/token; job code in X0w |
+| Phase 3 sign-off on `accepted-differences.json`, Phase 5 approval | Process | Security expert, code reviewer |
+
+### 28.8 Stakeholder items
+
+| ID | Question | Default until decided |
+|---|---|---|
+| S-1 | Oracle driver license (`Oracle.ManagedDataAccess.Core`) for distribution and production use | Code proceeds; Oracle is not announced as supported in a release until cleared |
+| S-2 | Databricks DML: Delta has no rollback for a governed statement, so `WebSql:MaxAffectedRows` cannot be enforced atomically. Accept post-hoc enforcement (audit only), or reject DML on Databricks while a limit is configured? | Fail closed: Databricks DML is rejected (`SQL_STATEMENT_NOT_PERMITTED`) while `MaxAffectedRows > 0`; reads are unaffected |
+| S-3 | Client-visible status changes (§28.4.3): compiler and DML errors move from 403/500 to 400/409/422/501/502 with stable codes | Adopt at X1; listed in the release notes as a breaking API change |
+| S-4 | Provision a Databricks workspace and SQL warehouse plus a service principal for the G9 CI job | Without it, Databricks ships wired but `Experimental` (not admitted to WebSQL) after X1 |
+| S-5 | Snowflake: confirm "fail closed on the governed path, generator kept test-only" (§28.3) | As decided here; WP-X4 only on request |
+
+### 28.9 Open dependency (not planned)
+
+OQ-GQL (GraphQL tree compiler onto the typed IR, `GovernedTreeQueryService.cs:264`) and OQ-4 (the §7.3 text consumers, including federated staging reads through `SqlDataSourceExecutor`) stay out of scope. After X0d/X0f they render from the typed IR and use no legacy API, so they do not block X1. They remain the only governed SQL outside `Compile` after the cutover, and M-7 lists them explicitly as allowed exceptions.
