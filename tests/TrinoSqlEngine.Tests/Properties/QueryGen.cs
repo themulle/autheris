@@ -351,7 +351,7 @@ internal static class QueryGen
         from left in IntSelect(size / 2, ImmutableArray<string>.Empty, ImmutableArray<ScopeCol>.Empty, aggregate: false)
         from right in IntSelect(size / 2, ImmutableArray<string>.Empty, ImmutableArray<ScopeCol>.Empty, aggregate: false)
         from op in Gen.Elements("union", "union all", "except", "intersect")
-        // Parenthesized operands are excluded: they hit known defect KD-1 (see KnownDefectTests), which would mask every other finding.
+        // Parenthesized operands are rejected by the builder (KD-1, see KnownDefectTests) and are therefore not generated.
         select left.Add(op.Split(' ')).Add(right);
 
     private static Gen<Frag> WithQuery(int size) =>

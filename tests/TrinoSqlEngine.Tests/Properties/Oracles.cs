@@ -58,14 +58,6 @@ internal static class Oracles
     public static bool IsTypedRejection(Exception e) => e is ParseCanceledException or SecurityException or AstBuildException or GovernedSqlException
         or DialectLimitExceededException;
 
-    /// <summary>
-    /// KD-1 (see <c>KnownDefectTests</c>): a parenthesized query primary makes <c>SqlAstBuilder</c> cast a <c>SelectStatement</c> to
-    /// <c>QueryBody</c>. It fails closed, so the property gate counts it separately instead of letting it mask other findings.
-    /// <c>KnownDefectTests.KD1_IsStillReproducible</c> fails when the defect is fixed, and the exemption must then be removed.
-    /// </summary>
-    internal static bool IsKnownDefectKd1(Exception e) =>
-        e is InvalidCastException && e.Message.Contains("Nodes.SelectStatement", StringComparison.Ordinal) && e.Message.Contains("Nodes.QueryBody", StringComparison.Ordinal);
-
     // ---- compile and classify ----
 
     public static (CompiledSql? Sql, Exception? Error) TryCompile(CompileFn compile, string sql, CaseCtx ctx, StatementPermissions permissions)
@@ -90,11 +82,6 @@ internal static class Oracles
 
         if (error is not null)
         {
-            if (IsKnownDefectKd1(error))
-            {
-                return (sql, c.Ctx, violations, false, "KD-1 InvalidCastException");
-            }
-
             if (!IsTypedRejection(error))
             {
                 violations.Add(new Violation(FailClosed, $"unhandled exception type {error.GetType().FullName}: {Short(error.Message)}"));
