@@ -123,6 +123,12 @@ public static class TenantPredicateFactory
                 // into a tautology (found by the Spark proxy test), which would make the comparison case-insensitive again.
                 static Expression Raw(Expression operand) => new CastExpression(operand, "varbinary");
 
+#if DEBUG
+                if (CompilerTestSeams.IsDisabled(SecurityControl.DatabricksUtf8BinaryRelaxation) && columnCollation == "UTF8_BINARY")
+                {
+                    return new BinaryExpression(Column(), BinaryOperator.Equal, Param());
+                }
+#endif
                 return new BinaryExpression(Raw(Column()), BinaryOperator.Equal, Raw(Param()));
             }
             case TenantComparisonStyle.CastBlob:

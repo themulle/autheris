@@ -26,7 +26,9 @@ public class SecurityMutantGateTests(ITestOutputHelper output)
 
     public static IEnumerable<object[]> MutantIds() => SecurityMutants.Active.Select(m => new object[] { m.Id });
 
-    public static IEnumerable<object[]> PendingIds() => SecurityMutants.Pending.Select(m => new object[] { m.Id });
+    // An empty theory fails in xUnit; with no pending mutant a single empty id stands in and the test returns.
+    public static IEnumerable<object[]> PendingIds() =>
+        SecurityMutants.Pending.Count == 0 ? new[] { new object[] { string.Empty } } : SecurityMutants.Pending.Select(m => new object[] { m.Id });
 
     /// <summary>A probe passes on the real pipeline. With <c>SQLGATE_MUTANT</c> set, the named mutant stays active and the probes that guard it fail.</summary>
     [Theory]
@@ -105,6 +107,7 @@ public class SecurityMutantGateTests(ITestOutputHelper output)
     [MemberData(nameof(PendingIds))]
     public void PendingMutant_IsActivated_WhenItsControlExists(string id)
     {
+        if (id.Length == 0) return;   // no pending mutant
         var pending = SecurityMutants.Pending.Single(m => m.Id == id);
         var regex = new Regex(pending.ActivationRegex, RegexOptions.CultureInvariant);
         bool present = RepositoryFiles.Search(pending.SourcePattern).Any(f => regex.IsMatch(File.ReadAllText(f)));

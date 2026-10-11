@@ -22,7 +22,27 @@ public static class CompiledSqlBinders
     private static readonly CheckedDmlExecutor SqliteExecutor = new(Sqlite);
 
     /// <exception cref="SqlCompileNotSupportedException">Reason Dialect, for Snowflake, Ansi and any dialect without a binder.</exception>
-    public static DbCommandCompiledSqlBinder For(TargetSqlDialect dialect) => dialect switch
+    public static DbCommandCompiledSqlBinder For(TargetSqlDialect dialect)
+    {
+#if DEBUG
+        if (CompilerTestSeams.IsDisabled(SecurityControl.BinderFactoryRefusal))
+        {
+            return dialect switch
+            {
+                TargetSqlDialect.SqlServer => new SqlServerCompiledSqlBinder { NeverRefuses = true },
+                TargetSqlDialect.DuckDb => new DuckDbCompiledSqlBinder { NeverRefuses = true },
+                TargetSqlDialect.PostgreSql => new PostgreSqlCompiledSqlBinder { NeverRefuses = true },
+                TargetSqlDialect.Oracle => new OracleCompiledSqlBinder { NeverRefuses = true },
+                TargetSqlDialect.Databricks => new DatabricksCompiledSqlBinder { NeverRefuses = true },
+                TargetSqlDialect.Sqlite => new SqliteCompiledSqlBinder { NeverRefuses = true },
+                _ => throw NoBinder(dialect)
+            };
+        }
+#endif
+        return Resolve(dialect);
+    }
+
+    private static DbCommandCompiledSqlBinder Resolve(TargetSqlDialect dialect) => dialect switch
     {
         TargetSqlDialect.SqlServer => SqlServer,
         TargetSqlDialect.DuckDb => DuckDb,

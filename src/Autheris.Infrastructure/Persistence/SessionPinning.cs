@@ -40,6 +40,12 @@ public static class SessionPinning
     /// <summary>Fails closed unless the database confirmed the pin. The message names the pin, never a configured value.</summary>
     public static void EnsurePinned(bool? verified, string what)
     {
+#if DEBUG
+        if (TrinoSqlEngine.CompilerTestSeams.IsDisabled(TrinoSqlEngine.SecurityControl.SessionPinReadBack))
+        {
+            return;
+        }
+#endif
         if (verified != true)
         {
             throw new SqlSourceUnavailableException($"The session pin '{what}' could not be verified.");

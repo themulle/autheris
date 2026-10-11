@@ -116,10 +116,15 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
         BindCore(command, compiled, clientParameterValues);
     }
 
-    private static bool RefusesUncheckedBinding(CompiledSql compiled)
+#if DEBUG
+    /// <summary>Test seam only (<see cref="SecurityControl.BinderFactoryRefusal"/>): a binder that never refuses. Compiled out of Release.</summary>
+    internal bool NeverRefuses { get; init; }
+#endif
+
+    private bool RefusesUncheckedBinding(CompiledSql compiled)
     {
 #if DEBUG
-        if (CompilerTestSeams.IsDisabled(SecurityControl.BinderRefusal))
+        if (NeverRefuses || CompilerTestSeams.IsDisabled(SecurityControl.BinderRefusal))
         {
             return false;
         }

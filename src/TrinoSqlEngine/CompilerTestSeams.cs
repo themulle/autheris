@@ -120,6 +120,27 @@ internal enum SecurityControl
     CteCaseInsensitiveScope,
 
     /// <summary>The MERGE clause set is no longer closed in the coverage verifier.</summary>
-    MergeClauseClosedSet
+    MergeClauseClosedSet,
+
+    /// <summary>The checked executor does not enforce <c>CheckedDmlLimits.MaxAffectedRows</c> (X0k).</summary>
+    CheckedDmlMaxAffectedRows,
+
+    /// <summary><c>CompiledSqlBinders.For</c> hands out a binder that does not refuse a statement that needs the checked executor (X0k).</summary>
+    BinderFactoryRefusal,
+
+    /// <summary>The Databricks tenant comparison is relaxed to a plain equality for a catalog collation of UTF8_BINARY (removed by X0j).</summary>
+    DatabricksUtf8BinaryRelaxation,
+
+    /// <summary><c>SessionPinning.EnsurePinned</c> accepts an unverified or failed session pin (X0b).</summary>
+    SessionPinReadBack,
+
+    /// <summary>The error mapper returns <c>Exception.Message</c> as the title of the mapped error (X0a).</summary>
+    ErrorMapperFixedMessage,
+
+    /// <summary>The tenant registry gate returns <c>Registered</c> when the store is unavailable (X0p).</summary>
+    TenantRegistryFailClosed,
+
+    /// <summary>A catalog load failure yields an empty catalog entry instead of a denied table (X0c).</summary>
+    CatalogLoadFailureDenies
 }
 #endif

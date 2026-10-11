@@ -93,6 +93,16 @@ internal static class SecurityMutants
         m.Add(new SecurityMutant("cache-key-omits-token-guards", "the plan-cache key omits the token guards", "M-8", OmitFromKey("TokenGuards")));
         m.Add(new SecurityMutant("cache-key-omits-versions", "the plan-cache key omits the compiler and capability version", "M-8", OmitFromKey("Versions")));
 
+        // WP-X0v activation (the controls of X0a, X0b, X0c, X0j, X0k, X0p are on this branch)
+        m.Add(new SecurityMutant("skip-session-pin-read-back", "skip the session pin read-back on a connection rental", "Phase 3 amendment, SEC-X1-08", Off(SecurityControl.SessionPinReadBack)));
+        m.Add(new SecurityMutant("skip-max-affected-rows", "skip MaxAffectedRows in ExecuteInTransactionAsync", "Phase 3 amendment, SEC-X1-07", Off(SecurityControl.CheckedDmlMaxAffectedRows)));
+        m.Add(new SecurityMutant("commit-before-enforce-in-transaction", "commit before DmlCheckOption.Enforce in ExecuteInTransactionAsync", "Phase 3 amendment, SEC-X1-07", Off(SecurityControl.CheckedDmlCommitBeforeEnforce)));
+        m.Add(new SecurityMutant("error-mapper-returns-exception-message", "the error mapper returns Exception.Message", "Phase 3 amendment, SEC-X1-12", Off(SecurityControl.ErrorMapperFixedMessage)));
+        m.Add(new SecurityMutant("tenant-registry-registered-when-unavailable", "the tenant registry returns Registered when it is unavailable", "Phase 3 amendment, SEC-X1-13", Off(SecurityControl.TenantRegistryFailClosed)));
+        m.Add(new SecurityMutant("catalog-load-failure-returns-empty-entry", "a catalog load failure returns an empty (allow-all) entry", "Phase 3 amendment, SEC-X1-09", Off(SecurityControl.CatalogLoadFailureDenies)));
+        m.Add(new SecurityMutant("compiled-sql-binders-for-non-refusing", "CompiledSqlBinders.For returns a non-refusing binder", "Phase 3 amendment, SEC-X1-07", Off(SecurityControl.BinderFactoryRefusal)));
+        m.Add(new SecurityMutant("reenable-databricks-utf8-binary-relaxation", "re-enable the Databricks UTF8_BINARY relaxation", "Phase 3 amendment, SEC-X1-10", Off(SecurityControl.DatabricksUtf8BinaryRelaxation)));
+
         return m;
     }
 
@@ -101,24 +111,6 @@ internal static class SecurityMutants
     /// Mutants of controls that live on other X0 branches (not on the base of this package). Each has an automatic activation
     /// check: once the control is on this branch, the check fails until the mutant is implemented and moved to <see cref="Active"/>.
     /// </summary>
-    public static IReadOnlyList<PendingMutant> Pending { get; } = new PendingMutant[]
-    {
-        new("skip-session-pin-read-back", "skip the session pin read-back on a connection rental", "Phase 3 amendment, SEC-X1-08", "X0b (feat/ast-x1-session-pinning)",
-            "src/Autheris.Infrastructure/**/*.cs", @"\bclass\s+SessionPinning\b"),
-        new("skip-max-affected-rows", "skip MaxAffectedRows in ExecuteInTransactionAsync", "Phase 3 amendment, SEC-X1-07", "X0k (feat/ast-x1-checked-exec)",
-            "src/**/*.cs", @"\brecord\s+CheckedDmlLimits\b"),
-        new("commit-before-enforce-in-transaction", "commit before DmlCheckOption.Enforce in ExecuteInTransactionAsync", "Phase 3 amendment, SEC-X1-07", "X0k (feat/ast-x1-checked-exec)",
-            "src/**/*.cs", @"\bExecuteInTransactionAsync\s*\("),
-        new("error-mapper-returns-exception-message", "the error mapper returns Exception.Message", "Phase 3 amendment, SEC-X1-12", "X0a (feat/ast-x1-errors)",
-            "src/**/*.cs", @"\bclass\s+SqlCompilerErrorMapper\b"),
-        new("tenant-registry-registered-when-unavailable", "the tenant registry returns Registered when it is unavailable", "Phase 3 amendment, SEC-X1-13", "X0p (feat/ast-x1-tenant-registry)",
-            "src/**/*.cs", @"\binterface\s+ITenantRegistry\b"),
-        new("catalog-load-failure-returns-empty-entry", "a catalog load failure returns an empty (allow-all) entry", "Phase 3 amendment, SEC-X1-09", "X0c (feat/ast-x1-catalog)",
-            "src/**/*.cs", @"\bclass\s+GovernedCatalogProvider\b"),
-        new("compiled-sql-binders-for-non-refusing", "CompiledSqlBinders.For returns a non-refusing binder", "Phase 3 amendment, SEC-X1-07", "X0k (feat/ast-x1-checked-exec)",
-            "src/**/*.cs", @"\bclass\s+CompiledSqlBinders\b"),
-        new("reenable-databricks-utf8-binary-relaxation", "re-enable the Databricks UTF8_BINARY relaxation", "Phase 3 amendment, SEC-X1-10", "X0j (feat/ast-x1-databricks-wiring)",
-            "src/TrinoSqlEngine/Ast/Security/TenantPredicateFactory.cs", @"UTF8_BINARY", ActivatesWhenAbsent: true)
-    };
+    public static IReadOnlyList<PendingMutant> Pending { get; } = Array.Empty<PendingMutant>();
 }
 #endif

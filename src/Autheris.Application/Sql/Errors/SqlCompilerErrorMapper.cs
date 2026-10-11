@@ -38,6 +38,18 @@ public static class SqlCompilerErrorMapper
     /// <summary>Maps an exception (or an exception in its inner chain) to the stable error; false when it is not a governed SQL error.</summary>
     public static bool TryMap(Exception? exception, out SqlErrorMapping mapping)
     {
+        bool mapped = TryMapCore(exception, out mapping);
+#if DEBUG
+        if (mapped && TrinoSqlEngine.CompilerTestSeams.IsDisabled(TrinoSqlEngine.SecurityControl.ErrorMapperFixedMessage))
+        {
+            mapping = mapping with { Title = exception!.Message };
+        }
+#endif
+        return mapped;
+    }
+
+    private static bool TryMapCore(Exception? exception, out SqlErrorMapping mapping)
+    {
         if (exception is null)
         {
             mapping = default;

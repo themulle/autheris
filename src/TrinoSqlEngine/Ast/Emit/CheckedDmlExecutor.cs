@@ -146,7 +146,12 @@ public sealed class CheckedDmlExecutor : ICheckedDmlExecutor
 #else
             DmlCheckOption.Enforce(compiled, affected);
 #endif
-            if (limits.MaxAffectedRows > 0 && (affected < 0 || affected > limits.MaxAffectedRows))
+#if DEBUG
+            bool enforceLimit = !CompilerTestSeams.IsDisabled(SecurityControl.CheckedDmlMaxAffectedRows);
+#else
+            const bool enforceLimit = true;
+#endif
+            if (enforceLimit && limits.MaxAffectedRows > 0 && (affected < 0 || affected > limits.MaxAffectedRows))
             {
                 throw new DmlAffectedRowsLimitException(compiled.Dialect);
             }

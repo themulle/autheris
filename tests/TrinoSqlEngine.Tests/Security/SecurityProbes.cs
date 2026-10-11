@@ -354,6 +354,7 @@ internal static class SecurityProbes
             }
         }, new[] { TargetSqlDialect.SqlServer, TargetSqlDialect.PostgreSql });
 
+        all.AddRange(ActivationProbes.Build());
         return all;
     }
 

@@ -134,17 +134,16 @@ public partial class SecurityRegressionTraceabilityTests
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
     }
 
-    /// <summary>Reports the Phase 3 IDs that have no evidence on this branch yet (owned by work packages that are not merged).</summary>
+    /// <summary>
+    /// With every X0 package merged, only the IDs whose control is the WP-X1 cutover itself may lack evidence. A new row without
+    /// evidence must be a conscious decision: add it here together with the owning package.
+    /// </summary>
     [Fact]
-    public void Phase3IdsWithoutEvidenceOnThisBranch_AreTheKnownUnmergedOnes()
+    public void Phase3IdsWithoutEvidence_AreOnlyThoseOwnedByTheX1Cutover()
     {
         var without = SecurityRegressionCatalog.Phase3.Where(e => e.Evidence.Length == 0).Select(e => e.Id).ToArray();
-        // These belong to work packages outside the compiler core (producers, Databricks REST client, audit, federation, startup).
-        // A new row without evidence must be a conscious decision: add it here together with the owning package.
-        string[] expected =
-        {
-            "SEC-ADG-02", "SEC-ADG-09", "SEC-ADG-12", "SEC-ADG-15", "SEC-ADG-21", "SEC-ADG-23", "SEC-ADG-25", "SEC-ADG-26", "SEC-ADG-28"
-        };
+        // SEC-ADG-28: the removal of the WebSql:SqlRewriterEngine key and its fail-fast startup check are part of the cutover (WP-X1).
+        string[] expected = { "SEC-ADG-28" };
         Assert.Equal(expected, without);
     }
 }
