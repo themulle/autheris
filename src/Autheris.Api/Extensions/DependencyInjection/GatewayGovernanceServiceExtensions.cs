@@ -9,6 +9,7 @@ using Autheris.Application.Governance;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Services;
+using Autheris.Api.Security;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Application.Policy.Interfaces;
@@ -80,6 +81,21 @@ public static class GatewayGovernanceServiceExtensions
             services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAccessProfileRepository>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
             services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<SqliteGovernanceRepository>());
+        }
+
+        if (gatewayOptions.TenantIsolation.Registry.Enabled)
+        {
+            // CR-ADG-31: the governance repository is the persistent registry; the gate adds the positive cache and the per-issuer budget.
+            var registry = gatewayOptions.TenantIsolation.Registry;
+            services.AddSingleton<ITenantRegistry>(sp => new TenantRegistryGate(
+                (ITenantRegistry)sp.GetRequiredService<IGovernanceRepository>(),
+                new TenantRegistryGateOptions(
+                    registry.MaxNewTenantsPerIssuerPerWindow,
+                    TimeSpan.FromSeconds(registry.WindowSeconds),
+                    TimeSpan.FromSeconds(registry.CacheTtlSeconds),
+                    registry.MaxCacheEntries,
+                    registry.MaxTrackedIssuers)));
+            services.AddHostedService<TenantRegistryPreseedService>();
         }
 
         services.AddSingleton<IAccessProfileCache, AccessProfileCache>();

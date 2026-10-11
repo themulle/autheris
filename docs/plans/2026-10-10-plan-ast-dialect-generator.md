@@ -3541,3 +3541,15 @@ The orchestrator accepted the fail-closed defaults written in §28.8. They are b
   - A Phase 3 sign-off is given on the final `accepted-differences.json` and on the cutover PR itself.
 - **WP-X1-DBX:** blocked on X1, a green G9 (S-4) and the S-2 rule.
 - **WP-X4:** not scheduled (S-5).
+
+### WP-X0p implementation log
+
+Branch `feat/ast-x1-tenant-registry` (CR-ADG-31, SEC-X1-13). Additive and off by default: `Gateway:TenantIsolation:Registry:Enabled=false` keeps the legacy configured-tenant guard as the only check.
+
+- **Contract:** `Autheris.Domain/Interfaces/ITenantRegistry.cs` with `TenantRegistration { Registered, Existing, Collision, RateLimited }` and `RegisterOrGetAsync(TenantId, string? issuer, ct)` plus `PreseedAsync`. The key is `TenantRegistryKey.Normalize` (NFKC plus invariant upper case).
+- **Persistence:** table `TENANT_REGISTRY(normalized_key PK, tenant_id, collided, first_seen_at)` in the SQLite, PostgreSQL and SQL Server schema scripts; portable SQL in `TenantRegistryStore`, implemented by the three governance repositories (instead of a separate `GovernanceDbTenantRegistry` class and migration). A second spelling loses the primary-key race, sets `collided = 1`, and from then on every spelling of the group is denied, including the first one.
+- **Gate (SEC-X1-13):** `TenantRegistryGate` caches only positive results (TTL, bounded map), evicts a group on collision, never caches a collision or an outage as an allow, and reserves a per-issuer budget before each store call (released when nothing new was registered; tracked issuers are bounded, the rest share one overflow bucket). Over budget returns `RateLimited` without a write.
+- **Middleware:** after the B-1 configuration guard, for authenticated principals only: `Collision` is 403 `TENANT_ID_COLLISION` with a `TENANT_COLLISION_DENIED` audit entry (an audit failure still denies), `RateLimited` is 429 `TENANT_REGISTRATION_RATE_LIMITED`, an unavailable registry is 503 `TENANT_REGISTRY_UNAVAILABLE`.
+- **Preseed:** `TenantRegistryPreseedService` records the configured tenant ids at startup (B-1: configured collision groups are marked); a registry failure fails the start.
+- **Tests:** `TenantRegistry{Key,Store,Gate,Middleware,Wiring}Tests` (unit) and `{PostgreSql,SqlServer}TenantRegistryContractTests` (Testcontainers).
+- **Limits:** a collision recorded by another replica reaches a replica's cache within `CacheTtlSeconds`; there is no operator tool yet to clear a `collided` group (manual row delete).
