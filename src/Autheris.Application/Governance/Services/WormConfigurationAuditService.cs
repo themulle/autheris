@@ -38,7 +38,8 @@ public sealed class WormConfigurationAuditService : IWormConfigurationAuditServi
     {
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _currentConfigHash = ComputeCanonicalHash(_gatewayOptions.CurrentValue.Classification ?? new ClassificationOptions());
+        // The baseline hash is intentionally NOT seeded here: the first audit snapshot (startup bootstrap)
+        // must mint epoch 1 chained to the all-zero genesis hash. Seeding would suppress that WORM record.
     }
 
     public string? CurrentConfigHash => _currentConfigHash;
