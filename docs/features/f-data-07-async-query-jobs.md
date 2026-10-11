@@ -100,6 +100,23 @@ curl -X GET "http://localhost:8080/api/v1/jobs/job_98a7f23c_1b44/result" \
   -o result.json
 ```
 
+### Federated Query Transport Opt-In (`WebSql:CrossSource:AllowedTransports`)
+
+Federated queries that span several data sources are only available when `Gateway:WebSql:CrossSource:Enabled` is true, and only for transports that are explicitly listed in `Gateway:WebSql:CrossSource:AllowedTransports`. Valid names are the constants of `SqlTransports`: `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints` and `AsyncJob`. When nothing is configured, only `WebSql` and `Trino` are allowed. Every other channel, including this one, is rejected on federated queries (generic "not supported" response) unless its name is listed. Asynchronous jobs run federated aggregations under the transport name `AsyncJob`, which is deliberately not part of the default list; add `AsyncJob` to enable federated queries in async jobs. An explicitly empty list allows no transport at all (fail-closed). A configured list replaces the default; it is not merged with it.
+
+```json
+{
+  "Gateway": {
+    "WebSql": {
+      "CrossSource": {
+        "Enabled": true,
+        "AllowedTransports": [ "WebSql", "Trino", "AsyncJob" ]
+      }
+    }
+  }
+}
+```
+
 ---
 
 ## 5. Configuration Example

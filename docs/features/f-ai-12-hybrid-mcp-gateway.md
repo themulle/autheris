@@ -19,6 +19,23 @@ Autheris exposes an **Enterprise Model Context Protocol (MCP)** server built dir
   - `explore_dataset`: Guided data discovery template with schema grounding and query safety guardrails.
   - `audit_access_compliance`: Compliance inspection template examining effective consents, delegations, and access logs.
 
+### Federated Query Transport Opt-In (`WebSql:CrossSource:AllowedTransports`)
+
+Federated queries that span several data sources are only available when `Gateway:WebSql:CrossSource:Enabled` is true, and only for transports that are explicitly listed in `Gateway:WebSql:CrossSource:AllowedTransports`. Valid names are the constants of `SqlTransports`: `WebSql`, `Trino`, `Rest`, `Mcp`, `ArrowExport`, `FlightSql`, `SqlEndpoints` and `AsyncJob`. When nothing is configured, only `WebSql` and `Trino` are allowed. Every other channel is rejected on federated queries (generic "not supported" response) unless its name is listed. MCP query tools use the transport name `Mcp`. An explicitly empty list allows no transport at all (fail-closed). A configured list replaces the default; it is not merged with it.
+
+```json
+{
+  "Gateway": {
+    "WebSql": {
+      "CrossSource": {
+        "Enabled": true,
+        "AllowedTransports": [ "WebSql", "Trino", "Mcp" ]
+      }
+    }
+  }
+}
+```
+
 ## 2. Protocol Integration
 
 - **Transport:** Streamable HTTP with Server-Sent Events (SSE) and stateless request handling at `/mcp`.

@@ -42,6 +42,7 @@ The dataset description is also available as an MCP resource: the resource templ
   - Truncated results return valid, parseable JSON payloads with `truncated: true`.
 - **Four-eyes:** `sample_rows` and `query_graphql` on a four-eyes table need step-up approval ([F-AI-05](f-ai-05-hitl-step-up-approval.md)); `describe_dataset` returns no rows and needs none.
 - **Complexity:** GraphQL queries are subject to the gateway's complexity budget; agents should always pass a small `first`.
+- **Federated transport opt-in:** dataset queries on virtual (REST or cross-source) tables run under the transport name `Mcp`. Federated queries are rejected for `Mcp` unless `Gateway:WebSql:CrossSource:AllowedTransports` lists it; the default is `WebSql` and `Trino` only, and a configured list replaces the default (see [`F-DATA-02`](f-data-02-governed-websql.md)).
 
 ## 4. Example
 

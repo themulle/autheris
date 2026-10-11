@@ -13,6 +13,9 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
+using System.Linq;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -27,7 +30,7 @@ public sealed class GovernedDataQueryServiceTests
 
     private readonly TableIdentifier _customerTable = new("sales", "dbo", "customers");
 
-    private TableMetadata CreateCustomerTableMetadata()
+    private TableMetadata CreateCustomerTableMetadata(DataSourceType sourceType = DataSourceType.Sql)
     {
         return new TableMetadata
         {
@@ -38,7 +41,7 @@ public sealed class GovernedDataQueryServiceTests
                 SourceName = "sales",
                 SchemaName = "dbo",
                 TableName = "customers",
-                DataSourceType = DataSourceType.Sql,
+                DataSourceType = sourceType,
                 IsActive = true
             },
             Columns = new List<TableColumn>
@@ -217,5 +220,172 @@ public sealed class GovernedDataQueryServiceTests
         });
 
         exception.Message.ShouldContain("email");
+    }
+
+    // ---- Pagination window (FR-07/FR-09/FR-10) ----
+
+    private void AllowAll(TableMetadata metadata)
+    {
+        _metadataRepo.GetTableMetadataAsync(_customerTable, Arg.Any<CancellationToken>()).Returns(metadata);
+        _pdp.EvaluateAccessAsync(
+            _customerTable,
+            metadata,
+            Arg.Any<Autheris.Domain.Security.SecurityPrincipalContext>(),
+            Arg.Any<IReadOnlyList<string>?>(),
+            Arg.Any<CancellationToken>())
+            .Returns(TableAccessDecision.Allowed(
+                _customerTable,
+                new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["id"] = ColumnAccessLevel.Clear,
+                    ["email"] = ColumnAccessLevel.Clear,
+                    ["name"] = ColumnAccessLevel.Clear
+                },
+                hasUnconstrainedColumnAllow: true));
+    }
+
+    private static List<IReadOnlyDictionary<string, object?>> Rows(int count) =>
+        Enumerable.Range(1, count)
+            .Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["id"] = i, ["name"] = "n" + i })
+            .ToList();
+
+    private GovernedDataQueryService CreateService(GatewayOptions? options = null) =>
+        new(_metadataRepo, _pdp, _sqlExecutionService, _federatedExecutionService, _maskingProvider,
+            options == null ? null : Options.Create(options));
+
+    private static RequestContext Ctx() =>
+        new(new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("sub", "user-123") }, "TestAuth")), new TenantId("default"));
+
+    private static GovernedSqlResult SqlResult(int rowCount, bool truncated = false) =>
+        new("q", "q", new[] { "id", "name" }, Rows(rowCount), rowCount, 1, truncated);
+
+    [Fact]
+    public async Task ExecuteQueryAsync_WithOffset_EmitsNoOffsetAndLimitOffsetPlusLimitPlusOne_ThreePartName()
+    {
+        AllowAll(CreateCustomerTableMetadata());
+        GovernedSqlQueryRequest? captured = null;
+        _sqlExecutionService.ExecuteQueryBufferedAsync(
+                Arg.Do<GovernedSqlQueryRequest>(r => captured = r),
+                Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(61));
+
+        var result = await CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 10, Transport: "Rest"), Ctx());
+
+        captured.ShouldNotBeNull();
+        captured.Sql.ShouldNotContain("OFFSET", Case.Insensitive);
+        captured.Sql.ShouldEndWith("LIMIT 61");
+        captured.Sql.ShouldContain("FROM sales.dbo.customers");
+        captured.Transport.ShouldBe("Rest");
+
+        // 61 rows fetched, first 10 skipped: ids 11..60 returned and the 61st row proves HasMore.
+        result.Count.ShouldBe(50);
+        result.Data[0]["id"].ShouldBe(11);
+        result.Data[49]["id"].ShouldBe(60);
+        result.HasMore.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_WithOffset_LastPage_HasMoreFalse()
+    {
+        AllowAll(CreateCustomerTableMetadata());
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(55));
+
+        var result = await CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 10), Ctx());
+
+        result.Count.ShouldBe(45);
+        result.Data[0]["id"].ShouldBe(11);
+        result.HasMore.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_OffsetBeyondData_ReturnsEmptyPage()
+    {
+        AllowAll(CreateCustomerTableMetadata());
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(5));
+
+        var result = await CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 100), Ctx());
+
+        result.Count.ShouldBe(0);
+        result.HasMore.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(949, 50, true)]   // window 1000 == effective cap
+    [InlineData(950, 50, false)]  // window 1001 > cap
+    [InlineData(980, 50, false)]  // the reviewed scenario: MaxAllowedRows=1000, offset=980, limit=50
+    public async Task ExecuteQueryAsync_WindowCapFollowsWebSqlMaxAllowedRows(int offset, int limit, bool allowed)
+    {
+        AllowAll(CreateCustomerTableMetadata());
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(offset + limit + 1));
+        var service = CreateService(new GatewayOptions { WebSql = new WebSqlOptions { MaxAllowedRows = 1000 } });
+        var request = new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: limit, Offset: offset);
+
+        if (allowed)
+        {
+            (await service.ExecuteQueryAsync(request, Ctx())).Count.ShouldBe(limit);
+        }
+        else
+        {
+            await Should.ThrowAsync<ArgumentException>(() => service.ExecuteQueryAsync(request, Ctx()));
+            await _sqlExecutionService.DidNotReceive().ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
+        }
+    }
+
+    [Theory]
+    [InlineData(9949, 50, true)]
+    [InlineData(9950, 50, false)]
+    public async Task ExecuteQueryAsync_DefaultWindowCap_Is10000(int offset, int limit, bool allowed)
+    {
+        AllowAll(CreateCustomerTableMetadata());
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(offset + limit + 1));
+        var service = CreateService(new GatewayOptions { WebSql = new WebSqlOptions { MaxAllowedRows = 0 } });
+        var request = new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: limit, Offset: offset);
+
+        if (allowed)
+        {
+            (await service.ExecuteQueryAsync(request, Ctx())).Count.ShouldBe(limit);
+        }
+        else
+        {
+            await Should.ThrowAsync<ArgumentException>(() => service.ExecuteQueryAsync(request, Ctx()));
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_CrossSourcePath_CapsWindowAtDuckDbMaxResultRows()
+    {
+        var metadata = CreateCustomerTableMetadata(DataSourceType.HttpDeclarative);
+        AllowAll(metadata);
+        _federatedExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(100));
+        var service = CreateService(new GatewayOptions
+        {
+            WebSql = new WebSqlOptions { MaxAllowedRows = 0 },
+            DuckDbOlap = new DuckDbOlapOptions { MaxResultRows = 500 }
+        });
+
+        await Should.ThrowAsync<ArgumentException>(() => service.ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 450), Ctx()));
+        (await service.ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 0), Ctx())).Count.ShouldBe(50);
+    }
+
+    [Fact]
+    public async Task ExecuteQueryAsync_TruncatedBelowWindow_FailsClosedInsteadOfShortPage()
+    {
+        AllowAll(CreateCustomerTableMetadata());
+        // The SQL layer cut the result (Truncated) before the requested window was served.
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(1000, truncated: true));
+
+        await Should.ThrowAsync<ArgumentException>(() => CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 50, Offset: 980), Ctx()));
     }
 }
