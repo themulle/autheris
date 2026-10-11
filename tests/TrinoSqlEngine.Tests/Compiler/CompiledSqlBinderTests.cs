@@ -252,4 +252,26 @@ public class CompiledSqlBinderTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, compiled, new Dictionary<string, object?>()));
         Assert.Equal(0, await CountAsync(connection));
     }
+
+    /// <summary>
+    /// Microsoft.Data.Sqlite stores a decimal parameter as TEXT, so a numeric literal such as 1.5 came back as the string "1.5"
+    /// (found by the SQLite differential: legacy returns the REAL 1.5). SQLite has no decimal type; its numeric literal is a REAL.
+    /// </summary>
+    [Fact]
+    public void Sqlite_DecimalLiteral_IsBoundAsReal_NotAsText()
+    {
+        using var connection = new SqliteConnection("Data Source=:memory:");
+        connection.Open();
+        using var cmd = connection.CreateCommand();
+        var compiled = new CompiledSql("SELECT typeof(?1), ?1", ImmutableArray.Create(
+                new BoundParameter("?1", "?1", 0, 1.5m, SqlParameterType.Decimal, ParameterOrigin.QueryLiteral, null)),
+            TargetSqlDialect.Sqlite, SqlStatementClass.Select, ImmutableArray<TrinoSqlEngine.Ast.Nodes.SecurityPredicateId>.Empty, "test");
+
+        new SqliteCompiledSqlBinder().Bind(cmd, compiled, new Dictionary<string, object?>());
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+
+        Assert.Equal("real", reader.GetString(0));
+        Assert.Equal(1.5d, reader.GetDouble(1));
+    }
 }

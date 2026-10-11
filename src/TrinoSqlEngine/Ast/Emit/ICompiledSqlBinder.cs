@@ -52,6 +52,9 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
 
     protected virtual DbType TimestampDbType => DbType.DateTime;
 
+    /// <summary>The provider has no decimal type and would store a decimal parameter as text (SQLite): bind a REAL instead.</summary>
+    protected virtual bool DecimalAsDouble => false;
+
     /// <summary>The provider passes strings as C strings and would truncate at an embedded NUL (fail closed instead).</summary>
     protected virtual bool RejectsEmbeddedNul => false;
 
@@ -268,6 +271,13 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
                 break;
             case SqlParameterType.Decimal:
                 decimal d = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+                if (DecimalAsDouble)
+                {
+                    parameter.DbType = DbType.Double;
+                    parameter.Value = (double)d;
+                    break;
+                }
+
                 parameter.DbType = DbType.Decimal;
                 if (SetsSizesAndPrecision && parameter is IDbDataParameter dbData)
                 {
@@ -415,6 +425,9 @@ public sealed class DatabricksCompiledSqlBinder : DbCommandCompiledSqlBinder
 public sealed class SqliteCompiledSqlBinder : DbCommandCompiledSqlBinder
 {
     protected override TargetSqlDialect Dialect => TargetSqlDialect.Sqlite;
+
+    /// <summary>Microsoft.Data.Sqlite stores a decimal as TEXT; a SQLite numeric literal such as 1.5 is a REAL.</summary>
+    protected override bool DecimalAsDouble => true;
 
     /// <summary>The provider matches a numbered marker by its full text (<c>?1</c>), prefix included.</summary>
     protected override string ParameterNameFor(BoundParameter parameter) => parameter.Marker;
