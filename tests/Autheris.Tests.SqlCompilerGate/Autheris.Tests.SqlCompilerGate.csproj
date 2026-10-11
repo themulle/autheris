@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TrinoSqlEngine\TrinoSqlEngine.csproj" />
+    <ProjectReference Include="..\..\tools\SqlGate.BenchCheck\SqlGate.BenchCheck.csproj" />
   </ItemGroup>
 
   <ItemGroup>
