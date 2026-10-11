@@ -66,6 +66,42 @@ public static class SqlFunctionAllowlists
         "listagg", "median", "translate", "dump", "vsize", "nanvl",
     ];
 
+    private static readonly string[] DatabricksFunctions =
+    [
+        "now", "date_trunc", "date_add", "date_sub", "datediff", "dateadd", "date_format", "to_date", "to_timestamp", "trunc",
+        "year", "month", "day", "dayofmonth", "dayofweek", "dayofyear", "hour", "minute", "second", "quarter", "weekofyear",
+        "last_day", "add_months", "months_between", "make_date", "ifnull", "nvl", "nvl2", "instr", "locate", "concat_ws",
+        "initcap", "translate", "regexp_replace", "startswith", "endswith", "contains", "approx_count_distinct", "any_value",
+        "bool_and", "bool_or", "every", "string_agg", "percentile_cont", "percentile_disc", "median", "try_cast", "pi",
+        "localtimestamp", "current_timestamp", "current_date",
+    ];
+
+    // Trino function names the AST builder or a dialect generator rewrites (the rewrite is the dialect's rule, see
+    // SqlDialectGeneratorBase subclasses), plus the SQL special forms that the builder checks under their function name.
+    private static readonly string[] TrinoMappedFunctions =
+    [
+        "strpos", "approx_distinct", "arbitrary", "date_add", "date_trunc", "now", "current_time", "localtime", "localtimestamp",
+        "substring", "trim", "position", "extract", "cast", "current_date", "current_timestamp",
+    ];
+
+    /// <summary>
+    /// Names that have a rule in the per-dialect function map of the governed compiler (CR-ADG-02): the legacy allowlist of the
+    /// dialect plus the Trino functions that the compiler rewrites. Anything else is rejected (INV-1, plan 3.6).
+    /// </summary>
+    internal static IReadOnlySet<string> CompilerNames(TargetSqlDialect dialect)
+    {
+        var names = new HashSet<string>(GetDefault(dialect), StringComparer.OrdinalIgnoreCase);
+        foreach (var name in TrinoMappedFunctions)
+        {
+            if (!SqlFunctionPolicy.IsDeniedByDefault(name)) names.Add(name);
+        }
+
+        return names.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Databricks allowlist (ANSI + the reviewed safe Spark SQL functions; no reflection, secrets or UDF calls).</summary>
+    public static IReadOnlySet<string> Databricks { get; } = Create(CommonFunctions, DatabricksFunctions);
+
     /// <summary>Dialect-neutral (ANSI) allowlist.</summary>
     public static IReadOnlySet<string> Ansi { get; } = Create(CommonFunctions);
 
@@ -92,6 +128,7 @@ public static class SqlFunctionAllowlists
         TargetSqlDialect.Sqlite => Sqlite,
         TargetSqlDialect.Oracle => Oracle,
         TargetSqlDialect.DuckDb => DuckDb,
+        TargetSqlDialect.Databricks => Databricks,
         _ => Ansi
     };
 

@@ -14,6 +14,7 @@ public static class AuditEventTypes
     public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
     public const string TokenRevoked = "TOKEN_REVOKED";
     public const string TokenRevokedHit = "TOKEN_REVOKED_HIT";
+    public const string TenantCollisionDenied = "TENANT_COLLISION_DENIED";
 
     // Catalog & Metadata Reads (Tier B)
     public const string CatalogRead = "CATALOG_READ";

@@ -1,14 +1,43 @@
 using System.Data.Common;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Hosting;
+using Oracle.ManagedDataAccess.Client;
 
 namespace Autheris.Infrastructure.Persistence;
 
 public sealed class SqlConnectionFactory : ISqlConnectionFactory
 {
+    private readonly bool _requireOracleTcps;
+    private readonly IKeyVaultSecretProvider? _secrets;
+    private readonly IHostEnvironment? _environment;
+
+    public SqlConnectionFactory()
+        : this(null, null)
+    {
+    }
+
+    /// <summary>Oracle connections must use TCPS everywhere except in Development.</summary>
+    public SqlConnectionFactory(IHostEnvironment? environment)
+        : this(environment, null)
+    {
+    }
+
+    /// <summary>
+    /// Oracle connections must use TCPS and a Key Vault password everywhere except in Development
+    /// (<see cref="DataSourceConnectionOptions.PasswordKeyVaultRef"/>, WP-F1).
+    /// </summary>
+    public SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets)
+    {
+        _environment = environment;
+        _secrets = secrets;
+        _requireOracleTcps = environment is null || !environment.IsDevelopment();
+    }
+
     /// <summary>RR-L5-01: Session settings required by the literal escaping in <c>DatabaseDialect.EscapeSqlLiteral</c>.</summary>
     public const string PostgreSqlSessionInitializationSql = "SET standard_conforming_strings = on";
 
@@ -28,12 +57,22 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             throw UnsupportedProvider(options.Provider);
         }
 
-        // Architecture 5: Oracle and Databricks are dialects without a driver here.
+        string connectionString = options.ConnectionString;
+        if (dialect == DatabaseDialect.Oracle)
+        {
+            // WP-F1: validated before any network traffic.
+            OracleConnectionStringPolicy.Validate(connectionString, _requireOracleTcps);
+            connectionString = ResolveOraclePassword(options, connectionString);
+        }
+
+        // Architecture 5: Databricks is a dialect without a driver here.
         DbConnection connection = dialect switch
         {
             DatabaseDialect.Sqlite => new SqliteConnection(options.ConnectionString),
             DatabaseDialect.SqlServer => new SqlConnection(options.ConnectionString),
             DatabaseDialect.PostgreSql => new Npgsql.NpgsqlConnection(options.ConnectionString),
+            // CR-ADG-07: the raw driver connection never leaves this factory; every command is created with BindByName = true.
+            DatabaseDialect.Oracle => new BindByNameOracleConnection(new OracleConnection(connectionString)),
             _ => throw UnsupportedProvider(options.Provider)
         };
 
@@ -49,6 +88,14 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
                 await using var initCmd = pgConn.CreateCommand();
                 initCmd.CommandText = PostgreSqlSessionInitializationSql;
                 await initCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+
+            if (connection is BindByNameOracleConnection)
+            {
+                // WP-F2: pinned and verified on every pool rental, so one tenant's session state never reaches another.
+                await using var pinCmd = connection.CreateCommand();
+                pinCmd.CommandText = OracleSessionInitialization.PinAndVerifyBlock;
+                await pinCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
             if (options.ReadUncommitted && connection is SqlConnection)
@@ -78,6 +125,33 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             await connection.DisposeAsync().ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>
+    /// CR-ADG-08: outside Development a plaintext password in the connection string is refused (fail closed); the password is
+    /// resolved from the Key Vault reference and never logged.
+    /// </summary>
+    private string ResolveOraclePassword(DataSourceConnectionOptions options, string connectionString)
+    {
+        bool plaintext = OracleConnectionStringPolicy.HasPlaintextPassword(connectionString);
+        if (_requireOracleTcps && plaintext)
+        {
+            throw new System.Security.SecurityException("An Oracle connection string with a plaintext password is not permitted outside Development; use PasswordKeyVaultRef.");
+        }
+
+        if (string.IsNullOrWhiteSpace(options.PasswordKeyVaultRef))
+        {
+            if (_requireOracleTcps)
+            {
+                throw new System.Security.SecurityException("An Oracle data source needs a Key Vault password reference outside Development.");
+            }
+
+            return connectionString;
+        }
+
+        string password = SecretReferenceResolver.Resolve(_secrets, options.PasswordKeyVaultRef, _environment, allowPlaintextInDevelopment: false, logger: null, "Oracle database password")
+            ?? throw new System.Security.SecurityException("The Oracle database password could not be resolved (fail-closed).");
+        return new OracleConnectionStringBuilder(connectionString) { Password = password }.ConnectionString;
     }
 
     private static NotSupportedException UnsupportedProvider(string? provider) =>

@@ -1,3 +1,6 @@
+> [!WARNING]
+> **Superseded** by [2026-10-10-plan-ast-dialect-generator.md](2026-10-10-plan-ast-dialect-generator.md) (English implementation plan, `PLAN-AST-DIALECT-GEN-16`). This German draft is kept for history only and is not maintained.
+
 # Implementierungsplan: AST Target Dialect Generator (SQL-Pipeline)
 
 **Referenz:** [ADR-017: Multi-Node State Synchronisation, AST Dialect Generator und RBAC-Konsolidierung](file:///root/autheris/docs/adr/ADR-017-distributed-state-ast-generator-and-rbac.md) (Abschnitt 2)  

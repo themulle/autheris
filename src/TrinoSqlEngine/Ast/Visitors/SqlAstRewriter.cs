@@ -3,6 +3,8 @@ namespace TrinoSqlEngine.Ast.Visitors;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using TrinoSqlEngine.Ast.Nodes;
 
 /// <summary>
@@ -11,9 +13,24 @@ using TrinoSqlEngine.Ast.Nodes;
 /// </summary>
 public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 {
+    private int _visits;
+
+    /// <summary>
+    /// Cooperative cancellation (compile budget, SEC-ADG-05): observed every 256 visited nodes. Defaults to none.
+    /// </summary>
+    public CancellationToken CancellationToken { get; set; }
+
     public virtual SqlNode Visit(SqlNode node)
     {
         ArgumentNullException.ThrowIfNull(node);
+
+        // SEC-ADG-05: a StackOverflowException cannot be caught and would end the process for every tenant. Deep trees raise
+        // InsufficientExecutionStackException here, which the compiler maps to a typed limit error.
+        RuntimeHelpers.EnsureSufficientExecutionStack();
+        if ((++_visits & 255) == 0)
+        {
+            CancellationToken.ThrowIfCancellationRequested();
+        }
 
         return node switch
         {
@@ -21,6 +38,10 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             InsertStatement i => VisitInsertStatement(i),
             UpdateStatement u => VisitUpdateStatement(u),
             DeleteStatement d => VisitDeleteStatement(d),
+            MergeStatement m => VisitMergeStatement(m),
+            MergeUpdateClause mu => VisitMergeUpdateClause(mu),
+            MergeDeleteClause md => VisitMergeDeleteClause(md),
+            MergeInsertClause mi => VisitMergeInsertClause(mi),
             QuerySpecification qs => VisitQuerySpecification(qs),
             SetOperationQuery so => VisitSetOperationQuery(so),
             ValuesQueryBody v => VisitValuesQueryBody(v),
@@ -37,6 +58,10 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             UsingJoinCondition using_ => VisitUsingJoinCondition(using_),
             ColumnReference cr => VisitColumnReference(cr),
             ParameterReference p => VisitParameterReference(p),
+            PolicyParameterExpression policyParameter => policyParameter,
+            // INV-3: injected security predicates are opaque; a rewriter never descends into them.
+            SecurityPredicateExpression securityPredicate => securityPredicate,
+            MaskExpression mask => mask,
             LiteralExpression lit => VisitLiteralExpression(lit),
             BinaryExpression b => VisitBinaryExpression(b),
             UnaryExpression un => VisitUnaryExpression(un),
@@ -124,6 +149,41 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             return node;
 
         return node with { TargetTable = target, Where = where };
+    }
+
+    public virtual SqlNode VisitMergeStatement(MergeStatement node)
+    {
+        var target = (NamedTableSource)Visit(node.Target);
+        var source = (TableSource)Visit(node.Source);
+        var on = (Expression)Visit(node.On);
+        var clauses = RewriteList(node.Clauses, c => (MergeClause)Visit(c));
+
+        if (target == node.Target && source == node.Source && on == node.On && clauses == node.Clauses)
+            return node;
+
+        return node with { Target = target, Source = source, On = on, Clauses = clauses };
+    }
+
+    public virtual SqlNode VisitMergeUpdateClause(MergeUpdateClause node)
+    {
+        var condition = node.Condition != null ? (Expression)Visit(node.Condition) : null;
+        var assignments = RewriteList(node.Assignments, a => (UpdateAssignment)Visit(a));
+        if (condition == node.Condition && assignments == node.Assignments) return node;
+        return node with { Condition = condition, Assignments = assignments };
+    }
+
+    public virtual SqlNode VisitMergeDeleteClause(MergeDeleteClause node)
+    {
+        var condition = node.Condition != null ? (Expression)Visit(node.Condition) : null;
+        return condition == node.Condition ? node : node with { Condition = condition };
+    }
+
+    public virtual SqlNode VisitMergeInsertClause(MergeInsertClause node)
+    {
+        var condition = node.Condition != null ? (Expression)Visit(node.Condition) : null;
+        var values = RewriteList(node.Values, v => (Expression)Visit(v));
+        if (condition == node.Condition && values == node.Values) return node;
+        return node with { Condition = condition, Values = values };
     }
 
     public virtual SqlNode VisitQuerySpecification(QuerySpecification node)

@@ -92,4 +92,30 @@ public sealed class SqlRewritePipelineTests
         expr.ShouldContain(expectedColumn);
         expr.ShouldContain(expectedCast);
     }
+
+    [Fact]
+    public void SqlDataMaskingProvider_RendersOracleMasks_WithoutTextTypeOrPosition()
+    {
+        // CR-ADG-18: the legacy strings used CAST(... AS TEXT) and POSITION, which Oracle rejects.
+        var email = SqlDataMaskingProvider.BuildEmailMaskExpression("EMAIL", DatabaseDialect.Oracle);
+        email.ShouldContain("CAST(\"EMAIL\" AS VARCHAR2(4000))");
+        email.ShouldContain("INSTR(");
+        email.ShouldNotContain("TEXT");
+        email.ShouldNotContain("POSITION");
+
+        var iban = SqlDataMaskingProvider.BuildIbanMaskExpression("IBAN", DatabaseDialect.Oracle);
+        iban.ShouldContain("CAST(\"IBAN\" AS VARCHAR2(4000))");
+        iban.ShouldContain("SUBSTR(");
+        iban.ShouldNotContain("TEXT");
+        iban.ShouldNotContain("POSITION");
+    }
+
+    [Theory]
+    [InlineData("NUMBER")]
+    [InlineData("number(10,2)")]
+    [InlineData("BINARY_DOUBLE")]
+    public void OracleNumericTypes_AreMaskedWithNull(string dataType)
+    {
+        SqlDataMaskingProvider.IsNumericOrTemporalType(dataType).ShouldBeTrue();
+    }
 }

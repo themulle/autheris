@@ -62,6 +62,11 @@ public static class SqlFunctionPolicy
         "decryptbypassphrase", "decryptbycert", "decryptbyasymkey", "decryptbykeyautocert",
         // SEC P-02 SQLite: extension loading, file access (fileio extension), memory DoS
         "load_extension", "readfile", "writefile", "edit", "zeroblob", "randomblob", "fts3_tokenizer",
+        // CR-ADG-02 Databricks / Spark: JVM reflection (code execution), secret access, identity and environment disclosure
+        "reflect", "java_method", "try_reflect", "secret", "current_user", "session_user", "current_catalog", "current_metastore",
+        "current_version", "input_file_name", "input_file_block_start", "input_file_block_length", "assert_true", "raise_error",
+        // CR-ADG-02 SQL Server role and principal probing, Oracle URI and XML types (object constructors read remote data)
+        "is_rolemember", "database_principal_id", "dburitype", "xmltype", "xdburitype", "sys_dburigen", "sys_xmlgen", "extractvalue",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>

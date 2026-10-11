@@ -19,7 +19,7 @@
     <PackageReference Include="Testcontainers.PostgreSql" Version="4.15.0" />
     <PackageReference Include="Testcontainers.MsSql" Version="4.15.0" />
     <PackageReference Include="Testcontainers.Oracle" Version="4.15.0" />
-    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.7.0" />
+    <PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.26.301" />
     <PackageReference Include="Shouldly" Version="4.3.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
@@ -35,6 +35,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="Spark\runner.py" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
+    <None Include="Spark\Dockerfile" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
+    <None Include="Spark\fetch-delta.py" CopyToOutputDirectory="PreserveNewest" LinkBase="Spark" />
     <None Update="xunit.runner.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

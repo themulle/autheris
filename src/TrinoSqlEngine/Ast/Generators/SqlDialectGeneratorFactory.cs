@@ -19,7 +19,8 @@ public static class SqlDialectGeneratorFactory
             [TargetSqlDialect.Sqlite] = new SqliteDialectGenerator(),
             [TargetSqlDialect.DuckDb] = new DuckDbDialectGenerator(),
             [TargetSqlDialect.Snowflake] = new SnowflakeDialectGenerator(),
-            [TargetSqlDialect.Oracle] = new OracleDialectGenerator()
+            [TargetSqlDialect.Oracle] = new OracleDialectGenerator(),
+            [TargetSqlDialect.Databricks] = new DatabricksDialectGenerator()
         }.ToFrozenDictionary();
 
     public static ISqlDialectGenerator GetGenerator(TargetSqlDialect dialect)

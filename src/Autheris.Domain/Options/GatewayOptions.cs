@@ -53,6 +53,7 @@ public sealed class GatewayOptions
     [Required] public VirtualFilterOptions VirtualFilters { get; init; } = new();
     [Required] public LoggingOptions Logging { get; init; } = new();
     [Required] public ClassificationOptions Classification { get; init; } = new();
+    [Required] public TenantIsolationOptions TenantIsolation { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".
@@ -998,6 +999,12 @@ public sealed class DataSourceConnectionOptions
     /// on busy operational databases; default false. Ignored by other providers (PostgreSQL has no dirty reads).
     /// </summary>
     public bool ReadUncommitted { get; init; }
+
+    /// <summary>
+    /// Oracle only (WP-F1, CR-ADG-08): Key Vault reference of the database password. Outside Development the connection string
+    /// must not contain a plaintext <c>Password</c>; the factory injects the resolved secret when it opens the connection.
+    /// </summary>
+    public string? PasswordKeyVaultRef { get; init; }
 }
 
 public sealed class ItsmOptions
@@ -1788,3 +1795,14 @@ public sealed class LoggingOptions
 }
 
 
+
+/// <summary>Decision B-1: handling of tenant ids that differ only in case.</summary>
+public sealed class TenantIsolationOptions
+{
+    /// <summary>
+    /// Default <c>false</c>: colliding tenants are denied per request (403 <c>TENANT_ID_COLLISION</c> plus an audit entry) and the
+    /// start only logs a critical warning, so one bad tenant id does not take down the others. <c>true</c> refuses the start
+    /// outside Development (strict mode).
+    /// </summary>
+    public bool StrictCollisionStartup { get; init; }
+}

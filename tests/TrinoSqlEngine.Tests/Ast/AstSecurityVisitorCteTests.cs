@@ -26,7 +26,7 @@ public sealed class AstSecurityVisitorCteTests
     }
 
     [Fact]
-    public void Cte_ExitTiming_PhysicalTableInsideCteIsSecured()
+    public void Cte_ExitTiming_SelfNamedReferenceInNonRecursiveWith_IsRejected()
     {
         var options = new RlsOptions
         {
@@ -34,11 +34,11 @@ public sealed class AstSecurityVisitorCteTests
             TargetDialect = TargetSqlDialect.PostgreSql
         };
 
-        // CTE shadows 'orders': physical 'orders' inside the CTE body MUST have RLS applied
-        string sql = "WITH orders AS (SELECT * FROM orders) SELECT * FROM orders";
-        string result = SecureAndGenerate(sql, options);
+        // CR-ADG-32: a self-reference needs WITH RECURSIVE; it is never silently a physical scan
+        Assert.Throws<System.Security.SecurityException>(() => SecureAndGenerate("WITH orders AS (SELECT * FROM orders) SELECT * FROM orders", options));
 
-        // Inside the CTE body, the physical table is wrapped with tenant_id = 42
+        // A schema-qualified reference is never the CTE: the physical table keeps its RLS
+        string result = SecureAndGenerate("WITH orders AS (SELECT * FROM public.orders) SELECT * FROM orders", options);
         Assert.Contains("\"tenant_id\" = 42", result, StringComparison.OrdinalIgnoreCase);
     }
 

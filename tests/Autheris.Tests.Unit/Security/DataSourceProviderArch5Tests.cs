@@ -87,7 +87,6 @@ public sealed class DataSourceProviderArch5Tests
     }
 
     [Theory]
-    [InlineData("Oracle")]
     [InlineData("Databricks")]
     public async Task ConnectionFactory_DialectsWithoutDriver_AreNotSupported(string provider)
     {

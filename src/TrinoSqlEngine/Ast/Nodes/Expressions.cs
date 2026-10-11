@@ -2,6 +2,8 @@ namespace TrinoSqlEngine.Ast.Nodes;
 
 using System;
 using System.Collections.Generic;
+using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Governance;
 
 public abstract record Expression : SqlNode;
 
@@ -13,6 +15,31 @@ public sealed record ColumnReference(SqlQualifiedName Name) : Expression;
 /// as the legacy rewriter does. The AST builder never creates it, so client SQL can never produce this node.
 /// </summary>
 public sealed record TrustedSqlExpression(string Sql) : Expression;
+
+/// <summary>
+/// A value bound by the gateway (tenant, policy, mask argument). It never originates from request text; the value comes from
+/// the <see cref="ParameterSource"/> at emission time, so the AST (and a cached template) stays value-free.
+/// <paramref name="IsLikePattern"/> marks an admin-authored LIKE pattern whose wildcards are intentional; any other policy
+/// value used as a LIKE pattern is escaped (SEC-ADG-18). <paramref name="ColumnType"/> is the catalog data type of the column the
+/// value is compared with (CR-ADG-09); the binder follows it.
+/// </summary>
+public sealed record PolicyParameterExpression(
+    string Name,
+    SqlParameterType Type,
+    ParameterOrigin Origin = ParameterOrigin.Policy,
+    bool IsLikePattern = false,
+    string? ColumnType = null) : Expression;
+
+/// <summary>
+/// Semantic column mask, rendered per dialect by the generator (replaces raw trusted SQL fragments). The masked column is
+/// referenced by the node only; the value never reaches the output. All arguments are bound parameters (INV-4).
+/// <paramref name="DataType"/> is the catalog data type of the column; typed masks require it. The node is opaque to rewriters.
+/// </summary>
+public sealed record MaskExpression(
+    MaskKind Kind,
+    ColumnReference Column,
+    MaskArguments Arguments,
+    string? DataType = null) : Expression;
 
 public sealed record ParameterReference(
     string Name,
@@ -233,10 +260,16 @@ public enum DateUnit
 /// <summary>Wunsch 4: <c>INTERVAL '<Value>' <Field></c> with a single unsigned field.</summary>
 public sealed record IntervalLiteralExpression(string Value, string Field) : Expression;
 
+/// <param name="IsNativeType">
+/// CR-ADG-42: <paramref name="TargetType"/> is a provider-native catalog column type (for example <c>nvarchar(20)</c> or
+/// <c>NUMBER(18,2)</c>), emitted as is after it resolved through <c>CatalogTypeMap</c> for the dialect, instead of a Trino type
+/// that the dialect maps. Only the governed INSERT check option creates such a cast; the AST builder never does.
+/// </param>
 public sealed record CastExpression(
     Expression Operand,
     string TargetType,
-    bool IsTryCast = false) : Expression;
+    bool IsTryCast = false,
+    bool IsNativeType = false) : Expression;
 
 public sealed record RowValueExpression(
     IReadOnlyList<Expression> Elements) : Expression;
