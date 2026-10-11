@@ -179,6 +179,11 @@ public static class GatewayServiceCollectionExtensions
                 "Security critical: Demo or production-targeted ReBAC seed tuples are not permitted outside Development.")
             .ValidateOnStart();
 
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<GatewayOptions>>(sp =>
+            new Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator(
+                configuration,
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Api.Extensions.DependencyInjection.GatewayEmptyListConfigurationValidator>>()));
+
         var gatewayOptions = configuration.GetSection(GatewayOptions.SectionName).Get<GatewayOptions>() ?? new GatewayOptions();
         ValidateGatewayOptions(gatewayOptions, environment);
 
@@ -198,7 +203,7 @@ public static class GatewayServiceCollectionExtensions
                 options.KnownProxies.Add(System.Net.IPAddress.Loopback);
                 options.KnownProxies.Add(System.Net.IPAddress.IPv6Loopback);
 
-                foreach (var netStr in gatewayOptions.ReverseProxy.KnownNetworks)
+                foreach (var netStr in gatewayOptions.ReverseProxy.GetEffectiveKnownNetworks())
                 {
                     if (System.Net.IPNetwork.TryParse(netStr, out var network))
                     {

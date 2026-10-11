@@ -388,7 +388,21 @@ public sealed class PluginsOptions
 public sealed class ReverseProxyOptions
 {
     public bool Enabled { get; init; } = true;
-    public List<string> KnownNetworks { get; init; } = ["127.0.0.1/32", "::1/128"];
+
+    /// <summary>
+    /// Networks whose X-Forwarded-* headers are trusted. When not configured, only loopback (127.0.0.1/32, ::1/128) is
+    /// trusted. A configured list replaces the default entirely. Nullable on purpose: the configuration binder appends
+    /// to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON array is logged
+    /// as a startup warning and treated as not configured (loopback is always trusted); to trust no forwarded headers
+    /// at all, set <see cref="Enabled"/> to false.
+    /// </summary>
+    public List<string>? KnownNetworks { get; init; }
+
+    private static readonly string[] DefaultKnownNetworks = ["127.0.0.1/32", "::1/128"];
+
+    /// <summary>Configured <see cref="KnownNetworks"/> or the loopback default.</summary>
+    public IReadOnlyList<string> GetEffectiveKnownNetworks() => KnownNetworks ?? (IReadOnlyList<string>)DefaultKnownNetworks;
+
     public List<string> KnownProxies { get; init; } = [];
 }
 
@@ -436,8 +450,17 @@ public sealed class ForwardAuthOptions
     /// RR-L2-02: Allowlist of roles accepted from the (proxy-asserted) roles header. Matching uses the role name
     /// after an optional "tenant:" prefix. Administrative roles (ClusterAdmin, PlatformAdmin, GatewayAdmin,
     /// GovernanceAdmin, SecurityAdmin, PrivacyAdmin, BreakGlassOperator) are never accepted from headers.
+    /// When not configured, GatewayUser, Consumer, Analyst and Developer are accepted; a configured list replaces that
+    /// default entirely. Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty
+    /// default could not be narrowed. An empty JSON array aborts the start (it would silently apply the default); a list containing only a
+    /// role name that no proxy asserts accepts no header role.
     /// </summary>
-    public List<string> AllowedRoles { get; init; } = ["GatewayUser", "Consumer", "Analyst", "Developer"];
+    public List<string>? AllowedRoles { get; init; }
+
+    private static readonly string[] DefaultAllowedRoles = ["GatewayUser", "Consumer", "Analyst", "Developer"];
+
+    /// <summary>Configured <see cref="AllowedRoles"/> or the default list.</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedRoles() => AllowedRoles ?? (IReadOnlyList<string>)DefaultAllowedRoles;
 
     /// <summary>
     /// RR-L2-02: When false (default), every group from the groups header is namespaced as
@@ -500,8 +523,19 @@ public sealed class BasicAuthSessionOptions
 
     public bool Enabled { get; init; } = false;
 
-    /// <summary>Environments in which the session cookie may be enabled. "Production" is never accepted.</summary>
-    public List<string> AllowedEnvironments { get; init; } = ["Development"];
+    /// <summary>
+    /// Environments in which the session cookie may be enabled. "Production" is never accepted. When not configured,
+    /// only Development is allowed; a configured list replaces that default entirely. Nullable on purpose: the
+    /// configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON
+    /// array aborts the start (it would silently apply the default); to disable the session everywhere, set
+    /// <see cref="Enabled"/> to false.
+    /// </summary>
+    public List<string>? AllowedEnvironments { get; init; }
+
+    private static readonly string[] DefaultAllowedEnvironments = ["Development"];
+
+    /// <summary>Configured <see cref="AllowedEnvironments"/> or the default list (Development).</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedEnvironments() => AllowedEnvironments ?? (IReadOnlyList<string>)DefaultAllowedEnvironments;
 
     /// <summary>Cookie name; must use the <c>__Host-</c> prefix (Secure, Path=/, no Domain).</summary>
     public string CookieName { get; init; } = "__Host-Autheris.Session";
@@ -551,8 +585,17 @@ public sealed class EntraIdAuthOptions
     /// <summary>
     /// Delegated scopes (<c>scp</c>) that only permit reading, e.g. an agent scope. A user token whose scopes all appear
     /// here is read-only: writes over HTTP, GraphQL mutations and WebSQL DML are rejected.
+    /// When not configured, "Agent.Read" is the read-only scope; a configured list replaces that default entirely.
+    /// Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty default could not be
+    /// replaced. An empty JSON array is logged as a startup warning and treated as not configured: the default
+    /// (Agent.Read) is more restrictive than no read-only scope, so the start is not aborted.
     /// </summary>
-    public List<string> ReadOnlyScopes { get; init; } = ["Agent.Read"];
+    public List<string>? ReadOnlyScopes { get; init; }
+
+    private static readonly string[] DefaultReadOnlyScopes = ["Agent.Read"];
+
+    /// <summary>Configured <see cref="ReadOnlyScopes"/> or the default list (Agent.Read).</summary>
+    public IReadOnlyList<string> GetEffectiveReadOnlyScopes() => ReadOnlyScopes ?? (IReadOnlyList<string>)DefaultReadOnlyScopes;
 
     /// <summary>How app-only tokens (client credentials, no signed-in person) are treated. Defaults to ReadOnly.</summary>
     public AppOnlyTokenAccess AppOnlyTokens { get; init; } = AppOnlyTokenAccess.ReadOnly;
@@ -1234,7 +1277,22 @@ public sealed class ExtensibilityOptions
     public bool RequireJustificationForBreakGlass { get; init; } = true;
     // SEC M-06: Break-glass requires an authorized role by default.
     public bool RequireRoleForBreakGlass { get; init; } = true;
-    public List<string> BreakGlassAllowedRoles { get; init; } = ["BreakGlassOperator", "ClusterAdmin", "GovernanceAdmin", "SecurityAdmin"];
+
+    /// <summary>
+    /// Roles that may invoke break-glass when <see cref="RequireRoleForBreakGlass"/> is true. When not configured:
+    /// BreakGlassOperator, ClusterAdmin, GovernanceAdmin and SecurityAdmin. A configured list replaces that default
+    /// entirely, so an operator who restricts the list gets exactly what was configured. Nullable on purpose: the
+    /// configuration binder appends to pre-filled lists, so a non-empty default could not be narrowed. An empty JSON
+    /// array aborts the start (it would silently apply the default); to permit break-glass for nobody, set
+    /// <see cref="EnableBreakGlass"/> to false.
+    /// </summary>
+    public List<string>? BreakGlassAllowedRoles { get; init; }
+
+    private static readonly string[] DefaultBreakGlassAllowedRoles = ["BreakGlassOperator", "ClusterAdmin", "GovernanceAdmin", "SecurityAdmin"];
+
+    /// <summary>Configured <see cref="BreakGlassAllowedRoles"/> or the default list.</summary>
+    public IReadOnlyList<string> GetEffectiveBreakGlassAllowedRoles() => BreakGlassAllowedRoles ?? (IReadOnlyList<string>)DefaultBreakGlassAllowedRoles;
+
     public string JustificationHeaderName { get; init; } = "X-Access-Justification";
     public string BreakGlassHeaderName { get; init; } = "X-Break-Glass";
     public string PluginDirectory { get; init; } = "plugins";
@@ -1309,7 +1367,21 @@ public sealed class SystemMetricsOptions
 {
     public bool Enabled { get; init; } = true;
     public bool ExposeRestEndpoints { get; init; } = true;
-    public List<string> AllowedRoles { get; init; } = ["GovernanceAdmin", "ClusterAdmin", "SecurityAdmin"];
+
+    /// <summary>
+    /// Roles that may read the system metrics endpoints. When not configured: GovernanceAdmin, ClusterAdmin and
+    /// SecurityAdmin. A configured list replaces that default entirely. Nullable on purpose: the configuration binder
+    /// appends to pre-filled lists, so a non-empty default could not be narrowed. A configured empty JSON array
+    /// aborts the start (it would silently apply the default); to switch the endpoints off set <see cref="Enabled"/>
+    /// (or <see cref="ExposeRestEndpoints"/>) to false. A list that is empty only when built in code (not through
+    /// configuration) makes the endpoints require GovernanceAdmin.
+    /// </summary>
+    public List<string>? AllowedRoles { get; init; }
+
+    private static readonly string[] DefaultAllowedRoles = ["GovernanceAdmin", "ClusterAdmin", "SecurityAdmin"];
+
+    /// <summary>Configured <see cref="AllowedRoles"/> or the default list.</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedRoles() => AllowedRoles ?? (IReadOnlyList<string>)DefaultAllowedRoles;
 }
 
 public sealed class GoldenQueryOptions
@@ -1481,7 +1553,22 @@ public sealed class CrossSourceOptions
     public int TimeoutSeconds { get; init; } = 30;
     public int MaxParallelSourceReads { get; init; } = 4;
     public bool AllowNonEquiJoins { get; init; } = false;
-    public List<string> AllowedHttpAuthModes { get; init; } = ["None", "StaticApiKey", "ClientCredentials"];
+
+    /// <summary>
+    /// HTTP data source authentication modes allowed in federated queries. When not configured: None, StaticApiKey and
+    /// ClientCredentials. A configured list replaces that default entirely. Nullable on purpose: the configuration
+    /// binder appends to pre-filled lists, so a non-empty default could not be narrowed. Enforced fail-closed by the
+    /// federated staging step before any source is read: an HTTP source whose auth mode is not listed is denied with
+    /// error code HTTP_AUTH_MODE_DENIED (HTTP 403). ForwardBearerToken is never permitted, even if listed. An empty JSON
+    /// array aborts the start (it would silently apply the default); to permit no federated HTTP source, set
+    /// <see cref="Enabled"/> to false.
+    /// </summary>
+    public List<string>? AllowedHttpAuthModes { get; init; }
+
+    private static readonly string[] DefaultAllowedHttpAuthModes = ["None", "StaticApiKey", "ClientCredentials"];
+
+    /// <summary>Configured <see cref="AllowedHttpAuthModes"/> or the default list.</summary>
+    public IReadOnlyList<string> GetEffectiveAllowedHttpAuthModes() => AllowedHttpAuthModes ?? (IReadOnlyList<string>)DefaultAllowedHttpAuthModes;
 }
 
 public sealed class WebSqlPlanCacheOptions

@@ -590,6 +590,23 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WebApplicationFacto
         fwdOptions.KnownIPNetworks.ShouldContain(net => net.BaseAddress.ToString() == "10.0.0.0" && net.PrefixLength == 8);
         fwdOptions.KnownIPNetworks.ShouldContain(net => net.BaseAddress.ToString() == "192.168.1.0" && net.PrefixLength == 24);
         fwdOptions.KnownProxies.ShouldContain(ip => ip.ToString() == "172.16.0.1");
+
+        // A configured list replaces the loopback default entirely: the default entries must be absent.
+        fwdOptions.KnownIPNetworks.ShouldNotContain(net => net.BaseAddress.ToString() == "127.0.0.1" && net.PrefixLength == 32);
+        fwdOptions.KnownIPNetworks.ShouldNotContain(net => net.BaseAddress.ToString() == "::1" && net.PrefixLength == 128);
+    }
+
+    [Fact]
+    public void Startup_WithExplicitlyEmptySystemMetricsRoles_FailsLoudly()
+    {
+        using var customFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Gateway:SystemMetrics:AllowedRoles", "");
+        });
+
+        var ex = Should.Throw<Exception>(() => customFactory.CreateClient());
+
+        ex.ToString().ShouldContain("Gateway:SystemMetrics:AllowedRoles");
     }
 
     [Fact]

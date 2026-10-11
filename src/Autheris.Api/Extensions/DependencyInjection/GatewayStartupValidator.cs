@@ -115,7 +115,7 @@ public static class GatewayStartupValidator
         // RR-L1-01: Validate ReverseProxy.KnownNetworks and KnownProxies against invalid formats and wildcard spoofing
         if (options.ReverseProxy.Enabled)
         {
-            foreach (var netStr in options.ReverseProxy.KnownNetworks)
+            foreach (var netStr in options.ReverseProxy.GetEffectiveKnownNetworks())
             {
                 if (!System.Net.IPNetwork.TryParse(netStr, out var network))
                 {
