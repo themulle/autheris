@@ -64,6 +64,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
     private readonly IVirtualFilterFederationPlanner? _vfPlanner;
+    private readonly Autheris.Application.Policy.TypedPolicySources? _typedPolicies;
     private readonly ILogger<FederatedDuckDbExecutionService>? _logger;
 
     public FederatedDuckDbExecutionService(
@@ -85,8 +86,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         IAccessProfileRepository? accessProfileRepository = null,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
         ILogger<FederatedDuckDbExecutionService>? logger = null,
-        IVirtualFilterFederationPlanner? vfPlanner = null)
+        IVirtualFilterFederationPlanner? vfPlanner = null,
+        Autheris.Application.Policy.TypedPolicySources? typedPolicies = null)
     {
+        _typedPolicies = typedPolicies;
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _router = router ?? throw new ArgumentNullException(nameof(router));
@@ -108,7 +111,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         _vfPlanner = vfPlanner;
     }
 
-    private TableAccessPolicy AccessPolicy() =>
+    internal TableAccessPolicy AccessPolicy() =>
         new(_consentRepository!, _consentResolution!,
             _consentCache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             _policyEnforcement ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
@@ -118,7 +121,9 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             _contractManager,
             _accessProfileRepository,
-            _memoryCache);
+            _memoryCache,
+            rowPolicyFactory: _typedPolicies?.RowPolicies,
+            maskPolicyFactory: _typedPolicies?.MaskPolicies);
 
     private IPAddress? ResolveClientIp(ClaimsPrincipal user)
     {

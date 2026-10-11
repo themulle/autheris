@@ -92,7 +92,8 @@ public static class GatewayExecutionServiceExtensions
             sp.GetService<IAutherisConnectorRegistry>(),
             sp.GetService<ITableReadConcurrencyGate>(),
             sp.GetService<IRebacEvaluator>(),
-            sp.GetRequiredService<IMandatoryRowFilterResolver>()));
+            sp.GetRequiredService<IMandatoryRowFilterResolver>(),
+            typedPolicies: sp.GetService<Autheris.Application.Policy.TypedPolicySources>()));
         services.AddScoped<IGatewayExecutionService>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<ITableAccessResolver>(sp => sp.GetRequiredService<GatewayExecutionService>());
         services.AddScoped<IGovernedTreeQueryService, GovernedTreeQueryService>();

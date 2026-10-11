@@ -69,8 +69,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IAccessProfileRepository? accessProfileRepository = null,
         IMemoryCache? memoryCache = null,
         IServiceProvider? serviceProvider = null,
-        IFederatedQueryExecutionService? federatedExecutionService = null)
-        : this(options, NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, planCache, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService)
+        IFederatedQueryExecutionService? federatedExecutionService = null,
+        TypedPolicySources? typedPolicies = null)
+        : this(options, NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, planCache, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies)
     {
     }
 
@@ -98,7 +99,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IAccessProfileRepository? accessProfileRepository = null,
         IMemoryCache? memoryCache = null,
         IServiceProvider? serviceProvider = null,
-        IFederatedQueryExecutionService? federatedExecutionService = null)
+        IFederatedQueryExecutionService? federatedExecutionService = null,
+        TypedPolicySources? typedPolicies = null)
     {
         _serviceProvider = serviceProvider;
         _federatedExecutionService = federatedExecutionService;
@@ -120,7 +122,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             mandatoryFilters,
             contractManager,
             accessProfileRepository,
-            memoryCache);
+            memoryCache,
+            typedPolicies: typedPolicies);
 
         _rowFilterResolver = mandatoryFilters;
 

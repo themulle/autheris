@@ -47,6 +47,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly ILogger<GovernedProcedureExecutionService>? _logger;
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
+    private readonly Autheris.Application.Policy.TypedPolicySources? _typedPolicies;
 
     public GovernedProcedureExecutionService(
         IProcedureRegistry registry,
@@ -62,8 +63,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IProcedureRowScopeResolver? rowScope = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         IConsentCacheService? consentCache = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
-        : this(registry, invoker, options, Autheris.Application.Audit.NullAuditLogRepository.Instance, tableRepository, consentRepository, consentResolution, masking, policyEnforcement, clientIpResolver, logger, rowScope, rebacEvaluator, consentCache, mandatoryFilters)
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        Autheris.Application.Policy.TypedPolicySources? typedPolicies = null)
+        : this(registry, invoker, options, Autheris.Application.Audit.NullAuditLogRepository.Instance, tableRepository, consentRepository, consentResolution, masking, policyEnforcement, clientIpResolver, logger, rowScope, rebacEvaluator, consentCache, mandatoryFilters, typedPolicies)
     {
     }
 
@@ -82,8 +84,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IProcedureRowScopeResolver? rowScope = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         IConsentCacheService? consentCache = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        Autheris.Application.Policy.TypedPolicySources? typedPolicies = null)
     {
+        _typedPolicies = typedPolicies;
         _mandatoryFilters = mandatoryFilters;
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
         _invoker = invoker ?? throw new ArgumentNullException(nameof(invoker));
@@ -377,7 +381,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
                 _clientIpResolver,
                 _options.Value,
-                _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance)
+                _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+                rowPolicyFactory: _typedPolicies?.RowPolicies,
+                maskPolicyFactory: _typedPolicies?.MaskPolicies)
                 .DecideAsync(
                     new Autheris.Application.Policy.TableAccessQuery(
                         userSid,

@@ -60,8 +60,10 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
         Autheris.Application.Governance.Contracts.ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
-        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null)
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+        TypedPolicySources? typedPolicies = null)
     {
+        _typedPolicies = typedPolicies;
         _accessProfileRepository = accessProfileRepository;
         _memoryCache = memoryCache;
         _contractManager = contractManager;
@@ -569,8 +571,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
     private readonly Autheris.Application.Governance.Contracts.ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
+    private readonly TypedPolicySources? _typedPolicies;
 
-    private TableAccessPolicy AccessPolicy() =>
+    internal TableAccessPolicy AccessPolicy() =>
         new(_consentRepository, _resolutionService,
             _cacheService,
             _policyEnforcementService ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
@@ -580,7 +583,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             _contractManager,
             _accessProfileRepository,
-            _memoryCache);
+            _memoryCache,
+            rowPolicyFactory: _typedPolicies?.RowPolicies,
+            maskPolicyFactory: _typedPolicies?.MaskPolicies);
 
     /// <summary>
     /// Virtual filters: an in-memory row filter cannot evaluate their subqueries (it would return nothing and look like
