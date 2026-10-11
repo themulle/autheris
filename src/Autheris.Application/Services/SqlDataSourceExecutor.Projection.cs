@@ -28,9 +28,28 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
         _ => throw new NotSupportedException($"No mask SQL mapping exists for dialect '{dialect}'.")
     };
 
+    /// <summary>
+    /// Projection of a masked column for rules that need no bound value. A rule whose mask carries bound values (partial mask) must
+    /// use the overload with <c>maskParameters</c>; this overload throws instead of emitting an unbound marker.
+    /// </summary>
     public static string BuildMaskedColumnProjection(string columnName, string? dataType, DatabaseDialect dialect, TableMetadata tableMeta)
     {
+        var parameters = new Dictionary<string, object?>();
+        var projection = BuildMaskedColumnProjection(columnName, dataType, dialect, tableMeta, parameters);
+        return parameters.Count == 0
+            ? projection
+            : throw new InvalidOperationException("The mask of this column carries bound values; use the overload with mask parameters.");
+    }
+
+    /// <summary>
+    /// WP-X0f: GEO_JITTER and PARTIAL_MASK are rendered from the typed <see cref="TrinoSqlEngine.Governance.MaskSpec"/> through the
+    /// dialect generator; their values are added to <paramref name="maskParameters"/> keyed by marker (the caller binds them).
+    /// </summary>
+    public static string BuildMaskedColumnProjection(
+        string columnName, string? dataType, DatabaseDialect dialect, TableMetadata tableMeta, IDictionary<string, object?> maskParameters)
+    {
         ArgumentNullException.ThrowIfNull(tableMeta);
+        ArgumentNullException.ThrowIfNull(maskParameters);
         DatabaseDialectExtensions.ValidateIdentifier(columnName);
         var quotedCol = dialect.QuoteIdentifier(columnName);
         string maskExpr;
@@ -43,26 +62,9 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
             {
                 maskExpr = "NULL";
             }
-            else if (ruleType == "GEO_JITTER")
+            else if (ruleType is "GEO_JITTER" or "PARTIAL_MASK")
             {
-                var targetDialect = ToMaskTargetDialect(dialect);
-                maskExpr = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
-                    columnName,
-                    "GEO_JITTER",
-                    targetDialect,
-                    decimals: rule.Decimals ?? 2);
-            }
-            else if (ruleType == "PARTIAL_MASK")
-            {
-                var targetDialect = ToMaskTargetDialect(dialect);
-                maskExpr = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
-                    columnName,
-                    "PARTIAL_MASK",
-                    targetDialect,
-                    keepPrefix: rule.KeepPrefix ?? 1,
-                    keepSuffix: rule.KeepSuffix ?? 0,
-                    maskChar: rule.MaskChar ?? '*',
-                    fixedLength: rule.FixedLength ?? false);
+                maskExpr = RenderTypedMask(rule, columnName, effectiveDataType, dialect, maskParameters);
             }
             else if (IsHmacRule(rule))
             {
@@ -86,6 +88,28 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
         }
 
         return $"{maskExpr} AS {quotedCol}";
+    }
+
+    private static string RenderTypedMask(
+        MaskingRule rule, string columnName, string? dataType, DatabaseDialect dialect, IDictionary<string, object?> maskParameters)
+    {
+        try
+        {
+            var spec = Autheris.Application.Sql.Masking.SqlDataMaskingProvider.BuildUnkeyedMaskSpec(rule, columnName);
+            var rendered = new Autheris.Application.Sql.Masking.MaskSpecRenderer()
+                .Render(spec, columnName, dataType, ToMaskTargetDialect(dialect), name => dialect.FormatParameterMarker(name));
+            foreach (var (marker, value) in rendered.Parameters)
+            {
+                maskParameters[marker] = value;
+            }
+
+            return rendered.Sql;
+        }
+        catch (SecurityException)
+        {
+            // Missing or unsupported catalog data type: the typed emitter cannot render, the stricter default mask applies.
+            return "'***'";
+        }
     }
 
     private static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;

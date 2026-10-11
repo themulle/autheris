@@ -160,6 +160,7 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
             ?? context.Principal?.FindFirst("tenant")?.Value
             ?? TenantId.LegacySingleTenant.Value;
         var gatewayHmacColumns = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase);
+        var maskParameters = new Dictionary<string, object?>(StringComparer.Ordinal);
 
         foreach (var col in authorizedColumns)
         {
@@ -180,7 +181,7 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
                 }
                 else
                 {
-                    selectParts.Add(BuildMaskedColumnProjection(col, colDef?.DataType, dialect, metadata));
+                    selectParts.Add(BuildMaskedColumnProjection(col, colDef?.DataType, dialect, metadata, maskParameters));
                 }
             }
             else
@@ -197,6 +198,15 @@ public sealed partial class SqlDataSourceExecutor : IDataSourceExecutor
         if (selectParts.Count == 0)
         {
             selectParts.Add("1 AS __unauthorized_placeholder");
+        }
+
+        foreach (var (marker, value) in maskParameters)
+        {
+            // WP-X0f: the bound values of typed masks (marker keyed, e.g. @__gql_mask_x_pre).
+            var maskParameter = command.CreateParameter();
+            maskParameter.ParameterName = dialect.FormatParameterName(marker.TrimStart('@', ':'));
+            maskParameter.Value = value ?? DBNull.Value;
+            command.Parameters.Add(maskParameter);
         }
 
         var selectClause = string.Join(", ", selectParts);

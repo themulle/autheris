@@ -118,6 +118,51 @@ public record TableAccessDecision(
             : Denied(Table, TypedRowPolicyRequiredReason);
     }
 
+    /// <summary>
+    /// The typed column masks (WP-X0f). Masked columns of the compiler path come from here; a mask that exists only as a dialect SQL
+    /// string (rendered by the legacy consumers from the catalog rules) is not carried by the decision.
+    /// </summary>
+    public IColumnMaskPolicy? ColumnMasks { get; init; }
+
+    /// <summary>
+    /// WP-X0f, analogous to <see cref="RequireTypedRowPolicy"/>: a decision that masks a column (<see cref="ColumnAccessLevel.Mask"/>)
+    /// without a typed mask for it is denied on the compiler path (fail closed). Catalog-sensitive columns that the decision does not
+    /// list are covered by passing <paramref name="metadata"/>. A denied decision and a decision without masked columns are returned
+    /// unchanged.
+    /// </summary>
+    public TableAccessDecision RequireTypedColumnMasks(TableMetadata? metadata = null)
+    {
+        if (!IsAllowed)
+        {
+            return this;
+        }
+
+        var masked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (column, level) in ColumnAccess)
+        {
+            if (level == ColumnAccessLevel.Mask)
+            {
+                masked.Add(column);
+            }
+        }
+
+        if (metadata != null)
+        {
+            foreach (var column in metadata.Columns)
+            {
+                if (GetEffectiveColumnAccess(column.ColumnName, metadata) == ColumnAccessLevel.Mask)
+                {
+                    masked.Add(column.ColumnName);
+                }
+            }
+        }
+
+        return masked.All(column => ColumnMasks?.HasMask(column) == true) ? this : Denied(Table, TypedColumnMaskRequiredReason);
+    }
+
+    /// <summary>Reason of a decision that the compiler path rejects because a masked column has no typed mask.</summary>
+    public const string TypedColumnMaskRequiredReason = "A column mask is not available as a typed mask (fail-closed).";
+
     /// <summary>Reason of a decision that the compiler path rejects because its row filter is not (consistently) typed.</summary>
     public const string TypedRowPolicyRequiredReason = "The row-level policy is not available as a typed policy (fail-closed).";
 
