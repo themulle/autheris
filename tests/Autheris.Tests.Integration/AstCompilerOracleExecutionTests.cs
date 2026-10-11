@@ -27,99 +27,6 @@ using TrinoSqlEngine.Governance;
 using Xunit;
 
 /// <summary>One Oracle Free container with an application schema, a hostile logon trigger and a pool of size one.</summary>
-public sealed class AstCompilerOracleFixture : IAsyncLifetime
-{
-    public const string AppUser = "AUTH_APP";
-    public const string AppPassword = "App_Password_2026";
-
-    // Pinned by digest (WP-F5, SEC-ADG-24, CR-ADG-08 d). Update together with the digest recorded in docs/plans (implementation log).
-    public const string Image = "gvenzl/oracle-free:23-slim-faststart@sha256:d86d09794ae138a8951e97d7ee010778dcd43088e8d0f83a51002abab8c6d7fd";
-
-    private readonly OracleContainer _container = new OracleBuilder(Image)
-        .WithPassword("Oracle_Password_2026")
-        .Build();
-
-    public string AdminConnectionString => _container.GetConnectionString();
-
-    public string AppConnectionString { get; private set; } = string.Empty;
-
-    public async Task InitializeAsync()
-    {
-        await _container.StartAsync();
-        string dataSource = $"{_container.Hostname}:{_container.GetMappedPublicPort(1521)}/FREEPDB1";
-        AppConnectionString = $"User Id={AppUser};Password={AppPassword};Data Source={dataSource};Pooling=true;Max Pool Size=1;Min Pool Size=0";
-
-        // The builder default user is not a DBA; SYSTEM uses the ORACLE_PASSWORD of the image.
-        await using var admin = new OracleConnection($"User Id=system;Password=Oracle_Password_2026;Data Source={dataSource}");
-        await admin.OpenAsync();
-        foreach (var statement in new[]
-        {
-            $"CREATE USER {AppUser} IDENTIFIED BY {AppPassword} QUOTA UNLIMITED ON USERS",
-            $"GRANT CREATE SESSION, ALTER SESSION, CREATE TABLE TO {AppUser}",
-            $"""
-            CREATE TABLE {AppUser}.ORDERS (
-                ID NUMBER(10) PRIMARY KEY,
-                TENANT_ID VARCHAR2(64) NOT NULL,
-                REGION VARCHAR2(20) NOT NULL,
-                STATUS VARCHAR2(20) NOT NULL,
-                AMOUNT NUMBER(18,2) NOT NULL,
-                EMAIL VARCHAR2(200))
-            """,
-            $"CREATE TABLE {AppUser}.ENTITLEMENTS (ID NUMBER(10) PRIMARY KEY, TENANT_ID VARCHAR2(64) NOT NULL, ORDER_ID NUMBER(10) NOT NULL)",
-            $"""
-            INSERT ALL
-                INTO {AppUser}.ORDERS VALUES (1, 'acme',  'EU', 'open',   10.50, 'alice.smith@acme.example')
-                INTO {AppUser}.ORDERS VALUES (2, 'acme',  'US', 'open',   20.00, 'bob.jones@acme.example')
-                INTO {AppUser}.ORDERS VALUES (3, 'ACME',  'EU', 'open',   30.00, 'upper.case@ACME.example')
-                INTO {AppUser}.ORDERS VALUES (4, 'ACME',  'US', 'closed', 40.00, 'upper.us@ACME.example')
-                INTO {AppUser}.ORDERS VALUES (5, 'other', 'EU', 'open',   50.00, 'carol@other.example')
-                INTO {AppUser}.ORDERS VALUES (6, 'acme',  'EU', 'closed', 60.00, NULL)
-            SELECT 1 FROM DUAL
-            """,
-            $"""
-            INSERT ALL
-                INTO {AppUser}.ENTITLEMENTS VALUES (1, 'acme', 1)
-                INTO {AppUser}.ENTITLEMENTS VALUES (2, 'other', 2)
-                INTO {AppUser}.ENTITLEMENTS VALUES (3, 'acme', 6)
-                INTO {AppUser}.ENTITLEMENTS VALUES (4, 'ACME', 3)
-            SELECT 1 FROM DUAL
-            """,
-            "COMMIT"
-        })
-        {
-            await using var cmd = admin.CreateCommand();
-            cmd.CommandText = statement;
-            try { await cmd.ExecuteNonQueryAsync(); } catch (OracleException ex) { throw new InvalidOperationException("Fixture statement failed: " + statement.Split((char)10)[0] + " => " + ex.Message, ex); }
-        }
-
-        // Hostile database defaults: every session of the application user starts case-insensitive and linguistic. The trigger
-        // owner needs the privileges directly (roles do not apply inside definer-rights PL/SQL).
-        await using (var grant = admin.CreateCommand())
-        {
-            grant.CommandText = "GRANT ALTER SESSION, ADMINISTER DATABASE TRIGGER TO SYSTEM";
-            try { await grant.ExecuteNonQueryAsync(); } catch (OracleException ex) { throw new InvalidOperationException("Fixture GRANT failed => " + ex.Message, ex); }
-        }
-
-        await using (var trigger = admin.CreateCommand())
-        {
-            trigger.CommandText = $"""
-                CREATE OR REPLACE TRIGGER SYSTEM.AUTH_APP_HOSTILE_LOGON AFTER LOGON ON {AppUser}.SCHEMA
-                BEGIN
-                  EXECUTE IMMEDIATE 'ALTER SESSION SET NLS_COMP = LINGUISTIC';
-                  EXECUTE IMMEDIATE 'ALTER SESSION SET NLS_SORT = BINARY_CI';
-                END;
-                """;
-            try { await trigger.ExecuteNonQueryAsync(); } catch (OracleException ex) { throw new InvalidOperationException("Fixture TRIGGER failed => " + ex.Message, ex); }
-        }
-    }
-
-    public async Task DisposeAsync()
-    {
-        OracleConnection.ClearAllPools();
-        await _container.DisposeAsync();
-    }
-}
-
 internal sealed class DevelopmentEnvironment : IHostEnvironment
 {
     public string EnvironmentName { get; set; } = Environments.Development;
@@ -133,7 +40,8 @@ internal sealed class DevelopmentEnvironment : IHostEnvironment
 /// (session pinning on every pool rental), <see cref="DbSessionContextInitializer"/> and <see cref="OracleCompiledSqlBinder"/>
 /// with <c>BindByName</c>.
 /// </summary>
-public sealed class AstCompilerOracleExecutionTests : IClassFixture<AstCompilerOracleFixture>
+[Collection(OracleCollection.Name)]
+public sealed class AstCompilerOracleExecutionTests
 {
     private static readonly TableIdentity Orders = new(AstCompilerOracleFixture.AppUser, "ORDERS");
     private static readonly TableIdentity Entitlements = new(AstCompilerOracleFixture.AppUser, "ENTITLEMENTS");
@@ -240,12 +148,7 @@ public sealed class AstCompilerOracleExecutionTests : IClassFixture<AstCompilerO
     {
         // Sanity: the hostile logon trigger really makes a raw session case-insensitive.
         // Pooling=false: a pooled session may already have been pinned by an earlier test.
-        await using (var raw = new OracleConnection(_fx.AppConnectionString + ";Pooling=false"))
-        {
-            await raw.OpenAsync();
-            await using var probe = new OracleCommand("SELECT COUNT(*) FROM AUTH_APP.ORDERS WHERE TENANT_ID = 'acme'", raw);
-            Convert.ToInt32(await probe.ExecuteScalarAsync()).ShouldBe(5);
-        }
+        (await _fx.RawHostileSessionCountAsync("SELECT COUNT(*) FROM AUTH_APP.ORDERS WHERE TENANT_ID = 'acme'")).ShouldBe(5);
 
         OracleConnection.ClearAllPools();
 

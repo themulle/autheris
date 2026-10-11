@@ -26,7 +26,8 @@ using Xunit;
 /// DML runs in an explicit transaction. Every test owns two tables. The shared <see cref="AstCompilerDmlContract"/> runs with the
 /// Oracle MERGE form (one UPDATE and one INSERT clause, no stand-alone DELETE).
 /// </summary>
-public sealed class AstCompilerOracleDmlExecutionTests : AstCompilerDmlContract, IClassFixture<AstCompilerOracleFixture>, IAsyncLifetime
+[Collection(OracleCollection.Name)]
+public sealed class AstCompilerOracleDmlExecutionTests : AstCompilerDmlContract, IAsyncLifetime
 {
     private readonly AstCompilerOracleFixture _fx;
     private readonly string _suffix = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
@@ -135,12 +136,7 @@ public sealed class AstCompilerOracleDmlExecutionTests : AstCompilerDmlContract,
     {
         // The hostile logon trigger makes a raw session linguistic and case-insensitive; the pinned gateway session and the byte-exact
         // tenant comparison keep acme and ACME apart even for DML.
-        await using (var raw = new OracleConnection(_fx.AppConnectionString + ";Pooling=false"))
-        {
-            await raw.OpenAsync();
-            await using var probe = new OracleCommand($"SELECT COUNT(*) FROM {RawTable("Orders")} WHERE TENANTID = 'acme'", raw);
-            Convert.ToInt32(await probe.ExecuteScalarAsync()).ShouldBe(5);
-        }
+        (await _fx.RawHostileSessionCountAsync($"SELECT COUNT(*) FROM {RawTable("Orders")} WHERE TENANTID = 'acme'")).ShouldBe(5);
 
         (await ExecAsync($"UPDATE {O} SET status = 'z' WHERE id > 0", "acme")).ShouldBe(3);
         (await ExecAsync($"DELETE FROM {O} WHERE id > 0", "ACME")).ShouldBe(2);
