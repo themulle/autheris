@@ -67,7 +67,7 @@ public sealed partial class SecurityCoverageVerifier
                     ConjunctNodes(p.Expression, into);
                     return;
                 case BinaryExpression { Operator: BinaryOperator.And } b:
-                    RuntimeHelpers.EnsureSufficientExecutionStack();
+                    ExecutionStackGuard.Ensure();
                     ConjunctNodes(b.Left, into);
                     ConjunctNodes(b.Right, into);
                     return;
@@ -180,7 +180,7 @@ public sealed partial class SecurityCoverageVerifier
 
         private void VerifyInsertSourceShape(QueryBody source, int columnCount, int tenantIndex)
         {
-            RuntimeHelpers.EnsureSufficientExecutionStack();
+            ExecutionStackGuard.Ensure();
             switch (source)
             {
                 case ValuesQueryBody values:
@@ -335,7 +335,7 @@ public sealed partial class SecurityCoverageVerifier
 
         private void VerifyCheckOptionRows(QueryBody body, int columnCount, int tenantIndex, string?[] nativeTypes)
         {
-            RuntimeHelpers.EnsureSufficientExecutionStack();
+            ExecutionStackGuard.Ensure();
             switch (body)
             {
                 case SetOperationQuery { Operator: SetOperator.Union, Distinct: false } setOp:
@@ -433,7 +433,7 @@ public sealed partial class SecurityCoverageVerifier
 
             foreach (var clause in merge.Clauses)
             {
-                RuntimeHelpers.EnsureSufficientExecutionStack();
+                ExecutionStackGuard.Ensure();
                 NoMaskedReads(requirement, names, clause.Condition);
                 if (clause.Condition != null) Expr(clause.Condition, ImmutableHashSet<string>.Empty, policyScope: false);
                 switch (clause)
@@ -467,6 +467,12 @@ public sealed partial class SecurityCoverageVerifier
                         break;
                     }
                     default:
+#if DEBUG
+                        if (CompilerTestSeams.IsDisabled(SecurityControl.MergeClauseClosedSet))
+                        {
+                            break;
+                        }
+#endif
                         // The clause set is closed (SEC-ADG-08 a): an unknown clause such as BY SOURCE is never emitted.
                         throw new SecurityCoverageException($"MERGE clause '{clause.GetType().Name}' is not covered.");
                 }

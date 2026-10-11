@@ -79,6 +79,18 @@ internal sealed class GovernedSqlCompiler
 #endif
     }
 
+    /// <summary>The DML guards the pipeline applies: the validated request guards (strict), except in a Debug seam that runs a mutant.</summary>
+    private static DmlGuardOptions EffectiveDmlGuards(DmlGuardOptions requested)
+    {
+#if DEBUG
+        if (CompilerTestSeams.Current?.DmlGuardMutator is { } mutate)
+        {
+            return mutate(requested);
+        }
+#endif
+        return requested;
+    }
+
     private static void CheckBudget(CompileRequest request, Stopwatch clock, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -124,7 +136,8 @@ internal sealed class GovernedSqlCompiler
         string rawSql = sql.ToString();
         string keyMaterial = CompileCacheKey.Material(request, rawSql, caps, _engine.MaxQueryLength);
         var policy = request.Policy;
-        var typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = policy.Dml };
+        var guards = EffectiveDmlGuards(policy.Dml);
+        var typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards };
 
         var template = _cache.Find(keyMaterial);
         if (template is not null && TryRehydrate(template, typed))
@@ -137,7 +150,7 @@ internal sealed class GovernedSqlCompiler
         if (template is not null)
         {
             // A rehydration attempt may have added values; start clean. A plain miss reuses the context (CR-ADG-12).
-            typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = policy.Dml };
+            typed = new TypedPolicyContext(policy.Catalog, policy.RowFilters, policy.Masks, policy.Tenant, caps) { Dml = guards };
         }
 
         // 3. token guards + parse
@@ -184,7 +197,13 @@ internal sealed class GovernedSqlCompiler
 
         // 7. production coverage proof (does not trust the injector)
         Pass("verify");
+#if DEBUG
+        var applied = CompilerTestSeams.IsDisabled(SecurityControl.CoverageVerifier)
+            ? System.Collections.Immutable.ImmutableArray<SecurityPredicateId>.Empty
+            : typed.CreateVerifier(request.TargetDialect).Verify(secured, token);
+#else
         var applied = typed.CreateVerifier(request.TargetDialect).Verify(secured, token);
+#endif
 
         // 8. dialect capabilities
         Pass("capabilities");
@@ -287,6 +306,7 @@ internal sealed class GovernedSqlCompiler
     private static RlsOptions BuildOptions(CompileRequest request, TypedPolicyContext typed)
     {
         var catalog = typed.Catalog;
+        var guards = typed.Dml;
         return new RlsOptions
         {
             // The typed path never consults the string policy provider; any use fails loudly.
@@ -301,14 +321,14 @@ internal sealed class GovernedSqlCompiler
             TablesWithConsentRowFilter = new HashSet<string>(request.Policy.TablesWithConsentRowFilter, StringComparer.OrdinalIgnoreCase),
             RejectMaskedColumnsInPredicates = true,
             // DML guards of the request (DmlGuardOptions.Strict by default); the coverage verifier proves what they require.
-            EnforceWithCheckOption = request.Policy.Dml.EnforceWithCheckOption,
-            RequireTenantColumnInInsert = request.Policy.Dml.RequireTenantColumnInInsert,
-            DisallowTenantColumnModificationInUpdate = request.Policy.Dml.DisallowTenantColumnModificationInUpdate,
-            RejectUnfilteredDml = request.Policy.Dml.RejectUnfilteredDml,
-            RejectMaskedColumnsInDml = request.Policy.Dml.RejectMaskedColumnsInDml,
-            RejectConsentFilteredInsert = request.Policy.Dml.RejectConsentFilteredInsert,
-            RejectWholeRowReferencesInDml = request.Policy.Dml.RejectWholeRowReferencesInDml,
-            RejectPolicyColumnAssignment = request.Policy.Dml.RejectPolicyColumnAssignment
+            EnforceWithCheckOption = guards.EnforceWithCheckOption,
+            RequireTenantColumnInInsert = guards.RequireTenantColumnInInsert,
+            DisallowTenantColumnModificationInUpdate = guards.DisallowTenantColumnModificationInUpdate,
+            RejectUnfilteredDml = guards.RejectUnfilteredDml,
+            RejectMaskedColumnsInDml = guards.RejectMaskedColumnsInDml,
+            RejectConsentFilteredInsert = guards.RejectConsentFilteredInsert,
+            RejectWholeRowReferencesInDml = guards.RejectWholeRowReferencesInDml,
+            RejectPolicyColumnAssignment = guards.RejectPolicyColumnAssignment
         };
     }
 

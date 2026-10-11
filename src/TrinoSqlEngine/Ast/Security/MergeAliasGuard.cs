@@ -14,7 +14,7 @@ internal static class MergeAliasGuard
     /// <summary>The effective qualifiers a top-level MERGE source introduces (alias, or the table's own name).</summary>
     public static void CollectSourceQualifiers(TableSource source, ICollection<string> into)
     {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
         switch (source)
         {
             case NamedTableSource named:

@@ -129,7 +129,7 @@ public sealed partial class SecurityCoverageVerifier
 
         private void Enter()
         {
-            RuntimeHelpers.EnsureSufficientExecutionStack();
+            ExecutionStackGuard.Ensure();
             if ((++_ticks & 255) == 0) ct.ThrowIfCancellationRequested();
             if (++_depth > owner._maxAstDepth)
             {
@@ -376,7 +376,7 @@ public sealed partial class SecurityCoverageVerifier
                     StrictConjuncts(p.Expression);
                     return;
                 case BinaryExpression { Operator: BinaryOperator.And } b:
-                    RuntimeHelpers.EnsureSufficientExecutionStack();
+                    ExecutionStackGuard.Ensure();
                     StrictConjuncts(b.Left);
                     StrictConjuncts(b.Right);
                     return;
@@ -433,7 +433,7 @@ public sealed partial class SecurityCoverageVerifier
                     Conjuncts(p.Expression, into);
                     return;
                 case BinaryExpression { Operator: BinaryOperator.And } b:
-                    RuntimeHelpers.EnsureSufficientExecutionStack();
+                    ExecutionStackGuard.Ensure();
                     Conjuncts(b.Left, into);
                     Conjuncts(b.Right, into);
                     return;

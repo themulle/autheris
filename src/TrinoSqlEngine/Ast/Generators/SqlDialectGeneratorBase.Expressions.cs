@@ -17,7 +17,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     // Expression emitter
     public virtual void GenerateExpression(Expression expression, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
-        RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
         context.Tick();
         switch (expression)
         {

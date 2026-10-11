@@ -26,7 +26,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
 
         // SEC-ADG-05: a StackOverflowException cannot be caught and would end the process for every tenant. Deep trees raise
         // InsufficientExecutionStackException here, which the compiler maps to a typed limit error.
-        RuntimeHelpers.EnsureSufficientExecutionStack();
+        ExecutionStackGuard.Ensure();
         if ((++_visits & 255) == 0)
         {
             CancellationToken.ThrowIfCancellationRequested();

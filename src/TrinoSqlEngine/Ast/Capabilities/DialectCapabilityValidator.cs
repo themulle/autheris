@@ -21,7 +21,11 @@ public static class DialectCapabilityValidator
                 case MergeStatement merge when capabilities.MergeShape == MergeClauseShape.OracleSingleClause:
                     ValidateSingleClauseMerge(merge);
                     break;
-                case InListExpression inList when capabilities.MaxInListItems is { } max && inList.Items.Count > max:
+                case InListExpression inList when capabilities.MaxInListItems is { } max && inList.Items.Count > max
+#if DEBUG
+                                                    && !CompilerTestSeams.IsDisabled(SecurityControl.InListLimit)
+#endif
+                                                    :
                     throw new SqlLimitExceededException(SqlLimitKind.InListItems, capabilities.Dialect, inList.Items.Count, max);
                 case SqlIdentifier id:
                     int length = capabilities.IdentifierLengthUnit == IdentifierLengthUnit.Bytes
