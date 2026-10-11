@@ -67,7 +67,11 @@ public sealed record VirtualFilterSyncRequest(
     TenantId TenantId,
     ManagedBy ManagedBy,
     IReadOnlyList<VirtualFilter> Filters,
-    IReadOnlyList<VirtualFilterAccessProfile> Profiles);
+    IReadOnlyList<VirtualFilterAccessProfile> Profiles)
+{
+    /// <summary>Bindings (by reference) whose <c>max_pushdown_keys</c> the caller stated explicitly; null when the caller cannot tell.</summary>
+    public IReadOnlySet<FilterBinding>? ExplicitKeyBudgets { get; init; }
+}
 
 /// <summary>
 /// Differences between the file repository and Autheris. Drift = a stored row changed outside Autheris.
@@ -101,6 +105,7 @@ public sealed class VirtualFilterAdministrationService
     private readonly IVirtualFilterRepository _repository;
     private readonly IAuditLogRepository _audit;
     private readonly VirtualFilterOptions _options;
+    private readonly VirtualFilterFederationOptions _federation;
     private readonly IVirtualFilterSnapshotProvider? _snapshots;
     private readonly ITableMetadataRepository? _catalog;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<TenantId, List<(DateTimeOffset Timestamp, int Count)>> _removalHistory = new();
@@ -116,6 +121,7 @@ public sealed class VirtualFilterAdministrationService
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _audit = audit ?? throw new ArgumentNullException(nameof(audit));
         _options = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
+        _federation = _options.Federation ?? new VirtualFilterFederationOptions();
         _snapshots = snapshots;
     }
 
@@ -416,11 +422,12 @@ public sealed class VirtualFilterAdministrationService
         await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_DELETED", $"virtual_filter:{name}", new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
     }
 
-    public async Task<VirtualFilterAccessProfile> SaveProfileAsync(VirtualFilterAccessProfile profile, VirtualFilterActor actor, CancellationToken ct = default)
+    public async Task<VirtualFilterAccessProfile> SaveProfileAsync(VirtualFilterAccessProfile profile, VirtualFilterActor actor, IReadOnlySet<FilterBinding>? explicitKeyBudgets = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentNullException.ThrowIfNull(actor);
         profile.Validate();
+        await VirtualFilterBindingValidator.ValidateAsync([profile], _federation, _catalog, explicitKeyBudgets, ct).ConfigureAwait(false);
 
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         EnsureFiltersExist(profile, snapshot.Filters.Where(f => f.TenantId == profile.TenantId).Select(f => f.Name));
@@ -613,6 +620,9 @@ public sealed class VirtualFilterAdministrationService
         {
             validated.Add(await ValidateDefinitionAsync(filter with { TenantId = request.TenantId }, ct).ConfigureAwait(false));
         }
+
+        // Binding options are validated for every profile of a plan or apply (the same rules as a single profile write).
+        await VirtualFilterBindingValidator.ValidateAsync(request.Profiles, _federation, _catalog, request.ExplicitKeyBudgets, ct).ConfigureAwait(false);
 
         return request with { Filters = validated };
     }

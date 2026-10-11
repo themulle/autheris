@@ -688,7 +688,7 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             return TableAccessDecision.Denied(decision.Table, mandatory.DenyReason ?? "Denied by virtual filters.");
         }
 
-        return mandatory.PredicateSql != null ? decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters) : decision;
+        return mandatory.PredicateSql != null ? decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings) : decision;
     }
 
     private System.Net.IPAddress ResolveClientIp(ClaimsPrincipal user)

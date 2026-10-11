@@ -257,7 +257,7 @@ public sealed class TableAccessPolicy
 
             if (mandatory.PredicateSql != null)
             {
-                decision = decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters);
+                decision = decision.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
             }
         }
 
@@ -361,13 +361,6 @@ public sealed class TableAccessPolicy
             }
         }
 
-        var mergedFilter = consentDecision.CombinedRowFilterSql;
-        if (!string.IsNullOrWhiteSpace(policyDecision.CombinedRowFilterSql))
-        {
-            mergedFilter = !string.IsNullOrWhiteSpace(mergedFilter)
-                ? $"({mergedFilter}) AND ({policyDecision.CombinedRowFilterSql})"
-                : policyDecision.CombinedRowFilterSql;
-        }
 
         var mergedParameters = consentDecision.RowFilterParameters;
         if (policyDecision.RowFilterParameters is { Count: > 0 })
@@ -389,10 +382,11 @@ public sealed class TableAccessPolicy
             mergedParameters = merged;
         }
 
-        return consentDecision with
+        // F-GOV-14 WI-3: the ABAC filter is added through the decision helper so it survives the removal of an enforced
+        // Virtual Filter predicate (WithoutEnforcedVirtualFilters).
+        return consentDecision.WithAdditionalRowFilter(policyDecision.CombinedRowFilterSql ?? string.Empty) with
         {
             ColumnAccess = mergedColumns,
-            CombinedRowFilterSql = mergedFilter,
             RowFilterParameters = mergedParameters
         };
     }

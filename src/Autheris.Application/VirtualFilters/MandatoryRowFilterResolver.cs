@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Policy;
+using Autheris.Application.VirtualFilters.Federation;
 
 /// <summary>One caller and one object for the virtual filter resolution.</summary>
 public sealed record MandatoryFilterQuery(
@@ -29,9 +30,13 @@ public sealed record MandatoryFilterOutcome(bool IsDenied, string? DenyReason, s
 
     public static MandatoryFilterOutcome Deny(string reason) => new(true, reason, null, Array.Empty<string>());
 
+    /// <summary>F-GOV-14 (M1): the effective (filter, binding) pairs behind <see cref="PredicateSql"/>, one per identity.</summary>
+    public IReadOnlyList<AppliedVirtualFilterBinding> AppliedBindings { get; init; } = Array.Empty<AppliedVirtualFilterBinding>();
+
     public bool Equals(MandatoryFilterOutcome? other) =>
         other is not null && IsDenied == other.IsDenied && DenyReason == other.DenyReason &&
-        PredicateSql == other.PredicateSql && AppliedFilters.SequenceEqual(other.AppliedFilters);
+        PredicateSql == other.PredicateSql && AppliedFilters.SequenceEqual(other.AppliedFilters) &&
+        AppliedBindings.SequenceEqual(other.AppliedBindings);
 
     public override int GetHashCode() => HashCode.Combine(IsDenied, DenyReason, PredicateSql);
 }
@@ -74,6 +79,13 @@ public interface IVirtualFilterPredicateBuilder
 public interface IMandatoryRowFilterResolver
 {
     ValueTask<MandatoryFilterOutcome> ResolveAsync(MandatoryFilterQuery query, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether the tenant has any Virtual Filter profile. A caller without a subject identity cannot be matched to a
+    /// grantee, so a channel that would otherwise substitute an anonymous identity must deny when this is true. An
+    /// implementation that cannot tell answers true (fail closed).
+    /// </summary>
+    ValueTask<bool> HasActiveProfilesAsync(TenantId tenant, CancellationToken ct = default);
 }
 
 /// <summary>Explicit "no virtual filters" (tests and tools); production wiring always uses <see cref="MandatoryRowFilterResolver"/>.</summary>
@@ -83,6 +95,8 @@ public sealed class NullMandatoryRowFilterResolver : IMandatoryRowFilterResolver
 
     public ValueTask<MandatoryFilterOutcome> ResolveAsync(MandatoryFilterQuery query, CancellationToken ct = default) =>
         ValueTask.FromResult(MandatoryFilterOutcome.None);
+
+    public ValueTask<bool> HasActiveProfilesAsync(TenantId tenant, CancellationToken ct = default) => ValueTask.FromResult(false);
 }
 
 /// <summary>Columns a filter needs on the protected object.</summary>
@@ -169,6 +183,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         if (Interlocked.Exchange(ref _memoGeneration, snapshot.Generation) != snapshot.Generation)
         {
             _memo.Clear();
+            TargetPatternMatcher.ClearCache();
         }
 
         var key = new VirtualFilterMemoKey(snapshot.Generation, query);
@@ -180,6 +195,19 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         var outcome = Resolve(snapshot, query, trace: null);
         _memo[key] = outcome;
         return outcome;
+    }
+
+    public async ValueTask<bool> HasActiveProfilesAsync(TenantId tenant, CancellationToken ct = default)
+    {
+        try
+        {
+            var snapshot = await _snapshots.GetAsync(ct).ConfigureAwait(false);
+            return snapshot.Profiles.Any(p => p.TenantId == tenant && p.Status == FilterApprovalStatus.Active);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return true;   // without the current profiles nothing can be ruled out (fail closed)
+        }
     }
 
     /// <summary>Same resolution as <see cref="ResolveAsync"/>, with the reason for every profile and binding (no memo).</summary>
@@ -246,8 +274,10 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                 {
                     if (profile.Uncovered == UncoveredPolicy.Deny)
                     {
-                        uncoveredDeny = MandatoryFilterOutcome.Deny(
-                            $"Virtual filters: '{table.ToString()}' is in the scope of the profile '{profile.Name}' but no filter of the profile covers it (uncovered: deny).");
+                        // A binding that matched the object but lacks catalog columns is a misconfiguration (ST-37), not "uncovered".
+                        uncoveredDeny = MandatoryFilterOutcome.Deny(missingBinding != null
+                            ? $"{VirtualFilterErrorCodes.BindingMisconfigured}: '{table.ToString()}' matches filter '{missingBinding.Value.Filter.Name}' in profile '{profile.Name}', but lacks required column(s): {string.Join(", ", missingBinding.Value.Missing)} (uncovered: deny, fail-closed)."
+                            : $"Virtual filters: '{table.ToString()}' is in the scope of the profile '{profile.Name}' but no filter of the profile covers it (uncovered: deny).");
                         if (trace == null)
                         {
                             return uncoveredDeny;
@@ -257,7 +287,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
                     {
                         // SR15-13: Matching binding lacks required columns, and profile is not covered by another filter -> fail-closed (Deny)
                         uncoveredDeny = MandatoryFilterOutcome.Deny(
-                            $"Virtual filters: '{table.ToString()}' matches filter '{missingBinding.Value.Filter.Name}' in profile '{profile.Name}', but lacks required column(s): {string.Join(", ", missingBinding.Value.Missing)} (uncovered: deny, fail-closed).");
+                            $"{VirtualFilterErrorCodes.BindingMisconfigured}: '{table.ToString()}' matches filter '{missingBinding.Value.Filter.Name}' in profile '{profile.Name}', but lacks required column(s): {string.Join(", ", missingBinding.Value.Missing)} (uncovered: deny, fail-closed).");
                         if (trace == null)
                         {
                             return uncoveredDeny;
@@ -336,11 +366,24 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
             }
 
             var predicate = parts.Count == 1 ? parts[0] : string.Join(" AND ", parts.Select(p => $"({p})"));
-            return new MandatoryFilterOutcome(false, null, predicate, effective.Select(a => a.Filter.Name).Distinct(StringComparer.Ordinal).ToList());
+            var appliedBindings = effective
+                .Select(a => new AppliedVirtualFilterBinding(a.Filter, a.Binding, snapshot.Generation))
+                .Distinct()
+                .ToList();
+            return new MandatoryFilterOutcome(false, null, predicate, effective.Select(a => a.Filter.Name).Distinct(StringComparer.Ordinal).ToList())
+            {
+                AppliedBindings = appliedBindings
+            };
+        }
+        catch (TargetPatternEvaluationException ex)
+        {
+            // SEC-7/SEC-8 (F-GOV-14): a pattern that cannot be evaluated never means "binding does not apply".
+            return MandatoryFilterOutcome.Deny(
+                $"{VirtualFilterErrorCodes.PatternEvaluationFailed}: the target pattern of the filter '{currentFilter}' could not be evaluated for '{table.ToString()}' ({ex.InnerException?.GetType().Name}).");
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or NotSupportedException or RegexMatchTimeoutException)
         {
-            return MandatoryFilterOutcome.Deny($"Virtual filters: the filter '{currentFilter}' could not be evaluated for '{table.ToString()}' ({ex.Message}).");
+            return MandatoryFilterOutcome.Deny($"{VirtualFilterErrorCodes.BindingMisconfigured}: the filter '{currentFilter}' could not be evaluated for '{table.ToString()}' ({ex.Message}).");
         }
     }
 
@@ -363,9 +406,17 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         {
             if (query.Metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative ||
                 binding.TargetPattern == null ||
-                !binding.MatchesTarget(table))
+                !MatchesTarget(binding, table))
             {
                 return (false, $"object is not in the filter's data source '{filter.Source}'", []);
+            }
+        }
+        else if (TargetPatternMatcher.IsRegex(binding.TargetPattern))
+        {
+            // A regex pattern means the same in both branches: full match on domain.schema.table.
+            if (!MatchesTarget(binding, table))
+            {
+                return (false, "pattern does not match the object", []);
             }
         }
         else
@@ -387,4 +438,20 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
     }
 
     private ObjectPattern Pattern(string text) => _patterns.GetOrAdd(text, ObjectPattern.Parse);
+
+    private static bool MatchesTarget(FilterBinding binding, TableIdentifier table)
+    {
+        try
+        {
+            return binding.MatchesTarget(table);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or RegexMatchTimeoutException)
+        {
+            throw new TargetPatternEvaluationException(ex);
+        }
+    }
+
+    /// <summary>Carries a target pattern failure to the resolver boundary, where it becomes a deny with its code.</summary>
+    private sealed class TargetPatternEvaluationException(Exception inner)
+        : Exception("The target pattern could not be evaluated.", inner);
 }

@@ -968,7 +968,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                     try
                     {
                         var actor = new VirtualFilterActor(new Sid("S-1-5-21-DBT-SYNC"), IsSync: true);
-                        await _virtualFilterAdmin.SaveProfileAsync(profile, actor, ct).ConfigureAwait(false);
+                        await _virtualFilterAdmin.SaveProfileAsync(profile, actor, ct: ct).ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {

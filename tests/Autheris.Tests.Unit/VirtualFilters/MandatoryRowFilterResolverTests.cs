@@ -94,6 +94,20 @@ public sealed class MandatoryRowFilterResolverTests
     }
 
     [Theory]
+    [InlineData(FilterApprovalStatus.Active, true)]
+    [InlineData(FilterApprovalStatus.PendingApproval, false)]
+    [InlineData(FilterApprovalStatus.Rejected, false)]
+    public async Task HasActiveProfiles_CountsOnlyActiveProfilesOfTheTenant(FilterApprovalStatus status, bool expected)
+    {
+        // CR-14: a draft, pending or rejected profile is never applied by the resolver, so it does not count as "a profile exists".
+        var profile = Profile(UncoveredPolicy.Deny, new FilterBinding { FilterName = "filter_a" }) with { Status = status };
+        var resolver = Resolver(Snapshot([ByClient], profile));
+
+        (await resolver.HasActiveProfilesAsync(Tenant)).ShouldBe(expected);
+        (await resolver.HasActiveProfilesAsync(new TenantId("another_tenant"))).ShouldBeFalse();
+    }
+
+    [Theory]
     [InlineData(GranteeType.Group, true)]
     [InlineData(GranteeType.Role, true)]
     [InlineData(GranteeType.User, false)]

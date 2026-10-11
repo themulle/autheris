@@ -231,10 +231,10 @@ public sealed class WebSqlHeterogeneousJoinTests
 
         // 2. Source read audits (WEBSQL_CROSS_SOURCE_SOURCE_READ) for both tables
         await auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == ordersMeta.Identifier.ToQualifiedName()),
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == ordersMeta.Identifier.ToString()),
             Arg.Any<CancellationToken>());
         await auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == shipmentsMeta.Identifier.ToQualifiedName()),
+            Arg.Is<AuditLogEntry>(e => e.EventType == AuditEventTypes.WebSqlCrossSourceSourceRead && e.TargetTable == shipmentsMeta.Identifier.ToString()),
             Arg.Any<CancellationToken>());
     }
 

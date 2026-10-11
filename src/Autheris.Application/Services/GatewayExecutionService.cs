@@ -342,6 +342,14 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 Items: pageItems
             );
 
+            // CR-10 (D-12): a declarative HTTP table cannot evaluate the row filter nor attest a pushdown. When the filter carries
+            // a Virtual Filter predicate this channel (OData, REST, GraphQL) does not federate, so it is denied here, before
+            // the upstream is called, not after unauthorized rows were fetched into gateway memory.
+            if (metadata.DataSourceType == DataSourceType.HttpDeclarative && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+            {
+                EnsureInMemoryFilterIsEnforceable(decision);
+            }
+
             rawRows = await executor.ExecuteAsync(execContext, ct);
 
             rlsPushdownAlreadyOccurred = execContext.Items.TryGetValue("RlsPushdownExecuted", out var p2) && p2 is true;

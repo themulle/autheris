@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using Autheris.Application.VirtualFilters.Federation;
 using Microsoft.Extensions.Options;
 
 /// <summary>
@@ -48,16 +49,9 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
         string Target(string column) => $"{targetAlias}.{dialect.QuoteIdentifier(target.GetColumn(column)?.ColumnName ?? column)}";
         string Source(string qualified) => dialect.QuoteQualifiedColumn(qualified);
 
-        // FROM ... JOIN ... WHERE <conditions>
-        var from = new StringBuilder()
-            .Append("FROM ").Append(dialect.FormatTableIdentifier(definition.From)).Append(" AS ").Append(dialect.QuoteIdentifier(definition.FromAlias));
-        foreach (var join in definition.Joins)
-        {
-            from.Append(" INNER JOIN ").Append(dialect.FormatTableIdentifier(join.Table)).Append(" AS ").Append(dialect.QuoteIdentifier(join.Alias))
-                .Append(" ON ").Append(Source(join.LeftColumn)).Append(" = ").Append(Source(join.RightColumn));
-        }
-
-        var conditions = definition.Where.Select(c => Condition(c, dialect, Source)).ToList();
+        // FROM ... JOIN ... WHERE <conditions> (shared with the federation key query, F-GOV-14)
+        var from = StructuredFilterSqlParts.From(definition, dialect);
+        var conditions = definition.Where.Select(c => StructuredFilterSqlParts.Condition(c, dialect, v => Literal(v, dialect))).ToList();
 
         // key correlations: filter key column (alias.column) = target column (renamed by the binding's map)
         var keys = filter.KeyColumns
@@ -107,18 +101,8 @@ public sealed partial class StructuredFilterSqlBuilder : IVirtualFilterPredicate
 
     private static string Where(IReadOnlyList<string> parts) => parts.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", parts);
 
-    private static string Condition(FilterCondition condition, DatabaseDialect dialect, Func<string, string> column)
-    {
-        var quoted = column(condition.Column);
-        return condition.Operator switch
-        {
-            FilterConditionOperator.IsNull => $"{quoted} IS NULL",
-            FilterConditionOperator.IsNotNull => $"{quoted} IS NOT NULL",
-            FilterConditionOperator.Eq => $"{quoted} = {Literal(condition.Value!, dialect)}",
-            FilterConditionOperator.NotEq => $"{quoted} <> {Literal(condition.Value!, dialect)}",
-            _ => throw new InvalidOperationException($"Unsupported condition operator {condition.Operator}.")
-        };
-    }
+    /// <summary>Whether a condition value is rendered as a number (shared with the federation key query).</summary>
+    internal static bool IsNumericLiteral(string value) => NumericLiteral().IsMatch(value);
 
     private static string Literal(string value, DatabaseDialect dialect) =>
         NumericLiteral().IsMatch(value)

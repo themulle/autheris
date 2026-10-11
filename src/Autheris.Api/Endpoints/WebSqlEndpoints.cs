@@ -527,6 +527,10 @@ public static class WebSqlEndpoints
                 }, ct);
                 break;
 
+            case Autheris.Domain.Exceptions.GatewaySecurityException gatewayDenied:
+                await Middleware.GatewayDenialStatusMapper.WriteWebSqlResponseAsync(httpContext, gatewayDenied, logger, GenericForbiddenMessage, ct);
+                break;
+
             case SecurityException secEx:
                 logger.LogWarning(secEx, "WebSQL Security Violation. TraceId={TraceId}", httpContext.TraceIdentifier);
                 httpContext.Response.StatusCode = StatusCodes.Status403Forbidden;
