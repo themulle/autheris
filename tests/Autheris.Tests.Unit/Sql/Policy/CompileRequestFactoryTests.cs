@@ -93,9 +93,24 @@ public sealed class CompileRequestFactoryTests
     [InlineData(true)]
     public void DmlGuards_AlwaysStrict(bool isDml)
     {
+        var strict = Policy();
+
+        var request = Create(isDml: isDml, policy: strict);
+
+        request.Policy.ShouldBeSameAs(strict);
+        request.Policy.Dml.ShouldBe(DmlGuardOptions.Strict);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RelaxedDmlGuards_AreAConfigurationError_NotSilentlyRepaired(bool isDml)
+    {
         var relaxed = DmlGuardOptions.Strict with { RejectUnfilteredDml = false, RejectConsentFilteredInsert = false };
 
-        Create(isDml: isDml, policy: Policy(relaxed)).Policy.Dml.ShouldBe(DmlGuardOptions.Strict);
+        // CR-ADG-38: the guards are not a per-request choice. The factory never assigns them (an architecture scan forbids it in
+        // production code); a policy that carries another value is rejected exactly like the compiler rejects it.
+        Should.Throw<SqlCompileConfigurationException>(() => Create(isDml: isDml, policy: Policy(relaxed)));
     }
 
     [Fact]
