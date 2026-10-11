@@ -1,5 +1,6 @@
 using System.Reflection;
 using NetArchTest.Rules;
+using System.Xml.Linq;
 using Shouldly;
 using Xunit;
 
@@ -78,5 +79,60 @@ public sealed class OracleDriverArchitectureTests
 
         result.IsSuccessful.ShouldBeTrue(
             $"A raw OracleTransaction exposes the unwrapped connection (CR-ADG-28): {string.Join(", ", result.FailingTypeNames ?? [])}");
+    }
+
+    /// <summary>
+    /// WP-X0o / CR-ADG-18 / SEC-ADG-24: restore must require signed packages and trust only the pinned nuget.org repository
+    /// certificate. The Oracle package carries no author signature (only the nuget.org repository signature), so an Oracle author
+    /// signer cannot be pinned; the repository signer is the only trust anchor.
+    /// </summary>
+    [Fact]
+    public void NuGetConfig_RequiresSignatures_TrustsOnlyPinnedRepositoryCertificate()
+    {
+        var config = LoadNuGetConfig();
+
+        var mode = config.Root!.Element("config")?.Elements("add")
+            .FirstOrDefault(e => (string?)e.Attribute("key") == "signatureValidationMode");
+        ((string?)mode?.Attribute("value")).ShouldBe("require");
+
+        var repositories = config.Root.Element("trustedSigners")?.Elements("repository").ToList();
+        repositories.ShouldNotBeNull();
+        repositories.Count.ShouldBe(1);
+        var repository = repositories[0];
+        ((string?)repository.Attribute("name")).ShouldBe("nuget.org");
+        ((string?)repository.Attribute("serviceIndex")).ShouldBe("https://api.nuget.org/v3/index.json");
+
+        var certificates = repository.Elements("certificate").ToList();
+        certificates.ShouldNotBeEmpty();
+        foreach (var certificate in certificates)
+        {
+            ((string?)certificate.Attribute("hashAlgorithm")).ShouldBe("SHA256");
+            ((string?)certificate.Attribute("allowUntrustedRoot")).ShouldBe("false");
+            ((string?)certificate.Attribute("fingerprint")).ShouldNotBeNull().ShouldMatch("^[0-9A-F]{64}$");
+        }
+
+        config.Root.Element("trustedSigners")!.Elements("author").ShouldBeEmpty(
+            "Oracle.ManagedDataAccess.Core has no author signature; an unverifiable author signer must not be trusted.");
+    }
+
+    [Fact]
+    public void NuGetConfig_StillMapsEveryPackageToNuGetOrgOnly()
+    {
+        var config = LoadNuGetConfig();
+
+        config.Root!.Element("packageSources")!.Elements("add").Select(e => (string?)e.Attribute("key")).ShouldBe(["nuget.org"]);
+        config.Root.Element("packageSources")!.Elements("clear").ShouldHaveSingleItem();
+    }
+
+    private static XDocument LoadNuGetConfig()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "NuGet.config")))
+        {
+            directory = directory.Parent;
+        }
+
+        directory.ShouldNotBeNull("NuGet.config not found above the test output directory.");
+        return XDocument.Load(Path.Combine(directory.FullName, "NuGet.config"));
     }
 }
