@@ -120,7 +120,14 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         bool hasUnconstrainedColumnAllow =
             ResolveColumnLevel(column: null, unconstrainedConsents, rowConstrainedGroups) == ColumnAccessLevel.Clear;
 
-        return TableAccessDecision.Allowed(table, columnAccess, rowFilterSql, hasUnconstrainedColumnAllow);
+        // WP-X0l: the same inputs that produced the text, for the typed row policy (and for the decision cache).
+        var recipe = rowFilterSql is null
+            ? null
+            : new ConsentRowFilterRecipe(
+                aConsents.Select(static c => c.RowFilters).ToList(),
+                dConsents.Where(static c => c.RowFilters.Count > 0).Select(static c => c.RowFilters).ToList());
+
+        return TableAccessDecision.Allowed(table, columnAccess, rowFilterSql, hasUnconstrainedColumnAllow) with { ConsentFilterRecipe = recipe };
     }
 
     /// <summary>

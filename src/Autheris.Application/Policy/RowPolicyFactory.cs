@@ -56,6 +56,16 @@ public sealed class RowPolicyFactory
         return new PolicyPredicateRowPolicy(predicate, PolicyParameterNamer.ToTargetDialect(dialect), _renderer);
     }
 
+    /// <summary>The typed row policy of a consent decision; null when the recipe restricts no rows.</summary>
+    /// <exception cref="InvalidOperationException">A filter is invalid (unsafe column, unknown operator); the caller keeps the decision string-only.</exception>
+    public IRowPolicy? FromConsentFilters(ConsentRowFilterRecipe recipe, DatabaseDialect dialect)
+    {
+        ArgumentNullException.ThrowIfNull(recipe);
+        var target = PolicyParameterNamer.ToTargetDialect(dialect);
+        var predicate = new TypedRowFilterBuilder().BuildCombined(recipe.Allow, recipe.Deny, default, target);
+        return predicate is null ? null : new PolicyPredicateRowPolicy(predicate, target, _renderer);
+    }
+
     /// <summary>
     /// Parses an access-profile row filter (canonical Trino syntax) once into a typed policy.
     /// </summary>

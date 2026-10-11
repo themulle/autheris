@@ -514,9 +514,9 @@ public sealed class TableAccessPolicy
         {
             contextHash = IConsentCacheService.ComputeSubjectContextHash(query.GroupSids, query.Roles);
             var cached = await _cacheService.GetCachedDecisionAsync(query.Tenant, query.UserSid, table, contextHash, ct).ConfigureAwait(false);
-            if (cached != null)
+            if (cached != null && !IsUntypedConsentFilter(cached, query.Metadata))
             {
-                return cached;
+                return WithTypedConsentPolicy(cached, query.Metadata);
             }
         }
 
@@ -549,7 +549,44 @@ public sealed class TableAccessPolicy
             await _cacheService.SetCachedDecisionAsync(query.Tenant, query.UserSid, table, decision, ttl, contextHash!, epochAtLoad, ct).ConfigureAwait(false);
         }
 
-        return decision;
+        return WithTypedConsentPolicy(decision, query.Metadata);
+    }
+
+    /// <summary>The compiler path needs the typed form only for SQL sources; the other sources keep the legacy text (no marker consumers there).</summary>
+    private bool WantsTypedConsentPolicy(TableMetadata metadata) =>
+        _rowPolicyFactory != null && metadata.DataSourceType == DataSourceType.Sql;
+
+    /// <summary>
+    /// WP-X0l: a cached decision that carries a consent row filter as text only (an entry written before the recipe existed, or one whose
+    /// recipe did not survive the L2 round trip) cannot be typed. It is treated as a miss, so the consents are resolved again.
+    /// </summary>
+    private bool IsUntypedConsentFilter(TableAccessDecision cached, TableMetadata metadata) =>
+        WantsTypedConsentPolicy(metadata) && cached.IsAllowed && cached.ConsentFilterRecipe == null &&
+        !string.IsNullOrWhiteSpace(cached.CombinedRowFilterSql);
+
+    /// <summary>
+    /// WP-X0l: replaces the legacy consent text by the typed row policy built from the same filter inputs (the decision's
+    /// <see cref="ConsentRowFilterRecipe"/>). The text becomes the projection of the policy and the values become bound parameters. A
+    /// filter that cannot be typed leaves the decision string-only, which the compiler path denies.
+    /// </summary>
+    private TableAccessDecision WithTypedConsentPolicy(TableAccessDecision decision, TableMetadata metadata)
+    {
+        if (!WantsTypedConsentPolicy(metadata) || !decision.IsAllowed || decision.RowPolicy != null || decision.ConsentFilterRecipe == null)
+        {
+            return decision;
+        }
+
+        try
+        {
+            var policy = _rowPolicyFactory!.FromConsentFilters(decision.ConsentFilterRecipe, metadata.Dialect);
+            return policy == null
+                ? decision
+                : (decision with { CombinedRowFilterSql = null, RowFilterParameters = null }).WithAdditionalRowPolicy(policy);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Security.SecurityException or ArgumentException or NotSupportedException)
+        {
+            return decision;
+        }
     }
 
     private SecurityEvaluationContext BuildEvaluationContext(TableAccessQuery query)

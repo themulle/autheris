@@ -50,15 +50,31 @@ public sealed partial class TypedRowFilterBuilder
     {
         ArgumentNullException.ThrowIfNull(aConsents);
         ArgumentNullException.ThrowIfNull(dConsents);
+        return BuildCombined(
+            aConsents.Select(static c => c.RowFilters).ToList(), dConsents.Select(static c => c.RowFilters).ToList(), table, dialect);
+    }
+
+    /// <summary>
+    /// The same combination from the row filters of the consents alone (an allow consent with an empty list is unconstrained), so that the
+    /// policy can be rebuilt from a <see cref="ConsentRowFilterRecipe"/>, for example after a decision-cache hit.
+    /// </summary>
+    public PolicyPredicate? BuildCombined(
+        IReadOnlyList<IReadOnlyList<ConsentRowFilter>> allowFilters,
+        IReadOnlyList<IReadOnlyList<ConsentRowFilter>> denyFilters,
+        TableIdentity table,
+        TargetSqlDialect? dialect = null)
+    {
+        ArgumentNullException.ThrowIfNull(allowFilters);
+        ArgumentNullException.ThrowIfNull(denyFilters);
         var namer = new PolicyParameterNamer();
 
         Expression? allow = null;
-        if (!aConsents.Any(c => c.RowFilters.Count == 0))
+        if (!allowFilters.Any(f => f.Count == 0))
         {
-            allow = OrChain(aConsents.Select(c => ConsentExpression(c.RowFilters, dialect, namer, isDeny: false)));
+            allow = OrChain(allowFilters.Select(f => ConsentExpression(f, dialect, namer, isDeny: false)));
         }
 
-        Expression? deny = OrChain(dConsents.Where(c => c.RowFilters.Count > 0).Select(c => ConsentExpression(c.RowFilters, dialect, namer, isDeny: true)));
+        Expression? deny = OrChain(denyFilters.Where(f => f.Count > 0).Select(f => ConsentExpression(f, dialect, namer, isDeny: true)));
         if (deny != null)
         {
             // The generator parenthesizes the operand of NOT itself.

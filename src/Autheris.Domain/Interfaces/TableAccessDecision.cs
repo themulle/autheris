@@ -23,6 +23,12 @@ public record TableAccessDecision(
     /// </summary>
     public IRowPolicy? RowPolicy { get; init; }
 
+    /// <summary>
+    /// The inputs of the consent row filter (WP-X0l). The decision cache keeps them, so a cached decision can be turned into a typed
+    /// <see cref="RowPolicy"/> again; null when the consents did not restrict rows.
+    /// </summary>
+    public Autheris.Domain.Model.ConsentRowFilterRecipe? ConsentFilterRecipe { get; init; }
+
     /// <summary>The typed Virtual Filter policy behind <see cref="MandatoryRowPredicateSql"/> (null when it was added as text).</summary>
     public IRowPolicy? MandatoryRowPolicy { get; init; }
 

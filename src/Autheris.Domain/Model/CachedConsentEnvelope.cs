@@ -23,6 +23,9 @@ public partial class CachedConsentEnvelope
     public Dictionary<string, int> ColumnAccess { get; set; } = new();
     public List<string> DeniedReasons { get; set; } = new();
 
+    /// <summary>WP-X0l: the consent row filter inputs (JSON), so that a typed row policy can be rebuilt from an L2 hit. Appended last (MemoryPack layout).</summary>
+    public string? RowFilterRecipeJson { get; set; }
+
     public static CachedConsentEnvelope FromDecision(TableAccessDecision decision, long epoch)
     {
         ArgumentNullException.ThrowIfNull(decision);
@@ -37,7 +40,8 @@ public partial class CachedConsentEnvelope
             RowFilterSql = decision.CombinedRowFilterSql,
             HasUnconstrainedColumnAllow = decision.HasUnconstrainedColumnAllow,
             ColumnAccess = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase),
-            DeniedReasons = new List<string>(decision.DeniedReasons)
+            DeniedReasons = new List<string>(decision.DeniedReasons),
+            RowFilterRecipeJson = decision.ConsentFilterRecipe?.ToJson()
         };
 
         foreach (var (col, level) in decision.ColumnAccess)
@@ -69,6 +73,10 @@ public partial class CachedConsentEnvelope
             colMap,
             RowFilterSql,
             DeniedReasons,
-            HasUnconstrainedColumnAllow);
+            HasUnconstrainedColumnAllow)
+        {
+            // A recipe that does not parse is dropped: a decision with row-filter text but without a recipe is not trusted as typed.
+            ConsentFilterRecipe = ConsentRowFilterRecipe.TryParse(RowFilterRecipeJson, out var recipe) ? recipe : null
+        };
     }
 }
