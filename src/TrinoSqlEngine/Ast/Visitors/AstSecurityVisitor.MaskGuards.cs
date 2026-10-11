@@ -35,13 +35,16 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         CheckNoMaskedColumnReferences(normalizedTableName, targetAlias, scope, clause);
     }
 
+    private Stack<SqlNode>? _maskGuardStack;
+
     private void CheckNoMaskedColumnReferences(string normalizedTableName, string? targetAlias, SqlNode scope, string clause)
     {
         if (_options.ColumnMaskingProvider == null)
             return;
 
         string simpleTableName = SqlIdentifierHelper.GetSimpleName(normalizedTableName);
-        var stack = new Stack<SqlNode>();
+        var stack = _maskGuardStack ??= new Stack<SqlNode>(64);   // one visitor per compile: the work stack is reused by every call
+        stack.Clear();
         stack.Push(scope);
 
         while (stack.Count > 0)

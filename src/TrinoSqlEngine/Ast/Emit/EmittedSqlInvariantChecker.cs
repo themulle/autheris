@@ -68,7 +68,7 @@ public static class EmittedSqlInvariantChecker
         VerifyTerminator(sql, dialect, statementClass, sorted);
         Array.Sort(sorted, static (a, b) => a.Start.CompareTo(b.Start));
 
-        var markersInText = new HashSet<string>(StringComparer.Ordinal);
+        var markersInText = new HashSet<string>(parameters.Length + 4, StringComparer.Ordinal);
         var markerLookup = markersInText.GetAlternateLookup<ReadOnlySpan<char>>();   // no substring for a marker that was seen already
         int i = 0;
         while (i < sql.Length)
@@ -135,7 +135,7 @@ public static class EmittedSqlInvariantChecker
             i++;
         }
 
-        var declared = new HashSet<string>(StringComparer.Ordinal);
+        var declared = new HashSet<string>(parameters.Length + 4, StringComparer.Ordinal);
         foreach (var p in parameters)
         {
             if (!declared.Add(p.Marker))

@@ -66,7 +66,7 @@ public sealed class SqlEmitterContext
         CancellationToken = cancellationToken;
         _bound = new List<BoundParameter>(8);
         _dedup = new Dictionary<DedupKey, int>(8); // string fields hash with the randomized default string comparer (SEC-ADG-05)
-        _ranges = new List<EmittedRange>(4);
+        _ranges = new List<EmittedRange>(16);
     }
 
     public ImmutableArray<BoundParameter> Parameters => _bound is null ? ImmutableArray<BoundParameter>.Empty : _bound.ToImmutableArray();

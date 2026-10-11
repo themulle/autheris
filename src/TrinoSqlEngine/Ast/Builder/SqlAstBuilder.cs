@@ -1436,14 +1436,35 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
     private static SqlQualifiedName ToSqlQualifiedName(SqlBaseParser.QualifiedNameContext context)
     {
-        var ids = context.identifier();
-        if (ids == null || ids.Length == 0)
+        // The identifier children are read straight from the parse tree: the generated identifier() accessor copies them into a list
+        // and an array first.
+        var children = context.children;
+        int count = 0;
+        if (children != null)
+        {
+            for (int i = 0; i < children.Count; i++)
+            {
+                if (children[i] is SqlBaseParser.IdentifierContext) count++;
+            }
+        }
+
+        if (count == 0)
         {
             string t = context.GetText();
             bool isQ = IsQuotedIdentifier(t);
             return new SqlQualifiedName(new[] { new SqlIdentifier(UnquoteIdentifier(t, isQ), isQ) });
         }
-        var parts = ids.Select(ToSqlIdentifier).ToList();
+
+        var parts = new SqlIdentifier[count];
+        int next = 0;
+        for (int i = 0; i < children!.Count; i++)
+        {
+            if (children[i] is SqlBaseParser.IdentifierContext identifier)
+            {
+                parts[next++] = ToSqlIdentifier(identifier);
+            }
+        }
+
         return new SqlQualifiedName(parts);
     }
 
