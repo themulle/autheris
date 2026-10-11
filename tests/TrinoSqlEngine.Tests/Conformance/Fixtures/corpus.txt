@@ -1,0 +1,656 @@
+# WP-X0t conformance corpus: group;id;Trino SQL. The expected output per dialect lives in the *.json files.
+select;select-001;SELECT a FROM t
+select;select-002;SELECT a, b, c FROM t
+select;select-003;SELECT a AS x FROM t
+select;select-004;SELECT t.a FROM t
+select;select-005;SELECT s.t.a FROM s.t
+select;select-006;SELECT x.a FROM s.t AS x
+select;select-007;SELECT * FROM t
+select;select-008;SELECT t.* FROM t
+select;select-009;SELECT DISTINCT a FROM t
+select;select-010;SELECT DISTINCT a, b FROM t
+select;select-011;SELECT a FROM t WHERE a = 1
+select;select-012;SELECT a FROM t WHERE a <> 1
+select;select-013;SELECT a FROM t WHERE a != 1
+select;select-014;SELECT a FROM t WHERE a < 1 OR a > 10
+select;select-015;SELECT a FROM t WHERE a <= 1 AND b >= 2
+select;select-016;SELECT a FROM t WHERE NOT (a = 1)
+select;select-017;SELECT a FROM t WHERE a = 1 AND (b = 2 OR c = 3)
+select;select-018;SELECT a FROM t WHERE a IS NULL
+select;select-019;SELECT a FROM t WHERE a IS NOT NULL
+select;select-020;SELECT a FROM t WHERE a IN (1, 2, 3)
+select;select-021;SELECT a FROM t WHERE a NOT IN (1, 2, 3)
+select;select-022;SELECT a FROM t WHERE a BETWEEN 1 AND 10
+select;select-023;SELECT a FROM t WHERE a NOT BETWEEN 1 AND 10
+select;select-024;SELECT a FROM t WHERE a LIKE 'x%'
+select;select-025;SELECT a FROM t WHERE a NOT LIKE '%x'
+select;select-026;SELECT a FROM t WHERE a LIKE 'x!%' ESCAPE '!'
+select;select-027;SELECT a FROM t WHERE a = b
+select;select-028;SELECT a + b AS s FROM t
+select;select-029;SELECT "select" FROM "from"
+select;select-030;SELECT "Mixed Case" FROM "My Table"
+select;select-031;SELECT a FROM t WHERE a = 'it''s'
+select;select-032;SELECT 1
+select;select-033;TABLE t
+select;select-034;SELECT 1 + 2
+select;select-035;SELECT 'x'
+select;select-036;SELECT NULL
+select;select-037;SELECT TRUE, FALSE
+literal;literal-001;SELECT 0 FROM t
+literal;literal-002;SELECT 42 FROM t
+literal;literal-003;SELECT -42 FROM t
+literal;literal-004;SELECT 2147483647 FROM t
+literal;literal-005;SELECT 2147483648 FROM t
+literal;literal-006;SELECT 9223372036854775807 FROM t
+literal;literal-007;SELECT 1.5 FROM t
+literal;literal-008;SELECT 0.0001 FROM t
+literal;literal-009;SELECT -3.14159 FROM t
+literal;literal-010;SELECT 1E3 FROM t
+literal;literal-011;SELECT 1.5E-3 FROM t
+literal;literal-012;SELECT DECIMAL '12.50' FROM t
+literal;literal-013;SELECT '' FROM t
+literal;literal-014;SELECT 'abc' FROM t
+literal;literal-015;SELECT 'a''b' FROM t
+literal;literal-016;SELECT 'a\b' FROM t
+literal;literal-017;SELECT 'with -- comment' FROM t
+literal;literal-018;SELECT 'semi;colon' FROM t
+literal;literal-019;SELECT U&'\0041' FROM t
+literal;literal-020;SELECT X'ABCD' FROM t
+literal;literal-021;SELECT TRUE FROM t
+literal;literal-022;SELECT FALSE FROM t
+literal;literal-023;SELECT NULL FROM t
+literal;literal-024;SELECT CAST(NULL AS integer) FROM t
+literal;literal-025;SELECT DATE '2024-01-15' FROM t
+literal;literal-026;SELECT TIMESTAMP '2024-01-15 10:30:00' FROM t
+literal;literal-027;SELECT TIMESTAMP '2024-01-15 10:30:00.123' FROM t
+literal;literal-028;SELECT TIME '10:30:00' FROM t
+literal;literal-029;SELECT TIMESTAMP '2024-01-15 10:30:00 UTC' FROM t
+literal;literal-030;SELECT INTERVAL '1' DAY FROM t
+literal;literal-031;SELECT INTERVAL '2' MONTH FROM t
+literal;literal-032;SELECT INTERVAL '3' YEAR FROM t
+literal;literal-033;SELECT INTERVAL '4' HOUR FROM t
+literal;literal-034;SELECT INTERVAL '30' SECOND FROM t
+literal;literal-035;SELECT a FROM t WHERE a = 1 AND b = 1
+literal;literal-036;SELECT a FROM t WHERE a = 'x' AND b = 'x'
+literal;literal-037;SELECT a FROM t WHERE a = 1.5
+literal;literal-038;SELECT a FROM t WHERE d = DATE '2024-01-15'
+literal;literal-039;SELECT a FROM t WHERE ts > TIMESTAMP '2024-01-15 10:30:00'
+operator;operator-001;SELECT a + b AS r FROM t
+operator;operator-002;SELECT a - b AS r FROM t
+operator;operator-003;SELECT a * b AS r FROM t
+operator;operator-004;SELECT a / b AS r FROM t
+operator;operator-005;SELECT a % b AS r FROM t
+operator;operator-006;SELECT -a AS r FROM t
+operator;operator-007;SELECT +a AS r FROM t
+operator;operator-008;SELECT a + b * c AS r FROM t
+operator;operator-009;SELECT (a + b) * c AS r FROM t
+operator;operator-010;SELECT a - (b - c) AS r FROM t
+operator;operator-011;SELECT a / (b * c) AS r FROM t
+operator;operator-012;SELECT a || b AS r FROM t
+operator;operator-013;SELECT a || 'x' || b AS r FROM t
+operator;operator-014;SELECT a = b AS r FROM t
+operator;operator-015;SELECT a <> b AS r FROM t
+operator;operator-016;SELECT a < b AS r FROM t
+operator;operator-017;SELECT a >= b AS r FROM t
+operator;operator-018;SELECT a IS DISTINCT FROM b AS r FROM t
+operator;operator-019;SELECT a IS NOT DISTINCT FROM b AS r FROM t
+operator;operator-020;SELECT a IS NULL AS r FROM t
+operator;operator-021;SELECT a IS NOT NULL AS r FROM t
+operator;operator-022;SELECT a AND b AS r FROM t
+operator;operator-023;SELECT a OR b AND c AS r FROM t
+operator;operator-024;SELECT NOT a AS r FROM t
+operator;operator-025;SELECT a LIKE b AS r FROM t
+operator;operator-026;SELECT a BETWEEN b AND c AS r FROM t
+operator;operator-027;SELECT a IN (b, c) AS r FROM t
+operator;operator-028;SELECT a IN (1, 2, 3) AS r FROM t
+operator;operator-029;SELECT a NOT IN ('x', 'y') AS r FROM t
+operator;operator-030;SELECT CASE WHEN a = 1 THEN 'one' ELSE 'other' END AS r FROM t
+operator;operator-031;SELECT CASE WHEN a = 1 THEN 'one' WHEN a = 2 THEN 'two' END AS r FROM t
+operator;operator-032;SELECT CASE a WHEN 1 THEN 'one' WHEN 2 THEN 'two' ELSE 'many' END AS r FROM t
+operator;operator-033;SELECT COALESCE(a, b) AS r FROM t
+operator;operator-034;SELECT COALESCE(a, b, 0) AS r FROM t
+operator;operator-035;SELECT NULLIF(a, 0) AS r FROM t
+operator;operator-036;SELECT IF(a > 1, 'y', 'n') AS r FROM t
+operator;operator-037;SELECT IF(a > 1, 'y') AS r FROM t
+operator;operator-038;SELECT GREATEST(a, b) AS r FROM t
+operator;operator-039;SELECT LEAST(a, b, c) AS r FROM t
+operator;operator-040;SELECT a[1] AS r FROM t
+operator;operator-041;SELECT ARRAY[1, 2, 3] AS r FROM t
+operator;operator-042;SELECT ROW(1, 'a') AS r FROM t
+operator;operator-043;SELECT (a, b) AS r FROM t
+cast;cast-001;SELECT CAST(a AS boolean) AS c FROM t
+cast;cast-002;SELECT CAST(a AS tinyint) AS c FROM t
+cast;cast-003;SELECT CAST(a AS smallint) AS c FROM t
+cast;cast-004;SELECT CAST(a AS integer) AS c FROM t
+cast;cast-005;SELECT CAST(a AS int) AS c FROM t
+cast;cast-006;SELECT CAST(a AS bigint) AS c FROM t
+cast;cast-007;SELECT CAST(a AS real) AS c FROM t
+cast;cast-008;SELECT CAST(a AS double) AS c FROM t
+cast;cast-009;SELECT CAST(a AS decimal) AS c FROM t
+cast;cast-010;SELECT CAST(a AS decimal(10, 2)) AS c FROM t
+cast;cast-011;SELECT CAST(a AS decimal(38, 0)) AS c FROM t
+cast;cast-012;SELECT CAST(a AS numeric(5, 1)) AS c FROM t
+cast;cast-013;SELECT CAST(a AS varchar) AS c FROM t
+cast;cast-014;SELECT CAST(a AS varchar(20)) AS c FROM t
+cast;cast-015;SELECT CAST(a AS char(5)) AS c FROM t
+cast;cast-016;SELECT CAST(a AS char) AS c FROM t
+cast;cast-017;SELECT CAST(a AS varbinary) AS c FROM t
+cast;cast-018;SELECT CAST(a AS date) AS c FROM t
+cast;cast-019;SELECT CAST(a AS time) AS c FROM t
+cast;cast-020;SELECT CAST(a AS timestamp) AS c FROM t
+cast;cast-021;SELECT CAST(a AS timestamp(3)) AS c FROM t
+cast;cast-022;SELECT CAST(a AS timestamp with time zone) AS c FROM t
+cast;cast-023;SELECT CAST(a AS time with time zone) AS c FROM t
+cast;cast-024;SELECT CAST(a AS double precision) AS c FROM t
+cast;cast-025;SELECT CAST(a AS json) AS c FROM t
+cast;cast-026;SELECT CAST(a AS uuid) AS c FROM t
+cast;trycast-001;SELECT TRY_CAST(a AS integer) AS c FROM t
+cast;trycast-002;SELECT TRY_CAST(a AS bigint) AS c FROM t
+cast;trycast-003;SELECT TRY_CAST(a AS double) AS c FROM t
+cast;trycast-004;SELECT TRY_CAST(a AS varchar) AS c FROM t
+cast;trycast-005;SELECT TRY_CAST(a AS date) AS c FROM t
+cast;trycast-006;SELECT TRY_CAST(a AS timestamp) AS c FROM t
+cast;trycast-007;SELECT TRY_CAST(a AS decimal(10, 2)) AS c FROM t
+cast;castx-001;SELECT CAST(a AS varchar) || CAST(b AS varchar) FROM t
+cast;castx-002;SELECT CAST(CAST(a AS integer) AS varchar) FROM t
+cast;castx-003;SELECT CAST('2024-01-15' AS date) FROM t
+cast;castx-004;SELECT CAST(1 AS double) FROM t
+cast;castx-005;SELECT CAST(a + b AS bigint) FROM t
+fn-string;fn-string-001;SELECT lower(a) AS r FROM t
+fn-string;fn-string-002;SELECT upper(a) AS r FROM t
+fn-string;fn-string-003;SELECT length(a) AS r FROM t
+fn-string;fn-string-004;SELECT trim(a) AS r FROM t
+fn-string;fn-string-005;SELECT ltrim(a) AS r FROM t
+fn-string;fn-string-006;SELECT rtrim(a) AS r FROM t
+fn-string;fn-string-007;SELECT reverse(a) AS r FROM t
+fn-string;fn-string-008;SELECT concat(a, b) AS r FROM t
+fn-string;fn-string-009;SELECT concat(a, b, c) AS r FROM t
+fn-string;fn-string-010;SELECT substr(a, 2) AS r FROM t
+fn-string;fn-string-011;SELECT substr(a, 2, 3) AS r FROM t
+fn-string;fn-string-012;SELECT substring(a, 2) AS r FROM t
+fn-string;fn-string-013;SELECT substring(a FROM 2 FOR 3) AS r FROM t
+fn-string;fn-string-014;SELECT strpos(a, 'x') AS r FROM t
+fn-string;fn-string-015;SELECT position('x' IN a) AS r FROM t
+fn-string;fn-string-016;SELECT replace(a, 'x', 'y') AS r FROM t
+fn-string;fn-string-017;SELECT replace(a, 'x') AS r FROM t
+fn-string;fn-string-018;SELECT lpad(a, 5, '0') AS r FROM t
+fn-string;fn-string-019;SELECT rpad(a, 5, '0') AS r FROM t
+fn-string;fn-string-020;SELECT split_part(a, ',', 1) AS r FROM t
+fn-string;fn-string-021;SELECT starts_with(a, 'x') AS r FROM t
+fn-string;fn-string-022;SELECT chr(65) AS r FROM t
+fn-string;fn-string-023;SELECT codepoint(a) AS r FROM t
+fn-string;fn-string-024;SELECT trim(BOTH 'x' FROM a) AS r FROM t
+fn-string;fn-string-025;SELECT trim(LEADING 'x' FROM a) AS r FROM t
+fn-string;fn-string-026;SELECT trim(TRAILING 'x' FROM a) AS r FROM t
+fn-string;fn-string-027;SELECT left(a, 2) AS r FROM t
+fn-string;fn-string-028;SELECT right(a, 2) AS r FROM t
+fn-string;fn-string-029;SELECT regexp_like(a, 'x.*') AS r FROM t
+fn-string;fn-string-030;SELECT regexp_replace(a, 'x', 'y') AS r FROM t
+fn-string;fn-string-031;SELECT regexp_extract(a, 'x(.)') AS r FROM t
+fn-string;fn-string-032;SELECT to_hex(a) AS r FROM t
+fn-string;fn-string-033;SELECT from_hex(a) AS r FROM t
+fn-string;fn-string-034;SELECT md5(a) AS r FROM t
+fn-string;fn-string-035;SELECT sha256(a) AS r FROM t
+fn-string;fn-string-036;SELECT translate(a, 'ab', 'cd') AS r FROM t
+fn-string;fn-string-037;SELECT initcap(a) AS r FROM t
+fn-string;fn-string-038;SELECT repeat(a, 3) AS r FROM t
+fn-string;fn-string-039;SELECT contains(a, 'x') AS r FROM t
+fn-string;fn-string-040;SELECT ends_with(a, 'x') AS r FROM t
+fn-string;fn-string-041;SELECT url_encode(a) AS r FROM t
+fn-string;fn-string-042;SELECT to_utf8(a) AS r FROM t
+fn-string;fn-string-043;SELECT from_utf8(a) AS r FROM t
+fn-string;fn-string-044;SELECT format('%s-%s', a, b) AS r FROM t
+fn-string;fn-string-045;SELECT luhn_check(a) AS r FROM t
+fn-string;fn-string-046;SELECT soundex(a) AS r FROM t
+fn-string;fn-string-047;SELECT levenshtein_distance(a, b) AS r FROM t
+fn-string;fn-string-048;SELECT word_stem(a) AS r FROM t
+fn-string;fn-string-049;SELECT normalize(a) AS r FROM t
+fn-string;fn-string-050;SELECT bit_length(a) AS r FROM t
+fn-string;fn-string-051;SELECT octet_length(a) AS r FROM t
+fn-string;fn-string-052;SELECT char_length(a) AS r FROM t
+fn-string;fn-string-053;SELECT character_length(a) AS r FROM t
+fn-string;fn-string-054;SELECT hamming_distance(a, b) AS r FROM t
+fn-math;fn-math-001;SELECT abs(a) AS r FROM t
+fn-math;fn-math-002;SELECT ceil(a) AS r FROM t
+fn-math;fn-math-003;SELECT ceiling(a) AS r FROM t
+fn-math;fn-math-004;SELECT floor(a) AS r FROM t
+fn-math;fn-math-005;SELECT round(a) AS r FROM t
+fn-math;fn-math-006;SELECT round(a, 2) AS r FROM t
+fn-math;fn-math-007;SELECT truncate(a) AS r FROM t
+fn-math;fn-math-008;SELECT truncate(a, 2) AS r FROM t
+fn-math;fn-math-009;SELECT sqrt(a) AS r FROM t
+fn-math;fn-math-010;SELECT cbrt(a) AS r FROM t
+fn-math;fn-math-011;SELECT exp(a) AS r FROM t
+fn-math;fn-math-012;SELECT ln(a) AS r FROM t
+fn-math;fn-math-013;SELECT log10(a) AS r FROM t
+fn-math;fn-math-014;SELECT log2(a) AS r FROM t
+fn-math;fn-math-015;SELECT log(2, a) AS r FROM t
+fn-math;fn-math-016;SELECT power(a, 2) AS r FROM t
+fn-math;fn-math-017;SELECT pow(a, 2) AS r FROM t
+fn-math;fn-math-018;SELECT mod(a, 3) AS r FROM t
+fn-math;fn-math-019;SELECT sign(a) AS r FROM t
+fn-math;fn-math-020;SELECT sin(a) AS r FROM t
+fn-math;fn-math-021;SELECT cos(a) AS r FROM t
+fn-math;fn-math-022;SELECT tan(a) AS r FROM t
+fn-math;fn-math-023;SELECT asin(a) AS r FROM t
+fn-math;fn-math-024;SELECT acos(a) AS r FROM t
+fn-math;fn-math-025;SELECT atan(a) AS r FROM t
+fn-math;fn-math-026;SELECT atan2(a, b) AS r FROM t
+fn-math;fn-math-027;SELECT sinh(a) AS r FROM t
+fn-math;fn-math-028;SELECT cosh(a) AS r FROM t
+fn-math;fn-math-029;SELECT tanh(a) AS r FROM t
+fn-math;fn-math-030;SELECT degrees(a) AS r FROM t
+fn-math;fn-math-031;SELECT radians(a) AS r FROM t
+fn-math;fn-math-032;SELECT pi() AS r FROM t
+fn-math;fn-math-033;SELECT e() AS r FROM t
+fn-math;fn-math-034;SELECT random() AS r FROM t
+fn-math;fn-math-035;SELECT rand() AS r FROM t
+fn-math;fn-math-036;SELECT random(10) AS r FROM t
+fn-math;fn-math-037;SELECT is_nan(a) AS r FROM t
+fn-math;fn-math-038;SELECT is_finite(a) AS r FROM t
+fn-math;fn-math-039;SELECT is_infinite(a) AS r FROM t
+fn-math;fn-math-040;SELECT nan() AS r FROM t
+fn-math;fn-math-041;SELECT infinity() AS r FROM t
+fn-math;fn-math-042;SELECT width_bucket(a, 0, 10, 5) AS r FROM t
+fn-math;fn-math-043;SELECT bitwise_and(a, b) AS r FROM t
+fn-math;fn-math-044;SELECT bitwise_or(a, b) AS r FROM t
+fn-math;fn-math-045;SELECT bitwise_xor(a, b) AS r FROM t
+fn-math;fn-math-046;SELECT bitwise_not(a) AS r FROM t
+fn-math;fn-math-047;SELECT from_base('ff', 16) AS r FROM t
+fn-math;fn-math-048;SELECT to_base(a, 16) AS r FROM t
+fn-math;fn-math-049;SELECT cosine_similarity(a, b) AS r FROM t
+fn-math;fn-math-050;SELECT div(a, b) AS r FROM t
+fn-date;fn-date-001;SELECT current_date AS r FROM t
+fn-date;fn-date-002;SELECT current_timestamp AS r FROM t
+fn-date;fn-date-003;SELECT current_time AS r FROM t
+fn-date;fn-date-004;SELECT localtime AS r FROM t
+fn-date;fn-date-005;SELECT localtimestamp AS r FROM t
+fn-date;fn-date-006;SELECT now() AS r FROM t
+fn-date;fn-date-007;SELECT year(d) AS r FROM t
+fn-date;fn-date-008;SELECT month(d) AS r FROM t
+fn-date;fn-date-009;SELECT day(d) AS r FROM t
+fn-date;fn-date-010;SELECT hour(ts) AS r FROM t
+fn-date;fn-date-011;SELECT minute(ts) AS r FROM t
+fn-date;fn-date-012;SELECT second(ts) AS r FROM t
+fn-date;fn-date-013;SELECT quarter(d) AS r FROM t
+fn-date;fn-date-014;SELECT week(d) AS r FROM t
+fn-date;fn-date-015;SELECT day_of_week(d) AS r FROM t
+fn-date;fn-date-016;SELECT day_of_year(d) AS r FROM t
+fn-date;fn-date-017;SELECT dow(d) AS r FROM t
+fn-date;fn-date-018;SELECT doy(d) AS r FROM t
+fn-date;fn-date-019;SELECT date_diff('day', d1, d2) AS r FROM t
+fn-date;fn-date-020;SELECT date_diff('month', d1, d2) AS r FROM t
+fn-date;fn-date-021;SELECT date_diff('second', ts1, ts2) AS r FROM t
+fn-date;fn-date-022;SELECT date(ts) AS r FROM t
+fn-date;fn-date-023;SELECT to_unixtime(ts) AS r FROM t
+fn-date;fn-date-024;SELECT from_unixtime(a) AS r FROM t
+fn-date;fn-date-025;SELECT last_day_of_month(d) AS r FROM t
+fn-date;fn-date-026;SELECT format_datetime(ts, 'yyyy-MM-dd') AS r FROM t
+fn-date;fn-date-027;SELECT date_format(ts, '%Y-%m-%d') AS r FROM t
+fn-date;fn-date-028;SELECT date_parse('2024-01-15', '%Y-%m-%d') AS r FROM t
+fn-date;fn-date-029;SELECT parse_datetime('2024-01-15', 'yyyy-MM-dd') AS r FROM t
+fn-date;fn-date-030;SELECT to_iso8601(ts) AS r FROM t
+fn-date;fn-date-031;SELECT from_iso8601_date('2024-01-15') AS r FROM t
+fn-date;fn-date-032;SELECT EXTRACT(year FROM d) AS r FROM t
+fn-date;fn-date-033;SELECT EXTRACT(month FROM d) AS r FROM t
+fn-date;fn-date-034;SELECT EXTRACT(day FROM d) AS r FROM t
+fn-date;fn-date-035;SELECT EXTRACT(hour FROM ts) AS r FROM t
+fn-date;fn-date-036;SELECT EXTRACT(minute FROM ts) AS r FROM t
+fn-date;fn-date-037;SELECT EXTRACT(second FROM ts) AS r FROM t
+fn-date;fn-date-038;SELECT EXTRACT(dow FROM d) AS r FROM t
+fn-date;fn-date-039;SELECT EXTRACT(doy FROM d) AS r FROM t
+fn-date;fn-date-040;SELECT EXTRACT(quarter FROM d) AS r FROM t
+fn-date;fn-date-041;SELECT EXTRACT(week FROM d) AS r FROM t
+fn-date;fn-date-042;SELECT EXTRACT(epoch FROM ts) AS r FROM t
+fn-date;fn-date-043;SELECT at_timezone(ts, 'UTC') AS r FROM t
+fn-date;fn-date-044;SELECT with_timezone(ts, 'UTC') AS r FROM t
+fn-date;fn-date-045;SELECT timezone_hour(ts) AS r FROM t
+fn-date;fn-date-046;SELECT millisecond(ts) AS r FROM t
+fn-date;fn-date-047;SELECT human_readable_seconds(a) AS r FROM t
+fn-date;fn-date-048;SELECT to_milliseconds(a) AS r FROM t
+date-translated;date-translated-001;SELECT date_trunc('day', ts) AS r FROM t
+date-translated;date-translated-002;SELECT date_trunc('month', ts) AS r FROM t
+date-translated;date-translated-003;SELECT date_trunc('year', ts) AS r FROM t
+date-translated;date-translated-004;SELECT date_trunc('hour', ts) AS r FROM t
+date-translated;date-translated-005;SELECT date_trunc('week', d) AS r FROM t
+date-translated;date-translated-006;SELECT date_trunc('minute', ts) AS r FROM t
+date-translated;date-translated-007;SELECT date_trunc('second', ts) AS r FROM t
+date-translated;date-translated-008;SELECT date_add('day', 1, d) AS r FROM t
+date-translated;date-translated-009;SELECT date_add('month', 2, d) AS r FROM t
+date-translated;date-translated-010;SELECT date_add('hour', 3, ts) AS r FROM t
+date-translated;date-translated-011;SELECT date_add('year', -1, d) AS r FROM t
+date-translated;date-translated-012;SELECT date_add('week', 2, d) AS r FROM t
+date-translated;date-translated-013;SELECT date_add('minute', 5, ts) AS r FROM t
+date-translated;date-translated-014;SELECT date_add('second', 30, ts) AS r FROM t
+date-translated;date-translated-015;SELECT d + INTERVAL '1' DAY AS r FROM t
+date-translated;date-translated-016;SELECT d - INTERVAL '1' MONTH AS r FROM t
+date-translated;date-translated-017;SELECT ts + INTERVAL '2' HOUR AS r FROM t
+date-translated;date-translated-018;SELECT INTERVAL '3' DAY + d AS r FROM t
+date-translated;date-translated-019;SELECT ts - INTERVAL '15' MINUTE AS r FROM t
+date-translated;date-translated-020;SELECT d + INTERVAL '2' YEAR AS r FROM t
+date-translated;date-translated-021;SELECT date_diff('day', d1, d2) AS r FROM t
+fn-misc;fn-misc-001;SELECT typeof(a) AS r FROM t
+fn-misc;fn-misc-002;SELECT json_extract_scalar(j, '$.a') AS r FROM t
+fn-misc;fn-misc-003;SELECT json_extract(j, '$.a') AS r FROM t
+fn-misc;fn-misc-004;SELECT json_array_length(j) AS r FROM t
+fn-misc;fn-misc-005;SELECT json_format(j) AS r FROM t
+fn-misc;fn-misc-006;SELECT json_parse(a) AS r FROM t
+fn-misc;fn-misc-007;SELECT is_json_scalar(j) AS r FROM t
+fn-misc;fn-misc-008;SELECT cardinality(arr) AS r FROM t
+fn-misc;fn-misc-009;SELECT element_at(arr, 1) AS r FROM t
+fn-misc;fn-misc-010;SELECT contains(arr, 1) AS r FROM t
+fn-misc;fn-misc-011;SELECT array_join(arr, ',') AS r FROM t
+fn-misc;fn-misc-012;SELECT array_sort(arr) AS r FROM t
+fn-misc;fn-misc-013;SELECT array_distinct(arr) AS r FROM t
+fn-misc;fn-misc-014;SELECT array_max(arr) AS r FROM t
+fn-misc;fn-misc-015;SELECT array_min(arr) AS r FROM t
+fn-misc;fn-misc-016;SELECT slice(arr, 1, 2) AS r FROM t
+fn-misc;fn-misc-017;SELECT map_keys(m) AS r FROM t
+fn-misc;fn-misc-018;SELECT map_values(m) AS r FROM t
+fn-misc;fn-misc-019;SELECT element_at(m, 'k') AS r FROM t
+fn-misc;fn-misc-020;SELECT uuid() AS r FROM t
+fn-misc;fn-misc-021;SELECT from_base64(a) AS r FROM t
+fn-misc;fn-misc-022;SELECT to_base64(a) AS r FROM t
+fn-misc;fn-misc-023;SELECT crc32(a) AS r FROM t
+fn-misc;fn-misc-024;SELECT xxhash64(a) AS r FROM t
+fn-misc;fn-misc-025;SELECT hmac_sha256(a, b) AS r FROM t
+fn-misc;fn-misc-026;SELECT sha1(a) AS r FROM t
+fn-misc;fn-misc-027;SELECT sha512(a) AS r FROM t
+fn-misc;fn-misc-028;SELECT sha384(a) AS r FROM t
+fn-misc;fn-misc-029;SELECT bar(a, 10) AS r FROM t
+fn-misc;fn-misc-030;SELECT try(a / b) AS r FROM t
+fn-misc;fn-misc-031;SELECT current_user AS r FROM t
+fn-misc;fn-misc-032;SELECT current_catalog AS r FROM t
+fn-misc;fn-misc-033;SELECT current_schema AS r FROM t
+fn-misc;fn-misc-034;SELECT version() AS r FROM t
+fn-misc;fn-misc-035;SELECT a AT TIME ZONE 'UTC' AS r FROM t
+fn-misc;fn-misc-036;SELECT map(arr1, arr2) AS r FROM t
+fn-misc;fn-misc-037;SELECT transform(arr, x -> x + 1) AS r FROM t
+fn-misc;fn-misc-038;SELECT filter(arr, x -> x > 1) AS r FROM t
+fn-misc;fn-misc-039;SELECT reduce(arr, 0, (s, x) -> s + x, s -> s) AS r FROM t
+fn-misc;fn-misc-040;SELECT any_match(arr, x -> x > 1) AS r FROM t
+fn-misc;fn-misc-041;SELECT zip(arr1, arr2) AS r FROM t
+fn-misc;fn-misc-042;SELECT flatten(arr) AS r FROM t
+agg;agg-001;SELECT count(*) AS r FROM t
+agg;agg-002;SELECT count(a) AS r FROM t
+agg;agg-003;SELECT count(DISTINCT a) AS r FROM t
+agg;agg-004;SELECT sum(a) AS r FROM t
+agg;agg-005;SELECT sum(DISTINCT a) AS r FROM t
+agg;agg-006;SELECT avg(a) AS r FROM t
+agg;agg-007;SELECT min(a) AS r FROM t
+agg;agg-008;SELECT max(a) AS r FROM t
+agg;agg-009;SELECT stddev(a) AS r FROM t
+agg;agg-010;SELECT stddev_pop(a) AS r FROM t
+agg;agg-011;SELECT stddev_samp(a) AS r FROM t
+agg;agg-012;SELECT variance(a) AS r FROM t
+agg;agg-013;SELECT var_pop(a) AS r FROM t
+agg;agg-014;SELECT var_samp(a) AS r FROM t
+agg;agg-015;SELECT bool_and(a) AS r FROM t
+agg;agg-016;SELECT bool_or(a) AS r FROM t
+agg;agg-017;SELECT every(a) AS r FROM t
+agg;agg-018;SELECT bit_and(a) AS r FROM t
+agg;agg-019;SELECT count_if(a > 1) AS r FROM t
+agg;agg-020;SELECT arbitrary(a) AS r FROM t
+agg;agg-021;SELECT any_value(a) AS r FROM t
+agg;agg-022;SELECT array_agg(a) AS r FROM t
+agg;agg-023;SELECT array_agg(a ORDER BY b) AS r FROM t
+agg;agg-024;SELECT string_agg(a, ',') AS r FROM t
+agg;agg-025;SELECT listagg(a, ',') WITHIN GROUP (ORDER BY b) AS r FROM t
+agg;agg-026;SELECT max_by(a, b) AS r FROM t
+agg;agg-027;SELECT min_by(a, b) AS r FROM t
+agg;agg-028;SELECT approx_distinct(a) AS r FROM t
+agg;agg-029;SELECT approx_percentile(a, 0.5) AS r FROM t
+agg;agg-030;SELECT corr(a, b) AS r FROM t
+agg;agg-031;SELECT covar_pop(a, b) AS r FROM t
+agg;agg-032;SELECT covar_samp(a, b) AS r FROM t
+agg;agg-033;SELECT regr_slope(a, b) AS r FROM t
+agg;agg-034;SELECT geometric_mean(a) AS r FROM t
+agg;agg-035;SELECT sum(a) FILTER (WHERE b > 1) AS r FROM t
+agg;agg-036;SELECT count(*) FILTER (WHERE b > 1) AS r FROM t
+agg;agg-037;SELECT avg(a) FILTER (WHERE b IS NOT NULL) AS r FROM t
+agg;agg-038;SELECT checksum(a) AS r FROM t
+agg;agg-039;SELECT histogram(a) AS r FROM t
+agg;agg-040;SELECT map_agg(a, b) AS r FROM t
+window;window-001;SELECT row_number() OVER (ORDER BY a) AS r FROM t
+window;window-002;SELECT rank() OVER (ORDER BY a) AS r FROM t
+window;window-003;SELECT dense_rank() OVER (ORDER BY a) AS r FROM t
+window;window-004;SELECT percent_rank() OVER (ORDER BY a) AS r FROM t
+window;window-005;SELECT cume_dist() OVER (ORDER BY a) AS r FROM t
+window;window-006;SELECT ntile(4) OVER (ORDER BY a) AS r FROM t
+window;window-007;SELECT lag(a) OVER (ORDER BY b) AS r FROM t
+window;window-008;SELECT lag(a, 2) OVER (ORDER BY b) AS r FROM t
+window;window-009;SELECT lag(a, 2, 0) OVER (ORDER BY b) AS r FROM t
+window;window-010;SELECT lead(a) OVER (ORDER BY b) AS r FROM t
+window;window-011;SELECT lead(a, 1, 0) OVER (ORDER BY b) AS r FROM t
+window;window-012;SELECT first_value(a) OVER (ORDER BY b) AS r FROM t
+window;window-013;SELECT last_value(a) OVER (ORDER BY b) AS r FROM t
+window;window-014;SELECT nth_value(a, 2) OVER (ORDER BY b) AS r FROM t
+window;window-015;SELECT sum(a) OVER (PARTITION BY b) AS r FROM t
+window;window-016;SELECT sum(a) OVER (PARTITION BY b ORDER BY c) AS r FROM t
+window;window-017;SELECT avg(a) OVER (ORDER BY b ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) AS r FROM t
+window;window-018;SELECT sum(a) OVER (ORDER BY b ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS r FROM t
+window;window-019;SELECT sum(a) OVER (ORDER BY b ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS r FROM t
+window;window-020;SELECT sum(a) OVER (ORDER BY b RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS r FROM t
+window;window-021;SELECT count(*) OVER () AS r FROM t
+window;window-022;SELECT min(a) OVER (PARTITION BY b ORDER BY c DESC NULLS LAST) AS r FROM t
+window;window-023;SELECT max(a) OVER (ORDER BY b ROWS 3 PRECEDING) AS r FROM t
+window;window-024;SELECT sum(a) OVER (ORDER BY b ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) AS r FROM t
+window;window-025;SELECT row_number() OVER (PARTITION BY a ORDER BY b DESC, c ASC) AS r FROM t
+window;window-026;SELECT lag(a) IGNORE NULLS OVER (ORDER BY b) AS r FROM t
+window;window-named-001;SELECT sum(a) OVER w AS r FROM t WINDOW w AS (PARTITION BY b ORDER BY c)
+source;source-001;SELECT a FROM t1 JOIN t2 ON t1.id = t2.id
+source;source-002;SELECT a FROM t1 INNER JOIN t2 ON t1.id = t2.id
+source;source-003;SELECT a FROM t1 LEFT JOIN t2 ON t1.id = t2.id
+source;source-004;SELECT a FROM t1 LEFT OUTER JOIN t2 ON t1.id = t2.id
+source;source-005;SELECT a FROM t1 RIGHT JOIN t2 ON t1.id = t2.id
+source;source-006;SELECT a FROM t1 FULL JOIN t2 ON t1.id = t2.id
+source;source-007;SELECT a FROM t1 FULL OUTER JOIN t2 ON t1.id = t2.id
+source;source-008;SELECT a FROM t1 CROSS JOIN t2
+source;source-009;SELECT a FROM t1, t2
+source;source-010;SELECT a FROM t1 JOIN t2 USING (id)
+source;source-011;SELECT a FROM t1 JOIN t2 USING (id, k)
+source;source-012;SELECT a FROM t1 NATURAL JOIN t2
+source;source-013;SELECT a FROM t1 JOIN t2 ON t1.id = t2.id AND t1.k > 5
+source;source-014;SELECT a FROM t1 JOIN t2 ON t1.id = t2.id JOIN t3 ON t2.id = t3.id
+source;source-015;SELECT a FROM t1 JOIN (t2 JOIN t3 ON t2.id = t3.id) ON t1.id = t2.id
+source;source-016;SELECT x.a FROM (SELECT a FROM t) AS x
+source;source-017;SELECT x.a FROM (SELECT a FROM t) x
+source;source-018;SELECT x.a FROM (SELECT a FROM t WHERE a > 1) AS x WHERE x.a < 10
+source;source-019;SELECT x.a, y.b FROM (SELECT a FROM t1) AS x JOIN (SELECT b FROM t2) AS y ON x.a = y.b
+source;source-020;SELECT * FROM (VALUES (1, 'a'), (2, 'b')) AS v (x, y)
+source;source-021;SELECT * FROM (VALUES 1, 2, 3) AS v (x)
+source;source-022;VALUES (1, 'a'), (2, 'b')
+source;source-023;SELECT a FROM t1 AS x JOIN t2 AS y ON x.id = y.id
+source;source-024;SELECT a FROM t1 CROSS JOIN LATERAL (SELECT b FROM t2 WHERE t2.id = t1.id) AS l
+source;source-025;SELECT a FROM t1 LEFT JOIN LATERAL (SELECT b FROM t2 WHERE t2.id = t1.id) AS l ON TRUE
+source;source-026;SELECT a FROM t1 AS x (c1, c2)
+source;source-027;SELECT a FROM UNNEST(ARRAY[1, 2]) AS u (x)
+source;source-028;SELECT a FROM cat.s.t
+source;source-029;SELECT a FROM cat.s.t AS x
+source;source-030;SELECT a FROM t TABLESAMPLE BERNOULLI (10)
+subquery;subquery-001;SELECT a FROM t WHERE a IN (SELECT a FROM u)
+subquery;subquery-002;SELECT a FROM t WHERE a NOT IN (SELECT a FROM u)
+subquery;subquery-003;SELECT a FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.a = t.a)
+subquery;subquery-004;SELECT a FROM t WHERE NOT EXISTS (SELECT 1 FROM u WHERE u.a = t.a)
+subquery;subquery-005;SELECT (SELECT max(b) FROM u) AS m FROM t
+subquery;subquery-006;SELECT a FROM t WHERE a > (SELECT avg(a) FROM t)
+subquery;subquery-007;SELECT a FROM t WHERE a = ANY (SELECT a FROM u)
+subquery;subquery-008;SELECT a FROM t WHERE a > ALL (SELECT a FROM u)
+subquery;subquery-009;SELECT a FROM t WHERE a = SOME (SELECT a FROM u)
+subquery;subquery-010;SELECT a FROM t WHERE a < ALL (SELECT a FROM u)
+subquery;subquery-011;SELECT a, (SELECT count(*) FROM u WHERE u.a = t.a) AS c FROM t
+subquery;subquery-012;SELECT a FROM t WHERE (a, b) IN (SELECT a, b FROM u)
+subquery;subquery-013;SELECT a FROM t WHERE a IN (SELECT a FROM u WHERE b IN (SELECT b FROM v))
+subquery;subquery-014;SELECT a FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.a = t.a AND EXISTS (SELECT 1 FROM v WHERE v.a = u.a))
+subquery;subquery-015;SELECT a FROM t GROUP BY a HAVING sum(b) > (SELECT avg(b) FROM u)
+subquery;subquery-016;SELECT a FROM t ORDER BY (SELECT max(b) FROM u)
+subquery;subquery-017;SELECT CASE WHEN EXISTS (SELECT 1 FROM u) THEN 1 ELSE 0 END FROM t
+setop;setop-001;SELECT a FROM t UNION SELECT a FROM u
+setop;setop-002;SELECT a FROM t UNION ALL SELECT a FROM u
+setop;setop-003;SELECT a FROM t INTERSECT SELECT a FROM u
+setop;setop-004;SELECT a FROM t INTERSECT ALL SELECT a FROM u
+setop;setop-005;SELECT a FROM t EXCEPT SELECT a FROM u
+setop;setop-006;SELECT a FROM t EXCEPT ALL SELECT a FROM u
+setop;setop-007;SELECT a FROM t UNION SELECT a FROM u UNION SELECT a FROM v
+setop;setop-008;SELECT a FROM t UNION ALL SELECT a FROM u ORDER BY a
+setop;setop-009;SELECT a FROM t UNION ALL SELECT a FROM u ORDER BY a LIMIT 5
+setop;setop-010;(SELECT a FROM t) UNION ALL (SELECT a FROM u)
+setop;setop-011;SELECT a FROM t UNION ALL SELECT a FROM u EXCEPT SELECT a FROM v
+setop;setop-012;SELECT a FROM t INTERSECT SELECT a FROM u UNION SELECT a FROM v
+cte;cte-001;WITH c AS (SELECT a FROM t) SELECT a FROM c
+cte;cte-002;WITH c AS (SELECT a FROM t), d AS (SELECT a FROM c) SELECT a FROM d
+cte;cte-003;WITH c (x) AS (SELECT a FROM t) SELECT x FROM c
+cte;cte-004;WITH c AS (SELECT a FROM t) SELECT a FROM c WHERE a > 1
+cte;cte-005;WITH c AS (SELECT a FROM t) SELECT c1.a FROM c AS c1 JOIN c AS c2 ON c1.a = c2.a
+cte;cte-006;WITH RECURSIVE r (n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM r WHERE n < 10) SELECT n FROM r
+cte;cte-007;WITH c AS (SELECT a FROM t) SELECT a FROM c UNION ALL SELECT a FROM c
+cte;cte-008;WITH c AS (SELECT a FROM t) SELECT a FROM t WHERE a IN (SELECT a FROM c)
+cte;cte-009;WITH c AS (SELECT a, sum(b) AS s FROM t GROUP BY a) SELECT a FROM c WHERE s > 10
+cte;cte-010;WITH c AS (SELECT a FROM t ORDER BY a LIMIT 3) SELECT a FROM c
+cte;cte-011;WITH c AS (VALUES (1), (2)) SELECT * FROM c
+group;group-001;SELECT a, count(*) FROM t GROUP BY a
+group;group-002;SELECT a, b, sum(c) FROM t GROUP BY a, b
+group;group-003;SELECT a, count(*) FROM t GROUP BY a HAVING count(*) > 1
+group;group-004;SELECT a FROM t GROUP BY 1
+group;group-005;SELECT a, sum(b) FROM t GROUP BY a ORDER BY sum(b) DESC
+group;group-006;SELECT a, b FROM t GROUP BY ROLLUP (a, b)
+group;group-007;SELECT a, b FROM t GROUP BY CUBE (a, b)
+group;group-008;SELECT a, b FROM t GROUP BY GROUPING SETS ((a), (b), ())
+group;group-009;SELECT a, b, GROUPING(a, b) AS g FROM t GROUP BY ROLLUP (a, b)
+group;group-010;SELECT a, GROUPING(a) FROM t GROUP BY CUBE (a)
+group;group-011;SELECT a, b, c FROM t GROUP BY a, ROLLUP (b, c)
+group;group-012;SELECT a FROM t GROUP BY DISTINCT a, ROLLUP (a)
+group;group-013;SELECT count(*) FROM t
+group;group-014;SELECT count(*) FROM t HAVING count(*) > 0
+group;group-015;SELECT a, b FROM t GROUP BY GROUPING SETS ((a, b), (a))
+order-page;order-page-001;SELECT a FROM t ORDER BY a
+order-page;order-page-002;SELECT a FROM t ORDER BY a DESC
+order-page;order-page-003;SELECT a FROM t ORDER BY a ASC, b DESC
+order-page;order-page-004;SELECT a FROM t ORDER BY 1
+order-page;order-page-005;SELECT a FROM t ORDER BY a NULLS FIRST
+order-page;order-page-006;SELECT a FROM t ORDER BY a NULLS LAST
+order-page;order-page-007;SELECT a FROM t ORDER BY a DESC NULLS FIRST
+order-page;order-page-008;SELECT a FROM t ORDER BY a DESC NULLS LAST
+order-page;order-page-009;SELECT a FROM t ORDER BY a ASC NULLS LAST, b DESC NULLS FIRST
+order-page;order-page-010;SELECT a FROM t LIMIT 10
+order-page;order-page-011;SELECT a FROM t ORDER BY a LIMIT 10
+order-page;order-page-012;SELECT a FROM t ORDER BY a OFFSET 5
+order-page;order-page-013;SELECT a FROM t ORDER BY a OFFSET 5 ROWS
+order-page;order-page-014;SELECT a FROM t ORDER BY a OFFSET 5 LIMIT 10
+order-page;order-page-015;SELECT a FROM t ORDER BY a OFFSET 5 ROWS FETCH NEXT 10 ROWS ONLY
+order-page;order-page-016;SELECT a FROM t ORDER BY a FETCH FIRST 10 ROWS ONLY
+order-page;order-page-017;SELECT a FROM t ORDER BY a FETCH FIRST ROW ONLY
+order-page;order-page-018;SELECT a FROM t ORDER BY a FETCH FIRST 3 ROWS WITH TIES
+order-page;order-page-019;SELECT a FROM t LIMIT ALL
+order-page;order-page-020;SELECT a FROM t LIMIT 0
+order-page;order-page-021;SELECT a FROM t OFFSET 0 ROWS
+order-page;order-page-022;SELECT DISTINCT a FROM t ORDER BY a LIMIT 5
+order-page;order-page-023;SELECT a FROM t ORDER BY a + b
+order-page;order-page-024;SELECT a FROM t ORDER BY lower(a)
+order-page;order-page-025;SELECT a, b FROM t ORDER BY b, a LIMIT 1
+order-page;order-page-026;SELECT a FROM t WHERE a > 1 ORDER BY a LIMIT 100
+order-page;order-page-027;SELECT a FROM (SELECT a FROM t ORDER BY a LIMIT 5) AS x
+order-page;order-page-028;SELECT a FROM t ORDER BY a FETCH FIRST 1 ROWS WITH TIES
+order-page;order-page-029;SELECT a FROM t ORDER BY a OFFSET 10 ROWS FETCH FIRST 5 ROWS WITH TIES
+order-page;order-page-030;SELECT a FROM t ORDER BY a LIMIT 1000000
+dml-insert;dml-insert-001;INSERT INTO orders (id, tenantid, status) VALUES (1, 'acme', 'open')
+dml-insert;dml-insert-002;INSERT INTO orders (id, tenantid, status) VALUES (1, 'acme', 'open'), (2, 'acme', 'closed')
+dml-insert;dml-insert-003;INSERT INTO orders VALUES (1, 'acme', 'EU', 'open', 10.5, 'a@b.c')
+dml-insert;dml-insert-004;INSERT INTO orders (id, tenantid) VALUES (1, 'acme')
+dml-insert;dml-insert-005;INSERT INTO orders (id, tenantid, status) VALUES (NULL, 'acme', NULL)
+dml-insert;dml-insert-006;INSERT INTO dbo.orders (id, tenantid, amount) VALUES (1, 'acme', 1.5)
+dml-insert;dml-insert-007;INSERT INTO orders (id, tenantid, status) VALUES (1 + 2, 'acme', lower('X'))
+dml-insert;dml-insert-008;INSERT INTO orders (id, tenantid, status) VALUES (CAST('5' AS integer), 'acme', 'it''s')
+dml-insert;dml-insert-009;INSERT INTO orders (id, tenantid, status) SELECT id, tenantid, status FROM entitlements
+dml-insert;dml-insert-010;INSERT INTO orders (id, tenantid, status) SELECT id, 'acme', 'x' FROM entitlements WHERE orderid > 1
+dml-insert;dml-insert-011;INSERT INTO orders (id, tenantid) SELECT id, tenantid FROM entitlements
+dml-insert;dml-insert-012;INSERT INTO orders (id, tenantid) VALUES (1, 'other')
+dml-insert;dml-insert-013;INSERT INTO orders (id) VALUES (1)
+dml-insert;dml-insert-014;INSERT INTO orders (id, tenantid, status) WITH c AS (SELECT id, tenantid, 'x' AS s FROM entitlements) SELECT id, tenantid, s FROM c
+dml-insert;dml-insert-015;INSERT INTO orders (id, tenantid, amount) VALUES (1, 'acme', 1.5), (2, 'acme', 2.5), (3, 'acme', 3.5)
+dml-insert;dml-insert-016;INSERT INTO lookup (code) VALUES ('X')
+dml-update;dml-update-001;UPDATE orders SET status = 'x'
+dml-update;dml-update-002;UPDATE orders SET status = 'x' WHERE id = 2
+dml-update;dml-update-003;UPDATE orders SET status = 'x', region = 'EU' WHERE amount > 3
+dml-update;dml-update-004;UPDATE orders SET amount = amount + 1 WHERE id = 2
+dml-update;dml-update-005;UPDATE orders SET status = NULL WHERE id = 2
+dml-update;dml-update-006;UPDATE dbo.orders SET status = 'x' WHERE id = 2
+dml-update;dml-update-007;UPDATE orders SET status = (SELECT max(status) FROM entitlements) WHERE id = 2
+dml-update;dml-update-008;UPDATE orders SET status = 'x' WHERE id IN (SELECT orderid FROM entitlements)
+dml-update;dml-update-009;UPDATE orders SET status = 'x' WHERE EXISTS (SELECT 1 FROM entitlements e WHERE e.orderid = orders.id)
+dml-update;dml-update-010;UPDATE orders SET status = lower(region) WHERE email IS NOT NULL
+dml-update;dml-update-011;UPDATE orders SET status = CASE WHEN amount > 1 THEN 'big' ELSE 'small' END WHERE id = 3
+dml-update;dml-update-012;UPDATE orders SET tenantid = 'other' WHERE id = 1
+dml-update;dml-update-013;UPDATE orders SET status = 'it''s' WHERE region LIKE 'E%'
+dml-update;dml-update-014;UPDATE lookup SET code = 'Y' WHERE code = 'X'
+dml-delete;dml-delete-001;DELETE FROM orders
+dml-delete;dml-delete-002;DELETE FROM orders WHERE id = 1
+dml-delete;dml-delete-003;DELETE FROM dbo.orders WHERE id = 1
+dml-delete;dml-delete-004;DELETE FROM orders WHERE id IN (1, 2, 3)
+dml-delete;dml-delete-005;DELETE FROM orders WHERE id IN (SELECT orderid FROM entitlements)
+dml-delete;dml-delete-006;DELETE FROM orders WHERE EXISTS (SELECT 1 FROM entitlements e WHERE e.orderid = orders.id)
+dml-delete;dml-delete-007;DELETE FROM orders WHERE id = 1 AND status = 'x'
+dml-delete;dml-delete-008;DELETE FROM orders WHERE amount BETWEEN 1 AND 10
+dml-delete;dml-delete-009;DELETE FROM orders WHERE email LIKE 'x%'
+dml-delete;dml-delete-010;DELETE FROM orders WHERE region IS NULL
+dml-delete;dml-delete-011;DELETE FROM lookup WHERE code = 'X'
+dml-merge;dml-merge-001;MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x'
+dml-merge;dml-merge-002;MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN DELETE
+dml-merge;dml-merge-003;MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')
+dml-merge;dml-merge-004;MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x' WHEN NOT MATCHED THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')
+dml-merge;dml-merge-005;MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED AND entitlements.id > 1 THEN UPDATE SET status = 'x'
+dml-merge;dml-merge-006;MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED AND entitlements.id = 1 THEN DELETE WHEN MATCHED THEN UPDATE SET status = 'x'
+dml-merge;dml-merge-007;MERGE INTO orders USING (SELECT id, orderid FROM entitlements) AS e ON orders.id = e.orderid WHEN MATCHED THEN UPDATE SET status = 'x'
+dml-merge;dml-merge-008;MERGE INTO orders AS o USING entitlements AS e ON o.id = e.orderid WHEN MATCHED THEN UPDATE SET status = 'x'
+dml-merge;dml-merge-009;MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN NOT MATCHED AND entitlements.id > 1 THEN INSERT (id, tenantid) VALUES (entitlements.id, 'acme')
+dml-merge;dml-merge-010;MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x', region = 'EU' WHEN NOT MATCHED THEN INSERT (id, tenantid, status) VALUES (entitlements.id, 'acme', 'n')
+dml-merge;dml-merge-011;MERGE INTO dbo.orders USING dbo.entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET status = 'x'
+dml-merge;dml-merge-012;MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN NOT MATCHED BY SOURCE THEN DELETE
+dml-merge;dml-merge-013;MERGE INTO orders USING entitlements ON orders.id = entitlements.orderid WHEN MATCHED THEN UPDATE SET tenantid = 'other'
+complex;complex-001;SELECT a, sum(b) AS s, rank() OVER (ORDER BY sum(b) DESC) AS r FROM t GROUP BY a ORDER BY r LIMIT 10
+complex;complex-002;SELECT t.a, u.b FROM t JOIN u ON t.id = u.id WHERE t.a IN (SELECT a FROM v) AND u.b > 1 ORDER BY t.a LIMIT 20
+complex;complex-003;WITH c AS (SELECT a, count(*) AS n FROM t GROUP BY a) SELECT c.a, c.n, u.b FROM c LEFT JOIN u ON c.a = u.a WHERE c.n > 1 ORDER BY c.n DESC
+complex;complex-004;SELECT CASE WHEN a > 1 THEN 'big' ELSE 'small' END AS size, count(*) FROM t GROUP BY 1
+complex;complex-005;SELECT upper(a) || '-' || CAST(b AS varchar) AS k, coalesce(c, 0) + 1 AS n FROM t WHERE lower(a) LIKE 'x%' AND b BETWEEN 1 AND 5
+complex;complex-006;SELECT a, lag(b) OVER (PARTITION BY a ORDER BY c) - b AS delta FROM t
+complex;complex-007;SELECT date_trunc('month', d) AS m, sum(a) FROM t WHERE d >= DATE '2024-01-01' GROUP BY 1 ORDER BY 1
+complex;complex-008;SELECT x.a FROM (SELECT a, row_number() OVER (PARTITION BY b ORDER BY c) AS rn FROM t) AS x WHERE x.rn = 1
+complex;complex-009;SELECT a FROM t WHERE a IN (SELECT a FROM u WHERE b > (SELECT avg(b) FROM v))
+complex;complex-010;SELECT a, b FROM t UNION ALL SELECT c, d FROM u ORDER BY 1 LIMIT 5
+complex;complex-011;SELECT count(DISTINCT a) FILTER (WHERE b > 1) AS n FROM t
+complex;complex-012;SELECT a FROM t WHERE (a = 1 OR b = 2) AND (c = 3 OR d = 4) AND NOT e
+complex;complex-013;SELECT a * 2 + b / 3 - c % 4 AS e FROM t
+complex;complex-014;SELECT (a + b) * (c - d) AS e FROM t
+complex;complex-015;SELECT a FROM t WHERE a = 1 OR a = 2 OR a = 3
+complex;complex-016;SELECT a FROM t WHERE x = 'a' OR y = 'b' AND z = 'c'
+complex;complex-017;SELECT max(a) - min(a) AS range FROM t GROUP BY b HAVING max(a) > 1 AND count(*) > 2
+complex;complex-018;SELECT coalesce(nullif(a, ''), 'n/a') AS v FROM t
+complex;complex-019;SELECT a FROM t1 JOIN t2 ON t1.id = t2.id AND t2.k IN (1, 2) WHERE t1.a LIKE '%x%' ESCAPE '\'
+complex;complex-020;SELECT * FROM t1 LEFT JOIN t2 ON t1.id = t2.id WHERE t2.id IS NULL
+identifier;identifier-001;SELECT a FROM t AS "Alias With Space"
+identifier;identifier-002;SELECT "a""b" FROM t
+identifier;identifier-003;SELECT a AS "select" FROM t
+identifier;identifier-004;SELECT "Order" FROM "Group"
+identifier;identifier-005;SELECT a FROM "s"."t"
+identifier;identifier-006;SELECT "T"."A" FROM "T"
+identifier;identifier-007;SELECT a AS "été" FROM t
+identifier;identifier-008;SELECT a AS "x]y" FROM t
+identifier;identifier-009;SELECT a AS "x`y" FROM t
+identifier;identifier-010;SELECT a AS "x'y" FROM t
+identifier;identifier-011;SELECT user, level, comment FROM "table"
+identifier;identifier-012;SELECT a AS rownum FROM t
+ast;ast-001;@policy-param-where
+ast;ast-002;@policy-param-like
+ast;ast-003;@policy-param-int
+ast;ast-004;@security-predicate
+ast;ast-005;@trusted-sql
+ast;ast-006;@param-ref-named
+ast;ast-007;@param-ref-positional
+ast;ast-008;@mask-nullify
+ast;ast-009;@mask-redact-text
+ast;ast-010;@mask-redact-numeric
+ast;ast-011;@mask-partial
+ast;ast-012;@mask-hmac
+ast;ast-013;@mask-constant
+ast;ast-014;@mask-geojitter
+ast;ast-015;@parenthesized

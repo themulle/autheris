@@ -1,0 +1,27 @@
+{
+  "Oracle": {
+    "IntervalLiteralExpression": "The Oracle emitter writes the interval amount inline; the emitted-SQL invariant (unregistered-numeric-token) rejects it, so the statement fails closed.",
+    "MergeDeleteClause": "The compile pipeline rejects the MERGE ... THEN DELETE fixtures for Oracle (SqlCompileNotSupportedException)."
+  },
+  "SqlServer": {
+    "ArrayConstructorExpression": "T-SQL has no array type; the statement is rejected by the emitted-SQL invariant (parameter-without-marker).",
+    "SubscriptExpression": "T-SQL has no array subscripts; the statement is rejected by the emitted-SQL invariant (parameter-without-marker).",
+    "IntervalLiteralExpression": "SQL Server has no interval type; the builder rejects the construct.",
+    "UsingJoinCondition": "T-SQL has no JOIN ... USING; the builder rejects the construct."
+  },
+  "Databricks": {
+    "ArrayConstructorExpression": "Array constructors and subscripts are not supported for Databricks; the builder rejects the construct.",
+    "SubscriptExpression": "Array constructors and subscripts are not supported for Databricks; the builder rejects the construct."
+  },
+  "Sqlite": {
+    "DateFunctionExpression": "date_add and date_trunc are not in the SQLite function allowlist; the function policy rejects them.",
+    "ExtractExpression": "The SQLite emitter output for EXTRACT violates the emitted-SQL invariant (forbidden-character), so the statement fails closed.",
+    "TypedLiteralExpression": "DATE/TIME/TIMESTAMP literals are emitted inline by the SQLite generator and violate the emitted-SQL invariant (forbidden-character), so they fail closed.",
+    "GroupingOperationExpression": "GROUPING() is not supported for SQLite (no grouping sets); the builder rejects the construct.",
+    "IntervalLiteralExpression": "SQLite has no interval type; the builder rejects the construct.",
+    "MergeStatement": "MERGE is not supported on SQLite (statement class); the compile pipeline rejects it.",
+    "MergeUpdateClause": "MERGE is not supported on SQLite (statement class); the compile pipeline rejects it.",
+    "MergeDeleteClause": "MERGE is not supported on SQLite (statement class); the compile pipeline rejects it.",
+    "MergeInsertClause": "MERGE is not supported on SQLite (statement class); the compile pipeline rejects it."
+  }
+}

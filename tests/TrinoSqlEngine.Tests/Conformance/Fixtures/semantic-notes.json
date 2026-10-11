@@ -1,0 +1,75 @@
+{
+  "operator-004": {
+    "*": "semantic-note: integer / integer is emitted unchanged, so the result type is backend semantics (plan 3.3): integer division on PostgreSQL, SQL Server and SQLite, exact NUMBER division on Oracle, DOUBLE on Databricks."
+  },
+  "operator-012": {
+    "SqlServer": "semantic-note: || becomes +, so NULL propagation follows CONCAT_NULL_YIELDS_NULL (ON in every supported configuration)."
+  },
+  "order-page-001": {
+    "*": "semantic-note: the default null ordering is backend semantics (plan 3.3); the emitter injects no NULLS FIRST/LAST."
+  },
+  "order-page-005": {
+    "SqlServer": "semantic-note: ASC NULLS FIRST is the native T-SQL ordering, so the clause is omitted."
+  },
+  "order-page-008": {
+    "SqlServer": "semantic-note: DESC NULLS LAST is the native T-SQL ordering, so the clause is omitted."
+  },
+  "select-024": {
+    "PostgreSql": "semantic-note: LIKE is case-sensitive.",
+    "DuckDb": "semantic-note: LIKE is case-sensitive.",
+    "Oracle": "semantic-note: LIKE is case-sensitive (the session NLS_COMP/NLS_SORT is pinned by the gateway).",
+    "Databricks": "semantic-note: LIKE is case-sensitive.",
+    "SqlServer": "semantic-note: LIKE follows the column collation (usually case-insensitive).",
+    "Sqlite": "semantic-note: LIKE is ASCII case-insensitive (SEC-ADG-18)."
+  },
+  "literal-013": {
+    "Oracle": "semantic-note: the empty string is NULL in Oracle, so the bound '' is NULL (SEC-ADG-17)."
+  },
+  "complex-018": {
+    "Oracle": "semantic-note: NULLIF(a, '') compares with NULL on Oracle because '' is NULL (SEC-ADG-17)."
+  },
+  "literal-021": {
+    "SqlServer": "semantic-note: the boolean literal is emitted as the integer 1 (no boolean type).",
+    "Sqlite": "semantic-note: the boolean literal is emitted as the integer 1 (no boolean type).",
+    "Oracle": "semantic-note: the boolean literal is emitted as the integer 1 (no SQL boolean in SELECT lists)."
+  },
+  "fn-string-009": {
+    "Oracle": "KNOWN-GAP: Oracle CONCAT takes exactly two arguments; the three-argument form is emitted unchanged and fails at execution."
+  },
+  "fn-string-010": {
+    "SqlServer": "KNOWN-GAP: SUBSTR is not a T-SQL function; the call is emitted unchanged and fails at execution."
+  },
+  "fn-string-011": {
+    "SqlServer": "KNOWN-GAP: SUBSTR is not a T-SQL function; the call is emitted unchanged and fails at execution."
+  },
+  "fn-string-012": {
+    "SqlServer": "KNOWN-GAP: SUBSTRING needs three arguments in T-SQL; the two-argument form fails at execution.",
+    "Oracle": "KNOWN-GAP: Oracle has no SUBSTRING function (SUBSTR); the call is emitted unchanged and fails at execution."
+  },
+  "fn-string-017": {
+    "PostgreSql": "KNOWN-GAP: the two-argument REPLACE does not exist on PostgreSQL; it fails at execution.",
+    "SqlServer": "KNOWN-GAP: the two-argument REPLACE does not exist in T-SQL; it fails at execution."
+  },
+  "fn-string-018": {
+    "SqlServer": "KNOWN-GAP: LPAD does not exist in T-SQL; the call is emitted unchanged and fails at execution."
+  },
+  "fn-string-019": {
+    "SqlServer": "KNOWN-GAP: RPAD does not exist in T-SQL; the call is emitted unchanged and fails at execution."
+  },
+  "fn-string-051": {
+    "SqlServer": "KNOWN-GAP: OCTET_LENGTH does not exist in T-SQL (DATALENGTH); it fails at execution.",
+    "Oracle": "KNOWN-GAP: OCTET_LENGTH does not exist in Oracle (LENGTHB); it fails at execution."
+  },
+  "fn-string-052": {
+    "Oracle": "KNOWN-GAP: CHAR_LENGTH does not exist in Oracle (LENGTH); it fails at execution."
+  },
+  "fn-string-053": {
+    "Oracle": "KNOWN-GAP: CHARACTER_LENGTH does not exist in Oracle (LENGTH); it fails at execution."
+  },
+  "fn-math-013": {
+    "Oracle": "KNOWN-GAP: Oracle has no LOG10 function (LOG(10, x)); it fails at execution."
+  },
+  "setop-010": {
+    "*": "KNOWN-DEFECT: parenthesized query terms in a set operation make the AST builder throw InvalidCastException instead of a typed rejection (fail closed, wrong error type)."
+  }
+}

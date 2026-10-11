@@ -23,6 +23,9 @@
     <None Update="Fixtures\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="Conformance\Fixtures\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Update="Fixtures\RawJava\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
