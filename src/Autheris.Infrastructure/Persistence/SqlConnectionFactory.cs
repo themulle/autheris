@@ -31,7 +31,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
     /// Oracle connections must use TCPS and a Key Vault password everywhere except in Development
     /// (<see cref="DataSourceConnectionOptions.PasswordKeyVaultRef"/>, WP-F1).
     /// </summary>
-    public SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets)
+    public SqlConnectionFactory(IHostEnvironment? environment, IKeyVaultSecretProvider? secrets, IServiceProvider? services = null)
     {
         _environment = environment;
         _secrets = secrets;

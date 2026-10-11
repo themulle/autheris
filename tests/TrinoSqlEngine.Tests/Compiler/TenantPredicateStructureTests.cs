@@ -130,15 +130,16 @@ public class TenantPredicateStructureTests
     [Theory]
     [InlineData("UTF8_BINARY")]
     [InlineData("utf8_binary")]
-    public void Databricks_Utf8BinaryColumn_UsesOnlyThePlainEquality(string collation)
+    public void Databricks_Utf8BinaryCatalogCollation_StillBinaryTemplate(string collation)
     {
+        // SEC-X1-09 (WP-X0j): the plain-equality relaxation relied on cached catalog metadata, so a collation change inside the TTL
+        // would make the tenant comparison case-insensitive. The binary template is always used until X1-DBX re-enables it with G9 evidence.
         var predicate = TenantPredicateFactory.Build(DialectCapabilityTable.Default.Get(TargetSqlDialect.Databricks), Column, Parameter, SqlParameterType.String, null, collation);
         var conjuncts = new List<BinaryExpression>();
         Conjuncts(predicate, conjuncts);
 
         var only = Assert.Single(conjuncts);
-        Assert.Equal("@", Shape(only.Left));     // col = :t, exact and sargable on UTF8_BINARY
-        Assert.Equal("@", Shape(only.Right));
+        Assert.Equal("cast(@ as varbinary)", Shape(only.Left));
     }
 
     [Theory]

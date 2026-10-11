@@ -28,19 +28,22 @@ public sealed class SqlDialectConsistencyTests
     }
 
     [Fact]
-    public void SqlDialectMapper_Databricks_ThrowsNotSupportedException()
+    public void Mapper_Databricks_RoundTrip()
     {
-        SqlDialectMapper.TryToTargetDialect(DatabaseDialect.Databricks, out _).ShouldBeFalse();
-        Should.Throw<NotSupportedException>(() => SqlDialectMapper.ToTargetDialect(DatabaseDialect.Databricks));
+        // WP-X0j: Databricks maps to its AST dialect (catalog reader, binder, generator) but is NOT admitted to WebSQL (S-4).
+        SqlDialectMapper.TryToTargetDialect(DatabaseDialect.Databricks, out var target).ShouldBeTrue();
+        target.ShouldBe(TargetSqlDialect.Databricks);
+        SqlDialectMapper.ToTargetDialect(DatabaseDialect.Databricks).ShouldBe(TargetSqlDialect.Databricks);
         SqlDialectMapper.IsExecutable(DatabaseDialect.Databricks).ShouldBeFalse();
     }
 
     [Fact]
-    public void SqlDialectMapper_IsExecutable_Matches_SqlConnectionFactory_SupportedDialects()
+    public void SqlDialectMapper_IsExecutable_IsTheAdmittedSet_AndExcludesDatabricks()
     {
         foreach (DatabaseDialect dialect in Enum.GetValues<DatabaseDialect>())
         {
             bool isExec = SqlDialectMapper.IsExecutable(dialect);
+            // The factory also opens Databricks (REST facade, WP-X0j), but admission is a separate decision (S-4, X1-DBX).
             bool factorySupports = dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Sqlite or DatabaseDialect.Oracle;
             isExec.ShouldBe(factorySupports, $"Mismatch for dialect {dialect}: IsExecutable={isExec}, Factory={factorySupports}");
         }
