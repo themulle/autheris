@@ -10,6 +10,7 @@ using Autheris.Application.Governance;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.Databricks;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -31,6 +32,7 @@ public static class GatewayStartupValidator
         ValidateObjectRecursively(options);
 
         ValidateOracleRuntime(options, environment, logger);
+        ValidateDatabricks(options, environment);
         ValidateTenantCollisions(options, environment, logger);
 
         // SEC E-01: the egress allowlist is validated in every environment; invalid or too broad entries abort the start.
@@ -576,8 +578,48 @@ public static class GatewayStartupValidator
     /// WP-F1 / CR-ADG-08: outside Development an Oracle data source never carries a plaintext password (the connection string
     /// has no <c>Password</c>; <c>PasswordKeyVaultRef</c> names the Key Vault secret) and always uses the policy-compliant account.
     /// </summary>
+    /// <summary>WP-X0i / SEC-ADG-09: validates every Databricks data source (exact host, auth mode, Pat only in Development).</summary>
     public static void ValidateDatabricks(GatewayOptions options, IHostEnvironment environment)
     {
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        foreach (var (name, connection) in options.DataSources.Connections)
+        {
+            if (!DataSourceProvider.Is(connection.Provider, DatabaseDialect.Databricks))
+            {
+                continue;
+            }
+
+            var db = connection.Databricks
+                ?? throw new ValidationException($"Databricks data source '{name}' requires a DataSources:Connections:{name}:Databricks section.");
+            if (!DatabricksHostPolicy.IsValidHost(db.Host))
+            {
+                throw new ValidationException($"Databricks data source '{name}': Host must be one exact DNS name (no scheme, port, path, wildcard or IP literal).");
+            }
+
+            if (string.IsNullOrWhiteSpace(db.WarehouseId))
+            {
+                throw new ValidationException($"Databricks data source '{name}': WarehouseId is required.");
+            }
+
+            if (db.Auth.Mode == DatabricksAuthMode.Pat)
+            {
+                if (!environment.IsDevelopment())
+                {
+                    throw new ValidationException($"Security violation: Databricks data source '{name}' uses Auth.Mode Pat, which is allowed in Development only.");
+                }
+
+                if (string.IsNullOrWhiteSpace(db.Auth.PatRef))
+                {
+                    throw new ValidationException($"Databricks data source '{name}': Auth.PatRef is required for Pat mode.");
+                }
+            }
+            else if (string.IsNullOrWhiteSpace(db.Auth.ClientId) || string.IsNullOrWhiteSpace(db.Auth.ClientSecretRef))
+            {
+                throw new ValidationException($"Databricks data source '{name}': OAuthM2M requires Auth.ClientId and Auth.ClientSecretRef (Key Vault reference).");
+            }
+        }
     }
 
     public static void ValidateOracleRuntime(GatewayOptions options, IHostEnvironment environment, ILogger? logger = null)

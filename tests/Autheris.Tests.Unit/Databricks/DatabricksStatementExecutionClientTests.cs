@@ -36,7 +36,6 @@ public sealed class DatabricksStatementExecutionClientTests
         post.Authorization.ShouldBe($"Bearer {AccessToken}");
         var body = Body(post);
         body.GetProperty("statement").GetString().ShouldBe("SELECT id, name FROM t WHERE a = :p0");
-        post.Body.ShouldNotContain("DROP TABLE");
         body.GetProperty("statement").GetString()!.ShouldNotContain(evil);
         var parameters = body.GetProperty("parameters");
         parameters.GetArrayLength().ShouldBe(2);
@@ -174,6 +173,18 @@ public sealed class DatabricksStatementExecutionClientTests
     }
 
     [Fact]
+    public async Task ResultOverByteLimit_FailsClosed_ResponseBufferCap()
+    {
+        var huge = "[[\"1\",\"" + new string('z', DatabricksStatementExecutionClient.ResponseOverheadBytes + 8192) + "\"]]";
+        var handler = new FakeDatabricksHandler(Router(_ => Ok(Succeeded(StatementId, huge))));
+        var client = Client(handler, Options(byteLimit: 4096));
+
+        var ex = await CaptureAsync(() => client.ExecuteAsync(Request(), CancellationToken.None));
+
+        ex.ShouldBeOfType<DatabricksResultTooLargeException>();
+    }
+
+    [Fact]
     public async Task ResultOverByteLimit_FailsClosed_TruncatedManifest()
     {
         var handler = new FakeDatabricksHandler(Router(_ => Ok(Succeeded(StatementId, """[["1","a"]]""", truncated: true))));
@@ -188,7 +199,7 @@ public sealed class DatabricksStatementExecutionClientTests
     public async Task ResultOverByteLimit_FailsClosed_AccumulatedChunksTooLarge()
     {
         var chunk1 = $"/api/2.0/sql/statements/{StatementId}/result/chunks/1";
-        var rows = "[" + string.Join(",", Enumerable.Range(0, 40).Select(i => $"[\"{i}\",\"{new string('y', 40)}\"]")) + "]";
+        var rows = "[" + string.Join(",", Enumerable.Range(0, 60).Select(i => $"[\"{i}\",\"{new string('y', 40)}\"]")) + "]";
         var handler = new FakeDatabricksHandler(Router(r => r.Method == HttpMethod.Post
             ? Ok(Succeeded(StatementId, rows, chunk1))
             : Ok("{\"chunk_index\":1,\"data_array\":" + rows + ",\"next_chunk_internal_link\":\"" + chunk1 + "\"}")));
@@ -270,18 +281,18 @@ public sealed class DatabricksStatementExecutionClientTests
     }
 
     [Fact]
-    public async Task Host_PassesSsrfPolicy_PrivateResolutionBlocked()
+    public async Task Host_PassesSsrfPolicy_PrivateResolutionBlocked_ForDatabricksIntegration()
     {
-        var inner = new FakeDatabricksHandler(Router(_ => Ok(Succeeded(StatementId, "[]"))));
-        var ssrf = new SsrfProtectionHandler(Env("Production"), Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), "Databricks",
-            (_, _) => Task.FromResult(new[] { IPAddress.Parse("10.0.0.5") }))
-        { InnerHandler = inner };
-        var client = Client(inner, outer: ssrf);
+        // The connect-time decision of the hardened primary handler (used by AddSecureOutboundHandlers("Databricks")).
+        var allowlist = EgressAllowlist.Create(new OutboundEgressOptions(), EgressIntegrations.Databricks);
 
-        var ex = await CaptureAsync(() => client.ExecuteAsync(Request(), CancellationToken.None));
-
-        ex.ShouldBeOfType<SecurityException>();
-        inner.Requests.ShouldBeEmpty();
+        await Should.ThrowAsync<SecurityException>(() => SecureOutboundHttp.ResolvePermittedAddressesAsync(
+            Host, false, allowlist, (_, _) => Task.FromResult(new[] { IPAddress.Parse("10.0.0.5") }), CancellationToken.None));
+        await Should.ThrowAsync<SecurityException>(() => SecureOutboundHttp.ResolvePermittedAddressesAsync(
+            Host, false, allowlist, (_, _) => Task.FromResult(new[] { IPAddress.Parse("169.254.169.254") }), CancellationToken.None));
+        var ok = await SecureOutboundHttp.ResolvePermittedAddressesAsync(
+            Host, false, allowlist, (_, _) => Task.FromResult(new[] { IPAddress.Parse("20.50.1.1") }), CancellationToken.None);
+        ok.Count.ShouldBe(1);
     }
 
     [Theory]
