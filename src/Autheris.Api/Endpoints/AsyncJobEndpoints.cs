@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Threading;
 using Autheris.Api.Extensions;
 using Autheris.Application.Jobs.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
@@ -38,7 +39,7 @@ public static class AsyncJobEndpoints
                 ResultDownloadUrl: $"/api/v1/jobs/{job.JobId}/result");
 
             return Results.Accepted($"/api/v1/jobs/{job.JobId}/status", response);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobSubmitted);
 
         group.MapGet("/{jobId}/status", async (
             string jobId,
@@ -73,7 +74,7 @@ public static class AsyncJobEndpoints
                 ResultDownloadUrl: downloadUrl);
 
             return Results.Ok(response);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.AsyncJobStatusRead);
 
         group.MapGet("/{jobId}/result", async (
             string jobId,
@@ -98,7 +99,7 @@ public static class AsyncJobEndpoints
             var fileName = $"query-result-{jobId}.{format}";
 
             return Results.File(stream, contentType, fileDownloadName: fileName);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobDownloaded);
 
         group.MapDelete("/{jobId}", async (
             string jobId,
@@ -113,7 +114,7 @@ public static class AsyncJobEndpoints
 
             var cancelled = await jobManager.CancelJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
             return cancelled ? Results.NoContent() : Results.NotFound();
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Delegated, AuditEventTypes.AsyncJobCancelled);
 
         return app;
     }

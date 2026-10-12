@@ -43,7 +43,7 @@ public static class GovernancePlanEndpoints
         {
             var plan = planningService.GetPlan(planId);
             return plan != null ? Results.Ok(plan) : Results.NotFound(new { error = $"Plan '{planId}' not found or expired." });
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.AccessPlanRead);
 
         // 3. Confirm Plan with TOTP 2FA: issues HMAC-signed confirmation token (ADR-03, ADR-05, R-62)
         app.MapPost("/api/governance/plans/{planId}/confirm", async (

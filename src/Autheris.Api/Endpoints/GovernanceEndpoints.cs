@@ -542,7 +542,7 @@ public static class GovernanceEndpoints
 
             var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, ct);
             return Results.Ok(result);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
 
         app.MapPost("/api/governance/consents/apply", async (
             HttpContext context,
@@ -586,7 +586,7 @@ public static class GovernanceEndpoints
 
             var result = await applyService.ApplyManifestAsync(context.User, manifest, dryRun, ct);
             return Results.Ok(result);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
 
         return app;
     }

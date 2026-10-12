@@ -11,6 +11,7 @@ using Autheris.Api.UI;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -62,7 +63,7 @@ public static class DevPortalEndpoints
 
             var html = Generate2FaEnrollHtml(userSid, formattedSecret, enrollment.SecretBase32, svg, nonce);
             return Results.Content(html, "text/html;charset=utf-8");
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.TwoFactorEnrollmentStarted);
 
         app.MapPost("/portal/2fa/enroll/verify", async (
             HttpContext context,
@@ -114,7 +115,7 @@ public static class DevPortalEndpoints
             }
 
             return Results.Ok(new { success = true, message = "2FA Enrollment completed successfully." });
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.TwoFactorEnrollmentVerified);
 
         // R-64 UX: DevPortal HitL Step-Up Approvals Console
         app.MapGet("/portal/approvals", (
@@ -129,7 +130,7 @@ public static class DevPortalEndpoints
 
             var html = GenerateApprovalsHtml(tenant.Value, tickets, nonce);
             return Results.Content(html, "text/html;charset=utf-8");
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.StepUpApprovalsListed);
 
         app.MapPost("/portal/approvals/{ticketId}/step-up", async (
             string ticketId,
@@ -169,7 +170,7 @@ public static class DevPortalEndpoints
             }
 
             return Results.Ok(new { success = true, confirmationToken = result.Ticket?.Signature ?? result.Ticket?.ApprovalId ?? ticketId });
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.StepUpApprovalAttempted);
 
         return app;
     }
