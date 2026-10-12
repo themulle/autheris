@@ -333,7 +333,7 @@ services:
   # 8. Grafana (Dashboard Visualizations)
   # ----------------------------------------------------------------------------
   grafana:
-    image: docker.io/grafana/grafana:11.2.0
+    image: docker.io/grafana/grafana:13.2.3
     container_name: gqlgateway-grafana
     profiles:
       - monitoring
