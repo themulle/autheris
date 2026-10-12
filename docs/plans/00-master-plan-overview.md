@@ -24,6 +24,9 @@
 
 | Plan / Document ID | Topic & Scope | Addressed Requirements & Components | Status | Next Milestone |
 |---|---|---|---|---|
+| [`2026-10-12-plan-gateway-hardening-wave1.md`](file:///root/autheris/doc/plan/2026-10-12-plan-gateway-hardening-wave1.md)<br/>`PLAN-WAVE1-HARDENING-2026-10-12` | **Wave 1 Gateway Hardening & Protocol Hygiene** | Delivers 5 GitHub issues (#44, #42, #41, #31, #30): Auth-exempt pre-auth rate limits, protocol kill switches (OData, Arrow, Iceberg, DuckDB), Kerberos cleanup, Caller context in WORM audit chain, distinguishable error codes. | **COMPLETED & VERIFIED ✅** | Documented in `docs/features/f-sec-05-gateway-hardening-defense.md` & verified with 3,500+ unit tests |
+| [`2026-10-12-plan-github-issues-roadmap.md`](file:///root/autheris/doc/plan/2026-10-12-plan-github-issues-roadmap.md)<br/>`PLAN-GH-ISSUES-ROADMAP-2026-10-12` | **GitHub Issues Master Roadmap & Execution Plan** | Comprehensive qualification and 4-wave delivery plan for 19 open GitHub issues (#26-#44): (1) Gateway Hardening [DONE], (2) Governance & Consents, (3) Catalog & Ownership, (4) Aggregations & Headless BI | **ACTIVE & IN EXECUTION 🚀** | Wave 1 Completed; ready for Wave 2 (Governance & Consents) |
+| [`2026-10-12-req-datahub-integration-suite.md`](file:///root/autheris/doc/plan/2026-10-12-req-datahub-integration-suite.md)<br/>`REQ-DATAHUB-01` | **Dual-Mode Enterprise Data Governance Suite** | Dual-Mode: (1) Embedded Standalone Mode (AST lineage graph, declarative data contracts & assertions in SQLite/DuckDB) and (2) Federated Enterprise Mode (DataHub GMS client, MCL webhooks, lineage egress, and contract circuit breaker) | **PROPOSED / APPROVED 📝** | Architecture implementation plan (`csharp-architect`) |
 | [`2026-10-10-konzept-federated-virtual-filter-web-api-duckdb.md`](file:///root/autheris/doc/plan/2026-10-10-konzept-federated-virtual-filter-web-api-duckdb.md)<br/>`PLAN-FEDERATED-VF-DUCKDB-15` | **Federated Virtual Filters on Web-APIs via DuckDB** | 3-stage adaptive federation (Short-circuit, Key-set pushdown, DuckDB staging); dynamic regex matching; composite key joins in `VirtualFilterStore` | **COMPLETED & VERIFIED ✅** | Documented in `docs/features/f-gov-14-federated-virtual-filters.md` & verified with unit/integration test suite |
 | [`2026-10-10-konzept-datenklassifizierung-ki-vorklassifizierung.md`](file:///root/autheris/doc/plan/2026-10-10-konzept-datenklassifizierung-ki-vorklassifizierung.md)<br/>`PLAN-GOV-KI-13` | **Data Object Classification & AI Pre-Classification** | Fail-Closed `UNCLASSIFIED` initial state; optional AI pre-classification with 150ms timeout guard; auto-preclassify at confidence $\ge 95\%$; dual-sign-off workflows | **IMPLEMENTED / IN REVIEW 🛡️** | Finalize UI workflow endpoints and telemetry hooks |
 | [`2026-10-10-implementierungsplan-offline-doc-mcp-gateway.md`](file:///root/autheris/doc/plan/2026-10-10-implementierungsplan-offline-doc-mcp-gateway.md)<br/>`PLAN-OFFLINE-DOC-MCP-12` | **Offline Doc- & Runbook-MCP Gateway** | Ingestion pipeline for Markdown, arc42, Runbooks, OpenAPI, Error Catalogs; local BM25/SIMD hybrid search; `GatewayMcpServer` stdio/SSE bridge | **IN PROGRESS / DRAFT 🛡️** | Implement BM25 SIMD vector tokenizer and document deposit endpoint |
@@ -41,6 +44,9 @@ flowchart TD
     subgraph Governance ["Data & Agent Governance"]
         AG["PLAN-AGENT-GOV-DOCS-01<br/>Agent Governance & English Docs"]
         DK["PLAN-GOV-KI-13<br/>Data Classification & AI Pre-Classification"]
+        DH["REQ-DATAHUB-01<br/>DataHub Integration Suite"]
+        GHI["PLAN-GH-ISSUES-ROADMAP-2026-10-12<br/>GitHub Issues Roadmap (19 Issues)"]
+        W1["PLAN-WAVE1-HARDENING-2026-10-12<br/>Wave 1 Gateway Hardening (COMPLETED ✅)"]
     end
     
     subgraph ExecutionEngine ["Federation & Virtual Filters"]
@@ -54,12 +60,16 @@ flowchart TD
 
     MP --> AG
     MP --> DK
+    MP --> DH
+    MP --> GHI
     MP --> VF
     MP --> DM
     MP --> UDS
 
+    GHI --> W1
     DM <--> UDS
     DK -.-> VF
+    DH -.-> DK
 ```
 
 ---
