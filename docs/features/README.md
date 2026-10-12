@@ -25,6 +25,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-AI-12** | Official Hybrid MCP Gateway (Query Tools, Native Resources & Prompts) | [f-ai-12-hybrid-mcp-gateway.md](f-ai-12-hybrid-mcp-gateway.md) |
 | **F-AI-13** | Admin MCP Tools & Two-Phase Access Planning (HitL) | [f-ai-13-admin-mcp-tools-two-phase-hitl.md](f-ai-13-admin-mcp-tools-two-phase-hitl.md) |
 | **F-AI-14** | MCP Schema-RAG & Hybrid-Vector Search Engine | [f-ai-14-mcp-schema-rag-vector-search.md](f-ai-14-mcp-schema-rag-vector-search.md) |
+| **F-AI-15** | Offline Doc- & Runbook-MCP Gateway | [f-ai-15-offline-doc-runbook-mcp-gateway.md](f-ai-15-offline-doc-runbook-mcp-gateway.md) |
 | **F-API-03** | Dual-Access Exposure (OData v4 & Dynamic OpenAPI 3.1) | [f-api-03-odata-openapi.md](f-api-03-odata-openapi.md) |
 | **F-API-04** | Upstream Web API & Microservice Ingestion via OpenAPI | [f-api-04-openapi-ingestion.md](f-api-04-openapi-ingestion.md) |
 | **F-API-07** | Canonical System Metadata & Monitoring Schema ($system) | [f-api-07-system-metadata-monitoring.md](f-api-07-system-metadata-monitoring.md) |
