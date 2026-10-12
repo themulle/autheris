@@ -23,10 +23,24 @@ public sealed class TenantRegistryWiringTests
     }
 
     [Fact]
-    public void RegistryDisabledByDefault_NothingIsRegistered()
+    public void RegistryIsEnabledByDefault()
+    {
+        // Phase 5 L6 (X1): the registry is on by default; Registry:Enabled = false is the explicit opt-out.
+        new TenantRegistryOptions().Enabled.ShouldBeTrue();
+        new GatewayOptions().TenantIsolation.Registry.Enabled.ShouldBeTrue();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(Substitute.For<IEpochValidationService>());
+        services.AddAutherisGovernance(new GatewayOptions());
+
+        services.Any(d => d.ServiceType == typeof(ITenantRegistry)).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void RegistryExplicitlyDisabled_NothingIsRegistered()
     {
         var services = new ServiceCollection();
-        services.AddAutherisGovernance(new GatewayOptions());
+        services.AddAutherisGovernance(new GatewayOptions { TenantIsolation = new TenantIsolationOptions { Registry = new TenantRegistryOptions { Enabled = false } } });
 
         services.Any(d => d.ServiceType == typeof(ITenantRegistry)).ShouldBeFalse();
     }

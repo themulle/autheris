@@ -1089,11 +1089,13 @@ public sealed class DataSourceConnectionOptions
     public string? DefaultSchema { get; init; }
 
     /// <summary>
-    /// WP-X0b: when true the connection factory refuses to hand out a PostgreSQL or Oracle connection of this data source unless
-    /// <see cref="DefaultSchema"/> is set and valid (SQL_SOURCE_UNAVAILABLE, fail closed). Startup validation sets the same
-    /// requirement for every WebSQL-reachable PostgreSQL/Oracle source; this flag extends it to request time (options reload).
+    /// WP-X0b: the connection factory refuses to hand out a PostgreSQL or Oracle connection of this data source unless
+    /// <see cref="DefaultSchema"/> is set and valid (SQL_SOURCE_UNAVAILABLE, fail closed), and startup validation refuses the start
+    /// for such a source. Default <c>true</c> since X1: the schema pin (<c>search_path</c>, <c>CURRENT_SCHEMA</c>) is what makes an
+    /// unqualified table name resolve to the governed table. A source that no WebSQL path reaches may opt out with <c>false</c>; a
+    /// WebSQL-reachable PostgreSQL or Oracle source always needs the schema. Other providers ignore the flag.
     /// </summary>
-    public bool RequireDefaultSchema { get; init; }
+    public bool RequireDefaultSchema { get; init; } = true;
 
     /// <summary>Databricks only (WP-X0i, SEC-ADG-09): Statement Execution API settings. Required when <c>Provider</c> is databricks.</summary>
     public DatabricksDataSourceOptions? Databricks { get; init; }
@@ -2020,11 +2022,15 @@ public sealed class TenantIsolationOptions
     public TenantRegistryOptions Registry { get; init; } = new();
 }
 
-/// <summary>Tenant registry settings (<c>Gateway:TenantIsolation:Registry</c>). Off by default; the legacy configured-tenant guard stays active either way.</summary>
+/// <summary>
+/// Tenant registry settings (<c>Gateway:TenantIsolation:Registry</c>). On by default since X1 (Phase 5 L6): the existence check precedes the
+/// budget and an issuer-less token has a budget per authentication scheme. <c>Enabled = false</c> is the explicit opt-out; the legacy
+/// configured-tenant guard stays active either way.
+/// </summary>
 public sealed class TenantRegistryOptions
 {
     /// <summary>When <c>true</c> every authenticated request registers its tenant id; the registry being unavailable then denies the request (503).</summary>
-    public bool Enabled { get; init; }
+    public bool Enabled { get; init; } = true;
 
     /// <summary>Budget of new tenant registrations per identity provider issuer and window (SEC-X1-13).</summary>
     [Range(1, 100_000)] public int MaxNewTenantsPerIssuerPerWindow { get; init; } = 20;

@@ -93,6 +93,65 @@ public sealed class TenantRegistryGateTests
         (await gate.RegisterOrGetAsync(new TenantId("t3"), "evil", default)).ShouldBe(TenantRegistration.Registered);
     }
 
+    // ---- Phase 5 L6 (X1): the existence check comes before the budget ---------------------------------------------------------
+
+    [Fact]
+    public async Task ExistingTenant_IsNotRateLimited_WhenTheIssuerBudgetIsExhausted()
+    {
+        var inner = Substitute.For<ITenantRegistry>();
+        inner.TryGetAsync(Arg.Any<TenantId>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration?>((TenantRegistration?)null));
+        inner.TryGetAsync(new TenantId("known"), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration?>(TenantRegistration.Existing));
+        inner.RegisterOrGetAsync(Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Registered));
+        var gate = Gate(inner, perIssuer: 1);
+
+        (await gate.RegisterOrGetAsync(new TenantId("new1"), "busy", default)).ShouldBe(TenantRegistration.Registered);
+        (await gate.RegisterOrGetAsync(new TenantId("new2"), "busy", default)).ShouldBe(TenantRegistration.RateLimited);   // the budget is gone
+
+        // a tenant that merely exists (another node registered it, or the cache expired) is a lookup, not a registration
+        (await gate.RegisterOrGetAsync(new TenantId("known"), "busy", default)).ShouldBe(TenantRegistration.Existing);
+        await inner.DidNotReceive().RegisterOrGetAsync(new TenantId("known"), Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task CollisionFoundByTheLookup_NeverConsumesBudget_AndIsNeverCachedAsAnAllow()
+    {
+        var inner = Substitute.For<ITenantRegistry>();
+        inner.TryGetAsync(Acme, Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration?>(TenantRegistration.Collision));
+        var gate = Gate(inner, perIssuer: 1);
+
+        for (var i = 0; i < 3; i++)
+        {
+            (await gate.RegisterOrGetAsync(Acme, "busy", default)).ShouldBe(TenantRegistration.Collision);
+        }
+
+        await inner.DidNotReceive().RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        await inner.Received(3).TryGetAsync(Acme, Arg.Any<CancellationToken>());   // a collision is never cached
+    }
+
+    [Fact]
+    public async Task ExistingFoundByTheLookup_IsCached_PositiveOnly()
+    {
+        var inner = Substitute.For<ITenantRegistry>();
+        inner.TryGetAsync(Acme, Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration?>(TenantRegistration.Existing));
+        var gate = Gate(inner);
+
+        await gate.RegisterOrGetAsync(Acme, "iss", default);
+        await gate.RegisterOrGetAsync(Acme, "iss", default);
+
+        await inner.Received(1).TryGetAsync(Acme, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task LookupUnavailable_FailsClosed_AndIsNotCached()
+    {
+        var inner = Substitute.For<ITenantRegistry>();
+        inner.TryGetAsync(Acme, Arg.Any<CancellationToken>()).Returns<ValueTask<TenantRegistration?>>(_ => throw new InvalidOperationException("down"));
+        var gate = Gate(inner);
+
+        await Should.ThrowAsync<InvalidOperationException>(async () => await gate.RegisterOrGetAsync(Acme, "iss", default));
+        await inner.DidNotReceive().RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>());
+    }
+
     [Fact]
     public async Task ExistingAndCollisionResults_DoNotConsumeTheRegistrationBudget()
     {

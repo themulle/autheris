@@ -26,8 +26,19 @@ public enum TenantRegistration
 public interface ITenantRegistry
 {
     /// <param name="tenant">A validated tenant id of an authenticated principal.</param>
-    /// <param name="issuer">The identity provider issuer, used to rate-limit new registrations per issuer.</param>
+    /// <param name="issuer">
+    /// The budget key that rate-limits new registrations: the identity provider issuer, or <c>scheme:&lt;authentication scheme&gt;</c> for a
+    /// token without an issuer (one bucket per scheme, never one shared bucket for all issuer-less tokens).
+    /// </param>
     ValueTask<TenantRegistration> RegisterOrGetAsync(TenantId tenant, string? issuer, CancellationToken ct);
+
+    /// <summary>
+    /// Phase 5 L6: a read-only lookup that never writes and never consumes a registration budget. <see cref="TenantRegistration.Existing"/>
+    /// when this exact spelling is recorded and its group does not collide, <see cref="TenantRegistration.Collision"/> when the group is
+    /// marked, and <c>null</c> when the tenant is unknown or is another spelling of a known group (only <see cref="RegisterOrGetAsync"/>
+    /// may register a tenant or mark a collision). The default (a store without a lookup) is "unknown".
+    /// </summary>
+    ValueTask<TenantRegistration?> TryGetAsync(TenantId tenant, CancellationToken ct) => ValueTask.FromResult<TenantRegistration?>(null);
 
     /// <summary>Records the configured tenant ids (not rate limited); configured spellings that collide mark their group.</summary>
     ValueTask PreseedAsync(IEnumerable<string> configuredTenantIds, CancellationToken ct);

@@ -79,14 +79,50 @@ public sealed class SessionPinningTests
     }
 
     [Fact]
-    public void Startup_SourcesNotReachableByWebSql_OrOtherProviders_NeedNoDefaultSchema()
+    public void RequireDefaultSchema_DefaultsToTrue_ForEveryDataSource()
+    {
+        // X1 (Phase 5 review, known item): the schema pin of PostgreSQL and Oracle is required unless a source opts out explicitly.
+        new DataSourceConnectionOptions().RequireDefaultSchema.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("PostgreSql", PgConnection)]
+    [InlineData("Oracle", OraConnection)]
+    public void Startup_PostgreSqlOrOracleSourceWithoutDefaultSchema_Fails_EvenWhenWebSqlDoesNotReachIt(string provider, string connection)
+    {
+        // The factory refuses to hand out such a connection at request time (RequireDefaultSchema), so the start refuses it first.
+        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDefaultSchemas(
+            Gateway(new DataSourceConnectionOptions { Provider = provider, ConnectionString = connection }, webSql: false)));
+    }
+
+    [Fact]
+    public void Startup_ExplicitOptOut_IsHonoured_ForSourcesWebSqlDoesNotReach()
     {
         Should.NotThrow(() => GatewayStartupValidator.ValidateDefaultSchemas(
-            Gateway(new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = PgConnection }, webSql: false)));
+            Gateway(new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = PgConnection, RequireDefaultSchema = false }, webSql: false)));
+
+        // ... but never for a source that WebSQL reaches: the session pin cannot be applied without a schema
+        Should.Throw<ValidationException>(() => GatewayStartupValidator.ValidateDefaultSchemas(
+            Gateway(new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = PgConnection, RequireDefaultSchema = false })));
+    }
+
+    [Fact]
+    public void Startup_OtherProviders_NeedNoDefaultSchema()
+    {
         Should.NotThrow(() => GatewayStartupValidator.ValidateDefaultSchemas(
             Gateway(new DataSourceConnectionOptions { Provider = "SqlServer", ConnectionString = "Server=x;Database=y" })));
         Should.NotThrow(() => GatewayStartupValidator.ValidateDefaultSchemas(
             Gateway(new DataSourceConnectionOptions { Provider = "Sqlite", ConnectionString = "Data Source=:memory:" })));
+    }
+
+    [Fact]
+    public async Task FactoryRefusesAPinnedSourceWithoutDefaultSchema_ByDefault()
+    {
+        var factory = new SqlConnectionFactory(Dev());
+
+        // no RequireDefaultSchema assignment: the default applies (nothing connects, the refusal comes before any network traffic)
+        await Should.ThrowAsync<SqlSourceUnavailableException>(() => factory.CreateOpenConnectionAsync(
+            new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = PgConnection }));
     }
 
     [Theory]

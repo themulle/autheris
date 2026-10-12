@@ -10,9 +10,11 @@ using Autheris.Domain.Interfaces;
 /// <item>Only positive results (<see cref="TenantRegistration.Registered"/>/<see cref="TenantRegistration.Existing"/>) are cached, for a short
 /// TTL and in a bounded map. A collision, a rate-limit decision or an unavailable registry is never cached as an allow, and a
 /// collision evicts every cached spelling of its group. A collision recorded by another replica reaches this cache within the TTL.</item>
-/// <item>A cache miss reserves one unit of the issuer's budget before the store is called and releases it when the store did not
-/// register anything new, so the number of rows one issuer can create per window is bounded. When the budget is exhausted the call
-/// returns <see cref="TenantRegistration.RateLimited"/> without touching the store. The number of tracked issuers is bounded; further
+/// <item>A cache miss first asks the store whether the tenant already exists (a read that neither writes nor costs budget): an existing
+/// tenant is answered from the lookup, so an issuer that exhausted its budget for new tenants can still serve the tenants it already has.
+/// Only an unknown tenant reserves one unit of the issuer's budget before the store registers it, and the unit is released when the store
+/// did not register anything new (a lost race), so the number of rows one issuer can create per window is bounded. When the budget is
+/// exhausted the call returns <see cref="TenantRegistration.RateLimited"/> without writing. The number of tracked issuers is bounded; further
 /// issuers share one overflow bucket.</item>
 /// </list>
 /// </summary>
@@ -48,6 +50,20 @@ public sealed class TenantRegistryGate(ITenantRegistry inner, TenantRegistryGate
             _cache.TryRemove(tenant.Value, out _);
         }
 
+        // Phase 5 L6: existence before budget. A lookup failure is an unavailable registry and fails closed (it throws).
+        var existing = await inner.TryGetAsync(tenant, ct).ConfigureAwait(false);
+        if (existing == TenantRegistration.Existing)
+        {
+            Remember(tenant, now);
+            return TenantRegistration.Existing;
+        }
+
+        if (existing == TenantRegistration.Collision)
+        {
+            EvictGroup(TenantRegistryKey.Normalize(tenant.Value));
+            return TenantRegistration.Collision;
+        }
+
         var bucket = BucketFor(issuer);
         if (!TryReserve(bucket, now))
         {
@@ -76,26 +92,35 @@ public sealed class TenantRegistryGate(ITenantRegistry inner, TenantRegistryGate
             Release(bucket);
         }
 
-        var key = TenantRegistryKey.Normalize(tenant.Value);
         if (result is TenantRegistration.Registered or TenantRegistration.Existing)
         {
-            if (_cache.Count < options.MaxCacheEntries)
-            {
-                _cache[tenant.Value] = new CacheEntry(key, now + _ttl);
-            }
+            Remember(tenant, now);
         }
         else if (result == TenantRegistration.Collision)
         {
-            foreach (var pair in _cache)
-            {
-                if (pair.Value.Key == key)
-                {
-                    _cache.TryRemove(pair.Key, out _);
-                }
-            }
+            EvictGroup(TenantRegistryKey.Normalize(tenant.Value));
         }
 
         return result;
+    }
+
+    private void Remember(TenantId tenant, DateTimeOffset now)
+    {
+        if (_cache.Count < options.MaxCacheEntries)
+        {
+            _cache[tenant.Value] = new CacheEntry(TenantRegistryKey.Normalize(tenant.Value), now + _ttl);
+        }
+    }
+
+    private void EvictGroup(string key)
+    {
+        foreach (var pair in _cache)
+        {
+            if (pair.Value.Key == key)
+            {
+                _cache.TryRemove(pair.Key, out _);
+            }
+        }
     }
 
     public ValueTask PreseedAsync(IEnumerable<string> configuredTenantIds, CancellationToken ct) =>

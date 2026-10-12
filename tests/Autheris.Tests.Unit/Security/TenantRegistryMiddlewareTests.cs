@@ -25,7 +25,7 @@ public sealed class TenantRegistryMiddlewareTests
         public IDisposable? OnChange(Action<GatewayOptions, string?> listener) => null;
     }
 
-    private static (DefaultHttpContext Context, IAuditLogRepository Audit) Request(string tenant, ITenantRegistry? registry, bool authenticated = true, string issuer = "https://idp.example/")
+    private static (DefaultHttpContext Context, IAuditLogRepository Audit) Request(string tenant, ITenantRegistry? registry, bool authenticated = true, string? issuer = "https://idp.example/", string scheme = "Bearer")
     {
         var audit = Substitute.For<IAuditLogRepository>();
         var services = new ServiceCollection();
@@ -36,10 +36,13 @@ public sealed class TenantRegistryMiddlewareTests
         context.Response.Body = new MemoryStream();
         if (authenticated)
         {
-            context.User = new ClaimsPrincipal(new ClaimsIdentity(new[]
+            var claims = new List<Claim> { new("sub", "S-1-5-21-USER9"), new("tenant_id", tenant) };
+            if (issuer is not null)
             {
-                new Claim("sub", "S-1-5-21-USER9"), new Claim("tenant_id", tenant), new Claim("iss", issuer)
-            }, "Bearer"));
+                claims.Add(new Claim("iss", issuer));
+            }
+
+            context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, scheme));
         }
 
         return (context, audit);
@@ -72,6 +75,20 @@ public sealed class TenantRegistryMiddlewareTests
 
         nextInvoked.ShouldBeTrue();
         await registry.Received(1).RegisterOrGetAsync(new TenantId("acme"), "https://idp.example/", Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("Bearer")]
+    [InlineData("ApiKey")]
+    public async Task TokenWithoutIssuer_GetsABudgetPerAuthenticationScheme(string scheme)
+    {
+        // Phase 5 L6: issuer-less tokens (API keys, forward auth) must not all share one bucket: the budget key is the scheme.
+        var registry = Registry(TenantRegistration.Registered);
+        var (context, _) = Request("acme", registry, issuer: null, scheme: scheme);
+
+        await Run(context);
+
+        await registry.Received(1).RegisterOrGetAsync(new TenantId("acme"), $"scheme:{scheme}", Arg.Any<CancellationToken>());
     }
 
     [Fact]

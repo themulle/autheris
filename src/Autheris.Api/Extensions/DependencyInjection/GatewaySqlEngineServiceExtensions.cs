@@ -74,6 +74,11 @@ public static class GatewaySqlEngineServiceExtensions
             return new Autheris.Application.Sql.CompiledSqlQueryPlanCache(planCacheOptions.MaxEntries, ttl);
         });
         services.AddScoped<IGovernedSqlExecutionService, GovernedSqlExecutionService>();
+        if (gatewayOptions.WebSql.Enabled)
+        {
+            // SEC-ADG-26: the start lists the tables that the governed pipeline denies (ids only).
+            services.AddHostedService<DeniedTablesStartupReporter>();
+        }
         services.AddSingleton<IWebSqlStatementManager, WebSqlStatementManager>();
         services.AddSingleton<ISqlEndpointRegistry, InMemorySqlEndpointRegistry>();
         services.AddSingleton<SqlEndpointLoader>();

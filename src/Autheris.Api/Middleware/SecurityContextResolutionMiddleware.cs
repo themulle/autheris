@@ -2,6 +2,7 @@ namespace Autheris.Api.Middleware;
 
 using System;
 using System.Security;
+using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
 using Autheris.Application.Interfaces;
@@ -96,7 +97,7 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
         TenantRegistration result;
         try
         {
-            result = await registry.RegisterOrGetAsync(securityContext.TenantId, context.User.FindFirst("iss")?.Value, context.RequestAborted).ConfigureAwait(false);
+            result = await registry.RegisterOrGetAsync(securityContext.TenantId, BudgetKey(context.User), context.RequestAborted).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -118,6 +119,16 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
                 await WriteCollisionDenialAsync(context, securityContext, "tenant id collides with a registered tenant id (tenant registry)").ConfigureAwait(false);
                 return true;
         }
+    }
+
+    /// <summary>
+    /// Phase 5 L6: the budget key of a new tenant registration: the issuer of the token, or one bucket per authentication scheme for a token
+    /// without an issuer (API keys, forward auth), so that issuer-less callers do not share a single bucket.
+    /// </summary>
+    private static string BudgetKey(ClaimsPrincipal user)
+    {
+        var issuer = user.FindFirst("iss")?.Value;
+        return !string.IsNullOrWhiteSpace(issuer) ? issuer : $"scheme:{user.Identity?.AuthenticationType ?? "unknown"}";
     }
 
     private static Task WriteJsonAsync(HttpContext context, int status, string message, string code)

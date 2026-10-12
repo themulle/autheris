@@ -60,7 +60,8 @@ public sealed class OracleRuntimeTests
         var options = new DataSourceConnectionOptions
         {
             Provider = "Oracle",
-            ConnectionString = "User Id=app;Password=x;DBA Privilege=SYSDBA;Data Source=" + Tcps
+            ConnectionString = "User Id=app;Password=x;DBA Privilege=SYSDBA;Data Source=" + Tcps,
+            DefaultSchema = "APP"
         };
         await Should.ThrowAsync<SecurityException>(() => factory.CreateOpenConnectionAsync(options));
     }

@@ -35,6 +35,23 @@ public sealed class TenantRegistryStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Lookup_ReportsExistingAndCollision_AndNeverWrites()
+    {
+        (await Registry.TryGetAsync(new TenantId("acme"), default)).ShouldBeNull();                    // unknown: nothing is recorded
+        (await Registry.TryGetAsync(new TenantId("acme"), default)).ShouldBeNull();
+        (await Registry.RegisterOrGetAsync(new TenantId("acme"), "iss", default)).ShouldBe(TenantRegistration.Registered);   // so this is still the first sight
+
+        (await Registry.TryGetAsync(new TenantId("acme"), default)).ShouldBe(TenantRegistration.Existing);
+        // another spelling of a known group is not an existing tenant: only the registration path may mark the collision
+        (await Registry.TryGetAsync(new TenantId("ACME"), default)).ShouldBeNull();
+        (await Registry.TryGetAsync(new TenantId("acme"), default)).ShouldBe(TenantRegistration.Existing);   // the lookup did not mark the group
+
+        (await Registry.RegisterOrGetAsync(new TenantId("ACME"), "iss", default)).ShouldBe(TenantRegistration.Collision);
+        (await Registry.TryGetAsync(new TenantId("acme"), default)).ShouldBe(TenantRegistration.Collision);
+        (await Registry.TryGetAsync(new TenantId("ACME"), default)).ShouldBe(TenantRegistration.Collision);
+    }
+
+    [Fact]
     public async Task ConcurrentRegistration_OneWins()
     {
         var results = await Task.WhenAll(Enumerable.Range(0, 32)

@@ -33,6 +33,23 @@ internal static class TenantRegistryStore
         return await EvaluateAsync(connection, key, tenant.Value, row.Value, ct).ConfigureAwait(false);
     }
 
+    /// <summary>Read-only lookup (Phase 5 L6): never inserts and never marks a collision.</summary>
+    public static async Task<TenantRegistration?> LookupAsync(DbConnection connection, TenantId tenant, CancellationToken ct)
+    {
+        var row = await ReadAsync(connection, TenantRegistryKey.Normalize(tenant.Value), ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            return null;
+        }
+
+        if (row.Value.Collided)
+        {
+            return TenantRegistration.Collision;
+        }
+
+        return string.Equals(row.Value.TenantId, tenant.Value, StringComparison.Ordinal) ? TenantRegistration.Existing : null;
+    }
+
     /// <summary>Records configured ids. Spellings that are not valid tenant ids are skipped (they can never authenticate).</summary>
     public static async Task PreseedAsync(DbConnection connection, IEnumerable<string> tenantIds, CancellationToken ct)
     {
