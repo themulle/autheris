@@ -14,6 +14,7 @@ public static class ClassificationServiceCollectionExtensions
         services.AddSingleton<IClassificationEngine, ClassificationEngine>();
         services.AddSingleton<IClassificationWorkflowStateMachine, ClassificationWorkflowStateMachine>();
         services.AddSingleton<IWormConfigurationAuditService, WormConfigurationAuditService>();
+        services.AddHostedService<WormConfigurationStartupAuditor>();
         return services;
     }
 }
