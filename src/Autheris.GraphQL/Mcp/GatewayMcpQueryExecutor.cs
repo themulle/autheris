@@ -267,6 +267,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                     ? await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), Number("offset"), Number("limit"), cancellationToken).ConfigureAwait(false)
                     : await _datasetCatalog.ListDatasetsAsync(principal, Text("search"), Text("domain"), cancellationToken).ConfigureAwait(false),
                 McpDatasetTools.DescribeDataset => await _datasetCatalog.DescribeDatasetAsync(principal, Text("dataset") ?? string.Empty, cancellationToken).ConfigureAwait(false),
+                McpDatasetTools.DescribeMyAccess => await _datasetCatalog.DescribeMyAccessAsync(principal, Text("dataset") ?? Text("table") ?? string.Empty, cancellationToken).ConfigureAwait(false),
                 _ => await _datasetCatalog.SampleRowsAsync(principal, Text("dataset") ?? string.Empty, ToCount(variables), cancellationToken).ConfigureAwait(false)
             };
 

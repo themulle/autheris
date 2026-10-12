@@ -611,5 +611,88 @@ public class ConsentResolutionTests
 
         decision.IsAllowed.ShouldBeFalse();
     }
+
+    [Fact]
+    public void ResolveAccess_WithAgentReadScope_WhenColumnRestrictedForAgent_MasksColumn()
+    {
+        var consent = CreateBaseConsent(ConsentEffect.Allow, GranteeType.User, _userSid);
+        consent.ColumnRules = new List<ConsentColumnRule>
+        {
+            new() { ColumnName = "name", AccessLevel = ColumnAccessLevel.Clear },
+            new() { ColumnName = "salary", AccessLevel = ColumnAccessLevel.Clear },
+            new() { ColumnName = "salary", AccessLevel = ColumnAccessLevel.Mask, ApplicableScopes = new[] { "Agent.Read" } }
+        };
+
+        // Caller 1: Human without Agent.Read
+        var humanDecision = _service.ResolveAccess(
+            _userSid,
+            new HashSet<Sid>(),
+            new HashSet<string>(),
+            _testTable,
+            new[] { consent },
+            callerScopes: new HashSet<string>()
+        );
+
+        humanDecision.IsAllowed.ShouldBeTrue();
+        humanDecision.GetColumnAccess("salary").ShouldBe(ColumnAccessLevel.Clear);
+
+        // Caller 2: Agent with Agent.Read
+        var agentDecision = _service.ResolveAccess(
+            _userSid,
+            new HashSet<Sid>(),
+            new HashSet<string>(),
+            _testTable,
+            new[] { consent },
+            callerScopes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Agent.Read" }
+        );
+
+        agentDecision.IsAllowed.ShouldBeTrue();
+        agentDecision.GetColumnAccess("salary").ShouldBe(ColumnAccessLevel.Mask);
+    }
+
+    [Fact]
+    public void ResolveAccess_WithScope_CannotWidenDeniedColumn_MonotonicHardening()
+    {
+        var consent = CreateBaseConsent(ConsentEffect.Allow, GranteeType.User, _userSid);
+        consent.ColumnRules = new List<ConsentColumnRule>
+        {
+            new() { ColumnName = "secret", AccessLevel = ColumnAccessLevel.Deny },
+            new() { ColumnName = "secret", AccessLevel = ColumnAccessLevel.Clear, ApplicableScopes = new[] { "Agent.Read" } }
+        };
+
+        var agentDecision = _service.ResolveAccess(
+            _userSid,
+            new HashSet<Sid>(),
+            new HashSet<string>(),
+            _testTable,
+            new[] { consent },
+            callerScopes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Agent.Read" }
+        );
+
+        // Monotonic hardening: scope can NEVER loosen a base Deny to Clear
+        agentDecision.GetColumnAccess("secret").ShouldBe(ColumnAccessLevel.Deny);
+    }
+
+    [Fact]
+    public void ResolveAccess_WithScopeSpecificDeny_WhenCallerHasScope_HardensToDeny()
+    {
+        var consent = CreateBaseConsent(ConsentEffect.Allow, GranteeType.User, _userSid);
+        consent.ColumnRules = new List<ConsentColumnRule>
+        {
+            new() { ColumnName = "internal_notes", AccessLevel = ColumnAccessLevel.Mask },
+            new() { ColumnName = "internal_notes", AccessLevel = ColumnAccessLevel.Deny, ApplicableScopes = new[] { "Agent.Read" } }
+        };
+
+        var agentDecision = _service.ResolveAccess(
+            _userSid,
+            new HashSet<Sid>(),
+            new HashSet<string>(),
+            _testTable,
+            new[] { consent },
+            callerScopes: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "Agent.Read" }
+        );
+
+        agentDecision.GetColumnAccess("internal_notes").ShouldBe(ColumnAccessLevel.Deny);
+    }
 }
 

@@ -2,12 +2,13 @@
 
 **Document ID:** `PLAN-WAVE2-GOVERNANCE-2026-10-12`  
 **Date:** 2026-10-12  
-**Status:** APPROVED / IN EXECUTION 🚀  
+**Status:** COMPLETED & VERIFIED ✅  
 **Author:** Delivery Project Manager, Solution Architect & Security Expert  
 **Target Branch:** `feat/governance-consents-wave2`  
 **Target Path:** `docs/plans/2026-10-12-plan-governance-consents-wave2.md`  
 **Parent Plan:** [PLAN-GH-ISSUES-ROADMAP-2026-10-12](file:///root/autheris/docs/plans/2026-10-12-plan-github-issues-roadmap.md)  
 **PRD:** [REQ-WAVE2-GOVERNANCE-2026-10-12](file:///root/autheris/docs/plans/2026-10-12-req-governance-consents-wave2.md)  
+**Documentation:** [F-GOV-15 Feature Catalog](file:///root/autheris/docs/features/f-gov-15-declarative-consents-scopes.md)  
 
 ---
 
@@ -122,9 +123,9 @@ This implementation plan delivers **Wave 2** of the Autheris GitHub Issues Roadm
 
 ## 4. Phase 4: Delivery Sequence (Red-Green-Refactor)
 
-- [ ] **Step 1:** Implement WP-4 (`ApplicableScopes` on `ConsentColumnRule` & Monotonic Scope Masking) + Unit Tests.
-- [ ] **Step 2:** Implement WP-5 (`App.Read` in `ReadOnlyScopes` & FinOps attribution) + Unit Tests.
-- [ ] **Step 3:** Implement WP-2 (`IEffectiveAccessExplanationService`, `myAccess`, `describe_my_access`) + Unit Tests.
-- [ ] **Step 4:** Implement WP-3 (Approver Inbox & Request Queries) + Unit Tests.
-- [ ] **Step 5:** Implement WP-1 (Declarative GitOps Apply API & Service) + Unit Tests.
-- [ ] **Step 6:** Run full test suite (`dotnet test Autheris.sln`) -> verify 100% green.
+- [x] **Step 1:** Implement WP-4 (`ApplicableScopes` on `ConsentColumnRule` & Monotonic Scope Masking) + Unit Tests.
+- [x] **Step 2:** Implement WP-5 (`App.Read` in `ReadOnlyScopes` & FinOps attribution) + Unit Tests.
+- [x] **Step 3:** Implement WP-2 (`IEffectiveAccessExplanationService`, `myAccess`, `describe_my_access`) + Unit Tests.
+- [x] **Step 4:** Implement WP-3 (Approver Inbox & Request Queries) + Unit Tests.
+- [x] **Step 5:** Implement WP-1 (Declarative GitOps Apply API & Service) + Unit Tests.
+- [x] **Step 6:** Run full test suite (`dotnet test Autheris.sln`) -> verify 100% green.

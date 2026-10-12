@@ -26,7 +26,8 @@ public sealed class McpDatasetCatalog(
     IGatewayExecutionService gatewayExecutionService,
     IGoldenQueryService? goldenQueryService = null,
     IOptions<GatewayOptions>? options = null,
-    IGraphQlCatalogMap? graphQlMap = null) : IMcpDatasetCatalog
+    IGraphQlCatalogMap? graphQlMap = null,
+    Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService = null) : IMcpDatasetCatalog
 {
     public const int MaxListedDatasets = 200;
     public const int DefaultSampleRows = 5;
@@ -133,6 +134,22 @@ public sealed class McpDatasetCatalog(
             examples,
             graphQl == null ? null : await GraphQlAccessAsync(principal, graphQl, columns, ct).ConfigureAwait(false),
             DatasetAccess(id));
+    }
+
+    public async Task<EffectiveTableAccessDto> DescribeMyAccessAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        if (!TryParseDatasetId(dataset, out var tableId))
+        {
+            throw new ArgumentException($"Invalid dataset format: '{dataset}'. Expected 'domain.schema.table' or 'domain.table'.", nameof(dataset));
+        }
+
+        if (explanationService != null)
+        {
+            return await explanationService.ExplainMyAccessAsync(principal, tableId, ct).ConfigureAwait(false);
+        }
+
+        throw new InvalidOperationException("EffectiveAccessExplanationService is not configured.");
     }
 
     public async Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, CancellationToken ct = default)

@@ -281,7 +281,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<IConsentCacheService, ConsentCacheService>();
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();
         services.AddHttpContextAccessor();
-        services.AddScoped<Autheris.Application.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
+        services.AddSingleton<Autheris.Application.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
         {
             services.AddSingleton<PostgreSqlGovernanceRepository>();
@@ -435,6 +435,8 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<ISchemaSunsettingService, SchemaSunsettingService>();
         services.AddSingleton<IDifferentialPrivacyEngine, DifferentialPrivacyEngine>();
         services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
+        services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
+        services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService, Autheris.Application.Governance.Services.DeclarativeConsentApplyService>();
 
         // ITSM orchestration (dispatcher, recertification, outbox workers). The outbound REST clients (ServiceNow & Jira)
         // and the inbound webhook handler are registered by AddGatewayExtensions (Autheris.Extensions/Itsm).
@@ -484,7 +486,6 @@ public static class GatewayServiceCollectionExtensions
         services.AddScoped<Autheris.Application.Connectors.CrossDomain.ICrossDomainAccessResolver, Autheris.Application.Connectors.CrossDomain.DefaultCrossDomainAccessResolver>();
 
         services.AddScoped<IClientIpResolver, Autheris.Api.Security.HttpContextClientIpResolver>();
-        services.AddScoped<Autheris.Application.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
         // O10: process-wide counter of running table reads per tenant, user and table
         services.AddSingleton<ITableReadConcurrencyGate, TableReadConcurrencyGate>();
         // M-1: database session context initializer for PostgreSQL GUCs and SQL Server SESSION_CONTEXT

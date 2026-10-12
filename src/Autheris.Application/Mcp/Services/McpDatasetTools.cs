@@ -13,6 +13,7 @@ public static class McpDatasetTools
 {
     public const string ListDatasets = "list_datasets";
     public const string DescribeDataset = "describe_dataset";
+    public const string DescribeMyAccess = "describe_my_access";
     public const string SampleRows = "sample_rows";
     public const string QueryGraphQl = "query_graphql";
 
@@ -31,6 +32,7 @@ public static class McpDatasetTools
     public static bool IsDatasetTool(string? toolName) =>
         string.Equals(toolName, ListDatasets, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, DescribeMyAccess, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, SampleRows, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, QueryGraphQl, StringComparison.OrdinalIgnoreCase);
 
@@ -55,9 +57,17 @@ public static class McpDatasetTools
             return null;
         }
 
+        if (string.Equals(toolName, DescribeMyAccess, StringComparison.OrdinalIgnoreCase))
+        {
+            return (TryGetStringArgument(argumentsJson, "dataset", out var ds) || TryGetStringArgument(argumentsJson, "table", out ds)) &&
+                   McpDatasetCatalog.TryParseDatasetId(ds, out var id)
+                ? id
+                : null;
+        }
+
         return TryGetStringArgument(argumentsJson, "dataset", out var dataset) &&
-               McpDatasetCatalog.TryParseDatasetId(dataset, out var id)
-            ? id
+               McpDatasetCatalog.TryParseDatasetId(dataset, out var matchId)
+            ? matchId
             : null;
     }
 
@@ -122,6 +132,20 @@ public static class McpDatasetTools
             }
             """,
             TargetGraphQLOperation: SampleRows);
+
+        yield return new McpToolDefinition(
+            Name: DescribeMyAccess,
+            Description: "Explains effective permissions, active row filters, and column masks for the caller on a specific dataset without data leakage.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["dataset"],
+              "properties": {
+                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table)." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: DescribeMyAccess);
     }
 
     /// <summary>

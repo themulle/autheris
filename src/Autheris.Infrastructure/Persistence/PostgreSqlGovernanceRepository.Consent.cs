@@ -1019,6 +1019,46 @@ public partial class PostgreSqlGovernanceRepository
         return req;
     }
 
+    public async Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, string? status = null, CancellationToken ct = default)
+    {
+        var list = new List<ConsentRequest>();
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        var sql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
+                           r.business_justification, r.status, r.requested_at, r.requested_valid_to,
+                           t.source_name, t.schema_name, t.table_name
+                    FROM CONSENT_REQUESTS r
+                    JOIN TABLES t ON r.table_id = t.id
+                    WHERE r.requester_sid = @reqSid";
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            sql += " AND UPPER(r.status) = @status";
+            cmd.Parameters.AddWithValue("@status", status.Trim().ToUpperInvariant());
+        }
+        sql += " ORDER BY r.requested_at DESC";
+        cmd.CommandText = sql;
+        cmd.Parameters.AddWithValue("@reqSid", requesterSid.Value);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            list.Add(new ConsentRequest
+            {
+                Id = Guid.Parse(reader.GetString(0)),
+                TableId = Guid.Parse(reader.GetString(1)),
+                RequesterSid = new Sid(reader.GetString(2)),
+                RequestedGranteeType = Enum.Parse<GranteeType>(reader.GetString(3), true),
+                RequestedGranteeRef = reader.GetString(4),
+                BusinessJustification = reader.GetString(5),
+                Status = reader.GetString(6),
+                RequestedAt = DateTimeOffset.Parse(reader.GetString(7)),
+                RequestedValidTo = DateTimeOffset.Parse(reader.GetString(8)),
+                TableIdentifier = new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11))
+            });
+        }
+        return list;
+    }
+
     public async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default)
     {
         var list = new List<ConsentRequest>();
