@@ -32,16 +32,12 @@ public abstract class DifferentialGateBase<TDatabase>(DifferentialFixture<TDatab
         return false;
     }
 
-    /// <summary>The AST leg exists only once the compiler lists the dialect with a binder. Reported, never silent.</summary>
+    /// <summary>The AST leg must run in every scenario of every available database: an unavailable leg fails the gate.</summary>
     private async Task<IReadOnlyList<StatementResult>?> ResultsAsync()
     {
         if (!DatabaseReady()) return null;
         var results = await Fixture.GetResultsAsync();
-        if (!Fixture.AstSupported)
-        {
-            output.WriteLine($"AST LEG SKIPPED: the AST compiler does not list {Fixture.Database.Dialect} yet (WP-X0h for SQLite).");
-            return null;
-        }
+        DifferentialRules.RequireAstLeg(Fixture.Database.Dialect.ToString(), Fixture.AstUnavailable);
 
         var counts = results.GroupBy(r => r.Classification.Class.ToWireName()).OrderBy(g => g.Key, StringComparer.Ordinal)
             .Select(g => $"{g.Key}={g.Count()}");
@@ -121,7 +117,7 @@ public abstract class DifferentialGateBase<TDatabase>(DifferentialFixture<TDatab
         // A confirmed legacy defect (approved, listed by statement id) is skipped, but only while the AST path has zero oracle violations.
         // Everything else that is looser stays red: ast-looser-* is never acceptable as a class.
         bool IsSkippedLegacyDefect(StatementResult r) =>
-            accepted.IsLegacyDefect(r.Statement.Id, Fixture.Database.Dialect) && r.Classification.AstViolations.Count == 0;
+            DifferentialRules.IsSkippedLegacyDefect(accepted.IsLegacyDefect(r.Statement.Id, Fixture.Database.Dialect), r.Classification.AstViolations.Count);
 
         var skipped = results.Where(r => r.Classification.Class.IsLooser() && IsSkippedLegacyDefect(r)).ToList();
         if (skipped.Count > 0) output.WriteLine($"{skipped.Count} ast-looser results skipped as confirmed legacy defects:\n{Describe(skipped)}");

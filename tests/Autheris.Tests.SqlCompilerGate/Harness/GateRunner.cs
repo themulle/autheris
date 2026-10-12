@@ -25,34 +25,32 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
 
     public PolicyScenario Scenario => scenario;
 
-    /// <summary>The binder of the dialect, or null when the engine has none yet (SQLite until WP-X0h).</summary>
+    /// <summary>The binder of the dialect, or null for a dialect the gate does not know.</summary>
     private DbCommandCompiledSqlBinder? Binder() => database.Dialect switch
     {
         GateDialect.PostgreSql => new PostgreSqlCompiledSqlBinder(),
         GateDialect.SqlServer => new SqlServerCompiledSqlBinder(),
         GateDialect.Oracle => new OracleCompiledSqlBinder(),
-        GateDialect.Sqlite => typeof(ICompiledSqlBinder).Assembly.GetType("TrinoSqlEngine.Ast.Emit.SqliteCompiledSqlBinder") is { } t
-            ? (DbCommandCompiledSqlBinder)Activator.CreateInstance(t)!
-            : null,
+        GateDialect.Sqlite => new SqliteCompiledSqlBinder(),
         _ => null
     };
 
     /// <summary>
-    /// Whether the AST compiler lists the database's dialect with a binder. Until then the AST leg of that dialect is reported
-    /// as skipped (not as an all-stricter result): a dialect the compiler does not support has no meaningful differential.
+    /// Null when the AST compiler supports the database's dialect in this scenario, otherwise why not. An unsupported dialect is a
+    /// failure of the gate (see <see cref="DifferentialRules.RequireAstLeg"/>), never a skip. Any other exception propagates.
     /// </summary>
-    public bool AstSupported()
+    public string? AstUnavailableReason()
     {
-        if (Binder() is null) return false;
+        if (Binder() is null) return $"no compiled-SQL binder for {database.Dialect}";
         try
         {
             var options = _policies.LegacyOptions(false);
             _engine.Compile("SELECT id FROM orders".AsMemory(), _policies.AstRequest(options, StatementPermissions.ReadOnly), CancellationToken.None);
-            return true;
+            return null;
         }
-        catch (Exception ex) when (ex is ArgumentOutOfRangeException or SqlCompileNotSupportedException)
+        catch (SqlCompileNotSupportedException ex)
         {
-            return false;
+            return ex.Message;
         }
     }
 

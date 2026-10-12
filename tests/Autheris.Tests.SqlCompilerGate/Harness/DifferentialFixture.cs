@@ -30,7 +30,8 @@ public sealed class DifferentialFixture<TDatabase> : IAsyncLifetime
 
     public TDatabase Database { get; } = new();
 
-    public bool AstSupported { get; private set; }
+    /// <summary>One entry per scenario whose AST leg is unavailable (empty when every scenario ran).</summary>
+    public IReadOnlyList<string> AstUnavailable { get; private set; } = [];
 
     public Task InitializeAsync() => GateProfile.DifferentialEnabled ? Database.InitializeAsync() : Task.CompletedTask;
 
@@ -42,11 +43,16 @@ public sealed class DifferentialFixture<TDatabase> : IAsyncLifetime
     {
         {
             var results = new List<StatementResult>();
+            var unavailable = new List<string>();
             foreach (var scenario in Enum.GetValues<PolicyScenario>())
             {
                 var runner = new GateRunner(Database, scenario);
-                AstSupported = runner.AstSupported();
-                if (!AstSupported) continue;
+                if (runner.AstUnavailableReason() is { } reason)
+                {
+                    unavailable.Add($"{scenario}: {reason}");
+                    continue;
+                }
+
                 var oracle = new PolicyOracle(scenario);
                 foreach (var statement in GateProfile.Corpus())
                 {
@@ -62,6 +68,7 @@ public sealed class DifferentialFixture<TDatabase> : IAsyncLifetime
                 }
             }
 
+            AstUnavailable = unavailable;
             WriteReport(results);
             if (Environment.GetEnvironmentVariable("SQLGATE_UPDATE_ACCEPTED") is { Length: > 0 } acceptedPath)
             {
@@ -131,4 +138,23 @@ public static class GateProfile
         EngineOutcome.Written w => $"written:{w.Changes.Count}",
         _ => "unknown"
     };
+}
+
+/// <summary>The database-free rules the differential tests apply to the fixture result.</summary>
+public static class DifferentialRules
+{
+    /// <summary>
+    /// The AST leg is the subject of the gate, and every dialect has a binder: when the database is available and the AST compiler
+    /// cannot run a scenario, the gate fails instead of reporting an empty (green) differential.
+    /// </summary>
+    public static void RequireAstLeg(string dialect, IReadOnlyList<string> unavailableScenarios)
+    {
+        if (unavailableScenarios.Count > 0)
+        {
+            Assert.Fail($"The AST leg is unavailable on {dialect}: {string.Join("; ", unavailableScenarios)}");
+        }
+    }
+
+    /// <summary>A confirmed legacy defect is skipped only while the AST path has zero oracle violations; otherwise it stays red.</summary>
+    public static bool IsSkippedLegacyDefect(bool isLegacyDefect, int astViolationCount) => isLegacyDefect && astViolationCount == 0;
 }
