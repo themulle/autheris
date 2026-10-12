@@ -27,7 +27,7 @@ services:
   # 1. PostgreSQL (Real Enterprise Data Store for Invoices & Relational Data)
   # ----------------------------------------------------------------------------
   postgres:
-    image: docker.io/library/postgres:16-alpine
+    image: docker.io/library/postgres:18-alpine
     container_name: gqlgateway-postgres
     networks:
       - gateway-bench-net
@@ -54,7 +54,7 @@ services:
   # 2. Redis (ConsentCache Invalidation, Rate Limiter Token Bucket, Idempotency)
   # ----------------------------------------------------------------------------
   redis:
-    image: docker.io/library/redis:7-alpine
+    image: docker.io/library/redis:8-alpine
     container_name: gqlgateway-redis
     networks:
       - gateway-bench-net
@@ -199,7 +199,7 @@ services:
   # 3f. Azurite (Azure Blob Storage / ADLS Gen2 Emulator for Lakehouse)
   # ----------------------------------------------------------------------------
   azurite:
-    image: mcr.microsoft.com/azure-storage/azurite:3.33.0
+    image: mcr.microsoft.com/azure-storage/azurite:3.37.0
     container_name: gqlgateway-azurite
     profiles:
       - azure
@@ -313,7 +313,7 @@ services:
   # 7. Prometheus (Metrics Scraping & Time-Series Storage)
   # ----------------------------------------------------------------------------
   prometheus:
-    image: docker.io/prom/prometheus:v2.54.1
+    image: docker.io/prom/prometheus:v3.15.0
     container_name: gqlgateway-prometheus
     profiles:
       - monitoring
@@ -333,7 +333,7 @@ services:
   # 8. Grafana (Dashboard Visualizations)
   # ----------------------------------------------------------------------------
   grafana:
-    image: docker.io/grafana/grafana:11.2.0
+    image: docker.io/grafana/grafana:13.2.3
     container_name: gqlgateway-grafana
     profiles:
       - monitoring

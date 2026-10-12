@@ -19,13 +19,15 @@ public static class NegotiateHardening
         options.PersistNtlmCredentials = false;
         options.PersistKerberosCredentials = false;
 
-        if (requireKerberosOnly)
+        options.Events = new NegotiateEvents
         {
-            options.Events = new NegotiateEvents
+            OnAuthenticated = requireKerberosOnly ? RejectNonKerberos : _ => Task.CompletedTask,
+            OnAuthenticationFailed = context =>
             {
-                OnAuthenticated = RejectNonKerberos
-            };
-        }
+                context.Fail(context.Exception ?? new InvalidOperationException("Negotiate authentication failed."));
+                return Task.CompletedTask;
+            }
+        };
     }
 
     internal static Task RejectNonKerberos(AuthenticatedContext context)

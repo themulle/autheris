@@ -163,7 +163,8 @@ public partial class SqliteGovernanceRepository
                 consent_id TEXT NOT NULL,
                 table_column_id TEXT NOT NULL,
                 column_name TEXT NOT NULL,
-                access_level INTEGER NOT NULL
+                access_level INTEGER NOT NULL,
+                applicable_scopes TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS CONSENT_ROW_FILTERS (
@@ -371,6 +372,7 @@ public partial class SqliteGovernanceRepository
         cmd.ExecuteNonQuery();
 
         EnsureConsentRowFilterColumns();
+        EnsureConsentColumnRuleColumns();
         EnsureTableColumns();
         EnsureTableColumnFields();
         EnsureConsentRequestColumns();
@@ -578,6 +580,33 @@ public partial class SqliteGovernanceRepository
                 catch (SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
                 {
                 }
+            }
+        }
+    }
+
+    private void EnsureConsentColumnRuleColumns()
+    {
+        var existingCols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using (var cmd = _connection.CreateCommand())
+        {
+            cmd.CommandText = "PRAGMA table_info(CONSENT_COLUMN_RULES);";
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                existingCols.Add(reader.GetString(1));
+            }
+        }
+
+        if (!existingCols.Contains("applicable_scopes"))
+        {
+            try
+            {
+                using var alterCmd = _connection.CreateCommand();
+                alterCmd.CommandText = "ALTER TABLE CONSENT_COLUMN_RULES ADD COLUMN applicable_scopes TEXT NOT NULL DEFAULT '';";
+                alterCmd.ExecuteNonQuery();
+            }
+            catch (SqliteException ex) when (ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+            {
             }
         }
     }

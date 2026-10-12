@@ -29,7 +29,7 @@ public sealed class GatewayEmptyListConfigurationValidator : IValidateOptions<Ga
         new("WebSql:CrossSource:AllowedHttpAuthModes", true,
             "To permit no federated HTTP source, set Gateway:WebSql:CrossSource:Enabled to false."),
         new("Authentication:EntraId:ReadOnlyScopes", false,
-            "The default read-only scope (Agent.Read) applies, which is more restrictive than no read-only scope."),
+            "The default read-only scopes (Agent.Read, App.Read) apply, which is more restrictive than no read-only scope."),
         new("ReverseProxy:KnownNetworks", false,
             "The loopback default applies; loopback is always trusted for X-Forwarded-* headers."),
     ];

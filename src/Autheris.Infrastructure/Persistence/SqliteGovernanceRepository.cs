@@ -56,6 +56,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
     private readonly ILogger<SqliteGovernanceRepository>? _logger;
     private string? _auditChainViolation;
     private readonly GatewayOptions? _options;
+    private readonly ICallerContextProvider? _callerContextProvider;
 
     public SqliteGovernanceRepository(
         IEpochValidationService epochValidationService,
@@ -64,11 +65,13 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
         IKeyVaultSecretProvider? secretProvider = null,
         IAuditChainAnchorStore? auditAnchorStore = null,
         ILogger<SqliteGovernanceRepository>? logger = null,
-        IAuditAnchorSigner? auditAnchorSigner = null)
+        IAuditAnchorSigner? auditAnchorSigner = null,
+        ICallerContextProvider? callerContextProvider = null)
     {
         _epochValidationService = epochValidationService;
         _logger = logger;
         _options = options?.Value;
+        _callerContextProvider = callerContextProvider;
         var connStr = options?.Value?.GovernanceDb?.ConnectionString ?? $"Data Source=governance_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
         EnsureSqliteDirectoryExists(connStr);
         _connection = new SqliteConnection(connStr);

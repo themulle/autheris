@@ -22,6 +22,7 @@ public sealed record SecurityPrincipalContext
     public bool IsAuthenticated { get; init; } = true;
     public string? BreakGlassJustification { get; init; }
     public System.Net.IPAddress? ClientIp { get; init; }
+    public CallerContext? Caller { get; init; }
     public IEnumerable<System.Security.Claims.Claim>? Claims { get; init; }
 
     /// <summary>Cluster-level administrator authorized to perform cross-tenant operations.</summary>
@@ -108,7 +109,7 @@ public sealed record SecurityPrincipalContext
     }
 
     /// <summary>Creates an anonymous security context with LegacySingleTenant and empty permissions.</summary>
-    public static SecurityPrincipalContext Anonymous(TenantId? tenantId = null) => new()
+    public static SecurityPrincipalContext Anonymous(TenantId? tenantId = null, CallerContext? caller = null) => new()
     {
         UserSid = new Sid("ANONYMOUS"),
         TenantId = tenantId ?? TenantId.LegacySingleTenant,
@@ -116,7 +117,8 @@ public sealed record SecurityPrincipalContext
         TenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
         ClusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
         AuthenticationScheme = "Anonymous",
-        IsAuthenticated = false
+        IsAuthenticated = false,
+        Caller = caller
     };
 
     /// <summary>
@@ -127,7 +129,8 @@ public sealed record SecurityPrincipalContext
         TenantId? overrideTenant = null,
         string? authenticationScheme = null,
         string? breakGlassJustification = null,
-        System.Net.IPAddress? clientIp = null)
+        System.Net.IPAddress? clientIp = null,
+        CallerContext? caller = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
 
@@ -166,6 +169,7 @@ public sealed record SecurityPrincipalContext
             IsAuthenticated = principal.Identity?.IsAuthenticated ?? true,
             BreakGlassJustification = breakGlassJustification,
             ClientIp = clientIp,
+            Caller = caller,
             Claims = principal.Claims
         };
     }

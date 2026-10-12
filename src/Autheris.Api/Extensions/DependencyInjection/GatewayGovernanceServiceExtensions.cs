@@ -140,6 +140,8 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<ISchemaSunsettingService, SchemaSunsettingService>();
         services.AddSingleton<IDifferentialPrivacyEngine, DifferentialPrivacyEngine>();
         services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
+        services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
+        services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService, Autheris.Application.Governance.Services.DeclarativeConsentApplyService>();
 
         // ITSM orchestration (dispatcher, recertification, outbox workers)
         services.AddScoped<ItsmWorkflowDispatcher>();
@@ -163,6 +165,10 @@ public static class GatewayGovernanceServiceExtensions
 
         // Governance Data Classification Engine & Workflows
         services.AddAutherisDataClassification();
+
+        // DataHub & Data Contract Engine (REQ-DATAHUB-01)
+        services.AddSingleton<IDataContractEngine, InMemoryDataContractEngine>();
+        services.AddScoped<IDataHubCatalogClient, DataHubCatalogClient>();
 
         return services;
     }

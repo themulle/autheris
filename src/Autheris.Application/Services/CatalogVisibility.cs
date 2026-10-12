@@ -18,6 +18,44 @@ using Autheris.Domain.Model;
 /// </summary>
 public static class CatalogVisibility
 {
+    public static string ComputeAccessStatus(
+        TableIdentifier table,
+        IEnumerable<Consent> activeConsents,
+        IEnumerable<ConsentRequest>? pendingRequests = null,
+        bool isAdmin = false)
+    {
+        if (isAdmin)
+        {
+            return "GRANTED";
+        }
+
+        var hasAllow = activeConsents.Any(c =>
+            c.TableIdentifier == table &&
+            c.Effect == ConsentEffect.Allow);
+
+        var hasUnconditionalDeny = activeConsents.Any(c =>
+            c.TableIdentifier == table &&
+            c.Effect == ConsentEffect.Deny &&
+            c.RowFilters.Count == 0 &&
+            c.ColumnRules.Count == 0);
+
+        if (hasAllow && !hasUnconditionalDeny)
+        {
+            return "GRANTED";
+        }
+
+        if (pendingRequests != null && pendingRequests.Any(r =>
+            r.TableIdentifier == table &&
+            (r.Status.StartsWith("PENDING", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(r.Status, "ESCALATED", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(r.Status, "SUBMITTED", StringComparison.OrdinalIgnoreCase))))
+        {
+            return "PENDING";
+        }
+
+        return "NONE";
+    }
+
     public static IReadOnlyList<TableMetadata> FilterForSubject(
         IEnumerable<TableMetadata> allTables,
         IEnumerable<Consent> activeConsents,
@@ -45,9 +83,25 @@ public static class CatalogVisibility
         var visible = new List<TableMetadata>();
         foreach (var table in allTables)
         {
-            if (!allowedTableIds.Contains(table.Identifier) || unconditionallyDeniedTableIds.Contains(table.Identifier))
+            var isAllowed = allowedTableIds.Contains(table.Identifier) && !unconditionallyDeniedTableIds.Contains(table.Identifier);
+            if (!isAllowed)
             {
-                continue;
+                if (table.Table.Visibility == DatasetVisibility.Hidden)
+                {
+                    continue;
+                }
+
+                if (table.Table.Visibility == DatasetVisibility.Summary)
+                {
+                    visible.Add(table with { Columns = Array.Empty<TableColumn>() });
+                    continue;
+                }
+
+                if (table.Table.Visibility == DatasetVisibility.Full)
+                {
+                    visible.Add(table);
+                    continue;
+                }
             }
 
             var tableConsents = consentsByTable.TryGetValue(table.Identifier, out var tc) ? tc : [];

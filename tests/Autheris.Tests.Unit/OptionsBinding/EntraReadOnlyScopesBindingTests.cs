@@ -23,10 +23,10 @@ public class EntraReadOnlyScopesBindingTests
     }
 
     [Fact]
-    public void NothingConfigured_UsesAgentReadDefault()
+    public void NothingConfigured_UsesAgentReadAndAppReadDefault()
     {
         Bind(new() { ["Enabled"] = "true" })
-            .GetEffectiveReadOnlyScopes().ToArray().ShouldBe(["Agent.Read"]);
+            .GetEffectiveReadOnlyScopes().ToArray().ShouldBe(["Agent.Read", "App.Read"]);
     }
 
     [Fact]

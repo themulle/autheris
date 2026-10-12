@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Interfaces;
+using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -26,7 +27,10 @@ public sealed class McpDatasetCatalog(
     IGatewayExecutionService gatewayExecutionService,
     IGoldenQueryService? goldenQueryService = null,
     IOptions<GatewayOptions>? options = null,
-    IGraphQlCatalogMap? graphQlMap = null) : IMcpDatasetCatalog
+    IGraphQlCatalogMap? graphQlMap = null,
+    Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService = null,
+    IDataOwnershipRepository? dataOwnershipRepository = null,
+    IConsentApprovalRepository? approvalRepository = null) : IMcpDatasetCatalog
 {
     public const int MaxListedDatasets = 200;
     public const int DefaultSampleRows = 5;
@@ -48,14 +52,24 @@ public sealed class McpDatasetCatalog(
         string? search,
         string? domain,
         CancellationToken ct) =>
-        ListDatasetsAsync(principal, search, domain, offset: null, limit: null, ct);
+        ListDatasetsAsync(principal, search, domain, offset: null, limit: null, tag: null, ct);
 
-    public async Task<McpDatasetList> ListDatasetsAsync(
+    public Task<McpDatasetList> ListDatasetsAsync(
         ClaimsPrincipal principal,
         string? search,
         string? domain,
+        int? offset,
+        int? limit,
+        CancellationToken ct) =>
+        ListDatasetsAsync(principal, search, domain, offset, limit, tag: null, ct);
+
+    public async Task<McpDatasetList> ListDatasetsAsync(
+        ClaimsPrincipal principal,
+        string? search = null,
+        string? domain = null,
         int? offset = null,
         int? limit = null,
+        string? tag = null,
         CancellationToken ct = default)
     {
         var visible = await VisibleTablesAsync(principal, ct).ConfigureAwait(false);
@@ -63,6 +77,7 @@ public sealed class McpDatasetCatalog(
         var matches = visible
             .Where(t => string.IsNullOrWhiteSpace(domain) || string.Equals(t.Identifier.Domain, domain.Trim(), StringComparison.OrdinalIgnoreCase))
             .Where(t => string.IsNullOrWhiteSpace(search) || Matches(t, search.Trim()))
+            .Where(t => string.IsNullOrWhiteSpace(tag) || (t.Table.Tags != null && t.Table.Tags.Any(tg => string.Equals(tg, tag.Trim(), StringComparison.OrdinalIgnoreCase))))
             .OrderBy(t => DatasetId(t.Identifier), StringComparer.Ordinal)
             .ToList();
 
@@ -72,11 +87,24 @@ public sealed class McpDatasetCatalog(
         var pagedMatches = matches.Skip(effectiveOffset).Take(effectiveLimit).ToList();
         var datasets = new List<McpDatasetSummary>(pagedMatches.Count);
 
+        var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
+
         foreach (var t in pagedMatches)
         {
             var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(t.Identifier, ct).ConfigureAwait(false);
+            var status = options?.Value.IsMcpAuthBypassed == true
+                ? "GRANTED"
+                : CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
+
             // 4b.1: Only short description in summary; long description only in describe_dataset
-            datasets.Add(new McpDatasetSummary(DatasetId(t.Identifier), t.Table.Description, t.Table.Sensitivity, t.Columns.Count, graphQl?.QueryField));
+            datasets.Add(new McpDatasetSummary(
+                DatasetId(t.Identifier),
+                t.Table.Description,
+                t.Table.Sensitivity,
+                t.Columns.Count,
+                graphQl?.QueryField,
+                Tags: t.Table.Tags ?? Array.Empty<string>(),
+                AccessStatus: status));
         }
 
         var total = matches.Count;
@@ -107,7 +135,7 @@ public sealed class McpDatasetCatalog(
             .Select(c =>
             {
                 graphQlColumns.TryGetValue(c.ColumnName, out var field);
-                return new McpDatasetColumn(c.ColumnName, c.DataType, c.Description, c.IsSensitive, primaryKeys.Contains(c.ColumnName), field?.Field, field?.GraphQlType);
+                return new McpDatasetColumn(c.ColumnName, c.DataType, c.Description, c.IsSensitive, primaryKeys.Contains(c.ColumnName), field?.Field, field?.GraphQlType, c.Semantics);
             })
             .ToList();
 
@@ -118,6 +146,44 @@ public sealed class McpDatasetCatalog(
             examples = goldens
                 .Select(g => new McpDatasetExample(g.Title, g.Description, g.QueryText, g.VariablesJson))
                 .ToList();
+        }
+
+        var (activeConsents, pendingRequests, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
+        var accessStatus = options?.Value.IsMcpAuthBypassed == true
+            ? "GRANTED"
+            : CatalogVisibility.ComputeAccessStatus(id, activeConsents, pendingRequests, isAdmin);
+
+        string? dataOwner = null;
+        List<string>? dataOwnerDelegates = null;
+        if (dataOwnershipRepository != null)
+        {
+            try
+            {
+                var owners = await dataOwnershipRepository.GetDataOwnersForTableAsync(id, ct).ConfigureAwait(false);
+                var activeOwners = owners.Where(o => o.IsActive).ToList();
+                if (activeOwners.Count > 0)
+                {
+                    var primary = activeOwners[0];
+                    dataOwner = !string.IsNullOrWhiteSpace(primary.DisplayName) && !string.IsNullOrWhiteSpace(primary.Email)
+                        ? $"{primary.DisplayName} <{primary.Email}>"
+                        : (!string.IsNullOrWhiteSpace(primary.DisplayName)
+                            ? primary.DisplayName
+                            : (!string.IsNullOrWhiteSpace(primary.Email) ? primary.Email : primary.AdAccount));
+
+                    if (activeOwners.Count > 1)
+                    {
+                        dataOwnerDelegates = activeOwners.Skip(1).Select(o =>
+                            !string.IsNullOrWhiteSpace(o.DisplayName) && !string.IsNullOrWhiteSpace(o.Email)
+                                ? $"{o.DisplayName} <{o.Email}>"
+                                : (!string.IsNullOrWhiteSpace(o.DisplayName) ? o.DisplayName : (o.Email ?? o.AdAccount))
+                        ).ToList();
+                    }
+                }
+            }
+            catch
+            {
+                // Fail-safe
+            }
         }
 
         return new McpDatasetDescription(
@@ -132,7 +198,63 @@ public sealed class McpDatasetCatalog(
             columns,
             examples,
             graphQl == null ? null : await GraphQlAccessAsync(principal, graphQl, columns, ct).ConfigureAwait(false),
-            DatasetAccess(id));
+            DatasetAccess(id),
+            Tags: table.Table.Tags ?? Array.Empty<string>(),
+            DataOwner: dataOwner,
+            DataOwnerDelegates: dataOwnerDelegates,
+            AccessStatus: accessStatus);
+    }
+
+    private async Task<(IReadOnlyList<Consent> ActiveConsents, IReadOnlyList<ConsentRequest> PendingRequests, bool IsAdmin)> GetCallerConsentsAndRequestsAsync(ClaimsPrincipal principal, CancellationToken ct)
+    {
+        var roles = principal.GetUserRoles();
+        var isAdmin = roles.Contains("GovernanceAdmin") || roles.Contains("ClusterAdmin");
+        if (isAdmin)
+        {
+            return (Array.Empty<Consent>(), Array.Empty<ConsentRequest>(), true);
+        }
+
+        var userSid = principal.GetUserSid();
+        if (userSid == null)
+        {
+            return (Array.Empty<Consent>(), Array.Empty<ConsentRequest>(), false);
+        }
+
+        var tenantId = principal.GetTenantId();
+        var subjects = principal.GetGroupSids().Append(userSid.Value).ToList();
+        var activeConsents = await _consentRepository.GetAllActiveConsentsForSubjectsAsync(
+            subjects, roles, DateTimeOffset.UtcNow, tenantId, ct).ConfigureAwait(false);
+
+        IReadOnlyList<ConsentRequest> pendingRequests = Array.Empty<ConsentRequest>();
+        if (approvalRepository != null)
+        {
+            try
+            {
+                pendingRequests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid.Value, "PENDING", ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Fail-safe
+            }
+        }
+
+        return (activeConsents, pendingRequests, false);
+    }
+
+    public async Task<EffectiveTableAccessDto> DescribeMyAccessAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        if (!TryParseDatasetId(dataset, out var tableId))
+        {
+            throw new ArgumentException($"Invalid dataset format: '{dataset}'. Expected 'domain.schema.table' or 'domain.table'.", nameof(dataset));
+        }
+
+        if (explanationService != null)
+        {
+            return await explanationService.ExplainMyAccessAsync(principal, tableId, ct).ConfigureAwait(false);
+        }
+
+        throw new InvalidOperationException("EffectiveAccessExplanationService is not configured.");
     }
 
     public async Task<McpDatasetSample> SampleRowsAsync(ClaimsPrincipal principal, string dataset, int? count, CancellationToken ct = default)
@@ -190,14 +312,17 @@ public sealed class McpDatasetCatalog(
     private IReadOnlyList<McpAccessPath> DatasetAccess(TableIdentifier id)
     {
         var o = options?.Value ?? new GatewayOptions();
-        var paths = new List<McpAccessPath>
+        var paths = new List<McpAccessPath>();
+
+        if (o.OData.Enabled)
         {
-            new("OData v4", "GET", $"/odata/v4/{id.Domain}/{id.Schema}/{id.TableName}",
-                "OData query options $select, $filter, $orderby, $top, $skip. JSON with OData annotations."),
-            new("OpenAPI (REST)", "GET", $"/odata/v4/{id.Domain}/openapi.json",
-                "OpenAPI 3.1 description of the REST routes of this domain."),
-            new("MCP sample_rows", "MCP", SampleRows, "A few rows of this dataset, for a first look.")
-        };
+            paths.Add(new("OData v4", "GET", $"/odata/v4/{id.Domain}/{id.Schema}/{id.TableName}",
+                "OData query options $select, $filter, $orderby, $top, $skip. JSON with OData annotations."));
+            paths.Add(new("OpenAPI (REST)", "GET", $"/odata/v4/{id.Domain}/openapi.json",
+                "OpenAPI 3.1 description of the REST routes of this domain."));
+        }
+
+        paths.Add(new("MCP sample_rows", "MCP", SampleRows, "A few rows of this dataset, for a first look."));
 
         if (o.Arrow.Enabled)
         {
@@ -216,11 +341,15 @@ public sealed class McpDatasetCatalog(
         {
             new("GraphQL", "POST", GraphQlEndpoint,
                 "Preferred query path: query, filter, sort, page and follow relations between datasets in one request. Use the query_graphql tool.",
-                Preferred: true),
-            new("OData v4", "GET", "/odata/v4",
-                "Service document; /odata/v4/$metadata is the CSDL schema, /odata/v4/{domain}/{schema}/{table} the entity sets."),
-            new("OpenAPI (REST)", "GET", "/api/v1/openapi/index", "Index of the OpenAPI 3.1 documents per domain.")
+                Preferred: true)
         };
+
+        if (o.OData.Enabled)
+        {
+            endpoints.Add(new("OData v4", "GET", "/odata/v4",
+                "Service document; /odata/v4/$metadata is the CSDL schema, /odata/v4/{domain}/{schema}/{table} the entity sets."));
+            endpoints.Add(new("OpenAPI (REST)", "GET", "/api/v1/openapi/index", "Index of the OpenAPI 3.1 documents per domain."));
+        }
 
         if (o.WebSql.Enabled)
         {
@@ -249,6 +378,15 @@ public sealed class McpDatasetCatalog(
         if (o.Arrow.Enabled)
         {
             endpoints.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow", "Columnar bulk export of one dataset."));
+            if (o.Arrow.EnableFlightSql)
+            {
+                endpoints.Add(new("Arrow Flight SQL", "POST", "/api/v1/flight/sql", "Arrow Flight SQL protocol for analytical clients."));
+            }
+        }
+
+        if (o.Lakehouse.Enabled)
+        {
+            endpoints.Add(new("Iceberg REST Catalog", "GET", "/v1/namespaces", "Apache Iceberg REST Catalog protocol endpoint."));
         }
 
         return endpoints;

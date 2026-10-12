@@ -92,7 +92,7 @@ public static class GatewayApplicationBuilderExtensions
         // on this header to recognize the endpoint as a valid OData feed.
         app.Use(async (context, next) =>
         {
-            if (context.Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
+            if (gatewayOptions.OData.Enabled && context.Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
             {
                 context.Response.Headers["OData-Version"] = "4.0";
             }
@@ -436,10 +436,15 @@ public static class GatewayApplicationBuilderExtensions
         app.MapStreamingCdcEndpoints();
         app.MapDbtEndpoints();
         app.MapGovernanceEndpoints();
+        app.MapDataContractEndpoints();
+        app.MapDocIngestionEndpoints();
         app.MapGovernanceClassificationEndpoints();
         app.MapCatalogEndpoints();
         app.MapSystemEndpoints();
-        app.MapODataEndpoints(gatewayOptions);
+        if (gatewayOptions.OData.Enabled)
+        {
+            app.MapODataEndpoints(gatewayOptions);
+        }
         app.MapMcpEndpoints(gatewayOptions);
         app.MapSchemaRegistryEndpoints();
         app.MapBackstageEndpoints(gatewayOptions);
@@ -450,10 +455,22 @@ public static class GatewayApplicationBuilderExtensions
         app.MapFinOpsEndpoints();
         app.MapRebacEndpoints();
         app.MapVirtualFilterEndpoints();
-        app.MapArrowExportEndpoints();
-        app.MapArrowFlightSqlEndpoints();
-        app.MapDuckDbOlapEndpoints();
-        app.MapIcebergRestCatalogEndpoints();
+        if (gatewayOptions.Arrow.Enabled)
+        {
+            app.MapArrowExportEndpoints();
+        }
+        if (gatewayOptions.Arrow.Enabled && gatewayOptions.Arrow.EnableFlightSql)
+        {
+            app.MapArrowFlightSqlEndpoints();
+        }
+        if (gatewayOptions.DuckDbOlap.Enabled)
+        {
+            app.MapDuckDbOlapEndpoints();
+        }
+        if (gatewayOptions.Lakehouse.Enabled)
+        {
+            app.MapIcebergRestCatalogEndpoints();
+        }
         app.MapEnvoyExtAuthzEndpoints();
         app.MapWebSqlEndpoints(gatewayOptions);
         app.MapDatasetDataEndpoints();

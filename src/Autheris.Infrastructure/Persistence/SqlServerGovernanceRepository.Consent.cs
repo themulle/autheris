@@ -270,7 +270,7 @@ public partial class SqlServerGovernanceRepository
         {
             var batch = consentIds.GetRange(offset, Math.Min(ConsentHydrateBatchSize, consentIds.Count - offset));
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT consent_id, table_column_id, column_name, access_level FROM CONSENT_COLUMN_RULES WHERE consent_id IN (" + BuildConsentIdInClause(cmd, "id", batch) + ")";
+            cmd.CommandText = "SELECT consent_id, table_column_id, column_name, access_level, applicable_scopes FROM CONSENT_COLUMN_RULES WHERE consent_id IN (" + BuildConsentIdInClause(cmd, "id", batch) + ")";
 
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -279,6 +279,11 @@ public partial class SqlServerGovernanceRepository
                 if (rulesMap.TryGetValue(cId, out var ruleList))
                 {
                     var rawLevel = reader.GetInt32(3);
+                    var scopesRaw = reader.IsDBNull(4) ? null : reader.GetString(4);
+                    var scopes = string.IsNullOrWhiteSpace(scopesRaw)
+                        ? Array.Empty<string>()
+                        : scopesRaw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
                     ruleList.Add(new ConsentColumnRule
                     {
                         Id = Guid.NewGuid(),
@@ -287,7 +292,8 @@ public partial class SqlServerGovernanceRepository
                         ColumnName = reader.GetString(2),
                         AccessLevel = Enum.IsDefined((ColumnAccessLevel)rawLevel)
                             ? (ColumnAccessLevel)rawLevel
-                            : ColumnAccessLevel.Deny
+                            : ColumnAccessLevel.Deny,
+                        ApplicableScopes = scopes
                     });
                 }
             }
@@ -427,13 +433,14 @@ public partial class SqlServerGovernanceRepository
                 var ruleId = Guid.NewGuid();
                 await using var ruleCmd = conn.CreateCommand();
                 ruleCmd.Transaction = tx;
-                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
-                                        VALUES (@id, @consentId, @colId, @colName, @level)";
+                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
+                                        VALUES (@id, @consentId, @colId, @colName, @level, @scopes)";
                 ruleCmd.Parameters.AddWithValue("@id", ruleId.ToString());
                 ruleCmd.Parameters.AddWithValue("@consentId", consentId.ToString());
                 ruleCmd.Parameters.AddWithValue("@colId", rule.TableColumnId.ToString());
                 ruleCmd.Parameters.AddWithValue("@colName", rule.ColumnName);
                 ruleCmd.Parameters.AddWithValue("@level", (int)rule.AccessLevel);
+                ruleCmd.Parameters.AddWithValue("@scopes", rule.ApplicableScopes != null && rule.ApplicableScopes.Count > 0 ? string.Join(",", rule.ApplicableScopes) : "");
                 await ruleCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -1466,8 +1473,8 @@ public partial class SqlServerGovernanceRepository
             {
                 await using var ruleCmd = conn.CreateCommand();
                 ruleCmd.Transaction = tx;
-                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
-                                        VALUES (@id, @consentId, @colId, @colName, @level)";
+                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
+                                        VALUES (@id, @consentId, @colId, @colName, @level, '')";
                 ruleCmd.Parameters.AddWithValue("@id", ruleId.ToString());
                 ruleCmd.Parameters.AddWithValue("@consentId", consentId.ToString());
                 ruleCmd.Parameters.AddWithValue("@colId", colId.ToString());

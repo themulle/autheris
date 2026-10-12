@@ -18,15 +18,22 @@ public static class SecurityContextFactory
     public const string TenantHeaderNameAlt = "X-Tenant-Id";
     public const string JustificationHeaderName = "X-Break-Glass-Justification";
     public const string JustificationHeaderNameAlt = "X-Justification";
+    public const string CallerAppHeaderName = "X-Caller-Application";
+    public const string CallerAppHeaderNameAlt = "X-Application-Name";
+    public const string CallerVersionHeaderName = "X-Caller-Version";
+    public const string CallerVersionHeaderNameAlt = "X-Application-Version";
+    public const string CallerQueryHeaderName = "X-Caller-Query-Name";
+    public const string CallerQueryHeaderNameAlt = "X-Query-Name";
 
     public static SecurityPrincipalContext CreateFromHttpContext(HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
+        var caller = ExtractCallerContext(context);
         var user = context.User;
         if (user.Identity?.IsAuthenticated != true)
         {
-            return SecurityPrincipalContext.Anonymous();
+            return SecurityPrincipalContext.Anonymous(caller: caller);
         }
 
         // 1. Resolve canonical SID (RV-02: never fall back to the display name – fail closed)
@@ -140,7 +147,50 @@ public static class SecurityContextFactory
             AuthenticationScheme = user.Identity?.AuthenticationType ?? "Unknown",
             IsAuthenticated = true,
             BreakGlassJustification = justification,
-            ClientIp = clientIp
+            ClientIp = clientIp,
+            Caller = caller
         };
+    }
+
+    private static CallerContext? ExtractCallerContext(HttpContext context)
+    {
+        string? app = GetHeader(context, CallerAppHeaderName, CallerAppHeaderNameAlt);
+        string? ver = GetHeader(context, CallerVersionHeaderName, CallerVersionHeaderNameAlt);
+        string? qry = GetHeader(context, CallerQueryHeaderName, CallerQueryHeaderNameAlt);
+
+        if (app == null && ver == null && qry == null) return null;
+        return new CallerContext(app, ver, qry);
+    }
+
+    private static string? GetHeader(HttpContext context, string primary, string alt)
+    {
+        if (context.Request.Headers.TryGetValue(primary, out var val) && !string.IsNullOrWhiteSpace(val))
+        {
+            return SanitizeCallerHeader(val.ToString());
+        }
+        if (context.Request.Headers.TryGetValue(alt, out var altVal) && !string.IsNullOrWhiteSpace(altVal))
+        {
+            return SanitizeCallerHeader(altVal.ToString());
+        }
+        return null;
+    }
+
+    private static string? SanitizeCallerHeader(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var trimmed = value.Trim();
+        if (trimmed.Length > 128) trimmed = trimmed[..128];
+        var chars = new char[trimmed.Length];
+        int count = 0;
+        foreach (var c in trimmed)
+        {
+            if (!char.IsControl(c))
+            {
+                chars[count++] = c;
+            }
+        }
+        if (count == 0) return null;
+        var res = new string(chars, 0, count).Trim();
+        return string.IsNullOrWhiteSpace(res) ? null : res;
     }
 }

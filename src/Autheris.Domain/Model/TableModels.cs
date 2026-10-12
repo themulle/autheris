@@ -14,6 +14,13 @@ public enum GranteeType
     ServicePrincipal = 4
 }
 
+public enum DatasetVisibility
+{
+    Hidden = 0,
+    Summary = 1,
+    Full = 2
+}
+
 public sealed class Table
 {
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -34,6 +41,7 @@ public sealed class Table
     public HttpEndpointDescriptor? HttpEndpoint { get; init; }
     public string? PluginName { get; init; }
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
+    public DatasetVisibility Visibility { get; init; } = DatasetVisibility.Hidden;
 
     /// <summary>Rank of a sensitivity class; unknown classes rank like HIGH (fail-closed). Empty means NORMAL.</summary>
     public static int SensitivityRank(string? sensitivity)
@@ -87,6 +95,13 @@ public sealed class TableColumn
     public string? LongDescription { get; init; }
     public string? DocumentationSource { get; init; }
     public IReadOnlyDictionary<string, string> Meta { get; init; } = new Dictionary<string, string>();
+
+    public ColumnSemantics Semantics => new(
+        Role: Meta.TryGetValue("role", out var r) ? r : null,
+        Unit: Meta.TryGetValue("unit", out var u) ? u : null,
+        BusinessName: Meta.TryGetValue("business_name", out var bn) ? bn : null,
+        RawMeta: Meta
+    );
 }
 
 
