@@ -60,6 +60,15 @@ public sealed class DynamicTableType : ObjectType
 
                 if (level == ColumnAccessLevel.Mask)
                 {
+                    if (ctx.ContextData.TryGetValue("MaskedFields", out var mfObj) && mfObj is System.Collections.Concurrent.ConcurrentBag<string> bag)
+                    {
+                        bag.Add(ctx.Path.Print());
+                    }
+                    else if (ctx.ScopedContextData.TryGetValue("MaskedFields", out var smfObj) && smfObj is System.Collections.Concurrent.ConcurrentBag<string> sbag)
+                    {
+                        sbag.Add(ctx.Path.Print());
+                    }
+
                     var rule = _metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var r)
                         ? r
                         : new MaskingRule { RuleType = "REDACT" };

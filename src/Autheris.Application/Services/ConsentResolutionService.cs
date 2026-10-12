@@ -23,7 +23,8 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         TableIdentifier table,
         IReadOnlyList<Consent> activeConsents,
         DatabaseDialect dialect = DatabaseDialect.SqlServer,
-        IReadOnlySet<Sid>? allUserSids = null)
+        IReadOnlySet<Sid>? allUserSids = null,
+        IReadOnlySet<string>? callerScopes = null)
     {
         var now = DateTimeOffset.UtcNow;
 
@@ -57,6 +58,14 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         {
             foreach (var colRule in c.ColumnRules)
             {
+                if (colRule.ApplicableScopes != null && colRule.ApplicableScopes.Count > 0)
+                {
+                    if (callerScopes == null || !colRule.ApplicableScopes.Any(s => callerScopes.Contains(s)))
+                    {
+                        continue;
+                    }
+                }
+
                 if (colRule.AccessLevel == ColumnAccessLevel.Deny)
                 {
                     hardDeniedColumns.Add(colRule.ColumnName);
@@ -100,7 +109,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
                 continue;
             }
 
-            var level = ResolveColumnLevel(column, unconstrainedConsents, rowConstrainedGroups);
+            var level = ResolveColumnLevel(column, unconstrainedConsents, rowConstrainedGroups, callerScopes);
 
             if (maskedOnlyColumns.Contains(column) && level == ColumnAccessLevel.Clear)
             {
@@ -118,7 +127,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         // at least one allow consent without column rules. Previously a single row-constrained consent without column
         // rules released every unmentioned column for the rows of all other consents.
         bool hasUnconstrainedColumnAllow =
-            ResolveColumnLevel(column: null, unconstrainedConsents, rowConstrainedGroups) == ColumnAccessLevel.Clear;
+            ResolveColumnLevel(column: null, unconstrainedConsents, rowConstrainedGroups, callerScopes) == ColumnAccessLevel.Clear;
 
         return TableAccessDecision.Allowed(table, columnAccess, rowFilterSql, hasUnconstrainedColumnAllow);
     }
@@ -182,12 +191,13 @@ public sealed class ConsentResolutionService : IConsentResolutionService
     private static ColumnAccessLevel ResolveColumnLevel(
         string? column,
         IReadOnlyList<Consent> unconstrainedConsents,
-        IReadOnlyList<List<Consent>> rowConstrainedGroups)
+        IReadOnlyList<List<Consent>> rowConstrainedGroups,
+        IReadOnlySet<string>? callerScopes = null)
     {
         if (unconstrainedConsents.Count > 0)
         {
             // Rows outside every row filter are visible only through the unconstrained consents.
-            var maxLevel = unconstrainedConsents.Max(c => GetConsentColumnLevel(c, column));
+            var maxLevel = unconstrainedConsents.Max(c => GetConsentColumnLevel(c, column, callerScopes));
             return Enum.IsDefined(maxLevel) ? maxLevel : ColumnAccessLevel.Deny;
         }
 
@@ -199,7 +209,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         var result = ColumnAccessLevel.Clear;
         foreach (var group in rowConstrainedGroups)
         {
-            var rawGroupLevel = group.Max(c => GetConsentColumnLevel(c, column));
+            var rawGroupLevel = group.Max(c => GetConsentColumnLevel(c, column, callerScopes));
             var groupLevel = Enum.IsDefined(rawGroupLevel) ? rawGroupLevel : ColumnAccessLevel.Deny;
             if (groupLevel < result)
             {
@@ -210,7 +220,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         return result;
     }
 
-    private static ColumnAccessLevel GetConsentColumnLevel(Consent consent, string? column)
+    private static ColumnAccessLevel GetConsentColumnLevel(Consent consent, string? column, IReadOnlySet<string>? callerScopes = null)
     {
         if (consent.ColumnRules.Count == 0)
         {
@@ -222,15 +232,52 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             return ColumnAccessLevel.Deny;
         }
 
-        var rule = consent.ColumnRules.FirstOrDefault(cr => string.Equals(cr.ColumnName, column, StringComparison.OrdinalIgnoreCase));
-        if (rule == null)
+        var matchingRules = consent.ColumnRules
+            .Where(cr => string.Equals(cr.ColumnName, column, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (matchingRules.Count == 0)
         {
             return ColumnAccessLevel.Deny;
         }
 
-        return Enum.IsDefined(rule.AccessLevel)
-            ? rule.AccessLevel
-            : ColumnAccessLevel.Deny;
+        var baseRules = matchingRules
+            .Where(r => r.ApplicableScopes == null || r.ApplicableScopes.Count == 0)
+            .ToList();
+
+        var scopeRules = matchingRules
+            .Where(r => r.ApplicableScopes != null && r.ApplicableScopes.Count > 0)
+            .ToList();
+
+        ColumnAccessLevel baseLevel;
+        if (baseRules.Count > 0)
+        {
+            var raw = baseRules.Max(r => r.AccessLevel);
+            baseLevel = Enum.IsDefined(raw) ? raw : ColumnAccessLevel.Deny;
+        }
+        else
+        {
+            // If only scope-specific rules exist, access defaults to Clear for callers without that scope
+            baseLevel = ColumnAccessLevel.Clear;
+        }
+
+        ColumnAccessLevel effectiveLevel = baseLevel;
+        if (callerScopes != null && callerScopes.Count > 0)
+        {
+            foreach (var sr in scopeRules)
+            {
+                if (sr.ApplicableScopes.Any(s => callerScopes.Contains(s)))
+                {
+                    // Monotonic hardening: scope rules can ONLY tighten access level
+                    if (sr.AccessLevel < effectiveLevel)
+                    {
+                        effectiveLevel = sr.AccessLevel;
+                    }
+                }
+            }
+        }
+
+        return effectiveLevel;
     }
 
     private static bool IsSubjectMatch(

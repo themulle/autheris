@@ -360,10 +360,11 @@ public sealed class TableAccessPolicy
     private async Task<TableAccessDecision> ResolveConsentAsync(TableAccessQuery query, CancellationToken ct)
     {
         var table = query.Metadata.Identifier;
+        var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(query.Claims);
         string? contextHash = null;
         if (_cacheService != null)
         {
-            contextHash = IConsentCacheService.ComputeSubjectContextHash(query.GroupSids, query.Roles);
+            contextHash = IConsentCacheService.ComputeSubjectContextHash(query.GroupSids, query.Roles, scopes);
             var cached = await _cacheService.GetCachedDecisionAsync(query.Tenant, query.UserSid, table, contextHash, ct).ConfigureAwait(false);
             if (cached != null)
             {
@@ -387,7 +388,15 @@ public sealed class TableAccessPolicy
         var allSids = query.AllUserSids != null && query.AllUserSids.Any(s => s != query.UserSid)
             ? query.AllUserSids
             : null;
-        var decision = _resolutionService.ResolveAccess(query.UserSid, query.GroupSids, query.Roles, table, activeConsents, query.Metadata.Dialect, allSids);
+        var decision = _resolutionService.ResolveAccess(
+            query.UserSid,
+            query.GroupSids,
+            query.Roles,
+            table,
+            activeConsents,
+            query.Metadata.Dialect,
+            allSids,
+            scopes is { Count: > 0 } ? scopes : null);
         if (decision == null)
         {
             return TableAccessDecision.Denied(table, "Access denied: consent resolution returned no decision.");

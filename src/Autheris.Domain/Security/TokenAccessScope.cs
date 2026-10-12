@@ -40,4 +40,29 @@ public static class TokenAccessScope
             .SelectMany(c => c.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             .Distinct(StringComparer.Ordinal)
             .ToList();
+
+    public static IReadOnlySet<string> GetScopeSet(ClaimsPrincipal? principal)
+    {
+        if (principal == null) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        return new HashSet<string>(GetScopes(principal), StringComparer.OrdinalIgnoreCase);
+    }
+
+    public static IReadOnlySet<string> GetScopeSet(IEnumerable<Claim>? claims)
+    {
+        if (claims == null) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var claim in claims)
+        {
+            if (ScopeClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase) ||
+                string.Equals(claim.Type, "scope", StringComparison.OrdinalIgnoreCase))
+            {
+                var parts = claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                foreach (var part in parts)
+                {
+                    set.Add(part);
+                }
+            }
+        }
+        return set;
+    }
 }

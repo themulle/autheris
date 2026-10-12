@@ -23,6 +23,7 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
     private readonly ISchemaRegistryService? _schemaRegistry;
     private readonly ITableMetadataRepository? _tableRepository;
     private readonly ISchemaSunsettingService? _sunsettingService;
+    private readonly IDataOwnershipRepository? _dataOwnershipRepository;
     private readonly GatewayOptions _options;
     private readonly ILogger<BackstageCatalogExportService>? _logger;
 
@@ -31,13 +32,15 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
         ISchemaRegistryService? schemaRegistry = null,
         ITableMetadataRepository? tableRepository = null,
         ISchemaSunsettingService? sunsettingService = null,
-        ILogger<BackstageCatalogExportService>? logger = null)
+        ILogger<BackstageCatalogExportService>? logger = null,
+        IDataOwnershipRepository? dataOwnershipRepository = null)
     {
         _options = options?.Value ?? new GatewayOptions();
         _schemaRegistry = schemaRegistry;
         _tableRepository = tableRepository;
         _sunsettingService = sunsettingService;
         _logger = logger;
+        _dataOwnershipRepository = dataOwnershipRepository;
     }
 
     public async Task<IReadOnlyList<BackstageEntity>> ExportCatalogEntitiesAsync(
@@ -275,6 +278,11 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
                         tags.Add(SanitizeEntityName($"sensitivity-{table.Sensitivity}"));
                     }
 
+                    if (table.Tags != null && table.Tags.Count > 0)
+                    {
+                        tags.AddRange(table.Tags.Select(SanitizeEntityName));
+                    }
+
                     var annotations = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                     {
                         ["backstage.io/managed-by-location"] = $"url:/api/integrations/backstage/catalog-entities/{entityName}",
@@ -315,6 +323,27 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
                         }
                     }
 
+                    var owner = backstageOpts.DefaultOwner;
+                    if (_dataOwnershipRepository != null)
+                    {
+                        try
+                        {
+                            var owners = await _dataOwnershipRepository.GetDataOwnersForTableAsync(tableMetadata.Identifier, cancellationToken).ConfigureAwait(false);
+                            var primaryOwner = owners.FirstOrDefault(o => o.IsActive);
+                            if (primaryOwner != null)
+                            {
+                                owner = !string.IsNullOrWhiteSpace(primaryOwner.Email)
+                                    ? primaryOwner.Email
+                                    : (!string.IsNullOrWhiteSpace(primaryOwner.AdAccount) ? primaryOwner.AdAccount : backstageOpts.DefaultOwner);
+                                annotations["autheris.io/data-owner"] = owner;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogDebug(ex, "Failed to load data owners for table {Table}", tableMetadata.Identifier);
+                        }
+                    }
+
                     var tableEntity = new BackstageEntity
                     {
                         ApiVersion = "backstage.io/v1alpha1",
@@ -332,7 +361,7 @@ public sealed class BackstageCatalogExportService : IBackstageCatalogExportServi
                         {
                             Type = "openapi",
                             Lifecycle = isDeprecated || !table.IsActive ? "deprecated" : "production",
-                            Owner = backstageOpts.DefaultOwner,
+                            Owner = owner,
                             System = backstageOpts.DefaultSystem
                         }
                     };

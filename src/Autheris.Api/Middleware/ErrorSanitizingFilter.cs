@@ -23,6 +23,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "UNAUTHORIZED",
         "NOT_FOUND",
         "RATE_LIMIT_EXCEEDED",
+        "RATE_LIMIT",
         "TOO_MANY_REQUESTS",
         "QUERY_TOO_COMPLEX",
         "BAD_REQUEST",
@@ -31,7 +32,11 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "VALIDATION_ERROR",
         "RESPONSE_TOO_LARGE",
         "TIMEOUT",
-        "UNAVAILABLE"
+        "UNAVAILABLE",
+        "COLUMN_NOT_RELEASED",
+        "FILTER_ON_MASKED_COLUMN",
+        "COST_LIMIT",
+        "ROW_LIMIT"
     };
 
     private static readonly string[] SensitivePatterns =

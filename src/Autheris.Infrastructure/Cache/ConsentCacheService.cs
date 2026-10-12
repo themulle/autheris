@@ -330,8 +330,8 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
 
     private static string NormalizeTableKey(TableIdentifier table) => table.ToString().ToLowerInvariant();
 
-    public static string ComputeSubjectContextHash(IReadOnlySet<Sid>? groupSids, IReadOnlySet<string>? roles) =>
-        IConsentCacheService.ComputeSubjectContextHash(groupSids, roles);
+    public static string ComputeSubjectContextHash(IReadOnlySet<Sid>? groupSids, IReadOnlySet<string>? roles, IReadOnlySet<string>? scopes = null) =>
+        IConsentCacheService.ComputeSubjectContextHash(groupSids, roles, scopes);
 
     private static string BuildCacheKey(TenantId tenant, Sid userSid, TableIdentifier table, string? contextHash = null)
     {
