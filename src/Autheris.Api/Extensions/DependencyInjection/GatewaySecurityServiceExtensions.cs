@@ -93,7 +93,7 @@ public static class GatewaySecurityServiceExtensions
         // Security, Context & Audit
         services.AddHttpContextAccessor();
         services.AddScoped<IClientIpResolver, HttpContextClientIpResolver>();
-        services.AddScoped<Autheris.Application.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
+        services.AddSingleton<Autheris.Application.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
         services.AddScoped<AuditContext>();
         services.AddSingleton<IAuthFailureAggregator, AuthFailureAggregator>();
         services.AddSingleton<ITableReadConcurrencyGate, TableReadConcurrencyGate>();
