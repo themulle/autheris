@@ -67,4 +67,9 @@ public static class AuditEventTypes
     public const string TwoFactorEnrollmentVerified = "TWO_FACTOR_ENROLLMENT_VERIFIED";
     public const string StepUpApprovalsListed = "STEP_UP_APPROVALS_LISTED";
     public const string StepUpApprovalAttempted = "STEP_UP_APPROVAL_ATTEMPTED";
+
+    // Universal Documentation Store & MCP Ingestion
+    public const string DocIngestionBundleApplied = "DOC_INGESTION_BUNDLE_APPLIED";
+    public const string DocIngestionDocumentApplied = "DOC_INGESTION_DOCUMENT_APPLIED";
+    public const string DocDiscoveryRead = "DOC_DISCOVERY_READ";
 }

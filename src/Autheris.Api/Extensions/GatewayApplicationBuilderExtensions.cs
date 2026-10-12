@@ -437,6 +437,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapDbtEndpoints();
         app.MapGovernanceEndpoints();
         app.MapDataContractEndpoints();
+        app.MapDocIngestionEndpoints();
         app.MapGovernanceClassificationEndpoints();
         app.MapCatalogEndpoints();
         app.MapSystemEndpoints();
