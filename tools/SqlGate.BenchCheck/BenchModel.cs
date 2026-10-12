@@ -39,7 +39,7 @@ public sealed record BenchThresholds
 
     /// <summary>
     /// Buckets that must not trigger any Gen2 collection (plan 9.3, amended by the orchestrator decision 2026-10-11). In the other buckets a query
-    /// is already on the large object heap as UTF-16, so the AST Gen2 count is compared with legacy (at most <see cref="MaxAllocationRatio"/>).
+    /// is already on the large object heap as UTF-16, so the AST Gen2 count is compared with legacy (at most <see cref="MaxGen2Ratio"/>).
     /// </summary>
     public IReadOnlySet<string> ZeroGen2Buckets { get; init; } = new HashSet<string>(StringComparer.Ordinal) { "0.5KB", "4KB" };
 

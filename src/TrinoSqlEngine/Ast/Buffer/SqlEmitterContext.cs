@@ -197,14 +197,14 @@ public sealed class SqlEmitterContext
 
     // G8: markers and names are a pure function of (style, ordinal); the first 256 ordinals of every style are formatted once per process.
     private const int CachedMarkerOrdinals = 256;
-    private static readonly MarkerPair?[][] MarkerCache = new MarkerPair?[6][];
+    private static readonly MarkerPair?[][] MarkerCache = new MarkerPair?[Enum.GetValues<ParameterMarkerStyle>().Length][];
 
     // A class (not a tuple) so that a racing writer can never expose a torn value: a reference write is atomic.
     private sealed record MarkerPair(string Marker, string Name);
 
     private static (string Marker, string Name) MarkerAndName(ParameterMarkerStyle style, int ordinal)
     {
-        if ((uint)ordinal < CachedMarkerOrdinals && (int)style is >= 0 and < 6)
+        if ((uint)ordinal < CachedMarkerOrdinals && (uint)(int)style < (uint)MarkerCache.Length)
         {
             var perStyle = MarkerCache[(int)style] ??= new MarkerPair?[CachedMarkerOrdinals];
             var known = perStyle[ordinal];

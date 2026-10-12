@@ -149,7 +149,7 @@ public sealed class CompiledSqlTemplateCache
             }
             finally
             {
-                System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+                System.Buffers.ArrayPool<byte>.Shared.Return(rented, clearArray: true);   // holds the key material (tenant, policy)
             }
         }
 

@@ -575,10 +575,6 @@ public static class GatewayStartupValidator
         }
     }
 
-    /// <summary>
-    /// WP-F1 / CR-ADG-08: outside Development an Oracle data source never carries a plaintext password (the connection string
-    /// has no <c>Password</c>; <c>PasswordKeyVaultRef</c> names the Key Vault secret) and always uses the policy-compliant account.
-    /// </summary>
     /// <summary>WP-X0i / SEC-ADG-09: validates every Databricks data source (exact host, auth mode, Pat only in Development).</summary>
     public static void ValidateDatabricks(GatewayOptions options, IHostEnvironment environment)
     {
@@ -623,6 +619,10 @@ public static class GatewayStartupValidator
         }
     }
 
+    /// <summary>
+    /// WP-F1 / CR-ADG-08: outside Development an Oracle data source never carries a plaintext password (the connection string
+    /// has no <c>Password</c>; <c>PasswordKeyVaultRef</c> names the Key Vault secret) and always uses the policy-compliant account.
+    /// </summary>
     public static void ValidateOracleRuntime(GatewayOptions options, IHostEnvironment environment, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(options);
