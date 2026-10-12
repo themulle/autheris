@@ -175,4 +175,97 @@ public class ODataIntegrationTests : IClassFixture<WebApplicationFactory<Program
         var body = await response.Content.ReadAsStringAsync();
         body.ShouldContain(expectedErrorCode);
     }
+
+    [Fact]
+    public async Task ExcelCompatibility_RootODataPath_Unauthenticated_Returns401WithODataJsonError_NotHtml()
+    {
+        var client = _factory.CreateClient();
+        // Excel and WinInet send text/html in the Accept header by default
+        client.DefaultRequestHeaders.Add("Accept", "text/html, application/xhtml+xml, application/json;odata.metadata=minimal, */*");
+
+        var response = await client.GetAsync("/odata");
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        response.Headers.GetValues("OData-Version").ShouldContain("4.0");
+        response.Headers.WwwAuthenticate.ToString().ShouldContain("Basic");
+
+        // Power Query requires JSON error response rather than HTML, even when Accept includes text/html
+        response.Content.Headers.ContentType?.MediaType.ShouldBe("application/json");
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.ShouldNotContain("<!DOCTYPE html>");
+        body.ShouldContain("\"error\"");
+        body.ShouldContain("\"UNAUTHORIZED\"");
+    }
+
+    [Fact]
+    public async Task ExcelCompatibility_RootODataPath_WhenAuthenticated_Returns200WithMatchingServiceRootContext()
+    {
+        var userSid = new Sid("S-1-5-21-EXCEL-USER");
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", userSid.Value);
+
+        var response = await client.GetAsync("/odata");
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.GetValues("OData-Version").ShouldContain("4.0");
+
+        var body = await response.Content.ReadAsStringAsync();
+        // Power Query strictly validates that @odata.context matches the requested service root
+        body.ShouldContain("/odata/$metadata");
+        body.ShouldNotContain("/odata/v4/$metadata");
+    }
+
+    [Fact]
+    public async Task ExcelCompatibility_ODataMetadataPath_ReturnsValidXml()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-EXCEL-USER");
+
+        var response = await client.GetAsync("/odata/$metadata");
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.GetValues("OData-Version").ShouldContain("4.0");
+        response.Content.Headers.ContentType?.MediaType.ShouldBe("application/xml");
+
+        var xml = await response.Content.ReadAsStringAsync();
+        xml.ShouldContain("<edmx:Edmx Version=\"4.0\"");
+        xml.ShouldContain("<Schema Namespace=\"Autheris.OData\"");
+    }
+
+    [Fact]
+    public async Task ExcelCompatibility_RootODataPath_EntitySet_Returns200AndRows()
+    {
+        var userSid = new Sid("S-1-5-21-EXCEL-ANALYST");
+        var tableId = new TableIdentifier("finance", "dbo", "finance_table_1");
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var consentRepo = scope.ServiceProvider.GetRequiredService<IConsentRepository>();
+            var metaRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
+
+            var meta = await metaRepo.GetTableMetadataAsync(tableId);
+            if (meta != null)
+            {
+                await consentRepo.CreateConsentAsync(new Consent
+                {
+                    TableId = meta.Table.Id,
+                    TableIdentifier = tableId,
+                    Effect = ConsentEffect.Allow,
+                    GranteeType = GranteeType.User,
+                    GranteeSid = userSid,
+                    ValidFrom = DateTimeOffset.UtcNow.AddHours(-1),
+                    ValidTo = DateTimeOffset.UtcNow.AddHours(24)
+                });
+            }
+        }
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", userSid.Value);
+
+        var response = await client.GetAsync("/odata/finance/dbo/finance_table_1?$top=5");
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.GetValues("OData-Version").ShouldContain("4.0");
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.ShouldContain("/odata/$metadata#finance_dbo_finance_table_1");
+        body.ShouldContain("value");
+    }
 }

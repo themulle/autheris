@@ -436,6 +436,8 @@ public static class GatewayApplicationBuilderExtensions
         app.MapStreamingCdcEndpoints();
         app.MapDbtEndpoints();
         app.MapGovernanceEndpoints();
+        app.MapDataContractEndpoints();
+        app.MapDocIngestionEndpoints();
         app.MapGovernanceClassificationEndpoints();
         app.MapCatalogEndpoints();
         app.MapSystemEndpoints();

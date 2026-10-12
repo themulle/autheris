@@ -63,19 +63,15 @@ public static class ODataEndpoints
                 return Results.Challenge();
             }
             context.Response.Headers["OData-Version"] = "4.0";
-            var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
+            var serviceRoot = ResolveServiceRoot(context);
             var doc = await odataHandler.GetServiceDocumentAsync(serviceRoot, context.User, context.RequestAborted);
             return Results.Json(doc, contentType: "application/json;odata.metadata=minimal;charset=utf-8");
         }
 
-        app.MapGet("/odata/v4", HandleServiceDocumentAsync)
-            .RequireAuthorization()
-            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-
-        app.MapGet("/odata/v4/$metadata", async (
+        async Task<IResult> HandleMetadataAsync(
             IODataHandler odataHandler,
             HttpContext context,
-            IWebHostEnvironment env) =>
+            IWebHostEnvironment env)
         {
             if (RequiresMetadataChallenge(gatewayOptions, env, context))
             {
@@ -84,8 +80,23 @@ public static class ODataEndpoints
             context.Response.Headers["OData-Version"] = "4.0";
             var xml = await odataHandler.GetMetadataCsdlAsync(context.User, context.RequestAborted);
             return Results.Content(xml, "application/xml;charset=utf-8");
-        }).RequireAuthorization()
-          .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        }
+
+        app.MapGet("/odata", HandleServiceDocumentAsync)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        app.MapGet("/odata/v4", HandleServiceDocumentAsync)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        app.MapGet("/odata/$metadata", HandleMetadataAsync)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        app.MapGet("/odata/v4/$metadata", HandleMetadataAsync)
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         bool IsOpenApiAuthorized(HttpContext context)
         {
@@ -284,12 +295,26 @@ public static class ODataEndpoints
             return Results.Stream(stream, contentType, enableRangeProcessing: false);
         }).AllowAnonymous().WithAuditExemption("Swagger UI static asset");
 
+        app.MapGet("/odata/{domain}/{schema}/{tableName}", HandleEntitySetRequestAsync)
+           .WithMetadata(new ParquetOutputSupportedMetadata())
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
+
         app.MapGet("/odata/v4/{domain}/{schema}/{tableName}", HandleEntitySetRequestAsync)
            .WithMetadata(new ParquetOutputSupportedMetadata())
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
+        app.MapGet("/odata/{domain}/{schema}/{tableName}/$count", HandleCountRequestAsync)
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
+
         app.MapGet("/odata/v4/{domain}/{schema}/{tableName}/$count", HandleCountRequestAsync)
+           .RequireAuthorization()
+           .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
+
+        app.MapGet("/odata/{entitySetName}", HandleFlatEntitySetRequestAsync)
+           .WithMetadata(new ParquetOutputSupportedMetadata())
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
@@ -311,6 +336,11 @@ public static class ODataEndpoints
         ITableMetadataRepository metadataRepo,
         HttpContext context)
     {
+        if (entitySetName.StartsWith('$'))
+        {
+            return Results.NotFound();
+        }
+
         var tables = await metadataRepo.GetAllTablesAsync(context.RequestAborted).ConfigureAwait(false);
         var tenant = context.User.GetTenantId();
         var candidateTables = tables
@@ -362,7 +392,7 @@ public static class ODataEndpoints
         HttpContext context)
     {
         context.Response.Headers["OData-Version"] = "4.0";
-        var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
+        var serviceRoot = ResolveServiceRoot(context);
         var tableId = new TableIdentifier(domain, schema, tableName);
 
         var optionError = ValidateSystemQueryOptions(context.Request.Query);
@@ -417,6 +447,10 @@ public static class ODataEndpoints
             {
                 return ODataError(StatusCodes.Status400BadRequest, "InvalidQueryOption", "The query parameter '$count' must be 'true' or 'false'.");
             }
+        }
+        else if (context.Request.Query.TryGetValue("$inlinecount", out var inlineCountVal))
+        {
+            includeCount = string.Equals(inlineCountVal.ToString(), "allpages", StringComparison.OrdinalIgnoreCase);
         }
 
         // Befund 1.2: Strict Content Negotiation. If Accept header requests non-OData formats (CSV, NDJSON, etc.), reject with 406.
@@ -494,7 +528,7 @@ public static class ODataEndpoints
             }
         }
 
-        var serviceRoot = $"{context.Request.Scheme}://{context.Request.Host}/odata/v4";
+        var serviceRoot = ResolveServiceRoot(context);
         var headers = context.Request.Headers.ToDictionary(h => h.Key, h => h.Value.Select(v => v ?? string.Empty).ToArray());
         var result = await odataHandler.ExecuteEntitySetQueryAsync(
             principal: context.User,
@@ -525,7 +559,7 @@ public static class ODataEndpoints
 
     /// <summary>System query options the entity set endpoint implements.</summary>
     private static readonly FrozenSet<string> SupportedSystemQueryOptions =
-        new[] { "$top", "$skip", "$select", "$count", "$orderby", "$filter", "$format" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        new[] { "$top", "$skip", "$select", "$count", "$inlinecount", "$orderby", "$filter", "$format" }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>OData v4 system query options that exist but are not implemented yet (answered with 501, never ignored).</summary>
     private static readonly FrozenSet<string> NotImplementedSystemQueryOptions =
@@ -576,6 +610,19 @@ public static class ODataEndpoints
             new { error = new { code, message } },
             statusCode: statusCode,
             contentType: "application/json;odata.metadata=minimal;charset=utf-8");
+
+    /// <summary>
+    /// Resolves the canonical OData service root URL based on whether the caller accessed /odata/v4 or /odata.
+    /// Preserves request scheme, host, path base (if reverse proxied), and the appropriate base segment.
+    /// </summary>
+    internal static string ResolveServiceRoot(HttpContext context)
+    {
+        var path = context.Request.Path.Value ?? string.Empty;
+        var isV4 = path.StartsWith("/odata/v4", StringComparison.OrdinalIgnoreCase);
+        var baseSegment = isV4 ? "/odata/v4" : "/odata";
+        var pathBase = context.Request.PathBase.Value?.TrimEnd('/') ?? string.Empty;
+        return $"{context.Request.Scheme}://{context.Request.Host}{pathBase}{baseSegment}";
+    }
 
     /// <summary>
     /// Extracts the governed rows ("value") of an OData entity set payload without @odata annotations.

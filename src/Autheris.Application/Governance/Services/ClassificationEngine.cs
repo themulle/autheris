@@ -20,6 +20,7 @@ public sealed class ClassificationEngine : IClassificationEngine
 {
     private readonly IOptionsMonitor<GatewayOptions> _gatewayOptions;
     private readonly IClassificationAiProvider? _aiProvider;
+    private readonly IClassificationProposalStore? _proposalStore;
     private readonly IEnumerable<IGovernanceWorkflowHook>? _hooks;
     private readonly ILogger<ClassificationEngine> _logger;
     private readonly ConcurrentDictionary<string, Regex> _regexCache = new(StringComparer.OrdinalIgnoreCase);
@@ -28,11 +29,13 @@ public sealed class ClassificationEngine : IClassificationEngine
         IOptionsMonitor<GatewayOptions> gatewayOptions,
         ILogger<ClassificationEngine> logger,
         IClassificationAiProvider? aiProvider = null,
+        IClassificationProposalStore? proposalStore = null,
         IEnumerable<IGovernanceWorkflowHook>? hooks = null)
     {
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _aiProvider = aiProvider;
+        _proposalStore = proposalStore;
         _hooks = hooks;
     }
 
@@ -90,13 +93,22 @@ public sealed class ClassificationEngine : IClassificationEngine
             ? "UNCLASSIFIED"
             : "PENDING_OWNER_REVIEW";
 
-        return new TableClassificationProposal(
+        var proposal = new TableClassificationProposal(
             Guid.NewGuid(),
             context.TableIdentifier,
             resolvedOwner,
             initialStatus,
             finalProposals,
             DateTimeOffset.UtcNow);
+
+        if (_proposalStore != null)
+        {
+            await _proposalStore.SaveProposalAsync(proposal, ct).ConfigureAwait(false);
+        }
+
+        Diagnostics.ClassificationDiagnostics.RecordProposalCreated(proposal.Status, profile.PreClassification.Mode);
+
+        return proposal;
     }
 
     private string? ResolveOwner(TableClassificationContext context, OwnerResolutionConfig config)

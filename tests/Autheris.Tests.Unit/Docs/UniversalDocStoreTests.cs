@@ -1,0 +1,213 @@
+namespace Autheris.Tests.Unit.Docs;
+
+using System;
+using System.IO;
+using System.IO.Compression;
+using System.Text;
+using System.Threading.Tasks;
+using Autheris.Application.Docs.Interfaces;
+using Autheris.Application.Docs.Services;
+using Autheris.Application.Mcp.Services;
+using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging.Abstractions;
+using Shouldly;
+using Xunit;
+
+public sealed class UniversalDocStoreTests : IDisposable
+{
+    private readonly string _testRootDir;
+    private readonly IDocSearchService _searchService;
+    private readonly IDocIngestor _ingestor;
+    private readonly FileSystemUniversalDocStore _docStore;
+
+    public UniversalDocStoreTests()
+    {
+        _testRootDir = Path.Combine(Path.GetTempPath(), "autheris_docstore_test_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_testRootDir);
+
+        _searchService = new InMemoryDocSearchService();
+        _ingestor = new MarkdownDocIngestor();
+        _docStore = new FileSystemUniversalDocStore(
+            _testRootDir,
+            _searchService,
+            _ingestor,
+            NullLogger<FileSystemUniversalDocStore>.Instance);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(_testRootDir))
+            {
+                Directory.Delete(_testRootDir, recursive: true);
+            }
+        }
+        catch
+        {
+            // Ignore cleanup errors in tests
+        }
+    }
+
+    [Fact]
+    public async Task DepositDocumentAsync_SafelyStoresAndIndexesDocument()
+    {
+        var request = new DepositDocRequest(
+            AppId: "billing-service",
+            Category: DocCategory.Runbook,
+            Title: "Invoice Payment Gateway Timeout Resolution",
+            Content: """
+            # Invoice Payment Gateway Timeout Resolution
+
+            ## Symptom
+            Error code `PAY_TIMEOUT_504` occurs during high traffic bursts.
+
+            ## Remediation
+            Scale out the gateway connection pool:
+            ```bash
+            kubectl scale deployment payment-gw --replicas=5
+            ```
+            """,
+            DocId: "payment-gw-timeout",
+            ErrorCode: "PAY_TIMEOUT_504");
+
+        var result = await _docStore.DepositDocumentAsync(request);
+
+        result.Success.ShouldBeTrue();
+        result.FilePath.ShouldNotBeNull();
+        File.Exists(result.FilePath).ShouldBeTrue();
+
+        // Verify instant discoverability via IDocSearchService
+        var searchHits = await _searchService.SearchAsync("PAY_TIMEOUT_504");
+        searchHits.Count.ShouldBeGreaterThanOrEqualTo(1);
+        searchHits[0].AppId.ShouldBe("billing-service");
+        searchHits[0].Title.ShouldContain("Invoice Payment Gateway");
+
+        // Verify listing applications
+        var apps = await _docStore.ListApplicationsAsync();
+        apps.Count.ShouldBe(1);
+        apps[0].AppId.ShouldBe("billing-service");
+        apps[0].DocumentCount.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ExtractBundleAsync_DefendsAgainstZipSlipAttack()
+    {
+        using var memoryStream = new MemoryStream();
+        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            // Legitimate entry
+            var goodEntry = archive.CreateEntry("runbooks/normal.md");
+            using (var writer = new StreamWriter(goodEntry.Open()))
+            {
+                writer.WriteLine("# Normal Runbook");
+            }
+
+            // Malicious traversal entry trying to escape target dir
+            var maliciousEntry = archive.CreateEntry("../../evil_system_file.txt");
+            using (var writer = new StreamWriter(maliciousEntry.Open()))
+            {
+                writer.WriteLine("malicious payload");
+            }
+        }
+
+        memoryStream.Position = 0;
+
+        var result = await _docStore.ExtractBundleAsync("compromised-app", memoryStream);
+
+        result.Success.ShouldBeFalse();
+        result.ErrorCode.ShouldBe("ZIP_SLIP_ATTEMPT");
+        result.Message.ShouldContain("Security violation");
+    }
+
+    [Fact]
+    public async Task ExtractBundleAsync_ExtractsValidArchiveAndIndexesMarkdown()
+    {
+        using var memoryStream = new MemoryStream();
+        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            var manifestEntry = archive.CreateEntry("manifest.json");
+            using (var writer = new StreamWriter(manifestEntry.Open()))
+            {
+                writer.WriteLine("""
+                {
+                  "appId": "auth-service",
+                  "name": "Corporate Auth Service",
+                  "version": "3.1.0",
+                  "domain": "security",
+                  "owner": "sec-ops@corp.local",
+                  "governanceTier": "Tier-1",
+                  "tags": ["OAuth2", "Security"]
+                }
+                """);
+            }
+
+            var runbookEntry = archive.CreateEntry("runbooks/mfa-recovery.md");
+            using (var writer = new StreamWriter(runbookEntry.Open()))
+            {
+                writer.WriteLine("""
+                # Emergency MFA Token Reset
+
+                ## Procedure
+                Execute reset tool with break-glass token:
+                `autheris-admin reset-mfa --user user123`
+                """);
+            }
+        }
+
+        memoryStream.Position = 0;
+
+        var result = await _docStore.ExtractBundleAsync("auth-service", memoryStream);
+
+        result.Success.ShouldBeTrue();
+        result.Message.ShouldContain("unpacked");
+
+        // Verify manifest parsed
+        var manifest = await _docStore.GetManifestAsync("auth-service");
+        manifest.ShouldNotBeNull();
+        manifest.Name.ShouldBe("Corporate Auth Service");
+        manifest.Domain.ShouldBe("security");
+
+        // Verify search hit
+        var hits = await _searchService.SearchAsync("Emergency MFA");
+        hits.Count.ShouldBeGreaterThanOrEqualTo(1);
+        hits[0].AppId.ShouldBe("auth-service");
+    }
+
+    [Fact]
+    public async Task ValidateIdentifier_RejectsPathTraversalInAppId()
+    {
+        var request = new DepositDocRequest(
+            AppId: "../../../etc",
+            Category: DocCategory.Runbook,
+            Title: "Exploit",
+            Content: "some text");
+
+        await Should.ThrowAsync<ArgumentException>(async () =>
+        {
+            await _docStore.DepositDocumentAsync(request);
+        });
+    }
+
+    [Fact]
+    public async Task McpTools_ListApplicationsAndDepositDocumentation_WorkCorrectly()
+    {
+        // 1. Deposit via MCP execution handler
+        var depositArgs = """
+        {
+          "appId": "crm-system",
+          "category": "Guide",
+          "title": "Customer Data Sync Guide",
+          "content": "# Customer Data Sync\n\nDaily sync runs at 02:00 UTC."
+        }
+        """;
+
+        var depositJson = await McpDocTools.ExecuteDepositDocumentationAsync(_docStore, depositArgs);
+        depositJson.ShouldContain("\"success\": true");
+
+        // 2. List via MCP execution handler
+        var listJson = await McpDocTools.ExecuteListApplicationsAsync(_docStore, null);
+        listJson.ShouldContain("\"total\": 1");
+        listJson.ShouldContain("crm-system");
+    }
+}
