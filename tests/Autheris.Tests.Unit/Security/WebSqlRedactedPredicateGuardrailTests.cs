@@ -91,7 +91,6 @@ public sealed class WebSqlRedactedPredicateGuardrailTests
             policyEnforcement: null,
             consentResolution: resolution,
             tableRepository: repo,
-            auditLogRepository: null,
             connectionFactory: null,
             clientIpResolver: null,
             environment: env,

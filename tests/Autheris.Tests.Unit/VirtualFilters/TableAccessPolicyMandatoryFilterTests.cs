@@ -61,7 +61,12 @@ public sealed class TableAccessPolicyMandatoryFilterTests
         IConsentCacheService? cache = null,
         IPolicyEnforcementService? casbin = null,
         GatewayOptions? options = null) =>
-        new(consents, new ConsentResolutionService(), cache, casbin, rebacEvaluator: null, clientIpResolver: null, options ?? new GatewayOptions(),
+        new(consents, new ConsentResolutionService(),
+            cache ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
+            casbin ?? Autheris.Application.Policy.Services.NullPolicyEnforcementService.Instance,
+            Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
+            clientIpResolver: null,
+            options ?? new GatewayOptions(),
             new MandatoryRowFilterResolver(new MandatoryRowFilterResolverTests.FixedSnapshot(Snapshot), new MandatoryRowFilterResolverTests.PlaceholderPredicates()));
 
     private static TableAccessQuery Query(TableMetadata table) =>

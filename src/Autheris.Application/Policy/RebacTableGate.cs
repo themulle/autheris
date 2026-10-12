@@ -22,6 +22,27 @@ public static class RebacTableGate
     /// </summary>
     public static string ObjectId(TableIdentifier table) => $"table:{table.Domain}.{table.Schema}.{table.TableName}";
 
+    /// <summary>
+    /// Canonical parent object id for a schema: schema:{Domain}.{Schema}.
+    /// Domain qualification ensures equal schema names across different domains do not collide.
+    /// </summary>
+    public static string SchemaObjectId(string domain, string schema) => $"schema:{domain}.{schema}";
+
+    /// <summary>
+    /// Canonical parent object id for a schema belonging to a table identifier.
+    /// </summary>
+    public static string SchemaObjectId(TableIdentifier table) => SchemaObjectId(table.Domain, table.Schema);
+
+    /// <summary>
+    /// Canonical parent object id for a domain: domain:{Domain}.
+    /// </summary>
+    public static string DomainObjectId(string domain) => $"domain:{domain}";
+
+    /// <summary>
+    /// Canonical parent object id for the domain of a table identifier.
+    /// </summary>
+    public static string DomainObjectId(TableIdentifier table) => DomainObjectId(table.Domain);
+
     /// <summary>True when the query paths must check ReBAC for this configuration.</summary>
     public static bool IsEnforcedOnQueryPaths(GatewayOptions? options) =>
         options?.Rebac is { Enabled: true, EnforceOnQueryPaths: true };
@@ -42,7 +63,14 @@ public static class RebacTableGate
             return false;
         }
 
-        var result = await evaluator.CheckAsync(new RebacCheckRequest(tenant.Value, subject.Value, Relation, ObjectId(table)), ct).ConfigureAwait(false);
-        return result.Allowed;
+        try
+        {
+            var result = await evaluator.CheckAsync(new RebacCheckRequest(tenant.Value, subject.Value, Relation, ObjectId(table)), ct).ConfigureAwait(false);
+            return result.Allowed;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

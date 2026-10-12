@@ -207,7 +207,7 @@ public sealed class IntegrationGapBTests
         var audit = Substitute.For<IAuditLogRepository>();
 
         var guardrail = new AiDataGuardrailService(new McpToolRegistry(), Options.Create(new GatewayOptions()),
-            NullLogger<AiDataGuardrailService>.Instance, executor, audit);
+            NullLogger<AiDataGuardrailService>.Instance, audit, executor);
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_customers", "{}"), CreateSession());
 

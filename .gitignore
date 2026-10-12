@@ -48,6 +48,7 @@ scratch/
 
 # Dev persistence (Gateway:Dev:Persist)
 .data/
+worktrees/
 dist/
 libpod/
 .claude/

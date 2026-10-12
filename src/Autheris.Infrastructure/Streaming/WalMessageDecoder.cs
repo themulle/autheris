@@ -11,7 +11,12 @@ public sealed record WalRelation(
     string Namespace,
     string RelationName,
     IReadOnlyList<string> ColumnNames
-);
+)
+{
+    public string Schema => Namespace;
+    public string TableName => RelationName;
+    public TableIdentifier TableIdentifier => new("postgresql", Namespace, RelationName);
+}
 
 public sealed record WalChange(
     uint RelationId,
@@ -33,6 +38,12 @@ public sealed class WalMessageDecoder
     public void RegisterRelation(uint relationId, string schema, string table, IReadOnlyList<string> columns)
     {
         _relations[relationId] = new WalRelation(relationId, schema, table, columns);
+    }
+
+    public void RegisterRelation(uint relationId, TableIdentifier table, IReadOnlyList<string> columns)
+    {
+        ArgumentNullException.ThrowIfNull(columns);
+        RegisterRelation(relationId, table.Schema, table.TableName, columns);
     }
 
     public bool TryGetRelation(uint relationId, out WalRelation? relation)

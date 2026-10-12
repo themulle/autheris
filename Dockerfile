@@ -26,13 +26,17 @@ EXPOSE 8080
 
 # Datenverzeichnis für persistente SQLite-Governance-DB & Cache anlegen und an Non-Root User übergeben
 # DEP-4: Verhindert SQLite Error 14 ('unable to open database file'), da /app root gehört
+ENV APP_UID=10001
 RUN mkdir -p /app/data && chown -R $APP_UID:$APP_UID /app/data
 VOLUME /app/data
 
 # Kopiere die vom CI/CD-Runner publizierten Artefakte
 COPY dist/publish/ ./
 
-# Non-Root User für Container-Härtung
-USER $APP_UID
+# Non-Root User für Container-Härtung (UID:GID 10001:10001)
+USER 10001:10001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD dotnet Autheris.Api.dll --healthcheck || exit 1
 
 ENTRYPOINT ["dotnet", "Autheris.Api.dll"]

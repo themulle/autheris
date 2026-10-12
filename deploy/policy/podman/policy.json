@@ -1,0 +1,40 @@
+{
+  "default": [
+    {
+      "type": "reject"
+    }
+  ],
+  "transports": {
+    "docker": {
+      "ghcr.io/themulle/autheris": [
+        {
+          "type": "sigstoreSigned",
+          "fulcio": {
+            "oidc-issuer": "https://token.actions.githubusercontent.com",
+            "subject-regex": "^https://github\\.com/themulle/autheris/\\.github/workflows/docker-publish\\.yml@refs/(heads/main|tags/v.+)$"
+          },
+          "rekorPublicKeyData": ""
+        }
+      ],
+      "": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ]
+    },
+    "dir": {
+      "": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ]
+    },
+    "tarball": {
+      "": [
+        {
+          "type": "insecureAcceptAnything"
+        }
+      ]
+    }
+  }
+}

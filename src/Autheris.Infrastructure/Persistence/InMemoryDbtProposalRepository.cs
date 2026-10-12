@@ -42,19 +42,24 @@ public sealed class InMemoryDbtProposalRepository : IDbtProposalRepository
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reviewedBy);
 
-        if (!_proposals.TryGetValue(proposalId, out var existing))
+        while (true)
         {
-            throw new KeyNotFoundException($"Dbt proposal with ID '{proposalId}' not found.");
+            if (!_proposals.TryGetValue(proposalId, out var existing))
+            {
+                throw new KeyNotFoundException($"Dbt proposal with ID '{proposalId}' not found.");
+            }
+
+            var updated = existing with
+            {
+                Status = status,
+                ReviewedAt = DateTimeOffset.UtcNow,
+                ReviewedBy = reviewedBy
+            };
+
+            if (_proposals.TryUpdate(proposalId, updated, existing))
+            {
+                return Task.FromResult(updated);
+            }
         }
-
-        var updated = existing with
-        {
-            Status = status,
-            ReviewedAt = DateTimeOffset.UtcNow,
-            ReviewedBy = reviewedBy
-        };
-
-        _proposals.AddOrUpdate(proposalId, updated, (_, _) => updated);
-        return Task.FromResult(updated);
     }
 }

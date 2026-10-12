@@ -365,7 +365,7 @@ Dynamically generates OpenAPI 3.0 specifications for all active procedure endpoi
 
 ```sql
 -- Login and user for catalog discovery and generator tool
-CREATE LOGIN autheris_ci WITH PASSWORD = 'StrongPassword123!';
+CREATE LOGIN autheris_ci WITH PASSWORD = '<GENERATE_STRONG_SECRET>'; -- openssl rand -base64 32
 CREATE USER autheris_ci FOR LOGIN autheris_ci;
 
 GRANT EXECUTE ON SCHEMA::api TO autheris_ci;
@@ -377,7 +377,7 @@ GRANT VIEW DATABASE STATE TO autheris_ci;
 
 ```sql
 -- Production technical login with ZERO metadata permissions
-CREATE LOGIN autheris_proc WITH PASSWORD = 'UltraSecureProductionPassword!';
+CREATE LOGIN autheris_proc WITH PASSWORD = '<GENERATE_STRONG_SECRET>'; -- openssl rand -base64 32
 CREATE USER autheris_proc FOR LOGIN autheris_proc;
 
 -- Grant EXECUTE only

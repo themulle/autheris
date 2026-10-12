@@ -680,7 +680,7 @@ public sealed class Mutation
     public async Task<bool> ReloadSchemaAsync(
         [Service] IEventBus eventBus = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
-        [Service] Autheris.Application.Interfaces.IAuditLogRepository? auditLog = null,
+        [Service] Autheris.Application.Interfaces.IAuditLogRepository auditLog = default!,
         CancellationToken ct = default)
     {
         var principal = httpContextAccessor?.HttpContext?.User;
@@ -704,29 +704,26 @@ public sealed class Mutation
         await eventBus.PublishAsync("schema:reload", DateTimeOffset.UtcNow.ToString("O"), ct);
 
         // Review E-10: schema reloads change what the gateway exposes and belong in the audit chain.
-        if (auditLog != null)
+        TenantId reloadTenant;
+        try
         {
-            TenantId reloadTenant;
-            try
-            {
-                reloadTenant = principal.GetTenantId();
-            }
-            catch (System.Security.SecurityException)
-            {
-                reloadTenant = TenantId.LegacySingleTenant; // cluster admins may have no tenant claim
-            }
-
-            await auditLog.RecordAuditEventAsync(new AuditLogEntry
-            {
-                TenantId = reloadTenant,
-                EventType = "SCHEMA_RELOAD",
-                ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
-                TargetTable = string.Empty,
-                Decision = "ALLOW",
-                TraceId = Guid.NewGuid().ToString("N"),
-                DetailsJson = "{}"
-            }, ct);
+            reloadTenant = principal.GetTenantId();
         }
+        catch (System.Security.SecurityException)
+        {
+            reloadTenant = TenantId.LegacySingleTenant; // cluster admins may have no tenant claim
+        }
+
+        await auditLog.RecordAuditEventAsync(new AuditLogEntry
+        {
+            TenantId = reloadTenant,
+            EventType = "SCHEMA_RELOAD",
+            ActorSid = principal.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = string.Empty,
+            Decision = "ALLOW",
+            TraceId = Guid.NewGuid().ToString("N"),
+            DetailsJson = "{}"
+        }, ct);
 
         return true;
     }

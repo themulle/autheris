@@ -29,7 +29,6 @@ public sealed class GraphQlEnumerationShieldMiddleware
     /// <summary>Validation errors with these codes do not depend on the catalog and keep their own message.</summary>
     private static readonly HashSet<string> NeutralValidationCodes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "QUERY_TOO_COMPLEX"
     };
 
     private readonly RequestDelegate _next;

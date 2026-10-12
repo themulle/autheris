@@ -1,7 +1,7 @@
 # ADR-017: Multi-Node State Synchronisation, AST Dialect Generator und RBAC-Konsolidierung
 
 ## Status
-Akzeptiert & Umgesetzt
+Teilweise umgesetzt (09.10.2026: AR-01 Epochen-Keying, AR-02/AR-03 ReBAC-Pull-Validierung, AR-04 Atomare DP-/FinOps-Cluster-Zähler umgesetzt; Session-/HitL-Migration ausstehend)
 
 ## Kontext
 Nach erfolgreicher Behebung aller 100 operativen Sicherheitsbefunde der Runden 4 und 5 (ADR-016) verbleiben drei architektonische Strukturthemen:
@@ -39,3 +39,19 @@ Nach erfolgreicher Behebung aller 100 operativen Sicherheitsbefunde der Runden 4
 ### Negativ
 - Zusätzliche optionale Infrastrukturabhängigkeit (Redis oder NATS Cluster im Produktionsbetrieb).
 - Höherer anfänglicher Entwicklungsaufwand für den AST-Code-Generator.
+
+## Anhang: Inventar verbleibender lokaler Zustände (Stand 09.10.2026, AR-04-Rest)
+
+Im Rahmen der Architekturüberarbeitung (Plan `plan-architektur-distributed-state-invalidation.md`, AR-01 bis AR-04) wurden Access Profile Caches, ReBAC Generation Caches, FinOps Hard-Limit-Zähler und Differential Privacy Epsilon-Budgets auf den Cluster-Store migriert bzw. per Epochen-/Pull-Validierung abgesichert.
+
+Folgende prozesslokale Zustände verbleiben vorerst im Monolithen und werden wie folgt bewertet:
+
+| Komponente | Zustandstyp | Sicherheitsrelevanz | Bewertung & Folgeplan |
+|---|---|---|---|
+| `HitLStepUpApprovalService` | In-Memory Tickets (`ConcurrentDictionary`) | **Hoch** | Single-Node-Genehmigung; in Multi-Node-Umgebung müssen Step-Up-Tickets clusterweit verifiziert werden. Eigener Architekturplan zur Migration auf Cluster-Store mit Fail-Closed-Semantik. |
+| `McpSessionStore` | In-Memory Sessions | **Mittel** | Pod-Neustart oder Lastverteilung auf andere Replicas führt zu MCP-Session-Verlust / Re-Handshake. Funktionale Auswirkung, kein Autorisierungsbypass. |
+| `ClientTierResolver` | In-Memory Tier-Cache | **Niedrig** | Statische/Konfigurierte Tier-Mappings; geringe Updatefrequenz, Re-Fetch bei Cache-Miss unkritisch. |
+| `DbtHealthCircuitBreaker` | Circuit Breaker State | **Niedrig** | Health/Circuit-Breaker-Status lokal pro Instanz isoliert; lokale Auswertung verhindert Kaskadierungsausfälle. |
+| `SubgraphCanaryRouter` | Canary Weights / Counters | **Niedrig** | Lokale Routing-Verteilung führt über Law of Large Numbers zu korrekten globalen Verhältnissen. |
+| `Golden Queries Cache` | Read-Cache für Referenzqueries | **Keine** | Reiner Lese-Cache zur Performance-Optimierung ohne Rechteprüfung oder State-Mutation. |
+

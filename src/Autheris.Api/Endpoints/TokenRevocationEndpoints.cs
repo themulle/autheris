@@ -4,8 +4,10 @@ using System;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
@@ -68,7 +70,7 @@ public static class TokenRevocationEndpoints
             await auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
             {
                 TenantId = tenantId,
-                EventType = "TOKEN_REVOKED",
+                EventType = AuditEventTypes.TokenRevoked,
                 ActorSid = context.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
                 TargetTable = string.Empty,
                 Decision = "DENY",
@@ -86,7 +88,7 @@ public static class TokenRevocationEndpoints
                 tenant = isClusterAdmin ? null : tenantId.Value,
                 note = isClusterAdmin ? null : "Applies to tokens of this tenant only. Use a ClusterAdmin to revoke across tenants."
             });
-        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin);
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Delegated, AuditEventTypes.TokenRevoked);
 
         return app;
     }

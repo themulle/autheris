@@ -152,7 +152,6 @@ public sealed class GovernedSqlPlanCacheTests
             policyEnforcement: null,
             consentResolution: consentResolution,
             tableRepository: repository,
-            auditLogRepository: null,
             connectionFactory: null,
             clientIpResolver: null,
             environment: null,
@@ -160,7 +159,7 @@ public sealed class GovernedSqlPlanCacheTests
             consentRepository: consentRepository,
             secretProvider: null,
             sqlEngine: sqlEngine,
-            planCache: planCache);
+            planCache: planCache ?? NullCompiledSqlQueryPlanCache.Instance);
     }
 
     [Fact]
@@ -254,7 +253,6 @@ public sealed class GovernedSqlPlanCacheTests
             policyEnforcement: null,
             consentResolution: consentResolution,
             tableRepository: repo,
-            auditLogRepository: null,
             connectionFactory: null,
             clientIpResolver: null,
             environment: null,

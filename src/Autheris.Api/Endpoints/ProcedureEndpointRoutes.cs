@@ -8,7 +8,9 @@ using System.Security;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Application.Procedures.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -34,7 +36,7 @@ public static class ProcedureEndpointRoutes
 
         var group = app.MapGroup("/api/v1/procedures");
 
-        group.MapGet("/", HandleList).WithName("ListProcedureEndpoints").RequireAuthorization();
+        group.MapGet("/", HandleList).WithName("ListProcedureEndpoints").RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // OpenSchema (documentation mode): anonymous callers see all active procedures in the spec. This is documentation
         // only; every execution endpoint still requires authorization and the full governance checks.
@@ -42,7 +44,8 @@ public static class ProcedureEndpointRoutes
         var openApi = group.MapGet("/openapi.json",
                 (HttpContext http, Autheris.Application.Procedures.Interfaces.IProcedureRegistry registry) =>
                     HandleOpenApi(http, registry, documentAllForAnonymous))
-            .WithName("GetProcedureEndpointsOpenApiSpec");
+            .WithName("GetProcedureEndpointsOpenApiSpec")
+            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         if (gatewayOptions.IsOpenSchemaAllowed != true)
         {
             openApi.RequireAuthorization();
@@ -52,8 +55,8 @@ public static class ProcedureEndpointRoutes
             openApi.AllowAnonymous();
         }
 
-        group.MapGet("/{name}", HandleGet).WithName("ExecuteProcedureGet").RequireAuthorization();
-        group.MapPost("/{name}", HandlePost).WithName("ExecuteProcedurePost").RequireAuthorization();
+        group.MapGet("/{name}", HandleGet).WithName("ExecuteProcedureGet").RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
+        group.MapPost("/{name}", HandlePost).WithName("ExecuteProcedurePost").RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
         return app;
     }
 

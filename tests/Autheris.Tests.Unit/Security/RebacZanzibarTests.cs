@@ -108,7 +108,7 @@ public sealed class RebacZanzibarTests
 
         // 2. Delete tuple and invalidate cache
         await _store.DeleteTupleAsync(tuple);
-        _evaluator.InvalidateTenantCache("tenant-cache");
+        await _evaluator.InvalidateTenantCacheAsync("tenant-cache");
 
         // 3. Second check must reflect the revocation
         var revokedCheck = await _evaluator.CheckAsync(new RebacCheckRequest("tenant-cache", "user:bob", "editor", "document:doc-300"));

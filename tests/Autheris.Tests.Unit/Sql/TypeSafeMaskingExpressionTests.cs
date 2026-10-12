@@ -68,10 +68,10 @@ public sealed class TypeSafeMaskingExpressionTests
     }
 
     [Theory]
-    [InlineData("int", "0")]
-    [InlineData("bigint", "0")]
-    [InlineData("numeric(10,2)", "0")]
-    [InlineData("date", "'1970-01-01'")]
+    [InlineData("int", "NULL AS")]
+    [InlineData("bigint", "NULL AS")]
+    [InlineData("numeric(10,2)", "NULL AS")]
+    [InlineData("date", "NULL AS")]
     [InlineData("varchar(50)", "'***'")]
     public async Task Rewrite_MaskedColumn_ProducesTypeSafeDefaultExpression(string dataType, string expectedMask)
     {

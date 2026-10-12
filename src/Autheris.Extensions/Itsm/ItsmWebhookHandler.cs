@@ -1,3 +1,5 @@
+using Autheris.Application.State;
+
 namespace Autheris.Extensions.Itsm;
 
 using System;
@@ -106,7 +108,8 @@ public sealed class ItsmWebhookHandler(
     IOptions<GatewayOptions> options,
     ILogger<ItsmWebhookHandler> logger,
     IEventBus? eventBus = null,
-    ItsmWebhookReplayCache? replayCache = null) : IItsmWebhookHandler
+    ItsmWebhookReplayCache? replayCache = null,
+    IDistributedClusterStateProvider? clusterState = null) : IItsmWebhookHandler
 {
     private const string GlobalWebhookSecretRef = "itsm:webhook-secret";
     private readonly ItsmOptions _itsmOptions = options.Value.Itsm;
@@ -257,6 +260,31 @@ public sealed class ItsmWebhookHandler(
                     SanitizeForLog(instanceId),
                     SanitizeForLog(payload.TicketId));
                 return true;
+            }
+
+            if (clusterState != null)
+            {
+                try
+                {
+                    var count = await clusterState.IncrementAsync($"itsm:dedup:{key}", 1, ItsmWebhookReplayCache.Window, ct).ConfigureAwait(false);
+                    if (count > 1)
+                    {
+                        foreach (var registered in registeredKeys)
+                        {
+                            _replayCache.Remove(registered);
+                        }
+
+                        logger.LogWarning(
+                            "Cluster webhook replay detected (instance '{InstanceId}', ticket '{TicketId}'). Delivery is acknowledged without effect.",
+                            SanitizeForLog(instanceId),
+                            SanitizeForLog(payload.TicketId));
+                        return true;
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "ITSM webhook cluster state unavailable; falling back to in-memory replay cache.");
+                }
             }
 
             registeredKeys.Add(key);

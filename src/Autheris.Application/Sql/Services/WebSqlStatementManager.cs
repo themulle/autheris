@@ -444,8 +444,7 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
         }
 
         if (ex is Autheris.Domain.Exceptions.GatewayInvalidQueryException or
-                  Antlr4.Runtime.Misc.ParseCanceledException or
-                  ArgumentException)
+                  Antlr4.Runtime.Misc.ParseCanceledException)
         {
             return ex.Message;
         }

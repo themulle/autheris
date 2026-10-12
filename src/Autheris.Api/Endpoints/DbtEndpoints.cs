@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Application.Dbt.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
@@ -47,7 +48,8 @@ public static class DbtEndpoints
                 return result.Success ? Results.Ok(result) : Results.BadRequest(result);
             }, manifestTooLarge);
         }).RequireAuthorization()
-          .WithRequestBodyLimit(100 * 1024 * 1024); // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithRequestBodyLimit(100 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // dbt Governance Ingestion Endpoint (R-24)
         app.MapPost("/api/extensions/dbt/governance", async (
@@ -70,14 +72,18 @@ public static class DbtEndpoints
 
             var dryRun = context.Request.Query.ContainsKey("dryRun") &&
                          bool.TryParse(context.Request.Query["dryRun"], out var dr) && dr;
+            var replace = (context.Request.Query.ContainsKey("replace") &&
+                           bool.TryParse(context.Request.Query["replace"], out var rep) && rep) ||
+                          string.Equals(context.Request.Query["mode"], "replace", StringComparison.OrdinalIgnoreCase);
 
             return await EndpointSecurity.WithBodyLimitAsync(async () =>
             {
-                var result = await dbtService.IngestGovernanceStreamAsync(context.Request.Body, dryRun, context.RequestAborted);
+                var result = await dbtService.IngestGovernanceStreamAsync(context.Request.Body, dryRun, replace, context.RequestAborted);
                 return result.Success ? Results.Ok(result) : Results.BadRequest(result);
             }, governanceTooLarge);
         }).RequireAuthorization()
-          .WithRequestBodyLimit(100 * 1024 * 1024);
+          .WithRequestBodyLimit(100 * 1024 * 1024)
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapGet("/api/extensions/dbt/exposures", async (
             IDbtExposurePublisher exposurePublisher,
@@ -92,7 +98,7 @@ public static class DbtEndpoints
 
             var yaml = await exposurePublisher.GenerateExposuresYamlAsync(context.RequestAborted);
             return Results.Content(yaml, "text/yaml; charset=utf-8");
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/api/extensions/dbt/proposals", async (
             IDbtMetadataIngestionService dbtService,
@@ -115,7 +121,7 @@ public static class DbtEndpoints
 
             var proposals = await dbtService.GetPendingProposalsAsync(table, context.RequestAborted);
             return Results.Ok(proposals);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapPost("/api/extensions/dbt/proposals/{id:guid}/approve", async (
             Guid id,
@@ -144,7 +150,7 @@ public static class DbtEndpoints
                 // R-EXT-1: not pending, not applicable (RLS/Casbin) or blocked by the ratchet; the status is unchanged.
                 return Results.Conflict(new { error = ex.Message });
             }
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         app.MapPost("/api/extensions/dbt/proposals/{id:guid}/reject", async (
             Guid id,
@@ -172,7 +178,7 @@ public static class DbtEndpoints
             {
                 return Results.Conflict(new { error = ex.Message });
             }
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentDenied);
 
         app.MapPost("/api/extensions/dbt/validate-contract", async (
             HttpContext context,
@@ -200,7 +206,8 @@ public static class DbtEndpoints
                 return result.IsCompatible ? Results.Ok(result) : Results.UnprocessableEntity(result);
             }, manifestTooLarge);
         }).RequireAuthorization()
-          .WithRequestBodyLimit(100 * 1024 * 1024); // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithRequestBodyLimit(100 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // dbt Health & Circuit Breaker Endpoints (F-DBT-1)
         app.MapPost("/api/extensions/dbt/run-results", async (
@@ -230,7 +237,8 @@ public static class DbtEndpoints
                 return Results.Ok(report);
             }, runResultsTooLarge);
         }).RequireAuthorization()
-          .WithRequestBodyLimit(50 * 1024 * 1024); // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithRequestBodyLimit(50 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapGet("/api/extensions/dbt/health", async (
             HttpContext context,
@@ -255,7 +263,7 @@ public static class DbtEndpoints
 
             var allStates = await circuitBreaker.GetAllHealthStatesAsync(context.RequestAborted);
             return Results.Ok(allStates);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapPost("/api/extensions/dbt/health/reset", async (
             HttpContext context,
@@ -287,7 +295,7 @@ public static class DbtEndpoints
 
             await circuitBreaker.ResetAllAsync(context.RequestAborted);
             return Results.Ok(new { message = "All table health states reset to healthy." });
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // F-DBT-4: dbt Cloud & Orchestrator HMAC Webhook Receiver
         app.MapPost("/api/extensions/dbt/webhooks/dbt-cloud", async (
@@ -323,7 +331,8 @@ public static class DbtEndpoints
 
             return Results.Ok(result);
         }).AllowAnonymous()
-          .WithRequestBodyLimit(10 * 1024 * 1024); // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithRequestBodyLimit(10 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         return app;
     }

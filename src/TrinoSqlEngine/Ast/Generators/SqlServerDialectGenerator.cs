@@ -322,6 +322,11 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 
     protected override void GeneratePagination(PaginationClause pagination, OrderByClause? orderBy, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        if (pagination.WithTies && orderBy == null)
+        {
+            throw new TrinoSqlEngine.Ast.Builder.AstBuildException("FETCH … WITH TIES requires an ORDER BY clause.");
+        }
+
         if (orderBy == null)
         {
             builder.Append("ORDER BY (SELECT NULL) ");
@@ -342,7 +347,7 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
         {
             builder.Append(" FETCH NEXT ");
             GenerateExpression(pagination.Limit, ref builder, context);
-            builder.Append(" ROWS ONLY");
+            builder.Append(pagination.WithTies ? " ROWS WITH TIES" : " ROWS ONLY");
         }
     }
 }

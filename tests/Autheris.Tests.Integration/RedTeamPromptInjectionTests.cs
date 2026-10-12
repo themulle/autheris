@@ -164,6 +164,12 @@ public class RedTeamPromptInjectionTests
             return Task.CompletedTask;
         }
 
+        public Task RecordAuditEventAsync(AuditLogEntry entry, System.Data.Common.DbTransaction existingTx, System.Threading.CancellationToken ct = default)
+        {
+            RecordedEvents.Add(entry);
+            return Task.CompletedTask;
+        }
+
         public Task<IReadOnlyList<AuditLogEntry>> GetAuditLogEntriesAsync(int limit = 100, TenantId? tenantId = null, System.Threading.CancellationToken ct = default)
         {
             var query = RecordedEvents.AsEnumerable();

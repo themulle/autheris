@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/azure-sql-edge:1.0.7
+FROM mcr.microsoft.com/azure-sql-edge:1.0.7@sha256:7bc52119beea8a0ebc728e7e17cb971ca2a9d6bf091e92d8351508db2cc2574e
 
 USER root
 COPY containers/sqlserver/entrypoint.sh /usr/local/bin/entrypoint.sh

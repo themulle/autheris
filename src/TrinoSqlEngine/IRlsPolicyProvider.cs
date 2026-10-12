@@ -129,6 +129,13 @@ public sealed class RlsOptions
     public Func<string, IReadOnlyList<string>?>? TableColumnsProvider { get; set; }
 
     /// <summary>
+    /// SEC SG-26: When true, every table with a known column list from <see cref="TableColumnsProvider"/> is encapsulated
+    /// in a subquery projecting only the cataloged columns, preventing access to non-cataloged physical columns and
+    /// internal database system columns (ctid, rowid, tableoid, xmin).
+    /// </summary>
+    public bool EnforceCatalogProjection { get; set; } = false;
+
+    /// <summary>
     /// Clamps or injects LIMIT {maxRows} on top-level queries to prevent result set exhaustion attacks (0 = disabled).
     /// </summary>
     public long EnforcedMaxRows { get; set; } = 0;
@@ -250,6 +257,17 @@ public sealed class RlsOptions
     /// in SET or WHERE are rejected (prevents copy-out and row-count oracles on masked data).
     /// </summary>
     public bool RejectMaskedColumnsInDml { get; set; } = true;
+
+    /// <summary>
+    /// R-53 / SEC-SPEC: When true (default), SELECT queries with WHERE, HAVING, or ORDER BY referencing masked columns
+    /// are rejected with SecurityException (Fail-Closed Predicate Guard against filter leakage and sorting attacks).
+    /// </summary>
+    public bool RejectMaskedColumnsInPredicates { get; set; } = true;
+
+    /// <summary>
+    /// Optional provider for column data types, used for typed masking expressions like CAST(NULL AS ...).
+    /// </summary>
+    public Func<string, string, string?>? ColumnDataTypeProvider { get; set; }
 
     /// <summary>
     /// When true (default), UPDATE/DELETE statements without a WHERE clause, or with a trivially true WHERE clause

@@ -10,8 +10,19 @@
 # ==============================================================================
 services:
   gql-gateway:
-    image: ghcr.io/themulle/autheris:getting-started
+    image: ghcr.io/themulle/autheris:getting-started@sha256:222759b391a1aaf241166672c8f99b2d4ada452e7b5319f3c6e8f265a37b5ad4
     container_name: gql-gateway
+    user: "10001:10001"
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    pids_limit: 512
+    mem_limit: 1g
+    cpus: 2
     ports:
       # Loopback only. Publish on other interfaces only behind a TLS-terminating, authenticating proxy.
       - "127.0.0.1:8080:8080"
@@ -23,6 +34,11 @@ services:
       - Gateway__GovernanceDb__ConnectionString=Data Source=/app/data/governance.db;Cache=Shared
     volumes:
       - autheris-data:/app/data
+    healthcheck:
+      test: ["CMD", "dotnet", "Autheris.Api.dll", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
 volumes:

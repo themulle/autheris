@@ -143,6 +143,7 @@ public sealed class PostgreSqlWebSqlTransactionTests : IAsyncLifetime
 
         var service = new GovernedSqlExecutionService(
             Options.Create(options),
+            auditLogRepository: Substitute.For<IAuditLogRepository>(),
             consentResolution: resolution,
             tableRepository: repo,
             environment: env,

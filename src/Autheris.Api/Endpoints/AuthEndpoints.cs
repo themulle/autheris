@@ -11,6 +11,8 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Autheris.Api.Extensions;
+using Autheris.Domain.Audit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -34,7 +36,7 @@ public static class AuthEndpoints
                 groups = groups,
                 authenticationType = principal.Identity?.AuthenticationType ?? "Basic"
             });
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         app.MapPost("/api/auth/login", (ClaimsPrincipal principal) =>
         {
@@ -52,15 +54,15 @@ public static class AuthEndpoints
                 groups = groups,
                 authenticationType = principal.Identity?.AuthenticationType ?? "Basic"
             });
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         // F-AUTH-DX: effective identity of the current request (works for every scheme, incl. the session cookie).
-        app.MapGet("/api/auth/session", GetSession).RequireAuthorization();
+        app.MapGet("/api/auth/session", GetSession).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         // F-AUTH-DX: ends the Basic session: revokes its id and deletes the cookie. Anonymous so that an expired
         // cookie can always be cleared. Browsers that cached Basic credentials from the native dialog will send
         // them again on the next 401; use a private window to switch users in the browser.
-        app.MapPost("/api/auth/logout", (Delegate)LogoutAsync).AllowAnonymous();
+        app.MapPost("/api/auth/logout", (Delegate)LogoutAsync).AllowAnonymous().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         return app;
     }

@@ -8,6 +8,7 @@ using Autheris.Domain.Options;
 
 namespace Autheris.Api.Security;
 
+#if AUTHERIS_TEST_AUTH
 public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
     public const string SchemeName = "TestAuth";
@@ -154,3 +155,4 @@ public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationScheme
         return Task.CompletedTask;
     }
 }
+#endif

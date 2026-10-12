@@ -35,6 +35,11 @@ public sealed class AstBuilderFailLoudTests
     [InlineData("SELECT json_value(payload, 'lax $.a') FROM t")]
     [InlineData("SELECT overlay(name PLACING 'x' FROM 2) FROM t")]
     [InlineData("SELECT listagg(name, ',') WITHIN GROUP (ORDER BY name) FROM t")]
+    // Sampling and pattern recognition (AP-1)
+    [InlineData("SELECT id FROM t TABLESAMPLE BERNOULLI (10)")]
+    [InlineData("SELECT id FROM t TABLESAMPLE SYSTEM (5)")]
+    [InlineData("SELECT * FROM t PIVOT (SUM(amount) FOR dept IN ('Sales', 'Dev'))")]
+    [InlineData("SELECT * FROM stock MATCH_RECOGNIZE (MEASURES A.price AS price ONE ROW PER MATCH AFTER MATCH SKIP PAST LAST ROW PATTERN (A+ B+) DEFINE A AS A.price > 10)")]
     public void Unsupported_Construct_IsRejected(string sql)
     {
         var ex = Assert.Throws<AstBuildException>(() => Build(sql));

@@ -2,10 +2,12 @@
 # Containerfile for load-generator (k6)
 # ==============================================================================
 
-FROM docker.io/grafana/k6:latest
+FROM docker.io/grafana/k6:0.54.0@sha256:49c0ea45ff7430030a597a731d6801869e5572004ee2fe0374e2d36fa33c706c
 
 WORKDIR /app
 
 COPY containers/load-generator/k6-benchmark.js /app/benchmark.js
+
+USER 10001:10001
 
 ENTRYPOINT ["k6", "run", "/app/benchmark.js"]

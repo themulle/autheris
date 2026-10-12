@@ -166,6 +166,11 @@ public sealed class SqliteDialectGenerator : SqlDialectGeneratorBase
 
     protected override void GeneratePagination(PaginationClause pagination, OrderByClause? orderBy, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        if (pagination.WithTies)
+        {
+            throw UnsupportedConstruct("FETCH … WITH TIES", TargetDialect);
+        }
+
         if (pagination.Limit != null)
         {
             builder.Append("LIMIT ");

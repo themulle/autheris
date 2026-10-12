@@ -9,6 +9,8 @@ using Autheris.Application.DataCatalog.Interfaces;
 using Autheris.Application.DataCatalog.Models;
 using Autheris.Application.DataCatalog.Services;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
+using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -22,6 +24,7 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly IEpochValidationService _epochService;
     private readonly IOptions<GatewayOptions> _options;
+    private readonly IRebacStore? _rebacStore;
     private readonly ILogger<DataCatalogSyncService> _logger;
 
     public DataCatalogSyncService(
@@ -30,11 +33,23 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
         IEpochValidationService epochService,
         IOptions<GatewayOptions> options,
         ILogger<DataCatalogSyncService> logger)
+        : this(clientFactory, metadataRepo, epochService, options, null, logger)
+    {
+    }
+
+    public DataCatalogSyncService(
+        IDataCatalogClientFactory clientFactory,
+        ITableMetadataRepository metadataRepo,
+        IEpochValidationService epochService,
+        IOptions<GatewayOptions> options,
+        IRebacStore? rebacStore,
+        ILogger<DataCatalogSyncService> logger)
     {
         _clientFactory = clientFactory ?? throw new ArgumentNullException(nameof(clientFactory));
         _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
         _epochService = epochService ?? throw new ArgumentNullException(nameof(epochService));
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _rebacStore = rebacStore;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -187,6 +202,19 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
             if (!dryRun)
             {
                 await _metadataRepo.UpsertTableMetadataAsync(metadata, ct).ConfigureAwait(false);
+
+                if (_rebacStore != null)
+                {
+                    var tableId = tableAsset.Identifier;
+                    var domainObj = RebacTableGate.DomainObjectId(tableId.Domain);
+                    var schemaObj = RebacTableGate.SchemaObjectId(tableId.Domain, tableId.Schema);
+                    var tableObj = RebacTableGate.ObjectId(tableId);
+
+                    await _rebacStore.AddTuplesAsync([
+                        new RebacTuple(tableId.Domain, schemaObj, "parent", tableObj),
+                        new RebacTuple(tableId.Domain, domainObj, "parent", schemaObj)
+                    ], ct).ConfigureAwait(false);
+                }
             }
         }
 

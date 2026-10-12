@@ -31,6 +31,10 @@
     <OptimizationPreference>Speed</OptimizationPreference>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(AutherisIncludeTestAuth)' == 'true'">
+    <DefineConstants>$(DefineConstants);AUTHERIS_TEST_AUTH</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- Swagger UI wird lokal ausgeliefert (offline-faehig, kein CDN) -->
     <EmbeddedResource Include="Assets\swagger-ui\*.css;Assets\swagger-ui\*.js;Assets\swagger-ui\*.png" LogicalName="swagger-ui/%(Filename)%(Extension)" />

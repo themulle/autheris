@@ -47,6 +47,7 @@ public sealed class IcebergRestCatalogSecurityTests
         TenantId = new TenantId(tenant),
         GranteeType = GranteeType.User,
         GranteeSid = new Sid(sid),
+        Effect = ConsentEffect.Allow,
         ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
         ValidTo = validTo ?? DateTimeOffset.UtcNow.AddDays(1),
         ColumnRules = rules ?? Array.Empty<ConsentColumnRule>()
@@ -159,7 +160,8 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataReader,
             _metadataRepo,
             _options,
-            NullLogger<IcebergRestCatalogFederationService>.Instance);
+            NullLogger<IcebergRestCatalogFederationService>.Instance,
+            Substitute.For<IAuditLogRepository>());
 
         // Act
         // Wunsch 9: a GovernanceAdmin sees the whole catalog of the tenant, but still never another tenant's tables
@@ -182,7 +184,8 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataReader,
             _metadataRepo,
             _options,
-            NullLogger<IcebergRestCatalogFederationService>.Instance);
+            NullLogger<IcebergRestCatalogFederationService>.Instance,
+            Substitute.For<IAuditLogRepository>());
 
         var unauthenticatedPrincipal = new ClaimsPrincipal(new ClaimsIdentity()); // no identity or permissions
 
@@ -240,9 +243,9 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataRepo,
             _options,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
+            auditRepo,
             new ConsentResolutionService(),
-            consentRepo,
-            auditRepository: auditRepo);
+            consentRepo);
 
         var response = await service.LoadTableAsync("tenant-1", "raw", "orders", Analyst());
         response.ShouldNotBeNull();
@@ -282,10 +285,10 @@ public sealed class IcebergRestCatalogSecurityTests
             _metadataRepo,
             optionsWithRebac,
             NullLogger<IcebergRestCatalogFederationService>.Instance,
+            auditRepo,
             new ConsentResolutionService(),
             consentRepo,
-            rebacEvaluator: rebac,
-            auditRepository: auditRepo);
+            rebacEvaluator: rebac);
 
         await Should.ThrowAsync<SecurityException>(() =>
             service.LoadTableAsync("tenant-1", "raw", "orders", Analyst()).AsTask());
@@ -296,5 +299,91 @@ public sealed class IcebergRestCatalogSecurityTests
                 e.Decision == "DENY" &&
                 e.TargetTable.Contains("orders")),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ListTables_WhenRebacEnforced_FiltersOutDeniedTables_ConsistentlyWithLoadTable()
+    {
+        var optionsWithRebac = Options.Create(new GatewayOptions
+        {
+            Rebac = new RebacOptions { Enabled = true, EnforceOnQueryPaths = true }
+        });
+
+        var ordersMeta = Orders("id", "name");
+        var customersId = new TableIdentifier("tenant-1", "raw", "customers");
+        var customersMeta = new TableMetadata
+        {
+            Identifier = customersId,
+            Table = new Table { SourceName = "tenant-1", SchemaName = "raw", TableName = "customers", DataSourceType = DataSourceType.LakehouseIceberg },
+            Columns = [new TableColumn { ColumnName = "id" }]
+        };
+
+        _metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([ordersMeta, customersMeta]));
+        _metadataRepo.GetTableMetadataAsync(OrdersId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(ordersMeta));
+        _metadataRepo.GetTableMetadataAsync(customersId, Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<TableMetadata?>(customersMeta));
+
+        var consentRepo = Substitute.For<IConsentRepository>();
+        consentRepo.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([
+                AllowFor("analyst@corp.com", tenant: "tenant-1"),
+                new Consent
+                {
+                    TableIdentifier = customersId,
+                    TenantId = new TenantId("tenant-1"),
+                    GranteeType = GranteeType.User,
+                    GranteeSid = new Sid("analyst@corp.com"),
+                    Effect = ConsentEffect.Allow,
+                    ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                    ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+                }
+            ]));
+        consentRepo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Is<TableIdentifier>(t => t == OrdersId), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([AllowFor("analyst@corp.com", tenant: "tenant-1")]));
+        consentRepo.GetActiveConsentsForSubjectsAsync(Arg.Any<IReadOnlyList<Sid>>(), Arg.Is<TableIdentifier>(t => t == customersId), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([
+                new Consent
+                {
+                    TableIdentifier = customersId,
+                    TenantId = new TenantId("tenant-1"),
+                    GranteeType = GranteeType.User,
+                    GranteeSid = new Sid("analyst@corp.com"),
+                    Effect = ConsentEffect.Allow,
+                    ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                    ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+                }
+            ]));
+
+        // ReBAC: allow orders, deny customers
+        var rebac = Substitute.For<Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator>();
+        rebac.IsEnabled.Returns(true);
+        rebac.CheckAsync(Arg.Is<RebacCheckRequest>(r => r.Object.Contains("orders")), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<RebacCheckResult>(RebacCheckResult.Permitted));
+        rebac.CheckAsync(Arg.Is<RebacCheckRequest>(r => r.Object.Contains("customers")), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<RebacCheckResult>(RebacCheckResult.Denied));
+
+        var service = new IcebergRestCatalogFederationService(
+            _metadataReader,
+            _metadataRepo,
+            optionsWithRebac,
+            NullLogger<IcebergRestCatalogFederationService>.Instance,
+            new ConsentResolutionService(),
+            consentRepo,
+            rebacEvaluator: rebac);
+
+        // 1. ListTablesAsync should only list 'orders' because 'customers' is denied by ReBAC
+        var listed = await service.ListTablesAsync("tenant-1", "raw", Analyst());
+        listed.ShouldContain("orders");
+        listed.ShouldNotContain("customers");
+
+        // 2. LoadTableAsync for 'orders' succeeds (consistent with listing)
+        var loaded = await service.LoadTableAsync("tenant-1", "raw", "orders", Analyst());
+        loaded.ShouldNotBeNull();
+
+        // 3. LoadTableAsync for 'customers' fails closed with 403 (consistent with exclusion from listing)
+        await Should.ThrowAsync<SecurityException>(() =>
+            service.LoadTableAsync("tenant-1", "raw", "customers", Analyst()).AsTask());
     }
 }

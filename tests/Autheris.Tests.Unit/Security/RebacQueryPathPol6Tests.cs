@@ -103,6 +103,7 @@ public sealed class RebacQueryPathPol6Tests
 
         return new GovernedSqlExecutionService(
             Options.Create(options),
+            auditLogRepository: Substitute.For<IAuditLogRepository>(),
             consentResolution: resolution,
             tableRepository: CreateRepository(),
             environment: env,

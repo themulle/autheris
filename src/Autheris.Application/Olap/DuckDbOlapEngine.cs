@@ -44,6 +44,16 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         _concurrencySemaphore = new SemaphoreSlim(maxConcurrent, maxConcurrent);
     }
 
+    public Task<OlapQueryResult> ExecuteGeneratedAsync(
+        GeneratedOlapQuery query,
+        IReadOnlyList<OlapTableSource> sources,
+        int? limit = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        return ExecuteOlapQueryAsync(new OlapQueryRequest(query.Sql, sources, limit), ct);
+    }
+
     public async Task<OlapQueryResult> ExecuteOlapQueryAsync(
         OlapQueryRequest request,
         CancellationToken ct = default)
@@ -209,7 +219,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         OlapTableSource source,
         CancellationToken ct)
     {
-        var cleanTableName = SanitizeIdentifier(source.Table.TableName);
+        var cleanTableName = SanitizeIdentifier(!string.IsNullOrWhiteSpace(source.StagingTableName) ? source.StagingTableName : source.Table.TableName);
         var columns = source.Metadata?.Columns != null && source.Metadata.Columns.Count > 0
             ? source.Metadata.Columns
             : InferColumns(source.GovernedRows);
@@ -220,7 +230,12 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             columns = [new TableColumn { ColumnName = "id", DataType = "int" }];
         }
 
-        var colDefs = columns.Select(c => $"\"{SanitizeIdentifier(c.ColumnName)}\" {MapDuckDbType(c)}");
+        var colDefs = columns.Select(c =>
+        {
+            bool isMasked = source.MaskedColumns != null && source.MaskedColumns.Contains(c.ColumnName);
+            var duckType = isMasked ? "VARCHAR" : MapDuckDbType(c);
+            return $"\"{SanitizeIdentifier(c.ColumnName)}\" {duckType}";
+        });
         var createTableSql = $"CREATE TABLE \"{cleanTableName}\" ({string.Join(", ", colDefs)});";
 
         using (var createCmd = connection.CreateCommand())
@@ -228,8 +243,8 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             createCmd.CommandText = createTableSql;
             await createCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
-            // Also create domain-prefixed view if distinct (e.g. crm_customers -> customers)
-            if (!string.IsNullOrWhiteSpace(source.Table.Domain))
+            // Also create domain-prefixed view if distinct and not using an explicit staging table name
+            if (string.IsNullOrWhiteSpace(source.StagingTableName) && !string.IsNullOrWhiteSpace(source.Table.Domain))
             {
                 var qualifiedViewName = SanitizeIdentifier($"{source.Table.Domain}_{source.Table.TableName}");
                 if (!string.Equals(qualifiedViewName, cleanTableName, StringComparison.OrdinalIgnoreCase))

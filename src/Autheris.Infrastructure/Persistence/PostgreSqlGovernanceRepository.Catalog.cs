@@ -275,16 +275,16 @@ public partial class PostgreSqlGovernanceRepository
                     await insertColCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
 
+                await using (var delMaskCmd = conn.CreateCommand())
+                {
+                    delMaskCmd.Transaction = tx;
+                    delMaskCmd.CommandText = "DELETE FROM COLUMN_MASKING_RULES WHERE table_column_id = @colId";
+                    delMaskCmd.Parameters.AddWithValue("@colId", colId.ToString());
+                    await delMaskCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+                }
+
                 if (metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var maskRule))
                 {
-                    await using (var delMaskCmd = conn.CreateCommand())
-                    {
-                        delMaskCmd.Transaction = tx;
-                        delMaskCmd.CommandText = "DELETE FROM COLUMN_MASKING_RULES WHERE table_column_id = @colId";
-                        delMaskCmd.Parameters.AddWithValue("@colId", colId.ToString());
-                        await delMaskCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-                    }
-
                     await using (var insertMaskCmd = conn.CreateCommand())
                     {
                         insertMaskCmd.Transaction = tx;

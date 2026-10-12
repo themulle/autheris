@@ -118,7 +118,7 @@ public sealed class BasicAuthOptimizationTests
     #region BasicAuthAttemptGuard Tests
 
     [Fact]
-    public void AttemptGuard_InMemory_LocksOutAfterMaxAttempts()
+    public async Task AttemptGuard_InMemory_LocksOutAfterMaxAttempts()
     {
         var options = new BasicAuthOptions { MaxFailedAttempts = 3, FailureWindowSeconds = 300 };
         var guard = new BasicAuthAttemptGuard(options);
@@ -126,27 +126,27 @@ public sealed class BasicAuthOptimizationTests
         const string user = "alice";
         var key = BasicAuthAttemptGuard.BuildAttemptKey(user, ip);
 
-        guard.IsLockedOut(key).ShouldBeFalse();
-        guard.RecordFailure(key);
-        guard.IsLockedOut(key).ShouldBeFalse();
+        (await guard.IsLockedOutAsync(key)).ShouldBeFalse();
+        await guard.RecordFailureAsync(key);
+        (await guard.IsLockedOutAsync(key)).ShouldBeFalse();
 
-        guard.RecordFailure(key);
-        guard.IsLockedOut(key).ShouldBeFalse();
+        await guard.RecordFailureAsync(key);
+        (await guard.IsLockedOutAsync(key)).ShouldBeFalse();
 
-        guard.RecordFailure(key); // 3rd attempt
-        guard.IsLockedOut(key).ShouldBeTrue();
+        await guard.RecordFailureAsync(key); // 3rd attempt
+        (await guard.IsLockedOutAsync(key)).ShouldBeTrue();
 
         // Different user from same IP is not locked out
         var bobKey = BasicAuthAttemptGuard.BuildAttemptKey("bob", ip);
-        guard.IsLockedOut(bobKey).ShouldBeFalse();
+        (await guard.IsLockedOutAsync(bobKey)).ShouldBeFalse();
 
         // Reset on success
-        guard.RecordSuccess(key);
-        guard.IsLockedOut(key).ShouldBeFalse();
+        await guard.RecordSuccessAsync(key);
+        (await guard.IsLockedOutAsync(key)).ShouldBeFalse();
     }
 
     [Fact]
-    public void AttemptGuard_WithDistributedCache_UsesCacheAndSurvivesExceptions()
+    public async Task AttemptGuard_WithDistributedCache_UsesCacheAndSurvivesExceptions()
     {
         var mockCache = Substitute.For<IDistributedCache>();
         mockCache.Get(Arg.Any<string>()).Throws(new InvalidOperationException("Redis connection failure"));
@@ -157,13 +157,12 @@ public sealed class BasicAuthOptimizationTests
         const string user = "charlie";
         var key = BasicAuthAttemptGuard.BuildAttemptKey(user, ip);
 
-        // Even though IDistributedCache threw, the guard must not crash and fallback to memory
-        guard.IsLockedOut(key).ShouldBeFalse();
-        guard.RecordFailure(key);
-        guard.RecordFailure(key);
-        guard.RecordFailure(key);
+        (await guard.IsLockedOutAsync(key)).ShouldBeFalse();
+        await guard.RecordFailureAsync(key);
+        await guard.RecordFailureAsync(key);
+        await guard.RecordFailureAsync(key);
 
-        guard.IsLockedOut(key).ShouldBeTrue();
+        (await guard.IsLockedOutAsync(key)).ShouldBeTrue();
     }
 
     #endregion
@@ -260,8 +259,8 @@ public sealed class BasicAuthOptimizationTests
         var resolvedKey = BasicAuthAttemptGuard.BuildAttemptKey(user, "203.0.113.195");
         var ingressKey = BasicAuthAttemptGuard.BuildAttemptKey(user, "10.0.0.1");
 
-        guard.IsLockedOut(resolvedKey).ShouldBeTrue();
-        guard.IsLockedOut(ingressKey).ShouldBeFalse();
+        (await guard.IsLockedOutAsync(resolvedKey)).ShouldBeTrue();
+        (await guard.IsLockedOutAsync(ingressKey)).ShouldBeFalse();
     }
 
     [Fact]

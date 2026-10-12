@@ -352,14 +352,7 @@ public static partial class SqlFilterCompiler
         var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
         var options = new RlsOptions
         {
-            TargetDialect = dialect switch
-            {
-                DatabaseDialect.SqlServer => TargetSqlDialect.SqlServer,
-                DatabaseDialect.PostgreSql => TargetSqlDialect.PostgreSql,
-                DatabaseDialect.Sqlite => TargetSqlDialect.Sqlite,
-                DatabaseDialect.Oracle => TargetSqlDialect.Oracle,
-                _ => throw new NotSupportedException($"Virtual filters with a sql definition are not supported for {dialect}.")
-            },
+            TargetDialect = Sql.SqlDialectMapper.ToTargetDialect(dialect),
             RewriterEngine = "AstCompiler",
             TranslateTrinoDateFunctions = true,
             PolicyProvider = new DefaultRlsPolicyProvider(predicate: _ => false),

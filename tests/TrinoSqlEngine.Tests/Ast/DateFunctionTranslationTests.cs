@@ -66,7 +66,7 @@ public sealed class DateFunctionTranslationTests
     [InlineData(TargetSqlDialect.Oracle, "day", "TRUNC(\"TS\", 'DD')")]
     [InlineData(TargetSqlDialect.Oracle, "week", "TRUNC(\"TS\", 'IW')")]
     [InlineData(TargetSqlDialect.DuckDb, "day", "DATE_TRUNC('day', \"ts\")")]
-    [InlineData(TargetSqlDialect.Snowflake, "month", "DATE_TRUNC('month', TS)")]
+    [InlineData(TargetSqlDialect.Snowflake, "month", "DATE_TRUNC('month', \"TS\")")]
     public void DateTrunc(TargetSqlDialect dialect, string unit, string expected)
     {
         Assert.Contains(expected, Generate($"date_trunc('{unit}', ts)", dialect));

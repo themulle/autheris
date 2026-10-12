@@ -10,6 +10,9 @@ using System.Text.Json;
 using Autheris.Application.DataCatalog.Services;
 using Autheris.Application.Dbt.Interfaces;
 using Autheris.Application.Interfaces;
+using Autheris.Application.Policy;
+using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
@@ -23,6 +26,8 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
     private readonly Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? _gatewayOptions;
     private readonly Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? _sqlEndpointLoader;
     private readonly ITableRelationRepository? _relationRepository;
+    private readonly VirtualFilterAdministrationService? _virtualFilterAdmin;
+    private readonly IRebacStore? _rebacStore;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
 
     public DbtMetadataIngestionService(
@@ -30,7 +35,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         ITableMetadataRepository metadataRepository,
         ILineageGraphStore lineageGraphStore,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, null, null, null, logger)
     {
     }
 
@@ -40,7 +45,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         ILineageGraphStore lineageGraphStore,
         IPolicyEpochRepository? epochRepository,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, null, null, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, null, null, null, null, null, logger)
     {
     }
 
@@ -50,7 +55,18 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         ILineageGraphStore lineageGraphStore,
         ITableRelationRepository? relationRepository,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, relationRepository, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, null, null, null, relationRepository, null, null, logger)
+    {
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        IPolicyEpochRepository? epochRepository,
+        ITableRelationRepository? relationRepository,
+        ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, null, null, relationRepository, null, null, logger)
     {
     }
 
@@ -62,7 +78,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
         Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ILogger<DbtMetadataIngestionService> logger)
-        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, null, logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, null, null, null, logger)
     {
     }
 
@@ -74,6 +90,35 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
         Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
         ITableRelationRepository? relationRepository,
+        ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, null, null, logger)
+    {
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        IPolicyEpochRepository? epochRepository,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
+        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        ITableRelationRepository? relationRepository,
+        VirtualFilterAdministrationService? virtualFilterAdmin,
+        ILogger<DbtMetadataIngestionService> logger)
+        : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository, virtualFilterAdmin, null, logger)
+    {
+    }
+
+    public DbtMetadataIngestionService(
+        IDbtProposalRepository proposalRepository,
+        ITableMetadataRepository metadataRepository,
+        ILineageGraphStore lineageGraphStore,
+        IPolicyEpochRepository? epochRepository,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions,
+        Autheris.Application.SqlEndpoints.Services.SqlEndpointLoader? sqlEndpointLoader,
+        ITableRelationRepository? relationRepository,
+        VirtualFilterAdministrationService? virtualFilterAdmin,
+        IRebacStore? rebacStore,
         ILogger<DbtMetadataIngestionService> logger)
     {
         _proposalRepository = proposalRepository ?? throw new ArgumentNullException(nameof(proposalRepository));
@@ -83,6 +128,8 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         _gatewayOptions = gatewayOptions;
         _sqlEndpointLoader = sqlEndpointLoader;
         _relationRepository = relationRepository;
+        _virtualFilterAdmin = virtualFilterAdmin;
+        _rebacStore = rebacStore;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -401,6 +448,7 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                     };
 
                     await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
+                    await SeedRebacStructureTuplesAsync(updatedMetadata.Identifier, ct).ConfigureAwait(false);
                 }
             }
 
@@ -497,7 +545,28 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         );
     }
 
-    public async Task<DbtGovernanceSyncResult> IngestGovernanceFileAsync(string filePath, bool dryRun = false, CancellationToken ct = default)
+    private static readonly HashSet<string> ValidMaskingRuleTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "REDACT", "NULLIFY", "HMAC", "HMAC_SHA256", "HASH", "MASK_EMAIL", "MASK_IBAN", "MASK_PHONE", "REGEX",
+        "GEO_JITTER", "PARTIAL_MASK", "TOKENIZE", "TOKENIZATION"
+    };
+
+    private static string NormalizeMaskingRuleType(string raw)
+    {
+        var trimmed = raw.Trim().ToUpperInvariant();
+        return trimmed switch
+        {
+            "GEO_JITTER" or "GEOJITTER" => "GEO_JITTER",
+            "PARTIAL_MASK" or "PARTIAL" or "PARTIALMASK" => "PARTIAL_MASK",
+            "TOKENIZE" or "TOKENIZATION" => "TOKENIZE",
+            "NULLING" or "NULLIFY" => "NULLIFY",
+            "PSEUDONYMIZE" or "PSEUDONYMIZATION" or "HMAC" or "HMAC_SHA256" => "HMAC",
+            "REDACT_COMPLETE" or "REDACT" => "REDACT",
+            _ => trimmed
+        };
+    }
+
+    public async Task<DbtGovernanceSyncResult> IngestGovernanceFileAsync(string filePath, bool dryRun = false, bool replace = false, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
         ValidateSafeFilePath(filePath);
@@ -510,10 +579,10 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         }
 
         await using var stream = File.OpenRead(fullPath);
-        return await IngestGovernanceStreamAsync(stream, dryRun, ct).ConfigureAwait(false);
+        return await IngestGovernanceStreamAsync(stream, dryRun, replace, ct).ConfigureAwait(false);
     }
 
-    public async Task<DbtGovernanceSyncResult> IngestGovernanceStreamAsync(Stream governanceStream, bool dryRun = false, CancellationToken ct = default)
+    public async Task<DbtGovernanceSyncResult> IngestGovernanceStreamAsync(Stream governanceStream, bool dryRun = false, bool replace = false, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(governanceStream);
 
@@ -521,6 +590,8 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
         int updatedTables = 0;
         int updatedColumns = 0;
         int maskingRulesCount = 0;
+        int removedMaskingRulesCount = 0;
+        int relaxedMaskingRulesCount = 0;
         int virtualFiltersCount = 0;
         int accessProfilesCount = 0;
 
@@ -529,6 +600,10 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             new JsonDocumentOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip },
             ct).ConfigureAwait(false);
         var root = doc.RootElement;
+
+        var effectiveReplace = replace || (root.ValueKind == JsonValueKind.Object &&
+            ((root.TryGetProperty("mode", out var modeProp) && string.Equals(modeProp.GetString(), "replace", StringComparison.OrdinalIgnoreCase)) ||
+             (root.TryGetProperty("replace", out var rProp) && rProp.ValueKind == JsonValueKind.True)));
 
         // Process classifications / models
         JsonElement modelsArray = default;
@@ -575,7 +650,15 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 }
                 if (existingMeta == null)
                 {
-                    warnings.Add($"Table '{tableId}' not found in catalog; skipped governance update.");
+                    // R-51: Distinguish routine / procedure from missing catalog tables
+                    if (IsRoutine(tableId.TableName, item))
+                    {
+                        warnings.Add($"Routine '{tableId}' nicht anwendbar (Routine); skipped governance update.");
+                    }
+                    else
+                    {
+                        warnings.Add($"Table '{tableId}' not found in catalog; skipped governance update.");
+                    }
                     continue;
                 }
 
@@ -621,7 +704,8 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         if (colObj.TryGetProperty("sensitivity", out var csProp))
                         {
                             var cs = csProp.GetString();
-                            colSensitivity = !string.Equals(cs, "PUBLIC", StringComparison.OrdinalIgnoreCase);
+                            // B-03: Use Table.IsSensitivityHigh (SensitivityRank >= 3) instead of != "PUBLIC"
+                            colSensitivity = Table.IsSensitivityHigh(cs);
                             if (!string.IsNullOrWhiteSpace(cs)) colMeta["sensitivity"] = cs;
                         }
                         if (colObj.TryGetProperty("description", out var cdProp) && cdProp.GetString() is string cd && !string.IsNullOrWhiteSpace(cd))
@@ -640,17 +724,175 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                         {
                             colMeta["classification_review"] = ccrProp.GetRawText();
                         }
-                        if (colObj.TryGetProperty("masking_rule", out var mrProp) && mrProp.GetString() is string mr && !string.IsNullOrWhiteSpace(mr))
+
+                        // B-01 / B-02: Handling masking_rule (none, null, false, replace mode, validation)
+                        if (colObj.TryGetProperty("masking_rule", out var mrProp))
                         {
-                            var newRule = new MaskingRule
+                            if (mrProp.ValueKind is JsonValueKind.Null or JsonValueKind.False)
                             {
-                                RuleType = mr,
-                                Replacement = mr == "REDACT" ? "[REDACTED]" : null
-                            };
-                            updatedMaskingRules[col.ColumnName] = newRule;
-                            maskingRulesCount++;
+                                // Explicit removal
+                                if (updatedMaskingRules.Remove(col.ColumnName))
+                                {
+                                    removedMaskingRulesCount++;
+                                }
+                            }
+                            else if (mrProp.ValueKind == JsonValueKind.String)
+                            {
+                                var rawRule = mrProp.GetString()?.Trim() ?? string.Empty;
+                                if (string.Equals(rawRule, "none", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(rawRule, "null", StringComparison.OrdinalIgnoreCase) ||
+                                    string.Equals(rawRule, "false", StringComparison.OrdinalIgnoreCase) ||
+                                    string.IsNullOrWhiteSpace(rawRule))
+                                {
+                                    // B-01: "none", "null", "false", or empty treated as no rule / remove
+                                    if (updatedMaskingRules.Remove(col.ColumnName))
+                                    {
+                                        removedMaskingRulesCount++;
+                                    }
+                                }
+                                else
+                                {
+                                    var upperRule = NormalizeMaskingRuleType(rawRule);
+                                    if (!ValidMaskingRuleTypes.Contains(upperRule))
+                                    {
+                                        // B-01: reject unknown rule type
+                                        throw new ArgumentException($"Unknown masking rule '{rawRule}' on column '{col.ColumnName}'.");
+                                    }
+
+                                    var newRule = new MaskingRule
+                                    {
+                                        RuleType = upperRule,
+                                        Replacement = upperRule == "REDACT" ? "[REDACTED]" : null
+                                    };
+
+                                    if (existingMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var existingRule))
+                                    {
+                                        int oldStrength = CatalogGovernanceRatchet.MaskingRuleStrength(existingRule);
+                                        int newStrength = CatalogGovernanceRatchet.MaskingRuleStrength(newRule);
+                                        if (newStrength < oldStrength)
+                                        {
+                                            relaxedMaskingRulesCount++;
+                                        }
+                                        else
+                                        {
+                                            maskingRulesCount++;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        maskingRulesCount++;
+                                    }
+
+                                    updatedMaskingRules[col.ColumnName] = newRule;
+                                }
+                            }
+                            else if (mrProp.ValueKind == JsonValueKind.Object)
+                            {
+                                string? rawRule = null;
+                                if (mrProp.TryGetProperty("rule_type", out var rtProp) ||
+                                    mrProp.TryGetProperty("type", out rtProp) ||
+                                    mrProp.TryGetProperty("RuleType", out rtProp))
+                                {
+                                    rawRule = rtProp.GetString();
+                                }
+
+                                if (string.IsNullOrWhiteSpace(rawRule))
+                                {
+                                    throw new ArgumentException($"Masking rule object on column '{col.ColumnName}' missing rule_type.");
+                                }
+
+                                var upperRule = NormalizeMaskingRuleType(rawRule);
+                                if (!ValidMaskingRuleTypes.Contains(upperRule))
+                                {
+                                    throw new ArgumentException($"Unknown masking rule '{rawRule}' on column '{col.ColumnName}'.");
+                                }
+
+                                var newRule = new MaskingRule
+                                {
+                                    RuleType = upperRule,
+                                    Replacement = upperRule == "REDACT" ? "[REDACTED]" : null
+                                };
+
+                                if (mrProp.TryGetProperty("replacement", out var repProp) || mrProp.TryGetProperty("Replacement", out repProp))
+                                {
+                                    newRule = newRule with { Replacement = repProp.GetString() };
+                                }
+                                if (mrProp.TryGetProperty("mode", out var ruleModeProp) || mrProp.TryGetProperty("Mode", out ruleModeProp))
+                                {
+                                    newRule = newRule with { Mode = ruleModeProp.GetString() };
+                                }
+                                if (mrProp.TryGetProperty("decimals", out var decProp) || mrProp.TryGetProperty("Decimals", out decProp))
+                                {
+                                    if (decProp.TryGetInt32(out var decVal)) newRule = newRule with { Decimals = decVal };
+                                }
+                                if (mrProp.TryGetProperty("radius_meters", out var radProp) || mrProp.TryGetProperty("radiusMeters", out radProp) || mrProp.TryGetProperty("RadiusMeters", out radProp))
+                                {
+                                    if (radProp.TryGetDouble(out var radVal)) newRule = newRule with { RadiusMeters = radVal };
+                                }
+                                if (mrProp.TryGetProperty("keep_prefix", out var kpProp) || mrProp.TryGetProperty("keepPrefix", out kpProp) || mrProp.TryGetProperty("KeepPrefix", out kpProp))
+                                {
+                                    if (kpProp.TryGetInt32(out var kpVal)) newRule = newRule with { KeepPrefix = kpVal };
+                                }
+                                if (mrProp.TryGetProperty("keep_suffix", out var ksProp) || mrProp.TryGetProperty("keepSuffix", out ksProp) || mrProp.TryGetProperty("KeepSuffix", out ksProp))
+                                {
+                                    if (ksProp.TryGetInt32(out var ksVal)) newRule = newRule with { KeepSuffix = ksVal };
+                                }
+                                if (mrProp.TryGetProperty("mask_char", out var mcProp) || mrProp.TryGetProperty("maskChar", out mcProp) || mrProp.TryGetProperty("MaskChar", out mcProp))
+                                {
+                                    var mcStr = mcProp.GetString();
+                                    if (!string.IsNullOrEmpty(mcStr)) newRule = newRule with { MaskChar = mcStr[0] };
+                                }
+                                if (mrProp.TryGetProperty("fixed_length", out var flProp) || mrProp.TryGetProperty("fixedLength", out flProp) || mrProp.TryGetProperty("FixedLength", out flProp))
+                                {
+                                    if (flProp.ValueKind == JsonValueKind.True || flProp.ValueKind == JsonValueKind.False)
+                                    {
+                                        newRule = newRule with { FixedLength = flProp.GetBoolean() };
+                                    }
+                                }
+                                if (mrProp.TryGetProperty("token_domain", out var tdProp) || mrProp.TryGetProperty("tokenDomain", out tdProp) || mrProp.TryGetProperty("TokenDomain", out tdProp))
+                                {
+                                    newRule = newRule with { TokenDomain = tdProp.GetString() };
+                                }
+
+                                if (existingMeta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var existingRule))
+                                {
+                                    int oldStrength = CatalogGovernanceRatchet.MaskingRuleStrength(existingRule);
+                                    int newStrength = CatalogGovernanceRatchet.MaskingRuleStrength(newRule);
+                                    if (newStrength < oldStrength)
+                                    {
+                                        relaxedMaskingRulesCount++;
+                                    }
+                                    else
+                                    {
+                                        maskingRulesCount++;
+                                    }
+                                }
+                                else
+                                {
+                                    maskingRulesCount++;
+                                }
+
+                                updatedMaskingRules[col.ColumnName] = newRule;
+                            }
                         }
+                        else if (effectiveReplace)
+                        {
+                            // B-02: replace mode - column without masking_rule loses its rule
+                            if (updatedMaskingRules.Remove(col.ColumnName))
+                            {
+                                removedMaskingRulesCount++;
+                            }
+                        }
+
                         updatedColumns++;
+                    }
+                    else if (effectiveReplace)
+                    {
+                        // B-02: replace mode - omitted column loses its rule
+                        if (updatedMaskingRules.Remove(col.ColumnName))
+                        {
+                            removedMaskingRulesCount++;
+                        }
                     }
 
                     updatedCols.Add(new TableColumn
@@ -678,8 +920,61 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
                 if (!dryRun)
                 {
                     await _metadataRepository.UpsertTableMetadataAsync(updatedMetadata, ct).ConfigureAwait(false);
+                    await SeedRebacStructureTuplesAsync(updatedMetadata.Identifier, ct).ConfigureAwait(false);
                 }
                 updatedTables++;
+            }
+        }
+
+        // R-50: Process virtual filters
+        JsonElement filtersProp = default;
+        if (root.ValueKind == JsonValueKind.Object &&
+            (root.TryGetProperty("virtual_filters", out filtersProp) ||
+             root.TryGetProperty("virtualFilters", out filtersProp) ||
+             root.TryGetProperty("filters", out filtersProp)))
+        {
+            var filters = ParseVirtualFilters(filtersProp);
+            foreach (var filter in filters)
+            {
+                virtualFiltersCount++;
+                if (!dryRun && _virtualFilterAdmin != null)
+                {
+                    try
+                    {
+                        var actor = new VirtualFilterActor(new Sid("S-1-5-21-DBT-SYNC"), IsSync: true);
+                        await _virtualFilterAdmin.SaveFilterAsync(filter, actor, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        warnings.Add($"Failed to import virtual filter '{filter.Name}': {ex.Message}");
+                    }
+                }
+            }
+        }
+
+        // R-50: Process access profiles
+        JsonElement profilesProp = default;
+        if (root.ValueKind == JsonValueKind.Object &&
+            (root.TryGetProperty("access_profiles", out profilesProp) ||
+             root.TryGetProperty("accessProfiles", out profilesProp) ||
+             root.TryGetProperty("profiles", out profilesProp)))
+        {
+            var profiles = ParseAccessProfiles(profilesProp);
+            foreach (var profile in profiles)
+            {
+                accessProfilesCount++;
+                if (!dryRun && _virtualFilterAdmin != null)
+                {
+                    try
+                    {
+                        var actor = new VirtualFilterActor(new Sid("S-1-5-21-DBT-SYNC"), IsSync: true);
+                        await _virtualFilterAdmin.SaveProfileAsync(profile, actor, ct).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        warnings.Add($"Failed to import access profile '{profile.Name}': {ex.Message}");
+                    }
+                }
             }
         }
 
@@ -690,8 +985,251 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
             MaskingRulesCount: maskingRulesCount,
             VirtualFiltersCount: virtualFiltersCount,
             AccessProfilesCount: accessProfilesCount,
-            Warnings: warnings
+            Warnings: warnings,
+            RemovedMaskingRulesCount: removedMaskingRulesCount,
+            RelaxedMaskingRulesCount: relaxedMaskingRulesCount
         );
+    }
+
+    private static bool IsRoutine(string tableName, JsonElement item)
+    {
+        if (tableName.StartsWith("sp_", StringComparison.OrdinalIgnoreCase) ||
+            tableName.StartsWith("fn_", StringComparison.OrdinalIgnoreCase) ||
+            tableName.StartsWith("usp_", StringComparison.OrdinalIgnoreCase) ||
+            tableName.StartsWith("ufn_", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (item.TryGetProperty("type", out var typeProp) &&
+            typeProp.GetString() is string typeStr &&
+            (string.Equals(typeStr, "routine", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(typeStr, "procedure", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(typeStr, "function", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (item.TryGetProperty("materialization", out var matProp) &&
+            matProp.GetString() is string matStr &&
+            (string.Equals(matStr, "routine", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(matStr, "procedure", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(matStr, "function", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static List<VirtualFilter> ParseVirtualFilters(JsonElement element)
+    {
+        var result = new List<VirtualFilter>();
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in element.EnumerateObject())
+            {
+                var filter = ParseSingleFilter(prop.Name, prop.Value);
+                if (filter != null) result.Add(filter);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var name = item.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                var filter = ParseSingleFilter(name, item);
+                if (filter != null) result.Add(filter);
+            }
+        }
+        return result;
+    }
+
+    private static VirtualFilter? ParseSingleFilter(string name, JsonElement val)
+    {
+        var tenantStr = val.TryGetProperty("tenant", out var tProp) ? tProp.GetString() : null;
+        var tenant = !string.IsNullOrWhiteSpace(tenantStr) ? new TenantId(tenantStr) : TenantId.LegacySingleTenant;
+        var source = val.TryGetProperty("source", out var sProp) ? sProp.GetString() ?? "" : "";
+        var sql = val.TryGetProperty("sql", out var sqlProp) ? sqlProp.GetString() : null;
+        var validFrom = val.TryGetProperty("valid_from", out var vfProp) ? vfProp.GetString() : null;
+        var validTo = val.TryGetProperty("valid_to", out var vtProp) ? vtProp.GetString() : null;
+
+        var keyCols = new List<string>();
+        if (val.TryGetProperty("key_columns", out var kcProp) && kcProp.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var k in kcProp.EnumerateArray()) if (k.GetString() is string s) keyCols.Add(s);
+        }
+
+        var supersedes = new List<string>();
+        if (val.TryGetProperty("supersedes", out var supProp) && supProp.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var s in supProp.EnumerateArray()) if (s.GetString() is string str) supersedes.Add(str);
+        }
+
+        StructuredFilterDefinition? structured = null;
+        if (val.TryGetProperty("from", out var fromProp) && fromProp.ValueKind == JsonValueKind.Object)
+        {
+            var fromTableStr = fromProp.TryGetProperty("table", out var ftProp) ? ftProp.GetString() ?? "" : "";
+            var fromAlias = fromProp.TryGetProperty("alias", out var faProp) ? faProp.GetString() ?? "" : "";
+            var parts = fromTableStr.Split('.');
+            var fromTable = parts.Length == 2 ? new TableIdentifier(source, parts[0], parts[1]) : new TableIdentifier(source, "dbo", fromTableStr);
+
+            var joins = new List<FilterJoin>();
+            if (val.TryGetProperty("joins", out var joinsProp) && joinsProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var j in joinsProp.EnumerateArray())
+                {
+                    var jTableStr = j.TryGetProperty("table", out var jt) ? jt.GetString() ?? "" : "";
+                    var jAlias = j.TryGetProperty("alias", out var ja) ? ja.GetString() ?? "" : "";
+                    var jLeft = j.TryGetProperty("left", out var jl) ? jl.GetString() ?? "" : "";
+                    var jRight = j.TryGetProperty("right", out var jr) ? jr.GetString() ?? "" : "";
+                    var jParts = jTableStr.Split('.');
+                    var jTable = jParts.Length == 2 ? new TableIdentifier(source, jParts[0], jParts[1]) : new TableIdentifier(source, "dbo", jTableStr);
+                    joins.Add(new FilterJoin(jTable, jAlias, jLeft, jRight));
+                }
+            }
+
+            var whereConditions = new List<FilterCondition>();
+            if (val.TryGetProperty("where", out var whereProp) && whereProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var w in whereProp.EnumerateArray())
+                {
+                    var col = w.TryGetProperty("column", out var wc) ? wc.GetString() ?? "" : "";
+                    var opStr = w.TryGetProperty("op", out var wo) ? wo.GetString() ?? "eq" : "eq";
+                    var wVal = w.TryGetProperty("value", out var wv) ? wv.GetString() : null;
+                    var op = opStr.ToLowerInvariant() switch
+                    {
+                        "eq" => FilterConditionOperator.Eq,
+                        "neq" => FilterConditionOperator.NotEq,
+                        "is_null" => FilterConditionOperator.IsNull,
+                        _ => FilterConditionOperator.IsNotNull
+                    };
+                    whereConditions.Add(new FilterCondition(col, op, wVal));
+                }
+            }
+
+            structured = new StructuredFilterDefinition
+            {
+                From = fromTable,
+                FromAlias = fromAlias,
+                Joins = joins,
+                Where = whereConditions
+            };
+        }
+
+        return new VirtualFilter
+        {
+            TenantId = tenant,
+            Name = name,
+            Source = source,
+            Sql = sql,
+            Structured = structured,
+            KeyColumns = keyCols,
+            ValidFromColumn = validFrom,
+            ValidToColumn = validTo,
+            Supersedes = supersedes
+        };
+    }
+
+    private static List<VirtualFilterAccessProfile> ParseAccessProfiles(JsonElement element)
+    {
+        var result = new List<VirtualFilterAccessProfile>();
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in element.EnumerateObject())
+            {
+                var profile = ParseSingleProfile(prop.Name, prop.Value);
+                if (profile != null) result.Add(profile);
+            }
+        }
+        else if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+            {
+                var name = item.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                var profile = ParseSingleProfile(name, item);
+                if (profile != null) result.Add(profile);
+            }
+        }
+        return result;
+    }
+
+    private static VirtualFilterAccessProfile? ParseSingleProfile(string name, JsonElement val)
+    {
+        var tenantStr = val.TryGetProperty("tenant", out var tProp) ? tProp.GetString() : null;
+        var tenant = !string.IsNullOrWhiteSpace(tenantStr) ? new TenantId(tenantStr) : TenantId.LegacySingleTenant;
+        var scope = val.TryGetProperty("scope", out var scProp) ? scProp.GetString() ?? "*" : "*";
+
+        UncoveredPolicy? uncovered = null;
+        if (val.TryGetProperty("uncovered", out var uProp) && uProp.GetString() is string uStr)
+        {
+            uncovered = string.Equals(uStr, "skip", StringComparison.OrdinalIgnoreCase) ? UncoveredPolicy.Skip : UncoveredPolicy.Deny;
+        }
+
+        GranteeType granteeType = GranteeType.User;
+        Sid? granteeSid = null;
+        string? roleName = null;
+
+        if (val.TryGetProperty("grantee", out var gProp) && gProp.ValueKind == JsonValueKind.Object)
+        {
+            var gTypeStr = gProp.TryGetProperty("type", out var gt) ? gt.GetString() : "user";
+            granteeType = (gTypeStr?.ToLowerInvariant()) switch
+            {
+                "group" => GranteeType.Group,
+                "role" => GranteeType.Role,
+                "serviceprincipal" => GranteeType.ServicePrincipal,
+                _ => GranteeType.User
+            };
+            if (gProp.TryGetProperty("sid", out var gs) && gs.GetString() is string s)
+            {
+                granteeSid = new Sid(s);
+            }
+            if (gProp.TryGetProperty("role", out var gr) && gr.GetString() is string r)
+            {
+                roleName = r;
+            }
+        }
+
+        var bindings = new List<FilterBinding>();
+        if (val.TryGetProperty("bindings", out var bProp) && bProp.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var b in bProp.EnumerateArray())
+            {
+                var fName = b.TryGetProperty("filter", out var fn) ? fn.GetString() ?? "" : "";
+                var target = b.TryGetProperty("target", out var tgt) ? tgt.GetString() : null;
+                var timeCol = b.TryGetProperty("time_column", out var tc) ? tc.GetString() : null;
+                Dictionary<string, string>? map = null;
+                if (b.TryGetProperty("map", out var m) && m.ValueKind == JsonValueKind.Object)
+                {
+                    map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var kv in m.EnumerateObject())
+                    {
+                        if (kv.Value.GetString() is string mv) map[kv.Name] = mv;
+                    }
+                }
+                bindings.Add(new FilterBinding
+                {
+                    FilterName = fName,
+                    TargetPattern = target,
+                    TimeColumn = timeCol,
+                    ColumnMap = map
+                });
+            }
+        }
+
+        return new VirtualFilterAccessProfile
+        {
+            TenantId = tenant,
+            Name = name,
+            GranteeType = granteeType,
+            GranteeSid = granteeSid,
+            RoleName = roleName,
+            Scope = scope,
+            Uncovered = uncovered,
+            Bindings = bindings
+        };
     }
 
     private static TableIdentifier ParseTableIdentifier(string raw, string? explicitSchema = null, string? explicitDatabase = null)
@@ -794,5 +1332,22 @@ public sealed class DbtMetadataIngestionService : IDbtMetadataIngestionService
     public Task<IReadOnlyList<DbtMetadataProposal>> GetPendingProposalsAsync(TableIdentifier? table = null, CancellationToken ct = default)
     {
         return _proposalRepository.GetPendingProposalsAsync(table, ct);
+    }
+
+    private async Task SeedRebacStructureTuplesAsync(TableIdentifier tableId, CancellationToken ct)
+    {
+        if (_rebacStore == null)
+        {
+            return;
+        }
+
+        var domainObj = RebacTableGate.DomainObjectId(tableId.Domain);
+        var schemaObj = RebacTableGate.SchemaObjectId(tableId.Domain, tableId.Schema);
+        var tableObj = RebacTableGate.ObjectId(tableId);
+
+        await _rebacStore.AddTuplesAsync([
+            new RebacTuple(tableId.Domain, schemaObj, "parent", tableObj),
+            new RebacTuple(tableId.Domain, domainObj, "parent", schemaObj)
+        ], ct).ConfigureAwait(false);
     }
 }

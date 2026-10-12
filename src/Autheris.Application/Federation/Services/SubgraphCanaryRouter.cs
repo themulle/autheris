@@ -63,18 +63,15 @@ public sealed class SubgraphCanaryRouter : ISubgraphCanaryRouter
 
         foreach (var rule in matchingRules)
         {
+            // SEC SG-23: Link all specified conditions with logical AND (header match, role requirement, tenant allowlist)
+            // A client providing X-Feature-Variant cannot bypass role or tenant restrictions.
+            bool hasCondition = false;
+
             // 1. Header match (e.g. X-Feature-Variant)
             if (!string.IsNullOrWhiteSpace(rule.HeaderValueMatch))
             {
-                if (string.Equals(variantHeader, rule.HeaderValueMatch, StringComparison.OrdinalIgnoreCase))
-                {
-                    return ValueTask.FromResult(new SubgraphRoutingDecision(
-                        rule.VariantName,
-                        new Uri(rule.TargetUrl),
-                        true,
-                        $"Matched variant header '{variantHeader}'"));
-                }
-                if (!string.IsNullOrWhiteSpace(variantHeader))
+                hasCondition = true;
+                if (!string.Equals(variantHeader, rule.HeaderValueMatch, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -83,31 +80,21 @@ public sealed class SubgraphCanaryRouter : ISubgraphCanaryRouter
             // 2. Role requirement
             if (!string.IsNullOrWhiteSpace(rule.RequiredRole))
             {
+                hasCondition = true;
                 if (principal == null || !principal.IsInRole(rule.RequiredRole))
                 {
                     continue;
                 }
-
-                return ValueTask.FromResult(new SubgraphRoutingDecision(
-                    rule.VariantName,
-                    new Uri(rule.TargetUrl),
-                    true,
-                    $"Matched user role '{rule.RequiredRole}'"));
             }
 
             // 3. Tenant allowlist
             if (rule.AllowedTenants != null && rule.AllowedTenants.Count > 0)
             {
+                hasCondition = true;
                 if (string.IsNullOrWhiteSpace(tenantId) || !rule.AllowedTenants.Contains(tenantId, StringComparer.OrdinalIgnoreCase))
                 {
                     continue;
                 }
-
-                return ValueTask.FromResult(new SubgraphRoutingDecision(
-                    rule.VariantName,
-                    new Uri(rule.TargetUrl),
-                    true,
-                    $"Matched tenant '{tenantId}'"));
             }
 
             // 4. Percentage-based canary weight
@@ -115,14 +102,25 @@ public sealed class SubgraphCanaryRouter : ISubgraphCanaryRouter
             {
                 var hash = Math.Abs(identityKey.GetHashCode());
                 var bucket = hash % 100;
-                if (bucket < rule.WeightPercent)
+                if (bucket >= rule.WeightPercent)
                 {
-                    return ValueTask.FromResult(new SubgraphRoutingDecision(
-                        rule.VariantName,
-                        new Uri(rule.TargetUrl),
-                        true,
-                        $"Deterministic weight rollout ({bucket} < {rule.WeightPercent}%)"));
+                    continue;
                 }
+
+                return ValueTask.FromResult(new SubgraphRoutingDecision(
+                    rule.VariantName,
+                    new Uri(rule.TargetUrl),
+                    true,
+                    $"Deterministic weight rollout ({bucket} < {rule.WeightPercent}%)"));
+            }
+
+            if (hasCondition)
+            {
+                return ValueTask.FromResult(new SubgraphRoutingDecision(
+                    rule.VariantName,
+                    new Uri(rule.TargetUrl),
+                    true,
+                    $"Matched canary criteria for variant '{rule.VariantName}'"));
             }
         }
 

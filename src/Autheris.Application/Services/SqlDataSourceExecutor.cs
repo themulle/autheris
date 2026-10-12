@@ -334,7 +334,6 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
 
             case DatabaseDialect.Sqlite:
             case DatabaseDialect.PostgreSql:
-            case DatabaseDialect.Databricks:
             default:
                 if (requestedOrder != null)
                 {
@@ -558,9 +557,43 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
         if (tableMeta.ColumnMaskingRules.TryGetValue(columnName, out var rule))
         {
             var ruleType = rule.RuleType?.ToUpperInvariant() ?? "REDACT";
-            if (ruleType == "NULLIFY")
+            var effectiveDataType = dataType ?? tableMeta.Columns?.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase))?.DataType;
+            if (ruleType == "NULLIFY" || (ruleType == "REDACT" && IsNumericOrTemporalType(effectiveDataType)))
             {
                 maskExpr = "NULL";
+            }
+            else if (ruleType == "GEO_JITTER")
+            {
+                var targetDialect = dialect switch
+                {
+                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
+                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
+                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
+                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
+                };
+                maskExpr = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
+                    columnName,
+                    "GEO_JITTER",
+                    targetDialect,
+                    decimals: rule.Decimals ?? 2);
+            }
+            else if (ruleType == "PARTIAL_MASK")
+            {
+                var targetDialect = dialect switch
+                {
+                    DatabaseDialect.SqlServer => TrinoSqlEngine.TargetSqlDialect.SqlServer,
+                    DatabaseDialect.Sqlite => TrinoSqlEngine.TargetSqlDialect.Sqlite,
+                    DatabaseDialect.Oracle => TrinoSqlEngine.TargetSqlDialect.Oracle,
+                    _ => TrinoSqlEngine.TargetSqlDialect.PostgreSql
+                };
+                maskExpr = TrinoSqlEngine.Ast.Visitors.AstSecurityVisitor.BuildDialectMaskExpression(
+                    columnName,
+                    "PARTIAL_MASK",
+                    targetDialect,
+                    keepPrefix: rule.KeepPrefix ?? 1,
+                    keepSuffix: rule.KeepSuffix ?? 0,
+                    maskChar: rule.MaskChar ?? '*',
+                    fixedLength: rule.FixedLength ?? false);
             }
             else if (IsHmacRule(rule))
             {
@@ -587,6 +620,17 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
     }
 
     private static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;
+
+    private static bool IsNumericOrTemporalType(string? dataType)
+    {
+        if (string.IsNullOrWhiteSpace(dataType)) return false;
+        var dt = dataType.Trim().ToLowerInvariant();
+        if (dt.Contains('(')) dt = dt[..dt.IndexOf('(')].Trim();
+        return dt is "int" or "integer" or "bigint" or "smallint" or "tinyint" or "numeric" or "decimal"
+            or "money" or "smallmoney" or "real" or "float" or "double precision" or "double"
+            or "bit" or "bool" or "boolean" or "date" or "datetime" or "datetime2" or "smalldatetime"
+            or "timestamp" or "timestamptz" or "time" or "uniqueidentifier" or "uuid";
+    }
 
     /// <summary>
     /// SEC H-13: Derives a tenant-scoped HMAC key id so pseudonyms cannot be correlated across tenants.
@@ -633,7 +677,6 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
             {
                 DatabaseDialect.PostgreSql => $"encode({quotedCol}, 'base64') AS {quotedCol}",
                 DatabaseDialect.Sqlite => $"hex({quotedCol}) AS {quotedCol}",
-                DatabaseDialect.Databricks => $"base64({quotedCol}) AS {quotedCol}",
                 DatabaseDialect.Oracle => $"RAWTOHEX({quotedCol}) AS {quotedCol}",
                 _ => quotedCol
             };
@@ -647,7 +690,6 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 DatabaseDialect.PostgreSql => $"to_char({quotedCol}, 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS {quotedCol}",
                 DatabaseDialect.SqlServer => $"CONVERT(VARCHAR(33), {quotedCol}, 126) AS {quotedCol}",
                 DatabaseDialect.Sqlite => $"strftime('%Y-%m-%dT%H:%M:%fZ', {quotedCol}) AS {quotedCol}",
-                DatabaseDialect.Databricks => $"date_format({quotedCol}, 'yyyy-MM-dd''T''HH:mm:ss.SSS''Z''') AS {quotedCol}",
                 DatabaseDialect.Oracle => $"TO_CHAR({quotedCol}, 'YYYY-MM-DD\"T\"HH24:MI:SS.FF6\"Z\"') AS {quotedCol}",
                 _ => quotedCol
             };
@@ -662,7 +704,6 @@ public sealed class SqlDataSourceExecutor : IDataSourceExecutor
                 DatabaseDialect.SqlServer => $"CONVERT(VARCHAR(10), {quotedCol}, 23) AS {quotedCol}",
                 DatabaseDialect.Oracle => $"TO_CHAR({quotedCol}, 'YYYY-MM-DD') AS {quotedCol}",
                 DatabaseDialect.Sqlite => $"strftime('%Y-%m-%d', {quotedCol}) AS {quotedCol}",
-                DatabaseDialect.Databricks => $"date_format({quotedCol}, 'yyyy-MM-dd') AS {quotedCol}",
                 _ => quotedCol
             };
         }

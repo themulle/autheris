@@ -2,6 +2,7 @@ namespace Autheris.Domain.Model;
 
 using System;
 using System.Collections.Generic;
+using Autheris.Domain.Audit;
 
 /// <summary>
 /// Represents an input parameter of a declarative SQL endpoint (e.g. @country, @fromDate).
@@ -44,4 +45,5 @@ public sealed record SqlEndpointDefinition(
     public IReadOnlyList<SqlEndpointParameter> Parameters { get; init; } = Parameters ?? [];
     public IReadOnlyList<SqlEndpointProjection> Projections { get; init; } = Projections ?? [];
     public IReadOnlyList<string> ReferencedTables { get; init; } = ReferencedTables ?? [];
+    public AuditPolicy AuditPolicy { get; init; } = new(AuditLevel.Full, AuditEventTypes.TableQuery);
 }

@@ -288,6 +288,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         PaginationClause? pagination = null;
         Expression? offset = null;
         Expression? limit = null;
+        bool withTies = false;
 
         if (context.offset != null)
         {
@@ -303,6 +304,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         }
         else if (context.FETCH() != null)
         {
+            withTies = context.TIES() != null;
             if (context.fetchFirst != null)
             {
                 limit = ParseRowCount(context.fetchFirst);
@@ -315,7 +317,7 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         if (offset != null || limit != null)
         {
-            pagination = new PaginationClause(offset, limit);
+            pagination = new PaginationClause(offset, limit, withTies);
         }
 
         return new SelectStatement(withClause, body, orderBy, pagination);
@@ -484,7 +486,34 @@ public sealed class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
     public override SqlNode VisitSampledRelation(SqlBaseParser.SampledRelationContext context)
     {
-        return Visit(context.pivot().patternRecognition().aliasedRelation());
+        using var _ = EnterScope();
+
+        if (context.TABLESAMPLE() != null)
+        {
+            throw Unsupported("TABLESAMPLE");
+        }
+
+        var pivotCtx = context.pivot();
+        if (pivotCtx != null)
+        {
+            if (pivotCtx.PIVOT() != null)
+            {
+                throw Unsupported("PIVOT");
+            }
+
+            var patternCtx = pivotCtx.patternRecognition();
+            if (patternCtx != null)
+            {
+                if (patternCtx.MATCH_RECOGNIZE() != null)
+                {
+                    throw Unsupported("MATCH_RECOGNIZE");
+                }
+
+                return Visit(patternCtx.aliasedRelation());
+            }
+        }
+
+        return VisitChildren(context);
     }
 
     public override SqlNode VisitAliasedRelation(SqlBaseParser.AliasedRelationContext context)

@@ -353,7 +353,7 @@ public sealed class VirtualFilterEndpointsTests : IDisposable
 
         var failingRepo = Substitute.For<IVirtualFilterRepository>();
         failingRepo.LoadSnapshotAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new VirtualFilterSnapshot(0, Array.Empty<VirtualFilter>(), Array.Empty<AccessProfile>())));
+            .Returns(Task.FromResult(new VirtualFilterSnapshot(0, Array.Empty<VirtualFilter>(), Array.Empty<VirtualFilterAccessProfile>())));
         failingRepo.When(r => r.ApplyAsync(Arg.Any<VirtualFilterChangeSet>(), Arg.Any<CancellationToken>()))
             .Do(_ => throw new InvalidOperationException("internal database connection string or schema leak"));
 

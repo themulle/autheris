@@ -622,6 +622,201 @@ public sealed class DbtTests
             m.Columns.First(c => c.ColumnName == "email_address").IsSensitive
         ), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task DbtMetadataIngestionService_B01_IgnoresNoneNullFalseMaskingRule_AndRejectsUnknownRule()
+    {
+        var proposalRepo = Substitute.For<IDbtProposalRepository>();
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var graphStore = Substitute.For<ILineageGraphStore>();
+        var logger = NullLogger<DbtMetadataIngestionService>.Instance;
+
+        var targetTableId = new TableIdentifier("postgres", "analytics", "customers");
+        var existingMetadata = new TableMetadata
+        {
+            Identifier = targetTableId,
+            Table = new Table
+            {
+                Id = Guid.NewGuid(),
+                SourceName = "postgres",
+                SchemaName = "analytics",
+                TableName = "customers",
+                Sensitivity = "NORMAL"
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "col_none", DataType = "varchar" },
+                new TableColumn { ColumnName = "col_null", DataType = "varchar" },
+                new TableColumn { ColumnName = "col_false", DataType = "varchar" }
+            ]
+        };
+
+        metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>())
+            .Returns(existingMetadata);
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([existingMetadata]);
+
+        var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
+
+        const string validJson = """
+        {
+          "classifications": [
+            {
+              "database": "postgres",
+              "schema": "analytics",
+              "table": "customers",
+              "columns": {
+                "col_none": { "masking_rule": "none" },
+                "col_null": { "masking_rule": "null" },
+                "col_false": { "masking_rule": "false" }
+              }
+            }
+          ]
+        }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(validJson));
+        var result = await service.IngestGovernanceStreamAsync(stream, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        result.MaskingRulesCount.ShouldBe(0);
+
+        const string unknownRuleJson = """
+        {
+          "classifications": [
+            {
+              "database": "postgres",
+              "schema": "analytics",
+              "table": "customers",
+              "columns": {
+                "col_none": { "masking_rule": "SUPER_SECRET_ALGO" }
+              }
+            }
+          ]
+        }
+        """;
+
+        using var badStream = new MemoryStream(Encoding.UTF8.GetBytes(unknownRuleJson));
+        var ex = await Should.ThrowAsync<ArgumentException>(() => service.IngestGovernanceStreamAsync(badStream, dryRun: false));
+        ex.Message.ShouldContain("SUPER_SECRET_ALGO");
+    }
+
+    [Fact]
+    public async Task DbtMetadataIngestionService_B02_ReplaceMode_RemovesOmittedRules_AndTracksCounts()
+    {
+        var proposalRepo = Substitute.For<IDbtProposalRepository>();
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var graphStore = Substitute.For<ILineageGraphStore>();
+        var logger = NullLogger<DbtMetadataIngestionService>.Instance;
+
+        var targetTableId = new TableIdentifier("postgres", "analytics", "customers");
+        var existingMetadata = new TableMetadata
+        {
+            Identifier = targetTableId,
+            Table = new Table
+            {
+                Id = Guid.NewGuid(),
+                SourceName = "postgres",
+                SchemaName = "analytics",
+                TableName = "customers"
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "col_a", DataType = "varchar" },
+                new TableColumn { ColumnName = "col_b", DataType = "varchar" }
+            ],
+            ColumnMaskingRules = new Dictionary<string, MaskingRule>
+            {
+                ["col_a"] = new MaskingRule { RuleType = "REDACT" },
+                ["col_b"] = new MaskingRule { RuleType = "REDACT" }
+            }
+        };
+
+        metadataRepo.GetTableMetadataAsync(targetTableId, Arg.Any<CancellationToken>())
+            .Returns(existingMetadata);
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>())
+            .Returns([existingMetadata]);
+
+        var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
+
+        // Only col_a is supplied with a rule; col_b is omitted
+        const string replaceJson = """
+        {
+          "classifications": [
+            {
+              "database": "postgres",
+              "schema": "analytics",
+              "table": "customers",
+              "columns": {
+                "col_a": { "masking_rule": "REDACT" }
+              }
+            }
+          ]
+        }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(replaceJson));
+        var result = await service.IngestGovernanceStreamAsync(stream, dryRun: false, replace: true);
+
+        result.Success.ShouldBeTrue();
+        result.MaskingRulesCount.ShouldBe(1);
+        result.RemovedMaskingRulesCount.ShouldBe(1);
+
+        await metadataRepo.Received(1).UpsertTableMetadataAsync(Arg.Is<TableMetadata>(m =>
+            m.ColumnMaskingRules.ContainsKey("col_a") &&
+            !m.ColumnMaskingRules.ContainsKey("col_b")
+        ), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public void DbtArtifactStreamingParser_B04_ExtractModelName_ResolvesSourceExpressions()
+    {
+        var result1 = DbtArtifactStreamingParser.ExtractModelName("source('lwetem_prod_conf', 'client')");
+        result1.ShouldBe("lwetem_prod_conf.client");
+
+        var result2 = DbtArtifactStreamingParser.ExtractModelName("source(\"crm\", \"accounts\")");
+        result2.ShouldBe("crm.accounts");
+
+        var result3 = DbtArtifactStreamingParser.ExtractModelName("ref('stg_orders')");
+        result3.ShouldBe("stg_orders");
+    }
+
+    [Fact]
+    public async Task DbtMetadataIngestionService_R51_RoutinesProduceRoutineWarnings()
+    {
+        var proposalRepo = Substitute.For<IDbtProposalRepository>();
+        var metadataRepo = Substitute.For<ITableMetadataRepository>();
+        var graphStore = Substitute.For<ILineageGraphStore>();
+        var logger = NullLogger<DbtMetadataIngestionService>.Instance;
+
+        metadataRepo.GetAllTablesAsync(Arg.Any<CancellationToken>()).Returns([]);
+
+        var service = new DbtMetadataIngestionService(proposalRepo, metadataRepo, graphStore, logger);
+
+        const string routineJson = """
+        {
+          "classifications": [
+            {
+              "database": "postgres",
+              "schema": "dbo",
+              "table": "sp_calculate_tax"
+            },
+            {
+              "database": "postgres",
+              "schema": "dbo",
+              "table": "fn_haversine"
+            }
+          ]
+        }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(routineJson));
+        var result = await service.IngestGovernanceStreamAsync(stream, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        result.Warnings.Count.ShouldBe(2);
+        result.Warnings.ShouldAllBe(w => w.Contains("nicht anwendbar (Routine)"));
+    }
 }
 
 

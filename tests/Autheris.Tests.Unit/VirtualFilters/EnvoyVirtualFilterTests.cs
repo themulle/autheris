@@ -21,7 +21,7 @@ using Xunit;
 /// </summary>
 public sealed class EnvoyVirtualFilterTests
 {
-    private static EnvoyExtAuthzService Service(params AccessProfile[] profiles)
+    private static EnvoyExtAuthzService Service(params VirtualFilterAccessProfile[] profiles)
     {
         var policy = Substitute.For<IPolicyEnforcementService>();
         policy.EvaluatePolicyAsync(Arg.Any<SecurityEvaluationContext>(), Arg.Any<CancellationToken>())
@@ -34,7 +34,7 @@ public sealed class EnvoyVirtualFilterTests
         [new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", MandatoryRowFilterResolverTests.Tenant.Value)], "MeshTls"));
 
     // The path /api/v1/air1 addresses the table default.public.air1 (ExtractResourceFromPath).
-    private static AccessProfile DavidProfile(string scope = "default.*.*") =>
+    private static VirtualFilterAccessProfile DavidProfile(string scope = "default.*.*") =>
         MandatoryRowFilterResolverTests.Profile(UncoveredPolicy.Skip, new FilterBinding { FilterName = "filter_a" }) with { Scope = scope };
 
     private static Task<EnvoyCheckResponse> CheckAsync(EnvoyExtAuthzService service, string sid) =>

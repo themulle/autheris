@@ -2,6 +2,8 @@ namespace Autheris.Api.Endpoints;
 
 using System.Linq;
 using System.Security;
+using Autheris.Api.Extensions;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Microsoft.AspNetCore.Builder;
@@ -27,7 +29,7 @@ public static class IcebergRestCatalogEndpoints
             var namespaces = await catalogService.ListNamespacesAsync(tenantId, context.User, context.RequestAborted);
             var response = new IcebergListNamespacesResponse(namespaces.Select(ns => (IReadOnlyList<string>)new[] { ns }).ToList());
             return Results.Ok(response);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // GET /v1/{prefix}/namespaces/{namespace}/tables
         app.MapGet("/v1/{prefix}/namespaces/{namespace}/tables", async (
@@ -43,7 +45,7 @@ public static class IcebergRestCatalogEndpoints
             var response = new IcebergListTablesResponse(
                 tables.Select(t => new IcebergRestTableIdentifier(new[] { @namespace }, t)).ToList());
             return Results.Ok(response);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // GET /v1/{prefix}/namespaces/{namespace}/tables/{table}
         app.MapGet("/v1/{prefix}/namespaces/{namespace}/tables/{table}", async (
@@ -66,7 +68,7 @@ public static class IcebergRestCatalogEndpoints
                 // Wunsch 9: unknown, inactive and denied tables all surface as SecurityException (403).
                 return HandleIcebergError(context, ex);
             }
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // POST /v1/{prefix}/namespaces/{namespace}/tables/{table}/credentials
         app.MapPost("/v1/{prefix}/namespaces/{namespace}/tables/{table}/credentials", async (
@@ -92,7 +94,7 @@ public static class IcebergRestCatalogEndpoints
             {
                 return HandleIcebergError(context, ex);
             }
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return app;
     }
@@ -103,6 +105,7 @@ public static class IcebergRestCatalogEndpoints
         return ex switch
         {
             SecurityException => Results.Problem(detail: isProduction ? "Access denied." : ex.Message, statusCode: StatusCodes.Status403Forbidden),
+            ArgumentException => Results.Problem(detail: isProduction ? "Access denied." : ex.Message, statusCode: StatusCodes.Status400BadRequest),
             NotSupportedException => Results.Problem(detail: isProduction ? "Not implemented." : ex.Message, statusCode: StatusCodes.Status501NotImplemented),
             _ => Results.Problem(detail: isProduction ? "An unexpected error occurred." : ex.Message, statusCode: StatusCodes.Status500InternalServerError)
         };

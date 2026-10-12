@@ -37,10 +37,27 @@ public sealed class ConsentRecertificationHostedService : BackgroundService
             try
             {
                 using var scope = _serviceProvider.CreateScope();
-                var recertificationService = scope.ServiceProvider.GetService<IConsentRecertificationService>();
-                if (recertificationService != null)
+                var clusterState = scope.ServiceProvider.GetService<Autheris.Application.State.IDistributedClusterStateProvider>();
+                IAsyncDisposable? scanLock = null;
+                if (clusterState != null)
                 {
-                    await recertificationService.ScanAndTriggerExpiringConsentRecertificationsAsync(ct: stoppingToken).ConfigureAwait(false);
+                    scanLock = await clusterState.TryAcquireLockAsync("itsm:recertification:scan", TimeSpan.FromMinutes(30), stoppingToken).ConfigureAwait(false);
+                    if (scanLock == null)
+                    {
+                        _logger.LogDebug("Consent recertification scan lock held by another cluster replica; skipping cycle.");
+                    }
+                }
+
+                if (clusterState == null || scanLock != null)
+                {
+                    await using (scanLock)
+                    {
+                        var recertificationService = scope.ServiceProvider.GetService<IConsentRecertificationService>();
+                        if (recertificationService != null)
+                        {
+                            await recertificationService.ScanAndTriggerExpiringConsentRecertificationsAsync(ct: stoppingToken).ConfigureAwait(false);
+                        }
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

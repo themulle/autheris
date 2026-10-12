@@ -9,7 +9,7 @@ using Xunit;
 public sealed class BasicAuthSprayProtectionTests
 {
     [Fact]
-    public void PasswordSpraying_OverManyUsers_LocksTheAddress_NotJustThePair()
+    public async Task PasswordSpraying_OverManyUsers_LocksTheAddress_NotJustThePair()
     {
         var guard = new BasicAuthAttemptGuard(new BasicAuthOptions { MaxFailedAttempts = 3, MaxFailedAttemptsPerIp = 6, FailureWindowSeconds = 300 });
         const string ip = "203.0.113.7";
@@ -18,12 +18,12 @@ public sealed class BasicAuthSprayProtectionTests
         for (int i = 0; i < 6; i++)
         {
             // every user is tried once: no (user, IP) pair ever reaches its own limit
-            guard.RecordFailure(BasicAuthAttemptGuard.BuildAttemptKey("user" + i, ip));
-            guard.RecordFailure(ipKey, guard.MaxFailedAttemptsPerIp);
+            await guard.RecordFailureAsync(BasicAuthAttemptGuard.BuildAttemptKey("user" + i, ip));
+            await guard.RecordFailureAsync(ipKey, guard.MaxFailedAttemptsPerIp);
         }
 
-        guard.IsLockedOut(BasicAuthAttemptGuard.BuildAttemptKey("user0", ip)).ShouldBeFalse();
-        guard.IsLockedOut(ipKey).ShouldBeTrue();
+        (await guard.IsLockedOutAsync(BasicAuthAttemptGuard.BuildAttemptKey("user0", ip))).ShouldBeFalse();
+        (await guard.IsLockedOutAsync(ipKey)).ShouldBeTrue();
     }
 
     [Fact]

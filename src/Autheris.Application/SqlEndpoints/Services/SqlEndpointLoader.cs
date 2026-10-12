@@ -17,17 +17,17 @@ public sealed class SqlEndpointLoader : IDisposable
     private static readonly Regex HeaderRegex = new(
         @"^\s*--\s*@([a-zA-Z0-9_]+)(?::|\s)\s*(.*)$",
         RegexOptions.Compiled | RegexOptions.Multiline,
-        TimeSpan.FromMilliseconds(100));
+        TimeSpan.FromSeconds(2));
 
     private static readonly Regex LeadingCommentRegex = new(
         @"^\s*--\s*(?!@)(.+)$",
         RegexOptions.Compiled | RegexOptions.Multiline,
-        TimeSpan.FromMilliseconds(100));
+        TimeSpan.FromSeconds(2));
 
     private static readonly Regex ParamHeaderRegex = new(
         @"\A([a-zA-Z0-9_]+)\s*:\s*([a-zA-Z0-9_]+)(\!)?(?:\s*=\s*(.+))?\z",
         RegexOptions.Compiled,
-        TimeSpan.FromMilliseconds(100));
+        TimeSpan.FromSeconds(2));
 
     private readonly ISqlEndpointRegistry _registry;
     private readonly ISqlEngine _sqlEngine;

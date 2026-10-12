@@ -522,7 +522,13 @@ public sealed class McpServerTests
         {
             ShouldListenTo = source => source.Name == Autheris.Application.Mcp.Diagnostics.McpDiagnostics.ActivitySourceName,
             Sample = (ref System.Diagnostics.ActivityCreationOptions<System.Diagnostics.ActivityContext> _) => System.Diagnostics.ActivitySamplingResult.AllData,
-            ActivityStopped = act => capturedActivity = act
+            ActivityStopped = act =>
+            {
+                if (act.GetTagItem("gen_ai.tool.name")?.ToString() == "query_customers")
+                {
+                    capturedActivity = act;
+                }
+            }
         };
         System.Diagnostics.ActivitySource.AddActivityListener(listener);
 

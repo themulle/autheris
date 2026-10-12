@@ -208,4 +208,78 @@ public sealed class OpenApiIngestionServiceTests
         result.Warnings.Any(w => w.Contains("violates outbound egress") || w.Contains("Invalid server URL")).ShouldBeTrue();
         await repo.DidNotReceive().UpsertTableMetadataAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task IngestOpenApiJsonAsync_Swagger20_ExtractsDefinitionsAndBuildsServerUrl()
+    {
+        const string swagger2Json = """
+        {
+          "swagger": "2.0",
+          "info": { "title": "Legacy Crane API", "version": "1.0.0" },
+          "host": "cranes.corp.internal",
+          "basePath": "/v2",
+          "schemes": ["https"],
+          "paths": {
+            "/cranes": {
+              "get": { "summary": "List cranes" },
+              "post": { "summary": "Create crane" }
+            }
+          },
+          "definitions": {
+            "CraneInfo": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "model": { "type": "string" }
+              }
+            }
+          }
+        }
+        """;
+
+        var repo = Substitute.For<ITableMetadataRepository>();
+        TableMetadata? saved = null;
+        repo.UpsertTableMetadataAsync(Arg.Do<TableMetadata>(t => saved = t), Arg.Any<CancellationToken>())
+            .Returns(callInfo => Task.FromResult(callInfo.Arg<TableMetadata>()));
+
+        var service = new OpenApiIngestionService(repo, NullLogger<OpenApiIngestionService>.Instance);
+        var result = await service.IngestOpenApiJsonAsync(swagger2Json, domain: "logistics");
+
+        result.Success.ShouldBeTrue();
+        result.IngestedTablesCount.ShouldBe(1);
+        result.IngestedTableNames.ShouldContain("craneinfo");
+        result.SkippedTableNames.ShouldNotBeNull();
+        result.SkippedTableNames.ShouldContain("POST /cranes");
+        saved.ShouldNotBeNull();
+        saved.Table.HttpEndpoint?.BaseUrl.ShouldBe("https://cranes.corp.internal/v2");
+        saved.Table.IsActive.ShouldBeFalse(); // SEC M-30 inaktiv-start
+    }
+
+    [Fact]
+    public async Task IngestOpenApiJsonAsync_WithAuthCredentials_StoresInSecretProviderWithoutLeaking()
+    {
+        var repo = Substitute.For<ITableMetadataRepository>();
+        var secretProvider = Substitute.For<IKeyVaultSecretProvider>();
+        TableMetadata? saved = null;
+        repo.UpsertTableMetadataAsync(Arg.Do<TableMetadata>(t => saved = t), Arg.Any<CancellationToken>())
+            .Returns(callInfo => Task.FromResult(callInfo.Arg<TableMetadata>()));
+
+        const string rawApiKey = "my-secret-api-key-8888";
+        var auth = new DatasourceAuthDto("apiKey", Name: "X-CUSTOM-KEY", Value: rawApiKey);
+
+        var service = new OpenApiIngestionService(repo, NullLogger<OpenApiIngestionService>.Instance, secretProvider: secretProvider);
+        var result = await service.IngestOpenApiJsonAsync(SampleOpenApiJson, "payments", defaultBaseUrl: null, auth: auth, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        saved.ShouldNotBeNull();
+        saved.Table.HttpEndpoint?.AuthMode.ShouldBe(HttpAuthMode.StaticApiKey);
+        saved.Table.HttpEndpoint?.ApiKeyHeaderName.ShouldBe("X-CUSTOM-KEY");
+        saved.Table.HttpEndpoint?.ApiKeySecretName.ShouldNotBeNull();
+        saved.Table.HttpEndpoint?.ApiKeySecretName.ShouldNotBe(rawApiKey);
+
+        // SecretProvider received the raw secret bytes
+        secretProvider.Received().SetSecret(
+            saved.Table.HttpEndpoint!.ApiKeySecretName!,
+            Arg.Is<byte[]>(b => System.Text.Encoding.UTF8.GetString(b) == rawApiKey));
+    }
 }

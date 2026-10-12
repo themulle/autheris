@@ -1,0 +1,51 @@
+{{- if .Values.monitoring.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "autheris.fullname" . }}-alerts
+  labels:
+    {{- include "autheris.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: autheris.ha.rules
+      rules:
+        # High 5xx Error Rate
+        - alert: AutherisHigh5xxRate
+          expr: sum(rate(http_requests_total{status=~"5.."}[2m])) / sum(rate(http_requests_total[2m])) * 100 > 0.5
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Autheris 5xx Error Rate > 0.5%"
+            description: "High error rate detected on Autheris gateway replicas ({{ $value }}%)."
+
+        # High P99 Latency
+        - alert: AutherisHighP99Latency
+          expr: histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 0.25
+          for: 3m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Autheris P99 Latency > 250ms"
+            description: "GraphQL P99 execution time is {{ $value }}s on cluster replicas."
+
+        # Audit DLQ Growing
+        - alert: AutherisAuditDeadLetterQueueGrowing
+          expr: increase(autheris_audit_dead_letter_total[5m]) > 0
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Audit log entries diverted to Dead-Letter Queue"
+            description: "Audit pipeline fail-closed is diverting uncommitted audit events to DLQ."
+
+        # Redis Disconnected / Degraded Mode
+        - alert: AutherisRedisClusterDisconnected
+          expr: autheris_cluster_state_connected == 0
+          for: 30s
+          labels:
+            severity: critical
+          annotations:
+            summary: "Autheris operating in degraded Redis fallback mode"
+            description: "Pod {{ $labels.pod }} cannot connect to Redis cluster. L2 distributed state inactive."
+{{- end }}

@@ -92,7 +92,6 @@ public sealed class WebSqlLimitAndTruncatedTests
             policyEnforcement: null,
             consentResolution: resolution,
             tableRepository: tableRepo,
-            auditLogRepository: null,
             connectionFactory: null,
             clientIpResolver: null,
             environment: null,

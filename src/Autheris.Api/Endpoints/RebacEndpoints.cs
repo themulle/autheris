@@ -5,9 +5,11 @@ using System.Linq;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
@@ -48,9 +50,36 @@ public static class RebacEndpoints
         }, http.RequestAborted).ConfigureAwait(false);
     }
 
+    private static async Task AuditInvalidationFailureAsync(
+        IAuditLogRepository auditLog, HttpContext http, TenantId callerTenant, string tenantId, Exception ex)
+    {
+        TenantId tenant;
+        try
+        {
+            tenant = new TenantId(tenantId);
+        }
+        catch (ArgumentException)
+        {
+            tenant = callerTenant;
+        }
+
+        await auditLog.RecordAuditEventAsync(new AuditLogEntry
+        {
+            TenantId = tenant,
+            EventType = "REBAC_INVALIDATION_FAILED",
+            ActorSid = http.User.GetUserSid() ?? new Sid("S-1-5-21-UNKNOWN"),
+            TargetTable = string.Empty,
+            Decision = "DENY",
+            TraceId = http.TraceIdentifier,
+            DetailsJson = JsonSerializer.Serialize(new { error = ex.Message, tenant = tenantId })
+        }, http.RequestAborted).ConfigureAwait(false);
+    }
+
     public static IEndpointRouteBuilder MapRebacEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/v1/rebac").RequireAuthorization();
+        var group = app.MapGroup("/api/v1/rebac")
+            .RequireAuthorization()
+            .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // POST /api/v1/rebac/tuples - Add relationship tuples
         group.MapPost("/tuples", async (
@@ -99,7 +128,15 @@ public static class RebacEndpoints
             foreach (var t in tuples)
             {
                 await store.AddTupleAsync(t, request.HttpContext.RequestAborted).ConfigureAwait(false);
-                evaluator.InvalidateTenantCache(t.TenantId);
+                try
+                {
+                    await evaluator.InvalidateTenantCacheAsync(t.TenantId, request.HttpContext.RequestAborted).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    await AuditInvalidationFailureAsync(auditLog, request.HttpContext, secContext.TenantId, t.TenantId, ex).ConfigureAwait(false);
+                    return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+                }
                 await AuditTupleChangeAsync(auditLog, request.HttpContext, secContext.TenantId, "REBAC_TUPLE_ADDED", "ALLOW", t).ConfigureAwait(false);
             }
 
@@ -141,7 +178,15 @@ public static class RebacEndpoints
             }
 
             var removed = await store.DeleteTupleAsync(tuple, request.HttpContext.RequestAborted).ConfigureAwait(false);
-            evaluator.InvalidateTenantCache(tuple.TenantId);
+            try
+            {
+                await evaluator.InvalidateTenantCacheAsync(tuple.TenantId, request.HttpContext.RequestAborted).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                await AuditInvalidationFailureAsync(auditLog, request.HttpContext, secContext.TenantId, tuple.TenantId, ex).ConfigureAwait(false);
+                return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+            }
             await AuditTupleChangeAsync(auditLog, request.HttpContext, secContext.TenantId, "REBAC_TUPLE_REMOVED", removed ? "REVOKED" : "NOOP", tuple).ConfigureAwait(false);
 
             return Results.Ok(new { removed });
@@ -186,7 +231,7 @@ public static class RebacEndpoints
                 request.HttpContext.RequestAborted).ConfigureAwait(false);
 
             return Results.Ok(tuples);
-        });
+        }).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // POST /api/v1/rebac/check - Single tuple evaluation
         group.MapPost("/check", async (
@@ -226,7 +271,7 @@ public static class RebacEndpoints
 
             var decision = await evaluator.CheckAsync(check, request.HttpContext.RequestAborted).ConfigureAwait(false);
             return Results.Ok(decision);
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         // POST /api/v1/rebac/batch-check - Batch evaluation (Zero-N+1, capped at 100 checks)
         group.MapPost("/batch-check", async (
@@ -281,7 +326,7 @@ public static class RebacEndpoints
 
             var decision = await evaluator.BatchCheckAsync(batchCheck, request.HttpContext.RequestAborted).ConfigureAwait(false);
             return Results.Ok(decision);
-        });
+        }).WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         return app;
     }

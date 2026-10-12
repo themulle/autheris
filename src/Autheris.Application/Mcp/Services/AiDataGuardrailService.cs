@@ -12,6 +12,8 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Mcp.Tools;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -28,7 +30,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     private readonly ILogger<AiDataGuardrailService> _logger;
     private readonly IMcpQueryExecutor? _queryExecutor;
     private readonly IConsentRepository? _consentRepository;
-    private readonly IAuditLogRepository? _auditLogRepository;
+    private readonly IAuditLogRepository _auditLogRepository;
     private readonly IPolicyEnforcementService? _policyEnforcementService;
     private readonly ITableMetadataRepository? _tableMetadataRepository;
     private readonly IMcpSessionStore? _sessionStore;
@@ -36,6 +38,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IGoldenQueryService? _goldenQueryService;
     private readonly IHitLStepUpApprovalService? _stepUpApprovalService;
     private readonly IGraphQlCatalogMap? _graphQlCatalogMap;
+    private readonly IAccessPlanningService? _accessPlanningService;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
 
@@ -60,7 +63,6 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IOptions<GatewayOptions> options,
         ILogger<AiDataGuardrailService> logger,
         IMcpQueryExecutor? queryExecutor = null,
-        IAuditLogRepository? auditLogRepository = null,
         IPolicyEnforcementService? policyEnforcementService = null,
         ITableMetadataRepository? tableMetadataRepository = null,
         IMcpSessionStore? sessionStore = null,
@@ -68,13 +70,33 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IGoldenQueryService? goldenQueryService = null,
         IHitLStepUpApprovalService? stepUpApprovalService = null,
         IGraphQlCatalogMap? graphQlCatalogMap = null,
-        IConsentRepository? consentRepository = null)
+        IConsentRepository? consentRepository = null,
+        IAccessPlanningService? accessPlanningService = null)
+        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository, accessPlanningService)
+    {
+    }
+
+    public AiDataGuardrailService(
+        IMcpToolRegistry toolRegistry,
+        IOptions<GatewayOptions> options,
+        ILogger<AiDataGuardrailService> logger,
+        IAuditLogRepository auditLogRepository,
+        IMcpQueryExecutor? queryExecutor = null,
+        IPolicyEnforcementService? policyEnforcementService = null,
+        ITableMetadataRepository? tableMetadataRepository = null,
+        IMcpSessionStore? sessionStore = null,
+        ISemanticPromptGuardrail? promptGuardrail = null,
+        IGoldenQueryService? goldenQueryService = null,
+        IHitLStepUpApprovalService? stepUpApprovalService = null,
+        IGraphQlCatalogMap? graphQlCatalogMap = null,
+        IConsentRepository? consentRepository = null,
+        IAccessPlanningService? accessPlanningService = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _queryExecutor = queryExecutor;
-        _auditLogRepository = auditLogRepository;
         _policyEnforcementService = policyEnforcementService;
         _tableMetadataRepository = tableMetadataRepository;
         _sessionStore = sessionStore;
@@ -83,6 +105,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         _stepUpApprovalService = stepUpApprovalService;
         _graphQlCatalogMap = graphQlCatalogMap;
         _consentRepository = consentRepository;
+        _accessPlanningService = accessPlanningService;
     }
 
 
@@ -174,6 +197,47 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                 }
             });
             _ = _sessionStore.SendEventAsync(sessionContext.SessionId, "message", progressData);
+        }
+
+        // Administrative MCP Tools Execution (Track E, ADR-03, ADR-05, R-60..R-64)
+        if (McpAdminTools.IsAdminTool(tool.Name))
+        {
+            var roles = sessionContext.Roles ?? [];
+            bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
+                           roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase) ||
+                           roles.Contains("TenantAdmin", StringComparer.OrdinalIgnoreCase);
+
+            if (!isAdmin && !_options.Value.IsMcpAuthBypassed)
+            {
+                activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+
+                await RecordAuditEventAsync(
+                    tool.Name,
+                    sessionContext,
+                    decision: "DENY",
+                    details: $"Tool execution denied: Admin tool '{tool.Name}' requires GovernanceAdmin or ClusterAdmin role.",
+                    isMasked: false,
+                    truncated: false,
+                    estimatedTokens: 0,
+                    cancellationToken).ConfigureAwait(false);
+
+                return new McpToolCallResult(
+                    IsSuccess: false,
+                    ContentJson: "{}",
+                    ErrorMessage: $"Access denied: Tool '{tool.Name}' requires administrative role (GovernanceAdmin / ClusterAdmin)."
+                );
+            }
+
+            if (_accessPlanningService != null)
+            {
+                return await McpAdminTools.ExecuteAdminToolAsync(
+                    tool.Name,
+                    request.ArgumentsJson ?? "{}",
+                    sessionContext,
+                    _accessPlanningService,
+                    cancellationToken).ConfigureAwait(false);
+            }
         }
 
         // Resolve real TargetTable for ABAC policy and Four-Eyes checks
@@ -604,8 +668,6 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         int estimatedTokens,
         CancellationToken ct)
     {
-        if (_auditLogRepository == null) return;
-
         try
         {
             var actorSid = !string.IsNullOrWhiteSpace(sessionContext.UserSid)

@@ -180,12 +180,6 @@ internal sealed class BasicAuthAttemptGuard
         }
     }
 
-    public bool IsLockedOut(string attemptKey)
-    {
-        // For synchronous invocations, check in-memory dictionary directly or run async
-        return IsLockedOutAsync(attemptKey).AsTask().GetAwaiter().GetResult();
-    }
-
     public async ValueTask RecordFailureAsync(string attemptKey, int? maxAttempts = null, CancellationToken ct = default)
     {
         int limit = Math.Max(1, maxAttempts ?? _maxFailedAttempts);
@@ -256,12 +250,6 @@ internal sealed class BasicAuthAttemptGuard
             }
         }
     }
-
-    public void RecordFailure(string attemptKey, int? maxAttempts = null)
-    {
-        RecordFailureAsync(attemptKey, maxAttempts).AsTask().GetAwaiter().GetResult();
-    }
-
     public async ValueTask RecordSuccessAsync(string attemptKey, CancellationToken ct = default)
     {
         if (_redis != null && _redis.IsConnected)
@@ -288,11 +276,6 @@ internal sealed class BasicAuthAttemptGuard
         }
 
         _failures.TryRemove(attemptKey, out _);
-    }
-
-    public void RecordSuccess(string attemptKey)
-    {
-        RecordSuccessAsync(attemptKey).AsTask().GetAwaiter().GetResult();
     }
 
     public bool TryGetCachedSuccess(string authorizationHeader, out string username)

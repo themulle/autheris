@@ -240,6 +240,13 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
 
     protected override void GeneratePagination(PaginationClause pagination, OrderByClause? orderBy, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        if (pagination.WithTies && orderBy == null)
+        {
+            throw new TrinoSqlEngine.Ast.Builder.AstBuildException("FETCH … WITH TIES requires an ORDER BY clause.");
+        }
+
+        string tiesOrOnly = pagination.WithTies ? " ROWS WITH TIES" : " ROWS ONLY";
+
         if (pagination.Offset != null)
         {
             builder.Append("OFFSET ");
@@ -249,14 +256,14 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
             {
                 builder.Append(" FETCH NEXT ");
                 GenerateExpression(pagination.Limit, ref builder, context);
-                builder.Append(" ROWS ONLY");
+                builder.Append(tiesOrOnly);
             }
         }
         else if (pagination.Limit != null)
         {
             builder.Append("FETCH FIRST ");
             GenerateExpression(pagination.Limit, ref builder, context);
-            builder.Append(" ROWS ONLY");
+            builder.Append(tiesOrOnly);
         }
     }
 }

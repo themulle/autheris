@@ -76,9 +76,9 @@ public sealed class CasbinActionClaimSpoofingTests
         var policy = new TableAccessPolicy(
             NoConsents(),
             ResolvesTo(true),
-            cacheService: null,
+            cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             casbinMock,
-            rebacEvaluator: null,
+            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance);
@@ -111,9 +111,9 @@ public sealed class CasbinActionClaimSpoofingTests
         var policy = new TableAccessPolicy(
             NoConsents(),
             ResolvesTo(true),
-            cacheService: null,
+            cacheService: Autheris.Application.Policy.Services.NullConsentCacheService.Instance,
             casbinMock,
-            rebacEvaluator: null,
+            rebacEvaluator: Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
             clientIpResolver: null,
             options: new GatewayOptions(),
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance);

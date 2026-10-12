@@ -91,6 +91,130 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         CancellationToken ct = default)
         => GetCachedDecisionAsync(TenantId.LegacySingleTenant, userSid, table, contextHash, ct);
 
+    public async Task<IReadOnlyDictionary<TableIdentifier, TableAccessDecision?>> GetCachedDecisionsAsync(
+        TenantId tenant,
+        Sid userSid,
+        IReadOnlyList<TableIdentifier> tables,
+        string? contextHash = null,
+        CancellationToken ct = default)
+    {
+        var result = new Dictionary<TableIdentifier, TableAccessDecision?>();
+        if (tables == null || tables.Count == 0)
+        {
+            return result;
+        }
+
+        var candidateEntries = new Dictionary<TableIdentifier, (string CacheKey, long Epoch, TableAccessDecision Decision, bool FromL2, TimeSpan? L1PromotionTtl, RedisKey? L2Key)>();
+        var missingTables = new List<TableIdentifier>();
+
+        foreach (var table in tables)
+        {
+            var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
+            if (_memoryCache.TryGetValue(cacheKey, out CacheEntryEnvelope? envelope) && envelope != null)
+            {
+                candidateEntries[table] = (cacheKey, envelope.Epoch, envelope.Decision, false, null, null);
+            }
+            else
+            {
+                missingTables.Add(table);
+            }
+        }
+
+        // L1 Misses: check L2
+        if (missingTables.Count > 0 && _redisDb != null && _serializer != null)
+        {
+            try
+            {
+                foreach (var table in missingTables)
+                {
+                    var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
+                    var l2Key = (RedisKey)$"{_prefix}consent:l2:{cacheKey}";
+                    var rawValue = await _redisDb.StringGetAsync(l2Key).ConfigureAwait(false);
+                    byte[]? payloadBytes = null;
+                    DateTimeOffset l2ExpiresAt = default;
+                    byte[]? rawBytes = rawValue.IsNullOrEmpty ? null : (byte[]?)rawValue;
+                    if (rawBytes != null && rawBytes.Length > 0)
+                    {
+                        payloadBytes = UnprotectL2Payload(l2Key.ToString(), rawBytes, out l2ExpiresAt);
+                        if (payloadBytes == null)
+                        {
+                            _logger?.LogWarning("Consent L2 cache entry failed integrity verification and was discarded (table {Table}).", table.ToString());
+                            await _redisDb.KeyDeleteAsync(l2Key).ConfigureAwait(false);
+                        }
+                    }
+
+                    if (payloadBytes != null && _serializer.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out var l2Env) && l2Env != null && MatchesTable(l2Env, table))
+                    {
+                        var decision = l2Env.ToDecision();
+                        var remaining = l2ExpiresAt - DateTimeOffset.UtcNow;
+                        var l1Ttl = remaining < MaxL1PromotionTtl ? remaining : MaxL1PromotionTtl;
+                        candidateEntries[table] = (cacheKey, l2Env.Epoch, decision, true, l1Ttl > TimeSpan.Zero ? l1Ttl : null, l2Key);
+                    }
+                    else
+                    {
+                        result[table] = null;
+                        CacheMisses.Inc();
+                        RemoveKeyFromTableIndex(table, cacheKey);
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback gracefully on L2 error
+            }
+        }
+        else
+        {
+            foreach (var table in missingTables)
+            {
+                var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
+                result[table] = null;
+                CacheMisses.Inc();
+                RemoveKeyFromTableIndex(table, cacheKey);
+            }
+        }
+
+        if (candidateEntries.Count == 0)
+        {
+            return result;
+        }
+
+        // Validate candidate epochs in batch
+        var checks = candidateEntries.Select(kv => new EpochCheck(kv.Key, kv.Value.Epoch, false)).ToList();
+        var validationResults = await _epochValidationService.AreEpochsValidAsync(checks, ct).ConfigureAwait(false);
+
+        foreach (var (table, candidate) in candidateEntries)
+        {
+            bool isValid = validationResults.TryGetValue(table, out var v) && v;
+            if (isValid)
+            {
+                if (candidate.FromL2 && candidate.L1PromotionTtl.HasValue)
+                {
+                    SetL1Internal(table, candidate.CacheKey, new CacheEntryEnvelope(candidate.Decision, candidate.Epoch), candidate.L1PromotionTtl.Value);
+                }
+
+                CacheHits.Inc();
+                result[table] = candidate.Decision;
+            }
+            else
+            {
+                CacheMisses.Inc();
+                if (!candidate.FromL2)
+                {
+                    _memoryCache.Remove(candidate.CacheKey);
+                }
+                else if (candidate.L2Key.HasValue && _redisDb != null)
+                {
+                    try { await _redisDb.KeyDeleteAsync(candidate.L2Key.Value).ConfigureAwait(false); } catch { }
+                }
+                RemoveKeyFromTableIndex(table, candidate.CacheKey);
+                result[table] = null;
+            }
+        }
+
+        return result;
+    }
+
     public async Task<TableAccessDecision?> GetCachedDecisionAsync(
         TenantId tenant,
         Sid userSid,

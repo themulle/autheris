@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Threading.Channels;
+using Autheris.Domain.Diagnostics;
 
 namespace Autheris.Infrastructure.Messaging;
 
@@ -23,31 +24,76 @@ public sealed class InProcessChannelEventBus : IEventBus, IAsyncDisposable
         {
             SingleWriter = false,
             SingleReader = true,
-            FullMode = BoundedChannelFullMode.DropOldest
+            FullMode = BoundedChannelFullMode.Wait
         };
         _channel = Channel.CreateBounded<EventEnvelope>(boundedOptions);
         _consumerTask = Task.Run(ProcessEventsAsync);
+    }
+
+    private static bool IsInvalidationChannel(string channel)
+    {
+        if (string.IsNullOrEmpty(channel)) return false;
+        return channel.Contains("invalidate", StringComparison.OrdinalIgnoreCase)
+            || channel.Contains("epoch", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task PublishAsync<T>(string channel, T message, CancellationToken ct = default)
     {
         if (message == null) return;
 
-        // Non-blocking fast path (guaranteed by DropOldest)
-        if (_channel.Writer.TryWrite(new EventEnvelope(channel, message)))
+        // AR-03: Invalidation channels are dispatched directly to subscribers without dropping or channel saturation delays
+        if (IsInvalidationChannel(channel))
         {
+            await DispatchInvalidationAsync(channel, message).ConfigureAwait(false);
             return;
         }
 
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        linkedCts.CancelAfter(TimeSpan.FromSeconds(1));
-        await _channel.Writer.WriteAsync(new EventEnvelope(channel, message), linkedCts.Token);
+        // Standard/telemetry channels use bounded queue with drop metrics
+        if (!_channel.Writer.TryWrite(new EventEnvelope(channel, message)))
+        {
+            Interlocked.Increment(ref _droppedCount);
+            GatewayDiagnostics.EventBusDroppedCounter.Add(1, KeyValuePair.Create<string, object?>("channel", channel));
+        }
+    }
+
+    private long _droppedCount;
+    public long DroppedCount => Interlocked.Read(ref _droppedCount);
+
+    private async Task DispatchInvalidationAsync(string channel, object message)
+    {
+        if (_subscribers.TryGetValue(channel, out var list))
+        {
+            DelegateHandler[] targets;
+            lock (list)
+            {
+                targets = list.ToArray();
+            }
+
+            foreach (var target in targets)
+            {
+                try
+                {
+                    await target.Handler(message).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Invalidation handlers should not crash publisher
+                }
+            }
+        }
     }
 
     public Task<long> IncrementCounterAsync(string key, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(key);
         var val = _counters.AddOrUpdate(key, 1, (_, current) => current + 1);
+        return Task.FromResult(val);
+    }
+
+    public Task<long> GetCounterAsync(string key, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        var val = _counters.TryGetValue(key, out var current) ? current : 0L;
         return Task.FromResult(val);
     }
 

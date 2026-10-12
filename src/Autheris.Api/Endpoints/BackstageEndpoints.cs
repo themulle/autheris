@@ -3,7 +3,9 @@ namespace Autheris.Api.Endpoints;
 using System;
 using System.Text;
 using System.Threading;
+using Autheris.Api.Extensions;
 using Autheris.Application.Integrations.Backstage;
+using Autheris.Domain.Audit;
 using Autheris.Extensions.Backstage;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
@@ -45,7 +47,7 @@ public static class BackstageEndpoints
 
             var entities = await backstageService.ExportCatalogEntitiesAsync(kind, type, ct);
             return Results.Ok(entities);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/api/integrations/backstage/catalog-entities/{name}", async (
             string name,
@@ -77,7 +79,7 @@ public static class BackstageEndpoints
             }
 
             return Results.Ok(entity);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/api/integrations/backstage/catalog-info.yaml", async (
             IBackstageCatalogExportService backstageService,
@@ -91,7 +93,7 @@ public static class BackstageEndpoints
 
             var yaml = await backstageService.ExportCatalogEntitiesYamlAsync(cancellationToken: ct);
             return Results.Content(yaml, "text/yaml; charset=utf-8", Encoding.UTF8);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         return app;
     }

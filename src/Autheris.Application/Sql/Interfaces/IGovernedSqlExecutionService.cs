@@ -12,7 +12,8 @@ public sealed record GovernedSqlQueryRequest(
     string Sql,
     IReadOnlyDictionary<string, object?>? Parameters = null,
     string? DataSourceName = null,
-    SqlRowLimit? RowLimit = null);
+    SqlRowLimit? RowLimit = null,
+    string? Transport = null);
 
 public sealed record GovernedSqlResult(
     string OriginalSql,

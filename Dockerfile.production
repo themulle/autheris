@@ -1,0 +1,34 @@
+# ==============================================================================
+# Autheris - Production Container Image
+# Multi-protocol Enterprise GraphQL Gateway (Hardened Production Posture)
+# ==============================================================================
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:222759b391a1aaf241166672c8f99b2d4ada452e7b5319f3c6e8f265a37b5ad4 AS runtime
+WORKDIR /app
+
+# Production environment variables
+ENV ASPNETCORE_HTTP_PORTS=8080 \
+    ASPNETCORE_ENVIRONMENT=Production \
+    DOTNET_RUNNING_IN_CONTAINER=true \
+    DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=0 \
+    Gateway__Caching__Garnet__EnableEmbeddedServer=true \
+    Gateway__Caching__Garnet__Host=127.0.0.1 \
+    Gateway__Caching__Garnet__Port=3278 \
+    Gateway__GovernanceDb__ConnectionString="Data Source=/app/data/governance.db;Cache=Shared"
+
+EXPOSE 8080
+
+# Setup data volume for SQLite governance DB with non-root ownership (10001:10001)
+RUN mkdir -p /app/data && chown -R 10001:10001 /app/data
+VOLUME /app/data
+
+# Copy pre-built publish artifacts
+COPY dist/publish/ ./
+
+# Non-Root User Drop (UID:GID 10001:10001)
+USER 10001:10001
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD dotnet Autheris.Api.dll --healthcheck || exit 1
+
+ENTRYPOINT ["dotnet", "Autheris.Api.dll"]

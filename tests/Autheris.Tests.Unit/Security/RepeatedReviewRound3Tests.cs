@@ -123,6 +123,7 @@ public sealed class RepeatedReviewRound3Tests
 
         var service = new GovernedSqlExecutionService(
             options,
+            auditLogRepository: Substitute.For<IAuditLogRepository>(),
             tableRepository: metaRepo,
             secretProvider: secretProvider,
             logger: NullLogger<GovernedSqlExecutionService>.Instance);

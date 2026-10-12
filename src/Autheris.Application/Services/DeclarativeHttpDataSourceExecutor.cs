@@ -77,7 +77,189 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
             }
         }
 
+        // Check if this execution uses multi-page pagination (R-56)
+        if (descriptor.Pagination != null && descriptor.Pagination.Strategy != HttpPaginationStrategy.None)
+        {
+            return await ExecutePagedRequestsAsync(descriptor, context, ct);
+        }
+
         return await ExecuteSingleRequestAsync(descriptor, context, context.Arguments, ct);
+    }
+
+    public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecutePagedRequestsAsync(
+        HttpEndpointDescriptor descriptor,
+        DataSourceExecutionContext context,
+        CancellationToken ct = default)
+    {
+        var config = descriptor.Pagination ?? new HttpPaginationConfig();
+        var allRows = new List<IReadOnlyDictionary<string, object?>>();
+        long totalBytes = 0;
+        int pageIndex = config.ZeroIndexedPage ? 0 : 1;
+        string? currentCursor = null;
+        string? currentNextLink = null;
+        Uri? baseUri = null;
+        if (!string.IsNullOrWhiteSpace(descriptor.BaseUrl) && Uri.TryCreate(descriptor.BaseUrl, UriKind.Absolute, out var parsedBase))
+        {
+            baseUri = parsedBase;
+        }
+
+        var client = _httpClientFactory.CreateClient(HttpClientName);
+
+        for (int page = 0; page < config.MaxPages; page++)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            string url;
+            if (config.Strategy == HttpPaginationStrategy.NextLinkUrl && !string.IsNullOrWhiteSpace(currentNextLink))
+            {
+                if (Uri.TryCreate(currentNextLink, UriKind.Absolute, out var absNextUri))
+                {
+                    if (config.EnforceSameHost && baseUri != null)
+                    {
+                        if (!string.Equals(absNextUri.Host, baseUri.Host, StringComparison.OrdinalIgnoreCase) ||
+                            absNextUri.Scheme != baseUri.Scheme ||
+                            absNextUri.Port != baseUri.Port)
+                        {
+                            throw new SecurityException($"NextLink host spoofing detected: '{absNextUri.Host}' does not match registered host '{baseUri.Host}'.");
+                        }
+                    }
+                    url = absNextUri.ToString();
+                }
+                else if (baseUri != null)
+                {
+                    url = new Uri(baseUri, currentNextLink).ToString();
+                }
+                else
+                {
+                    url = currentNextLink;
+                }
+            }
+            else
+            {
+                var pageArgs = new Dictionary<string, object?>(context.Arguments);
+                if (config.Strategy == HttpPaginationStrategy.OffsetLimit)
+                {
+                    var offsetParam = config.PageParamName ?? "offset";
+                    var limitParam = config.SizeParamName ?? "limit";
+                    int offset = (pageIndex - (config.ZeroIndexedPage ? 0 : 1)) * config.DefaultPageSize;
+                    pageArgs[offsetParam] = offset;
+                    pageArgs[limitParam] = config.DefaultPageSize;
+                }
+                else if (config.Strategy == HttpPaginationStrategy.PageNumber)
+                {
+                    var pageParam = config.PageParamName ?? "page";
+                    var sizeParam = config.SizeParamName ?? "size";
+                    pageArgs[pageParam] = pageIndex;
+                    pageArgs[sizeParam] = config.DefaultPageSize;
+                }
+                else if (config.Strategy == HttpPaginationStrategy.Cursor && !string.IsNullOrWhiteSpace(currentCursor))
+                {
+                    var cursorParam = config.PageParamName ?? "cursor";
+                    pageArgs[cursorParam] = currentCursor;
+                }
+                url = BuildUrl(descriptor, pageArgs, context.Principal);
+            }
+
+            await ValidateDestinationUrl(url, ct);
+            var method = new HttpMethod(descriptor.Method ?? "GET");
+
+            using var request = new HttpRequestMessage(method, url);
+            ApplyHeadersAndAuth(request, descriptor, context);
+
+            using var response = await SendWithRedirectProtectionAsync(client, request, descriptor, context, ct);
+            response.EnsureSuccessStatusCode();
+
+            var rawBytes = response.Content.Headers.ContentLength ?? 0;
+            await using var stream = await response.Content.ReadAsStreamAsync(ct);
+            using var jsonDoc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+
+            totalBytes += rawBytes > 0 ? rawBytes : stream.Length;
+            if (totalBytes > config.MaxStagedBytes)
+            {
+                throw new Autheris.Application.Connectors.ConnectorRowLimitExceededException(
+                    context.Metadata.Identifier,
+                    config.MaxStagedRows);
+            }
+
+            var rows = ExtractRowsFromJson(jsonDoc.RootElement, descriptor.JsonRootPath);
+            if (rows.Count == 0)
+            {
+                break;
+            }
+
+            allRows.AddRange(rows);
+            if (allRows.Count > config.MaxStagedRows)
+            {
+                throw new Autheris.Application.Connectors.ConnectorRowLimitExceededException(
+                    context.Metadata.Identifier,
+                    config.MaxStagedRows);
+            }
+
+            // Extract NextLink or Cursor if applicable
+            if (config.Strategy == HttpPaginationStrategy.NextLinkUrl)
+            {
+                var nextLinkPath = config.NextLinkJsonPath ?? "@odata.nextLink";
+                currentNextLink = ExtractJsonValue(jsonDoc.RootElement, nextLinkPath);
+                if (string.IsNullOrWhiteSpace(currentNextLink))
+                {
+                    break;
+                }
+            }
+            else if (config.Strategy == HttpPaginationStrategy.Cursor)
+            {
+                var cursorPath = config.NextCursorJsonPath ?? "next_cursor";
+                var nextCursor = ExtractJsonValue(jsonDoc.RootElement, cursorPath);
+                if (string.IsNullOrWhiteSpace(nextCursor) || string.Equals(nextCursor, currentCursor, StringComparison.Ordinal))
+                {
+                    break;
+                }
+                currentCursor = nextCursor;
+            }
+            else if (config.Strategy == HttpPaginationStrategy.OffsetLimit || config.Strategy == HttpPaginationStrategy.PageNumber)
+            {
+                if (rows.Count < config.DefaultPageSize)
+                {
+                    break; // Last page reached
+                }
+                pageIndex++;
+            }
+        }
+
+        return allRows;
+    }
+
+    private static string? ExtractJsonValue(JsonElement root, string path)
+    {
+        if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty(path, out var directMatch))
+        {
+            return directMatch.ValueKind switch
+            {
+                JsonValueKind.String => directMatch.GetString(),
+                JsonValueKind.Number => directMatch.GetRawText(),
+                _ => null
+            };
+        }
+
+        var parts = path.TrimStart('$', '.').Split('.', StringSplitOptions.RemoveEmptyEntries);
+        var current = root;
+        foreach (var p in parts)
+        {
+            if (current.ValueKind == JsonValueKind.Object && current.TryGetProperty(p, out var next))
+            {
+                current = next;
+            }
+            else
+            {
+                return null;
+            }
+        }
+
+        return current.ValueKind switch
+        {
+            JsonValueKind.String => current.GetString(),
+            JsonValueKind.Number => current.GetRawText(),
+            _ => null
+        };
     }
 
     public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteBatchAsync(

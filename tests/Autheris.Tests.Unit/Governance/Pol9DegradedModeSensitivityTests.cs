@@ -55,10 +55,11 @@ public sealed class Pol9DegradedModeSensitivityTests
             }
         });
 
+        var sensitivityLookup = new Autheris.Application.Services.TableMetadataSensitivityLookup(tableRepo);
         var service = new EpochValidationService(
             options,
-            multiplexer: multiplexer,
-            serviceProvider: new ServiceCollection().AddSingleton(tableRepo).BuildServiceProvider());
+            sensitivityLookup: sensitivityLookup,
+            multiplexer: multiplexer);
 
         // Act: check validity for table with RESTRICTED sensitivity
         var isValid = await service.IsEpochValidAsync(tableRestricted, cachedEpoch: 1);

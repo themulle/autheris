@@ -512,14 +512,16 @@ public partial class SqliteGovernanceRepository
                         await insertColCmd.ExecuteNonQueryAsync(ct);
                     }
 
-                    if (metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var maskRule))
+                    using (var delMaskCmd = _connection.CreateCommand())
                     {
-                        using var delMaskCmd = _connection.CreateCommand();
                         delMaskCmd.Transaction = tx;
                         delMaskCmd.CommandText = "DELETE FROM COLUMN_MASKING_RULES WHERE table_column_id = @colId";
                         delMaskCmd.Parameters.AddWithValue("@colId", colId.ToString());
                         await delMaskCmd.ExecuteNonQueryAsync(ct);
+                    }
 
+                    if (metadata.ColumnMaskingRules.TryGetValue(col.ColumnName, out var maskRule))
+                    {
                         using var insertMaskCmd = _connection.CreateCommand();
                         insertMaskCmd.Transaction = tx;
                         insertMaskCmd.CommandText = @"INSERT INTO COLUMN_MASKING_RULES (id, table_column_id, rule_type, pattern_or_format, replacement, hmac_key_id)

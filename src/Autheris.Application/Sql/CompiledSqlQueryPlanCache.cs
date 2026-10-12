@@ -1,39 +1,58 @@
 namespace Autheris.Application.Sql;
 
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO.Hashing;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Caching.Memory;
 
 /// <summary>
 /// Composite cache key that guarantees complete isolation between queries, database dialects,
-/// tenants, and user-specific Row-Level Security (RLS) contexts (SEC-CACHE-01).
+/// tenants, data sources, and user-specific Row-Level Security (RLS) contexts (SEC-CACHE-01).
 /// </summary>
 public readonly record struct CompiledSqlPlanKey(
     ulong QueryHash,
     DatabaseDialect Dialect,
     TenantId TenantId,
-    ulong PolicyHash
+    ulong PolicyHash,
+    string DataSource = ""
 );
 
 /// <summary>
 /// Lock-free, bounded query plan cache utilizing <see cref="XxHash3"/> 64-bit hashing for ultra-low latency plan lookups
 /// with zero-trust multi-tenant and per-user policy isolation (SEC-CACHE-01).
 /// </summary>
-public sealed class CompiledSqlQueryPlanCache : ICompiledSqlQueryPlanCache
+public sealed class CompiledSqlQueryPlanCache : ICompiledSqlQueryPlanCache, IDisposable
 {
-    private sealed record CacheEntry(string RawSql, string Sql, DateTimeOffset ExpiresAt);
-    private readonly ConcurrentDictionary<CompiledSqlPlanKey, CacheEntry> _cache = new();
-    private readonly TimeSpan _defaultTtl;
-    private const int MaxCachedPlans = 10_000;
+    private sealed record CacheEntry(string RawSql, string Sql, string? PolicyFingerprint);
 
-    public CompiledSqlQueryPlanCache(TimeSpan? defaultTtl = null)
+    private static readonly Prometheus.Counter HitsTotal = Prometheus.Metrics.CreateCounter(
+        "autheris_plan_cache_hits_total", "Number of CompiledSqlQueryPlanCache hits");
+    private static readonly Prometheus.Counter MissesTotal = Prometheus.Metrics.CreateCounter(
+        "autheris_plan_cache_misses_total", "Number of CompiledSqlQueryPlanCache misses");
+    private static readonly Prometheus.Counter EvictionsTotal = Prometheus.Metrics.CreateCounter(
+        "autheris_plan_cache_evictions_total", "Number of CompiledSqlQueryPlanCache evictions");
+
+    private readonly MemoryCache _cache;
+    private readonly TimeSpan _defaultTtl;
+
+    public CompiledSqlQueryPlanCache(TimeSpan defaultTtl)
+        : this(10_000, defaultTtl)
     {
+    }
+
+    public CompiledSqlQueryPlanCache(int maxEntries = 10_000, TimeSpan? defaultTtl = null)
+    {
+        var capacity = maxEntries > 0 ? maxEntries : 10_000;
         _defaultTtl = defaultTtl ?? TimeSpan.FromMinutes(10);
+        _cache = new MemoryCache(new MemoryCacheOptions
+        {
+            SizeLimit = capacity,
+            CompactionPercentage = 0.1
+        });
     }
 
     public bool TryGetCompiledSql(
@@ -43,7 +62,7 @@ public sealed class CompiledSqlQueryPlanCache : ICompiledSqlQueryPlanCache
         ulong policyHash,
         out string? sql)
     {
-        return TryGetCompiledSql(string.Empty, queryHash, dialect, tenantId, policyHash, out sql);
+        return TryGetCompiledSql(string.Empty, queryHash, dialect, tenantId, policyHash, null, null, out sql);
     }
 
     public bool TryGetCompiledSql(
@@ -54,25 +73,35 @@ public sealed class CompiledSqlQueryPlanCache : ICompiledSqlQueryPlanCache
         ulong policyHash,
         out string? sql)
     {
-        var key = new CompiledSqlPlanKey(queryHash, dialect, tenantId, policyHash);
-        if (_cache.TryGetValue(key, out var entry))
+        return TryGetCompiledSql(rawSql, queryHash, dialect, tenantId, policyHash, null, null, out sql);
+    }
+
+    public bool TryGetCompiledSql(
+        string rawSql,
+        ulong queryHash,
+        DatabaseDialect dialect,
+        TenantId tenantId,
+        ulong policyHash,
+        string? policyFingerprint,
+        string? dataSource,
+        out string? sql)
+    {
+        var key = new CompiledSqlPlanKey(queryHash, dialect, tenantId, policyHash, dataSource ?? string.Empty);
+        if (_cache.TryGetValue(key, out CacheEntry? entry) && entry != null)
         {
-            if (DateTimeOffset.UtcNow < entry.ExpiresAt)
+            // Verify raw query text equality to eliminate any 64-bit hash collision risk
+            bool rawMatch = string.IsNullOrEmpty(rawSql) || string.IsNullOrEmpty(entry.RawSql) || string.Equals(rawSql, entry.RawSql, StringComparison.Ordinal);
+            bool fpMatch = policyFingerprint == null || string.Equals(policyFingerprint, entry.PolicyFingerprint, StringComparison.Ordinal);
+
+            if (rawMatch && fpMatch)
             {
-                // Verify raw query text equality to eliminate any 64-bit hash collision risk
-                if (string.IsNullOrEmpty(rawSql) || string.IsNullOrEmpty(entry.RawSql) || string.Equals(rawSql, entry.RawSql, StringComparison.Ordinal))
-                {
-                    sql = entry.Sql;
-                    return true;
-                }
-            }
-            else
-            {
-                // Entry expired - remove it
-                _cache.TryRemove(key, out _);
+                HitsTotal.Inc();
+                sql = entry.Sql;
+                return true;
             }
         }
 
+        MissesTotal.Inc();
         sql = null;
         return false;
     }
@@ -85,7 +114,7 @@ public sealed class CompiledSqlQueryPlanCache : ICompiledSqlQueryPlanCache
         string sql,
         TimeSpan? ttl = null)
     {
-        SetCompiledSql(string.Empty, queryHash, dialect, tenantId, policyHash, sql, ttl);
+        SetCompiledSql(string.Empty, queryHash, dialect, tenantId, policyHash, null, null, sql, ttl);
     }
 
     public void SetCompiledSql(
@@ -97,21 +126,50 @@ public sealed class CompiledSqlQueryPlanCache : ICompiledSqlQueryPlanCache
         string sql,
         TimeSpan? ttl = null)
     {
+        SetCompiledSql(rawSql, queryHash, dialect, tenantId, policyHash, null, null, sql, ttl);
+    }
+
+    public void SetCompiledSql(
+        string rawSql,
+        ulong queryHash,
+        DatabaseDialect dialect,
+        TenantId tenantId,
+        ulong policyHash,
+        string? policyFingerprint,
+        string? dataSource,
+        string sql,
+        TimeSpan? ttl = null)
+    {
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 
-        if (_cache.Count >= MaxCachedPlans)
-        {
-            _cache.Clear();
-        }
+        var key = new CompiledSqlPlanKey(queryHash, dialect, tenantId, policyHash, dataSource ?? string.Empty);
+        var entry = new CacheEntry(rawSql ?? string.Empty, sql, policyFingerprint);
 
-        var expiresAt = DateTimeOffset.UtcNow.Add(ttl ?? _defaultTtl);
-        var key = new CompiledSqlPlanKey(queryHash, dialect, tenantId, policyHash);
-        _cache[key] = new CacheEntry(rawSql, sql, expiresAt);
+        var entryOptions = new MemoryCacheEntryOptions
+        {
+            Size = 1,
+            AbsoluteExpirationRelativeToNow = ttl ?? _defaultTtl
+        };
+
+        entryOptions.RegisterPostEvictionCallback((evictedKey, value, reason, state) =>
+        {
+            if (reason == EvictionReason.Capacity)
+            {
+                EvictionsTotal.Inc();
+            }
+        });
+
+        _cache.Set(key, entry, entryOptions);
     }
 
     public void Clear()
     {
         _cache.Clear();
+    }
+
+    public void Dispose()
+    {
+        _cache.Dispose();
     }
 
     public ulong ComputeHash(ReadOnlySpan<char> queryText, string? operationName = null)
@@ -209,7 +267,9 @@ public sealed class CompiledSqlQueryPlanCache : ICompiledSqlQueryPlanCache
         string? rewriterEngine = null,
         IReadOnlySet<string>? tablesWithConsentRowFilter = null,
         IReadOnlySet<string>? tablesWithMaskedColumns = null,
-        RowFilterSubqueryStrategy subqueryStrategy = RowFilterSubqueryStrategy.Exists)
+        RowFilterSubqueryStrategy subqueryStrategy = RowFilterSubqueryStrategy.Exists,
+        IReadOnlyDictionary<string, IReadOnlyList<string>>? catalogColumnsMap = null,
+        IReadOnlySet<string>? allowedFunctions = null)
     {
         var hasher = new XxHash3();
 
@@ -281,6 +341,33 @@ public sealed class CompiledSqlQueryPlanCache : ICompiledSqlQueryPlanCache
         // 7. Subquery Strategy
         byte strategyByte = (byte)subqueryStrategy;
         hasher.Append(MemoryMarshal.CreateReadOnlySpan(ref strategyByte, 1));
+
+        // 8. Catalog columns map
+        if (catalogColumnsMap != null && catalogColumnsMap.Count > 0)
+        {
+            AppendLengthPrefixed(hasher, "COLS");
+            foreach (var (tbl, cols) in catalogColumnsMap.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+            {
+                AppendLengthPrefixed(hasher, tbl);
+                if (cols != null)
+                {
+                    foreach (var col in cols.OrderBy(c => c, StringComparer.Ordinal))
+                    {
+                        AppendLengthPrefixed(hasher, col);
+                    }
+                }
+            }
+        }
+
+        // 9. Allowed functions
+        if (allowedFunctions != null && allowedFunctions.Count > 0)
+        {
+            AppendLengthPrefixed(hasher, "FUNCS");
+            foreach (var fn in allowedFunctions.OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+            {
+                AppendLengthPrefixed(hasher, fn);
+            }
+        }
 
         return hasher.GetCurrentHashAsUInt64();
     }

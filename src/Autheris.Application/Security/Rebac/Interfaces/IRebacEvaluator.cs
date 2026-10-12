@@ -19,5 +19,5 @@ public interface IRebacEvaluator
 
     void RegisterInheritance(string baseRelation, params string[] inheritedBy);
 
-    void InvalidateTenantCache(string tenantId);
+    Task InvalidateTenantCacheAsync(string tenantId, CancellationToken ct = default);
 }

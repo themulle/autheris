@@ -6,15 +6,19 @@ on:
   pull_request:
     branches: [ main ]
 
-permissions: read-all
+permissions: {}
 
 jobs:
   build-and-test:
     name: Build & Test All Suites
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -26,11 +30,9 @@ jobs:
 
       - name: Vulnerable Package Audit
         run: |
-          dotnet list Autheris.sln package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt
-          if grep -qi "has the following vulnerable packages" vulnerable.txt; then
-            echo "::error::Vulnerable NuGet packages detected"
-            exit 1
-          fi
+          dotnet list Autheris.sln package --vulnerable --include-transitive --format json --output-version 1 > vulnerable.json
+          jq -e '[.projects[].frameworks[]? | (.topLevelPackages // []) + (.transitivePackages // []) | .[]] | length == 0' vulnerable.json \
+            || { echo "::error::Vulnerable NuGet packages detected"; jq . vulnerable.json; exit 1; }
 
       - name: Test Autheris Solution
         run: dotnet test Autheris.sln -c Release --no-restore --verbosity normal

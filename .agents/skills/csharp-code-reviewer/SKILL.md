@@ -1,108 +1,72 @@
 ---
 name: csharp-code-reviewer
 description: >-
-  Tägliche Qualitätssicherung auf Code-Ebene für Pull Requests und Refactorings in C#/.NET.
-  Nutze diesen Skill zur Überprüfung moderner C#-Idiome (Pattern Matching, Nullable Reference Types,
-  Records, Primary Constructors), Identifikation von Code-Smells, unsauberer Exception-Behandlung
-  und zur Bewertung von Testbarkeit und Testqualität (xUnit, NUnit, Shouldly, Testcontainers).
+  Code quality assurance and PR reviews for C#/.NET 10. Inspects modern idioms (Pattern Matching, Nullable
+  Types, Primary Constructors), detects code smells, resource leaks, stack-trace preservation, and verifies tests.
 ---
 
 # C# & .NET Code Reviewer
 
-Dieser Skill leitet die strukturierte, konstruktive und präzise Code-Überprüfung für Pull Requests, Refactorings und neue Features in modernen C#/.NET-Projekten an.
+Guides structured, constructive, and precise code reviews for PRs, refactorings, and features in C#/.NET 10.
 
 ---
 
-## 1. Moderne C#-Idiome & Best Practices
+## 1. Modern C# Idioms & Best Practices
 
-### Nullable Reference Types & Guard Clauses
-- **Keine unbedachten Null-Forgiving-Operatoren (`!`)**:
-  - `!` nur verwenden, wenn die Null-Sicherheit durch das Framework garantiert ist (z. B. nach vorangegangener Assertion).
-- **Prägnante Argument-Validierung**:
-  ```csharp
-  // Modern in .NET 8+:
-  ArgumentNullException.ThrowIfNull(service);
-  ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
-  ```
-
-### Pattern Matching & Switch-Expressions
-- Verschachtelte `if / else if`-Kaskaden durch lesbare `switch`-Expressions und Property Patterns ersetzen:
-  ```csharp
-  public decimal CalculateDiscount(Order order) => order switch
-  {
-      { Customer.IsVip: true, Total: > 1000m } => 0.20m,
-      { Total: > 500m }                        => 0.10m,
-      _                                        => 0.0m
-  };
-  ```
-
-### Records, Collection Expressions & Primary Constructors
-- **Collection Expressions**: `int[] numbers = [1, 2, 3];` statt `new int[] { 1, 2, 3 };`.
-- **Primary Constructors für Dependency Injection**:
-  ```csharp
-  public sealed class InvoiceService(
-      IInvoiceRepository repository,
-      ILogger<InvoiceService> logger) : IInvoiceService
-  {
-      // Direkter Zugriff auf repository und logger ohne redundante private readonly Felder
-  }
-  ```
-- **Records für DTOs & Events**: Automatische Wertgleichheit und unveränderliche Datenstrukturen.
-
----
-
-## 2. Code-Smells & Sauberkeit
-
-### Exception-Behandlung
-- ❌ **StackTrace-Verlust verhindern**:
-  ```csharp
-  // FALSCH: Zerstört den originalen StackTrace!
-  catch (Exception ex)
-  {
-      logger.LogError(ex, "Error");
-      throw ex;
-  }
-
-  // RICHTIG:
-  catch (Exception ex)
-  {
-      logger.LogError(ex, "Error occurred");
-      throw; // Behält den StackTrace bei
-  }
-  ```
-- ❌ Keine leeren `catch { }` Blöcke ohne Protokollierung oder begründete Ausnahmebehandlung.
-- **Exception Filters**: Spezifische Fehler gezielt abfangen:
-  ```csharp
-  catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
-  ```
-
-### Ressourcen-Management
-- `using var` für `IDisposable` nutzen.
-- `await using var` für `IAsyncDisposable` (z. B. Streams, DbContexts, Verbindungen) verwenden.
-
----
-
-## 3. Testbarkeit & Test-Qualität
-
-### Teststruktur (Arrange-Act-Assert)
-- Tests müssen unabhängig, deterministisch und lesbar sein.
-- **Benennungskonvention**: `MethodName_StateUnderTest_ExpectedBehavior` (z. B. `AuthenticateAsync_WhenTokenIsExpired_ReturnsFailure`).
-- **Assertions**:
-  - Lesbare Frameworks wie Shouldly bevorzugen:
+- **Nullable Reference Types & Guards:**
+  - Avoid reckless null-forgiving operators (`!`); use only when null-safety is guaranteed by framework/assertion.
+  - Throw early with standard helpers:
     ```csharp
-    result.Succeeded.ShouldBeTrue();
-    result.Value.ShouldNotBeNull();
+    ArgumentNullException.ThrowIfNull(service);
+    ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
     ```
+- **Pattern Matching & Switch Expressions:**
+  - Prefer `switch` expressions over nested `if/else`:
+    ```csharp
+    public decimal CalculateDiscount(Order order) => order switch {
+        { Customer.IsVip: true, Total: > 1000m } => 0.20m,
+        { Total: > 500m }                        => 0.10m,
+        _                                        => 0.0m
+    };
+    ```
+- **Collection Expressions & Primary Constructors:**
+  - Use `[...]`: `int[] numbers = [1, 2, 3];` instead of `new int[] { 1, 2, 3 };`.
+  - Primary constructors for DI:
+    ```csharp
+    public sealed class InvoiceService(IInvoiceRepository repo, ILogger<InvoiceService> logger) : IInvoiceService
+    ```
+  - Records for immutable DTOs and event models.
 
-### Mocking mit NSubstitute
-- Nur externe Schnittstellen mocken, keine reinen Datenklassen oder Value Objects.
-- Sicherstellen, dass die Using-Direktive `using NSubstitute;` importiert ist, um `.Returns(...)` nutzen zu können.
+---
 
-### Integrationstests mit Testcontainers
-- Für Datenbank-, Redis- oder RabbitMQ-Tests echte Container via `Testcontainers` anstelle instabiler Mocking-Konstrukte oder abweichender In-Memory-Datenbanken verwenden:
+## 2. Code Smells & Hygiene
+
+- **Exception Handling:**
+  - ❌ **Never destroy stack traces:**
+    ```csharp
+    // BAD: Resets stack trace!
+    catch (Exception ex) { logger.LogError(ex, "Error"); throw ex; }
+
+    // GOOD: Preserves original stack trace
+    catch (Exception ex) { logger.LogError(ex, "Error"); throw; }
+    ```
+  - ❌ No empty `catch { }` blocks without explicit rationale/logging.
+  - Use exception filters: `catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)`.
+- **Resource Management:**
+  - Use `using var` for `IDisposable`.
+  - Use `await using var` for `IAsyncDisposable` (streams, DbContexts, connections).
+
+---
+
+## 3. Testability & Test Quality
+
+- **AAA Pattern:** Arrange, Act, Assert cleanly separated.
+- **Naming Standard:** `MethodUnderTest_Condition_ExpectedBehavior` (e.g. `AuthenticateAsync_WhenTokenExpired_ReturnsFailure`).
+- **Assertions:** Use `FluentAssertions` / `Shouldly` (`result.Succeeded.Should().BeTrue()`).
+- **Mocking (NSubstitute):** Mock only external interfaces, never data records or value objects. Ensure `using NSubstitute;`.
+- **Integration Tests (Testcontainers):** Use real containers for databases/queues instead of in-memory approximations:
   ```csharp
-  public sealed class PostgresFixture : IAsyncLifetime
-  {
+  public sealed class PostgresFixture : IAsyncLifetime {
       private readonly PostgreSqlContainer _container = new PostgreSqlBuilder().Build();
       public string ConnectionString => _container.GetConnectionString();
       public Task InitializeAsync() => _container.StartAsync();
@@ -112,11 +76,9 @@ Dieser Skill leitet die strukturierte, konstruktive und präzise Code-Überprüf
 
 ---
 
-## 4. Pull-Request Review-Schablone
+## 4. PR Review Template
 
-Bei der Abgabe von Feedback strukturieren nach:
-
-1. **🔴 Blocker / Kritisch**: Bugs, Sicherheitslücken, Race Conditions, Memory Leaks, StackTrace-Verlust.
-2. **🟡 Empfehlung / Verbesserung**: Performance-Tuning, idiomatische C#-Verbesserungen, Testabdeckung.
-3. **💡 Nitpick / Optional**: Naming, kosmetische Code-Formatierung.
-4. **🌟 Lob**: Gelungene Designmuster oder besonders saubere Implementierungen explizit hervorheben.
+1. 🔴 **Blocker (Must Fix):** Bugs, security flaws, race conditions, memory leaks, stack trace loss.
+2. 🟡 **Recommendation:** Performance optimizations, idiomatic C# enhancements, missing test coverage.
+3. 💡 **Nitpick:** Cosmetic styling, non-blocking naming tweaks.
+4. 🌟 **Praise:** Clean design patterns and elegant solutions.

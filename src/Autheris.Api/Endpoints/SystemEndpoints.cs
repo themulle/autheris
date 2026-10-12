@@ -5,9 +5,11 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Observability;
 using Autheris.Application.ResourceGroups;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
@@ -39,7 +41,7 @@ public static class SystemEndpoints
 
             var metrics = await metricsService.CollectSystemMetricsAsync(ct).ConfigureAwait(false);
             return Results.Ok(metrics);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/api/governance/system/health", async (
             HttpContext context,
@@ -68,7 +70,7 @@ public static class SystemEndpoints
                 uptime = metrics.Uptime,
                 components = metrics.Components
             }, statusCode: isAllHealthy ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapGet("/api/governance/system/resource-groups", (
             HttpContext context,
@@ -88,7 +90,7 @@ public static class SystemEndpoints
 
             var metrics = resourceGroupManager.GetMetrics();
             return Results.Ok(metrics);
-        }).RequireAuthorization();
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         return app;
     }

@@ -81,19 +81,34 @@ public sealed class CasbinEnforcementService : IPolicyEnforcementService, IDispo
     {
         public FrozenDictionary<string, Enforcer> Enforcers { get; }
         public FrozenDictionary<string, ImmutableArray<CasbinRuleMetadata>> Rules { get; }
+        public FrozenDictionary<string, FrozenDictionary<string, FrozenSet<string>>> RoleClosures { get; }
+        public FrozenDictionary<string, FrozenSet<string>> WildcardRoleClosure { get; }
         public Enforcer WildcardEnforcer { get; }
         public long Epoch { get; }
 
         public PolicySnapshot(
             FrozenDictionary<string, Enforcer> enforcers,
             FrozenDictionary<string, ImmutableArray<CasbinRuleMetadata>> rules,
+            FrozenDictionary<string, FrozenDictionary<string, FrozenSet<string>>> roleClosures,
+            FrozenDictionary<string, FrozenSet<string>> wildcardRoleClosure,
             Enforcer wildcardEnforcer,
             long epoch)
         {
             Enforcers = enforcers;
             Rules = rules;
+            RoleClosures = roleClosures;
+            WildcardRoleClosure = wildcardRoleClosure;
             WildcardEnforcer = wildcardEnforcer;
             Epoch = epoch;
+        }
+
+        public FrozenDictionary<string, FrozenSet<string>> GetRoleClosure(string tenant)
+        {
+            if (RoleClosures.TryGetValue(tenant, out var closure))
+            {
+                return closure;
+            }
+            return WildcardRoleClosure;
         }
 
         public bool HasPolicies(string tenant)
@@ -184,9 +199,12 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         _logger?.LogInformation("Casbin model loaded from {ModelSource}. SupportsWildcardTenant: {SupportsWildcardTenant}", modelSource, _modelSupportsWildcardTenant);
 
         var initialWildcardEnforcer = new Enforcer(DefaultModel.CreateFromText(_modelText));
+        var initialWildcardRoleClosure = FrozenDictionary<string, FrozenSet<string>>.Empty;
         _currentSnapshot = new PolicySnapshot(
             FrozenDictionary<string, Enforcer>.Empty,
             FrozenDictionary<string, ImmutableArray<CasbinRuleMetadata>>.Empty,
+            FrozenDictionary<string, FrozenDictionary<string, FrozenSet<string>>>.Empty,
+            initialWildcardRoleClosure,
             initialWildcardEnforcer,
             1);
     }
@@ -265,16 +283,20 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
         var enforcersDict = new Dictionary<string, Enforcer>(StringComparer.OrdinalIgnoreCase);
         var rulesDict = new Dictionary<string, ImmutableArray<CasbinRuleMetadata>>(StringComparer.OrdinalIgnoreCase);
+        var roleClosuresDict = new Dictionary<string, FrozenDictionary<string, FrozenSet<string>>>(StringComparer.OrdinalIgnoreCase);
 
         // F-8 optimization: reuse wildcard enforcer when only a single non-wildcard tenant changed
         bool isSingleTenantChange = !string.IsNullOrEmpty(changedTenant) && changedTenant != "*";
         Enforcer wildcardEnforcer;
+        FrozenDictionary<string, FrozenSet<string>> wildcardRoleClosure;
         if (isSingleTenantChange && previousSnapshot != null)
         {
             wildcardEnforcer = previousSnapshot.WildcardEnforcer;
+            wildcardRoleClosure = previousSnapshot.WildcardRoleClosure;
             rulesDict["*"] = previousSnapshot.Rules.TryGetValue("*", out var existingW)
                 ? existingW
                 : wildcardRules.ToImmutableArray();
+            roleClosuresDict["*"] = wildcardRoleClosure;
         }
         else
         {
@@ -283,6 +305,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 wildcardRules,
                 wildcardGrouping);
             rulesDict["*"] = wildcardRules.ToImmutableArray();
+            wildcardRoleClosure = BuildRoleClosure(wildcardGrouping);
+            roleClosuresDict["*"] = wildcardRoleClosure;
         }
 
         foreach (var tenant in src.AllTenants)
@@ -292,10 +316,12 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
                 previousSnapshot != null &&
                 !tenant.Equals(changedTenant, StringComparison.OrdinalIgnoreCase) &&
                 previousSnapshot.Enforcers.TryGetValue(tenant, out var existingTenantEnforcer) &&
-                previousSnapshot.Rules.TryGetValue(tenant, out var existingTenantRules))
+                previousSnapshot.Rules.TryGetValue(tenant, out var existingTenantRules) &&
+                previousSnapshot.RoleClosures.TryGetValue(tenant, out var existingTenantClosure))
             {
                 enforcersDict[tenant] = existingTenantEnforcer;
                 rulesDict[tenant] = existingTenantRules;
+                roleClosuresDict[tenant] = existingTenantClosure;
                 continue;
             }
 
@@ -326,13 +352,57 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
             var enforcer = CreateEnforcer(tenantRules, wildcardRules, tenantGrouping);
             enforcersDict[tenant] = enforcer;
             rulesDict[tenant] = tenantRules.ToImmutableArray();
+            roleClosuresDict[tenant] = BuildRoleClosure(tenantGrouping);
         }
 
         return new PolicySnapshot(
             enforcersDict.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
             rulesDict.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
+            roleClosuresDict.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase),
+            wildcardRoleClosure,
             wildcardEnforcer,
             epoch);
+    }
+
+    private static FrozenDictionary<string, FrozenSet<string>> BuildRoleClosure(IEnumerable<GroupingRule> groupingRules)
+    {
+        var graph = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var g in groupingRules)
+        {
+            if (!graph.TryGetValue(g.User, out var set))
+            {
+                set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                graph[g.User] = set;
+            }
+            set.Add(g.Role);
+        }
+
+        var closure = new Dictionary<string, FrozenSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var user in graph.Keys)
+        {
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var queue = new Queue<string>();
+            queue.Enqueue(user);
+
+            while (queue.Count > 0)
+            {
+                var current = queue.Dequeue();
+                if (graph.TryGetValue(current, out var directRoles))
+                {
+                    foreach (var role in directRoles)
+                    {
+                        if (visited.Add(role))
+                        {
+                            queue.Enqueue(role);
+                        }
+                    }
+                }
+            }
+
+            closure[user] = visited.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return closure.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
     }
 
     private void Publish(
@@ -653,9 +723,6 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         }
 
         var sw = Stopwatch.StartNew();
-        var enforcer = snapshot.Enforcers.TryGetValue(context.Tenant.Value, out var existing)
-            ? existing
-            : snapshot.WildcardEnforcer;
 
         var tenantRulesSnapshot = new List<CasbinRuleMetadata>();
         if (snapshot.Rules.TryGetValue("*", out var wildcardRulesList))
@@ -667,6 +734,8 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         {
             tenantRulesSnapshot.AddRange(tenantRulesList);
         }
+
+        var roleClosure = snapshot.GetRoleClosure(context.Tenant.Value);
 
         // Subjects evaluated exactly like the Casbin request: the user itself and each of its groups.
         var subjects = new List<string> { context.UserSid.Value };
@@ -683,72 +752,54 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
 
         try
         {
-            // F-4: Synchronize access to the shared enforcer across concurrent request threads.
-            lock (enforcer)
+            // AR-12: Lock-free pure stateless evaluation over immutable snapshot rules and role closure.
+            // First check if any deny policy matches for the user or their groups (Deny takes absolute precedence)
+            bool denied = false;
+            foreach (var rule in tenantRulesSnapshot)
             {
-                // First check if any deny policy matches for the user or their groups (Deny takes absolute precedence)
-                bool denied = false;
-                foreach (var rule in tenantRulesSnapshot)
+                // Deny rules are matched conservatively (matching action or wildcard, wildcard tenant or current tenant).
+                if (!string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase) ||
+                    (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
+                    !MatchObjectPattern(rule.Obj, tableStr) ||
+                    !IsActionMatch(rule.Act, requestedAction, isDeny: true))
                 {
-                    // Deny rules are matched conservatively (matching action or wildcard, wildcard tenant or current tenant).
-                    if (!string.Equals(rule.Eft, "deny", StringComparison.OrdinalIgnoreCase) ||
-                        (!string.Equals(rule.Tenant, "*", StringComparison.OrdinalIgnoreCase) && !string.Equals(rule.Tenant, context.Tenant.Value, StringComparison.OrdinalIgnoreCase)) ||
-                        !MatchObjectPattern(rule.Obj, tableStr) ||
-                        !IsActionMatch(rule.Act, requestedAction, isDeny: true))
+                    continue;
+                }
+
+                foreach (var subject in subjects)
+                {
+                    if (!IsSubjectMatch(rule.Sub, subject, roleClosure))
                     {
                         continue;
                     }
 
-                    foreach (var subject in subjects)
+                    // Fail-closed: a deny rule whose condition cannot be evaluated is treated as matching.
+                    if (EvaluateSubRule(rule.SubRule, context, subject, tableStr, requestedAction) != false)
                     {
-                        if (!IsSubjectMatch(rule.Sub, subject, enforcer))
-                        {
-                            continue;
-                        }
-
-                        // Fail-closed: a deny rule whose condition cannot be evaluated is treated as matching.
-                        if (EvaluateSubRule(rule.SubRule, context, subject, tableStr, requestedAction) != false)
-                        {
-                            denied = true;
-                            break;
-                        }
-                    }
-
-                    if (denied)
-                    {
+                        denied = true;
                         break;
                     }
                 }
 
-                if (!denied)
+                if (denied)
                 {
-                    // SEC H-12: The allow decision and the RLS filter collection use ONE matcher. The set of matching allow
-                    // rules determined here is both the authorization basis and the source of the RLS filters.
-                    foreach (var rule in tenantRulesSnapshot)
-                    {
-                        if (IsAllowRuleMatch(rule, context, subjects, tableStr, requestedAction, enforcer))
-                        {
-                            matchedAllowRules.Add(rule);
-                        }
-                    }
-
-                    // Casbin itself remains an additional (AND) gate: if Casbin denies (e.g. Casbin-only deny semantics,
-                    // role hierarchies), access is denied. If Casbin allows but no allow rule matched in the gateway
-                    // matcher (e.g. keyMatch2 treating '.' as regex wildcard, see M-18), access is denied as well,
-                    // because the RLS filters of the Casbin-matched rule could not be collected (fail-closed).
-                    bool casbinAllowed = false;
-                    foreach (var subject in subjects)
-                    {
-                        // r = sub, tenant, obj, act, ctx
-                        if (enforcer.Enforce(subject, context.Tenant.Value, tableStr, requestedAction, context))
-                        {
-                            casbinAllowed = true;
-                            break;
-                        }
-                    }
-
-                    allowed = casbinAllowed && matchedAllowRules.Count > 0;
+                    break;
                 }
+            }
+
+            if (!denied)
+            {
+                // SEC H-12: The allow decision and the RLS filter collection use ONE matcher. The set of matching allow
+                // rules determined here is both the authorization basis and the source of the RLS filters.
+                foreach (var rule in tenantRulesSnapshot)
+                {
+                    if (IsAllowRuleMatch(rule, context, subjects, tableStr, requestedAction, roleClosure))
+                    {
+                        matchedAllowRules.Add(rule);
+                    }
+                }
+
+                allowed = matchedAllowRules.Count > 0;
             }
         }
         catch (Exception)
@@ -831,10 +882,10 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         string.Equals(ruleAct, requestedAction, StringComparison.OrdinalIgnoreCase) ||
         (isDeny && string.Equals(ruleAct, "read", StringComparison.OrdinalIgnoreCase) && string.Equals(requestedAction, "write", StringComparison.OrdinalIgnoreCase));
 
-    private static bool IsSubjectMatch(string ruleSub, string subject, Enforcer enforcer) =>
+    private static bool IsSubjectMatch(string ruleSub, string subject, FrozenDictionary<string, FrozenSet<string>> roleClosure) =>
         string.Equals(ruleSub, "*", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(ruleSub, subject, StringComparison.OrdinalIgnoreCase) ||
-        enforcer.HasRoleForUser(subject, ruleSub);
+        (roleClosure.TryGetValue(subject, out var roles) && roles.Contains(ruleSub));
 
     private static bool IsAllowRuleMatch(
         CasbinRuleMetadata rule,
@@ -842,7 +893,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         IReadOnlyList<string> subjects,
         string tableStr,
         string requestedAction,
-        Enforcer enforcer)
+        FrozenDictionary<string, FrozenSet<string>> roleClosure)
     {
         if (!string.Equals(rule.Eft, "allow", StringComparison.OrdinalIgnoreCase))
         {
@@ -864,7 +915,7 @@ m = g(r.sub, p.sub) && (r.tenant == p.tenant || p.tenant == ""*"") && keyMatch2(
         foreach (var subject in subjects)
         {
             // Sub_rule is evaluated with r.sub = the matched subject (user or group), as in the Casbin request.
-            if (IsSubjectMatch(rule.Sub, subject, enforcer) &&
+            if (IsSubjectMatch(rule.Sub, subject, roleClosure) &&
                 EvaluateSubRule(rule.SubRule, context, subject, tableStr, requestedAction) == true)
             {
                 return true;

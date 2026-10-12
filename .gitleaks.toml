@@ -1,0 +1,26 @@
+# .gitleaks.toml
+# Gitleaks Secret Scanner Configuration & Allowlist
+# Ref: SC-03, SC-13
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Global and path-specific allowlists for dummy/test secrets"
+paths = [
+  '''tests/''',
+  '''benchmarks/load/docker/'''
+]
+
+[[rules]]
+id = "dev-fallback-credentials"
+description = "Allow documented dev-fallback passwords guarded by Development environment checks"
+[rules.allowlist]
+paths = [
+  '''src/Autheris.Infrastructure/Persistence/SqlServerGovernanceRepository\.cs''',
+  '''src/Autheris.Infrastructure/Catalog/PurviewDataCatalogClient\.cs'''
+]
+regexes = [
+  '''Autheris_Dev_Passw0rd!''',
+  '''DevPurviewSecretKey'''
+]

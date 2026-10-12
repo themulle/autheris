@@ -195,6 +195,21 @@ Speicherort für Metadaten, Freigaben, Delegationen, Vier-Augen-Genehmigungen un
 }
 ```
 
+**SQL Server als Governance-DB:** `Provider = "SqlServer"` (Aliase `MsSql`, `SqlServer`) legt das Schema beim Start selbst an (idempotent, serialisiert über `sp_getapplock`) und ist – wie PostgreSQL – für Cluster-/Mehr-Replika-Betrieb zugelassen. Beispiel:
+
+```json
+"GovernanceDb": {
+  "Provider": "SqlServer",
+  "ConnectionString": "Server=sql.corp.local;Database=autheris_governance;User Id=autheris_app;Password=<secret>;Encrypt=Mandatory;TrustServerCertificate=false",
+  "MigrationConnectionString": "Server=sql.corp.local;Database=autheris_governance;User Id=autheris_migrator;Password=<secret>;Encrypt=Mandatory"
+}
+```
+
+- Außerhalb von Development verlangt die TLS-Policy `Encrypt=Mandatory` (oder `Strict`) und `TrustServerCertificate=false`.
+- `MigrationConnectionString` (optional) führt die DDL mit einem separaten Login aus; der Laufzeit-Login braucht dann nur `SELECT`/`INSERT`/`UPDATE`/`DELETE` (auf `AUDIT_LOG_ENTRIES` nur `SELECT`/`INSERT`).
+- Das Audit-Log ist append-only: ein `INSTEAD OF`-Trigger blockiert `UPDATE`/`DELETE`, eine leere Guard-Tabelle mit Fremdschlüssel blockiert `TRUNCATE`. Ein Tabellen-Owner kann beides entfernen – der Laufzeit-Login darf deshalb keine DDL-Rechte haben.
+- Integrationstests: `SqlServer*ContractTests` laufen gegen `AUTHERIS_TEST_MSSQL` (Connection-String eines Servers, auf dem der Login Datenbanken anlegen darf) oder per Testcontainers (Docker).
+
 ---
 
 ### 2.4 `DataSources` (Backend-Fachdatenbanken & RLS-Pushdown)
@@ -296,6 +311,25 @@ Kombiniert Pre-Authentication IP-Limiting mit Token-Bucket-Verbrauch pro Windows
 | `TokensPerSecond` | `int` | `1 .. 10000` | `50` | Nachfüllrate des Token-Buckets pro Sekunde. |
 | `MaxCostPerMinute` | `int` | `100 .. 1000000` | `10000` | Maximales GraphQL-Komplexitätsbudget pro Minute pro Benutzer. |
 
+#### `RateLimiting.ClientTiers` (GraphQL Pre-Execution Cost & Quota Defense)
+
+Steuert die [`CostAndQuotaMiddleware`](file:///root/autheris/src/Autheris.GraphQL/Interceptors/CostAndQuotaMiddleware.cs) ([`F-PERF-13`](features/f-perf-13-cost-and-quota-rate-limiting.md)) zur dynamischen Zuordnung von Aufrufern zu Kontingent-Stufen (`Free`, `Standard`, `Enterprise`, `Internal`) vor der GraphQL-Ausführung.
+
+| Eigenschaft | Typ | Standard | Beschreibung |
+| :--- | :--- | :--- | :--- |
+| `RoleTierMappings` | `Dictionary<string, string>` | `{}` | Mappt Benutzerrollen (Claims) auf Tiers (z. B. `"FinanceAdmins": "Enterprise"`). |
+| `ApiKeys` | `Dictionary<string, string>` | `{}` | Mappt registrierte API-Keys (`X-API-Key`) auf Tiers. |
+| `TierLimits` | `Dictionary<string, ClientTierLimitOverride>` | Standardwerte je Tier | Ermöglicht das Überschreiben der Standard-Grenzwerte pro Tier. |
+
+##### `ClientTierLimitOverride` Parameter
+| Eigenschaft | Typ | Standard (Standard / Enterprise) | Beschreibung |
+| :--- | :--- | :--- | :--- |
+| `MaxCostPerQuery` | `int?` | `250` / `1000` | Maximal erlaubte statische AST-Kostenpunkte pro Einzelabfrage (Fail-Fast bei Überschreitung mit `QUERY_COST_QUOTA_EXCEEDED`). |
+| `MaxComplexityDepth` | `int?` | `10` / `20` | Maximale Verschachtelungstiefe der GraphQL-Selektion. |
+| `MaxTokensCapacity` | `int?` | `1000` / `10000` | Maximale Kapazität des verteilten Token-Buckets. |
+| `TokenRefillRatePerSecond` | `double?` | `20.0` / `200.0` | Nachfüllrate von Kostenpunkten pro Sekunde. |
+| `ExposeCostExtensions` | `bool?` | `true` | Schaltet die Rückgabe von `extensions.cost` in der GraphQL-Antwort frei. |
+
 ```json
 "RateLimiting": {
   "PreAuthIpRateLimit": {
@@ -307,6 +341,22 @@ Kombiniert Pre-Authentication IP-Limiting mit Token-Bucket-Verbrauch pro Windows
     "TokenBucketCapacity": 500,
     "TokensPerSecond": 50,
     "MaxCostPerMinute": 10000
+  },
+  "ClientTiers": {
+    "RoleTierMappings": {
+      "FinanceSuperUser": "Enterprise",
+      "AnalyticsService": "Standard"
+    },
+    "ApiKeys": {
+      "ak_live_partner_abc123": "Enterprise"
+    },
+    "TierLimits": {
+      "Standard": {
+        "MaxCostPerQuery": 300,
+        "MaxTokensCapacity": 2000,
+        "TokenRefillRatePerSecond": 30.0
+      }
+    }
   }
 }
 ```
@@ -457,7 +507,7 @@ Automatische Synchronisation von Schema-Metadaten, Klassifikations-Tags (`PII.*`
   "Enabled": true,
   "ServerUrl": "https://openmetadata.corp.local/api/v1",
   "AuthToken": "eyJhbGciOi...",
-  "WebhookSecret": "OM-WEBHOOK-HMAC-SECRET-2026",
+  "WebhookSecret": "<GENERATE_STRONG_SECRET>", // openssl rand -base64 32
   "ServiceFilter": "enterprise_dw",
   "SyncIntervalMinutes": 30,
   "TagToMaskingRuleMap": {
@@ -898,7 +948,7 @@ Gateway__GraphQL__TrustedOrigins__1=https://portal.corp.local
 Gateway__OpenMetadata__Enabled=true
 Gateway__OpenMetadata__ServerUrl=https://openmetadata.corp.local/api/v1
 Gateway__OpenMetadata__AuthToken=eyJhbGciOi...
-Gateway__OpenMetadata__WebhookSecret=MyWebhookHmacSecretKey
+Gateway__OpenMetadata__WebhookSecret=<GENERATE_STRONG_SECRET> # openssl rand -base64 32
 ```
 
 ### 3.2 Beispiel Kubernetes Deployment & ConfigMap
@@ -993,7 +1043,7 @@ metadata:
 spec:
   headers:
     customRequestHeaders:
-      X-Forwarded-Secret: "OM-SHARED-SECRET-TRAEFIK-TO-GATEWAY"
+      X-Forwarded-Secret: "<GENERATE_STRONG_SECRET>" # openssl rand -base64 32
 ```
 
 #### 3.3.3 Traefik IngressRoute

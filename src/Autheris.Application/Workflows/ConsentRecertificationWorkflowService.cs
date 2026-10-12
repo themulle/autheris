@@ -23,7 +23,7 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
 {
     private readonly IConsentRepository _consentRepo;
     private readonly IItsmOutboxRepository _outboxRepo;
-    private readonly IAuditLogRepository? _auditRepo;
+    private readonly IAuditLogRepository _auditRepo;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<ConsentRecertificationWorkflowService> _logger;
 
@@ -33,14 +33,23 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
         IConsentRepository consentRepo,
         IItsmOutboxRepository outboxRepo,
         IOptions<GatewayOptions> options,
+        ILogger<ConsentRecertificationWorkflowService> logger)
+        : this(consentRepo, outboxRepo, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance)
+    {
+    }
+
+    public ConsentRecertificationWorkflowService(
+        IConsentRepository consentRepo,
+        IItsmOutboxRepository outboxRepo,
+        IOptions<GatewayOptions> options,
         ILogger<ConsentRecertificationWorkflowService> logger,
-        IAuditLogRepository? auditRepo = null)
+        IAuditLogRepository auditRepo)
     {
         _consentRepo = consentRepo ?? throw new ArgumentNullException(nameof(consentRepo));
         _outboxRepo = outboxRepo ?? throw new ArgumentNullException(nameof(outboxRepo));
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _auditRepo = auditRepo;
+        _auditRepo = auditRepo ?? throw new ArgumentNullException(nameof(auditRepo));
     }
 
     public async Task<int> ScanAndTriggerExpiringConsentRecertificationsAsync(
@@ -170,27 +179,24 @@ public sealed class ConsentRecertificationWorkflowService : IConsentRecertificat
             "Extended consent '{ConsentId}' until {NewValidTo} by approver '{Approver}'. Justification: {Justification}",
             consentId, newValidTo, approverSid.Value, justification);
 
-        if (_auditRepo != null)
+        var auditEntry = new AuditLogEntry
         {
-            var auditEntry = new AuditLogEntry
+            TenantId = consent.TenantId,
+            EventType = "CONSENT_RECERTIFIED_AND_EXTENDED",
+            ActorSid = approverSid,
+            TargetTable = consent.TableIdentifier.ToString(),
+            Decision = "ALLOW",
+            TraceId = Guid.NewGuid().ToString("N"),
+            DetailsJson = JsonSerializer.Serialize(new
             {
-                TenantId = consent.TenantId,
-                EventType = "CONSENT_RECERTIFIED_AND_EXTENDED",
-                ActorSid = approverSid,
-                TargetTable = consent.TableIdentifier.ToString(),
-                Decision = "ALLOW",
-                TraceId = Guid.NewGuid().ToString("N"),
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    ConsentId = consentId,
-                    OldValidTo = consent.ValidTo,
-                    NewValidTo = newValidTo,
-                    ExtensionDays = extensionDuration.TotalDays,
-                    Justification = justification
-                })
-            };
-            await _auditRepo.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
-        }
+                ConsentId = consentId,
+                OldValidTo = consent.ValidTo,
+                NewValidTo = newValidTo,
+                ExtensionDays = extensionDuration.TotalDays,
+                Justification = justification
+            })
+        };
+        await _auditRepo.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
 
         return true;
     }

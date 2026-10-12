@@ -4,6 +4,13 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 
+public enum BudgetConsumeOutcome
+{
+    Consumed,
+    Exhausted,
+    StoreUnavailable
+}
+
 /// <summary>
 /// K-K14: Pluggable Distributed Cluster State Provider for Multi-Node Deployments.
 /// Provides distributed KV storage, pub/sub messaging for instant cache invalidation,
@@ -22,6 +29,14 @@ public interface IDistributedClusterStateProvider
     /// shared store is unreachable (callers must then fall back to local accounting). The TTL is set when the counter is created.
     /// </summary>
     ValueTask<long?> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically checks whether (counter + cost &lt;= limit). If so, increments key by cost, applies TTL,
+    /// and returns (Consumed, ConsumedAfter). If limit would be exceeded, returns (Exhausted, currentCounter).
+    /// If shared store is unreachable, returns (StoreUnavailable, 0).
+    /// </summary>
+    ValueTask<(BudgetConsumeOutcome Outcome, long ConsumedAfter)> TryConsumeBudgetAsync(
+        string key, long cost, long limit, TimeSpan ttl, CancellationToken ct = default);
 
     /// <summary>
     /// Publishes a broadcast event across all cluster nodes (e.g. token revocation, HitL step-up approval).
