@@ -54,7 +54,7 @@ services:
   # 2. Redis (ConsentCache Invalidation, Rate Limiter Token Bucket, Idempotency)
   # ----------------------------------------------------------------------------
   redis:
-    image: docker.io/library/redis:7-alpine
+    image: docker.io/library/redis:8-alpine
     container_name: gqlgateway-redis
     networks:
       - gateway-bench-net
