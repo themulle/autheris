@@ -52,7 +52,8 @@ internal sealed class BindByNameOracleConnection : DbConnection
     public override Task CloseAsync() => _inner.CloseAsync();
 
     protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) =>
-        new BindByNameOracleTransaction(_inner.BeginTransaction(isolationLevel), this);
+        // ODP.NET accepts only ReadCommitted and Serializable; the ADO.NET default (Unspecified) is Oracle's own default, ReadCommitted.
+        new BindByNameOracleTransaction(_inner.BeginTransaction(isolationLevel == IsolationLevel.Unspecified ? IsolationLevel.ReadCommitted : isolationLevel), this);
 
     protected override DbCommand CreateDbCommand() => new BindByNameOracleCommand(_inner.CreateCommand(), this);
 

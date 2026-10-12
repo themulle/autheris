@@ -143,6 +143,7 @@ internal static class OracleGatewayHost
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{tag}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
+            builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", Source);
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:Provider", "Oracle");
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:ConnectionString", fixture.AppConnectionString);
             builder.UseSetting($"Gateway:DataSources:Connections:{Source}:DefaultSchema", AstCompilerOracleFixture.AppUser);
