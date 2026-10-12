@@ -61,7 +61,8 @@ public sealed class GovernedCatalogProviderTests
     }
 
     private static (GovernedCatalogProvider Provider, FakeReader Reader, Clock Clock) Build(
-        string provider, TargetSqlDialect dialect, string[] govColumns, IEnumerable<DbColumnMetadata> dbColumns, int ttl = 300)
+        string provider, TargetSqlDialect dialect, string[] govColumns, IEnumerable<DbColumnMetadata> dbColumns, int ttl = 300,
+        IGovernanceRepository? governance = null)
     {
         var reader = new FakeReader(dialect) { Columns = dbColumns.ToList() };
         var gateway = new GatewayOptions
@@ -75,7 +76,7 @@ public sealed class GovernedCatalogProviderTests
         factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
             .Returns(_ => Task.FromResult<DbConnection>(new SqliteConnection()));
         var clock = new Clock();
-        var sut = new GovernedCatalogProvider(Governance(provider, govColumns), Options.Create(gateway), factory,
+        var sut = new GovernedCatalogProvider(governance ?? Governance(provider, govColumns), Options.Create(gateway), factory,
             new[] { reader }, new GovernedCatalogOptions { CacheTtlSeconds = ttl }, clock);
         return (sut, reader, clock);
     }
@@ -192,6 +193,65 @@ public sealed class GovernedCatalogProviderTests
         await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
         reader.Calls.ShouldBe(2);
     }
+
+    [Fact]
+    public async Task TenantColumnGovernedAfterCachedLoad_TakesEffectWithinTheTtl()
+    {
+        var repo = Governance("SqlServer", "id", "amount");
+        var (sut, reader, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id", "amount" }, SqlServerColumns, governance: repo);
+        Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None))!.TenantColumn.ShouldBeNull();
+
+        SetGovernedColumns(repo, "SqlServer", "id", "amount", "tenant_id");
+        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
+
+        entry.ShouldNotBeNull();
+        entry.TenantColumn.ShouldBe("tenant_id");
+        reader.Calls.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task GovernedColumnRemovedAfterCachedLoad_IsNoLongerExposedWithinTheTtl()
+    {
+        var repo = Governance("SqlServer", "id", "amount");
+        var (sut, _, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id", "amount" }, SqlServerColumns, governance: repo);
+        Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None))!.Columns.Select(c => c.Name).ShouldContain("amount");
+
+        SetGovernedColumns(repo, "SqlServer", "id");
+        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
+
+        entry.ShouldNotBeNull();
+        entry.Columns.Select(c => c.Name).ShouldBe(new[] { "id" });
+    }
+
+    [Fact]
+    public async Task GovernanceRecordRemovedAfterCachedLoad_DeniesTable()
+    {
+        var repo = Governance("SqlServer", "id");
+        var (sut, _, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id" }, SqlServerColumns, governance: repo);
+        Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldNotBeNull();
+
+        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns((TableMetadata?)null);
+
+        Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task UnchangedGovernance_StillServedFromCache()
+    {
+        var (sut, reader, _) = Build("SqlServer", TargetSqlDialect.SqlServer, new[] { "id" }, SqlServerColumns);
+        await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
+        await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
+
+        reader.Calls.ShouldBe(1);
+    }
+
+    private static void SetGovernedColumns(IGovernanceRepository repo, string provider, params string[] columns) =>
+        repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
+        {
+            Table = new Table { SourceType = provider, SourceName = Source, SchemaName = "dbo", TableName = "orders" },
+            Identifier = Orders,
+            Columns = columns.Select(Gov).ToArray()
+        });
 
     [Fact]
     public async Task FailedLoad_IsNotCached_NextCallReloads()

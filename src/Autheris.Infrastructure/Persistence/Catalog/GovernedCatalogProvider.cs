@@ -20,7 +20,9 @@ namespace Autheris.Infrastructure.Persistence.Catalog;
 /// the governance record, the data source, the dialect and the database metadata all agree. Every other case (load failure,
 /// zero columns, a governance column missing in the database, a tenant column with a non-TEXT SQLite affinity) omits the table,
 /// so the compiler rejects it as unknown. Entries are cached per data source and table for at most
-/// <see cref="GovernedCatalogOptions.MaxCacheTtlSeconds"/> seconds; denials and failures are never cached.
+/// <see cref="GovernedCatalogOptions.MaxCacheTtlSeconds"/> seconds; denials and failures are never cached. Every cache hit is
+/// re-validated against a fingerprint of the security-relevant governance inputs (data source, provider, dialect, governed columns,
+/// tenant column), so a governance change takes effect on the next compile and not only after the TTL.
 /// </summary>
 public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
 {
@@ -33,7 +35,7 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
     private readonly ILogger _logger;
     private readonly ConcurrentDictionary<(string DataSource, string Schema, string Table), CacheItem> _cache = new();
 
-    private readonly record struct CacheItem(TableCatalogEntry Entry, DateTimeOffset ExpiresAt);
+    private readonly record struct CacheItem(TableCatalogEntry Entry, DateTimeOffset ExpiresAt, string Fingerprint);
 
     public GovernedCatalogProvider(
         IGovernanceRepository governance,
@@ -84,7 +86,8 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
             {
                 ct.ThrowIfCancellationRequested();
                 var key = (dataSourceName.ToLowerInvariant(), table.Schema, table.TableName);
-                if (_cache.TryGetValue(key, out var cached) && cached.ExpiresAt > _time.GetUtcNow())
+                if (_cache.TryGetValue(key, out var cached) && cached.ExpiresAt > _time.GetUtcNow() &&
+                    await FingerprintMatchesAsync(dataSourceName, table, cached.Fingerprint, ct).ConfigureAwait(false))
                 {
                     entries.Add(cached.Entry);
                     continue;
@@ -92,14 +95,14 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
 
                 try
                 {
-                    var loaded = await LoadAsync(dataSourceName, table, async () => connection ??= await OpenAsync(dataSourceName, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
+                    var (loaded, fingerprint) = await LoadAsync(dataSourceName, table, async () => connection ??= await OpenAsync(dataSourceName, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
                     if (loaded is null)
                     {
                         _cache.TryRemove(key, out _);
                         continue;
                     }
 
-                    _cache[key] = new CacheItem(loaded, _time.GetUtcNow() + _ttl);
+                    _cache[key] = new CacheItem(loaded, _time.GetUtcNow() + _ttl, fingerprint);
                     entries.Add(loaded);
                 }
                 catch (OperationCanceledException)
@@ -145,13 +148,48 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
     private DataSourceConnectionOptions? FindConnection(string dataSourceName) =>
         _gateway.Value.DataSources?.Connections is { } connections && connections.TryGetValue(dataSourceName, out var options) ? options : null;
 
-    private async Task<TableCatalogEntry?> LoadAsync(
+    // A cache hit is only valid while the governance record still yields the same fingerprint. Any failure to read it is a miss
+    // (the reload then fails closed on its own).
+    private async Task<bool> FingerprintMatchesAsync(string dataSourceName, TableIdentifier table, string expected, CancellationToken ct)
+    {
+        try
+        {
+            var metadata = await _governance.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+            return metadata is not null &&
+                   FindConnection(dataSourceName) is { } connection &&
+                   string.Equals(Fingerprint(connection, metadata), expected, StringComparison.Ordinal);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static string Fingerprint(DataSourceConnectionOptions connection, TableMetadata metadata)
+    {
+        var columns = metadata.Columns.Select(static c => c.ColumnName.ToLowerInvariant()).Order(StringComparer.Ordinal);
+        return string.Join('\u001f', new[]
+        {
+            connection.Provider ?? string.Empty,
+            metadata.Table.SourceName.ToLowerInvariant(),
+            ((int)metadata.DataSourceType).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ((int)metadata.Dialect).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            metadata.TenantColumnName?.ToLowerInvariant() ?? string.Empty,
+            string.Join('\u001e', columns)
+        });
+    }
+
+    private async Task<(TableCatalogEntry? Entry, string Fingerprint)> LoadAsync(
         string dataSourceName, TableIdentifier table, Func<Task<DbConnection>> open, CancellationToken ct)
     {
         var connectionOptions = FindConnection(dataSourceName);
         if (connectionOptions is null || !DataSourceProvider.TryResolveDialect(connectionOptions.Provider, out var dialect))
         {
-            return null;
+            return (null, string.Empty);
         }
 
         var metadata = await _governance.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
@@ -160,13 +198,13 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
             !string.Equals(metadata.Table.SourceName, dataSourceName, StringComparison.OrdinalIgnoreCase) ||
             metadata.Dialect != dialect)
         {
-            return null;
+            return (null, string.Empty);
         }
 
         // Databricks has no mapping (and no reader before X1-DBX): the table is denied.
         if (!SqlDialectMapper.TryToTargetDialect(dialect, out var target) || !_readers.TryGetValue(target, out var reader))
         {
-            return null;
+            return (null, string.Empty);
         }
 
         var identity = new TableIdentity(metadata.Table.SchemaName, metadata.Table.TableName);
@@ -179,7 +217,7 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
 
         if (dbColumns.Count == 0)
         {
-            return null;   // a table without columns is a table the database does not know (or a wrong spelling)
+            return (null, string.Empty);   // a table without columns is a table the database does not know (or a wrong spelling)
         }
 
         var exposed = new List<DbColumnMetadata>(metadata.Columns.Count);
@@ -187,7 +225,7 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
         {
             if (!TryMatch(dbColumns, governed.ColumnName, out var match))
             {
-                return null;   // governance column missing (or ambiguous) in the database
+                return (null, string.Empty);   // governance column missing (or ambiguous) in the database
             }
 
             if (!exposed.Contains(match))
@@ -198,7 +236,7 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
 
         if (exposed.Count == 0)
         {
-            return null;
+            return (null, string.Empty);
         }
 
         // Keep the database column order, so the version does not depend on the order of the governance record.
@@ -209,23 +247,24 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
         {
             if (!TryMatch(exposed, governedTenant, out var tenant))
             {
-                return null;
+                return (null, string.Empty);
             }
 
             // With NUMERIC or INTEGER affinity '007' and '7' compare equal: such a column cannot isolate tenants (SEC-X1-09).
             if (target == TargetSqlDialect.Sqlite && SqliteTypeAffinity.Of(tenant.NativeType) != SqliteAffinity.TextAffinity)
             {
-                return null;
+                return (null, string.Empty);
             }
 
             tenantColumn = tenant.Name;
         }
 
-        return new TableCatalogEntry(
+        var entry = new TableCatalogEntry(
             identity,
             exposed.Select(static c => new CatalogColumn(c.Name, c.NativeType, c.Collation)).ToImmutableArray(),
             tenantColumn,
             CatalogColumnVersion.Compute(exposed));
+        return (entry, Fingerprint(connectionOptions, metadata));
     }
 
     // Exact spelling wins; otherwise a single case-insensitive match. Two candidates that differ only by case are ambiguous.
