@@ -52,6 +52,7 @@ public sealed class GatewayOptions
     [Required] public RowFilterOptions RowFilters { get; init; } = new();
     [Required] public VirtualFilterOptions VirtualFilters { get; init; } = new();
     [Required] public LoggingOptions Logging { get; init; } = new();
+    [Required] public ODataOptions OData { get; init; } = new();
 
     /// <summary>
     /// Getting Started Preset Profile: "Strict" (Default) or "Quickstart".
@@ -405,6 +406,8 @@ public sealed class AuthenticationOptions
     [Required] public string Domain { get; init; } = "CORP.LOCAL";
     [Required] public string ServicePrincipalName { get; init; } = "HTTP/gql-gateway.corp.local";
     public bool RequireKerberosOnly { get; init; } = true;
+    public bool EnableKerberos { get; init; } = false;
+    public bool IsKerberosConfigured => EnableKerberos;
     [Range(1, 60)] public int GroupCacheTtlMinutes { get; init; } = 5;
     public bool EnableTestAuthHandler { get; init; }
 
@@ -741,11 +744,23 @@ public sealed class ClientTierLimitOverride
     public bool? ExposeCostExtensions { get; init; }
 }
 
+public sealed class ODataOptions
+{
+    public bool Enabled { get; init; } = true;
+}
+
 public sealed class PreAuthIpRateLimitOptions
 {
     [Range(1, 100000)] public int PermitLimit { get; init; } = 100;
     [Range(1, 3600)] public int WindowSeconds { get; init; } = 60;
     public int QueueLimit { get; init; }
+
+    /// <summary>
+    /// When true, requests carrying an Authorization: Bearer token are exempt from the pre-auth IP bucket
+    /// and are instead governed by the per-identity post-auth SID and cost rate limiters.
+    /// Prevents IP rate exhaustion for multi-user client services behind a single NAT/gateway IP.
+    /// </summary>
+    public bool ExemptAuthenticatedRequests { get; init; } = true;
 }
 
 public sealed class PostAuthSidRateLimitOptions

@@ -280,6 +280,8 @@ public static class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver>(sp => sp.GetRequiredService<Autheris.Application.VirtualFilters.MandatoryRowFilterResolver>());
         services.AddSingleton<IConsentCacheService, ConsentCacheService>();
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();
+        services.AddHttpContextAccessor();
+        services.AddScoped<Autheris.Application.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
         if (DataSourceProvider.Is(gatewayOptions.GovernanceDb.Provider, DatabaseDialect.PostgreSql))
         {
             services.AddSingleton<PostgreSqlGovernanceRepository>();
@@ -482,6 +484,7 @@ public static class GatewayServiceCollectionExtensions
         services.AddScoped<Autheris.Application.Connectors.CrossDomain.ICrossDomainAccessResolver, Autheris.Application.Connectors.CrossDomain.DefaultCrossDomainAccessResolver>();
 
         services.AddScoped<IClientIpResolver, Autheris.Api.Security.HttpContextClientIpResolver>();
+        services.AddScoped<Autheris.Application.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
         // O10: process-wide counter of running table reads per tenant, user and table
         services.AddSingleton<ITableReadConcurrencyGate, TableReadConcurrencyGate>();
         // M-1: database session context initializer for PostgreSQL GUCs and SQL Server SESSION_CONTEXT
@@ -765,7 +768,7 @@ public static class GatewayServiceCollectionExtensions
             authBuilder.AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(
                 TestAuthHandler.SchemeName, _ => { });
         }
-        else
+        else if (gatewayOptions.Authentication.IsKerberosConfigured)
         {
             // Review E-2: never persist credentials on the (possibly shared, reverse-proxied) upstream connection, and
             // with RequireKerberosOnly reject every Negotiate identity that is not Kerberos (e.g. NTLM).
@@ -893,24 +896,32 @@ public static class GatewayServiceCollectionExtensions
                 {
                     if (gatewayOptions.Authentication.RequireKerberosOnly)
                     {
-                        return NegotiateDefaults.AuthenticationScheme;
+                        return gatewayOptions.Authentication.IsKerberosConfigured
+                            ? NegotiateDefaults.AuthenticationScheme
+                            : GatewayAuthSchemes.JwtBearer;
                     }
                     if (gatewayOptions.Authentication.BasicAuth.Enabled)
                     {
                         return GatewayAuthSchemes.Basic;
                     }
-                    return NegotiateDefaults.AuthenticationScheme;
+                    return gatewayOptions.Authentication.IsKerberosConfigured
+                        ? NegotiateDefaults.AuthenticationScheme
+                        : GatewayAuthSchemes.JwtBearer;
                 }
 
                 if (authHeader.StartsWith("Negotiate ", StringComparison.OrdinalIgnoreCase))
                 {
-                    return NegotiateDefaults.AuthenticationScheme;
+                    return gatewayOptions.Authentication.IsKerberosConfigured
+                        ? NegotiateDefaults.AuthenticationScheme
+                        : GatewayAuthSchemes.JwtBearer;
                 }
 
                 if (!gatewayOptions.Authentication.RequireKerberosOnly &&
                     authHeader.StartsWith("NTLM ", StringComparison.OrdinalIgnoreCase))
                 {
-                    return NegotiateDefaults.AuthenticationScheme;
+                    return gatewayOptions.Authentication.IsKerberosConfigured
+                        ? NegotiateDefaults.AuthenticationScheme
+                        : GatewayAuthSchemes.JwtBearer;
                 }
 
                 // 2. ForwardAuth (Traefik / Kubernetes Ingress) when enabled and proxy headers are present
@@ -961,7 +972,12 @@ public static class GatewayServiceCollectionExtensions
                     return GatewayAuthSchemes.Basic;
                 }
 
-                return NegotiateDefaults.AuthenticationScheme;
+                if (gatewayOptions.Authentication.IsKerberosConfigured)
+                {
+                    return NegotiateDefaults.AuthenticationScheme;
+                }
+
+                return GatewayAuthSchemes.JwtBearer;
             };
         });
 

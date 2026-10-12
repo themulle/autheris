@@ -119,3 +119,49 @@ public sealed class GatewayNotImplementedException : Exception
     }
 }
 
+public sealed class ColumnNotReleasedException : GatewaySecurityException
+{
+    public string ColumnName { get; }
+
+    public ColumnNotReleasedException(string columnName)
+        : base($"Column '{columnName}' is not released for this principal.", "COLUMN_NOT_RELEASED")
+    {
+        ColumnName = columnName;
+    }
+}
+
+public sealed class FilterOnMaskedColumnException : GatewaySecurityException
+{
+    public string ColumnName { get; }
+
+    public FilterOnMaskedColumnException(string columnName)
+        : base($"Filtering on masked column '{columnName}' is not permitted.", "FILTER_ON_MASKED_COLUMN")
+    {
+        ColumnName = columnName;
+    }
+}
+
+public sealed class CostLimitExceededException : GatewaySecurityException
+{
+    public CostLimitExceededException(string message = "Query exceeded maximum allowed execution cost.")
+        : base(message, "COST_LIMIT")
+    {
+    }
+}
+
+public sealed class RowLimitExceededException : GatewaySecurityException
+{
+    public RowLimitExceededException(string message = "Query requested more rows than permitted by security policy.")
+        : base(message, "ROW_LIMIT")
+    {
+    }
+}
+
+public sealed class GatewayRateLimitException : GatewaySecurityException
+{
+    public GatewayRateLimitException(string message = "Rate limit exceeded.")
+        : base(message, "RATE_LIMIT")
+    {
+    }
+}
+

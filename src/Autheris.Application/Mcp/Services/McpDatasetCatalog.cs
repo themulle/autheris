@@ -190,14 +190,17 @@ public sealed class McpDatasetCatalog(
     private IReadOnlyList<McpAccessPath> DatasetAccess(TableIdentifier id)
     {
         var o = options?.Value ?? new GatewayOptions();
-        var paths = new List<McpAccessPath>
+        var paths = new List<McpAccessPath>();
+
+        if (o.OData.Enabled)
         {
-            new("OData v4", "GET", $"/odata/v4/{id.Domain}/{id.Schema}/{id.TableName}",
-                "OData query options $select, $filter, $orderby, $top, $skip. JSON with OData annotations."),
-            new("OpenAPI (REST)", "GET", $"/odata/v4/{id.Domain}/openapi.json",
-                "OpenAPI 3.1 description of the REST routes of this domain."),
-            new("MCP sample_rows", "MCP", SampleRows, "A few rows of this dataset, for a first look.")
-        };
+            paths.Add(new("OData v4", "GET", $"/odata/v4/{id.Domain}/{id.Schema}/{id.TableName}",
+                "OData query options $select, $filter, $orderby, $top, $skip. JSON with OData annotations."));
+            paths.Add(new("OpenAPI (REST)", "GET", $"/odata/v4/{id.Domain}/openapi.json",
+                "OpenAPI 3.1 description of the REST routes of this domain."));
+        }
+
+        paths.Add(new("MCP sample_rows", "MCP", SampleRows, "A few rows of this dataset, for a first look."));
 
         if (o.Arrow.Enabled)
         {
@@ -216,11 +219,15 @@ public sealed class McpDatasetCatalog(
         {
             new("GraphQL", "POST", GraphQlEndpoint,
                 "Preferred query path: query, filter, sort, page and follow relations between datasets in one request. Use the query_graphql tool.",
-                Preferred: true),
-            new("OData v4", "GET", "/odata/v4",
-                "Service document; /odata/v4/$metadata is the CSDL schema, /odata/v4/{domain}/{schema}/{table} the entity sets."),
-            new("OpenAPI (REST)", "GET", "/api/v1/openapi/index", "Index of the OpenAPI 3.1 documents per domain.")
+                Preferred: true)
         };
+
+        if (o.OData.Enabled)
+        {
+            endpoints.Add(new("OData v4", "GET", "/odata/v4",
+                "Service document; /odata/v4/$metadata is the CSDL schema, /odata/v4/{domain}/{schema}/{table} the entity sets."));
+            endpoints.Add(new("OpenAPI (REST)", "GET", "/api/v1/openapi/index", "Index of the OpenAPI 3.1 documents per domain."));
+        }
 
         if (o.WebSql.Enabled)
         {
@@ -249,6 +256,15 @@ public sealed class McpDatasetCatalog(
         if (o.Arrow.Enabled)
         {
             endpoints.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow", "Columnar bulk export of one dataset."));
+            if (o.Arrow.EnableFlightSql)
+            {
+                endpoints.Add(new("Arrow Flight SQL", "POST", "/api/v1/flight/sql", "Arrow Flight SQL protocol for analytical clients."));
+            }
+        }
+
+        if (o.Lakehouse.Enabled)
+        {
+            endpoints.Add(new("Iceberg REST Catalog", "GET", "/v1/namespaces", "Apache Iceberg REST Catalog protocol endpoint."));
         }
 
         return endpoints;
