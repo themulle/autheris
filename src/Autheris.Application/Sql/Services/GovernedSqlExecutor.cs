@@ -55,6 +55,7 @@ public sealed class GovernedSqlExecutor
     private readonly IDbSessionContextInitializer _sessionInitializer;
     private readonly SqlDataSourceResolver _dataSourceResolver;
     private readonly CompiledSqlAuditDigester _digester;
+    private readonly IProviderExecutionGuard _executionGuard;
 
     public GovernedSqlExecutor(
         GovernedSqlRewriter rewriter,
@@ -65,7 +66,8 @@ public sealed class GovernedSqlExecutor
         ILogger? logger = null,
         ITableReadConcurrencyGate? concurrencyGate = null,
         IDbSessionContextInitializer? sessionInitializer = null,
-        IKeyVaultSecretProvider? secretProvider = null)
+        IKeyVaultSecretProvider? secretProvider = null,
+        IProviderExecutionGuard? executionGuard = null)
     {
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -77,6 +79,7 @@ public sealed class GovernedSqlExecutor
         _sessionInitializer = sessionInitializer ?? new DbSessionContextInitializer();
         _dataSourceResolver = new SqlDataSourceResolver(_options, logger);
         _digester = new CompiledSqlAuditDigester(_options, secretProvider);
+        _executionGuard = executionGuard ?? PassThroughExecutionGuard.Instance;
     }
 
     public async Task ExecuteGovernedQueryAsync(
@@ -355,8 +358,12 @@ public sealed class GovernedSqlExecutor
                 int affectedRows;
                 try
                 {
-                    affectedRows = await CompiledSqlBinders.CheckedExecutorFor(binderDialect)
-                        .ExecuteInTransactionAsync(tx, compiled, clientValues, limits, ct).ConfigureAwait(false);
+                    var checkedTx = tx;
+                    affectedRows = await _executionGuard.RunAsync(
+                        connection,
+                        TimeSpan.FromSeconds(commandTimeout),
+                        () => CompiledSqlBinders.CheckedExecutorFor(binderDialect).ExecuteInTransactionAsync(checkedTx, compiled, clientValues, limits, ct),
+                        ct).ConfigureAwait(false);
                 }
                 catch (Exception dmlEx)
                 {
@@ -385,17 +392,27 @@ public sealed class GovernedSqlExecutor
             command.CommandTimeout = commandTimeout;
             binder.Bind(command, compiled, clientValues);
 
-            await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
-            {
-                if (rewrite.DeliveredRowLimit > 0)
+            // SEC-X1-10: the execution and the streaming of the rows run under the provider guard (SQLite interrupts at the timeout).
+            await _executionGuard.RunAsync(
+                connection,
+                TimeSpan.FromSeconds(commandTimeout),
+                async () =>
                 {
-                    await rowWriter(new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit), ct).ConfigureAwait(false);
-                }
-                else
-                {
-                    await rowWriter(reader, ct).ConfigureAwait(false);
-                }
-            }
+                    await using (var reader = await command.ExecuteReaderAsync(CommandBehavior.SequentialAccess, ct).ConfigureAwait(false))
+                    {
+                        if (rewrite.DeliveredRowLimit > 0)
+                        {
+                            await rowWriter(new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit), ct).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await rowWriter(reader, ct).ConfigureAwait(false);
+                        }
+                    }
+
+                    return true;
+                },
+                ct).ConfigureAwait(false);
 
             if (tx != null)
             {

@@ -31,7 +31,8 @@ using Xunit;
 /// <see cref="IDbSessionContextInitializer"/> and <see cref="ISqlEngine"/> from DI, plus the Oracle binder. The Oracle data source
 /// is configured like an operator would (<c>Gateway:DataSources:Connections</c>) on a pool of size one, so every statement of every
 /// tenant reuses the same physical session; the database defaults are hostile (linguistic, case-insensitive logon trigger).
-/// The WebSQL HTTP endpoint still rejects Oracle (gap G-2, SEC-X1-03): X1.3 decides admission, and only with this suite green.
+/// Since X1.3 the WebSQL HTTP endpoint admits Oracle (SEC-X1-03): admission is derived from the capability tier and this suite is its evidence
+/// (<c>Admission_OracleOnlyWithF5Evidence</c> pins the test names).
 /// </summary>
 [Collection(OracleCollection.Name)]
 public sealed class OracleGatewayPathTests : IDisposable
@@ -276,18 +277,61 @@ public sealed class OracleGatewayPathTests : IDisposable
         Ids(await RunAsync("SELECT id FROM orders", "other")).ShouldBe(new List<int> { 5 });
     }
 
-    // ---- WebSQL admission (gap G-2) ----
+    // ---- WebSQL admission (X1.3, SEC-X1-03) ----
 
     [Fact]
-    public async Task WebSqlEndpoint_DoesNotAdmitOracle_UntilX1Decides()
+    public async Task WebSqlEndpoint_AdmitsOracle_OnTheCompiledPath_WithTenantIsolationAndSanitizedErrors()
     {
-        // SEC-X1-03: tier Production (compiler) is not admission. The admitted set changes only with X1.3 and this suite green.
-        var client = _host.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Tenant-Id", "acme");
+        // X1.3: Oracle (tier Production) is admitted, because this suite (WP-F5 / M-10) is green. The HTTP door now runs the compiler, the
+        // BindByName binder and the Oracle session pin; the engine-level cases above are the same path without HTTP.
+        using (var scope = _host.Services.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
+            await repo.UpsertTableMetadataAsync(new Autheris.Domain.Model.TableMetadata
+            {
+                Table = new Autheris.Domain.Model.Table
+                {
+                    Id = Guid.NewGuid(), DisplayName = "ORDERS", TableName = "ORDERS", SchemaName = AstCompilerOracleFixture.AppUser, SourceName = Source, SourceType = "Oracle"
+                },
+                Identifier = new Autheris.Domain.Common.TableIdentifier(Source, AstCompilerOracleFixture.AppUser, "ORDERS"),
+                Columns =
+                [
+                    new Autheris.Domain.Model.TableColumn { ColumnName = "ID", DataType = "int" },
+                    new Autheris.Domain.Model.TableColumn { ColumnName = "TENANT_ID", DataType = "varchar" },
+                    new Autheris.Domain.Model.TableColumn { ColumnName = "REGION", DataType = "varchar" },
+                    new Autheris.Domain.Model.TableColumn { ColumnName = "EMAIL", DataType = "varchar", IsSensitive = true }
+                ],
+                ColumnMaskingRules = new Dictionary<string, Autheris.Domain.Model.MaskingRule> { ["EMAIL"] = new() { RuleType = "REDACT" } }
+            });
+        }
 
-        var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql = "SELECT id FROM AUTH_APP.ORDERS", dataSource = Source });
+        async Task<System.Text.Json.JsonDocument> RunAs(string tenant, string sql)
+        {
+            var client = _host.CreateClient();
+            client.DefaultRequestHeaders.Add("X-Tenant-Id", tenant);
+            var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql, dataSource = Source });
+            var body = await response.Content.ReadAsStringAsync();
+            response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+            return System.Text.Json.JsonDocument.Parse(body);
+        }
 
-        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
-        (await response.Content.ReadAsStringAsync()).ShouldNotContain("alice.smith");
+        static List<int> IdsOf(System.Text.Json.JsonDocument doc) =>
+            doc.RootElement.GetProperty("rows").EnumerateArray()
+                .Select(r => r.ValueKind == System.Text.Json.JsonValueKind.Array ? r[0].GetInt32() : r.GetProperty("ID").GetInt32()).OrderBy(x => x).ToList();
+
+        using var acme = await RunAs("acme", $"SELECT id, email FROM {AstCompilerOracleFixture.AppUser}.ORDERS ORDER BY id");
+        IdsOf(acme).ShouldBe(new List<int> { 1, 2, 6 });                                // 'ACME' (3, 4) and 'other' (5) are other tenants
+        acme.RootElement.GetRawText().ShouldNotContain("alice.smith");                  // the raw value never leaves the database
+
+        using var other = await RunAs("other", $"SELECT id FROM {AstCompilerOracleFixture.AppUser}.ORDERS ORDER BY id");
+        IdsOf(other).ShouldBe(new List<int> { 5 });
+
+        // a provider error is a stable code with a fixed message (ORA-01722 text never reaches the caller)
+        var failing = _host.CreateClient();
+        failing.DefaultRequestHeaders.Add("X-Tenant-Id", "acme");
+        var error = await failing.PostAsJsonAsync("/api/v1/sql", new { sql = $"SELECT CAST(region AS integer) FROM {AstCompilerOracleFixture.AppUser}.ORDERS", dataSource = Source });
+        var errorBody = await error.Content.ReadAsStringAsync();
+        errorBody.ShouldNotContain("ORA-");
+        errorBody.ShouldContain("code");
     }
 }

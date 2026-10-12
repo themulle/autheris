@@ -111,6 +111,8 @@ public static class GatewayStorageServiceExtensions
         // admitted to WebSQL (SqlDialectMapper.IsExecutable, S-4) until a green G9 run.
         services.AddDatabricksStatementExecution();
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
+        // SEC-X1-10: SQLite statements are interrupted at the execution timeout and on cancellation.
+        services.AddSingleton<Autheris.Application.Sql.Interfaces.IProviderExecutionGuard, SqliteProviderExecutionGuard>();
 
         // WP-X0c (CR-ADG-47): column types and collations from database metadata. The TTL is validated here, so a value above
         // the 300 s maximum fails the startup (SEC-X1-09). Nothing consumes the provider before X1.

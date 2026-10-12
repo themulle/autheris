@@ -72,7 +72,7 @@ INSERT INTO md.client VALUES (1, 'CH'), (2, 'DE'), (1, 'AT');";
             {
                 Connections = new Dictionary<string, DataSourceConnectionOptions>
                 {
-                    ["erp"] = new() { Provider = "PostgreSql", ConnectionString = _container!.GetConnectionString() }
+                    ["erp"] = new() { Provider = "PostgreSql", ConnectionString = _container!.GetConnectionString(), DefaultSchema = "public" }
                 }
             }
         }));

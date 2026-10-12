@@ -58,7 +58,7 @@ public sealed class AstCompilerOracleExecutionTests
         _fx = fixture;
     }
 
-    private DataSourceConnectionOptions Options() => new() { Provider = "Oracle", ConnectionString = _fx.AppConnectionString };
+    private DataSourceConnectionOptions Options() => new() { Provider = "Oracle", ConnectionString = _fx.AppConnectionString, DefaultSchema = AstCompilerOracleFixture.AppUser };
 
     private static InMemoryTableCatalog Catalog() => new(new[]
     {

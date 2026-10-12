@@ -58,9 +58,9 @@ public sealed class GovernedSqlExecutorX1Tests
         };
     }
 
-    private static GatewayOptions Gateway(string provider, long maxAffectedRows = 1000, bool storeCompiledSql = false, string? hmacRef = null) => new()
+    private static GatewayOptions Gateway(string provider, long maxAffectedRows = 1000, bool storeCompiledSql = false, string? hmacRef = null, int timeoutSeconds = 30) => new()
     {
-        WebSql = new WebSqlOptions { Enabled = true, AllowDml = true, DmlWriterRoles = ["Writer"], DefaultDataSourceName = DataSource, MaxAffectedRows = maxAffectedRows },
+        WebSql = new WebSqlOptions { Enabled = true, AllowDml = true, DmlWriterRoles = ["Writer"], DefaultDataSourceName = DataSource, MaxAffectedRows = maxAffectedRows, ExecutionTimeoutSeconds = timeoutSeconds },
         Audit = new AuditOptions { StoreCompiledSql = storeCompiledSql },
         DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = hmacRef ?? string.Empty },
         DataSources = new SqlDataSourceOptions
@@ -112,7 +112,8 @@ public sealed class GovernedSqlExecutorX1Tests
         Func<FakeDbCommand>? commandFactory = null,
         bool sessionTransaction = false,
         GatewayOptions? options = null,
-        IKeyVaultSecretProvider? secrets = null)
+        IKeyVaultSecretProvider? secrets = null,
+        IProviderExecutionGuard? guard = null)
     {
         var gateway = options ?? Gateway(provider);
         var connection = new FakeDbConnection(commandFactory);
@@ -127,7 +128,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var log = new CapturingLogger<GovernedSqlExecutor>();
         var opts = Options.Create(gateway);
         var executor = new GovernedSqlExecutor(
-            new GovernedSqlRewriter(opts), opts, auditRepo, factory, environment: null, logger: log, sessionInitializer: session, secretProvider: secrets);
+            new GovernedSqlRewriter(opts), opts, auditRepo, factory, environment: null, logger: log, sessionInitializer: session, secretProvider: secrets, executionGuard: guard);
         return new Harness { Executor = executor, Factory = factory, Connection = connection, Audit = audit, Log = log };
     }
 
@@ -199,6 +200,82 @@ public sealed class GovernedSqlExecutorX1Tests
 
         tx.Commits.ShouldBe(1);
         tx.LastCommitTokenCanBeCanceled.ShouldBe(false);
+    }
+
+    // -------------------------------------------------------------------------------------------------------------------
+    // X1.2 / SEC-X1-10: the provider execution guard (SQLite interrupts a statement at the timeout)
+    // -------------------------------------------------------------------------------------------------------------------
+
+    private sealed class RecordingGuard : IProviderExecutionGuard
+    {
+        public List<TimeSpan> Timeouts { get; } = [];
+
+        public async Task<T> RunAsync<T>(DbConnection connection, TimeSpan timeout, Func<Task<T>> work, CancellationToken ct)
+        {
+            Timeouts.Add(timeout);
+            return await work();
+        }
+    }
+
+    [Fact]
+    public async Task ReadAndDml_RunUnderTheProviderExecutionGuard_WithTheConfiguredTimeout()
+    {
+        var read = await CompileAsync("Sqlite", "SELECT id FROM orders");
+        var dml = await CompileAsync("Sqlite", "UPDATE orders SET amount = 1 WHERE id = 1");
+        var guard = new RecordingGuard();
+        var options = Gateway("Sqlite", timeoutSeconds: 7);
+        var h = CreateHarness("Sqlite", options: options, guard: guard);
+
+        await ExecuteAsync(h, read);
+        await ExecuteAsync(h, dml, dml: Dml());
+
+        guard.Timeouts.ShouldBe([TimeSpan.FromSeconds(7), TimeSpan.FromSeconds(7)]);
+    }
+
+    [Fact]
+    public async Task AnExpensiveStatement_OnRealSqlite_IsInterruptedWithinTheTimeoutPlusOneSecond_AsATimeout()
+    {
+        // A three-way cross join of 1500 rows (3.4 billion row combinations): without the guard the statement runs for minutes
+        // (SQLite has no server-side timeout; CommandTimeout is only a busy timeout). The guard interrupts it after the 1 s budget.
+        const string Sql = "SELECT count(*) FROM orders a, orders b, orders c WHERE a.id + b.id + c.id > 0";
+        var compiled = await CompileAsync("Sqlite", Sql);
+        var path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "x1-guard-" + Guid.NewGuid().ToString("N") + ".db");
+        try
+        {
+            var connectionString = $"Data Source={path}";
+            await using (var setup = new Microsoft.Data.Sqlite.SqliteConnection(connectionString))
+            {
+                await setup.OpenAsync();
+                await using var create = setup.CreateCommand();
+                create.CommandText = "CREATE TABLE orders (id INTEGER, amount REAL, tenant_id TEXT); " +
+                    "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 1500) INSERT INTO orders SELECT i, 1, 'tenant_a' FROM n;";
+                await create.ExecuteNonQueryAsync();
+            }
+
+            var gateway = Gateway("Sqlite", timeoutSeconds: 1);
+            var factory = Substitute.For<ISqlConnectionFactory>();
+            factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
+                .Returns(async _ => { var c = new Microsoft.Data.Sqlite.SqliteConnection(connectionString); await c.OpenAsync(); return (DbConnection)c; });
+            var session = Substitute.For<IDbSessionContextInitializer>();
+            session.InitializeSessionAsync(Arg.Any<DbConnection>(), Arg.Any<DatabaseDialect>(), Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<bool>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult<DbTransaction?>(null));
+            var opts = Options.Create(gateway);
+            var executor = new GovernedSqlExecutor(
+                new GovernedSqlRewriter(opts), opts, Substitute.For<IAuditLogRepository>(), factory, null, NullLogger.Instance, null, session,
+                executionGuard: new Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard());
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+
+            await Should.ThrowAsync<TimeoutException>(() => executor.ExecuteRewrittenAsync(
+                new GovernedSqlQueryRequest(Sql), Writer(), new TenantId(Tenant), Rewrite(compiled), new DmlAuditContext(),
+                new Dictionary<string, object?>(), (_, _) => Task.CompletedTask, CancellationToken.None));
+
+            clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2.5));
+        }
+        finally
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+            try { System.IO.File.Delete(path); } catch { /* best effort */ }
+        }
     }
 
     // -------------------------------------------------------------------------------------------------------------------

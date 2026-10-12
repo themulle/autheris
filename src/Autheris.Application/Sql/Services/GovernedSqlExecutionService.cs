@@ -72,8 +72,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IServiceProvider? serviceProvider = null,
         IFederatedQueryExecutionService? federatedExecutionService = null,
         TypedPolicySources? typedPolicies = null,
-        GovernancePolicyFactory? policyFactory = null)
-        : this(options, NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, planCache, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies, policyFactory)
+        GovernancePolicyFactory? policyFactory = null,
+        IProviderExecutionGuard? executionGuard = null)
+        : this(options, NullAuditLogRepository.Instance, policyEnforcement, consentResolution, tableRepository, connectionFactory, clientIpResolver, environment, logger, consentRepository, secretProvider, sqlEngine, planCache, sqlSecurityValidator, concurrencyGate, sessionInitializer, rebacEvaluator, consentCache, mandatoryFilters, contractManager, accessProfileRepository, memoryCache, serviceProvider, federatedExecutionService, typedPolicies, policyFactory, executionGuard)
     {
     }
 
@@ -103,7 +104,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         IServiceProvider? serviceProvider = null,
         IFederatedQueryExecutionService? federatedExecutionService = null,
         TypedPolicySources? typedPolicies = null,
-        GovernancePolicyFactory? policyFactory = null)
+        GovernancePolicyFactory? policyFactory = null,
+        IProviderExecutionGuard? executionGuard = null)
     {
         _serviceProvider = serviceProvider;
         _federatedExecutionService = federatedExecutionService;
@@ -139,7 +141,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             logger,
             concurrencyGate,
             sessionInitializer,
-            secretProvider);
+            secretProvider,
+            executionGuard);
     }
 
     private IFederatedQueryExecutionService ResolveFederatedService()
