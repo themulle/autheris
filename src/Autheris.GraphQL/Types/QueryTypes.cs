@@ -270,15 +270,31 @@ public sealed class Query
         [Service] IHttpContextAccessor httpContextAccessor,
         [Service] IOptions<GatewayOptions>? options = null,
         CancellationToken ct = default)
-        => GetCatalogAsync(null, null, null, null, repository, repository, httpContextAccessor, options, ct);
+        => GetCatalogAsync(null, null, null, null, null, repository, repository, repository, repository, httpContextAccessor, options, ct);
+
+    [GraphQLIgnore]
+    public Task<IReadOnlyList<TableMetadataDto>> GetCatalogAsync(
+        string? domain,
+        int? first,
+        int? after,
+        string? search,
+        ITableMetadataRepository metadataRepository,
+        IConsentRepository consentRepository,
+        IHttpContextAccessor httpContextAccessor,
+        IOptions<GatewayOptions>? options = null,
+        CancellationToken ct = default)
+        => GetCatalogAsync(domain, first, after, search, tag: null, metadataRepository, consentRepository, approvalRepository: null, dataOwnershipRepository: null, httpContextAccessor, options, ct);
 
     public async Task<IReadOnlyList<TableMetadataDto>> GetCatalogAsync(
         string? domain = null,
         int? first = null,
         int? after = null,
         string? search = null,
+        string? tag = null,
         [Service] ITableMetadataRepository metadataRepository = default!,
         [Service] IConsentRepository consentRepository = default!,
+        [Service] IConsentApprovalRepository? approvalRepository = null,
+        [Service] IDataOwnershipRepository? dataOwnershipRepository = null,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] IOptions<GatewayOptions>? options = null,
         CancellationToken ct = default)
@@ -322,9 +338,11 @@ public sealed class Query
                 DisplayName = t.Table.DisplayName,
                 Sensitivity = t.Table.Sensitivity,
                 Description = t.Table.Description,
-                Columns = t.Columns.Select(c => c.ColumnName).ToList()
+                Columns = t.Columns.Select(c => c.ColumnName).ToList(),
+                Tags = t.Table.Tags ?? Array.Empty<string>(),
+                AccessStatus = "GRANTED"
             });
-            return FilterAndPaginateCatalog(dtos, domain, search, first, after);
+            return FilterAndPaginateCatalog(dtos, domain, search, tag, first, after);
         }
 
         if (principal?.Identity?.IsAuthenticated != true)
@@ -366,17 +384,38 @@ public sealed class Query
                 DisplayName = t.Table.DisplayName,
                 Sensitivity = t.Table.Sensitivity,
                 Description = t.Table.Description,
-                Columns = t.Columns.Select(c => c.ColumnName).ToList()
+                Columns = t.Columns.Select(c => c.ColumnName).ToList(),
+                Tags = t.Table.Tags ?? Array.Empty<string>(),
+                AccessStatus = "GRANTED"
             });
-            return FilterAndPaginateCatalog(dtos, domain, search, first, after);
+            return FilterAndPaginateCatalog(dtos, domain, search, tag, first, after);
         }
 
-        // F-CONS-04: Non-admins only see tables for which they have at least one active ALLOW consent
+        // F-CONS-04: Non-admins only see tables for which they have at least one active ALLOW consent (or visibility SUMMARY/FULL)
         var tenantId = principal.GetTenantId();
         var allSubjects = groupSids.Append(userSid).ToList();
         var activeConsents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(allSubjects, roles, DateTimeOffset.UtcNow, tenantId, ct);
-        var visibleTables = Autheris.Application.Services.CatalogVisibility.FilterForSubject(allTables, activeConsents, tenantId)
-            .Select(t => new TableMetadataDto
+
+        IReadOnlyList<ConsentRequest> pendingRequests = Array.Empty<ConsentRequest>();
+        if (approvalRepository != null)
+        {
+            try
+            {
+                pendingRequests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid, "PENDING", ct).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Fail-safe
+            }
+        }
+
+        var visibleTables = Autheris.Application.Services.CatalogVisibility.FilterForSubject(allTables, activeConsents, tenantId);
+        var catalogList = new List<TableMetadataDto>();
+
+        foreach (var t in visibleTables)
+        {
+            var status = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin: false);
+            catalogList.Add(new TableMetadataDto
             {
                 Domain = t.Identifier.Domain,
                 Schema = t.Table.SchemaName,
@@ -384,16 +423,27 @@ public sealed class Query
                 DisplayName = t.Table.DisplayName,
                 Sensitivity = t.Table.Sensitivity,
                 Description = t.Table.Description,
-                Columns = t.Columns.Select(c => c.ColumnName).ToList()
+                Columns = t.Columns.Select(c => c.ColumnName).ToList(),
+                Tags = t.Table.Tags ?? Array.Empty<string>(),
+                AccessStatus = status
             });
+        }
 
-        return FilterAndPaginateCatalog(visibleTables, domain, search, first, after);
+        return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);
     }
 
     private static IReadOnlyList<TableMetadataDto> FilterAndPaginateCatalog(
         IEnumerable<TableMetadataDto> tables,
         string? domain,
         string? search,
+        int? first,
+        int? after) => FilterAndPaginateCatalog(tables, domain, search, null, first, after);
+
+    private static IReadOnlyList<TableMetadataDto> FilterAndPaginateCatalog(
+        IEnumerable<TableMetadataDto> tables,
+        string? domain,
+        string? search,
+        string? tag,
         int? first,
         int? after)
     {
@@ -402,6 +452,11 @@ public sealed class Query
         if (!string.IsNullOrWhiteSpace(domain))
         {
             query = query.Where(t => string.Equals(t.Domain, domain, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(tag))
+        {
+            query = query.Where(t => t.Tags.Any(tg => string.Equals(tg, tag.Trim(), StringComparison.OrdinalIgnoreCase)));
         }
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -713,4 +768,8 @@ public sealed class TableMetadataDto
     public string Sensitivity { get; init; } = string.Empty;
     public string? Description { get; init; }
     public IReadOnlyList<string> Columns { get; init; } = [];
+    public IReadOnlyList<string> Tags { get; init; } = [];
+    public string? AccessStatus { get; init; }
+    public string? DataOwner { get; init; }
+    public IReadOnlyList<string>? Delegates { get; init; }
 }
