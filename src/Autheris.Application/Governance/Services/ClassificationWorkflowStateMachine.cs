@@ -17,16 +17,19 @@ using Microsoft.Extensions.Options;
 public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflowStateMachine
 {
     private readonly IOptionsMonitor<GatewayOptions> _gatewayOptions;
+    private readonly IClassificationProposalStore? _proposalStore;
     private readonly IEnumerable<IGovernanceWorkflowHook>? _hooks;
     private readonly ILogger<ClassificationWorkflowStateMachine> _logger;
 
     public ClassificationWorkflowStateMachine(
         IOptionsMonitor<GatewayOptions> gatewayOptions,
         ILogger<ClassificationWorkflowStateMachine> logger,
+        IClassificationProposalStore? proposalStore = null,
         IEnumerable<IGovernanceWorkflowHook>? hooks = null)
     {
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _proposalStore = proposalStore;
         _hooks = hooks;
     }
 
@@ -80,6 +83,12 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
         var profile = options.Workflow.GetActiveProfile();
         var pipeline = profile.ApprovalPipeline;
 
+        using var activity = Diagnostics.ClassificationDiagnostics.ActivitySource.StartActivity("autheris.governance.workflow_transition");
+        activity?.SetTag("proposal.id", proposal.ProposalId);
+        activity?.SetTag("table.id", proposal.TableIdentifier.ToQualifiedName());
+        activity?.SetTag("reviewer.role", request.ReviewerRole);
+        activity?.SetTag("action", request.Action);
+
         TableClassificationApprovalResult result;
 
         // Action: REJECT
@@ -90,6 +99,7 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                 Success: true,
                 NewStatus: "REJECTED",
                 Message: "Classification proposal was rejected.");
+            Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "REJECTED");
         }
         else if (string.Equals(request.ReviewerRole, "DATA_GOVERNANCE_REVIEWER", StringComparison.OrdinalIgnoreCase) &&
                  !string.IsNullOrWhiteSpace(proposal.DataOwnerSid) &&
@@ -103,6 +113,9 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                 NewStatus: proposal.Status,
                 Message: "SoD Violation: Data Owner cannot act as Governance Reviewer on their own proposal.",
                 ErrorCode: "SOD_ANTI_SELF_APPROVAL_VIOLATION");
+
+            Diagnostics.ClassificationDiagnostics.RecordSodViolation(proposal.TableIdentifier.ToQualifiedName());
+            Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "BLOCKED_SOD");
         }
         else
         {
@@ -128,6 +141,9 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                     Message: $"Step-Up 2FA/MFA token is required for sensitivity rank {maxEffectiveRank}.",
                     RequiresStepUpAuth: true,
                     ErrorCode: "STEP_UP_AUTH_REQUIRED");
+
+                Diagnostics.ClassificationDiagnostics.RecordStepUpChallenge(maxEffectiveRank);
+                Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "STEP_UP_REQUIRED");
             }
             else
             {
@@ -145,6 +161,7 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                         Success: true,
                         NewStatus: "CLASSIFIED",
                         Message: "Classification activated and approved.");
+                    Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "CLASSIFIED");
                 }
                 else if (string.Equals(request.ReviewerRole, "DATA_OWNER", StringComparison.OrdinalIgnoreCase))
                 {
@@ -154,6 +171,7 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                         NewStatus: "PENDING_GOVERNANCE_REVIEW",
                         Message: "Stage 1 approved. Awaiting final Governance Compliance review.",
                         RequiresSecondStage: true);
+                    Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "PENDING_GOVERNANCE_REVIEW");
                 }
                 else if (string.Equals(request.ReviewerRole, "DATA_GOVERNANCE_REVIEWER", StringComparison.OrdinalIgnoreCase))
                 {
@@ -162,6 +180,7 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                         Success: true,
                         NewStatus: "CLASSIFIED",
                         Message: "Classification sealed and activated cluster-wide.");
+                    Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "CLASSIFIED");
                 }
                 else
                 {
@@ -170,8 +189,15 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                         NewStatus: proposal.Status,
                         Message: $"Unknown reviewer role '{request.ReviewerRole}'.",
                         ErrorCode: "INVALID_REVIEWER_ROLE");
+                    Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "INVALID_ROLE");
                 }
             }
+        }
+
+        if (result.Success && _proposalStore != null)
+        {
+            var updatedProposal = proposal with { Status = result.NewStatus };
+            await _proposalStore.SaveProposalAsync(updatedProposal, ct).ConfigureAwait(false);
         }
 
         if (_hooks != null)

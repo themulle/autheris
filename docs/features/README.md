@@ -25,6 +25,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-AI-12** | Official Hybrid MCP Gateway (Query Tools, Native Resources & Prompts) | [f-ai-12-hybrid-mcp-gateway.md](f-ai-12-hybrid-mcp-gateway.md) |
 | **F-AI-13** | Admin MCP Tools & Two-Phase Access Planning (HitL) | [f-ai-13-admin-mcp-tools-two-phase-hitl.md](f-ai-13-admin-mcp-tools-two-phase-hitl.md) |
 | **F-AI-14** | MCP Schema-RAG & Hybrid-Vector Search Engine | [f-ai-14-mcp-schema-rag-vector-search.md](f-ai-14-mcp-schema-rag-vector-search.md) |
+| **F-AI-15** | Offline Doc- & Runbook-MCP Gateway | [f-ai-15-offline-doc-runbook-mcp-gateway.md](f-ai-15-offline-doc-runbook-mcp-gateway.md) |
 | **F-API-03** | Dual-Access Exposure (OData v4 & Dynamic OpenAPI 3.1) | [f-api-03-odata-openapi.md](f-api-03-odata-openapi.md) |
 | **F-API-04** | Upstream Web API & Microservice Ingestion via OpenAPI | [f-api-04-openapi-ingestion.md](f-api-04-openapi-ingestion.md) |
 | **F-API-07** | Canonical System Metadata & Monitoring Schema ($system) | [f-api-07-system-metadata-monitoring.md](f-api-07-system-metadata-monitoring.md) |
@@ -62,6 +63,8 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-GOV-14** | Federated Virtual Filters on Web-APIs via DuckDB & Adaptive Pushdown | [f-gov-14-federated-virtual-filters.md](f-gov-14-federated-virtual-filters.md) |
 | **F-GOV-15** | Declarative Consent GitOps, Effective Access Introspection & Scope Governance | [f-gov-15-declarative-consents-scopes.md](f-gov-15-declarative-consents-scopes.md) |
 | **F-GOV-16** | Catalog Discovery Transparency, Data Ownership & Response Masking Metadata | [f-gov-16-catalog-ownership-transparency.md](f-gov-16-catalog-ownership-transparency.md) |
+| **F-GOV-17** | GraphQL Cursor Pagination, Temporal Types & dbt Column Semantics | [f-gov-17-graphql-temporal-dbt-semantics.md](f-gov-17-graphql-temporal-dbt-semantics.md) |
+| **F-GOV-18** | Dual-Mode DataHub Integration, Declarative Contracts & SLA Circuit Breakers | [f-gov-18-datahub-integration-contracts.md](f-gov-18-datahub-integration-contracts.md) |
 | **F-INT-01** | Spotify Backstage Software Catalog Integration | [f-int-01-backstage-software-catalog.md](f-int-01-backstage-software-catalog.md) |
 | **F-MASK-02** | Extended Column Masking Engine (GEO_JITTER, PARTIAL_MASK, TOKENIZATION) | [f-mask-02-extended-masking-engine.md](f-mask-02-extended-masking-engine.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |

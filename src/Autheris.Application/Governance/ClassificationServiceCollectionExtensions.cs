@@ -11,6 +11,7 @@ public static class ClassificationServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddAutherisDataClassification(this IServiceCollection services)
     {
+        services.AddSingleton<IClassificationProposalStore, InMemoryClassificationProposalStore>();
         services.AddSingleton<IClassificationEngine, ClassificationEngine>();
         services.AddSingleton<IClassificationWorkflowStateMachine, ClassificationWorkflowStateMachine>();
         services.AddSingleton<IWormConfigurationAuditService, WormConfigurationAuditService>();

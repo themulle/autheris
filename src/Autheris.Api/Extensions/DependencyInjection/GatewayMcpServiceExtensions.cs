@@ -18,6 +18,8 @@ public static class GatewayMcpServiceExtensions
     {
         // Model Context Protocol (MCP) Server & AI Data Guardrails
         services.AddSingleton<ISemanticPromptGuardrail, SemanticPromptGuardrail>();
+        services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocSearchService, Autheris.Application.Docs.Services.InMemoryDocSearchService>();
+        services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocIngestor, Autheris.Application.Docs.Services.MarkdownDocIngestor>();
         services.AddSingleton<IGoldenQueryService, GoldenQueryService>();
         services.AddSingleton<ISemanticMcpCompiler, SemanticMcpCompiler>();
         services.AddScoped<IMcpDatasetCatalog, McpDatasetCatalog>();

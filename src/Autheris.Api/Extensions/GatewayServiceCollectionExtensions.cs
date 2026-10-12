@@ -600,6 +600,7 @@ public static class GatewayServiceCollectionExtensions
             .UseRequest<Autheris.GraphQL.Interceptors.SchemaSunsettingExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.CdnCacheTagMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.MaskedFieldsMiddleware>()
+            .UseRequest<Autheris.GraphQL.Interceptors.PaginationTruncationMiddleware>()
             .UseRequest<Autheris.GraphQL.Federation.SubgraphResultMaskingMiddleware>()
             .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
             .UseOperationCache()
