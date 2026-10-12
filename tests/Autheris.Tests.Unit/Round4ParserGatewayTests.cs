@@ -8,12 +8,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Sql;
+using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Unit.Databricks;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -41,10 +43,13 @@ public sealed class Round4ParserGatewayTests
             ],
             "Test"));
 
+    // The compiler emits the canonical catalog name; SQLite has no "public" schema.
+    private static string SchemaOf(string sourceType) => sourceType.Equals("Sqlite", StringComparison.OrdinalIgnoreCase) ? "main" : "public";
+
     private static TableMetadata CreateTable(string tableName, string sourceType) => new()
     {
-        Identifier = new TableIdentifier("default", "public", tableName),
-        Table = new Table { TableName = tableName, SchemaName = "public", SourceName = string.Empty, SourceType = sourceType },
+        Identifier = new TableIdentifier("default", SchemaOf(sourceType), tableName),
+        Table = new Table { TableName = tableName, SchemaName = SchemaOf(sourceType), SourceName = string.Empty, SourceType = sourceType },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "int" },
@@ -100,7 +105,8 @@ public sealed class Round4ParserGatewayTests
     private static GovernedSqlExecutionService CreateService(
         GatewayOptions options,
         ITableMetadataRepository repository,
-        ISqlConnectionFactory? connectionFactory = null)
+        ISqlConnectionFactory? connectionFactory = null,
+        Microsoft.Extensions.Logging.ILogger<GovernedSqlExecutionService>? logger = null)
     {
         var consentRepository = Substitute.For<IConsentRepository>();
         consentRepository.GetActiveConsentsForSubjectsAsync(
@@ -129,11 +135,11 @@ public sealed class Round4ParserGatewayTests
             Options.Create(options),
             policyEnforcement: null,
             consentResolution: consentResolution,
-            tableRepository: repository,
+            tableRepository: repository, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repository), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: connectionFactory,
             clientIpResolver: null,
             environment: null,
-            logger: NullLogger<GovernedSqlExecutionService>.Instance,
+            logger: logger ?? NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consentRepository,
             secretProvider: null);
     }
@@ -168,13 +174,12 @@ public sealed class Round4ParserGatewayTests
     {
         var service = CreatePostgreSqlService();
 
-        var secured = await RewriteAsync(
-            service,
+        var compiled = await service.CompileAsync(
             "SELECT region, count(*), max(id), round(avg(id), 2), lower(name), coalesce(region, 'n/a'), " +
-            "row_number() OVER (ORDER BY id) FROM employees GROUP BY region, name, id");
+            "row_number() OVER (ORDER BY id) FROM employees GROUP BY region, name, id", CreateUser(), new TenantId(Tenant));
 
-        secured.ShouldContain("tenant_id = 'tenant_a'");
-        secured.ShouldContain("count(*)");
+        compiled.ShouldBindTenant(Tenant);
+        compiled.Sql.ShouldContain("count(*)", Case.Insensitive);
     }
 
     [Theory]
@@ -198,9 +203,12 @@ public sealed class Round4ParserGatewayTests
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(strict, "SELECT md5(name) FROM employees"));
         ex.Message.ShouldContain("md5");
 
+        // X1 (CR-ADG-02): AdditionalAllowedFunctions can only narrow the dialect's function map; the compiler has no emission rule
+        // for md5 on PostgreSQL, so the statement is still rejected (stable code SQL_POLICY_VIOLATION), never passed through.
         var extended = CreatePostgreSqlService(["md5"]);
-        var secured = await RewriteAsync(extended, "SELECT md5(name) FROM employees");
-        secured.ShouldContain("md5(name)");
+        var rejected = await Should.ThrowAsync<System.Security.SecurityException>(() => RewriteAsync(extended, "SELECT md5(name) FROM employees"));
+        SqlCompilerErrorMapper.TryMap(rejected, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
     }
 
     [Fact]
@@ -218,7 +226,7 @@ public sealed class Round4ParserGatewayTests
     {
         var sqlServer = CreateService(CreateOptions(), CreateRepository(CreateTable("orders", "SqlServer")));
         var secured = await RewriteAsync(sqlServer, "SELECT len(name), isnull(region, 'n/a') FROM orders");
-        secured.ShouldContain("len(name)");
+        secured.ShouldContain("LEN(", Case.Insensitive);
 
         var postgres = CreateService(CreateOptions(), CreateRepository(CreateTable("orders", "PostgreSQL")));
         await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(postgres, "SELECT len(name) FROM orders"));
@@ -240,7 +248,6 @@ public sealed class Round4ParserGatewayTests
     }
 
     [Theory]
-    [InlineData("Oracle")]
     [InlineData("Databricks")]
     public async Task P05_UnsupportedTableDialect_IsRejected(string sourceType)
     {
@@ -248,6 +255,11 @@ public sealed class Round4ParserGatewayTests
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(service, "SELECT id FROM orders"));
         ex.Message.ShouldContain("only supports");
+        // X1.3: the message lists the admitted dialects from the capability table.
+        foreach (var admitted in SqlDialectMapper.AdmittedDialects)
+        {
+            ex.Message.ShouldContain(SqlDialectMapper.DisplayName(admitted));
+        }
     }
 
     [Fact]
@@ -262,7 +274,8 @@ public sealed class Round4ParserGatewayTests
     [Fact]
     public async Task P05_UnknownConnectionProvider_IsRejected()
     {
-        var options = CreateOptions(defaultConnection: new DataSourceConnectionOptions { Provider = "Oracle", ConnectionString = "Data Source=unused" });
+        // Databricks maps and connects, but is Experimental and therefore not admitted to WebSQL (S-4).
+        var options = CreateOptions(defaultConnection: new DataSourceConnectionOptions { Provider = "Databricks", ConnectionString = "Data Source=unused" });
         var service = CreateService(options, CreateRepository(CreateTable("orders", "PostgreSQL")));
 
         var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(service, "SELECT id FROM orders"));
@@ -291,7 +304,10 @@ public sealed class Round4ParserGatewayTests
         mssql.ShouldBe(DatabaseDialect.SqlServer);
         GovernedSqlExecutionService.TryMapProviderToDialect("Sqlite", out var sqlite).ShouldBeTrue();
         sqlite.ShouldBe(DatabaseDialect.Sqlite);
-        GovernedSqlExecutionService.TryMapProviderToDialect("Oracle", out _).ShouldBeFalse();
+        // X1.3: Oracle is admitted (tier Production, WP-X0z evidence); Databricks is not (Experimental until X1-DBX).
+        GovernedSqlExecutionService.TryMapProviderToDialect("Oracle", out var oracle).ShouldBeTrue();
+        oracle.ShouldBe(DatabaseDialect.Oracle);
+        GovernedSqlExecutionService.TryMapProviderToDialect("Databricks", out _).ShouldBeFalse();
 
     }
 
@@ -299,17 +315,21 @@ public sealed class Round4ParserGatewayTests
     public async Task P05_PostgreSqlConnection_ExecutesStandardConformingStringsBeforeTheQuery()
     {
         // The factory hands out a SQLite connection although the data source is configured as PostgreSQL: the first
-        // statement sent must be the session initialization, which SQLite rejects with a syntax error near "SET".
+        // statement sent must be the session initialization, which SQLite rejects with a syntax error near "SET". The caller only
+        // sees the sanitized provider error (X1.2); the original is in the server-side log.
         var factory = Substitute.For<ISqlConnectionFactory>();
         factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
             .Returns(_ => OpenSqliteAsync("Data Source=:memory:"));
         var options = CreateOptions(defaultConnection: new DataSourceConnectionOptions { Provider = "PostgreSql", ConnectionString = "Host=unused" });
-        var service = CreateService(options, CreateRepository(CreateTable("employees", "PostgreSQL")), factory);
+        var log = new CapturingLogger<GovernedSqlExecutionService>();
+        var service = CreateService(options, CreateRepository(CreateTable("employees", "PostgreSQL")), factory, log);
 
-        var ex = await Should.ThrowAsync<SqliteException>(() =>
+        var ex = await Should.ThrowAsync<TrinoSqlEngine.Ast.Emit.GovernedSqlException>(() =>
             service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELECT id FROM employees"), CreateUser(), new TenantId(Tenant)));
 
-        ex.Message.ShouldContain("SET");
+        ex.Code.ShouldBe("SQL_PROVIDER_ERROR");
+        ex.Message.ShouldNotContain("SET");
+        log.Lines.ShouldContain(l => l.Contains("SqliteException") && l.Contains("SET"));
     }
 
     [Fact]

@@ -90,7 +90,7 @@ public sealed class WebSqlRedactedPredicateGuardrailTests
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } }),
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null,
             clientIpResolver: null,
             environment: env,
@@ -140,8 +140,11 @@ public sealed class WebSqlRedactedPredicateGuardrailTests
     }
 
     [Fact]
-    public async Task QualifiedPredicate_OnClearColumnOfOtherTable_WithSameName_IsAllowed()
+    public async Task QualifiedPredicate_OnClearColumnOfOtherTable_WithSameName_IsRejectedFailClosed()
     {
+        // X1 (ast-stricter, kept fail closed): the compiler's masked-column guard matches the column NAME against every table of the
+        // statement that has a mask, so a clear column of another table with the same name is rejected as well. The legacy rewriter
+        // resolved the qualifier. Refining the guard is a follow-up (documented in the plan log); it must never become looser.
         var tables = new Dictionary<string, TableMetadata>(StringComparer.OrdinalIgnoreCase)
         {
             ["people"] = CreateTable("people"),
@@ -150,9 +153,11 @@ public sealed class WebSqlRedactedPredicateGuardrailTests
         var service = CreateService(tables, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "people" });
 
         string sql = "SELECT c.id FROM dbo.contacts c JOIN dbo.people p ON c.id = p.id WHERE c.email = 'anna@example.com' ORDER BY c.salary";
-        var rewritten = await service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant));
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
+            service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant)));
 
-        rewritten.ShouldNotBeNull();
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
     }
 
     [Fact]

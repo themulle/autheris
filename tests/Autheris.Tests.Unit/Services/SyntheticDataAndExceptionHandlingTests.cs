@@ -146,7 +146,7 @@ public sealed class SyntheticDataAndExceptionHandlingTests
             options,
             consentResolution: _resolutionService,
             consentRepository: _consentRepo,
-            tableRepository: _metadataRepo,
+            tableRepository: _metadataRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(_metadataRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             environment: null); // null environment
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity([

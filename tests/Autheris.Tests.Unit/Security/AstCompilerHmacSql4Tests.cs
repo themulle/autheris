@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Security;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
 using System.Text;
 using System.Threading;
@@ -61,14 +62,15 @@ public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
 
+        var gatewayOptions = Options.Create(new GatewayOptions
+        {
+            WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500, SqlRewriterEngine = engine },
+            DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "GQL-HMAC", HmacKeyId = "k1" }
+        });
         return new GovernedSqlExecutionService(
-            Options.Create(new GatewayOptions
-            {
-                WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500, SqlRewriterEngine = engine },
-                DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "GQL-HMAC", HmacKeyId = "k1" }
-            }),
+            gatewayOptions,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(gatewayOptions, secrets),
             environment: env,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consents,
@@ -83,11 +85,17 @@ public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
     {
         var service = CreateService(sourceType, "AstCompiler");
 
-        var sql = await service.RewriteSqlAsync("SELECT id, email FROM employees", User(), new TenantId(Tenant));
-        output.WriteLine(sql);
+        var compiled = await service.CompileAsync("SELECT id, email FROM employees", User(), new TenantId(Tenant));
+        output.WriteLine(compiled.Sql);
 
-        sql.ShouldNotContain("super-secret");
-        sql.ShouldContain("@__gql_mk0");
-        sql.ShouldContain("tenant_a");
+        // X1: the key and the tenant are bound parameters of the compiled statement, never text.
+        compiled.Sql.ShouldNotContain("super-secret");
+        compiled.Sql.ShouldNotContain("tenant_a");
+        compiled.ShouldBindTenant("tenant_a");
+        var maskBinds = compiled.Parameters.Where(p => p.Origin == TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ToList();
+        maskBinds.ShouldNotBeEmpty();
+        // The HMAC key is the HKDF-derived per-tenant key, not the master secret.
+        maskBinds.Any(p => p.Value is byte[] raw && Encoding.UTF8.GetString(raw).Contains("super-secret")).ShouldBeFalse();
+        maskBinds.Any(p => p.Value is string text && text.Contains("super-secret")).ShouldBeFalse();
     }
 }

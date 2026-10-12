@@ -5,6 +5,7 @@ namespace Autheris.Tests.Unit.Security;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security;
 using System.Security.Claims;
 using System.Text;
@@ -124,7 +125,7 @@ public sealed class RepeatedReviewRound3Tests
         var service = new GovernedSqlExecutionService(
             options,
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
-            tableRepository: metaRepo,
+            tableRepository: metaRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(metaRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(options, secretProvider),
             secretProvider: secretProvider,
             logger: NullLogger<GovernedSqlExecutionService>.Instance);
 
@@ -135,12 +136,14 @@ public sealed class RepeatedReviewRound3Tests
             new Claim("tenant_id", "tenant-alpha")
         }, "Bearer"));
 
-        var securedSql = await service.RewriteSqlAsync("SELECT id, ssn FROM hr.employees", user, new TenantId("tenant-alpha"));
-        
-        // When PreventInDbHmacKeyExposure is enabled, fail-closed redaction is emitted and NO internal HMAC parameters are bound
-        securedSql.ShouldNotContain("HASHBYTES");
-        securedSql.ShouldNotContain("HMAC");
-        securedSql.ShouldContain("'***'");
+        var compiled = await service.CompileAsync("SELECT id, ssn FROM hr.employees", user, new TenantId("tenant-alpha"));
+
+        // When PreventInDbHmacKeyExposure is enabled, a fail-closed redaction is emitted and NO HMAC key is bound
+        compiled.Sql.ShouldNotContain("HASHBYTES");
+        compiled.Sql.ShouldNotContain("HMAC");
+        var maskBinds = compiled.Parameters.Where(p => p.Origin == TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ToList();
+        maskBinds.ShouldNotBeEmpty();
+        maskBinds.ShouldAllBe(p => p.Value is string);   // the redaction constant, never key bytes
     }
 
     [Fact]

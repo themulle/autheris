@@ -69,7 +69,7 @@ public sealed class WebSqlCaseCollisionSql2Tests
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } }),
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             connectionFactory: null,
             clientIpResolver: null,
@@ -102,9 +102,9 @@ public sealed class WebSqlCaseCollisionSql2Tests
     {
         var service = CreateService(CreateTable("dbo", "Orders", "SqlServer"));
 
-        var sql = await service.RewriteSqlAsync("SELECT a.id FROM dbo.Orders a JOIN dbo.Orders b ON a.id = b.id", CreateUser(), new TenantId(Tenant));
+        var compiled = await service.CompileAsync("SELECT a.id FROM dbo.Orders a JOIN dbo.Orders b ON a.id = b.id", CreateUser(), new TenantId(Tenant));
 
-        sql.ShouldContain("tenant_id = 'tenant_a'");
+        compiled.ShouldBindTenant("tenant_a");
     }
     // SQL-5: the catalog part of a 3-part name was only checked against the logical data source name but emitted
     // SQ-09 / SQL-5 / Trino Compatibility: In Trino queries, 3-part names (catalog.schema.table) are allowed
@@ -115,10 +115,11 @@ public sealed class WebSqlCaseCollisionSql2Tests
     {
         var service = CreateService(CreateTable("dbo", "Orders", "SqlServer"));
 
-        var sql = await service.RewriteSqlAsync("SELECT id FROM default.dbo.Orders", CreateUser(), new TenantId(Tenant));
+        var compiled = await service.CompileAsync("SELECT id FROM default.dbo.Orders", CreateUser(), new TenantId(Tenant));
 
-        sql.ShouldContain("tenant_id = 'tenant_a'");
-        sql.ShouldNotContain("default.dbo.Orders");
+        compiled.ShouldBindTenant("tenant_a");
+        compiled.Sql.ShouldNotContain("default.dbo.Orders");
+        compiled.Sql.ShouldContain("[dbo].[Orders]");
     }
 
     [Fact]

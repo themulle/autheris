@@ -16,6 +16,7 @@ using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.Masking;
 using Autheris.Application.Sql.Pipeline;
+using Autheris.Application.Sql.Policy;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -27,15 +28,17 @@ using Microsoft.Extensions.Options;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 using TrinoSqlEngine.Ast;
+using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Visitors;
+using TrinoSqlEngine.Governance;
 
 /// <summary>
 /// AR-05 / Sicherheits-Invariante 1: Modularized SQL Rewriter executing the 5 strictly ordered pipeline stages.
 /// Stage 1: AnalyseAndStatementPolicy (AST parse, statement type, function security)
 /// Stage 2: IdentityResolution (User, Tenant, Roles, DataSource validation)
 /// Stage 3: GovernanceResolution (ReBAC, TableAccessPolicy, RLS filters, column masking)
-/// Stage 4: RewriteOptions (Construct RlsOptions, dialect, function allowlists)
-/// Stage 5: SecureRewrite (Compile SQL AST, plan cache fast-path)
+/// Stage 4: RewriteOptions (typed GovernancePolicy via GovernancePolicyFactory, CompileRequest, dialect, function allowlists)
+/// Stage 5: SecureRewrite (ISqlEngine.Compile: every value bound, value-free template cache inside the engine)
 /// </summary>
 public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 {
@@ -48,7 +51,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private const string InternalParameterPrefix = GovernedSqlExecutionService.InternalParameterPrefix;
 
     private readonly ISqlEngine _sqlEngine;
-    private readonly ICompiledSqlQueryPlanCache? _planCache;
+    private readonly GovernancePolicyFactory? _policyFactory;
     private readonly ISqlSecurityValidator _sqlSecurityValidator;
     private readonly IOptions<GatewayOptions> _options;
     private readonly IPolicyEnforcementService? _policyEnforcement;
@@ -63,7 +66,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private readonly ISchemaContractManager? _contractManager;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly IMemoryCache? _memoryCache;
-    private readonly SqlDataMaskingProvider _maskingProvider;
     private readonly SqlDataSourceResolver _dataSourceResolver;
     private readonly TypedPolicySources? _typedPolicies;
 
@@ -86,7 +88,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         IConsentRepository? consentRepository = null,
         IKeyVaultSecretProvider? secretProvider = null,
         ISqlEngine? sqlEngine = null,
-        ICompiledSqlQueryPlanCache? planCache = null,
+        GovernancePolicyFactory? policyFactory = null,
         ISqlSecurityValidator? sqlSecurityValidator = null,
         IRebacEvaluator? rebacEvaluator = null,
         IConsentCacheService? consentCache = null,
@@ -94,7 +96,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         ISchemaContractManager? contractManager = null,
         IAccessProfileRepository? accessProfileRepository = null,
         IMemoryCache? memoryCache = null,
-        SqlDataMaskingProvider? maskingProvider = null,
         SqlDataSourceResolver? dataSourceResolver = null,
         TypedPolicySources? typedPolicies = null)
     {
@@ -103,24 +104,30 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         _policyEnforcement = policyEnforcement; _consentResolution = consentResolution;
         _tableRepository = tableRepository; _clientIpResolver = clientIpResolver;
         _logger = logger; _consentRepository = consentRepository;
-        _sqlEngine = sqlEngine ?? FastSqlEngine.Default; _planCache = planCache;
+        _sqlEngine = sqlEngine ?? FastSqlEngine.Default; _policyFactory = policyFactory;
         _sqlSecurityValidator = sqlSecurityValidator ?? new DefaultSqlSecurityValidator();
         _rebacEvaluator = rebacEvaluator; _consentCache = consentCache;
         _mandatoryFilters = mandatoryFilters; _contractManager = contractManager;
         _accessProfileRepository = accessProfileRepository; _memoryCache = memoryCache;
-        _maskingProvider = maskingProvider ?? new SqlDataMaskingProvider(_options, secretProvider, logger);
         _dataSourceResolver = dataSourceResolver ?? new SqlDataSourceResolver(_options, logger);
     }
 
-    public async Task<string> RewriteSqlAsync(
+    /// <summary>
+    /// G-6: runs the whole governed pipeline up to and including <see cref="ISqlEngine.Compile"/> and discards the result. The caller
+    /// learns whether the statement would be accepted; no SQL text leaves the pipeline (Arrow Flight <c>GetFlightInfo</c>).
+    /// </summary>
+    public async Task ValidateAsync(
         string rawSql,
         ClaimsPrincipal user,
         TenantId tenantId,
         CancellationToken ct = default)
     {
-        var rewrite = await RewriteCoreAsync(rawSql, user, tenantId, dataSourceName: null, dmlContext: null, ct).ConfigureAwait(false);
-        return rewrite.Sql;
+        await RewriteCoreAsync(rawSql, user, tenantId, dataSourceName: null, dmlContext: null, ct).ConfigureAwait(false);
     }
+
+    /// <summary>The compiled statement of the governed pipeline (internal; the tests assert on the compiled text and its binds).</summary>
+    internal async Task<CompiledSql> CompileAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) =>
+        (await RewriteCoreAsync(rawSql, user, tenantId, dataSourceName: null, dmlContext: null, ct).ConfigureAwait(false)).Compiled;
 
     internal async Task<GovernedRewrite> RewriteCoreAsync(
         string rawSql,
@@ -226,8 +233,9 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         if (_options.Value.IsWebSqlGovernanceBypassed)
         {
-            _logger?.LogWarning("[DANGER] WebSQL governance bypass is active! Query will be executed without RLS or AST masking.");
-            return new GovernedRewrite(rawSql, new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase), Array.Empty<TableIdentifier>(), dataSourceName ?? _options.Value.WebSql.DefaultDataSourceName);
+            // X1: there is one code path. Text that did not come out of ISqlEngine.Compile never reaches a command, so the former
+            // bypass (raw SQL without RLS or masking) no longer exists. The flag is ignored: the statement is governed as usual.
+            _logger?.LogWarning("[DANGER] danger_bypass_websql_governance has no effect since the AST compiler cutover; the statement is governed.");
         }
 
         if (metadata.ReferencedTables.Count == 0)
@@ -242,10 +250,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
         if (metadata.FunctionCalls is { Count: > 0 })
         {
-            var functionPolicy = new RlsOptions { EnforceFunctionPolicy = true };
+            // G-9: the denylist only (no allowlist yet; the dialect allowlist is applied in stage 4).
             foreach (var functionName in metadata.FunctionCalls)
             {
-                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, functionPolicy))
+                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowedFunctions: null, additionalDeniedFunctions: null))
                 {
                     throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
                 }
@@ -311,16 +319,12 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         // -------------------------------------------------------------
         // Stage 3: Table, Consent, RLS & Masking Resolution
         // -------------------------------------------------------------
-        var tableRlsFilters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var tablesWithoutRls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var tableMaskingExpressions = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-        var tableColumnsMap = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
-        var tablesWithConsentRowFilter = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var tablesWithMaskedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var tableTenantColumns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        string? primaryTenantColumn = null;
-        var internalParameters = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        var hmacKeyParameterNames = new Dictionary<string, string>(StringComparer.Ordinal);
+        // X1: stage 3 only decides. The typed decisions (typed row policy, typed masks) go to GovernancePolicyFactory in stage 4; the
+        // tenant predicate is built by the compiler from the catalog's tenant column.
+        var decisions = new Dictionary<TableIdentity, TableAccessDecision>();
+        var decidedTableMetadata = new Dictionary<TableIdentity, TableMetadata>();
+        var decidedTargets = new Dictionary<TableIdentity, TableAccessTarget>();
+        var tablesWithoutRls = new HashSet<TableIdentity>();
         var accessedTables = new List<TableIdentifier>();
         var virtualFilters = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var accessedTableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -358,14 +362,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             dict[resolvedId.ToQualifiedName()] = value;
             if (tableNameCounts.TryGetValue(target.TableName, out var count) && count == 1) dict[target.TableName] = value;
             if (!string.IsNullOrWhiteSpace(target.Schema) && schemaTableCounts.TryGetValue($"{target.Schema}.{target.TableName}", out var sc) && sc == 1) dict[$"{target.Schema}.{target.TableName}"] = value;
-        }
-
-        void RegisterTableSet(ISet<string> set, TableAccessTarget target, TableIdentifier resolvedId)
-        {
-            set.Add(target.FullName);
-            set.Add(resolvedId.ToQualifiedName());
-            if (tableNameCounts.TryGetValue(target.TableName, out var count) && count == 1) set.Add(target.TableName);
-            if (!string.IsNullOrWhiteSpace(target.Schema) && schemaTableCounts.TryGetValue($"{target.Schema}.{target.TableName}", out var sc) && sc == 1) set.Add($"{target.Schema}.{target.TableName}");
         }
 
         foreach (var target in metadata.ReferencedTables)
@@ -426,10 +422,10 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 throw new WebSqlPolicyException($"WebSQL pushdown does not support table '{target.FullName}' with data source type '{tableMeta.Table.DataSourceType}'.");
             }
 
-            if (!SqlDataSourceResolver.IsWebSqlSupportedDialect(tableMeta.Dialect))
+            if (!SqlDialectMapper.IsExecutable(tableMeta.Dialect))
             {
                 _logger?.LogWarning("WebSQL rejected table {Table}: SQL dialect {Dialect} is not supported by WebSQL.", target.FullName, tableMeta.Dialect);
-                throw new WebSqlPolicyException("WebSQL only supports tables of PostgreSQL, SQL Server and SQLite data sources.");
+                throw new WebSqlPolicyException(SqlDialectMapper.UnsupportedDialectMessage);
             }
 
             if (targetDatabaseDialect == null)
@@ -492,7 +488,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             }
 
             var colList = tableMeta.Columns.Select(c => c.ColumnName).ToList();
-            RegisterTableLookup(tableColumnsMap, target, resolvedId, colList);
 
             if (accessedTableSet.Add(resolvedId.ToQualifiedName()))
             {
@@ -506,7 +501,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             }
 
             var decision = consentBypassed && (_consentRepository == null || _consentResolution == null)
-                ? TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
+                ? WithTypedMasks(TableAccessDecision.Allowed(resolvedId, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true), tableMeta, tenantId)
                 : await AccessPolicy().DecideAsync(
                     new TableAccessQuery(userSid, tenantId, groupSids, roles, tableMeta, user.Claims, colList, RebacEnforcement.QueryPaths, clientIp, actionAttribute),
                     ct).ConfigureAwait(false);
@@ -527,7 +522,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 }
             }
 
-            var rlsParts = new List<string>(2);
             string? tenantColumn = TableMetadata.RequireTenantColumnOrThrow(
                 tableMeta,
                 _options.Value.DataSources?.RequireTenantColumn == true,
@@ -539,10 +533,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                     throw new InvalidOperationException($"The tenant column '{tenantColumn}' of {target.FullName} is not a plain identifier; the query is refused (fail-closed).");
                 }
 
-                primaryTenantColumn ??= tenantColumn;
-                RegisterTableLookup(tableTenantColumns, target, resolvedId, tenantColumn);
-
-                rlsParts.Add($"{tenantColumn} = '{tenantId.Value.Replace("'", "''")}'");
             }
 
             if (decision.AppliedVirtualFilters is { Count: > 0 } applied)
@@ -550,38 +540,27 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                 RegisterTableLookup(virtualFilters, target, resolvedId, applied);
             }
 
+            var identity = new TableIdentity(tableMeta.Table.SchemaName, tableMeta.Table.TableName);
+            decisions[identity] = decision;
+            decidedTableMetadata[identity] = tableMeta;
+            decidedTargets.TryAdd(identity, target);
             if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
             {
                 _sqlSecurityValidator.ValidateRowFilter(decision);
-                rlsParts.Add($"({decision.CombinedRowFilterSql})");
-                SqlDataSourceResolver.AddInternalRowFilterParameters(decision.RowFilterParameters, internalParameters);
-                RegisterTableSet(tablesWithConsentRowFilter, target, resolvedId);
-            }
-
-            if (rlsParts.Count > 0)
-            {
-                var rlsFilter = string.Join(" AND ", rlsParts);
-                RegisterTableLookup(tableRlsFilters, target, resolvedId, rlsFilter);
             }
             else
             {
-                RegisterTableSet(tablesWithoutRls, target, resolvedId);
+                tablesWithoutRls.Add(identity);
             }
 
-            var columnMasks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var col in tableMeta.Columns)
             {
                 var lvl = decision.GetEffectiveColumnAccess(col.ColumnName, tableMeta);
-                bool isEffectiveHmac = false;
-
-                if (lvl == ColumnAccessLevel.Deny)
-                {
-                    columnMasks[col.ColumnName] = "NULL";
-                }
-                else if (lvl == ColumnAccessLevel.Mask)
-                {
-                    columnMasks[col.ColumnName] = _maskingProvider.GetMaskExpressionForRule(col.ColumnName, tableMeta, tenantId, internalParameters, hmacKeyParameterNames, out isEffectiveHmac);
-                }
+                // A masked column is joinable only when its typed mask is the keyed HMAC pseudonym (deterministic, so joins stay meaningful).
+                bool isEffectiveHmac = lvl == ColumnAccessLevel.Mask &&
+                    decision.ColumnMasks is ColumnMaskPolicy typedMasks &&
+                    typedMasks.TryGetSpec(col.ColumnName, out var maskSpec) &&
+                    maskSpec.Kind == MaskKind.Hmac;
 
                 if (lvl != ColumnAccessLevel.Clear && !isEffectiveHmac)
                 {
@@ -618,12 +597,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
                     }
                 }
             }
-
-            if (columnMasks.Count > 0)
-            {
-                RegisterTableLookup(tableMaskingExpressions, target, resolvedId, columnMasks);
-                RegisterTableSet(tablesWithMaskedColumns, target, resolvedId);
-            }
         }
 
         // -------------------------------------------------------------
@@ -635,152 +608,76 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         long deliveredRowLimit = probeExtraRow && !isDml && maxRows > 0 ? maxRows : 0;
         long enforcedMaxRows = deliveredRowLimit > 0 ? maxRows + 1 : maxRows;
 
-        const string denyAllFilter = "1 = 0";
-
         if (!targetDatabaseDialect.HasValue || !SqlDialectMapper.IsExecutable(targetDatabaseDialect.Value))
         {
-            throw new WebSqlPolicyException("WebSQL only supports tables of PostgreSQL, SQL Server and SQLite data sources.");
+            throw new WebSqlPolicyException(SqlDialectMapper.UnsupportedDialectMessage);
         }
         TargetSqlDialect targetSqlDialect = SqlDialectMapper.ToTargetDialect(targetDatabaseDialect.Value);
 
         IReadOnlySet<string> allowedFunctions = SqlFunctionAllowlists.Build(targetSqlDialect, webSqlOptions.AdditionalAllowedFunctions);
         if (metadata.FunctionCalls is { Count: > 0 })
         {
-            var allowlistPolicy = new RlsOptions { EnforceFunctionPolicy = true, AllowedFunctions = allowedFunctions };
+            // G-9: the three-argument overload; no RlsOptions bag.
             foreach (var functionName in metadata.FunctionCalls)
             {
-                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowlistPolicy))
+                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowedFunctions, additionalDeniedFunctions: null))
                 {
                     throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
                 }
             }
         }
 
-        var policyProvider = new DefaultRlsPolicyProvider(
-            defaultFilter: denyAllFilter,
-            predicate: tbl => !tablesWithoutRls.Contains(tbl),
-            filterFunc: tbl => tableRlsFilters.TryGetValue(tbl, out var f) ? f : denyAllFilter)
-        {
-            FallbackToSimpleName = false
-        };
-
-        var maskingPolicyProvider = new DefaultColumnMaskingPolicyProvider(
-            hasMaskPredicate: (tbl, col) => tableMaskingExpressions.TryGetValue(tbl, out var dict) && dict.ContainsKey(col),
-            maskExpressionProvider: (tbl, col) => tableMaskingExpressions.TryGetValue(tbl, out var dict) && dict.TryGetValue(col, out var expr) ? expr : "'***'")
-        {
-            FallbackToSimpleName = false
-        };
-
-        var rlsOptions = new RlsOptions
-        {
-            AppendTableAlias = true,
-            EnforceCatalogProjection = true,
-            EnforcedMaxRows = enforcedMaxRows,
-            EnforceReadOnlyQueries = !isDml,
-            TargetDialect = targetSqlDialect,
-            RejectComments = true,
-            RejectBackslashInStrings = true,
-            RejectEscapedStringLiterals = true,
-            RejectDollarQuoting = targetSqlDialect != TargetSqlDialect.PostgreSql,
-            RejectBracketLexerDifferentials = targetSqlDialect is TargetSqlDialect.SqlServer or TargetSqlDialect.Sqlite,
-            RejectNonAsciiIdentifiers = true,
-            RejectDotsInQuotedIdentifiers = true,
-            RejectTimeTravelQueries = true,
-            RejectConsentFilteredInsert = true,
-            RejectWholeRowReferencesInDml = true,
-            TablesWithConsentRowFilter = tablesWithConsentRowFilter,
-            TablesWithMaskedColumns = tablesWithMaskedColumns,
-            ExpectedTenantValue = tenantId.Value,
-            TenantColumnName = primaryTenantColumn ?? "tenant_id",
-            TableTenantColumns = tableTenantColumns,
-            RequireTenantColumnInInsert = true,
-            EnforceFunctionPolicy = true,
-            AllowedFunctions = allowedFunctions,
-            AllowInlineFunctionDefinitions = false,
-            RejectMaskedColumnsInDml = true,
-            RejectUnfilteredDml = true,
-            PolicyProvider = policyProvider,
-            TableColumnsProvider = tbl => tableColumnsMap.TryGetValue(tbl, out var cols) ? cols : null,
-            ColumnMaskingProvider = maskingPolicyProvider,
-            PolicyFiltersAreTargetDialectSql = true,
-            RewriterEngine = _options.Value.WebSql.SqlRewriterEngine
-        };
-
-        // -------------------------------------------------------------
-        // Stage 5: Secure Rewrite & Plan Cache Lookup (Sicherheits-Invariante 2)
-        // -------------------------------------------------------------
-        string securedSql;
-        ulong queryHash = 0;
-        ulong policyHash = 0;
-        var planCache = _planCache;
-        bool canUsePlanCache = planCache != null && targetDatabaseDialect.HasValue;
-        string policyFingerprint = $"tenant:{tenantId};dialect:{targetDatabaseDialect.GetValueOrDefault()};ds:{effectiveDataSourceName};engine:{webSqlOptions.SqlRewriterEngine}";
-
-        if (canUsePlanCache && planCache != null)
-        {
-            queryHash = planCache.ComputeHash(rawSql.AsSpan());
-            policyHash = planCache.ComputePolicyHash(
-                tableRlsFilters,
-                tableMaskingExpressions,
-                tablesWithoutRls,
-                enforcedMaxRows,
-                isDml,
-                webSqlOptions.SqlRewriterEngine ?? "LegacyTokenStream",
-                tablesWithConsentRowFilter,
-                tablesWithMaskedColumns,
-                _options.Value.RowFilters.SubqueryStrategy,
-                tableColumnsMap,
-                allowedFunctions);
-
-            if (planCache.TryGetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, policyFingerprint, effectiveDataSourceName, out var cachedSql) && !string.IsNullOrEmpty(cachedSql))
+        // Fail closed when the typed assembly is not wired (a DI defect, never a silent downgrade to string policies).
+        var policyFactory = _policyFactory ?? throw new SqlCompileConfigurationException();
+        var policy = await policyFactory.CreateAsync(
+            new GovernedPolicyInput(effectiveDataSourceName, tenantId, decisions, tablesWithoutRls, GovernedSubqueryStrategy.Correlated)
             {
-                return new GovernedRewrite(cachedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
+                Metadata = decidedTableMetadata
+            },
+            ct).ConfigureAwait(false);
+
+        // SEC-X1-05: a table that stage 3 admitted but the assembly dropped (no typed policy, catalog load failure, missing column)
+        // is denied here with the same exception as every other "table not usable" cause, before the compiler could answer differently.
+        foreach (var (identity, deniedTarget) in decidedTargets)
+        {
+            if (policy.Catalog.Resolve(identity.ToQualifiedName()) is null)
+            {
+                _logger?.LogWarning("WebSQL rejected table {Table}: it is not part of the verified governance catalog.", deniedTarget.FullName);
+                throw SqlDataSourceResolver.TableDenied(deniedTarget);
             }
         }
 
+        var request = CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions);
+
+        // -------------------------------------------------------------
+        // Stage 5: Compile (Sicherheits-Invariante 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
+        // stable codes with fixed messages at every error surface, and no Exception.Message is copied into a new exception.
+        // -------------------------------------------------------------
+        CompiledSql compiled;
         try
         {
-            securedSql = _sqlEngine.RewriteRls(rawSql.AsMemory(), rlsOptions, ct);
-            if (canUsePlanCache && planCache != null && !string.IsNullOrEmpty(securedSql))
-            {
-                planCache.SetCompiledSql(rawSql, queryHash, targetDatabaseDialect.Value, tenantId, policyHash, policyFingerprint, effectiveDataSourceName, securedSql);
-            }
+            compiled = _sqlEngine.Compile(rawSql.AsMemory(), request, ct);
         }
-        catch (WebSqlPolicyException)
+        catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException)
         {
+            _logger?.LogWarning(ex, "WebSQL statement rejected by the SQL compiler.");
             throw;
-        }
-        catch (UnfilteredDmlException unfilteredEx)
-        {
-            throw new WebSqlPolicyException(
-                "UPDATE/DELETE statements in WebSQL require a restricting WHERE clause (statements without WHERE or with a trivially true condition such as 'WHERE 1=1' are rejected).",
-                unfilteredEx);
-        }
-        catch (TrinoSqlEngine.Ast.Builder.AstBuildException astEx)
-        {
-            throw new ArgumentException($"The SQL statement could not be compiled: {astEx.Message}", nameof(rawSql), astEx);
-        }
-        catch (SecurityException secEx)
-        {
-            _logger?.LogWarning(secEx, "WebSQL statement rejected by RLS rewriter.");
-            throw new WebSqlPolicyException("The SQL statement violates the WebSQL row-level security policy.", secEx);
-        }
-        catch (OperationCanceledException timeoutEx) when (!ct.IsCancellationRequested && timeoutEx.InnerException is TimeoutException)
-        {
-            throw new WebSqlPolicyException("The SQL statement exceeded the parser time budget.", timeoutEx);
-        }
-        catch (OperationCanceledException parseEx) when (!ct.IsCancellationRequested)
-        {
-            throw new ArgumentException("The SQL statement could not be parsed.", nameof(rawSql), parseEx);
         }
 
         if (_options.Value.Logging.LogGeneratedSql)
         {
-            _logger?.LogDebug("GovernedSqlExecutionService: Generated secured SQL: {SecuredSql}", securedSql);
+            _logger?.LogDebug("GovernedSqlExecutionService: Compiled secured SQL: {SecuredSql}", compiled.Sql);
         }
 
-        return new GovernedRewrite(securedSql, internalParameters, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters);
     }
+
+    /// <summary>
+    /// A decision that is built locally (consent bypass, no consent services) still needs the typed masks of its sensitive columns, or
+    /// the typed assembly would deny the table (fail closed). The masks come from the same producer as for every other decision.
+    /// </summary>
+    private TableAccessDecision WithTypedMasks(TableAccessDecision decision, TableMetadata metadata, TenantId tenantId) =>
+        _typedPolicies is null ? decision : decision with { ColumnMasks = _typedPolicies.MaskPolicies.ForDecision(decision, metadata, tenantId) };
 
     internal TableAccessPolicy AccessPolicy() =>
         new(_consentRepository!, _consentResolution!,

@@ -746,7 +746,7 @@ public sealed class ParquetOutputNegotiationTests
         public Task<GovernedSqlResult> ExecuteQueryBufferedAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
             => throw new NotSupportedException();
 
-        public Task<string> RewriteSqlAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
+        public Task ValidateAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
             => throw new NotSupportedException();
     }
 

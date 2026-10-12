@@ -58,7 +58,19 @@ public sealed class VirtualFilterAuditTests
     public async Task WebSqlQuery_AuditNamesTheVirtualFiltersPerTable()
     {
         var audit = Substitute.For<IAuditLogRepository>();
-        var (service, _, _) = WebSqlTwoPartNameDataSourceTests.CreateServiceWithCommand(audit, new FixedOutcome(Applied), WebSqlTwoPartNameDataSourceTests.CraneId);
+        // X1: the compiler path takes only a typed Virtual Filter policy (a text-only predicate is denied).
+        var typed = new Autheris.Application.Policy.RowPolicyFactory(new Autheris.Application.Sql.Policy.PolicyPredicateRenderer()).FromPredicate(
+            TrinoSqlEngine.Governance.PolicyPredicate.Create(
+                new TrinoSqlEngine.Ast.Nodes.BinaryExpression(
+                    Autheris.Application.Sql.Policy.PolicyParameterNamer.Column("id"), TrinoSqlEngine.Ast.Nodes.BinaryOperator.Equal,
+                    new TrinoSqlEngine.Ast.Nodes.PolicyParameterExpression("__gql_vf_0_0", TrinoSqlEngine.Ast.Emit.SqlParameterType.Int64)),
+                new Dictionary<string, TrinoSqlEngine.Governance.PolicyValue> { ["__gql_vf_0_0"] = new(7L, TrinoSqlEngine.Ast.Emit.SqlParameterType.Int64) }),
+            DatabaseDialect.PostgreSql);
+        var appliedTyped = new MandatoryFilterOutcome(false, null, typed.Project().Sql, ["nicht_ausgelieferte_krane"])
+        {
+            TypedPredicate = ((Autheris.Application.Policy.PolicyPredicateRowPolicy)typed).Predicate
+        };
+        var (service, _, _) = WebSqlTwoPartNameDataSourceTests.CreateServiceWithCommand(audit, new FixedOutcome(appliedTyped), WebSqlTwoPartNameDataSourceTests.CraneId);
 
         await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELECT id FROM lwetem_prod.md.crane"),
             WebSqlTwoPartNameDataSourceTests.CreateUser(), new TenantId(WebSqlTwoPartNameDataSourceTests.Tenant));

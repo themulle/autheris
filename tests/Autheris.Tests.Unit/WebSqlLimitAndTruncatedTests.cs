@@ -91,7 +91,7 @@ public sealed class WebSqlLimitAndTruncatedTests
             Options.Create(options),
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: tableRepo,
+            tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null,
             clientIpResolver: null,
             environment: null,

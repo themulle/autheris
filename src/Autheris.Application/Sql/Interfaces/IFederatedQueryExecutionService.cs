@@ -22,7 +22,8 @@ public interface IFederatedQueryExecutionService
         TenantId tenantId,
         CancellationToken ct = default);
 
-    Task<string> RewriteSqlAsync(
+    /// <summary>G-6: plans a cross-source statement without executing it and without returning SQL text.</summary>
+    Task ValidateAsync(
         string rawSql,
         ClaimsPrincipal user,
         TenantId tenantId,

@@ -175,7 +175,7 @@ public sealed class TableAccessPolicyArch1Tests
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } }),
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             consentResolution: ResolvesTo(allowed: false),
-            tableRepository: tables,
+            tableRepository: tables, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tables), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             environment: env,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: NoConsents(),

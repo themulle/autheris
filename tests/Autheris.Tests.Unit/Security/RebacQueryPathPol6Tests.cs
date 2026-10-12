@@ -101,11 +101,13 @@ public sealed class RebacQueryPathPol6Tests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
 
+        var repo = CreateRepository();
         return new GovernedSqlExecutionService(
             Options.Create(options),
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             consentResolution: resolution,
-            tableRepository: CreateRepository(),
+            tableRepository: repo,
+            policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             environment: env,
             logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: consents,
@@ -172,8 +174,8 @@ public sealed class RebacQueryPathPol6Tests
     {
         var service = CreateWebSqlService(CreateOptions(enforceOnQueryPaths: true), CreateEvaluator(allowed: true));
 
-        var sql = await service.RewriteSqlAsync("SELECT id FROM orders", CreateUser(), new TenantId(Tenant));
+        var compiled = await service.CompileAsync("SELECT id FROM orders", CreateUser(), new TenantId(Tenant));
 
-        sql.ShouldContain("tenant_id = 'tenant_a'");
+        compiled.ShouldBindTenant(Tenant);
     }
 }

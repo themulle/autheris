@@ -206,9 +206,9 @@ public sealed class SqlEndpointsTests
 
     private sealed class FakeGovernedSqlExecutionService(Action<GovernedSqlQueryRequest> onRequest) : IGovernedSqlExecutionService
     {
-        public Task<string> RewriteSqlAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
+        public Task ValidateAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
         {
-            return Task.FromResult(rawSql);
+            return Task.CompletedTask;
         }
 
         public Task ExecuteGovernedQueryAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, Func<System.Data.Common.DbDataReader, CancellationToken, Task> rowWriter, CancellationToken ct = default)

@@ -92,7 +92,7 @@ public sealed class Sql6JoinGuardrailTests
             Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } }),
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             auditLogRepository: Substitute.For<IAuditLogRepository>(),
             connectionFactory: null,
             clientIpResolver: null,
@@ -103,8 +103,10 @@ public sealed class Sql6JoinGuardrailTests
     }
 
     [Fact]
-    public async Task JoinGuardrail_WhenDifferentTableHasMaskedColumnWithSameName_DoesNotTriggerFalsePositive()
+    public async Task JoinGuardrail_WhenDifferentTableHasMaskedColumnWithSameName_IsRejectedFailClosed()
     {
+        // X1 (ast-stricter, kept fail closed): the compiler's guard compares the column name with every masked table of the statement
+        // (the legacy rewriter resolved the alias). Refining it is a follow-up and must never become looser.
         // Table A has masked user_id. Table B and C have clear user_id.
         // Query joins B and C on user_id, referencing A without joining on A.user_id.
         var tables = new Dictionary<string, TableMetadata>(StringComparer.OrdinalIgnoreCase)
@@ -118,9 +120,11 @@ public sealed class Sql6JoinGuardrailTests
 
         // SQL-6: Table A must not be falsely rejected because b and c are joined on user_id
         string sql = "SELECT b.id FROM dbo.table_b b JOIN dbo.table_c c ON b.user_id = c.user_id, dbo.table_a a WHERE a.id = 1";
-        var rewritten = await service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant));
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
+            service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant)));
 
-        rewritten.ShouldNotBeNull();
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
     }
 
     [Fact]

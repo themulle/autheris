@@ -114,12 +114,11 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
         var factory = Substitute.For<ISqlConnectionFactory>();
         var conn = Substitute.For<DbConnection>();
         var cmd = Substitute.For<DbCommand>();
+        cmd.WireParameters();   // the binder owns the parameters of a governed command
         var reader = Substitute.For<DbDataReader>();
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
         reader.FieldCount.Returns(0);
         cmd.ExecuteReaderAsync(Arg.Any<CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
-        cmd.Parameters.Returns(Substitute.For<DbParameterCollection>());
-        cmd.CreateParameter().Returns(Substitute.For<DbParameter>());
         conn.CreateCommand().Returns(cmd);
         factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(conn));
@@ -128,7 +127,7 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
             Options.Create(options),
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: factory,
             clientIpResolver: null,
             environment: null,
@@ -146,7 +145,9 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
 
         cmd.CommandText.ShouldNotBeNull();
         // public.orders tenant isolation must NOT have been removed by archive.orders
-        cmd.CommandText.ShouldContain("tenant_id = 'tenant_multi'");
+        cmd.CommandText.ShouldNotContain("tenant_multi");
+        cmd.BoundValues().ShouldContain("tenant_multi");
+        cmd.CommandText.ShouldContain("tenant_id");
     }
 
     [Fact]
@@ -212,12 +213,11 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
         var factory = Substitute.For<ISqlConnectionFactory>();
         var conn = Substitute.For<DbConnection>();
         var cmd = Substitute.For<DbCommand>();
+        cmd.WireParameters();   // the binder owns the parameters of a governed command
         var reader = Substitute.For<DbDataReader>();
         reader.ReadAsync(Arg.Any<CancellationToken>()).Returns(Task.FromResult(false));
         reader.FieldCount.Returns(0);
         cmd.ExecuteReaderAsync(Arg.Any<CommandBehavior>(), Arg.Any<CancellationToken>()).Returns(Task.FromResult(reader));
-        cmd.Parameters.Returns(Substitute.For<DbParameterCollection>());
-        cmd.CreateParameter().Returns(Substitute.For<DbParameter>());
         conn.CreateCommand().Returns(cmd);
         factory.CreateOpenConnectionAsync(Arg.Any<DataSourceConnectionOptions>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(conn));
@@ -226,7 +226,7 @@ public sealed class GovernedSqlExecutionMultiSchemaShortNameTests
             Options.Create(options),
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: factory,
             clientIpResolver: null,
             environment: null,

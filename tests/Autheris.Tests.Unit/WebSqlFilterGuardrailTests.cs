@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -90,11 +91,12 @@ public sealed class WebSqlFilterGuardrailTests
         secretProvider.GetSecretBytes(Arg.Any<string>())
             .Returns(System.Text.Encoding.UTF8.GetBytes("super-secret-key-32-chars-long!"));
 
+        var gatewayOptions = Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } });
         return new GovernedSqlExecutionService(
-            Options.Create(new GatewayOptions { WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 } }),
+            gatewayOptions,
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(gatewayOptions, secretProvider),
             connectionFactory: null,
             clientIpResolver: null,
             environment: env,
@@ -148,20 +150,24 @@ public sealed class WebSqlFilterGuardrailTests
         var service = CreateService();
         string sql = "SELECT id, name FROM dbo.employees WHERE id = 1";
 
-        var rewritten = await service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant));
+        var compiled = await service.CompileAsync(sql, CreateUser(), new TenantId(Tenant));
 
-        rewritten.ShouldNotBeNull();
-        rewritten.ShouldContain("id = 1");
+        // X1: the literal is bound (the text carries a marker).
+        compiled.Sql.ShouldContain("[id] =");
+        compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.QueryLiteral).Select(Convert.ToInt64).ShouldContain(1L);
     }
 
     [Fact]
-    public async Task FilterGuardrail_WhenHmacMaskedColumnUsedInWhere_IsPermitted()
+    public async Task FilterGuardrail_WhenHmacMaskedColumnUsedInWhere_IsRejectedByTheCompiler()
     {
+        // X1 (ast-stricter, kept fail closed): the compiler rejects every masked column in a predicate, including an HMAC pseudonym
+        // that the legacy rewriter allowed for equality. Re-admitting HMAC equality is a follow-up decision, never a silent relaxation.
         var service = CreateService();
         string sql = "SELECT id, name FROM dbo.employees WHERE email = 'alice@example.com'";
 
-        var rewritten = await service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant));
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() => service.RewriteSqlAsync(sql, CreateUser(), new TenantId(Tenant)));
 
-        rewritten.ShouldNotBeNull();
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
     }
 }

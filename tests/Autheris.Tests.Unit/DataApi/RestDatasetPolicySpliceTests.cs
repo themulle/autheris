@@ -241,7 +241,7 @@ public sealed class RestDatasetPolicySpliceTests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         var service = new GovernedSqlExecutionService(
-            Options.Create(options), policyEnforcement: casbin, consentResolution: resolution, tableRepository: tableRepo,
+            Options.Create(options), policyEnforcement: casbin, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
         await service.RewriteSqlAsync("SELECT \"id\", \"name\" FROM default.dbo.customers LIMIT 11", user, new TenantId(TenantValue));
@@ -288,15 +288,17 @@ public sealed class RestDatasetPolicySpliceTests
         var env = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
         env.EnvironmentName.Returns("Development");
         var service = new GovernedSqlExecutionService(
-            Options.Create(Options_()), policyEnforcement: null, consentResolution: resolution, tableRepository: tableRepo,
+            Options.Create(Options_()), policyEnforcement: null, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
 
-        var rewritten = await service.RewriteSqlAsync(emitted, Alice(), new TenantId(TenantValue));
-        var baseline = await service.RewriteSqlAsync("SELECT \"id\", \"name\" FROM default.dbo.customers ORDER BY \"id\" LIMIT 11", Alice(), new TenantId(TenantValue));
+        var rewritten = await service.CompileAsync(emitted, Alice(), new TenantId(TenantValue));
+        var baseline = await service.CompileAsync("SELECT \"id\", \"name\" FROM default.dbo.customers ORDER BY \"id\" LIMIT 11", Alice(), new TenantId(TenantValue));
 
-        CountOf(rewritten, "= 'EU'").ShouldBe(1);
-        rewritten.ShouldBe(baseline);
+        // X1: the policy value is a bound parameter. It appears exactly once (no second copy from a splice) and never in the text.
+        rewritten.CountOfValue(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Policy, "EU").ShouldBe(1);
+        rewritten.Sql.ShouldNotContain("'EU'");
+        rewritten.Sql.ShouldBe(baseline.Sql);
     }
 
     // ---- MCP dataset tool: same SQL and rows as REST -----------------------------------------------------------------
@@ -445,13 +447,14 @@ public sealed class RestDatasetPolicySpliceTests
             DataSources = new SqlDataSourceOptions { RequireTenantColumn = true }
         };
         var service = new GovernedSqlExecutionService(
-            Options.Create(options), policyEnforcement: null, consentResolution: resolution, tableRepository: tableRepo,
+            Options.Create(options), policyEnforcement: null, consentResolution: resolution, tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null, clientIpResolver: null, environment: env, logger: NullLogger<GovernedSqlExecutionService>.Instance,
             consentRepository: repo, secretProvider: null);
-        var rewritten = await service.RewriteSqlAsync(emitted, Alice(), new TenantId(TenantValue));
+        var rewritten = await service.CompileAsync(emitted, Alice(), new TenantId(TenantValue));
 
-        rewritten.ShouldContain($"tenant_id = '{TenantValue}'");
-        rewritten.ShouldNotContain("tenant_b");
+        rewritten.ShouldBindTenant(TenantValue);
+        rewritten.Sql.ShouldNotContain("tenant_b");
+        rewritten.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Tenant).ShouldNotContain("tenant_b");
     }
 
     [Theory]

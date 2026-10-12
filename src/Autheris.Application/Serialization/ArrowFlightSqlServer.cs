@@ -92,7 +92,7 @@ public sealed class ArrowFlightSqlServer : IArrowFlightSqlServer
         {
             using var scope = _scopeFactory.CreateScope();
             var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
-            await sqlService.RewriteSqlAsync(query, principal, tenant, ct).ConfigureAwait(false);
+            await sqlService.ValidateAsync(query, principal, tenant, ct).ConfigureAwait(false);
         }
 
         var ticketId = Guid.NewGuid().ToString("N");

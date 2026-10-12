@@ -152,8 +152,8 @@ public sealed class FlightSqlGovernedExecutionTests
     public async Task FlightInfo_ValidatesTheStatementAndAnnouncesNoFakeSchema()
     {
         var (server, sql) = CreateServer();
-        sql.RewriteSqlAsync("SELECT * FROM hr.salaries", User, Tenant, Arg.Any<CancellationToken>())
-            .Returns<Task<string>>(_ => throw new WebSqlPolicyException("denied"));
+        sql.ValidateAsync("SELECT * FROM hr.salaries", User, Tenant, Arg.Any<CancellationToken>())
+            .Returns<Task>(_ => throw new WebSqlPolicyException("denied"));
 
         await Should.ThrowAsync<SecurityException>(() => server.GetFlightInfoAsync("SELECT * FROM hr.salaries", User, Tenant).AsTask());
 

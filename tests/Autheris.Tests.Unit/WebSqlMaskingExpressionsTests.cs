@@ -98,7 +98,7 @@ public sealed class WebSqlMaskingExpressionsTests
             Options.Create(options),
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: tableRepo,
+            tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: null,
             clientIpResolver: null,
             environment: null,
@@ -123,12 +123,11 @@ public sealed class WebSqlMaskingExpressionsTests
         var service = CreateService();
         var user = CreateUser();
 
-        var sql = await service.RewriteSqlAsync("SELECT email FROM sales.dbo.customers", user, new TenantId("tenant-1"));
+        var compiled = await service.CompileAsync("SELECT email FROM sales.dbo.customers", user, new TenantId("tenant-1"));
 
-        // Should NOT fall through to "'***'"
-        sql.ShouldNotContain("AS email FROM");
-        sql.ShouldContain("***@***");
-        sql.ShouldNotBe("SELECT '***' AS email FROM sales.dbo.customers");
+        // X0f/X1: MASK_EMAIL is the typed constant "***@***" (a bound Mask value), not the generic "***" redaction and never text.
+        compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldContain("***@***");
+        compiled.Sql.ShouldNotContain("***@***");
     }
 
     [Fact]
@@ -137,9 +136,10 @@ public sealed class WebSqlMaskingExpressionsTests
         var service = CreateService();
         var user = CreateUser();
 
-        var sql = await service.RewriteSqlAsync("SELECT iban FROM sales.dbo.customers", user, new TenantId("tenant-1"));
+        var compiled = await service.CompileAsync("SELECT iban FROM sales.dbo.customers", user, new TenantId("tenant-1"));
 
-        // Should NOT fall through to "'***'"
-        sql.ShouldContain("** **** **** ");
+        // X0f/X1: MASK_IBAN is the typed constant "****" (neither characters nor length are revealed), not the generic "***" redaction.
+        compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldContain("****");
+        compiled.Sql.ShouldNotContain("****");
     }
 }

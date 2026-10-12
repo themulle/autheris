@@ -111,7 +111,7 @@ public sealed class WebSqlCrossSourceGuardTests
             Options.Create(options),
             policyEnforcement: null,
             consentResolution: resolution,
-            tableRepository: repo,
+            tableRepository: repo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: factory,
             clientIpResolver: null,
             environment: null,

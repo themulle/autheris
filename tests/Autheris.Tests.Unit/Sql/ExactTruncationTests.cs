@@ -67,7 +67,7 @@ public sealed class ExactTruncationTests
         var result = await service.ExecuteQueryBufferedAsync(
             new GovernedSqlQueryRequest(sql), WebSqlTwoPartNameDataSourceTests.CreateUser(), new TenantId(WebSqlTwoPartNameDataSourceTests.Tenant));
 
-        command.CommandText.ShouldContain(executedLimit);
+        command.CommandText.ShouldContain(executedLimit);   // PostgreSQL emits the enforced limit inline (structural, not a user value)
         result.RowCount.ShouldBe(returned);
         result.Truncated.ShouldBe(truncated);
     }

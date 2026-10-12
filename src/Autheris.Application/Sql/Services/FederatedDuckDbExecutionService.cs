@@ -194,7 +194,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             truncated);
     }
 
-    public async Task<string> RewriteSqlAsync(
+    public async Task ValidateAsync(
         string rawSql,
         ClaimsPrincipal user,
         TenantId tenantId,
@@ -224,9 +224,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, ct).ConfigureAwait(false);
 
-        var plan = _planner.Plan(rawSql, metadata, routing.Tables, decisions, crossSourceOptions);
-
-        return plan.GeneratedDuckDbSql;
+        _planner.Plan(rawSql, metadata, routing.Tables, decisions, crossSourceOptions);
     }
 
     private async Task<(OlapQueryResult Result, CrossSourcePlan Plan)> ExecuteFederatedInternalAsync(
@@ -260,10 +258,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         // SqlFunctionPolicy check
         if (metadata.FunctionCalls is { Count: > 0 })
         {
-            var functionPolicy = new RlsOptions { EnforceFunctionPolicy = true };
             foreach (var functionName in metadata.FunctionCalls)
             {
-                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, functionPolicy))
+                // G-9: the denylist only; no RlsOptions bag.
+                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowedFunctions: null, additionalDeniedFunctions: null))
                 {
                     throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
                 }

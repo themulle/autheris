@@ -57,7 +57,8 @@ public interface IGovernedSqlExecutionService
         TenantId tenantId,
         CancellationToken ct = default);
 
-    Task<string> RewriteSqlAsync(
+    /// <summary>G-6: validates a statement through the governed pipeline without executing it and without returning SQL text.</summary>
+    Task ValidateAsync(
         string rawSql,
         ClaimsPrincipal user,
         TenantId tenantId,

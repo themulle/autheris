@@ -2,6 +2,8 @@ namespace Autheris.Tests.Integration;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -14,46 +16,98 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
 
-public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactory<Program>>
+public sealed class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
 {
     private readonly WebApplicationFactory<Program> _factory;
+    private readonly string _workDir;
+    private readonly string _dbPath;
 
+    // X1: the governed pipeline compiles against the catalog of the database, so every table of these tests exists in a real SQLite
+    // data source (tenant rows of several tenants), and the assertions are on rows, not on SQL text.
     public GovernedWebSqlIntegrationTests(WebApplicationFactory<Program> factory)
     {
+        _workDir = Path.Combine(Path.GetTempPath(), "autheris-gws-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_workDir);
+        _dbPath = Path.Combine(_workDir, "data.db");
+        Seed(_dbPath);
+
         _factory = factory.WithWebHostBuilder(builder =>
         {
             builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
             builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
             builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
             builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-{GetType().Name}-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:DataSources:Connections:default:Provider", "Sqlite");
+            builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", $"Data Source={_dbPath}");
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
+            builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "default");
             builder.UseSetting("Gateway:WebSql:AllowDml", "false");
             builder.UseSetting("Gateway:WebSql:DefaultMaxRows", "200");
             builder.UseSetting("Gateway:WebSql:MaxAllowedRows", "500");
         });
     }
 
+    public void Dispose()
+    {
+        SqliteConnection.ClearAllPools();
+        try { Directory.Delete(_workDir, true); } catch { /* best effort */ }
+    }
+
+    private static void Seed(string path)
+    {
+        using var conn = new SqliteConnection($"Data Source={path}");
+        conn.Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            CREATE TABLE customers (id TEXT, name TEXT, email TEXT, active TEXT, tenant_id TEXT);
+            INSERT INTO customers VALUES ('1','Ada','ada@x.example','1','tenant_alpha'),('2','Bob','bob@x.example','0','tenant_alpha');
+            CREATE TABLE users (id TEXT, name TEXT, tenant_id TEXT);
+            INSERT INTO users VALUES ('1','u1','tenant_gamma');
+            CREATE TABLE orders (id TEXT, total TEXT, email TEXT, ssn TEXT, tenant_id TEXT);
+            CREATE TABLE employees (id TEXT, name TEXT, ssn TEXT, tenant_id TEXT);
+            INSERT INTO employees VALUES ('1','Eve','123-45-6789','tenant_456'),('2','Mallory','987-65-4321','tenant_other');
+            CREATE TABLE accounts (id TEXT, balance TEXT, tenant_id TEXT);
+            INSERT INTO accounts VALUES ('1','10','victim'),('2','20','tenant_evil');
+            CREATE TABLE crm_customers (id TEXT, email TEXT, tenant_id TEXT);
+            CREATE TABLE secure_users (id TEXT, email TEXT, tenant_id TEXT);
+            CREATE TABLE hr_employees (id TEXT, ssn TEXT, tenant_id TEXT);
+            CREATE TABLE payroll (id TEXT, ssn TEXT, tenant_id TEXT);
+            """;
+        cmd.ExecuteNonQuery();
+        using var rows = conn.CreateCommand();
+        rows.CommandText = "INSERT INTO orders VALUES " + string.Join(",", Enumerable.Range(1, 700).Select(i => $"('{i}','{i}','e{i}@x.example','000','tenant_123')")) + ",('9999','1','x','000','tenant_other');";
+        rows.ExecuteNonQuery();
+    }
+
     // SEC C-03: WebSQL rejects tables without catalog metadata, so every table used by these tests is registered first.
-    private async Task RegisterTableAsync(string tableName, params string[] columns)
+    private async Task RegisterTableAsync(string tableName, params string[] columns) =>
+        await RegisterTableAsync(tableName, null, columns.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList());
+
+    private async Task RegisterTableAsync(string tableName, Dictionary<string, MaskingRule>? masking, List<TableColumn> columns)
     {
         using var scope = _factory.Services.CreateScope();
         var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
-        var cols = new List<TableColumn>();
-        foreach (var c in columns)
-        {
-            cols.Add(new TableColumn { ColumnName = c, DataType = "varchar" });
-        }
-
         await tableRepo.UpsertTableMetadataAsync(new TableMetadata
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = tableName, TableName = tableName },
-            Identifier = new TableIdentifier("default", "public", tableName),
-            Columns = cols
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = tableName, TableName = tableName, SchemaName = "main", SourceName = "default", SourceType = "Sqlite" },
+            Identifier = new TableIdentifier("default", "main", tableName),
+            Columns = columns,
+            ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
         });
+    }
+
+    private static ClaimsPrincipal User(string sid, string tenant) =>
+        new(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, sid), new Claim(ClaimTypes.PrimarySid, sid), new Claim("tenant_id", tenant)], "TestAuth"));
+
+    private async Task<GovernedSqlResult> RunAsync(string sql, ClaimsPrincipal user, string tenant)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>().ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest(sql), user, new TenantId(tenant));
     }
 
     [Fact]
@@ -65,11 +119,11 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
 
         var payload = new
         {
-            sql = "SELECT id, name, email FROM customers WHERE active = 1"
+            sql = "SELECT id, name, email FROM customers WHERE active = '1'"
         };
 
         var response = await client.PostAsJsonAsync("/api/v1/sql", payload);
-        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
 
         var json = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(json);
@@ -118,79 +172,39 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
     }
 
     [Fact]
-    public async Task WebSql_RewriteSqlAsync_InjectsTenantRlsAndClampsLimit()
+    public async Task WebSql_Select_ReturnsOnlyTheCallersTenantRows_AndClampsTheLimit()
     {
-        using var scope = _factory.Services.CreateScope();
-        var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
-
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, "usr_alice"),
-            new Claim("tenant_id", "tenant_123")
-        }, "TestAuth"));
-
         await RegisterTableAsync("orders", "id", "total", "email", "ssn", "tenant_id");
-        string rawSql = "SELECT * FROM orders WHERE total > 100 LIMIT 5000";
-        string secured = await sqlService.RewriteSqlAsync(rawSql, user, new TenantId("tenant_123"));
 
-        // RLS subquery rewrite must contain tenant predicate
-        secured.ShouldContain("tenant_id = 'tenant_123'");
-        // Limit must be clamped to MaxAllowedRows (500)
-        secured.ShouldContain("LIMIT 500");
-        secured.ShouldNotContain("5000");
+        var result = await RunAsync("SELECT * FROM orders WHERE CAST(total AS INTEGER) > 100 LIMIT 5000", User("usr_alice", "tenant_123"), "tenant_123");
+
+        // 700 rows of tenant_123 (600 with total > 100) and one foreign row; the limit is clamped to MaxAllowedRows (500)
+        result.RowCount.ShouldBe(500);
+        result.Truncated.ShouldBeTrue();
+        result.Rows.ShouldAllBe(r => Equals(r["tenant_id"], "tenant_123"));
     }
 
     [Fact]
-    public async Task WebSql_RewriteSqlAsync_WithColumnMaskingRules_PushesDownMaskingExpressions()
+    public async Task WebSql_ColumnMaskingRules_AreAppliedInTheResult()
     {
-        using var scope = _factory.Services.CreateScope();
-        var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
-        var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
+        await RegisterTableAsync(
+            "employees",
+            new Dictionary<string, MaskingRule> { ["ssn"] = new MaskingRule { RuleType = "REDACT", Replacement = "XXX-XX-XXXX" } },
+            [
+                new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "name", DataType = "varchar" },
+                new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
+            ]);
 
-        // Register table metadata with sensitive columns
-        var tableId = new TableIdentifier("default", "public", "employees");
-        await tableRepo.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "employees", TableName = "employees" },
-            Identifier = tableId,
-            Columns = new List<TableColumn>
-            {
-                new() { ColumnName = "id", DataType = "integer" },
-                new() { ColumnName = "name", DataType = "varchar" },
-                new() { ColumnName = "ssn", DataType = "varchar", IsSensitive = true },
-                new() { ColumnName = "tenant_id", DataType = "varchar" }
-            },
-            ColumnMaskingRules = new Dictionary<string, MaskingRule>
-            {
-                ["ssn"] = new MaskingRule { RuleType = "REDACT", Replacement = "XXX-XX-XXXX" }
-            }
-        });
+        var result = await RunAsync("SELECT id, name, ssn FROM employees", User("usr_bob", "tenant_456"), "tenant_456");
 
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, "usr_bob"),
-            new Claim("tenant_id", "tenant_456")
-        }, "TestAuth"));
-
-        string rawSql = "SELECT id, name, ssn FROM employees";
-        string secured = await sqlService.RewriteSqlAsync(rawSql, user, new TenantId("tenant_456"));
-
-        secured.ShouldContain("tenant_id = 'tenant_456'");
-        secured.ShouldContain("AS employees");
+        var row = result.Rows.ShouldHaveSingleItem();   // tenant_other's row is not visible
+        row["name"].ShouldBe("Eve");
+        row["ssn"].ShouldNotBe("123-45-6789");
     }
 
     [Fact]
     public async Task WebSql_AntiBypass_CteShadowing_DoesNotEvadeRlsOnPhysicalTable()
     {
-        using var scope = _factory.Services.CreateScope();
-        var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
-
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, "usr_eve"),
-            new Claim("tenant_id", "tenant_evil")
-        }, "TestAuth"));
-
         await RegisterTableAsync("accounts", "id", "balance", "tenant_id");
 
         // Attacker attempts to shadow physical table 'accounts' inside CTE to query external rows
@@ -200,10 +214,14 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
             )
             SELECT * FROM accounts";
 
-        string secured = await sqlService.RewriteSqlAsync(attackSql, user, new TenantId("tenant_evil"));
+        // The compiler refuses the self-referencing CTE (it needs WITH RECURSIVE), so nothing is executed and no row can leak. The
+        // rewritten form below proves that the physical 'accounts' inside a CTE definition stays tenant scoped.
+        await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(attackSql, User("usr_eve", "tenant_evil"), "tenant_evil"));
 
-        // Physical 'accounts' inside CTE definition MUST still have RLS injected
-        secured.ShouldContain("tenant_id = 'tenant_evil'");
+        var scoped = await RunAsync(
+            "WITH acc AS (SELECT * FROM accounts WHERE tenant_id = 'victim') SELECT * FROM acc",
+            User("usr_eve", "tenant_evil"), "tenant_evil");
+        scoped.Rows.ShouldBeEmpty();
     }
 
     [Fact]
@@ -248,22 +266,10 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
         var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 
-        var tableId = new TableIdentifier("default", "public", "crm_customers");
-        await tableRepo.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "crm_customers", TableName = "crm_customers" },
-            Identifier = tableId,
-            Columns = new List<TableColumn>
-            {
-                new() { ColumnName = "id", DataType = "integer" },
-                new() { ColumnName = "email", DataType = "varchar" },
-                new() { ColumnName = "tenant_id", DataType = "varchar" }
-            },
-            ColumnMaskingRules = new Dictionary<string, MaskingRule>
-            {
-                ["email"] = new MaskingRule { RuleType = "REDACT", Replacement = "***" }
-            }
-        });
+        await RegisterTableAsync(
+            "crm_customers",
+            new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "REDACT", Replacement = "***" } },
+            [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "email", DataType = "varchar" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
@@ -276,7 +282,7 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
 
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(async () =>
         {
-            await sqlService.RewriteSqlAsync(attackQuery, user, new TenantId("tenant_test"));
+            await sqlService.ValidateAsync(attackQuery, user, new TenantId("tenant_test"));
         });
 
         ex.Message.ShouldContain("Security Policy Violation: Column 'email'");
@@ -290,22 +296,10 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
         var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 
-        var tableId = new TableIdentifier("default", "public", "crm_customers");
-        await tableRepo.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "crm_customers", TableName = "crm_customers" },
-            Identifier = tableId,
-            Columns = new List<TableColumn>
-            {
-                new() { ColumnName = "id", DataType = "integer" },
-                new() { ColumnName = "email", DataType = "varchar" },
-                new() { ColumnName = "tenant_id", DataType = "varchar" }
-            },
-            ColumnMaskingRules = new Dictionary<string, MaskingRule>
-            {
-                ["email"] = new MaskingRule { RuleType = "REDACT", Replacement = "***" }
-            }
-        });
+        await RegisterTableAsync(
+            "crm_customers",
+            new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "REDACT", Replacement = "***" } },
+            [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "email", DataType = "varchar" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
@@ -319,7 +313,7 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
 
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(async () =>
         {
-            await sqlService.RewriteSqlAsync(commaJoinQuery, user, new TenantId("tenant_test"));
+            await sqlService.ValidateAsync(commaJoinQuery, user, new TenantId("tenant_test"));
         });
 
         ex.Message.ShouldContain("Security Policy Violation: Column 'email'");
@@ -327,57 +321,24 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
     }
 
     [Fact]
-    public async Task WebSql_JoinOnHmacPseudonymizedColumn_SucceedsAndPushesDownDeterministicHash()
+    public async Task WebSql_JoinOnHmacPseudonymizedColumn_IsRejectedByTheCompiler()
     {
         using var scope = _factory.Services.CreateScope();
-        var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
         var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 
-        var tableId = new TableIdentifier("default", "public", "secure_users");
-        await tableRepo.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "secure_users", TableName = "secure_users", SourceType = "SQLite" },
-            Identifier = tableId,
-            Columns = new List<TableColumn>
-            {
-                new() { ColumnName = "id", DataType = "integer" },
-                new() { ColumnName = "email", DataType = "varchar" },
-                new() { ColumnName = "tenant_id", DataType = "varchar" }
-            },
-            ColumnMaskingRules = new Dictionary<string, MaskingRule>
-            {
-                ["email"] = new MaskingRule { RuleType = "HMAC" }
-            }
-        });
+        await RegisterTableAsync(
+            "secure_users",
+            new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "HMAC" } },
+            [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "email", DataType = "varchar" }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]);
+        await RegisterTableAsync("orders", "id", "total", "email", "ssn", "tenant_id");
 
-        var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
-        {
-            new Claim(ClaimTypes.NameIdentifier, "usr_test"),
-            new Claim("tenant_id", "tenant_test")
-        }, "TestAuth"));
+        // X1 (ast-stricter, fail closed): the compiler rejects every masked column in a predicate, including an HMAC pseudonym that the
+        // legacy rewriter allowed to join on. Re-admitting it is a follow-up decision.
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
+            sqlService.ValidateAsync("SELECT u.id, o.id FROM secure_users u JOIN orders o ON u.email = o.email", User("usr_test", "tenant_test"), new TenantId("tenant_test")));
 
-        // SEC P-05: all tables of one WebSQL statement must share the data source dialect (here: SQLite).
-        await tableRepo.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "orders", TableName = "orders", SourceType = "SQLite" },
-            Identifier = new TableIdentifier("default", "public", "orders"),
-            Columns = new List<TableColumn>
-            {
-                new() { ColumnName = "id", DataType = "varchar" },
-                new() { ColumnName = "total", DataType = "varchar" },
-                new() { ColumnName = "email", DataType = "varchar" },
-                new() { ColumnName = "ssn", DataType = "varchar" },
-                new() { ColumnName = "tenant_id", DataType = "varchar" }
-            }
-        });
-        string validJoinQuery = "SELECT u.id, o.id FROM secure_users u JOIN orders o ON u.email = o.email";
-
-        string secured = await sqlService.RewriteSqlAsync(validJoinQuery, user, new TenantId("tenant_test"));
-
-        secured.ShouldContain("gateway_hmac_sha256");
-        // SEC H-13: The HMAC key (and the secret reference name) is bound as a parameter, never embedded in SQL text
-        secured.ShouldNotContain("DEV_INSECURE_TEST_KEY_ONLY");
-        secured.ShouldContain("@__gql_mk0");
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
     }
 
     [Fact]
@@ -388,18 +349,10 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
         var sqlService = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
 
         // Table metadata has NO static ColumnMaskingRules, but sensitive column marked
-        var tableId = new TableIdentifier("default", "public", "hr_employees");
-        await tableRepo.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = "hr_employees", TableName = "hr_employees" },
-            Identifier = tableId,
-            Columns = new List<TableColumn>
-            {
-                new() { ColumnName = "id", DataType = "integer" },
-                new() { ColumnName = "ssn", DataType = "varchar", IsSensitive = true },
-                new() { ColumnName = "tenant_id", DataType = "varchar" }
-            }
-        });
+        await RegisterTableAsync(
+            "hr_employees",
+            null,
+            [new TableColumn { ColumnName = "id", DataType = "varchar" }, new TableColumn { ColumnName = "ssn", DataType = "varchar", IsSensitive = true }, new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }]);
 
         var user = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
@@ -412,7 +365,7 @@ public class GovernedWebSqlIntegrationTests : IClassFixture<WebApplicationFactor
 
         var ex = await Should.ThrowAsync<System.Security.SecurityException>(async () =>
         {
-            await sqlService.RewriteSqlAsync(joinQuery, user, new TenantId("tenant_test"));
+            await sqlService.ValidateAsync(joinQuery, user, new TenantId("tenant_test"));
         });
 
         ex.Message.ShouldContain("Security Policy Violation: Column 'ssn'");

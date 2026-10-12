@@ -4,6 +4,7 @@ namespace Autheris.Tests.Unit;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Data;
 using System.Data.Common;
 using System.Diagnostics.CodeAnalysis;
@@ -213,11 +214,14 @@ public sealed class SecurityReview20261002WebSqlTests
         IAuditLogRepository? auditLog = null,
         bool withConsentServices = true)
     {
+        var repo = repository ?? CreateRepository(CreateEmployeesMetadata(), CreateOrdersMetadata());
+        var gatewayOptions = Options.Create(options ?? CreateOptions());
         return new GovernedSqlExecutionService(
-            Options.Create(options ?? CreateOptions()),
+            gatewayOptions,
             policyEnforcement: casbin,
             consentResolution: withConsentServices ? (consentResolution ?? CreateConsentResolution(t => UnconstrainedAllow(t))) : null,
-            tableRepository: repository ?? CreateRepository(CreateEmployeesMetadata(), CreateOrdersMetadata()),
+            tableRepository: repo,
+            policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(repo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(gatewayOptions, secretProvider),
             auditLogRepository: auditLog ?? Autheris.Application.Audit.NullAuditLogRepository.Instance,
             connectionFactory: null,
             clientIpResolver: null,
@@ -263,10 +267,10 @@ public sealed class SecurityReview20261002WebSqlTests
     {
         var service = CreateService();
 
-        var secured = await service.RewriteSqlAsync("SELECT id, name FROM employees", CreateUser(), new TenantId(Tenant));
+        var compiled = await service.CompileAsync("SELECT id, name FROM employees", CreateUser(), new TenantId(Tenant));
 
-        secured.ShouldContain("tenant_id = 'tenant_a'");
-        secured.ShouldContain("LIMIT 100");
+        compiled.ShouldBindTenant("tenant_a");
+        compiled.Sql.ShouldContain("LIMIT 100");
     }
 
     // =========================================================================
@@ -312,13 +316,29 @@ public sealed class SecurityReview20261002WebSqlTests
     [Fact]
     public async Task C03_ConsentRowFilter_IsPushedDown()
     {
-        var consent = CreateConsentResolution(t => UnconstrainedAllow(t, "region = 'EU'"));
-        var service = CreateService(consentResolution: consent);
+        // A real consent: the production resolution turns its row filter into a typed policy (a text-only filter would be denied).
+        var employees = CreateEmployeesMetadata();
+        var consentRepository = Substitute.For<IConsentRepository>();
+        consentRepository.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>([new Consent
+            {
+                TableIdentifier = employees.Identifier,
+                TenantId = new TenantId(Tenant),
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid("S-1-5-21-WEBSQL-USER"),
+                Effect = ConsentEffect.Allow,
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                RowFilters = [new ConsentRowFilter { ColumnName = "region", Operator = "EQ", ValueType = "string", ValueJson = "\"EU\"" }],
+                ColumnRules = employees.Columns.Select(c => new ConsentColumnRule { ColumnName = c.ColumnName, AccessLevel = ColumnAccessLevel.Clear }).ToList()
+            }]));
+        var service = CreateService(consentResolution: new Autheris.Application.Services.ConsentResolutionService(), consentRepository: consentRepository);
 
-        var secured = await service.RewriteSqlAsync("SELECT id, name FROM employees", CreateUser(), new TenantId(Tenant));
+        var compiled = await service.CompileAsync("SELECT id, name FROM employees", CreateUser(), new TenantId(Tenant));
 
-        secured.ShouldContain("region = 'EU'");
-        secured.ShouldContain("tenant_id = 'tenant_a'");
+        compiled.CountOfValue(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Policy, "EU").ShouldBe(1);
+        compiled.Sql.ShouldNotContain("EU");
+        compiled.ShouldBindTenant("tenant_a");
     }
 
     [Fact]
@@ -326,9 +346,9 @@ public sealed class SecurityReview20261002WebSqlTests
     {
         var service = CreateService(casbin: CreateCasbin());
 
-        var secured = await service.RewriteSqlAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
+        var compiled = await service.CompileAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
 
-        secured.ShouldContain("'***'");
+        compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldContain("***");
     }
 
     [Fact]
@@ -344,9 +364,9 @@ public sealed class SecurityReview20261002WebSqlTests
         }));
         var service = CreateService(consentResolution: consent, casbin: CreateCasbin());
 
-        var secured = await service.RewriteSqlAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
+        var compiled = await service.CompileAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
 
-        secured.ShouldNotContain("'***'");
+        compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldBeEmpty();
     }
 
     [Fact]
@@ -525,13 +545,16 @@ public sealed class SecurityReview20261002WebSqlTests
         var repo = CreateRepository(CreateEmployeesMetadata(hmacRuleType: "HMAC"));
         var service = CreateService(repository: repo, secretProvider: CreateSecretProvider());
 
-        var secured = await service.RewriteSqlAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
+        var compiled = await service.CompileAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
 
-        secured.ShouldContain("HMAC(");
-        secured.ShouldContain("@__gql_mk0");
-        secured.ShouldNotContain(HmacSecretRef);
-        secured.ShouldNotContain(HmacSecretValue);
-        secured.ShouldNotContain("DIGEST(");
+        // PostgreSQL: the HMAC runs in the database with a bound, HKDF-derived key; the key and its reference are never text.
+        compiled.Sql.ShouldContain("HMAC(", Case.Insensitive);
+        compiled.Parameters.Count(p => p.Origin == TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldBeGreaterThan(0);
+        compiled.Sql.ShouldNotContain(HmacSecretRef);
+        compiled.Sql.ShouldNotContain(HmacSecretValue);
+        compiled.Sql.ShouldNotContain("DIGEST(");
+        compiled.Parameters.Any(p => p.Value is string text && text.Contains(HmacSecretValue)).ShouldBeFalse();
+        compiled.Parameters.Any(p => p.Value is byte[] raw && Encoding.UTF8.GetString(raw).Contains(HmacSecretValue)).ShouldBeFalse();
     }
 
     [Fact]
@@ -570,11 +593,11 @@ public sealed class SecurityReview20261002WebSqlTests
         var repo = CreateRepository(CreateEmployeesMetadata(hmacRuleType: "HMAC"));
         var service = CreateService(repository: repo, secretProvider: null);
 
-        var secured = await service.RewriteSqlAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
+        var compiled = await service.CompileAsync("SELECT id, ssn FROM employees", CreateUser(), new TenantId(Tenant));
 
-        secured.ShouldContain("'***'");
-        secured.ShouldNotContain("HMAC(");
-        secured.ShouldNotContain(HmacSecretRef);
+        compiled.ValuesOf(TrinoSqlEngine.Ast.Emit.ParameterOrigin.Mask).ShouldContain("***");
+        compiled.Sql.ShouldNotContain("HMAC(", Case.Insensitive);
+        compiled.Sql.ShouldNotContain(HmacSecretRef);
     }
 
     [Fact]
@@ -634,8 +657,11 @@ public sealed class SecurityReview20261002WebSqlTests
     {
         var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]));
 
-        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+        // X1: a literal tenant value that is not the caller's is rejected by the compiler (typed SecurityException, SQL_POLICY_VIOLATION).
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
             service.RewriteSqlAsync("INSERT INTO orders (id, amount, tenant_id) VALUES (1, 10, '42')", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
     }
 
     [Fact]
@@ -643,8 +669,10 @@ public sealed class SecurityReview20261002WebSqlTests
     {
         var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]));
 
-        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() =>
             service.RewriteSqlAsync("INSERT INTO orders (id, amount) VALUES (1, 10)", CreateUser("WebSqlWriter"), new TenantId(Tenant)));
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
     }
 
     [Fact]
@@ -652,9 +680,10 @@ public sealed class SecurityReview20261002WebSqlTests
     {
         var service = CreateService(options: CreateOptions(allowDml: true, dmlWriterRoles: ["WebSqlWriter"]));
 
-        var secured = await service.RewriteSqlAsync("INSERT INTO orders (id, amount, tenant_id) VALUES (1, 10, 'tenant_a')", CreateUser("WebSqlWriter"), new TenantId(Tenant));
+        var compiled = await service.CompileAsync("INSERT INTO orders (id, amount, tenant_id) VALUES (1, 10, 'tenant_a')", CreateUser("WebSqlWriter"), new TenantId(Tenant));
 
-        secured.ShouldContain("INSERT");
+        compiled.Sql.ShouldContain("INSERT");
+        compiled.StatementClass.ShouldBe(TrinoSqlEngine.Ast.Emit.SqlStatementClass.Insert);
     }
 
     // =========================================================================
@@ -735,8 +764,8 @@ public sealed class SecurityReview20261002WebSqlTests
         public Task<GovernedSqlResult> ExecuteQueryBufferedAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
             => Task.FromException<GovernedSqlResult>(toThrow);
 
-        public Task<string> RewriteSqlAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
-            => Task.FromException<string>(toThrow);
+        public Task ValidateAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default)
+            => Task.FromException(toThrow);
     }
 
     // =========================================================================
@@ -783,7 +812,7 @@ public sealed class SecurityReview20261002WebSqlTests
             policyEnforcement: CreateCasbin(),
             consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
             consentRepository: CreateConsentRepository(),
-            tableRepository: tableRepo,
+            tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: connectionFactory,
             logger: NullLogger<GovernedSqlExecutionService>.Instance);
 
@@ -851,7 +880,7 @@ public sealed class SecurityReview20261002WebSqlTests
             policyEnforcement: CreateCasbin(),
             consentResolution: CreateConsentResolution(t => UnconstrainedAllow(t)),
             consentRepository: CreateConsentRepository(),
-            tableRepository: tableRepo,
+            tableRepository: tableRepo, policyFactory: global::Autheris.Tests.Unit.GovernedTestSupport.PolicyFactory(tableRepo), typedPolicies: global::Autheris.Tests.Unit.GovernedTestSupport.TypedPolicies(),
             connectionFactory: connectionFactory,
             logger: NullLogger<GovernedSqlExecutionService>.Instance);
 

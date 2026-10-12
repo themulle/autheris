@@ -90,7 +90,7 @@ public sealed class SqlDataSourceResolver
         if (!GovernedSqlExecutionService.TryMapProviderToDialect(connOptions.Provider, out var dialect))
         {
             _logger?.LogWarning("WebSQL rejected data source {DataSource}: provider is not supported by WebSQL.", dataSourceName);
-            throw new WebSqlPolicyException("The data source uses a database provider that is not supported by WebSQL (supported: PostgreSQL, SQL Server, SQLite).");
+            throw new WebSqlPolicyException(SqlDialectMapper.UnsupportedProviderMessage);
         }
 
         return dialect;
@@ -167,9 +167,6 @@ public sealed class SqlDataSourceResolver
             target[name] = value;
         }
     }
-
-    public static bool IsWebSqlSupportedDialect(DatabaseDialect dialect) =>
-        dialect is DatabaseDialect.PostgreSql or DatabaseDialect.SqlServer or DatabaseDialect.Sqlite;
 
     public static bool MatchesPostgreSqlCatalogName(TableAccessTarget target, TableIdentifier catalogTable)
     {
