@@ -106,13 +106,23 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
             return Task.FromResult<DocAppManifest?>(cached);
         }
 
-        var appDir = Path.Combine(_rootPath, appId);
-        if (!Directory.Exists(appDir))
+        var safeAppId = Path.GetFileName(appId);
+        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar)
+            ? _rootPath
+            : _rootPath + Path.DirectorySeparatorChar;
+
+        var appDir = Path.GetFullPath(Path.Combine(_rootPath, safeAppId));
+        if (!appDir.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase) || !Directory.Exists(appDir))
         {
             return Task.FromResult<DocAppManifest?>(null);
         }
 
-        var manifestJsonPath = Path.Combine(appDir, "manifest.json");
+        var manifestJsonPath = Path.GetFullPath(Path.Combine(appDir, "manifest.json"));
+        if (!manifestJsonPath.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult<DocAppManifest?>(null);
+        }
+
         if (File.Exists(manifestJsonPath))
         {
             try
@@ -127,7 +137,7 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to parse manifest.json for app {AppId}", appId);
+                _logger.LogWarning(ex, "Failed to parse manifest.json for app {AppId}", SanitizeForLog(appId));
             }
         }
 
@@ -145,31 +155,48 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
 
         ValidateSafeIdentifier(docId, nameof(docId));
 
-        var categoryName = request.Category.ToString().ToLowerInvariant();
-        var targetCategoryDir = Path.Combine(_rootPath, request.AppId, categoryName);
+        var safeAppId = Path.GetFileName(request.AppId);
+        var safeDocId = Path.GetFileName(docId);
+        var categoryName = Path.GetFileName(request.Category.ToString().ToLowerInvariant());
+
+        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar)
+            ? _rootPath
+            : _rootPath + Path.DirectorySeparatorChar;
+
+        var targetCategoryDir = Path.GetFullPath(Path.Combine(_rootPath, safeAppId, categoryName));
+        if (!targetCategoryDir.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Invalid category directory path.", nameof(request));
+        }
+
         Directory.CreateDirectory(targetCategoryDir);
 
-        var filePath = Path.Combine(targetCategoryDir, $"{docId}.md");
+        var filePath = Path.GetFullPath(Path.Combine(targetCategoryDir, $"{safeDocId}.md"));
+        if (!filePath.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("Invalid document file path.", nameof(request));
+        }
+
         await File.WriteAllTextAsync(filePath, request.Content, ct).ConfigureAwait(false);
 
         // Index in-memory for instant discovery (< 100ms)
         var chunks = await _ingestor.IngestMarkdownContentAsync(
             request.Content,
-            docId,
-            request.AppId,
+            safeDocId,
+            safeAppId,
             request.Category,
             filePath,
             ct).ConfigureAwait(false);
 
         await _searchService.IndexChunksAsync(chunks, ct).ConfigureAwait(false);
 
-        var firstChunkId = chunks.Count > 0 ? chunks[0].Id : new DocChunkIdentifier(request.AppId, categoryName, docId, "root");
+        var firstChunkId = chunks.Count > 0 ? chunks[0].Id : new DocChunkIdentifier(safeAppId, categoryName, safeDocId, "root");
 
         return new DepositDocResult(
             Success: true,
             ChunkId: firstChunkId,
             FilePath: filePath,
-            Message: $"Successfully deposited and indexed document '{docId}' for application '{request.AppId}'.");
+            Message: $"Successfully deposited and indexed document '{safeDocId}' for application '{safeAppId}'.");
     }
 
     public async Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, CancellationToken ct = default)
@@ -177,7 +204,17 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         ArgumentNullException.ThrowIfNull(zipStream);
         ValidateSafeIdentifier(appId, nameof(appId));
 
-        var targetDir = Path.GetFullPath(Path.Combine(_rootPath, appId));
+        var safeAppId = Path.GetFileName(appId);
+        var rootWithSep = _rootPath.EndsWith(Path.DirectorySeparatorChar)
+            ? _rootPath
+            : _rootPath + Path.DirectorySeparatorChar;
+
+        var targetDir = Path.GetFullPath(Path.Combine(_rootPath, safeAppId));
+        if (!targetDir.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase) || targetDir == _rootPath)
+        {
+            throw new ArgumentException("Invalid target application directory.", nameof(appId));
+        }
+
         var targetDirWithSep = targetDir.EndsWith(Path.DirectorySeparatorChar)
             ? targetDir
             : targetDir + Path.DirectorySeparatorChar;
@@ -189,12 +226,28 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
 
         foreach (var entry in archive.Entries)
         {
+            // OWASP AppSec: Zip Slip Defense - reject traversal indicators immediately
+            if (string.IsNullOrWhiteSpace(entry.FullName) ||
+                entry.FullName.Contains("..", StringComparison.Ordinal) ||
+                Path.IsPathRooted(entry.FullName))
+            {
+                _logger.LogError("Zip Slip traversal attempt detected for entry '{Entry}' in bundle '{AppId}'",
+                    SanitizeForLog(entry.FullName), SanitizeForLog(appId));
+                return new DepositDocResult(
+                    Success: false,
+                    ChunkId: null,
+                    FilePath: null,
+                    Message: $"Security violation: Archive entry '{entry.FullName}' attempts directory traversal outside destination directory.",
+                    ErrorCode: "ZIP_SLIP_ATTEMPT");
+            }
+
             var destinationPath = Path.GetFullPath(Path.Combine(targetDir, entry.FullName));
 
-            // OWASP AppSec: Zip Slip Defense
-            if (!destinationPath.StartsWith(targetDirWithSep, StringComparison.OrdinalIgnoreCase) && destinationPath != targetDir)
+            // Verify canonical destination path resides strictly within target directory
+            if (!destinationPath.StartsWith(targetDirWithSep, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogError("Zip Slip traversal attempt detected for entry '{Entry}' in bundle '{AppId}'", entry.FullName, appId);
+                _logger.LogError("Zip Slip traversal attempt detected for entry '{Entry}' in bundle '{AppId}'",
+                    SanitizeForLog(entry.FullName), SanitizeForLog(appId));
                 return new DepositDocResult(
                     Success: false,
                     ChunkId: null,
@@ -211,7 +264,9 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
             }
 
             var parentDir = Path.GetDirectoryName(destinationPath);
-            if (!string.IsNullOrEmpty(parentDir) && !Directory.Exists(parentDir))
+            if (!string.IsNullOrEmpty(parentDir) &&
+                parentDir.StartsWith(targetDirWithSep, StringComparison.OrdinalIgnoreCase) &&
+                !Directory.Exists(parentDir))
             {
                 Directory.CreateDirectory(parentDir);
             }
@@ -226,16 +281,22 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         {
             if (file.EndsWith(".md", StringComparison.OrdinalIgnoreCase))
             {
-                var relativePath = Path.GetRelativePath(targetDir, file);
+                var canonicalFile = Path.GetFullPath(file);
+                if (!canonicalFile.StartsWith(targetDirWithSep, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var relativePath = Path.GetRelativePath(targetDir, canonicalFile);
                 var category = ResolveCategoryFromPath(relativePath);
                 try
                 {
-                    var chunks = await _ingestor.IngestMarkdownFileAsync(file, appId, category, ct).ConfigureAwait(false);
+                    var chunks = await _ingestor.IngestMarkdownFileAsync(canonicalFile, safeAppId, category, ct).ConfigureAwait(false);
                     allChunks.AddRange(chunks);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to ingest markdown file {File}", file);
+                    _logger.LogWarning(ex, "Failed to ingest markdown file {File}", SanitizeForLog(canonicalFile));
                 }
             }
         }
@@ -281,5 +342,15 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
         if (string.IsNullOrWhiteSpace(text)) return "untitled";
         var slug = Regex.Replace(text.ToLowerInvariant(), @"[^a-z0-9\-]+", "-").Trim('-');
         return string.IsNullOrWhiteSpace(slug) ? "untitled" : slug;
+    }
+
+    private static string SanitizeForLog(string? input)
+    {
+        if (string.IsNullOrEmpty(input))
+        {
+            return string.Empty;
+        }
+
+        return input.Replace("\r", "_").Replace("\n", "_");
     }
 }

@@ -64,4 +64,15 @@ public sealed class MarkdownDocIngestorTests
         chunks[2].Content.ShouldContain("UPDATE consents SET is_revoked");
         chunks[2].ErrorCodes.ShouldContain("ERR_REVOCATION_FAILED");
     }
+
+    [Fact]
+    public async Task IngestMarkdownFileAsync_RejectsPathTraversalSequences()
+    {
+        var ingestor = new MarkdownDocIngestor();
+
+        await Should.ThrowAsync<ArgumentException>(async () =>
+        {
+            await ingestor.IngestMarkdownFileAsync("../../etc/passwd", "test-app", DocCategory.Runbook);
+        });
+    }
 }
