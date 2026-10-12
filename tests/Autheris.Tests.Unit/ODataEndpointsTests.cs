@@ -174,6 +174,9 @@ public sealed class ODataEndpointsTests
     [InlineData("?$count=true", true)]
     [InlineData("?$count=TRUE", true)]
     [InlineData("?$count=false", false)]
+    [InlineData("?$inlinecount=allpages", true)]
+    [InlineData("?$inlinecount=ALLPAGES", true)]
+    [InlineData("?$inlinecount=none", false)]
     [InlineData("", false)]
     public async Task HandleEntitySetRequestAsync_Count_ParsedCorrectly(string queryString, bool expectedCount)
     {
@@ -539,6 +542,25 @@ public sealed class ODataEndpointsTests
 
         var notFound = result.ShouldBeAssignableTo<IStatusCodeHttpResult>();
         notFound.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+    }
+
+    [Theory]
+    [InlineData("/odata", "", "http://localhost:8080/odata")]
+    [InlineData("/odata/sales/dbo/invoices", "", "http://localhost:8080/odata")]
+    [InlineData("/odata/v4", "", "http://localhost:8080/odata/v4")]
+    [InlineData("/odata/v4/sales/dbo/invoices", "", "http://localhost:8080/odata/v4")]
+    [InlineData("/odata", "/gateway", "http://localhost:8080/gateway/odata")]
+    [InlineData("/odata/v4", "/gateway", "http://localhost:8080/gateway/odata/v4")]
+    public void ResolveServiceRoot_ExtractsCorrectRoot(string path, string pathBase, string expectedServiceRoot)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Scheme = "http";
+        context.Request.Host = new HostString("localhost", 8080);
+        context.Request.Path = path;
+        context.Request.PathBase = pathBase;
+
+        var root = ODataEndpoints.ResolveServiceRoot(context);
+        root.ShouldBe(expectedServiceRoot);
     }
 }
 
