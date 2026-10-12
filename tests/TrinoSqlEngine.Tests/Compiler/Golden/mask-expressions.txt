@@ -1,0 +1,215 @@
+== SqlServer
+GEO: CASE WHEN [c"]]x] IS NULL OR [c"]]x] = 0.0 THEN [c"]]x] ELSE ROUND([c"]]x], 6) END
+GEO3: CASE WHEN [c] IS NULL OR [c] = 0.0 THEN [c] ELSE ROUND([c], 0) END
+GEO2: CASE WHEN [c] IS NULL OR [c] = 0.0 THEN [c] ELSE ROUND([c], 3) END
+PM p=2 s=0 fixed=False mc=#: CASE WHEN [c] IS NULL THEN NULL WHEN LEN([c]) <= 2 THEN '#####' ELSE CONCAT(LEFT([c], 2), REPLICATE('#', CASE WHEN LEN([c]) > 2 THEN LEN([c]) - 2 ELSE 5 END)) END
+PM p=1 s=3 fixed=False mc=*: CASE WHEN [c] IS NULL THEN NULL WHEN LEN([c]) <= 4 THEN '*****' ELSE CONCAT(LEFT([c], 1), REPLICATE('*', CASE WHEN LEN([c]) > 4 THEN LEN([c]) - 4 ELSE 5 END), RIGHT([c], 3)) END
+PM p=1 s=3 fixed=True mc=x: CASE WHEN [c] IS NULL THEN NULL WHEN LEN([c]) <= 4 THEN 'xxxxx' ELSE CONCAT(LEFT([c], 1), 'xxxxx', RIGHT([c], 3)) END
+PM p=0 s=0 fixed=True mc=*: CASE WHEN [c] IS NULL THEN NULL WHEN LEN([c]) <= 0 THEN '*****' ELSE CONCAT(LEFT([c], 0), '*****') END
+PM p=-1 s=-2 fixed=False mc=*: CASE WHEN [c] IS NULL THEN NULL WHEN LEN([c]) <= 0 THEN '*****' ELSE CONCAT(LEFT([c], 0), REPLICATE('*', CASE WHEN LEN([c]) > 0 THEN LEN([c]) - 0 ELSE 5 END)) END
+RED: N'[REDACTED]'
+RED2: N'it''s'
+RED nullrule: N'[REDACTED]'
+NULLIFY: NULL
+UNK: N'[REDACTED]'
+UNK2: N'x''y'
+T[int] redact=CAST(NULL AS INT) | default=CAST(NULL AS INT)
+T[INTEGER] redact=CAST(NULL AS INT) | default=CAST(NULL AS INT)
+T[bigint] redact=CAST(NULL AS BIGINT) | default=CAST(NULL AS BIGINT)
+T[smallint] redact=CAST(NULL AS SMALLINT) | default=CAST(NULL AS SMALLINT)
+T[tinyint] redact=CAST(NULL AS TINYINT) | default=CAST(NULL AS TINYINT)
+T[decimal(10,2)] redact=CAST(NULL AS DECIMAL(10,2)) | default=CAST(NULL AS DECIMAL(10,2))
+T[numeric] redact=CAST(NULL AS DECIMAL(18, 4)) | default=CAST(NULL AS DECIMAL(18, 4))
+T[float] redact=CAST(NULL AS FLOAT) | default=CAST(NULL AS FLOAT)
+T[real] redact=CAST(NULL AS FLOAT) | default=CAST(NULL AS FLOAT)
+T[double] redact=CAST(NULL AS FLOAT) | default=CAST(NULL AS FLOAT)
+T[double precision] redact=CAST(NULL AS DECIMAL(18, 4)) | default=CAST(NULL AS DECIMAL(18, 4))
+T[bit] redact=CAST(NULL AS BIT) | default=CAST(NULL AS BIT)
+T[bool] redact=CAST(NULL AS BIT) | default=CAST(NULL AS BIT)
+T[boolean] redact=CAST(NULL AS BIT) | default=CAST(NULL AS BIT)
+T[date] redact=CAST(NULL AS DATE) | default=CAST(NULL AS DATE)
+T[datetime] redact=CAST(NULL AS DATETIME2) | default=CAST(NULL AS DATETIME2)
+T[datetime2] redact=CAST(NULL AS DATETIME2) | default=CAST(NULL AS DATETIME2)
+T[timestamp] redact=CAST(NULL AS DATETIME2) | default=CAST(NULL AS DATETIME2)
+T[timestamptz] redact=CAST(NULL AS DECIMAL(18, 4)) | default=CAST(NULL AS DECIMAL(18, 4))
+T[uuid] redact=CAST(NULL AS UNIQUEIDENTIFIER) | default=CAST(NULL AS UNIQUEIDENTIFIER)
+T[uniqueidentifier] redact=CAST(NULL AS UNIQUEIDENTIFIER) | default=CAST(NULL AS UNIQUEIDENTIFIER)
+T[money] redact=CAST(NULL AS DECIMAL(18, 4)) | default=CAST(NULL AS DECIMAL(18, 4))
+T[smallmoney] redact=CAST(NULL AS DECIMAL(18, 4)) | default=CAST(NULL AS DECIMAL(18, 4))
+T[smalldatetime] redact=CAST(NULL AS DECIMAL(18, 4)) | default=CAST(NULL AS DECIMAL(18, 4))
+T[time] redact=CAST(NULL AS DECIMAL(18, 4)) | default=CAST(NULL AS DECIMAL(18, 4))
+T[varchar(10)] redact=N'[REDACTED]' | default=N'[REDACTED]'
+T[text] redact=N'[REDACTED]' | default=N'[REDACTED]'
+T[money (5)] redact=CAST(NULL AS DECIMAL(18, 4)) | default=CAST(NULL AS DECIMAL(18, 4))
+== PostgreSql
+GEO: CASE WHEN "c""]x" IS NULL OR "c""]x" = 0.0 THEN "c""]x" ELSE ROUND("c""]x"::numeric, 6)::double precision END
+GEO3: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c"::numeric, 0)::double precision END
+GEO2: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c"::numeric, 3)::double precision END
+PM p=2 s=0 fixed=False mc=#: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 2 THEN '#####' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 2), REPEAT('#', CASE WHEN LENGTH("c") > 2 THEN LENGTH("c") - 2 ELSE 5 END)) END
+PM p=1 s=3 fixed=False mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 4 THEN '*****' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 1), REPEAT('*', CASE WHEN LENGTH("c") > 4 THEN LENGTH("c") - 4 ELSE 5 END), SUBSTRING("c" FROM LENGTH("c") - 2 FOR 3)) END
+PM p=1 s=3 fixed=True mc=x: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 4 THEN 'xxxxx' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 1), 'xxxxx', SUBSTRING("c" FROM LENGTH("c") - 2 FOR 3)) END
+PM p=0 s=0 fixed=True mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 0 THEN '*****' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 0), '*****') END
+PM p=-1 s=-2 fixed=False mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 0 THEN '*****' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 0), REPEAT('*', CASE WHEN LENGTH("c") > 0 THEN LENGTH("c") - 0 ELSE 5 END)) END
+RED: '[REDACTED]'
+RED2: 'it''s'
+RED nullrule: '[REDACTED]'
+NULLIFY: NULL
+UNK: '[REDACTED]'
+UNK2: 'x''y'
+T[int] redact=CAST(NULL AS INTEGER) | default=CAST(NULL AS INTEGER)
+T[INTEGER] redact=CAST(NULL AS INTEGER) | default=CAST(NULL AS INTEGER)
+T[bigint] redact=CAST(NULL AS BIGINT) | default=CAST(NULL AS BIGINT)
+T[smallint] redact=CAST(NULL AS SMALLINT) | default=CAST(NULL AS SMALLINT)
+T[tinyint] redact=CAST(NULL AS SMALLINT) | default=CAST(NULL AS SMALLINT)
+T[decimal(10,2)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[numeric] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[float] redact=CAST(NULL AS REAL) | default=CAST(NULL AS REAL)
+T[real] redact=CAST(NULL AS REAL) | default=CAST(NULL AS REAL)
+T[double] redact=CAST(NULL AS DOUBLE PRECISION) | default=CAST(NULL AS DOUBLE PRECISION)
+T[double precision] redact=CAST(NULL AS DOUBLE PRECISION) | default=CAST(NULL AS DOUBLE PRECISION)
+T[bit] redact=CAST(NULL AS BOOLEAN) | default=CAST(NULL AS BOOLEAN)
+T[bool] redact=CAST(NULL AS BOOLEAN) | default=CAST(NULL AS BOOLEAN)
+T[boolean] redact=CAST(NULL AS BOOLEAN) | default=CAST(NULL AS BOOLEAN)
+T[date] redact=CAST(NULL AS DATE) | default=CAST(NULL AS DATE)
+T[datetime] redact=CAST(NULL AS TIMESTAMP) | default=CAST(NULL AS TIMESTAMP)
+T[datetime2] redact=CAST(NULL AS TIMESTAMP) | default=CAST(NULL AS TIMESTAMP)
+T[timestamp] redact=CAST(NULL AS TIMESTAMP) | default=CAST(NULL AS TIMESTAMP)
+T[timestamptz] redact=CAST(NULL AS TIMESTAMP) | default=CAST(NULL AS TIMESTAMP)
+T[uuid] redact=CAST(NULL AS UUID) | default=CAST(NULL AS UUID)
+T[uniqueidentifier] redact=CAST(NULL AS UUID) | default=CAST(NULL AS UUID)
+T[money] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[smallmoney] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[smalldatetime] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[time] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[varchar(10)] redact='[REDACTED]' | default='[REDACTED]'
+T[text] redact='[REDACTED]' | default='[REDACTED]'
+T[money (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+== DuckDb
+GEO: CASE WHEN "c""]x" IS NULL OR "c""]x" = 0.0 THEN "c""]x" ELSE ROUND("c""]x"::numeric, 6)::double precision END
+GEO3: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c"::numeric, 0)::double precision END
+GEO2: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c"::numeric, 3)::double precision END
+PM p=2 s=0 fixed=False mc=#: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 2 THEN '#####' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 2), REPEAT('#', CASE WHEN LENGTH("c") > 2 THEN LENGTH("c") - 2 ELSE 5 END)) END
+PM p=1 s=3 fixed=False mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 4 THEN '*****' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 1), REPEAT('*', CASE WHEN LENGTH("c") > 4 THEN LENGTH("c") - 4 ELSE 5 END), SUBSTRING("c" FROM LENGTH("c") - 2 FOR 3)) END
+PM p=1 s=3 fixed=True mc=x: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 4 THEN 'xxxxx' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 1), 'xxxxx', SUBSTRING("c" FROM LENGTH("c") - 2 FOR 3)) END
+PM p=0 s=0 fixed=True mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 0 THEN '*****' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 0), '*****') END
+PM p=-1 s=-2 fixed=False mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 0 THEN '*****' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 0), REPEAT('*', CASE WHEN LENGTH("c") > 0 THEN LENGTH("c") - 0 ELSE 5 END)) END
+RED: '[REDACTED]'
+RED2: 'it''s'
+RED nullrule: '[REDACTED]'
+NULLIFY: NULL
+UNK: '[REDACTED]'
+UNK2: 'x''y'
+T[int] redact=CAST(NULL AS INTEGER) | default=CAST(NULL AS INTEGER)
+T[INTEGER] redact=CAST(NULL AS INTEGER) | default=CAST(NULL AS INTEGER)
+T[bigint] redact=CAST(NULL AS BIGINT) | default=CAST(NULL AS BIGINT)
+T[smallint] redact=CAST(NULL AS SMALLINT) | default=CAST(NULL AS SMALLINT)
+T[tinyint] redact=CAST(NULL AS SMALLINT) | default=CAST(NULL AS SMALLINT)
+T[decimal(10,2)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[numeric] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[float] redact=CAST(NULL AS REAL) | default=CAST(NULL AS REAL)
+T[real] redact=CAST(NULL AS REAL) | default=CAST(NULL AS REAL)
+T[double] redact=CAST(NULL AS DOUBLE PRECISION) | default=CAST(NULL AS DOUBLE PRECISION)
+T[double precision] redact=CAST(NULL AS DOUBLE PRECISION) | default=CAST(NULL AS DOUBLE PRECISION)
+T[bit] redact=CAST(NULL AS BOOLEAN) | default=CAST(NULL AS BOOLEAN)
+T[bool] redact=CAST(NULL AS BOOLEAN) | default=CAST(NULL AS BOOLEAN)
+T[boolean] redact=CAST(NULL AS BOOLEAN) | default=CAST(NULL AS BOOLEAN)
+T[date] redact=CAST(NULL AS DATE) | default=CAST(NULL AS DATE)
+T[datetime] redact=CAST(NULL AS TIMESTAMP) | default=CAST(NULL AS TIMESTAMP)
+T[datetime2] redact=CAST(NULL AS TIMESTAMP) | default=CAST(NULL AS TIMESTAMP)
+T[timestamp] redact=CAST(NULL AS TIMESTAMP) | default=CAST(NULL AS TIMESTAMP)
+T[timestamptz] redact=CAST(NULL AS TIMESTAMP) | default=CAST(NULL AS TIMESTAMP)
+T[uuid] redact=CAST(NULL AS UUID) | default=CAST(NULL AS UUID)
+T[uniqueidentifier] redact=CAST(NULL AS UUID) | default=CAST(NULL AS UUID)
+T[money] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[smallmoney] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[smalldatetime] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[time] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[varchar(10)] redact='[REDACTED]' | default='[REDACTED]'
+T[text] redact='[REDACTED]' | default='[REDACTED]'
+T[money (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+== Sqlite
+GEO: CASE WHEN "c""]x" IS NULL OR "c""]x" = 0.0 THEN "c""]x" ELSE ROUND("c""]x", 6) END
+GEO3: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c", 0) END
+GEO2: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c", 3) END
+PM p=2 s=0 fixed=False mc=#: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 2 THEN '#####' ELSE SUBSTR("c", 1, 2) || '#####' END
+PM p=1 s=3 fixed=False mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 4 THEN '*****' ELSE SUBSTR("c", 1, 1) || '*****' || SUBSTR("c", -3) END
+PM p=1 s=3 fixed=True mc=x: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 4 THEN 'xxxxx' ELSE SUBSTR("c", 1, 1) || 'xxxxx' || SUBSTR("c", -3) END
+PM p=0 s=0 fixed=True mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 0 THEN '*****' ELSE SUBSTR("c", 1, 0) || '*****' END
+PM p=-1 s=-2 fixed=False mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 0 THEN '*****' ELSE SUBSTR("c", 1, 0) || '*****' END
+RED: '[REDACTED]'
+RED2: 'it''s'
+RED nullrule: '[REDACTED]'
+NULLIFY: NULL
+UNK: '[REDACTED]'
+UNK2: 'x''y'
+T[int] redact=CAST(NULL AS INTEGER) | default=CAST(NULL AS INTEGER)
+T[INTEGER] redact=CAST(NULL AS INTEGER) | default=CAST(NULL AS INTEGER)
+T[bigint] redact=CAST(NULL AS INTEGER) | default=CAST(NULL AS INTEGER)
+T[smallint] redact=CAST(NULL AS INTEGER) | default=CAST(NULL AS INTEGER)
+T[tinyint] redact=CAST(NULL AS INTEGER) | default=CAST(NULL AS INTEGER)
+T[decimal(10,2)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[numeric] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[float] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[real] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[double] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[double precision] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[bit] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[bool] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[boolean] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[date] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[datetime] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[datetime2] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[timestamp] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[timestamptz] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[uuid] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[uniqueidentifier] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[money] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[smallmoney] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[smalldatetime] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[time] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[varchar(10)] redact='[REDACTED]' | default='[REDACTED]'
+T[text] redact='[REDACTED]' | default='[REDACTED]'
+T[money (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+== Oracle
+GEO: CASE WHEN "c""]x" IS NULL OR "c""]x" = 0.0 THEN "c""]x" ELSE ROUND("c""]x", 6) END
+GEO3: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c", 0) END
+GEO2: CASE WHEN "c" IS NULL OR "c" = 0.0 THEN "c" ELSE ROUND("c", 3) END
+PM p=2 s=0 fixed=False mc=#: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 2 THEN '#####' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 2), REPEAT('#', CASE WHEN LENGTH("c") > 2 THEN LENGTH("c") - 2 ELSE 5 END)) END
+PM p=1 s=3 fixed=False mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 4 THEN '*****' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 1), REPEAT('*', CASE WHEN LENGTH("c") > 4 THEN LENGTH("c") - 4 ELSE 5 END), SUBSTRING("c" FROM LENGTH("c") - 2 FOR 3)) END
+PM p=1 s=3 fixed=True mc=x: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 4 THEN 'xxxxx' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 1), 'xxxxx', SUBSTRING("c" FROM LENGTH("c") - 2 FOR 3)) END
+PM p=0 s=0 fixed=True mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 0 THEN '*****' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 0), '*****') END
+PM p=-1 s=-2 fixed=False mc=*: CASE WHEN "c" IS NULL THEN NULL WHEN LENGTH("c") <= 0 THEN '*****' ELSE CONCAT(SUBSTRING("c" FROM 1 FOR 0), REPEAT('*', CASE WHEN LENGTH("c") > 0 THEN LENGTH("c") - 0 ELSE 5 END)) END
+RED: '[REDACTED]'
+RED2: 'it''s'
+RED nullrule: '[REDACTED]'
+NULLIFY: NULL
+UNK: '[REDACTED]'
+UNK2: 'x''y'
+T[int] redact=CAST(NULL AS INTEGER) | default=CAST(NULL AS INTEGER)
+T[INTEGER] redact=CAST(NULL AS INTEGER) | default=CAST(NULL AS INTEGER)
+T[bigint] redact=CAST(NULL AS BIGINT) | default=CAST(NULL AS BIGINT)
+T[smallint] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[tinyint] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[decimal(10,2)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[numeric] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[float] redact=CAST(NULL AS DOUBLE PRECISION) | default=CAST(NULL AS DOUBLE PRECISION)
+T[real] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[double] redact=CAST(NULL AS DOUBLE PRECISION) | default=CAST(NULL AS DOUBLE PRECISION)
+T[double precision] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[bit] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[bool] redact=CAST(NULL AS BOOLEAN) | default=CAST(NULL AS BOOLEAN)
+T[boolean] redact=CAST(NULL AS BOOLEAN) | default=CAST(NULL AS BOOLEAN)
+T[date] redact=CAST(NULL AS DATE) | default=CAST(NULL AS DATE)
+T[datetime] redact=CAST(NULL AS TIMESTAMP) | default=CAST(NULL AS TIMESTAMP)
+T[datetime2] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[timestamp] redact=CAST(NULL AS TIMESTAMP) | default=CAST(NULL AS TIMESTAMP)
+T[timestamptz] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[uuid] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[uniqueidentifier] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[money] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[smallmoney] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[smalldatetime] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[time] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)
+T[varchar(10)] redact='[REDACTED]' | default='[REDACTED]'
+T[text] redact='[REDACTED]' | default='[REDACTED]'
+T[money (5)] redact=CAST(NULL AS NUMERIC) | default=CAST(NULL AS NUMERIC)

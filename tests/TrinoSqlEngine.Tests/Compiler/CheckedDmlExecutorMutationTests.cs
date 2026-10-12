@@ -35,7 +35,7 @@ public class CheckedDmlExecutorMutationTests
         public int CommandsCreated { get; private set; }
         public YCmd? LastCommand { get; private set; }
         public YTx? LastTx { get; private set; }
-        public CountingContext? Ctx { get; set; }
+        public PostCounter? Ctx { get; set; }
 
         public YConn(ConnectionState state = ConnectionState.Open) => _state = state;
 
@@ -117,53 +117,63 @@ public class CheckedDmlExecutorMutationTests
         }
     }
 
-    private sealed class CountingContext : SynchronizationContext
+    /// <summary>The number of continuations posted to any <see cref="CountingContext"/> of one scenario.</summary>
+    private sealed class PostCounter
     {
         public int Posts;
+    }
 
+    private sealed class CountingContext(PostCounter counter) : SynchronizationContext
+    {
         public override void Post(SendOrPostCallback d, object? state)
         {
-            Interlocked.Increment(ref Posts);
-            RunOnNewThread(this, () => d(state));
+            Interlocked.Increment(ref counter.Posts);
+            RunOnNewThread(counter, () => d(state));
         }
     }
 
-    private static void RunOnNewThread(SynchronizationContext? context, Action action) =>
+    /// <summary>
+    /// Every thread gets its own context instance: a continuation that captured the context of the thread that ran the executor code is
+    /// resumed from another thread (another instance), so it is posted instead of being run inline.
+    /// </summary>
+    private static void RunOnNewThread(PostCounter? counter, Action action) =>
         new Thread(() =>
         {
-            if (context is not null) SynchronizationContext.SetSynchronizationContext(context);
+            if (counter is not null) SynchronizationContext.SetSynchronizationContext(new CountingContext(counter));
             action();
         }) { IsBackground = true }.Start();
 
     /// <summary>
-    /// Completes asynchronously on a thread that has <paramref name="context"/> installed. A <c>ConfigureAwait(false)</c> continuation
+    /// Completes asynchronously on a thread that has <paramref name="counter"/> installed. A <c>ConfigureAwait(false)</c> continuation
     /// then runs inline on that thread without capturing it, while a <c>ConfigureAwait(true)</c> one would capture the context at
     /// every await of the executor (not only the first) and post to it.
     /// </summary>
-    private static Task Hop(CountingContext? context)
+    private static Task Hop(PostCounter? counter)
     {
         var done = new TaskCompletionSource();
-        RunOnNewThread(context, () => done.SetResult());
+        RunOnNewThread(counter, () => done.SetResult());
         return done.Task;
     }
 
-    /// <summary>Runs <paramref name="run"/> under a context that counts every continuation posted to it; returns the count.</summary>
-    private static int PostsDuring(Func<CountingContext, Task> run)
+    /// <summary>Runs <paramref name="run"/> under a context that counts every continuation posted to it; returns the count and the failure, if any.</summary>
+    private static (int Posts, Exception? Failure) PostsDuring(Func<PostCounter, Task> run)
     {
-        var ctx = new CountingContext();
+        var counter = new PostCounter();
+        var ctx = new CountingContext(counter);
+        Exception? failure = null;
         var previous = SynchronizationContext.Current;
         SynchronizationContext.SetSynchronizationContext(ctx);
         try
         {
-            var task = run(ctx);
-            try { task.GetAwaiter().GetResult(); } catch (Exception) { /* a failing flow is part of some scenarios */ }
+            var task = run(counter);
+            try { task.GetAwaiter().GetResult(); } catch (Exception ex) { failure = ex; }
         }
         finally
         {
             SynchronizationContext.SetSynchronizationContext(previous);
         }
 
-        return ctx.Posts;
+        return (counter.Posts, failure);
     }
 
     // ---- arguments ----
@@ -389,39 +399,61 @@ public class CheckedDmlExecutorMutationTests
     [Fact]
     public void NoAwaitOfTheExecutors_ResumesOnTheCallersContext()
     {
-        int posts = PostsDuring(async ctx =>
+        // happy path of the connection overload: open, begin, execute, commit
+        var (posts, failure) = PostsDuring(ctx =>
         {
             var conn = new YConn(ConnectionState.Closed) { Affected = 1, Ctx = ctx };
-            await Executor().ExecuteAsync(conn, Dml("INSERT INTO t (a) SELECT 1", expected: 1), NoValues).ConfigureAwait(false);
+            return Executor().ExecuteAsync(conn, Dml("INSERT INTO t (a) SELECT 1", expected: 1), NoValues);
         });
+        Assert.Null(failure);
         Assert.Equal(0, posts);
 
-        posts = PostsDuring(ctx =>
+        // happy path of the transaction overload
+        (posts, failure) = PostsDuring(ctx =>
         {
             var conn = new YConn { Affected = 1, Ctx = ctx };
             return Executor().ExecuteInTransactionAsync(conn.NewTx(), Dml("UPDATE t SET a = 1"), NoValues, new CheckedDmlLimits(5, 5));
         });
+        Assert.Null(failure);
         Assert.Equal(0, posts);
 
-        // failure path: the rollback is awaited as well
-        posts = PostsDuring(ctx =>
+        // failure path: the rollback (and its quiet wrapper) is awaited as well
+        (posts, failure) = PostsDuring(ctx =>
         {
             var conn = new YConn { Affected = 2, Ctx = ctx };
             var tx = conn.NewTx();
             tx.ThrowOnRollback = true;
             return Executor().ExecuteInTransactionAsync(tx, Dml("INSERT INTO t (a) SELECT 1", expected: 1), NoValues, new CheckedDmlLimits(0, 0));
         });
+        Assert.IsType<DmlCheckOptionViolationException>(failure);
         Assert.Equal(0, posts);
 
-        posts = PostsDuring(ctx =>
+        (posts, failure) = PostsDuring(ctx =>
         {
             var conn = new YConn { Affected = 1, Ctx = ctx };
             return Executor(TargetSqlDialect.Databricks).ExecuteInTransactionAsync(conn.NewTx(), Dml("DELETE FROM t", TargetSqlDialect.Databricks), NoValues, new CheckedDmlLimits(0, 0));
         });
+        Assert.Null(failure);
         Assert.Equal(0, posts);
     }
 
 #if DEBUG
+    [Fact]
+    public void TheCommitBeforeEnforceSeamPath_DoesNotResumeOnTheCallersContext()
+    {
+        using var seam = CompilerTestSeams.Use(new CompilerTestSeams
+        {
+            DisabledControls = new HashSet<SecurityControl> { SecurityControl.CheckedDmlCommitBeforeEnforce, SecurityControl.CheckedDmlRowCount }
+        });
+        var (posts, failure) = PostsDuring(ctx =>
+        {
+            var conn = new YConn { Affected = 5, Ctx = ctx };
+            return Executor().ExecuteInTransactionAsync(conn.NewTx(), Dml("INSERT INTO t (a) SELECT 1", expected: 1), NoValues, new CheckedDmlLimits(0, 0));
+        });
+        Assert.Null(failure);
+        Assert.Equal(0, posts);
+    }
+
     [Fact]
     public async Task CommitBeforeEnforceSeam_CommitsFirst_AndReturnsWhenTheCheckIsAlsoOff()
     {

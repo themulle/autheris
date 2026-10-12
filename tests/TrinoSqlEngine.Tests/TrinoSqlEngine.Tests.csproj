@@ -31,6 +31,9 @@
     <None Update="Conformance\Fixtures\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Update="Compiler\Golden\*.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Update="Fixtures\RawJava\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
