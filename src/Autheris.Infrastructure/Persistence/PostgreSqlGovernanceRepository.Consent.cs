@@ -253,7 +253,7 @@ public partial class PostgreSqlGovernanceRepository
         // Fetch Column Rules
         await using (var cmd = conn.CreateCommand())
         {
-            cmd.CommandText = "SELECT consent_id, table_column_id, column_name, access_level FROM CONSENT_COLUMN_RULES WHERE consent_id = ANY(@ids)";
+            cmd.CommandText = "SELECT consent_id, table_column_id, column_name, access_level, applicable_scopes FROM CONSENT_COLUMN_RULES WHERE consent_id = ANY(@ids)";
             cmd.Parameters.AddWithValue("@ids", consentIds.ToArray());
 
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -263,6 +263,10 @@ public partial class PostgreSqlGovernanceRepository
                 if (rulesMap.TryGetValue(cId, out var ruleList))
                 {
                     var rawLevel = reader.GetInt32(3);
+                    var scopesStr = reader.FieldCount > 4 && !reader.IsDBNull(4) ? reader.GetString(4) : string.Empty;
+                    var scopes = string.IsNullOrWhiteSpace(scopesStr)
+                        ? Array.Empty<string>()
+                        : scopesStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                     ruleList.Add(new ConsentColumnRule
                     {
                         Id = Guid.NewGuid(),
@@ -271,7 +275,8 @@ public partial class PostgreSqlGovernanceRepository
                         ColumnName = reader.GetString(2),
                         AccessLevel = Enum.IsDefined((ColumnAccessLevel)rawLevel)
                             ? (ColumnAccessLevel)rawLevel
-                            : ColumnAccessLevel.Deny
+                            : ColumnAccessLevel.Deny,
+                        ApplicableScopes = scopes
                     });
                 }
             }
@@ -410,13 +415,14 @@ public partial class PostgreSqlGovernanceRepository
                 var ruleId = Guid.NewGuid();
                 await using var ruleCmd = conn.CreateCommand();
                 ruleCmd.Transaction = tx;
-                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
-                                        VALUES (@id, @consentId, @colId, @colName, @level)";
+                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
+                                        VALUES (@id, @consentId, @colId, @colName, @level, @scopes)";
                 ruleCmd.Parameters.AddWithValue("@id", ruleId.ToString());
                 ruleCmd.Parameters.AddWithValue("@consentId", consentId.ToString());
                 ruleCmd.Parameters.AddWithValue("@colId", rule.TableColumnId.ToString());
                 ruleCmd.Parameters.AddWithValue("@colName", rule.ColumnName);
                 ruleCmd.Parameters.AddWithValue("@level", (int)rule.AccessLevel);
+                ruleCmd.Parameters.AddWithValue("@scopes", rule.ApplicableScopes != null && rule.ApplicableScopes.Count > 0 ? string.Join(",", rule.ApplicableScopes) : string.Empty);
                 await ruleCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
@@ -1439,13 +1445,14 @@ public partial class PostgreSqlGovernanceRepository
             {
                 await using var ruleCmd = conn.CreateCommand();
                 ruleCmd.Transaction = tx;
-                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
-                                        VALUES (@id, @consentId, @colId, @colName, @level)";
+                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
+                                        VALUES (@id, @consentId, @colId, @colName, @level, @scopes)";
                 ruleCmd.Parameters.AddWithValue("@id", ruleId.ToString());
                 ruleCmd.Parameters.AddWithValue("@consentId", consentId.ToString());
                 ruleCmd.Parameters.AddWithValue("@colId", colId.ToString());
                 ruleCmd.Parameters.AddWithValue("@colName", colName);
                 ruleCmd.Parameters.AddWithValue("@level", accessLevel);
+                ruleCmd.Parameters.AddWithValue("@scopes", string.Empty);
                 await ruleCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 

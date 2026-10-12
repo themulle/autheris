@@ -131,8 +131,10 @@ public partial class PostgreSqlGovernanceRepository
                 consent_id TEXT NOT NULL,
                 table_column_id TEXT NOT NULL,
                 column_name TEXT NOT NULL,
-                access_level INTEGER NOT NULL
+                access_level INTEGER NOT NULL,
+                applicable_scopes TEXT NOT NULL DEFAULT ''
             );
+            ALTER TABLE CONSENT_COLUMN_RULES ADD COLUMN IF NOT EXISTS applicable_scopes TEXT NOT NULL DEFAULT '';
 
             CREATE TABLE IF NOT EXISTS CONSENT_ROW_FILTERS (
                 id TEXT PRIMARY KEY,

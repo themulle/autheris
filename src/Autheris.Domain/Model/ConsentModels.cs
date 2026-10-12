@@ -13,6 +13,7 @@ public sealed class ConsentColumnRule
         get => _accessLevel;
         init => _accessLevel = Enum.IsDefined(value) ? value : ColumnAccessLevel.Deny;
     }
+    public IReadOnlyList<string> ApplicableScopes { get; init; } = Array.Empty<string>();
 }
 
 public enum RowFilterType

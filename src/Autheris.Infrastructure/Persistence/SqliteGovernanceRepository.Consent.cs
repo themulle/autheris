@@ -342,7 +342,7 @@ public partial class SqliteGovernanceRepository
     {
         var rules = new List<ConsentColumnRule>();
         using var cmd = _connection.CreateCommand();
-        cmd.CommandText = @"SELECT id, consent_id, table_column_id, column_name, access_level
+        cmd.CommandText = @"SELECT id, consent_id, table_column_id, column_name, access_level, applicable_scopes
                             FROM CONSENT_COLUMN_RULES WHERE consent_id = @cid";
         cmd.Parameters.AddWithValue("@cid", consentId.ToString());
 
@@ -350,6 +350,10 @@ public partial class SqliteGovernanceRepository
         while (await reader.ReadAsync(ct))
         {
             var rawLevel = reader.GetInt32(4);
+            var scopesStr = reader.FieldCount > 5 && !reader.IsDBNull(5) ? reader.GetString(5) : string.Empty;
+            var scopes = string.IsNullOrWhiteSpace(scopesStr)
+                ? Array.Empty<string>()
+                : scopesStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             rules.Add(new ConsentColumnRule
             {
                 Id = Guid.Parse(reader.GetString(0)),
@@ -358,7 +362,8 @@ public partial class SqliteGovernanceRepository
                 ColumnName = reader.GetString(3),
                 AccessLevel = Enum.IsDefined((ColumnAccessLevel)rawLevel)
                     ? (ColumnAccessLevel)rawLevel
-                    : ColumnAccessLevel.Deny
+                    : ColumnAccessLevel.Deny,
+                ApplicableScopes = scopes
             });
         }
         return rules;
@@ -455,7 +460,7 @@ public partial class SqliteGovernanceRepository
             // 1. Batch load column rules
             using (var cmdRules = _connection.CreateCommand())
             {
-                cmdRules.CommandText = $@"SELECT id, consent_id, table_column_id, column_name, access_level
+                cmdRules.CommandText = $@"SELECT id, consent_id, table_column_id, column_name, access_level, applicable_scopes
                                          FROM CONSENT_COLUMN_RULES WHERE consent_id IN ({idList})";
                 for (int i = 0; i < consentChunk.Length; i++)
                 {
@@ -470,6 +475,10 @@ public partial class SqliteGovernanceRepository
                     if (rulesMap.TryGetValue(cid, out var list))
                     {
                         var rawLevel = reader.GetInt32(4);
+                        var scopesStr = reader.FieldCount > 5 && !reader.IsDBNull(5) ? reader.GetString(5) : string.Empty;
+                        var scopes = string.IsNullOrWhiteSpace(scopesStr)
+                            ? Array.Empty<string>()
+                            : scopesStr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                         list.Add(new ConsentColumnRule
                         {
                             Id = Guid.Parse(reader.GetString(0)),
@@ -478,7 +487,8 @@ public partial class SqliteGovernanceRepository
                             ColumnName = reader.GetString(3),
                             AccessLevel = Enum.IsDefined((ColumnAccessLevel)rawLevel)
                                 ? (ColumnAccessLevel)rawLevel
-                                : ColumnAccessLevel.Deny
+                                : ColumnAccessLevel.Deny,
+                            ApplicableScopes = scopes
                         });
                     }
                 }
@@ -851,13 +861,14 @@ public partial class SqliteGovernanceRepository
             {
                 using var ruleCmd = _connection.CreateCommand();
                 ruleCmd.Transaction = tx;
-                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
-                                        VALUES (@id, @cid, @tcid, @col, @lvl)";
+                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
+                                        VALUES (@id, @cid, @tcid, @col, @lvl, @scopes)";
                 ruleCmd.Parameters.AddWithValue("@id", ruleId.ToString());
                 ruleCmd.Parameters.AddWithValue("@cid", consentId.ToString());
                 ruleCmd.Parameters.AddWithValue("@tcid", colId.ToString());
                 ruleCmd.Parameters.AddWithValue("@col", colName);
                 ruleCmd.Parameters.AddWithValue("@lvl", accessLevel);
+                ruleCmd.Parameters.AddWithValue("@scopes", string.Empty);
                 await ruleCmd.ExecuteNonQueryAsync(ct);
             }
 
@@ -1268,13 +1279,14 @@ public partial class SqliteGovernanceRepository
             {
                 using var ruleCmd = _connection.CreateCommand();
                 ruleCmd.Transaction = tx;
-                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level)
-                                        VALUES (@id, @cid, @tcid, @col, @lvl)";
+                ruleCmd.CommandText = @"INSERT INTO CONSENT_COLUMN_RULES (id, consent_id, table_column_id, column_name, access_level, applicable_scopes)
+                                        VALUES (@id, @cid, @tcid, @col, @lvl, @scopes)";
                 ruleCmd.Parameters.AddWithValue("@id", rule.Id.ToString());
                 ruleCmd.Parameters.AddWithValue("@cid", consent.Id.ToString());
                 ruleCmd.Parameters.AddWithValue("@tcid", rule.TableColumnId.ToString());
                 ruleCmd.Parameters.AddWithValue("@col", rule.ColumnName);
                 ruleCmd.Parameters.AddWithValue("@lvl", (int)rule.AccessLevel);
+                ruleCmd.Parameters.AddWithValue("@scopes", rule.ApplicableScopes != null && rule.ApplicableScopes.Count > 0 ? string.Join(",", rule.ApplicableScopes) : string.Empty);
                 await ruleCmd.ExecuteNonQueryAsync(ct);
             }
 
