@@ -18,7 +18,7 @@ services:
   # 1. OpenSearch 2.x (Mandatory Search & Entity Index for OpenMetadata)
   # ----------------------------------------------------------------------------
   opensearch:
-    image: opensearchproject/opensearch:2.11.0
+    image: opensearchproject/opensearch:3.9.0
     container_name: gqlgateway-opensearch
     networks:
       - gateway-bench-net
