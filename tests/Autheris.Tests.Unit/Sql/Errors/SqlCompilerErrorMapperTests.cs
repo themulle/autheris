@@ -34,6 +34,11 @@ public sealed class SqlCompilerErrorMapperTests
         { "statement-class", () => new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, HostileMarker), 403, "SQL_STATEMENT_NOT_PERMITTED", null },
         { "dialect", () => new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Dialect, HostileMarker), 501, "SQL_DIALECT_NOT_SUPPORTED", null },
         { "limit", () => new SqlLimitExceededException(SqlLimitKind.InListItems, TargetSqlDialect.Oracle, 1001, 1000), 422, "SQL_LIMIT_EXCEEDED", "InListItems" },
+        // FastSqlEngine.RunWithParseBudget throws exactly this shape for a parser time budget overrun and for parser-slot exhaustion.
+        { "parser-timeout", () => new ParseCanceledException("SQL parsing exceeded the time budget.", new TimeoutException("budget")), 422, "SQL_LIMIT_EXCEEDED", "CompileTime" },
+        { "parser-slot-exhaustion", () => new ParseCanceledException("no slot", new TimeoutException("No parser thread slot became available within the parse time budget.")), 422, "SQL_LIMIT_EXCEEDED", "CompileTime" },
+        { "parser-timeout-wrapped", () => new InvalidOperationException(HostileMarker, new ParseCanceledException("x", new TimeoutException())), 422, "SQL_LIMIT_EXCEEDED", "CompileTime" },
+        { "parse-canceled-recognition", () => new ParseCanceledException("line 1:3: mismatched input", new InvalidOperationException("syntax")), 400, "SQL_SYNTAX_ERROR", null },
         { "parser-budget", () => new OperationCanceledException(HostileMarker, new TimeoutException()), 422, "SQL_LIMIT_EXCEEDED", "CompileTime" },
         { "unfiltered-dml", () => new UnfilteredDmlException(HostileMarker), 403, "SQL_UNFILTERED_DML", null },
         { "policy-parse", () => new PolicyParseException(HostileMarker), 403, "SQL_POLICY_DENIED", null },

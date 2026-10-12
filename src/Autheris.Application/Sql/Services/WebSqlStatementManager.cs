@@ -263,6 +263,20 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
                 ElapsedTimeMillis: elapsedMillis);
         }
 
+        // ParseCanceledException derives from OperationCanceledException, so a statement that does not parse (or whose parser timed out)
+        // ends as a canceled task. Only a cancellation that is not a governed SQL error is a CANCELED statement.
+        if (session.ExecutionTask.IsCanceled && CanceledGovernedError(session.ExecutionTask) is { } governedFailure)
+        {
+            return new StatementExecutionStatus(
+                session.StatementId,
+                "FAILED",
+                Columns: null,
+                Data: null,
+                NextUri: null,
+                ErrorMessage: SanitizeErrorMessage(governedFailure),
+                ElapsedTimeMillis: elapsedMillis);
+        }
+
         if (session.ExecutionTask.IsCanceled)
         {
             return new StatementExecutionStatus(
@@ -429,6 +443,23 @@ public sealed class WebSqlStatementManager : IWebSqlStatementManager, IDisposabl
             try { session.Cts.Dispose(); } catch { }
         }
         _sessions.Clear();
+    }
+
+    private static Exception? CanceledGovernedError(Task task)
+    {
+        try
+        {
+            task.GetAwaiter().GetResult();
+            return null;
+        }
+        catch (Exception ex) when (Errors.SqlCompilerErrorMapper.TryMap(ex, out _))
+        {
+            return ex;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string SanitizeErrorMessage(Exception? ex)

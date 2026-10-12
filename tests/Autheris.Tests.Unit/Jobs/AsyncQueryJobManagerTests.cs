@@ -172,6 +172,62 @@ public sealed class AsyncQueryJobManagerTests : IDisposable
         purged.ShouldBeNull();
     }
 
+    private async Task<AsyncJobDescriptor?> RunWorkerWithFailingSqlAsync(Exception failure)
+    {
+        var manager = new AsyncQueryJobManager(_auditLogRepo, environment: _environment);
+        var sqlService = Substitute.For<IGovernedSqlExecutionService>();
+        sqlService.ExecuteQueryBufferedAsync(
+            Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException<GovernedSqlResult>(failure));
+        var services = new ServiceCollection();
+        services.AddScoped(_ => sqlService);
+        var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+        var worker = new AsyncQueryJobBackgroundWorker(manager, scopeFactory, _auditLogRepo, logger: NullLogger<AsyncQueryJobBackgroundWorker>.Instance);
+        var descriptor = await manager.SubmitJobAsync(new AsyncQueryJobRequest("SELEC 1", Format: "json"), CreateUser("alice"), new TenantId("tenant-a"));
+
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await worker.StartAsync(cts.Token);
+        AsyncJobDescriptor? job = null;
+        for (int i = 0; i < 100; i++)
+        {
+            job = await manager.GetJobAsync(descriptor.JobId, new TenantId("tenant-a"), "alice");
+            if (job is { State: AsyncJobState.Failed or AsyncJobState.Cancelled or AsyncJobState.Completed }) break;
+            await Task.Delay(50);
+        }
+
+        await worker.StopAsync(CancellationToken.None);
+        return job;
+    }
+
+    [Fact]
+    public async Task BackgroundWorker_StatementThatDoesNotParse_IsFailedWithTheSyntaxMessage_NotCancelled()
+    {
+        var job = await RunWorkerWithFailingSqlAsync(new Antlr4.Runtime.Misc.ParseCanceledException("line 1:0: mismatched input"));
+
+        job.ShouldNotBeNull();
+        job.State.ShouldBe(AsyncJobState.Failed);
+        job.ErrorMessage.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.SyntaxError));
+    }
+
+    [Fact]
+    public async Task BackgroundWorker_ParserTimeout_IsFailedWithTheLimitMessage_NotCancelled()
+    {
+        var job = await RunWorkerWithFailingSqlAsync(new Antlr4.Runtime.Misc.ParseCanceledException("budget", new TimeoutException()));
+
+        job.ShouldNotBeNull();
+        job.State.ShouldBe(AsyncJobState.Failed);
+        job.ErrorMessage.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.LimitExceeded));
+    }
+
+    [Fact]
+    public async Task BackgroundWorker_PlainCancellation_StaysCancelled()
+    {
+        var job = await RunWorkerWithFailingSqlAsync(new OperationCanceledException());
+
+        job.ShouldNotBeNull();
+        job.State.ShouldBe(AsyncJobState.Cancelled);
+    }
+
     [Fact]
     public async Task BackgroundWorker_ExecutesGovernedSql_AndProducesResultFileWithDdm()
     {

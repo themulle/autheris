@@ -102,6 +102,9 @@ public static class SqlCompilerErrorMapper
 
     private static readonly Func<Exception, SqlErrorMapping?>[] Rules =
     [
+        // A parser time budget overrun and parser-slot exhaustion are ParseCanceledExceptions with a TimeoutException cause (FastSqlEngine):
+        // a limit, not a syntax error. This row precedes the syntax row, which would otherwise match first.
+        e => e is ParseCanceledException { InnerException: TimeoutException } ? Of(422, GovernedSqlErrorCodes.LimitExceeded, nameof(SqlLimitKind.CompileTime)) : null,
         e => e is ParseCanceledException or RecognitionException ? Of(400, GovernedSqlErrorCodes.SyntaxError) : null,
         e => e is MissingClientParameterException ? Of(400, GovernedSqlErrorCodes.ParameterMissing) : null,
         e => e switch

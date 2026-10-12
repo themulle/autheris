@@ -129,7 +129,8 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
 
             await RecordAuditAsync(completed, item.User, AuditEventTypes.AsyncJobCompleted, "ALLOW", "Job completed successfully.", stoppingToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        // ParseCanceledException derives from OperationCanceledException: a governed SQL error (syntax, parser timeout) is a failed job.
+        catch (OperationCanceledException ex) when (!Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(ex, out _))
         {
             var cancelled = runningJob with
             {
