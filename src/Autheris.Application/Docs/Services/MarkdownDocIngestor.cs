@@ -25,14 +25,20 @@ public sealed partial class MarkdownDocIngestor : IDocIngestor
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-        if (!File.Exists(filePath))
+        if (filePath.Contains("..", StringComparison.Ordinal))
         {
-            throw new FileNotFoundException($"Markdown file not found: {filePath}", filePath);
+            throw new ArgumentException("Path traversal sequences are not allowed.", nameof(filePath));
         }
 
-        var content = await File.ReadAllTextAsync(filePath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
-        var docId = Path.GetFileNameWithoutExtension(filePath);
-        return await IngestMarkdownContentAsync(content, docId, appId, category, filePath, cancellationToken).ConfigureAwait(false);
+        var fullPath = Path.GetFullPath(filePath);
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException($"Markdown file not found: {fullPath}", fullPath);
+        }
+
+        var content = await File.ReadAllTextAsync(fullPath, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+        var docId = Path.GetFileNameWithoutExtension(fullPath);
+        return await IngestMarkdownContentAsync(content, docId, appId, category, fullPath, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<IReadOnlyList<DocChunk>> IngestMarkdownContentAsync(
