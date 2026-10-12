@@ -3992,3 +3992,44 @@ Branch `feat/ast-x1-perf` (stacked on `feat/ast-x1-integration` `3e63bf8`). Clos
   AST/legacy allocation 1.77x to 1.21x (0.5 KB), 1.27x to 1.04x (4 KB), 1.22x to 1.04x (64 KB). The AST P99 at 4 KB is 1.42 ms (limit 2 ms). `SqlGate.BenchCheck` exits 0 on the final run. Timings of a shared laptop vary by about 10 percent between runs (the 0.5 KB P99 ratio was between 1.07x and 1.47x over six runs); allocation is deterministic.
 - **Baseline:** the AST side of `benchmarks/baselines/sql-compiler-legacy.json` was re-frozen (126,969 / 1,041,873 / 16,173,528 bytes); the legacy numbers are unchanged. The legacy Gen2 reference (`legacyGen2PerThousandOps`: 0, 0, 250) was added for the post-cutover check at 64 KB.
 - **Open:** the shared parse (a dedicated 16 MB thread per statement, token list growth, ANTLR contexts) is about 50 percent of the 0.5 KB allocation and 90 percent at 4 KB; reducing it helps both engines and would shrink the AST/legacy allocation margin, so it was left alone. `CatalogTypeMap.TryResolve` returns false when its 100 ms regex time-out fires, which made `DmlCompileTests.Insert_CheckOption_CastsEveryWrittenValueToItsCatalogType_ButTheBoundTenant` fail once under heavy parallel load (fail closed, pre-existing, not reproducible in two further full runs).
+
+#### Phase 5 review (X0 integration)
+
+Phase 5 review of `feat/ast-x1-integration` (2026-10-12): approve with conditions, no Blocker or High finding. Disposition of every finding:
+
+| Finding | Disposition |
+|---|---|
+| M1 `GovernedCatalogProvider` cache never invalidated (tenant column leak up to the TTL) | Fixed before X1 |
+| M2 G4 differential gate silently skips the AST leg | Fixed before X1 |
+| M3 parser timeout and parser-slot exhaustion mapped to 400 `SQL_SYNTAX_ERROR`; async parse failure reported as CANCELED | Fixed before X1 |
+| M4 `DatasetDataEndpoints` bypasses `SqlCompilerErrorMapper` (with the `SqlSourceUnavailable` mapping) | X1 |
+| L1 `CatalogTypeMap` regex timeout makes compiles random under load | Fixed before X1 |
+| L2 `CheckedDmlExecutor` commit uses the caller token | X1 |
+| L3 `ICompiledSqlBinder` `autheris_ins` substring check, user-triggerable false defect alarms | X1 |
+| L4 `CompiledSqlTemplate` pooled buffer returned without clearing | Fixed here (trivial extra) |
+| L5 `BoundedMemo` without eviction | Later |
+| L6 `TenantRegistryGate` budget before existence check, shared bucket without issuer | X1 (before the registry is enabled) |
+| L7 Databricks: no HTTP mapping for `DatabricksProviderException`, no server-side cancel on failure, `on_wait_timeout=CANCEL`, nulls not counted, reference equality in `SqlConnectionFactory` | X1-DBX |
+| L8 SQLite `trusted_schema` not verified | X1 |
+| L9 `GateRunner` `IsGoverned` too broad | Later |
+| L10 SqlGate steps without empty-selection guard; G9 green without secrets | Before cutover |
+| L11 SQLite timeout tests with tight upper bounds | Later |
+| L12 64 KB Gen2 baseline is machine dependent | Later |
+| L13 `AnonymizeSqlForAudit` misses `1.5E3` and `X'..'` | Later |
+| Known: stale Databricks comment, Databricks tables were admitted | Fixed before X1 (explicit deny until X1-DBX) |
+| Known: Oracle-skip rule of `DifferentialGateTests` untested | Fixed here (extracted and tested with M2) |
+| Known: `RequireDefaultSchema` true for PostgreSQL and Oracle | X1 |
+| Known: 15 accepted differences with approval pending | X1 (required check) |
+| Nits: `GatewayStartupValidator` misplaced summary, `BenchModel` doc, `SqlEmitterContext` marker cache size | Fixed here |
+| Nits: `CompiledSqlTemplate.Find/Add` trust the hash, dead code in `AstSecurityVisitor.MaskGuards.cs`, no concurrency test for the G8 caches | Later |
+
+#### Phase 5 review fixes (pre-X1) implementation log
+
+Branch `feat/ast-x1-prefix` (on the merge `b4de3de`). One commit per finding, each green; Red first.
+
+- **M1.** Wiring `Invalidate` into a change notification was not possible: no governance-change event or epoch reaches the catalog provider (the epoch services are keyed by table access decisions and only exist per node). Instead every cache hit is re-validated: `GetCatalogAsync` reads the governance record (the repositories keep their own short metadata cache that the writers refresh) and compares a fingerprint of the security-relevant governance inputs (connection provider, source name, data source type, dialect, tenant column, sorted governed column names) with the one stored with the entry; a mismatch, a missing record or a failed read is a miss, and the reload fails closed. The TTL now only bounds how long a database schema change (types, collations, dropped columns) goes unnoticed. `Invalidate` stays as the explicit reset. Tests (`GovernedCatalogProviderTests`): tenant column governed after a cached load is carried at the next compile, a removed governed column is no longer exposed, a removed governance record denies, unchanged governance is still served from the cache (one reader call).
+- **M2.** `GateRunner.AstUnavailableReason()` replaces `AstSupported()`: per scenario, no overwrite, no `ArgumentOutOfRangeException` catch (only `SqlCompileNotSupportedException` is a reason; everything else propagates). `DifferentialFixture` collects the reasons; `DifferentialRules.RequireAstLeg` fails the test whenever the database is available and any scenario has no AST leg. Always, not only under `DatabasesRequired`: all four dialects have a binder, so an unsupported leg is a regression and a green run without the AST leg is worthless; a local run without a database still returns before. The SQLite binder is referenced directly (the reflection lookup is gone). `DifferentialRules.IsSkippedLegacyDefect` holds the rule "legacy defect and zero AST violations"; `DifferentialRulesTests` cover both branches (skip with 0 violations, red with at least one) and the no-defect case.
+- **M3.** `SqlCompilerErrorMapper` has a first row for `ParseCanceledException` with a `TimeoutException` cause (the shape `FastSqlEngine.RunWithParseBudget` throws for the parse budget and for parser-slot exhaustion): 422 `SQL_LIMIT_EXCEEDED`, limit `CompileTime`; the syntax row follows. Mapper tests use the real shape (also wrapped in another exception) next to a syntax `ParseCanceledException`. The async problem: `ParseCanceledException` derives from `OperationCanceledException`, so a canceled `Task` (`WebSqlStatementManager`) and the `catch (OperationCanceledException)` of `AsyncQueryJobBackgroundWorker` classified every parse failure as a cancel. Both now treat an `OperationCanceledException` that `SqlCompilerErrorMapper` maps as a governed error as a failure (FAILED, fixed message of the stable code); a client cancel (`IsCancelled`) and any other cancellation stay CANCELED. Tests in `WebSqlStatementManagerTests` and `AsyncQueryJobManagerTests`: syntax error is FAILED with the syntax message, parser timeout is FAILED with the limit message, a plain cancellation stays CANCELED. `GovernedSqlCompiler` itself needed no change (it already excludes `ParseCanceledException` from the compile-time conversion).
+- **L1.** The regex is replaced by a hand-written linear parser (`CatalogTypeMap.TryParse`, ASCII, case-insensitive, no backtracking, no timeout), so the result no longer depends on load; no memoization was needed. `CatalogTypeMapGoldenTests` pins 200 type strings over all dialects (accepted, rejected, whitespace and time-zone variants, hostile input) recorded from the regex implementation before the change; every result is identical except one deliberate tightening: the case-insensitive regex also accepted the Kelvin sign U+212A as `k` (`intK` resolved on SQLite); only ASCII letters form a type name now (fail closed, no catalog produces such a type).
+- **Databricks admission.** `GovernedCatalogProvider` explicitly denies a Databricks source (warning log, no reader call) although the dialect is mapped and a reader exists; the stale comment is replaced. The former guard test is now a deny test. X1-DBX removes the check.
+- **Extras.** `CompiledSqlTemplate` returns the pooled key-material buffer with `clearArray: true` (L4; no meaningful test, the buffer is private); `GatewayStartupValidator` summary moved to `ValidateOracleRuntime`; `BenchModel` doc refers to `MaxGen2Ratio`; `SqlEmitterContext` sizes the marker cache from `ParameterMarkerStyle`.
