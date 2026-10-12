@@ -199,7 +199,7 @@ services:
   # 3f. Azurite (Azure Blob Storage / ADLS Gen2 Emulator for Lakehouse)
   # ----------------------------------------------------------------------------
   azurite:
-    image: mcr.microsoft.com/azure-storage/azurite:3.33.0
+    image: mcr.microsoft.com/azure-storage/azurite:3.37.0
     container_name: gqlgateway-azurite
     profiles:
       - azure
