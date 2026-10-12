@@ -108,17 +108,13 @@ public sealed class GovernedCatalogProviderTests
     }
 
     [Fact]
-    public async Task Databricks_TableIsLoadedThroughTheMapperAndTheDatabricksReader()
+    public async Task Databricks_TableIsDenied_EvenWithAMappedDialectAndARegisteredReader_UntilX1Dbx()
     {
-        // WP-X0j (written after the wiring; a guard, not a Red test): the Databricks dialect is mapped, so the table is no longer denied by default.
         var (sut, reader, _) = Build("Databricks", TargetSqlDialect.Databricks, new[] { "id", "tenantid" },
             new DbColumnMetadata[] { new("id", "int", null), new("tenantid", "string", "UTF8_BINARY") });
 
-        var entry = Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None));
-
-        reader.Calls.ShouldBe(1);
-        entry.ShouldNotBeNull();
-        entry.Columns.Select(c => (c.Name, c.DataType, c.Collation)).ShouldBe(new[] { ("id", "int", (string?)null), ("tenantid", "string", "UTF8_BINARY") });
+        Resolve(await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None)).ShouldBeNull();
+        reader.Calls.ShouldBe(0);
     }
 
     [Fact]

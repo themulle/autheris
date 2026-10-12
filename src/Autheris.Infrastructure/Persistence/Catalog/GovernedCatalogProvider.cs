@@ -201,9 +201,17 @@ public sealed class GovernedCatalogProvider : IGovernedCatalogProvider
             return (null, string.Empty);
         }
 
-        // Databricks has no mapping (and no reader before X1-DBX): the table is denied.
         if (!SqlDialectMapper.TryToTargetDialect(dialect, out var target) || !_readers.TryGetValue(target, out var reader))
         {
+            return (null, string.Empty);
+        }
+
+        // Databricks is mapped and has a column reader, but its governed AST path is not enabled before X1-DBX: the table is denied
+        // explicitly (fail closed), so enabling the reader or the mapping alone can never admit a Databricks source.
+        if (target == TargetSqlDialect.Databricks)
+        {
+            _logger.LogWarning("Catalog admission denied for data source {DataSource}, table {Table}: the Databricks dialect is not enabled for the governed SQL compiler (X1-DBX).",
+                dataSourceName, table.ToQualifiedName());
             return (null, string.Empty);
         }
 
