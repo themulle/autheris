@@ -502,6 +502,23 @@ public sealed partial class FastSqlEngine : ISqlEngine
                 }
             }
 
+            // Phase 5 L3: identifiers with the gateway prefix are reserved in the user statement (typed 400, fixed message, no echo)
+            if (options.RejectReservedIdentifiers && text != null &&
+                (type == SqlBaseLexer.IDENTIFIER || type == SqlBaseLexer.DIGIT_IDENTIFIER ||
+                 type == SqlBaseLexer.QUOTED_IDENTIFIER || type == SqlBaseLexer.BACKQUOTED_IDENTIFIER))
+            {
+                var name = text.AsSpan();
+                if (type is SqlBaseLexer.QUOTED_IDENTIFIER or SqlBaseLexer.BACKQUOTED_IDENTIFIER && name.Length >= 2)
+                {
+                    name = name[1..^1];
+                }
+
+                if (name.StartsWith(ReservedIdentifierException.Prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new ReservedIdentifierException();
+                }
+            }
+
             // SQ-13: Time-travel queries (FOR TIMESTAMP/VERSION AS OF)
             if (options.RejectTimeTravelQueries && (type == SqlBaseLexer.TIMESTAMP || type == SqlBaseLexer.VERSION))
             {

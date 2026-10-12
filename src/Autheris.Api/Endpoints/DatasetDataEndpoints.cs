@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Autheris.Application.Sql.Errors;
 using Autheris.Application.Data.Interfaces;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Audit;
@@ -186,6 +187,13 @@ public static class DatasetDataEndpoints
         {
             var envelope = await queryService.ExecuteQueryAsync(request, requestContext, ct).ConfigureAwait(false);
             await StreamDatasetEnvelopeAsync(httpContext.Response, envelope, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (SqlCompilerErrorMapper.TryMap(ex, out _))
+        {
+            // Phase 5 M4: governed SQL errors (compiler, policy, DML, source unavailable, timeout) answer with their stable code and the
+            // fixed message of that code, exactly as WebSQL does. Nothing of the exception reaches the response.
+            SqlCompilerErrorMapper.TryMap(ex, out var mapped);
+            await SqlErrorResponse.WriteAsync(httpContext, ex, mapped, logger, "Dataset query", ct).ConfigureAwait(false);
         }
         catch (TableNotFoundException ex)
         {

@@ -542,54 +542,9 @@ public static class WebSqlEndpoints
         }
     }
 
-    private static async Task WriteMappedErrorAsync(
-        HttpContext httpContext, Exception ex, SqlErrorMapping mapped, ILogger logger, CancellationToken ct)
-    {
-        SqlCompilerErrorMapper.RecordOutcome(mapped);
-        if (mapped.Status >= StatusCodes.Status500InternalServerError)
-        {
-            logger.LogError(ex, "WebSQL failed with {Code}. TraceId={TraceId}", mapped.Code, httpContext.TraceIdentifier);
-        }
-        else
-        {
-            logger.LogWarning(ex, "WebSQL rejected with {Code}. TraceId={TraceId}", mapped.Code, httpContext.TraceIdentifier);
-        }
-
-        httpContext.Response.StatusCode = mapped.Status;
-        httpContext.Response.ContentType = "application/json; charset=utf-8";
-        if (mapped.Status == StatusCodes.Status503ServiceUnavailable)
-        {
-            httpContext.Response.Headers.RetryAfter = "5";
-        }
-
-        // `limit` carries the limit kind only, never a count.
-        var body = new Dictionary<string, object?>
-        {
-            ["error"] = ErrorName(mapped.Status),
-            ["code"] = mapped.Code,
-            ["message"] = mapped.Title
-        };
-        if (mapped.Limit is not null)
-        {
-            body["limit"] = mapped.Limit;
-        }
-
-        body["traceId"] = httpContext.TraceIdentifier;
-        await httpContext.Response.WriteAsJsonAsync(body, ct);
-    }
-
-    private static string ErrorName(int status) => status switch
-    {
-        StatusCodes.Status400BadRequest => "BadRequest",
-        StatusCodes.Status403Forbidden => "Forbidden",
-        StatusCodes.Status409Conflict => "Conflict",
-        StatusCodes.Status422UnprocessableEntity => "UnprocessableEntity",
-        StatusCodes.Status501NotImplemented => "NotImplemented",
-        StatusCodes.Status502BadGateway => "BadGateway",
-        StatusCodes.Status503ServiceUnavailable => "ServiceUnavailable",
-        StatusCodes.Status504GatewayTimeout => "GatewayTimeout",
-        _ => "InternalServerError"
-    };
+    private static Task WriteMappedErrorAsync(
+        HttpContext httpContext, Exception ex, SqlErrorMapping mapped, ILogger logger, CancellationToken ct) =>
+        SqlErrorResponse.WriteAsync(httpContext, ex, mapped, logger, "WebSQL", ct);
 
     /// <summary>Database command timeouts (e.g. SqlException "Execution Timeout Expired") and TimeoutExceptions.</summary>
     private static bool IsExecutionTimeout(Exception ex)

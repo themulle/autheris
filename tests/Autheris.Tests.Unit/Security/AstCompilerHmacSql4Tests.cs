@@ -21,7 +21,7 @@ using Xunit;
 using Xunit.Abstractions;
 
 /// <summary>
-/// SQL-4: with SqlRewriterEngine = AstCompiler every query on an HMAC-masked column failed, because the gateway's
+/// SQL-4: with the AST compiler (the only path since X1) every query on an HMAC-masked column failed, because the gateway's
 /// pre-rendered mask expression (dialect SQL with bound key parameters) was parsed again as Trino SQL.
 /// </summary>
 public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
@@ -31,7 +31,7 @@ public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
     private static ClaimsPrincipal User() =>
         new(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-AST"), new Claim("tenant_id", Tenant)], "Test"));
 
-    private static GovernedSqlExecutionService CreateService(string sourceType, string engine, string? rowFilter = null, Dictionary<string, object?>? rowFilterParams = null)
+    private static GovernedSqlExecutionService CreateService(string sourceType)
     {
         var table = new TableMetadata
         {
@@ -55,7 +55,7 @@ public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
         var resolution = Substitute.For<IConsentResolutionService>();
         resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
-            .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), rowFilter, hasUnconstrainedColumnAllow: true) with { RowFilterParameters = rowFilterParams });
+            .Returns(ci => TableAccessDecision.Allowed(ci.ArgAt<TableIdentifier>(3), new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true));
 
         var secrets = Substitute.For<IKeyVaultSecretProvider>();
         secrets.GetSecretBytes(Arg.Any<string>()).Returns(Encoding.UTF8.GetBytes("super-secret-hmac-value-0123456789"));
@@ -64,7 +64,7 @@ public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
 
         var gatewayOptions = Options.Create(new GatewayOptions
         {
-            WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500, SqlRewriterEngine = engine },
+            WebSql = new WebSqlOptions { Enabled = true, DefaultMaxRows = 100, MaxAllowedRows = 500 },
             DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "GQL-HMAC", HmacKeyId = "k1" }
         });
         return new GovernedSqlExecutionService(
@@ -83,7 +83,7 @@ public sealed class AstCompilerHmacSql4Tests(ITestOutputHelper output)
     [InlineData("Sqlite")]
     public async Task AstCompiler_HmacMaskedColumn_IsRewritten(string sourceType)
     {
-        var service = CreateService(sourceType, "AstCompiler");
+        var service = CreateService(sourceType);
 
         var compiled = await service.CompileAsync("SELECT id, email FROM employees", User(), new TenantId(Tenant));
         output.WriteLine(compiled.Sql);

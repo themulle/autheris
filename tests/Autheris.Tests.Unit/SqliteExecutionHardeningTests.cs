@@ -34,6 +34,33 @@ public sealed class SqliteExecutionHardeningTests
         Convert.ToInt32(await ScalarAsync(connection, "PRAGMA trusted_schema")).ShouldBe(0);
     }
 
+    [Theory]
+    [InlineData(0L, true)]
+    [InlineData(0, true)]
+    [InlineData(1L, false)]
+    [InlineData(1, false)]
+    [InlineData(null, false)]
+    [InlineData("0", false)]   // anything but the integer 0 is a failed verification
+    public void TrustedSchemaReadBack_FailsClosed_UnlessTheDatabaseConfirmsOff(object? readBack, bool accepted)
+    {
+        // Phase 5 L8 (X1): the pragma is read back; a database that still trusts its schema never serves a governed statement.
+        if (accepted)
+        {
+            Should.NotThrow(() => SessionPinning.EnsureSqliteTrustedSchemaOff(readBack));
+        }
+        else
+        {
+            Should.Throw<Autheris.Application.Interfaces.SqlSourceUnavailableException>(() => SessionPinning.EnsureSqliteTrustedSchemaOff(readBack))
+                .Message.ShouldNotContain("trusted_schema = 1");
+        }
+    }
+
+    [Fact]
+    public void TrustedSchemaReadBack_UsesThePragmaQuery()
+    {
+        SessionPinning.SqliteTrustedSchemaReadBackSql.ShouldBe("PRAGMA trusted_schema");
+    }
+
     [Fact]
     public async Task FactoryConnection_KeepsExtensionLoadingDisabled()
     {

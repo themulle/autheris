@@ -121,6 +121,22 @@ public sealed class AstCompilerWebSqlTests(ITestOutputHelper output)
     }
 
     [Theory]
+    [InlineData("PostgreSQL")]
+    [InlineData("SqlServer")]
+    [InlineData("Sqlite")]
+    public async Task ReservedIdentifier_IsAStableClientError_NotADefect(string sourceType)
+    {
+        // Phase 5 L3: a column named like a gateway alias is a 400 with its own code and raises no invariant alarm.
+        var ex = await Should.ThrowAsync<TrinoSqlEngine.ReservedIdentifierException>(() =>
+            CompileAsync(sourceType, "SELECT id AS autheris_insights FROM orders"));
+
+        SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Status.ShouldBe(400);
+        mapped.Code.ShouldBe("SQL_RESERVED_IDENTIFIER");
+        mapped.Title.ShouldNotContain("autheris");
+    }
+
+    [Theory]
     [InlineData("PostgreSQL", "COALESCE(\"amount\", ")]
     [InlineData("SqlServer", "COALESCE([amount], ")]
     [InlineData("Sqlite", "COALESCE(\"amount\", ")]

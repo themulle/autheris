@@ -37,6 +37,16 @@ public static class SessionPinning
     public const string SqlServerAnsiVerifySql =
         "SELECT CASE WHEN (@@OPTIONS & 4472) = 4472 AND (@@OPTIONS & 8192) = 0 THEN 1 ELSE 0 END";
 
+    /// <summary>Phase 5 L8: reads <c>trusted_schema</c> back after it was set to OFF.</summary>
+    public const string SqliteTrustedSchemaReadBackSql = "PRAGMA trusted_schema";
+
+    /// <summary>
+    /// Phase 5 L8: fails closed unless the read-back of <c>PRAGMA trusted_schema</c> is the integer 0. A build or a connection that
+    /// ignores the setting would let a view, trigger or default of the database call functions that are not marked innocuous.
+    /// </summary>
+    public static void EnsureSqliteTrustedSchemaOff(object? readBack) =>
+        EnsurePinned(readBack is long or int && Convert.ToInt64(readBack, System.Globalization.CultureInfo.InvariantCulture) == 0, "trusted_schema");
+
     /// <summary>Fails closed unless the database confirmed the pin. The message names the pin, never a configured value.</summary>
     public static void EnsurePinned(bool? verified, string what)
     {

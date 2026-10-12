@@ -172,6 +172,11 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
                 hardenCmd.CommandText = SqliteTrustedSchemaOffSql;
                 await hardenCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
+                // Phase 5 L8: read back, never assume. A pragma that did not take effect fails the rental closed.
+                await using var verifyTrustCmd = connection.CreateCommand();
+                verifyTrustCmd.CommandText = SessionPinning.SqliteTrustedSchemaReadBackSql;
+                SessionPinning.EnsureSqliteTrustedSchemaOff(await verifyTrustCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
+
                 sqliteConn.CreateFunction("gateway_hmac_sha256", (string? val, string? salt) =>
                 {
                     if (val == null) return null;

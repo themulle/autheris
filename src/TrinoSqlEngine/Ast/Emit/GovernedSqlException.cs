@@ -20,6 +20,9 @@ public static class GovernedSqlErrorCodes
     public const string LimitExceeded = "SQL_LIMIT_EXCEEDED";
     public const string UnfilteredDml = "SQL_UNFILTERED_DML";
 
+    /// <summary>The statement uses an identifier with the reserved gateway prefix (a user error, 400; not a gateway defect).</summary>
+    public const string ReservedIdentifier = "SQL_RESERVED_IDENTIFIER";
+
     /// <summary>One code for every "table not usable" cause (not registered, inactive, no columns, denied, hidden column, load failure; SEC-X1-05).</summary>
     public const string PolicyDenied = "SQL_POLICY_DENIED";
 
@@ -46,6 +49,7 @@ public static class GovernedSqlErrorCodes
         DialectNotSupported => "The statement is not supported for this data source dialect.",
         LimitExceeded => "The statement exceeds a resource limit.",
         UnfilteredDml => "UPDATE and DELETE statements require a restricting WHERE clause.",
+        ReservedIdentifier => "The statement uses an identifier that is reserved by the gateway.",
         PolicyDenied => "Access to a referenced table or column is denied.",
         PolicyViolation => "The SQL statement was rejected by the gateway security policy.",
         TenantIdCollision => "Access denied.",

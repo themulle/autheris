@@ -106,6 +106,63 @@ public sealed class DatasetDataEndpointsTests
         httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
     }
 
+    // ---- X1 / Phase 5 M4: the dataset endpoints answer governed SQL errors through SqlCompilerErrorMapper ---------------------
+
+    private static async Task<(int Status, JsonDocument Body, DefaultHttpContext Context)> FailWithAsync(Exception error)
+    {
+        var httpContext = CreateHttpContext();
+        var queryService = Substitute.For<IGovernedDataQueryService>();
+        queryService.ExecuteQueryAsync(Arg.Any<DatasetQueryRequest>(), Arg.Any<RequestContext>(), Arg.Any<CancellationToken>())
+            .Returns<DatasetQueryEnvelope>(_ => throw error);
+
+        await DatasetDataEndpoints.HandleQueryThreePartAsync("sales", "dbo", "customers", httpContext, queryService, NullLoggerFactory.Instance, CancellationToken.None);
+
+        httpContext.Response.Body.Seek(0, SeekOrigin.Begin);
+        return (httpContext.Response.StatusCode, JsonDocument.Parse(httpContext.Response.Body), httpContext);
+    }
+
+    [Fact]
+    public async Task DatasetEndpoint_CompilerLimit_Returns422WithStableCode_AndFixedMessage()
+    {
+        var (status, body, _) = await FailWithAsync(new TrinoSqlEngine.Ast.Capabilities.SqlLimitExceededException(
+            TrinoSqlEngine.Ast.Capabilities.SqlLimitKind.InListItems, TrinoSqlEngine.TargetSqlDialect.PostgreSql, 5001, 1000));
+
+        status.ShouldBe(StatusCodes.Status422UnprocessableEntity);
+        body.RootElement.GetProperty("code").GetString().ShouldBe("SQL_LIMIT_EXCEEDED");
+        body.RootElement.GetProperty("limit").GetString().ShouldBe("InListItems");
+        body.RootElement.GetRawText().ShouldNotContain("5001");   // no counts
+    }
+
+    [Fact]
+    public async Task DatasetEndpoint_PolicyDenial_Returns403WithOneCodeForEveryUnusableTable()
+    {
+        var (status, body, _) = await FailWithAsync(new Autheris.Application.Sql.WebSqlTableDeniedException("Access to table 'secret.table' is denied"));
+
+        status.ShouldBe(StatusCodes.Status403Forbidden);
+        body.RootElement.GetProperty("code").GetString().ShouldBe("SQL_POLICY_DENIED");
+        body.RootElement.GetRawText().ShouldNotContain("secret.table");
+    }
+
+    [Fact]
+    public async Task DatasetEndpoint_SqlSourceUnavailable_Returns503WithStableCode()
+    {
+        var (status, body, context) = await FailWithAsync(new SqlSourceUnavailableException("pin failed for schema internal_schema"));
+
+        status.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+        body.RootElement.GetProperty("code").GetString().ShouldBe("SQL_SOURCE_UNAVAILABLE");
+        body.RootElement.GetRawText().ShouldNotContain("internal_schema");
+        context.Response.Headers.RetryAfter.ToString().ShouldNotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task DatasetEndpoint_ProviderError_Returns502WithStableCode()
+    {
+        var (status, body, _) = await FailWithAsync(new TrinoSqlEngine.Ast.Emit.GovernedSqlException("SQL_PROVIDER_ERROR", TrinoSqlEngine.TargetSqlDialect.PostgreSql));
+
+        status.ShouldBe(StatusCodes.Status502BadGateway);
+        body.RootElement.GetProperty("code").GetString().ShouldBe("SQL_PROVIDER_ERROR");
+    }
+
     [Fact]
     public async Task HandleQueryThreePartAsync_TableNotFound_Returns404()
     {

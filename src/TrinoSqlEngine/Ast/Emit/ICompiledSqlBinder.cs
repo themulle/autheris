@@ -140,8 +140,36 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
         return compiled.RequiresRowCountCheck || ContainsCheckAlias(compiled.Sql);
     }
 
-    private static bool ContainsCheckAlias(string sql) =>
-        sql.Contains(CheckAliasText, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// Phase 5 L3: the reserved alias is recognised as a whole identifier, in any quoting style. A longer identifier that merely
+    /// contains the text (for example <c>autheris_insights</c>) is not the alias; the compiler rejects such user identifiers anyway.
+    /// </summary>
+    private static bool ContainsCheckAlias(string sql)
+    {
+        int from = 0;
+        while (from < sql.Length)
+        {
+            int index = sql.IndexOf(CheckAliasText, from, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+            {
+                return false;
+            }
+
+            int end = index + CheckAliasText.Length;
+            bool startsIdentifier = index == 0 || !IsIdentifierPart(sql[index - 1]);
+            bool endsIdentifier = end >= sql.Length || !IsIdentifierPart(sql[end]);
+            if (startsIdentifier && endsIdentifier)
+            {
+                return true;
+            }
+
+            from = index + 1;
+        }
+
+        return false;
+    }
+
+    private static bool IsIdentifierPart(char c) => char.IsAsciiLetterOrDigit(c) || c is '_' or '$' or '#';
 
     private const string CheckAliasText = "autheris_ins";
 

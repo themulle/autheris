@@ -45,7 +45,7 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
     private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = new()
     {
         RejectComments = true, RejectBackslashInStrings = true, RejectEscapedStringLiterals = true,
-        RejectNonAsciiIdentifiers = true, RejectDotsInQuotedIdentifiers = true, RejectTimeTravelQueries = true
+        RejectNonAsciiIdentifiers = true, RejectDotsInQuotedIdentifiers = true, RejectTimeTravelQueries = true, RejectReservedIdentifiers = true
     };
 
     private const string InternalParameterPrefix = GovernedSqlExecutionService.InternalParameterPrefix;

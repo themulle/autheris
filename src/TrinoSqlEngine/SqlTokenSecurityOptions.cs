@@ -71,6 +71,13 @@ public sealed record SqlTokenSecurityOptions
     public bool RejectVariableSubstitutionSequences { get; init; }
 
     /// <summary>
+    /// Phase 5 L3: reject identifiers (quoted or not) that start with <see cref="ReservedIdentifierException.Prefix"/> with a
+    /// <see cref="ReservedIdentifierException"/>. For the user statement only (not part of <see cref="Strict"/>): the policy parser uses the strict
+    /// preset and must keep accepting the gateway aliases of the admin predicates.
+    /// </summary>
+    public bool RejectReservedIdentifiers { get; init; }
+
+    /// <summary>
     /// Derives the token switches from <see cref="RlsOptions"/>. Dollar quoting is always rejected for SQL Server targets.
     /// </summary>
     public static SqlTokenSecurityOptions FromRlsOptions(RlsOptions options)
