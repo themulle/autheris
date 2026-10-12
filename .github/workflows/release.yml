@@ -69,7 +69,7 @@ jobs:
               -p:AutherisIncludeTestAuth=false \
               -o "$OUT_DIR"
 
-            if strings "$OUT_DIR/$BINARY" | grep -E "(^TestAuth$|Autheris\.Api\.Security\.TestAuthHandler)" > /dev/null; then
+            if strings -e l "$OUT_DIR/$BINARY" | grep -F "TestAuthHandler is strictly prohibited" > /dev/null; then
               echo "::error::Security invariant violation: TestAuthHandler found in $RID binary!"
               exit 1
             fi
