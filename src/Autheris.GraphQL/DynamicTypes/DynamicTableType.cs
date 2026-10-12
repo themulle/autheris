@@ -123,6 +123,14 @@ public sealed class DynamicTableType : ObjectType
         {
             field.Type<BooleanType>();
         }
+        else if (lower == "date")
+        {
+            field.Type<DateType>();
+        }
+        else if (lower == "time" || lower.StartsWith("time(", StringComparison.Ordinal))
+        {
+            field.Type<LocalTimeType>();
+        }
         else if (lower.Contains("date") || lower.Contains("time"))
         {
             field.Type<DateTimeType>();
@@ -145,21 +153,30 @@ public sealed class DynamicTableType : ObjectType
                     : null));
         var hasLongDesc = !string.IsNullOrWhiteSpace(longDesc);
 
-        if (hasDesc && hasLongDesc)
-        {
-            return $"{col.Description}\n\n---\n**Detailed specification:**\n{longDesc}";
-        }
-
+        var sb = new System.Text.StringBuilder();
         if (hasDesc)
         {
-            return col.Description;
+            sb.Append(col.Description);
+        }
+
+        var semantics = col.Semantics;
+        var semanticsList = new List<string>();
+        if (!string.IsNullOrWhiteSpace(semantics.Role)) semanticsList.Add($"**Role:** `{semantics.Role}`");
+        if (!string.IsNullOrWhiteSpace(semantics.Unit)) semanticsList.Add($"**Unit:** `{semantics.Unit}`");
+        if (!string.IsNullOrWhiteSpace(semantics.BusinessName)) semanticsList.Add($"**Business Name:** {semantics.BusinessName}");
+
+        if (semanticsList.Count > 0)
+        {
+            if (sb.Length > 0) sb.Append("\n\n");
+            sb.Append(string.Join(" · ", semanticsList));
         }
 
         if (hasLongDesc)
         {
-            return longDesc;
+            if (sb.Length > 0) sb.Append("\n\n---\n**Detailed specification:**\n");
+            sb.Append(longDesc);
         }
 
-        return null;
+        return sb.Length > 0 ? sb.ToString() : null;
     }
 }

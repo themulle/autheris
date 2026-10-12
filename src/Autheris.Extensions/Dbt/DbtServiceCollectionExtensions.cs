@@ -20,6 +20,8 @@ public static class DbtServiceCollectionExtensions
         }
 
         services.TryAddSingleton<ITelemetryMetricsProvider, InMemoryTelemetryMetricsProvider>();
+        services.TryAddSingleton<ISemanticCatalogService, InMemorySemanticCatalog>();
+        services.TryAddScoped<IDbtSemanticManifestIngestionService, DbtSemanticManifestIngestionService>();
         services.TryAddScoped<IDbtMetadataIngestionService, DbtMetadataIngestionService>();
         services.TryAddScoped<IDbtExposurePublisher, DbtExposurePublisher>();
         services.TryAddScoped<IDbtContractValidator, DbtContractValidator>();

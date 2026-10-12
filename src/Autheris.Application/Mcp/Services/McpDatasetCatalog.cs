@@ -135,7 +135,7 @@ public sealed class McpDatasetCatalog(
             .Select(c =>
             {
                 graphQlColumns.TryGetValue(c.ColumnName, out var field);
-                return new McpDatasetColumn(c.ColumnName, c.DataType, c.Description, c.IsSensitive, primaryKeys.Contains(c.ColumnName), field?.Field, field?.GraphQlType);
+                return new McpDatasetColumn(c.ColumnName, c.DataType, c.Description, c.IsSensitive, primaryKeys.Contains(c.ColumnName), field?.Field, field?.GraphQlType, c.Semantics);
             })
             .ToList();
 

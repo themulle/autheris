@@ -334,6 +334,56 @@ public static class DbtEndpoints
           .WithRequestBodyLimit(10 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
+        // Wave 4 / Issue #38: dbt Semantic Manifest Ingestion & Metrics Catalog
+        app.MapPost("/api/extensions/dbt/semantic-manifest", async (
+            HttpContext context,
+            IDbtSemanticManifestIngestionService ingestionService) =>
+        {
+            var isPrivileged = EndpointSecurity.IsGlobalGovernanceAdmin(context.User) ||
+                               context.User.IsInRole("DbtAdmin");
+            if (!isPrivileged)
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+
+            var (payload, tooLarge) = await EndpointSecurity.TryReadBodyAsync(
+                context.Request,
+                10 * 1024 * 1024,
+                "Semantic manifest payload exceeds maximum allowed size (10 MB).",
+                context.RequestAborted);
+            if (payload == null)
+            {
+                return tooLarge!;
+            }
+
+            try
+            {
+                var manifest = await ingestionService.ParseAndIngestAsync(payload, context.RequestAborted);
+                return Results.Ok(new
+                {
+                    success = true,
+                    modelsCount = manifest.SemanticModels.Count,
+                    metricsCount = manifest.Metrics.Count
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.BadRequest(new { success = false, error = ex.Message });
+            }
+        }).RequireAuthorization()
+          .WithRequestBodyLimit(10 * 1024 * 1024)
+          .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+
+        app.MapGet("/api/extensions/dbt/metrics", async (
+            HttpContext context,
+            ISemanticCatalogService semanticCatalog) =>
+        {
+            var dataset = context.Request.Query["dataset"].ToString();
+            var metrics = await semanticCatalog.ListMetricsAsync(string.IsNullOrWhiteSpace(dataset) ? null : dataset, context.RequestAborted);
+            return Results.Ok(metrics);
+        }).RequireAuthorization()
+          .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
         return app;
     }
 }

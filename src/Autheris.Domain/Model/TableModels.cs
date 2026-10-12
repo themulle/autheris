@@ -95,6 +95,13 @@ public sealed class TableColumn
     public string? LongDescription { get; init; }
     public string? DocumentationSource { get; init; }
     public IReadOnlyDictionary<string, string> Meta { get; init; } = new Dictionary<string, string>();
+
+    public ColumnSemantics Semantics => new(
+        Role: Meta.TryGetValue("role", out var r) ? r : null,
+        Unit: Meta.TryGetValue("unit", out var u) ? u : null,
+        BusinessName: Meta.TryGetValue("business_name", out var bn) ? bn : null,
+        RawMeta: Meta
+    );
 }
 
 

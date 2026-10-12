@@ -62,6 +62,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-GOV-14** | Federated Virtual Filters on Web-APIs via DuckDB & Adaptive Pushdown | [f-gov-14-federated-virtual-filters.md](f-gov-14-federated-virtual-filters.md) |
 | **F-GOV-15** | Declarative Consent GitOps, Effective Access Introspection & Scope Governance | [f-gov-15-declarative-consents-scopes.md](f-gov-15-declarative-consents-scopes.md) |
 | **F-GOV-16** | Catalog Discovery Transparency, Data Ownership & Response Masking Metadata | [f-gov-16-catalog-ownership-transparency.md](f-gov-16-catalog-ownership-transparency.md) |
+| **F-GOV-17** | GraphQL Cursor Pagination, Temporal Types & dbt Column Semantics | [f-gov-17-graphql-temporal-dbt-semantics.md](f-gov-17-graphql-temporal-dbt-semantics.md) |
 | **F-INT-01** | Spotify Backstage Software Catalog Integration | [f-int-01-backstage-software-catalog.md](f-int-01-backstage-software-catalog.md) |
 | **F-MASK-02** | Extended Column Masking Engine (GEO_JITTER, PARTIAL_MASK, TOKENIZATION) | [f-mask-02-extended-masking-engine.md](f-mask-02-extended-masking-engine.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |

@@ -46,7 +46,8 @@ public sealed record McpDatasetColumn(
     bool Sensitive,
     bool PrimaryKey,
     string? GraphQlField = null,
-    string? GraphQlType = null);
+    string? GraphQlType = null,
+    ColumnSemantics? Semantics = null);
 
 /// <summary>A navigation from a dataset to a related dataset in the GraphQL API.</summary>
 public sealed record McpGraphQlRelation(string Field, string Dataset, bool IsList);
