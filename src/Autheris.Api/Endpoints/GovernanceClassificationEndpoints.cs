@@ -2,6 +2,7 @@ namespace Autheris.Api.Endpoints;
 
 using System;
 using System.Collections.Generic;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
@@ -75,7 +76,109 @@ public static class GovernanceClassificationEndpoints
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
 
-        // 3. Inspect Current Active Governance WORM Configuration Hash
+        // 3. List Pending Proposals for Review Inbox (Filtered by role or owner)
+        app.MapGet("/api/governance/classification/proposals/pending", async (
+            string? role,
+            string? owner,
+            IClassificationProposalStore store,
+            CancellationToken ct) =>
+        {
+            Sid? ownerSid = !string.IsNullOrWhiteSpace(owner) ? (Sid?)new Sid(owner) : null;
+            var proposals = await store.GetPendingProposalsAsync(role, ownerSid, ct).ConfigureAwait(false);
+            return Results.Ok(proposals);
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.ClassificationProposed);
+
+        // 4. Get Proposal Details by Proposal ID
+        app.MapGet("/api/governance/classification/proposals/{proposalId:guid}", async (
+            Guid proposalId,
+            IClassificationProposalStore store,
+            CancellationToken ct) =>
+        {
+            var proposal = await store.GetProposalByIdAsync(proposalId, ct).ConfigureAwait(false);
+            return proposal != null ? Results.Ok(proposal) : Results.NotFound(new { error = $"Proposal with ID '{proposalId}' was not found." });
+        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.ClassificationProposed);
+
+        // 5. Submit Human Approval (Stage 1 Data Owner or Stage 2 Compliance Reviewer)
+        app.MapPost("/api/governance/classification/proposals/{proposalId:guid}/approve", async (
+            Guid proposalId,
+            ClassificationApprovalPayload payload,
+            HttpContext httpContext,
+            IClassificationProposalStore store,
+            IClassificationWorkflowStateMachine stateMachine,
+            CancellationToken ct) =>
+        {
+            var proposal = await store.GetProposalByIdAsync(proposalId, ct).ConfigureAwait(false);
+            if (proposal == null)
+            {
+                return Results.NotFound(new { error = $"Proposal with ID '{proposalId}' was not found." });
+            }
+
+            var reviewerSid = httpContext.User.GetUserSid() ?? (!string.IsNullOrWhiteSpace(payload.ReviewerSid) ? new Sid(payload.ReviewerSid) : new Sid("ANONYMOUS_REVIEWER"));
+            var reviewerRole = !string.IsNullOrWhiteSpace(payload.ReviewerRole) ? payload.ReviewerRole : "DATA_OWNER";
+
+            var request = new TableClassificationApprovalRequest(
+                proposal.ProposalId,
+                proposal.TableIdentifier,
+                reviewerSid,
+                reviewerRole,
+                "APPROVE",
+                payload.ColumnDecisions ?? Array.Empty<ColumnClassificationDecision>(),
+                OverallComment: payload.OverallComment,
+                Justification: payload.Justification,
+                StepUpAuthToken: payload.StepUpAuthToken);
+
+            var result = await stateMachine.TransitionAsync(proposal, request, ct).ConfigureAwait(false);
+            return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
+
+        // 6. Submit Rejection
+        app.MapPost("/api/governance/classification/proposals/{proposalId:guid}/reject", async (
+            Guid proposalId,
+            ClassificationRejectionPayload payload,
+            HttpContext httpContext,
+            IClassificationProposalStore store,
+            IClassificationWorkflowStateMachine stateMachine,
+            CancellationToken ct) =>
+        {
+            var proposal = await store.GetProposalByIdAsync(proposalId, ct).ConfigureAwait(false);
+            if (proposal == null)
+            {
+                return Results.NotFound(new { error = $"Proposal with ID '{proposalId}' was not found." });
+            }
+
+            var reviewerSid = httpContext.User.GetUserSid() ?? (!string.IsNullOrWhiteSpace(payload.ReviewerSid) ? new Sid(payload.ReviewerSid) : new Sid("ANONYMOUS_REVIEWER"));
+            var reviewerRole = !string.IsNullOrWhiteSpace(payload.ReviewerRole) ? payload.ReviewerRole : "DATA_OWNER";
+
+            var request = new TableClassificationApprovalRequest(
+                proposal.ProposalId,
+                proposal.TableIdentifier,
+                reviewerSid,
+                reviewerRole,
+                "REJECT",
+                Array.Empty<ColumnClassificationDecision>(),
+                OverallComment: payload.Reason);
+
+            var result = await stateMachine.TransitionAsync(proposal, request, ct).ConfigureAwait(false);
+            return result.Success ? Results.Ok(result) : Results.BadRequest(result);
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
+
+        // 7. Assign Data Owner to Data Object
+        app.MapPost("/api/governance/classification/assign-owner", async (
+            AssignDataOwnerPayload payload,
+            IClassificationProposalStore store,
+            CancellationToken ct) =>
+        {
+            var tableId = new TableIdentifier(payload.Catalog, payload.Schema, payload.Table);
+            var updated = await store.UpdateDataOwnerAsync(tableId, payload.DataOwnerSid, ct).ConfigureAwait(false);
+            return Results.Ok(new
+            {
+                Table = tableId.ToQualifiedName(),
+                AssignedOwnerSid = payload.DataOwnerSid,
+                ProposalUpdated = updated
+            });
+        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
+
+        // 8. Inspect Current Active Governance WORM Configuration Hash
         app.MapGet("/api/governance/classification/config-hash", (
             IWormConfigurationAuditService auditService) =>
         {
@@ -93,3 +196,22 @@ public static class GovernanceClassificationEndpoints
 public sealed record TableClassificationTransitionPayload(
     TableClassificationProposal Proposal,
     TableClassificationApprovalRequest Request);
+
+public sealed record ClassificationApprovalPayload(
+    IReadOnlyList<ColumnClassificationDecision>? ColumnDecisions,
+    string? ReviewerRole = null,
+    string? ReviewerSid = null,
+    string? OverallComment = null,
+    string? Justification = null,
+    string? StepUpAuthToken = null);
+
+public sealed record ClassificationRejectionPayload(
+    string Reason,
+    string? ReviewerRole = null,
+    string? ReviewerSid = null);
+
+public sealed record AssignDataOwnerPayload(
+    string Catalog,
+    string Schema,
+    string Table,
+    string DataOwnerSid);
