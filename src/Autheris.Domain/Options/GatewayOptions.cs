@@ -1612,13 +1612,15 @@ public sealed class WebSqlOptions
     /// <summary>
     /// SQ-06 / SEC P-02: Additional SQL function names (unqualified, case-insensitive) permitted in WebSQL on top of the
     /// curated allowlist of the target dialect (TrinoSqlEngine.SqlFunctionAllowlists). Names on the built-in function
-    /// denylist are never permitted, even if listed here.
+    /// denylist are never permitted, even if listed here. Since X1 the list can only narrow the dialect's function map
+    /// (the compiler needs an emission rule for every function): a name without a rule is still rejected.
     /// </summary>
     public List<string> AdditionalAllowedFunctions { get; init; } = [];
+
     /// <summary>
-    /// Rewriter engine implementation: "AstCompiler" (AST target dialect generator),
-    /// "ShadowDualRun" (runs both engines with legacy authoritative for differential verification),
-    /// or null / "LegacyTokenStream" (defaults to engine's configuration).
+    /// REMOVED (X1, SEC-ADG-28). The AST compiler is the only SQL path and there is no runtime switch; any configured value makes
+    /// <c>GatewayStartupValidator.ValidateSqlRewriterEngine</c> fail the start. The property remains only so that the failure can name
+    /// the key; it is deleted together with the legacy rewriter (WP-X1 part B).
     /// </summary>
     public string? SqlRewriterEngine { get; init; }
 

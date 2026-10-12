@@ -378,4 +378,75 @@ public sealed class GovernancePolicyFactoryTests
         Should.Throw<SecurityException>(() => CompileRequestFactory.Create(
             policy, TargetSqlDialect.PostgreSql, new WebSqlOptions(), false, 100, new HashSet<string>()));
     }
+
+    // ---- X1: tables read by a policy subquery -----------------------------------------------------------------------------------
+
+    /// <summary>EXISTS (SELECT 1 FROM main.invoices dep WHERE dep.id = autheris_target.id): the shape of a correlated consent filter.</summary>
+    private static IRowPolicy CorrelatedPolicy() => new PolicyPredicateRowPolicy(PolicyPredicate.Create(
+        new ExistsExpression(new SelectStatement(null,
+            new QuerySpecification(
+                false,
+                [new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier("dep", true), new SqlIdentifier("id", true) })), null)],
+                new NamedTableSource(
+                    new SqlQualifiedName(new[] { new SqlIdentifier("main", true), new SqlIdentifier("invoices", true) }),
+                    new SqlIdentifier("dep", true)),
+                new BinaryExpression(
+                    new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier("dep", true), new SqlIdentifier("id", true) })),
+                    BinaryOperator.Equal,
+                    PolicyParameterNamer.Column($"{RowFilterAliases.Target}.id")),
+                null, null),
+            null, null)),
+        new Dictionary<string, PolicyValue>()), TargetSqlDialect.Sqlite, Renderer);
+
+    [Fact]
+    public async Task PolicySubqueryTable_IsRequestedFromTheProvider_ResolvableForThePolicy_ButNeverAdmitted()
+    {
+        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out var provider);
+        var decisions = new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy()) };
+
+        var policy = await factory.CreateAsync(Input(decisions), CancellationToken.None);
+
+        // the provider verifies the table that the policy reads, like any other table of the statement
+        await provider.Received().GetCatalogAsync(
+            "ds", Arg.Is<IReadOnlyCollection<TableIdentifier>>(t => t.Any(x => x.TableName == "invoices")), Arg.Any<CancellationToken>());
+        var request = Request(policy);
+        // the policy subquery resolves it (with the tenant predicate), so the statement compiles and filters by the other table's rows
+        Ids(Run(request, "SELECT id FROM orders ORDER BY id")).ShouldBe(new List<int> { 1 });
+        // a user reference is still decided by stage 3 and by the deny-all default: the table has no decision and no row policy
+        Ids(Run(request, "SELECT id FROM invoices")).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task PolicySubqueryTable_TheCatalogCannotVerify_DeniesTheTableOfThePolicy()
+    {
+        var factory = Factory(Catalog(Entry(Orders)), out _);   // invoices is not in the verified catalog
+        var decisions = new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy()) };
+
+        var policy = await factory.CreateAsync(Input(decisions), CancellationToken.None);
+
+        // fail closed: a policy that cannot be enforced makes its own table unknown to the compiler (the rewriter answers SQL_POLICY_DENIED)
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task CorrelatedConsentFilter_BuiltByTheProducer_CompilesAndFiltersEndToEnd()
+    {
+        // The producer of correlated consent filters (AdvancedRlsFilterGenerator) through the assembly and the compiler on a real database.
+        var filter = new ConsentRowFilter
+        {
+            FilterType = RowFilterType.SubqueryCorrelated,
+            DependentTable = InvoicesId,
+            DependentTableAlias = "dep",
+            ForeignKeyColumn = "id",
+            PrimaryKeyColumn = "id",
+            SubqueryFilterPredicateJson = null
+        };
+        var predicate = Autheris.Application.Services.AdvancedRlsFilterGenerator.BuildCorrelatedPredicate(filter);
+        var policy = new PolicyPredicateRowPolicy(predicate, TargetSqlDialect.Sqlite, Renderer);
+        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _);
+        var gp = await factory.CreateAsync(Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, policy) }), CancellationToken.None);
+        var request = Request(gp);
+
+        Ids(Run(request, "SELECT id FROM orders ORDER BY id")).ShouldBe(new List<int> { 1 });
+    }
 }

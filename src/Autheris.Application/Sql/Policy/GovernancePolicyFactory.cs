@@ -54,7 +54,29 @@ public sealed class GovernancePolicyFactory(IGovernedCatalogProvider catalogs)
         ArgumentException.ThrowIfNullOrWhiteSpace(input.DataSourceName);
 
         var tables = input.Decisions.Values.Select(static d => d.Table).Distinct().ToList();
-        var catalog = await _catalogs.GetCatalogAsync(input.DataSourceName, tables, ct).ConfigureAwait(false);
+
+        // A typed row policy can read other tables in a subquery (correlated consent filters, virtual filters with a key source). The
+        // compiler resolves those names against the same catalog, so the provider is asked for them too: it verifies them like any
+        // other table (an unverifiable table is simply absent, and the policy that needs it denies its own table below).
+        var policyTables = input.Decisions.Values
+            .Select(static d => d.RowPolicy)
+            .OfType<PolicyPredicateRowPolicy>()
+            .SelectMany(static p => PolicySubqueryTables.Names(p.Predicate))
+            .Distinct()
+            .ToList();
+        var requested = new List<TableIdentifier>(tables);
+        foreach (var name in policyTables)
+        {
+            foreach (var candidate in PolicySubqueryTables.Candidates(name, input.DataSourceName))
+            {
+                if (!requested.Contains(candidate))
+                {
+                    requested.Add(candidate);
+                }
+            }
+        }
+
+        var catalog = await _catalogs.GetCatalogAsync(input.DataSourceName, requested, ct).ConfigureAwait(false);
 
         var rowPredicates = new Dictionary<TableIdentity, PolicyPredicate?>();
         var masks = new Dictionary<TableIdentity, ColumnMaskPolicy>();
@@ -91,11 +113,28 @@ public sealed class GovernancePolicyFactory(IGovernedCatalogProvider catalogs)
         }
 
         var admitted = rowPredicates.Keys.ToHashSet();
+        // The tables that the admitted policies read: resolvable for the compiler's policy subqueries, but never "admitted" (no decision,
+        // so a user reference to one is still governed by stage 3 and by the deny-all default of the row policy provider).
+        var dependents = new HashSet<TableIdentity>();
+        foreach (var decision in input.Decisions)
+        {
+            if (admitted.Contains(decision.Key) && decision.Value.RowPolicy is PolicyPredicateRowPolicy policy)
+            {
+                foreach (var name in PolicySubqueryTables.Names(policy.Predicate))
+                {
+                    if (catalog.Resolve(name) is { } entry)
+                    {
+                        dependents.Add(entry.Identity);
+                    }
+                }
+            }
+        }
+
         return new GovernancePolicy
         {
             RowFilters = new DecisionRowPolicyProvider(rowPredicates, dialect),
             Masks = new DecisionColumnMaskProvider(masks),
-            Catalog = new AdmittedTableCatalog(catalog, admitted),
+            Catalog = new AdmittedTableCatalog(catalog, admitted, dependents),
             Tenant = new TenantBinding(RowPolicyFactory.TenantParameterName, input.Tenant.Value, SqlParameterType.String),
             TablesWithConsentRowFilter = consentFiltered.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             TablesWithMaskedColumns = masked.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
@@ -138,6 +177,14 @@ public sealed class GovernancePolicyFactory(IGovernedCatalogProvider catalogs)
             // A policy must never be dropped silently: a table with a row policy cannot also be declared without one.
             if (typed.RowPolicy is not PolicyPredicateRowPolicy predicateRowPolicy || declaredWithoutRls || !MarkersAgree(typed))
             {
+                return false;
+            }
+
+            // SEC-X1-05: a policy that reads a table the catalog cannot verify cannot be enforced, so its own table is denied (fail closed,
+            // reported like every other "table not usable" cause) instead of failing inside the compiler with another code.
+            if (PolicySubqueryTables.Names(predicateRowPolicy.Predicate).Any(name => catalog.Resolve(name) is null))
+            {
+                rowPolicy = null;
                 return false;
             }
 
@@ -212,13 +259,64 @@ public sealed class GovernancePolicyFactory(IGovernedCatalogProvider catalogs)
         return true;
     }
 
-    /// <summary>The catalog of the admitted tables only; everything else resolves to null, which the compiler rejects (fail closed).</summary>
-    private sealed class AdmittedTableCatalog(ITableCatalog inner, IReadOnlySet<TableIdentity> admitted) : ITableCatalog
+    /// <summary>
+    /// The catalog of the admitted tables and of the tables their policies read in subqueries; everything else resolves to null, which the
+    /// compiler rejects (fail closed).
+    /// </summary>
+    private sealed class AdmittedTableCatalog(ITableCatalog inner, IReadOnlySet<TableIdentity> admitted, IReadOnlySet<TableIdentity> dependents) : ITableCatalog
     {
         public TableCatalogEntry? Resolve(TrinoSqlEngine.Ast.Nodes.SqlQualifiedName name)
         {
             var entry = inner.Resolve(name);
-            return entry is not null && admitted.Contains(entry.Identity) ? entry : null;
+            return entry is not null && (admitted.Contains(entry.Identity) || dependents.Contains(entry.Identity)) ? entry : null;
+        }
+    }
+}
+
+/// <summary>The tables that a typed row policy reads in its subqueries (correlated consent filters, virtual filters with a key source).</summary>
+internal static class PolicySubqueryTables
+{
+    private sealed class Collector : TrinoSqlEngine.Ast.Visitors.SqlAstRewriter
+    {
+        public List<TrinoSqlEngine.Ast.Nodes.SqlQualifiedName> Names { get; } = [];
+
+        public override TrinoSqlEngine.Ast.Nodes.SqlNode VisitNamedTableSource(TrinoSqlEngine.Ast.Nodes.NamedTableSource node)
+        {
+            Names.Add(node.Name);
+            return node;
+        }
+    }
+
+    /// <summary>Every table name of the predicate (a predicate without a subquery has none).</summary>
+    public static IReadOnlyList<TrinoSqlEngine.Ast.Nodes.SqlQualifiedName> Names(PolicyPredicate predicate)
+    {
+        var collector = new Collector();
+        collector.Visit(predicate.Expression);
+        return collector.Names;
+    }
+
+    /// <summary>
+    /// The governance identifiers a policy table name may stand for. The policy renders <c>schema.table</c> (SQLite: the table alone), without
+    /// the data source, so the data source of the statement and the legacy <c>default</c> domain are tried. The provider verifies each
+    /// candidate against the governance record and the database and omits the ones that do not exist.
+    /// </summary>
+    public static IEnumerable<TableIdentifier> Candidates(TrinoSqlEngine.Ast.Nodes.SqlQualifiedName name, string dataSource)
+    {
+        var parts = name.Parts;
+        switch (parts.Count)
+        {
+            case 1:
+                yield return new TableIdentifier(dataSource, "main", parts[0].Value);
+                yield return new TableIdentifier("default", "main", parts[0].Value);
+                break;
+            case 2:
+                yield return new TableIdentifier(dataSource, parts[0].Value, parts[1].Value);
+                yield return new TableIdentifier("default", parts[0].Value, parts[1].Value);
+                break;
+            case 3:
+                yield return new TableIdentifier(parts[0].Value, parts[1].Value, parts[2].Value);
+                yield return new TableIdentifier(dataSource, parts[1].Value, parts[2].Value);
+                break;
         }
     }
 }

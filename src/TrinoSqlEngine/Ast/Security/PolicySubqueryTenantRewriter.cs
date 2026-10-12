@@ -53,13 +53,16 @@ internal sealed class PolicySubqueryTenantRewriter : SqlAstRewriter
         _typed.RecordDependency(node.Name, entry);
         var canonical = entry.Identity.ToQualifiedName();
 
+        // A table without a tenant column (a lookup table) is wrapped like every other: the coverage verifier accepts a physical table
+        // only as the source of a derived table, so a bare table would fail the proof. It simply has no predicate to carry.
         var tenant = _typed.BuildTenantPredicate(entry);
-        if (tenant is null)
+        Expression? where = null;
+        if (tenant is not null)
         {
-            return new NamedTableSource(canonical, node.Alias);
+            var id = new SecurityPredicateId(entry.Identity.ToString(), 0);
+            where = new SecurityPredicateExpression(tenant, id, SecurityScope.PolicySubquery);
         }
 
-        var id = new SecurityPredicateId(entry.Identity.ToString(), 0);
         var projections = entry.Columns
             .Select(c =>
             {
@@ -72,7 +75,7 @@ internal sealed class PolicySubqueryTenantRewriter : SqlAstRewriter
                 Distinct: false,
                 Projections: projections,
                 From: new NamedTableSource(canonical, null),
-                Where: new SecurityPredicateExpression(tenant, id, SecurityScope.PolicySubquery),
+                Where: where,
                 GroupBy: null,
                 Having: null),
             null, null);
