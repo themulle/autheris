@@ -43,7 +43,7 @@ public interface IConsentCacheService
     Task EvictTableDecisionsAsync(TableIdentifier table, CancellationToken ct = default);
     Task ClearL1CacheAsync(CancellationToken ct = default);
 
-    public static string ComputeSubjectContextHash(IReadOnlySet<Sid>? groupSids, IReadOnlySet<string>? roles)
+    public static string ComputeSubjectContextHash(IReadOnlySet<Sid>? groupSids, IReadOnlySet<string>? roles, IReadOnlySet<string>? scopes = null)
     {
         var groups = groupSids != null && groupSids.Count > 0
             ? string.Join(";", groupSids.Select(s => s.Value.ToUpperInvariant()).OrderBy(s => s, StringComparer.Ordinal))
@@ -51,8 +51,11 @@ public interface IConsentCacheService
         var r = roles != null && roles.Count > 0
             ? string.Join(";", roles.Select(x => x.ToUpperInvariant()).OrderBy(x => x, StringComparer.Ordinal))
             : string.Empty;
-        if (string.IsNullOrEmpty(groups) && string.IsNullOrEmpty(r)) return "default";
-        var bytes = Encoding.UTF8.GetBytes($"{groups}|{r}");
+        var scp = scopes != null && scopes.Count > 0
+            ? string.Join(";", scopes.Select(x => x.ToUpperInvariant()).OrderBy(x => x, StringComparer.Ordinal))
+            : string.Empty;
+        if (string.IsNullOrEmpty(groups) && string.IsNullOrEmpty(r) && string.IsNullOrEmpty(scp)) return "default";
+        var bytes = Encoding.UTF8.GetBytes($"{groups}|{r}|{scp}");
         return Convert.ToHexString(SHA256.HashData(bytes))[..16];
     }
 }

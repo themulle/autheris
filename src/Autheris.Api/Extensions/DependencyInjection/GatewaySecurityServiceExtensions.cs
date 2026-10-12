@@ -91,7 +91,9 @@ public static class GatewaySecurityServiceExtensions
         services.AddHostedService<RebacSeedHostedService>();
 
         // Security, Context & Audit
+        services.AddHttpContextAccessor();
         services.AddScoped<IClientIpResolver, HttpContextClientIpResolver>();
+        services.AddScoped<Autheris.Application.Interfaces.ICallerContextProvider, Autheris.Api.Security.HttpCallerContextProvider>();
         services.AddScoped<AuditContext>();
         services.AddSingleton<IAuthFailureAggregator, AuthFailureAggregator>();
         services.AddSingleton<ITableReadConcurrencyGate, TableReadConcurrencyGate>();

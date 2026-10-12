@@ -13,6 +13,7 @@ public static class McpDatasetTools
 {
     public const string ListDatasets = "list_datasets";
     public const string DescribeDataset = "describe_dataset";
+    public const string DescribeMyAccess = "describe_my_access";
     public const string SampleRows = "sample_rows";
     public const string QueryGraphQl = "query_graphql";
 
@@ -41,6 +42,7 @@ public static class McpDatasetTools
     public static bool IsDatasetTool(string? toolName) =>
         string.Equals(toolName, ListDatasets, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, DescribeDataset, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, DescribeMyAccess, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, SampleRows, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, QueryGraphQl, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, QuerySql, StringComparison.OrdinalIgnoreCase) ||
@@ -96,9 +98,17 @@ public static class McpDatasetTools
             return null;
         }
 
+        if (string.Equals(toolName, DescribeMyAccess, StringComparison.OrdinalIgnoreCase))
+        {
+            return (TryGetStringArgument(argumentsJson, "dataset", out var ds) || TryGetStringArgument(argumentsJson, "table", out ds)) &&
+                   McpDatasetCatalog.TryParseDatasetId(ds, out var id)
+                ? id
+                : null;
+        }
+
         return TryGetStringArgument(argumentsJson, "dataset", out var dataset) &&
-               McpDatasetCatalog.TryParseDatasetId(dataset, out var id)
-            ? id
+               McpDatasetCatalog.TryParseDatasetId(dataset, out var matchId)
+            ? matchId
             : null;
     }
 
@@ -128,6 +138,7 @@ public static class McpDatasetTools
               "properties": {
                 "search": { "type": "string", "description": "Optional text matched against dataset ids, descriptions and column names." },
                 "domain": { "type": "string", "description": "Optional business domain filter (e.g. 'sales')." },
+                "tag": { "type": "string", "description": "Optional tag filter to find datasets with a matching tag (e.g. 'finance', 'pii', 'sales')." },
                 "offset": { "type": "integer", "minimum": 0, "description": "Optional pagination offset (default 0)." },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Optional maximum datasets to return per page (default 50, max 100)." }
               }
@@ -163,6 +174,20 @@ public static class McpDatasetTools
             }
             """,
             TargetGraphQLOperation: SampleRows);
+
+        yield return new McpToolDefinition(
+Name: DescribeMyAccess,
+            Description: "Explains effective permissions, active row filters, and column masks for the caller on a specific dataset without data leakage.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "required": ["dataset"],
+              "properties": {
+                "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table)." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: DescribeMyAccess);
 
         yield return new McpToolDefinition(
             Name: QuerySql,

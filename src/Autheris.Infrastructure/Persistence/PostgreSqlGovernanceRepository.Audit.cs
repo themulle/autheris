@@ -16,6 +16,11 @@ public partial class PostgreSqlGovernanceRepository
 {
     public async Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
+        if (entry.Caller == null && _callerContextProvider != null)
+        {
+            entry.Caller = _callerContextProvider.ResolveCallerContext();
+        }
+
         // Tier-A: Security critical mutations, admin actions, or denied requests are synchronous (Fail-Closed)
         bool isTierA = string.Equals(entry.Decision, "DENY", StringComparison.OrdinalIgnoreCase) ||
                        (!string.Equals(entry.EventType, "TABLE_QUERY", StringComparison.OrdinalIgnoreCase) &&

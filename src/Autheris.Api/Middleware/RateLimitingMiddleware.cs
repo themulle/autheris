@@ -44,6 +44,16 @@ public sealed class PreAuthIpRateLimitingMiddleware
             return;
         }
 
+        // Issue #44: Exempt requests carrying an Authorization Bearer token from the pre-auth IP limit.
+        // They are strictly governed downstream by PostAuthSidRateLimitingMiddleware (per-identity SID bucket) and CostQuota.
+        if (_options.ExemptAuthenticatedRequests &&
+            context.Request.Headers.TryGetValue("Authorization", out var authHeader) &&
+            authHeader.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            await _next(context);
+            return;
+        }
+
         string ip = "127.0.0.1";
         if (_gatewayOptions.ReverseProxy.Enabled && context.Connection.RemoteIpAddress != null)
         {

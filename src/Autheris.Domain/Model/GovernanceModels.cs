@@ -69,6 +69,8 @@ public sealed class PolicyEpoch
 
 public sealed class AuditLogEntry
 {
+    private string _detailsJson = "{}";
+
     public Guid Id { get; init; } = Guid.NewGuid();
     public TenantId TenantId { get; init; } = TenantId.LegacySingleTenant;
     public DateTimeOffset OccurredAt { get; init; } = DateTimeOffset.UtcNow;
@@ -78,7 +80,49 @@ public sealed class AuditLogEntry
     public string? TargetColumn { get; init; }
     public string Decision { get; init; } = "ALLOW"; // ALLOW, DENY
     public string TraceId { get; init; } = string.Empty;
-    public string DetailsJson { get; init; } = "{}";
+
+    public string DetailsJson
+    {
+        get => EffectiveDetailsJson;
+        init => _detailsJson = value;
+    }
+
+    public Autheris.Domain.Security.CallerContext? Caller { get; set; }
+
+    public string EffectiveDetailsJson
+    {
+        get
+        {
+            if (Caller == null || Caller.IsEmpty)
+            {
+                return _detailsJson;
+            }
+
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(string.IsNullOrWhiteSpace(_detailsJson) ? "{}" : _detailsJson);
+                var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    dict[prop.Name] = prop.Value.Clone();
+                }
+
+                dict["caller"] = new
+                {
+                    app = Caller.Application,
+                    ver = Caller.Version,
+                    query = Caller.QueryName
+                };
+
+                return System.Text.Json.JsonSerializer.Serialize(dict);
+            }
+            catch
+            {
+                return _detailsJson;
+            }
+        }
+    }
+
     public string PrevHash { get; set; } = string.Empty;
     public string EntryHash { get; set; } = string.Empty;
 }

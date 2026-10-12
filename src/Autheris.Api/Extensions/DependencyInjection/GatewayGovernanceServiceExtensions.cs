@@ -112,6 +112,8 @@ public static class GatewayGovernanceServiceExtensions
         services.AddSingleton<ISchemaSunsettingService, SchemaSunsettingService>();
         services.AddSingleton<IDifferentialPrivacyEngine, DifferentialPrivacyEngine>();
         services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
+        services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
+        services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService, Autheris.Application.Governance.Services.DeclarativeConsentApplyService>();
 
         // ITSM orchestration (dispatcher, recertification, outbox workers)
         services.AddScoped<ItsmWorkflowDispatcher>();

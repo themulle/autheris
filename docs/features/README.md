@@ -60,6 +60,8 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-GOV-12** | Multi-Engine Governance Database Storage (MSSQL, PostgreSQL, SQLite) | [f-gov-12-multi-engine-governance-storage.md](f-gov-12-multi-engine-governance-storage.md) |
 | **F-GOV-13** | Enterprise Data Classification, PII Tagging & Sensitivity Governance Engine | [f-gov-13-data-classification-and-pii-governance.md](f-gov-13-data-classification-and-pii-governance.md) |
 | **F-GOV-14** | Federated Virtual Filters on Web-APIs via DuckDB & Adaptive Pushdown | [f-gov-14-federated-virtual-filters.md](f-gov-14-federated-virtual-filters.md) |
+| **F-GOV-15** | Declarative Consent GitOps, Effective Access Introspection & Scope Governance | [f-gov-15-declarative-consents-scopes.md](f-gov-15-declarative-consents-scopes.md) |
+| **F-GOV-16** | Catalog Discovery Transparency, Data Ownership & Response Masking Metadata | [f-gov-16-catalog-ownership-transparency.md](f-gov-16-catalog-ownership-transparency.md) |
 | **F-INT-01** | Spotify Backstage Software Catalog Integration | [f-int-01-backstage-software-catalog.md](f-int-01-backstage-software-catalog.md) |
 | **F-MASK-02** | Extended Column Masking Engine (GEO_JITTER, PARTIAL_MASK, TOKENIZATION) | [f-mask-02-extended-masking-engine.md](f-mask-02-extended-masking-engine.md) |
 | **F-OPEN-01** | OpenSchema Mode, Multi-File OpenAPI & Catalog Slicing | [f-open-01-openschema-catalog-slicing.md](f-open-01-openschema-catalog-slicing.md) |
@@ -72,6 +74,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-PERF-12** | Incremental Delivery via @defer & @stream | [f-perf-12-incremental-delivery.md](f-perf-12-incremental-delivery.md) |
 | **F-PERF-13** | GraphQL Cost & Client-Tier Quota Rate Limiting (CostAndQuotaMiddleware) | [f-perf-13-cost-and-quota-rate-limiting.md](f-perf-13-cost-and-quota-rate-limiting.md) |
 | **F-SEC-04** | Relationship-Based Access Control (ReBAC via OpenFGA / Zanzibar) | [f-sec-04-rebac-openfga.md](f-sec-04-rebac-openfga.md) |
+| **F-SEC-05** | Gateway Hardening & Adaptive Defense Suite | [f-sec-05-gateway-hardening-defense.md](f-sec-05-gateway-hardening-defense.md) |
 | **F-SQL-01** | Declarative SQL-to-API Engine & Auto-OpenAPI | [f-sql-01-declarative-sql-endpoints.md](f-sql-01-declarative-sql-endpoints.md) |
 | **F-SQL-02** | Governed Stored Procedures & Multi-DB TVFs | [f-sql-02-governed-stored-procedures.md](f-sql-02-governed-stored-procedures.md) |
 | **P1** | Enterprise Data Catalog Connectors (Purview, Collibra, OpenMetadata) | [p01-data-catalog-connectors.md](p01-data-catalog-connectors.md) |
