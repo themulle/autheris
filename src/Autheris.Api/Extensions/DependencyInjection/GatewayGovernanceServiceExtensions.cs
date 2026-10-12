@@ -138,6 +138,10 @@ public static class GatewayGovernanceServiceExtensions
         // Governance Data Classification Engine & Workflows
         services.AddAutherisDataClassification();
 
+        // DataHub & Data Contract Engine (REQ-DATAHUB-01)
+        services.AddSingleton<IDataContractEngine, InMemoryDataContractEngine>();
+        services.AddScoped<IDataHubCatalogClient, DataHubCatalogClient>();
+
         return services;
     }
 }
