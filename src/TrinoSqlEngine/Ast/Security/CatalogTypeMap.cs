@@ -5,7 +5,6 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
-using System.Text.RegularExpressions;
 
 /// <summary>Number and form of the arguments a native type accepts.</summary>
 internal enum NativeTypeArguments
@@ -28,9 +27,143 @@ internal enum NativeTypeArguments
 /// </summary>
 internal static class CatalogTypeMap
 {
-    private static readonly Regex TypeRegex = new(
-        @"\A\s*(?<name>[A-Za-z][A-Za-z0-9_]*(?: [A-Za-z][A-Za-z0-9_]*)*?)\s*(?:\(\s*(?<a>max|[0-9]{1,5})\s*(?:,\s*(?<b>[0-9]{1,3}))?\s*\))?(?<tz>\s+with(?:out)?\s+time\s+zone)?\s*\z",
-        RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
+    /// <summary>
+    /// The parsed shape of a catalog type string. Hand-written and linear (no backtracking, no timeout): the compile result must not
+    /// depend on the machine load. Grammar, ASCII only and case-insensitive:
+    /// <c>ws* name ws* [ '(' ws* (max | d{1,5}) ws* [',' ws* d{1,3}] ws* ')' ] [ ws+ ('with'|'without') ws+ 'time' ws+ 'zone' ] ws* end</c>,
+    /// where <c>name</c> is words (<c>[A-Za-z][A-Za-z0-9_]*</c>) separated by exactly one space; the name is the shortest run of words
+    /// after which the rest of the string is a valid tail.
+    /// </summary>
+    private readonly record struct TypeShape(string Name, bool HasA, string A, bool HasB, string B, string TimeZone);
+
+    private static bool IsSpace(char c) =>
+        c is '\t' or '\n' or '\v' or '\f' or '\r' or '\u0085' ||
+        (c > '\u007f' && char.GetUnicodeCategory(c) is System.Globalization.UnicodeCategory.SpaceSeparator or System.Globalization.UnicodeCategory.LineSeparator or System.Globalization.UnicodeCategory.ParagraphSeparator) ||
+        c == ' ';
+
+    private static bool IsLetter(char c) => c is >= 'a' and <= 'z' or >= 'A' and <= 'Z';
+
+    private static bool IsDigit(char c) => c is >= '0' and <= '9';
+
+    private static int SkipSpace(ReadOnlySpan<char> text, int pos)
+    {
+        while (pos < text.Length && IsSpace(text[pos])) pos++;
+        return pos;
+    }
+
+    private static int ReadWord(ReadOnlySpan<char> text, int pos)
+    {
+        if (pos >= text.Length || !IsLetter(text[pos])) return pos;
+        pos++;
+        while (pos < text.Length && (IsLetter(text[pos]) || IsDigit(text[pos]) || text[pos] == '_')) pos++;
+        return pos;
+    }
+
+    // Reads 1 to maxDigits ASCII digits; false when there is none or when more follow.
+    private static bool ReadDigits(ReadOnlySpan<char> text, ref int pos, int maxDigits, out string digits)
+    {
+        int start = pos;
+        while (pos < text.Length && IsDigit(text[pos])) pos++;
+        digits = text[start..pos].ToString();
+        return pos > start && pos - start <= maxDigits;
+    }
+
+    private static bool MatchWord(ReadOnlySpan<char> text, ref int pos, string word)
+    {
+        if (text.Length - pos < word.Length || !text.Slice(pos, word.Length).Equals(word, StringComparison.OrdinalIgnoreCase)) return false;
+        pos += word.Length;
+        return true;
+    }
+
+    // The tail after the name: optional argument list, optional time zone suffix, end of text.
+    private static bool TryParseTail(ReadOnlySpan<char> text, int pos, out bool hasA, out string a, out bool hasB, out string b, out string timeZone)
+    {
+        hasA = hasB = false;
+        a = b = timeZone = string.Empty;
+        int afterName = pos;
+        pos = SkipSpace(text, pos);
+        bool spaceBeforeNext = pos > afterName;
+
+        if (pos < text.Length && text[pos] == '(')
+        {
+            pos = SkipSpace(text, pos + 1);
+            if (MatchWord(text, ref pos, "max"))
+            {
+                hasA = true;
+                a = "max";
+            }
+            else if (ReadDigits(text, ref pos, 5, out a))
+            {
+                hasA = true;
+            }
+            else
+            {
+                return false;
+            }
+
+            pos = SkipSpace(text, pos);
+            if (pos < text.Length && text[pos] == ',')
+            {
+                // The second argument exists only after a numeric first one ('max' never has a scale: the regex accepted it here too and the caller rejects it).
+                pos = SkipSpace(text, pos + 1);
+                if (!ReadDigits(text, ref pos, 3, out b)) return false;
+                hasB = true;
+                pos = SkipSpace(text, pos);
+            }
+
+            if (pos >= text.Length || text[pos] != ')') return false;
+            int afterParen = pos + 1;
+            pos = SkipSpace(text, afterParen);
+            spaceBeforeNext = pos > afterParen;
+        }
+
+        if (pos < text.Length)
+        {
+            // ws+ ('with'|'without') ws+ 'time' ws+ 'zone'
+            if (!spaceBeforeNext) return false;
+            string prefix;
+            if (MatchWord(text, ref pos, "without")) prefix = "without";
+            else if (MatchWord(text, ref pos, "with")) prefix = "with";
+            else return false;
+            int p = SkipSpace(text, pos);
+            if (p == pos) return false;
+            pos = p;
+            if (!MatchWord(text, ref pos, "time")) return false;
+            p = SkipSpace(text, pos);
+            if (p == pos) return false;
+            pos = p;
+            if (!MatchWord(text, ref pos, "zone")) return false;
+            timeZone = prefix + " time zone";
+            pos = SkipSpace(text, pos);
+            if (pos < text.Length) return false;
+        }
+
+        return true;
+    }
+
+    private static bool TryParse(string text, out TypeShape shape)
+    {
+        shape = default;
+        ReadOnlySpan<char> span = text;
+        int start = SkipSpace(span, 0);
+        int pos = ReadWord(span, start);
+        if (pos == start) return false;
+
+        while (true)
+        {
+            if (TryParseTail(span, pos, out bool hasA, out string a, out bool hasB, out string b, out string tz))
+            {
+                shape = new TypeShape(span[start..pos].ToString(), hasA, a, hasB, b, tz);
+                return true;
+            }
+
+            // The name continues with one space and the next word; anything else cannot be a type.
+            if (pos + 1 >= span.Length || span[pos] != ' ') return false;
+            int next = ReadWord(span, pos + 1);
+            if (next == pos + 1) return false;
+            pos = next;
+        }
+    }
 
     private readonly record struct Entry(NativeTypeArguments Arguments, bool IsText = false, bool AllowsMax = false, bool AllowsTimeZone = false);
 
@@ -102,24 +235,14 @@ internal static class CatalogTypeMap
         var table = TableOf(dialect);
         if (table is null || string.IsNullOrWhiteSpace(catalogType)) return false;
 
-        Match match;
-        try
-        {
-            match = TypeRegex.Match(catalogType);
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return false;
-        }
-
-        if (!match.Success) return false;
-        string name = match.Groups["name"].Value.ToLowerInvariant();
+        if (!TryParse(catalogType, out var shape)) return false;
+        string name = shape.Name.ToLowerInvariant();
         if (!table.TryGetValue(name, out var entry)) return false;
 
-        bool hasA = match.Groups["a"].Success, hasB = match.Groups["b"].Success;
-        string a = match.Groups["a"].Value.ToLowerInvariant();
+        bool hasA = shape.HasA, hasB = shape.HasB;
+        string a = shape.A.ToLowerInvariant();
         bool max = a == "max";
-        string tz = match.Groups["tz"].Success ? Regex.Replace(match.Groups["tz"].Value.Trim().ToLowerInvariant(), @"\s+", " ") : string.Empty;
+        string tz = shape.TimeZone;
 
         if (tz.Length > 0 && !entry.AllowsTimeZone) return false;
         switch (entry.Arguments)
@@ -140,7 +263,7 @@ internal static class CatalogTypeMap
         if (hasA)
         {
             sb.Append('(').Append(a);
-            if (hasB) sb.Append(',').Append(match.Groups["b"].Value);
+            if (hasB) sb.Append(',').Append(shape.B);
             sb.Append(')');
         }
 
@@ -161,14 +284,7 @@ internal static class CatalogTypeMap
         isText = false;
         if (string.IsNullOrWhiteSpace(catalogType)) return false;
 
-        try
-        {
-            if (!TypeRegex.IsMatch(catalogType)) return false;
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return false;
-        }
+        if (!TryParse(catalogType, out _)) return false;
 
         var affinity = SqliteTypeAffinity.Of(catalogType);
         if (affinity == SqliteTypeAffinity.Kind.Blob) return false;
