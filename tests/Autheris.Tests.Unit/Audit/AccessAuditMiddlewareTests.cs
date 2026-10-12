@@ -8,7 +8,10 @@ using Autheris.Api.Middleware;
 using Autheris.Application.Audit;
 using Autheris.Application.Interfaces;
 using Autheris.Domain.Audit;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
+using System.Collections.Generic;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -166,5 +169,56 @@ public sealed class AccessAuditMiddlewareTests
         recorded.ShouldNotBeNull();
         recorded.Decision.ShouldBe("DENY");
         recorded.EventType.ShouldBe(expectedEventType);
+    }
+
+    private const string MalformedTenant = "evil<script>tenant";
+
+    private async Task<AuditLogEntry> RunWithClaimsAsync(int status, Action<DefaultHttpContext>? configure, params Claim[] claims)
+    {
+        AuditLogEntry? recorded = null;
+        _auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => recorded = e), Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/v1/data";
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
+        configure?.Invoke(context);
+        var auditContext = new AuditContext();
+
+        var middleware = CreateMiddleware(c => { c.Response.StatusCode = status; return Task.CompletedTask; });
+        await middleware.InvokeAsync(context, _auditRepo, auditContext);
+
+        recorded.ShouldNotBeNull();
+        return recorded;
+    }
+
+    [Fact]
+    public async Task InvokeAsync_ValidTenantIdWithMalformedTid_AttributesToValidTenant()
+    {
+        var entry = await RunWithClaimsAsync(200, null,
+            new Claim("sid", "S-1-5-21-USER1"),
+            new Claim("tenant_id", "tenant-a"),
+            new Claim("tid", MalformedTenant));
+
+        entry.TenantId.Value.ShouldBe("tenant-a");
+        entry.DetailsJson.ShouldNotContain("evil");
+    }
+
+    [Fact]
+    public async Task InvokeAsync_UsesTenantFromResolvedSecurityPrincipalContext()
+    {
+        var entry = await RunWithClaimsAsync(200,
+            c => c.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
+            {
+                UserSid = new Sid("S-1-5-21-USER1"),
+                TenantId = new TenantId("tenant-ctx"),
+                GroupSids = new HashSet<Sid>(),
+                TenantRoles = new HashSet<string>(),
+                ClusterRoles = new HashSet<string>(),
+                AuthenticationScheme = "TestAuth"
+            },
+            new Claim("sid", "S-1-5-21-USER1"),
+            new Claim("tid", "tenant-claim"));
+
+        entry.TenantId.Value.ShouldBe("tenant-ctx");
     }
 }
