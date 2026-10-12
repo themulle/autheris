@@ -14,7 +14,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Infrastructure.Persistence;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -85,73 +85,38 @@ public sealed class PostgreSqlWebSqlTransactionTests : IAsyncLifetime
     {
         if (!_available) return;
 
-        var tableMeta = new TableMetadata
+        // X1: through the real host (catalog reader, session pin, compiler, binder). The view reads the transaction-local tenant setting
+        // that the session initializer sets with set_config(..., true), so the row only shows the tenant when the statement runs in the
+        // session transaction.
+        using var host = new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
-            Identifier = TableId,
-            Table = new Table { TableName = "active_invoices", SchemaName = "public", SourceName = "finance", SourceType = "PostgreSql" },
-            Columns =
-            [
-                new TableColumn { ColumnName = "id", DataType = "int" },
-                new TableColumn { ColumnName = "tenant_id", DataType = "varchar" },
-                new TableColumn { ColumnName = "amount", DataType = "numeric" },
-                new TableColumn { ColumnName = "active_tenant", DataType = "varchar" }
-            ],
-            ColumnMaskingRules = new Dictionary<string, MaskingRule>()
-        };
+            builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "true");
+            builder.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "true");
+            builder.UseSetting("Gateway:GovernanceDb:Provider", "Sqlite");
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", $"Data Source=gov-pgtx-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+            builder.UseSetting("Gateway:WebSql:Enabled", "true");
+            builder.UseSetting("Gateway:WebSql:DefaultDataSourceName", "finance");
+            builder.UseSetting("Gateway:DataSources:Connections:finance:Provider", "PostgreSql");
+            builder.UseSetting("Gateway:DataSources:Connections:finance:ConnectionString", _container!.GetConnectionString());
+            builder.UseSetting("Gateway:DataSources:Connections:finance:DefaultSchema", "public");
+        });
 
-        var repo = Substitute.For<ITableMetadataRepository>();
-        repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<TableMetadata?>(tableMeta));
-        repo.GetAllTablesAsync(Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableMetadata>>([tableMeta]));
-
-        var consents = Substitute.For<IConsentRepository>();
-        consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<Consent>>([]));
-
-        var resolution = Substitute.For<IConsentResolutionService>();
-        resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
-            .Returns(TableAccessDecision.Allowed(TableId, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
-
-        var options = new GatewayOptions
+        using (var scope = host.Services.CreateScope())
         {
-            WebSql = new WebSqlOptions
+            var repo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
+            await repo.UpsertTableMetadataAsync(new TableMetadata
             {
-                Enabled = true,
-                DefaultDataSourceName = "finance",
-                AllowedDataSources = ["finance"],
-                DefaultMaxRows = 100,
-                MaxAllowedRows = 500
-            },
-            DataSources = new SqlDataSourceOptions
-            {
-                Connections = new Dictionary<string, DataSourceConnectionOptions>
-                {
-                    ["finance"] = new()
-                    {
-                        Provider = "PostgreSql",
-                        ConnectionString = _container!.GetConnectionString()
-                    }
-                }
-            }
-        };
-
-        var connFactory = new SqlConnectionFactory();
-        var sessionInit = new DbSessionContextInitializer();
-
-        var env = Substitute.For<IHostEnvironment>();
-        env.EnvironmentName.Returns("Development");
-
-        var service = new GovernedSqlExecutionService(
-            Options.Create(options),
-            auditLogRepository: Substitute.For<IAuditLogRepository>(),
-            consentResolution: resolution,
-            tableRepository: repo,
-            environment: env,
-            logger: NullLogger<GovernedSqlExecutionService>.Instance,
-            consentRepository: consents,
-            connectionFactory: connFactory,
-            sessionInitializer: sessionInit);
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = "active_invoices", TableName = "active_invoices", SchemaName = "public", SourceName = "finance", SourceType = "PostgreSql" },
+                Identifier = TableId,
+                Columns =
+                [
+                    new TableColumn { ColumnName = "id", DataType = "int" },
+                    new TableColumn { ColumnName = "tenant_id", DataType = "varchar" },
+                    new TableColumn { ColumnName = "amount", DataType = "numeric" },
+                    new TableColumn { ColumnName = "active_tenant", DataType = "varchar" }
+                ]
+            });
+        }
 
         var claims = new ClaimsPrincipal(new ClaimsIdentity(
         [
@@ -159,8 +124,10 @@ public sealed class PostgreSqlWebSqlTransactionTests : IAsyncLifetime
             new Claim("tenant_id", Tenant)
         ], "Test"));
 
-        var query = new GovernedSqlQueryRequest("SELECT id, amount, active_tenant FROM active_invoices WHERE id = 1");
-        var result = await service.ExecuteQueryBufferedAsync(query, claims, Tenant, CancellationToken.None);
+        using var executionScope = host.Services.CreateScope();
+        var service = executionScope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
+        var result = await service.ExecuteQueryBufferedAsync(
+            new GovernedSqlQueryRequest("SELECT id, amount, active_tenant FROM public.active_invoices WHERE id = 1"), claims, Tenant, CancellationToken.None);
 
         result.Rows.Count.ShouldBe(1);
         result.Rows[0]["id"].ShouldBe(1);
