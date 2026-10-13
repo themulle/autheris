@@ -1,424 +1,326 @@
-# TrinoSqlEngine: High-Performance SQL Parser, AST Analyzer & RLS Rewriter for .NET 10
+# TrinoSqlEngine: SQL Parser, Query Analyzer and Governed AST Compiler for .NET 10
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4.svg?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
-[![C# 14](https://img.shields.io/badge/C%23-14-239120.svg)](https://learn.microsoft.com/dotnet/csharp/)
 [![ANTLR 4](https://img.shields.io/badge/ANTLR-4.13.1-C9252B.svg)](https://www.antlr.org/)
-[![Tests](https://img.shields.io/badge/Tests-857%20Passing-brightgreen.svg)]()
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Zero-Allocation](https://img.shields.io/badge/Architecture-Zero--Allocation%20SLL-orange.svg)]()
 
-A high-throughput, allocation-optimized SQL parser, AST semantic analyzer, and Row-Level Security (RLS) query rewriting engine in C# / .NET 10, ported from the official [Trino](https://github.com/trinodb/trino) ANTLR4 grammar (`SqlBase.g4`).
+A SQL library for multi-tenant data gateways, written in C# for .NET 10. It parses Trino SQL with an ANTLR4 grammar ported from the
+official [Trino](https://github.com/trinodb/trino) `SqlBase.g4`, analyzes statements, and compiles a user statement into
+**governed, parameterized SQL for a target database dialect**. The compiler injects tenant isolation, row policies and column masks
+as typed AST nodes, proves that every table access is covered, and binds every value as a parameter.
 
-Designed for high-scale multi-tenant data gateways, lakehouses (Apache Iceberg), database proxies, and analytical query engines requiring zero-overhead security enforcement, fine-grained column masking, and standard ANSI SQL compliance.
-
----
-
-## 🌟 Key Capabilities
-
-- **Two-Stage Parsing Architecture ($O(n)$ SLL Fast-Path + LL Fallback)**:
-  Executes linear prediction with a pre-configured, reusable `BailErrorStrategy`. Allocates **0 bytes** for error listeners or strategy instances during normal execution. Automatically recovers using full contextual lookahead ($LL^*$) if ambiguity arises.
-- **Deep AST Query Analysis (`SqlQueryAnalyzer`)**:
-  Inspects parsed queries to extract statement types (`SELECT`, `INSERT`, `UPDATE`, `DELETE`, `DDL`), referenced physical tables (resolving schemas, catalogs, and aliases while ignoring CTE shadows), projected columns, join counts, join condition columns, subquery depth, and explicit `LIMIT` / `FETCH FIRST` clauses.
-- **AST Row-Level Security Rewriting (`RlsListener`)**:
-  Non-destructive AST query rewriter using ANTLR `TokenStreamRewriter`. Preserves original user formatting, spacing, indentation, and comments while injecting secure tenant isolation subqueries or `WHERE` filters.
-- **Dynamic In-Database Column Data Masking (`IColumnMaskingPolicyProvider`)**:
-  Pushes column masking expressions (e.g. `'***@domain.com'`, `NULL`, hashing) directly into the SQL AST projection with table schema awareness (`TableColumnsProvider`). Emits delimited identifiers to prevent syntax collisions.
-- **Hardened Algorithmic DoS & StackOverflow Guards**:
-  - `MaxQueryLength`: Configurable character ceiling (default 64,000) to prevent memory exhaustion attacks.
-  - `MaxNestingDepth`: Token-level depth scanner checking parentheses, brackets, `CASE ... END`, array/map literals, lambda expressions (`->`), and unary operator chains (`+`, `-`, `NOT`) before recursive parsing.
-  - `MaxParseTreeDepth`: Iterative (non-recursive) depth verification guarding against left-recursive grammar expansions before any recursive tree walk.
-- **Function Security Policy Sandboxing (`SqlFunctionPolicy`)**:
-  Pre-configured denylist of high-risk scalar and aggregate functions (PostgreSQL XML table dumps, `pg_read_file`, `dblink`, `xp_cmdshell`, `load_file`, `sys_eval`, `dbms_xmlgen`, etc.) with customizable allowlists and prefix rules.
-- **Lexer-Safe Parameter Extraction (`SqlParameterExtractor`)**:
-  Extracts named (`@param`, `{{param}}`) and positional parameters without regex Denial-of-Service vulnerabilities, with support for comment stripping and target column deduction.
-- **DML Protection & `WITH CHECK OPTION`**:
-  Strict validation for `INSERT` and `UPDATE` statements to prevent tenant hopping and trojan record injection. Disallows modifying tenant keys and blocks DML on masked columns to eliminate side-channel oracles.
+There is exactly one way to produce governed SQL: `ISqlEngine.Compile`. There is no text rewriter and no runtime switch.
 
 ---
 
-## ⚡ Performance Architecture
+## Capabilities
+
+- **Two-stage parsing** (`FastSqlEngine.Parse`): an SLL fast path with a reusable `BailErrorStrategy` and an LL fallback on
+  ambiguity, a pooled parser, a shared ATN/DFA cache, a case-insensitive zero-copy character stream, and a dedicated parser thread
+  with a configurable stack size and time budget.
+- **Query analysis** (`SqlQueryAnalyzer`, `FastSqlEngine.Analyze`): statement type, referenced physical tables (CTE names are not
+  tables), projected columns, join count, subquery depth and explicit limits.
+- **Governed compilation** (`FastSqlEngine.Compile`): token guards, parse, typed AST, simplification of the user tree, typed
+  security injection, a coverage proof, dialect capability validation and emission with every value bound.
+- **Typed policy input**: tenant binding, row policies, column masks, table catalog and DML guards are values of the request, never
+  text. Policy and mask values travel as parameters.
+- **Dialect generators** for PostgreSQL, SQL Server, SQLite, Oracle, DuckDB and Databricks, driven by a declarative capability table
+  (`DialectCapabilityTable`), plus ANSI and Snowflake generators that only render inline text.
+- **Binders and a checked DML executor** (`CompiledSqlBinders`, `CheckedDmlExecutor`): the only code that assigns
+  `DbCommand.CommandText` for governed SQL, with a row-count check for INSERT statements that have check-option semantics.
+- **Hardened limits**: query length, nesting depth, parse tree depth, parse time budget, parser concurrency, compile time budget,
+  output expansion factor, bind parameter count per dialect, `IN` list size and identifier length.
+- **Function policy** (`SqlFunctionPolicy`, `SqlFunctionAllowlists`): a denylist of high-risk functions that always wins, plus a
+  per-dialect function map; a function without an emission rule is rejected.
+- **Lexer-safe parameter extraction** (`SqlParameterExtractor`).
+
+---
+
+## The compile pipeline
 
 ```
-                  ┌────────────────────────────────────────┐
-                  │          Raw SQL (Memory<char>)        │
-                  └───────────────────┬────────────────────┘
-                                      │
-                         ZeroCopyCaseInsensitiveStream
-                         (Branchless CPU register case)
-                                      │
-                         SqlBaseLexer (Shared ATN/DFA)
-                                      │
-                         Nesting Depth Token Scanner
-                                      │
-                  ┌───────────────────┴────────────────────┐
-                  │                                        │
-           [ Stage 1: SLL ]                         [ Stage 2: LL(*) ]
-      Fast linear O(n) prediction               Full contextual fallback
-      BailErrorStrategy (0 alloc)               on ParseCanceledException
-                  │                                        │
-                  └───────────────────┬────────────────────┘
-                                      │
-                        Iterative Tree Depth Check
-                                      │
-                ┌─────────────────────┼─────────────────────┐
-                ▼                     ▼                     ▼
-        SqlQueryAnalyzer         RlsListener        SqlParameterExtractor
-     (Tables, Joins, Limits)  (RLS, Masking, DML)     (Named & Positional)
+Raw SQL + CompileRequest
+        |
+  1. validate the request (limits, mandatory token guards of the dialect)
+  2. template cache lookup (value-free, verified templates)     -> hit: rebind values, return
+  3. token guards + parse (SLL, then LL)
+  4. classify the statement, check that the request and the dialect permit it
+  5. build the typed AST and validate it
+  6. simplify the USER tree only (injected predicates do not exist yet)
+  7. typed security injection (AstSecurityVisitor)
+  8. coverage proof (SecurityCoverageVerifier does not trust the injector)
+  9. dialect capability validation
+ 10. emit parameterized SQL (EmittedSqlInvariantChecker verifies the text)
+ 11. output budget check; cache the verified template (never request values)
+        |
+   CompiledSql { Sql, Parameters, Dialect, StatementClass, AppliedPredicates, CompilerVersion }
 ```
 
-### 1. Zero-Allocation Case-Insensitive Character Stream
-- **Branchless CPU Uppercasing**: Converts ASCII characters on-the-fly (`(uint)(c - 'a') <= ('z' - 'a') ? (char)(c - 32) : char.ToUpperInvariant(c)`) directly in CPU registers without allocating temporary uppercase strings.
-- **`LA(1)` Inlined Fast Path**: Inlined lookahead shortcut for `i == 1` (>95% of lexer accesses) with zero bounds-check overhead.
-- **Direct Substring Slicing**: Avoids memory buffer copies by maintaining string slice offsets for sub-nanosecond token retrieval.
+Any failure is fail closed: the compiler throws a typed exception and emits nothing. A dialect or statement class without a
+governed path throws `SqlCompileNotSupportedException`.
 
-### 2. Global ATN & DFA Decision Table Caching
-- Static process-wide reuse of ANTLR `ATN` and `DFA` decision tables (`SharedParserCache.cs`).
-- Eliminates expensive DFA state re-initialization across threads and concurrent requests.
+### Injection model
 
-### 3. Parser Object Pooling & Zero-Allocation SLL Path
-- High-throughput pooling using `Microsoft.Extensions.ObjectPool<SqlBaseParser>`.
-- **Two-Stage Execution Engine**:
-  1. **Stage 1 (SLL Fast-Path)**: Executes linear $O(n)$ prediction with a pre-configured, reusable `BailErrorStrategy`. 0 bytes allocated for error listeners or strategy objects during normal execution.
-  2. **Stage 2 (LL(*) Fallback)**: Automatically recovers and resolves ambiguities using full contextual lookahead if `ParseCanceledException` occurs.
+- Every table reference becomes a derived table: `(SELECT <cataloged columns> FROM <physical table> WHERE <tenant> AND <policy>)`.
+  Only cataloged columns are projected, so non-cataloged and system columns cannot be reached.
+- The tenant predicate is always applied when the catalog declares a tenant column, and compares **binary-exact** per dialect
+  (`TenantComparisonStyle`), independent of the column collation.
+- Row policy predicates are `PolicyPredicate` ASTs. They contain `PolicyParameterExpression` nodes, never values.
+- Column masks are `MaskExpression` nodes (`Nullify`, `Redact`, `PartialMask`, `Hmac`, `GeoJitter`, `Constant`) that the dialect
+  generator renders; mask arguments are bound parameters. A masked column in a predicate, `ORDER BY` or join condition is rejected.
+- Every injected predicate is wrapped in a `SecurityPredicateExpression` that the generator always parenthesizes.
+- CTE scoping follows the ANSI exit-timing rule, CTE names compare by ordinal bytes, and a recursive CTE with the name of a catalog
+  table is rejected.
+- DML (`INSERT`, `UPDATE`, `DELETE`, `MERGE`) compiles only when the request allows the statement class and the dialect lists it. The
+  guards (`DmlGuardOptions.Strict` is the only accepted value) require a filtered `WHERE`, forbid tenant column changes, check the
+  tenant on inserts, reject masked columns and whole-row references, and reject assignments to policy columns.
 
-### 4. $O(1)$ Precomputed Keyword Table
-- Replaces runtime regular expressions on non-reserved keyword predicates (`isKeyword`) with a fixed 512-byte L1-cache-friendly `bool[]` lookup table (`SqlKeywords.cs`).
+### Binding
 
-### 5. .NET 10 Runtime Tuning
-- Enabled Dynamic PGO (`<TieredPGO>true</TieredPGO>`).
-- Dynamic Adaptation To Application Sizes GC (`<GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>`).
-- Aggressive inlining (`[MethodImpl(MethodImplOptions.AggressiveInlining)]`) across critical loop paths.
+Every literal of the user statement, the tenant value, policy values and mask arguments are `BoundParameter` entries of the
+`CompiledSql`. Client named parameters (`ParameterOrigin.ClientNamed`) carry no value; the binder resolves them per request.
+Binders derive from `DbCommandCompiledSqlBinder`, are created through `CompiledSqlBinders.For(dialect)`, and are the only code that
+sets `CommandText`. A statement with a row-count check is refused by the binders and runs only through `CheckedDmlExecutor`.
 
----
+### Template cache
 
-## 🔒 Row-Level Security (RLS) & Query Rewriter
-
-The engine includes a production-grade AST query rewriter (`RlsListener.cs`) backed by ANTLR's `TokenStreamRewriter`.
-
-### Supported Operations & Strategies
-
-| Statement | Rewrite Strategy | Security Enforcement |
-| :--- | :--- | :--- |
-| **`SELECT`** | Rewrites table references to `(SELECT * FROM table WHERE {filter}) [AS table]` | Lexical CTE scope isolation, PTF table argument rewriting, Column Masking Pushdown |
-| **`DELETE`** | Injects/merges filter into `WHERE`: `WHERE ({filter}) AND ({existingWhere})` | Strict parenthesization (prevents boolean `OR 1=1` bypass); blocks filters on masked columns |
-| **`UPDATE`** | Injects/merges filter into `WHERE`: `WHERE ({filter}) AND ({existingWhere})` | `WITH CHECK OPTION`: blocks modification of tenant ID column; rejects updates on masked columns |
-| **`INSERT`** | Rewrites underlying query sources | `WITH CHECK OPTION`: validates inline `VALUES` and constant `SELECT` projections; requires tenant column |
-| **`LIMIT`** | Clamps or injects top-level `LIMIT {maxRows}` | Result set exhaustion protection via `EnforcedMaxRows` |
-
-### Built-in Security Protections
-
-* **CTE Shadowing Defense (ANSI SQL Lexical Scoping):**
-  CTE names are added to scope on *exit* of the CTE definition, not entry. This prevents attacks where an attacker defines `WITH orders AS (SELECT * FROM orders) SELECT * FROM orders` in an attempt to bypass physical table filtering in the inner query.
-* **Quoted & Normalized Identifiers:**
-  Resilient against quote bypasses (`"orders"`, `` `orders` ``, `[orders]`). The engine strips quoting for policy verification while preserving the exact original representation in the rewritten output.
-* **Polymorphic Table Functions (PTF):**
-  Secures `TABLE(...)` arguments passed to table functions (e.g., `SELECT * FROM TABLE(my_ptf(TABLE(orders)))`). Table function names are verified against `AllowedTableFunctions`.
-* **Operator Precedence Protection:**
-  Every injected predicate is wrapped in parentheses (`({policyFilter}) AND ({userPredicate})`), preventing operator precedence hijack attacks.
-* **Administrative DDL Lockout:**
-  Whitelisting automatically rejects administrative and data definition statements (`DROP`, `TRUNCATE`, `ALTER`, `CREATE`, `MERGE`, `GRANT`) unless explicitly allowed.
-* **Function Policy Enforcement:**
-  Blocks unsafe database functions (e.g. `query_to_xml`, `pg_read_file`, `dblink`, `xp_cmdshell`, `load_file`) by default to prevent out-of-band data exfiltration and RLS bypasses.
+`FastSqlEngine.CompileCache` (`CompiledSqlTemplateCache`) holds verified, value-free compile templates. A hit re-validates the
+dependencies of the template and rebinds the current values, so two principals with different consent never share bound values, and
+the cache holds nothing that depends on a request value.
 
 ---
 
-## 💻 Usage Examples
+## Usage
 
-### 1. Basic Parsing & AST Inspection
+### Parse and inspect
 
 ```csharp
-using System;
 using TrinoSqlEngine;
 
 var engine = new FastSqlEngine();
-
-// Parse statement into ANTLR AST and TokenStream
 var (tree, tokens) = engine.Parse("SELECT id, name FROM users WHERE active = true".AsMemory());
-
-Console.WriteLine($"Parsed successfully: {tree.ChildCount} top-level nodes");
-
-// Parse standalone expression
 var (exprTree, exprTokens) = engine.ParseExpression("price * 1.19 > 100".AsMemory());
 ```
 
-### 2. SQL Query Analysis & Metadata Extraction
+### Analyze
 
 ```csharp
-using System;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
 
-var engine = new FastSqlEngine();
+SqlQueryMetadata meta = new FastSqlEngine().Analyze(
+    "WITH r AS (SELECT region, SUM(amount) AS total FROM orders GROUP BY region) SELECT c.name, r.total FROM customers c JOIN r ON c.region = r.region LIMIT 50".AsMemory());
 
-string sql = @"
-    WITH regional_sales AS (
-        SELECT region, SUM(amount) AS total FROM orders GROUP BY region
-    )
-    SELECT c.name, r.total 
-    FROM customers c 
-    JOIN regional_sales r ON c.region = r.region 
-    WHERE c.status = 'ACTIVE' 
-    LIMIT 50";
-
-SqlQueryMetadata meta = engine.Analyze(sql.AsMemory());
-
-Console.WriteLine($"Statement Type: {meta.StatementType}");        // Select
-Console.WriteLine($"Join Count:     {meta.JoinCount}");             // 1
-Console.WriteLine($"Has Limit:      {meta.HasExplicitLimit}");      // True
-Console.WriteLine($"Limit Value:    {meta.ExplicitLimitValue}");    // 50
-
-// Physical tables only (CTE 'regional_sales' is automatically filtered out):
-foreach (TableAccessTarget table in meta.ReferencedTables)
-{
-    Console.WriteLine($"Physical Table: {table.FullName} (Alias: {table.Alias})");
-}
-// Outputs:
-// Physical Table: orders (Alias: null)
-// Physical Table: customers (Alias: c)
+// meta.StatementType is Select, meta.JoinCount is 1, meta.ExplicitLimitValue is 50.
+// meta.ReferencedTables lists the physical tables orders and customers; the CTE r is not a table.
 ```
 
-### 3. Row-Level Security (RLS) Query Rewriting
+### Compile governed SQL
 
 ```csharp
-using System;
+using System.Collections.Immutable;
+using System.Threading;
 using TrinoSqlEngine;
+using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Governance;
 
-var engine = new FastSqlEngine();
+var orders = new TableIdentity("dbo", "Orders");
+var catalog = new InMemoryTableCatalog(
+[
+    new TableCatalogEntry(orders, ImmutableArray.Create(
+        new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", "nvarchar(64)"), new CatalogColumn("Status", "nvarchar(20)")),
+        "TenantId", 1)
+], "dbo");
 
-var options = new RlsOptions
+var request = new CompileRequest
 {
-    PolicyProvider = new DefaultRlsPolicyProvider(
-        defaultFilter: "tenant_id = 'tenant_corp_1'",
-        predicate: tableName => tableName.Equals("orders", StringComparison.OrdinalIgnoreCase)
-    ),
-    AppendTableAlias = true
+    TargetDialect = TargetSqlDialect.SqlServer,
+    TokenGuards = SqlTokenSecurityOptions.Strict,
+    Policy = new GovernancePolicy
+    {
+        RowFilters = myRowPolicies,   // IPolicyPredicateProvider: typed predicates per table, or "no policy"
+        Masks = myMasks,              // IColumnMaskProvider: typed masks per column
+        Catalog = catalog,
+        Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
+    },
+    EnforcedMaxRows = 1000
 };
 
-string sql = "SELECT orders.id, customers.name FROM orders JOIN customers ON orders.cust_id = customers.id";
-string secured = engine.RewriteRls(sql.AsMemory(), options);
+CompiledSql compiled = new FastSqlEngine().Compile("SELECT id FROM orders WHERE status = 'open'".AsMemory(), request, CancellationToken.None);
 
-Console.WriteLine(secured);
-// Output:
-// SELECT orders.id, customers.name FROM (SELECT * FROM orders WHERE tenant_id = 'tenant_corp_1') AS orders JOIN customers ON orders.cust_id = customers.id
+// compiled.Sql         the text with parameter markers only (no tenant, policy or literal value)
+// compiled.Parameters  every value, with its origin (QueryLiteral, Tenant, Policy, Mask, ClientNamed) and type
+using var command = connection.CreateCommand();
+CompiledSqlBinders.For(compiled.Dialect).Bind(command, compiled, new Dictionary<string, object?>());
 ```
 
-### 4. Dynamic Column Data Masking
+### Row policies and masks
+
+A row policy is a `PolicyPredicate`: an expression over the columns of the table whose values are `PolicyParameterExpression` nodes,
+plus a dictionary of `PolicyValue`. A correlated predicate refers to the target table through the reserved alias
+`RowFilterAliases.Target` (`autheris_target`). `PolicyExpressionParser` parses administrator text in Trino syntax into a typed
+predicate: literals become parameters, and any construct that would embed a value or a clock in a cached shape is rejected.
+
+### DML
 
 ```csharp
-using System;
-using TrinoSqlEngine;
-
-var engine = new FastSqlEngine();
-
-var options = new RlsOptions
-{
-    AppendTableAlias = true,
-    PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-    // Supply known table schema to push down column projection
-    TableColumnsProvider = tableName => tableName.Equals("employees", StringComparison.OrdinalIgnoreCase)
-        ? new[] { "id", "name", "email", "salary", "tenant_id" }
-        : null,
-    // Define masking transformations
-    ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
-        hasMaskPredicate: (tbl, col) => tbl.Equals("employees", StringComparison.OrdinalIgnoreCase) && 
-                                        (col.Equals("email", StringComparison.OrdinalIgnoreCase) || 
-                                         col.Equals("salary", StringComparison.OrdinalIgnoreCase)),
-        maskExpressionProvider: (tbl, col) => col.ToLowerInvariant() switch
-        {
-            "email" => "'***@company.com'",
-            "salary" => "0",
-            _ => col
-        })
-};
-
-string sql = "SELECT id, email, salary FROM employees";
-string secured = engine.RewriteRls(sql.AsMemory(), options);
-
-Console.WriteLine(secured);
-// Output:
-// SELECT id, email, salary FROM (SELECT "id", "name", '***@company.com' AS "email", 0 AS "salary", "tenant_id" FROM employees WHERE tenant_id = 't1') AS employees
+var dmlRequest = request with { Statements = StatementPermissions.Update };
+var update = engine.Compile("UPDATE orders SET status = 'closed' WHERE id = 7".AsMemory(), dmlRequest, CancellationToken.None);
 ```
 
-### 5. DML Rewriting with `WITH CHECK OPTION`
+A statement with `compiled.RequiresRowCountCheck` (an INSERT that carries the check-option semantics of the dialect) runs through
+`CompiledSqlBinders.CheckedExecutorFor(dialect)`, which compares the affected row count with the expected count inside a transaction
+and rolls back on a difference.
+
+### Lexer-safe parameter extraction
 
 ```csharp
-using System;
-using TrinoSqlEngine;
-
-var engine = new FastSqlEngine();
-
-var options = new RlsOptions
-{
-    EnforceReadOnlyQueries = false,          // Allow DML statements
-    EnforceWithCheckOption = true,          // Validate INSERT / UPDATE
-    TenantColumnName = "tenant_id",
-    ExpectedTenantValue = "42",
-    DisallowTenantColumnModificationInUpdate = true,
-    RejectMaskedColumnsInDml = true
-};
-
-// 1. DELETE rewrite (merges tenant filter with parenthesized user WHERE)
-string deleteSql = "DELETE FROM orders WHERE id = 10 OR 1=1";
-string securedDelete = engine.RewriteRls(deleteSql.AsMemory(), options);
-// Output: DELETE FROM orders WHERE (tenant_id = 42) AND (id = 10 OR 1=1)
-
-// 2. UPDATE rewrite (secures target table)
-string updateSql = "UPDATE orders SET status = 'shipped' WHERE id = 10";
-string securedUpdate = engine.RewriteRls(updateSql.AsMemory(), options);
-// Output: UPDATE orders SET status = 'shipped' WHERE (tenant_id = 42) AND (id = 10)
-
-// 3. WITH CHECK OPTION rejection (throws SecurityException)
-string maliciousInsert = "INSERT INTO orders (id, tenant_id) VALUES (1, 99)";
-engine.RewriteRls(maliciousInsert.AsMemory(), options); 
-// Throws: System.Security.SecurityException: Tenant column 'tenant_id' inserted value '99' does not match expected tenant '42'.
-```
-
-### 6. Result Limit Clamping & Injection (`EnforcedMaxRows`)
-
-```csharp
-var options = new RlsOptions
-{
-    EnforcedMaxRows = 100, // Clamp or inject LIMIT 100
-    PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42")
-};
-
-// Query without limit: appends LIMIT 100
-string query1 = engine.RewriteRls("SELECT * FROM items".AsMemory(), options);
-// Output: SELECT * FROM (SELECT * FROM items WHERE tenant_id = 42) LIMIT 100
-
-// Query with oversized limit: clamps to 100
-string query2 = engine.RewriteRls("SELECT * FROM items LIMIT 10000".AsMemory(), options);
-// Output: SELECT * FROM (SELECT * FROM items WHERE tenant_id = 42) LIMIT 100
-```
-
-### 7. Lexer-Safe Parameter Extraction
-
-```csharp
-using System;
 using TrinoSqlEngine.Analysis;
 
-string sql = "SELECT * FROM orders WHERE customer_id = @custId AND status = {{status}} AND total > ?";
-
-// Fast token extraction ignoring SQL comments
-var parameters = SqlParameterExtractor.ExtractTokens(sql);
-
-foreach (var p in parameters)
+foreach (var p in SqlParameterExtractor.ExtractTokens("SELECT * FROM orders WHERE customer_id = @custId AND total > ?"))
 {
-    Console.WriteLine($"Found Parameter: {p.Name} (Token: {p.Token})");
+    Console.WriteLine($"{p.Name} ({p.Token})");
 }
 ```
 
 ---
 
-## ⚙️ Configuration Reference
+## Dialects
 
-### `RlsOptions`
+The capability table (`DialectCapabilityTable.Default`) holds, per dialect and with sources: quoting, parameter marker style,
+pagination, boolean representation, tenant comparison, bind parameter limit, identifier length, `IN` list limit, the function map and
+the supported DML classes. A dialect without an entry cannot be compiled.
 
-| Property | Type | Default | Description |
-| :--- | :--- | :---: | :--- |
-| `PolicyProvider` | `IRlsPolicyProvider` | `DefaultRlsPolicyProvider` | Determines whether and which filter to inject for a given table. |
-| `ColumnMaskingProvider` | `IColumnMaskingPolicyProvider?` | `null` | Provides dynamic SQL expressions to mask sensitive columns. |
-| `TableColumnsProvider` | `Func<string, IReadOnlyList<string>?>?` | `null` | Returns the table column list for full in-database projection pushdown. |
-| `EnforcedMaxRows` | `long` | `0` | Clamps or injects top-level `LIMIT {n}` (0 = disabled). |
-| `EnforceReadOnlyQueries` | `bool` | `true` | Throws if non-SELECT statements (INSERT, UPDATE, DELETE, DDL) are passed. |
-| `AppendTableAlias` | `bool` | `false` | Automatically appends `AS {tableName}` to rewritten subqueries. |
-| `EnforceWithCheckOption` | `bool` | `true` | Validates INSERT/UPDATE statements against tenant boundaries. |
-| `TenantColumnName` | `string` | `"tenant_id"` | Name of the tenant partition column. |
-| `ExpectedTenantValue` | `string` | `"42"` | Expected tenant ID for `WITH CHECK OPTION`. |
-| `DisallowTenantColumnModificationInUpdate` | `bool` | `true` | Forbids updating the tenant column under any circumstances. |
-| `RequireTenantColumnInInsert` | `bool` | `true` | Requires INSERT statements to explicitly specify the tenant column. |
-| `RejectMaskedColumnsInDml` | `bool` | `true` | Forbids referencing masked columns in `UPDATE SET` or `WHERE` clauses. |
-| `EnforceFunctionPolicy` | `bool` | `true` | Validates every function call against `SqlFunctionPolicy`. |
-| `AllowedFunctions` | `IReadOnlySet<string>?` | `null` | Exclusive allowlist of permitted function names. The default denylist always wins. Curated per-dialect lists: `SqlFunctionAllowlists` (`Ansi`, `PostgreSql`, `SqlServer`, `Sqlite`, `Build(dialect, additional)`). |
-| `AdditionalDeniedFunctions` | `IReadOnlySet<string>?` | `null` | Additional function names to strictly reject. |
-| `AllowedTableFunctions` | `IReadOnlySet<string>?` | `null` | Permitted polymorphic table functions (`TABLE(...)`). Default rejects all. |
-| `AllowedSessionProperties` | `IReadOnlySet<string>?` | `null` | Permitted session properties in `WITH SESSION`. Default rejects all. |
-| `AllowInlineFunctionDefinitions` | `bool` | `false` | When false, rejects `WITH FUNCTION ...` inline functions. |
-| `RejectComments` | `bool` | `true` | Rejects SQL comments (SQ-02). |
-| `RejectBackslashInStrings` | `bool` | `true` | Rejects backslashes in string literals (SQ-01). |
-| `RejectEscapedStringLiterals` | `bool` | `true` | Rejects `E'...'` literals (SQ-01). |
-| `RejectDollarQuoting` | `bool` | `true` | Rejects `$$...$$` strings (SQ-02); always rejected for SQL Server targets. |
-| `RejectNonAsciiIdentifiers` | `bool` | `true` | Rejects non-ASCII characters in unquoted identifiers (SQ-10). |
-| `RejectDotsInQuotedIdentifiers` | `bool` | `true` | Rejects dots inside quoted identifiers, e.g. `"a.b"` (SQ-11). |
-| `RejectTimeTravelQueries` | `bool` | `true` | Rejects `FOR TIMESTAMP/VERSION AS OF` (SQ-13). |
+| Dialect | Tier |
+| :--- | :--- |
+| SQL Server | Production |
+| PostgreSQL | Production |
+| SQLite | Production |
+| Oracle | Production |
+| DuckDB | Production |
+| Databricks | Experimental |
 
-`RewriteRls` derives these token switches per call as an immutable `SqlTokenSecurityOptions` object; it never reads or
-modifies the engine's own `Reject*` properties. The engine properties (default `false`) only apply to direct
-`Parse`/`ParseExpression`/`Analyze` calls without explicit `SqlTokenSecurityOptions`, so that plain syntax parsing
-(Trino compliance fixtures) keeps working. Method call syntax (`expr.method(...)`, `Type::method(...)`) is always rejected
-by the rewriter and the analyzer.
-
-### `FastSqlEngine` Limits
-
-| Property | Type | Default | Description |
-| :--- | :--- | :---: | :--- |
-| `MaxQueryLength` | `int` | `65,536` | Maximum allowed SQL query length in characters. |
-| `MaxNestingDepth` | `int` | `100` | Maximum token-level nesting depth (parentheses, brackets, CASE, lambdas, unary chains). 0 disables only this check; token security checks always run. |
-| `MaxParseTreeDepth` | `int` | `3,000` | Maximum depth of the resulting parse tree (checked iteratively). |
-| `ParseTimeout` | `TimeSpan` | `5 s` | Time budget per parse (incl. waiting for a parser slot). On expiry a `ParseCanceledException` with inner `TimeoutException` is thrown. `<= 0` disables the budget. |
-| `ParseThreadStackSize` | `int` | `16 MB` | Stack size of the dedicated parser thread (minimum 256 KB). |
-| `ParseConcurrencyLimiter` | `SemaphoreSlim?` | `null` | Limits concurrently running parser threads; `null` uses the process-wide `SharedParseConcurrencyLimiter` (`Environment.ProcessorCount * 2`). |
+A tier flip is a security decision, because it admits a dialect. An experimental dialect is rejected unless a test sets
+`CompileRequest.AllowExperimentalDialect`. ANSI and Snowflake generators render inline text only (policy rendering and tests); they have
+no capability entry and are not compilable.
 
 ---
 
-## 🧪 Compliance & Test Suite
+## Configuration
 
-The engine includes **857 automated tests** (100% passing) verifying standard SQL compliance and enterprise security:
+### `CompileRequest`
 
-1. **761 Trino Official Compliance Tests (`TrinoParserComplianceTests.cs`)**:
-   Derived directly from Trino's official test suite (`io.trino.sql.parser.TestSqlParser`). Covers complex `SELECT`, `JOIN`, recursive `WITH`, window functions, pattern matching, `GROUPING SETS`, JSON path operators, and DML.
-2. **Security Remediation Suite (`SecurityRemediationTests.cs`)**:
-   Verifies algorithmic DoS protections (nesting depth, parse tree depth, query length limits), multi-threaded parser concurrency, CTE shadowing isolation, DML `WITH CHECK OPTION`, and function policy enforcement.
-3. **Analysis & Masking Suite (`AnalysisAndMaskingTests.cs`)**:
-   Validates table and column extraction, join count calculation, limit detection, dynamic column masking pushdown, and `EnforcedMaxRows` clamping.
-4. **Parameter Extractor Tests (`SqlParameterExtractorTests.cs`)**:
-   Verifies extraction of named and positional parameters across complex queries with comments.
+| Property | Default | Description |
+| :--- | :---: | :--- |
+| `TargetDialect` | required | The dialect to emit. There is no default; a missing or unsupported dialect fails closed. |
+| `Policy` | required | `GovernancePolicy`: `RowFilters`, `Masks`, `Catalog`, `Tenant`, `Dml`, `TablesWithConsentRowFilter`, `TablesWithMaskedColumns`. |
+| `TokenGuards` | required | `SqlTokenSecurityOptions` applied before parsing. The mandatory guards of the dialect are forced on. |
+| `Statements` | `ReadOnly` | Statement classes permitted besides `SELECT`. |
+| `EnforcedMaxRows` | `0` | Clamps or injects a row cap on the root read (0 = disabled). |
+| `AllowedFunctions` / `AllowedTableFunctions` | `null` | Narrow the function map of the dialect and the permitted `TABLE(...)` functions. |
+| `TranslateTrinoDateFunctions` | `false` | Translate `date_add`, `date_trunc`, `now()` and interval arithmetic into the date arithmetic of the dialect. |
+| `CompileTimeout` | 2 s | Compile budget, clamped to 30 s. |
+| `MaxExpansionFactor` | 64 | Maximum emitted length divided by the input length, clamped to 256. |
 
-### Running Tests
+### `SqlTokenSecurityOptions`
+
+`SqlTokenSecurityOptions.Strict` enables every switch except the reserved identifier check. Each value is immutable and passed per
+call, so concurrent callers that share one engine never influence each other.
+
+| Switch | Rejects |
+| :--- | :--- |
+| `RejectComments` | SQL comments (SQ-02) |
+| `RejectBackslashInStrings` | backslashes in string literals (SQ-01) |
+| `RejectEscapedStringLiterals` | `E'...'` literals (SQ-01) |
+| `RejectDollarQuoting` | `$$...$$` strings (SQ-02) |
+| `RejectBracketLexerDifferentials` | `[`, `]` and bracket or comment sequences in literals (SQL-1) |
+| `RejectNonAsciiIdentifiers` | non-ASCII characters in unquoted identifiers (SQ-10) |
+| `RejectDotsInQuotedIdentifiers` | dots inside quoted identifiers (SQ-11) |
+| `RejectTimeTravelQueries` | `FOR TIMESTAMP/VERSION AS OF` (SQ-13) |
+| `RejectVariableSubstitutionSequences` | `${` (SEC-ADG-10); forced on for Databricks |
+| `RejectReservedIdentifiers` | identifiers that start with the reserved gateway prefix |
+
+Method call syntax (`expr.method(...)`, `Type::method(...)`) is always rejected.
+
+### `FastSqlEngine` limits
+
+| Property | Default | Description |
+| :--- | :---: | :--- |
+| `MaxQueryLength` | 65,536 | Maximum SQL length in characters. |
+| `MaxNestingDepth` | 100 | Token-level nesting depth (parentheses, brackets, `CASE`, lambdas, unary chains). |
+| `MaxParseTreeDepth` | 3,000 | Maximum parse tree depth, checked iteratively. |
+| `ParseTimeout` | 5 s | Time budget per parse, including the wait for a parser slot. |
+| `ParseThreadStackSize` | 16 MB | Stack of the dedicated parser thread (minimum 256 KB). |
+| `ParseConcurrencyLimiter` | `null` | Limits concurrent parser threads; `null` uses the process-wide limiter (`ProcessorCount * 2`). |
+
+The `Reject*` properties of the engine apply only to direct `Parse`, `ParseExpression` and `Analyze` calls without explicit
+`SqlTokenSecurityOptions` (default `false`, so plain syntax parsing keeps working). `Compile` never reads them.
+
+---
+
+## Errors
+
+| Exception | Meaning |
+| :--- | :--- |
+| `SecurityException` and derived types | A security rule rejected the statement (function policy, masked column, DML guard, coverage). |
+| `SqlCompileNotSupportedException` | The dialect, statement class or construct has no governed path. |
+| `SqlLimitExceededException` | A resource or dialect limit was exceeded (kind, dialect and counts only, never values). |
+| `ReservedIdentifierException` | An identifier uses the reserved gateway prefix. |
+| `UnfilteredDmlException` | An `UPDATE` or `DELETE` without a meaningful `WHERE` clause. |
+| `ParseCanceledException` | Syntax error, or a token guard or the parse budget fired. |
+| `GovernedSqlException` and derived types | A rule of the binder or the checked executor (row-count check, affected rows limit, constraint). |
+
+Messages carry categories and counts, never request text or bound values.
+
+---
+
+## Tests
+
+| Project | Content |
+| :--- | :--- |
+| `tests/TrinoSqlEngine.Tests` | Trino grammar compliance, analyzer, parser concurrency and limits, the compiler (`Compiler/`), dialect generators, security regressions (`Security/`), conformance fixtures, property tests with oracles. |
+| `tests/Autheris.Tests.Architecture` | IL scans: no legacy types, no free-text expression nodes, `CompiledSql` is constructed only by the engine, `CommandText` is assigned only by the binder, governed entry points reach `Compile` and the binder. |
+| `tests/Autheris.Tests.SqlCompilerGate` | Differential and execution gate on SQLite, PostgreSQL, SQL Server and Oracle with an independent policy oracle. |
 
 ```bash
-# Run all 857 tests
-dotnet test TrinoSqlEngine.csproj
-
-# Run in Release mode with compiler optimizations
-dotnet test TrinoSqlEngine.csproj -c Release
+dotnet test tests/TrinoSqlEngine.Tests
 ```
 
 ---
 
-## 📁 Project Structure
+## Project structure
 
 ```text
-gql_sqlparser/
-├── FastSqlEngine.cs                   # Two-stage parsing engine & facade API
-├── RlsListener.cs                     # AST listener for RLS, masking & DML rewriting
-├── IRlsPolicyProvider.cs              # Policy provider interfaces & RlsOptions
-├── SqlFunctionPolicy.cs               # Pre-configured function security policies & denylists
-├── ZeroCopyCaseInsensitiveStream.cs   # Register-based case-insensitive ICharStream
-├── SharedParserCache.cs               # Global ATN/DFA static cache
-├── ParserPooledObjectPolicy.cs        # Object pool policy for SqlBaseParser
-├── SqlKeywords.cs                     # Precomputed O(1) keyword lookup table
-├── SqlBase.g4                         # Trino ANSI SQL ANTLR4 grammar
-├── TrinoSqlEngine.csproj              # .NET 10 project file
-├── Analysis/
-│   ├── ISqlQueryAnalyzer.cs           # Query analysis contracts & record models
-│   ├── SqlQueryAnalyzer.cs            # AST query analyzer implementation
-│   └── SqlParameterExtractor.cs       # Lexer-safe parameter extraction
-├── Fixtures/                          # Trino compliance test fixtures
-├── AnalysisAndMaskingTests.cs         # Tests for analyzer, masking & limit clamping
-├── SecurityRemediationTests.cs        # Security audit & DoS remediation tests
-├── SqlParameterExtractorTests.cs      # Parameter extractor tests
-├── TrinoParserComplianceTests.cs      # xUnit Trino grammar compliance suite (857 tests)
-├── LICENSE                            # Apache License 2.0
-├── NOTICE                             # Attribution notices
-└── THIRD_PARTY_NOTICES.md             # Third-party license documentation
+src/TrinoSqlEngine/
+├── FastSqlEngine.cs                   # Two-stage parsing engine and the ISqlEngine implementation
+├── ISqlEngine.cs                      # Compile, Parse, ParseExpression, Analyze
+├── GovernedSqlCompiler.cs             # The compile pipeline
+├── CompileRequest.cs                  # Immutable compile input, limits, errors
+├── SqlTokenSecurityOptions.cs         # Token guards
+├── SqlFunctionPolicy.cs               # Function denylist and allowlist rules
+├── SqlFunctionAllowlists.cs           # Curated per-dialect function lists
+├── RowFilterAliases.cs                # Reserved aliases of correlated row filters
+├── TargetSqlDialect.cs                # Dialect enum
+├── Analysis/                          # Query analyzer, parameter extractor
+├── Governance/                        # Policy predicates, providers, catalog, policy parser
+├── Ast/
+│   ├── Builder/                       # Parse tree to typed AST
+│   ├── Nodes/                         # Typed AST nodes
+│   ├── Visitors/                      # Security injection, simplification, validation
+│   ├── Security/                      # Coverage verifier, tenant predicates, type annotators
+│   ├── Capabilities/                  # Dialect capability table, validator, limits
+│   ├── Generators/                    # Dialect generators
+│   ├── Emit/                          # CompiledSql, template cache, binders, checked DML executor
+│   └── Buffer/                        # Emitter context and string builder
+├── SqlBase.g4                         # Trino SQL ANTLR4 grammar
+└── LICENSE, NOTICE, THIRD_PARTY_NOTICES.md
 ```
 
 ---
 
-## 📜 Legal & License Notice
+## Legal and license notice
 
-- **Grammar & Dialect**: Derived from the [Trino project](https://github.com/trinodb/trino), licensed under the **Apache License, Version 2.0**.
-- **Modifications**: In compliance with Section 4(b) of the Apache License 2.0, all modified files (including [`SqlBase.g4`](SqlBase.g4)) contain explicit modification headers.
-- **ANTLR 4 Runtime**: Licensed under the **BSD 3-Clause License**.
-- **Disclaimers**: Full license texts are documented in [`LICENSE`](LICENSE) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Attributions are listed in [`NOTICE`](NOTICE). *Trino* is a trademark of its respective owners; this project is an independent C# implementation and is not affiliated with or endorsed by Trino.
+- **Grammar and dialect**: derived from the [Trino project](https://github.com/trinodb/trino), licensed under the **Apache License, Version 2.0**.
+- **Modifications**: in compliance with Section 4(b) of the Apache License 2.0, all modified files (including [`SqlBase.g4`](SqlBase.g4)) contain explicit modification headers.
+- **ANTLR 4 runtime**: licensed under the **BSD 3-Clause License**.
+- **Disclaimers**: full license texts are in [`LICENSE`](LICENSE) and [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). Attributions are in [`NOTICE`](NOTICE). *Trino* is a trademark of its respective owners; this project is an independent C# implementation and is not affiliated with or endorsed by Trino.
