@@ -125,72 +125,18 @@ public class TrinoParserComplianceTests
         });
     }
 
-    [Fact]
-    public void Rls_ShouldRewriteSimpleSelect()
-    {
-        var engine = new FastSqlEngine();
-        var query = "SELECT id, amount FROM orders WHERE amount > 100".AsMemory();
-
-        var (tree, tokens) = engine.Parse(query);
-
-        var rewriter = new RlsListener(tokens);
-        ParseTreeWalker.Default.Walk(rewriter, tree);
-
-        string securedQuery = rewriter.GetSecuredSql();
-        Assert.Equal("SELECT id, amount FROM (SELECT * FROM orders WHERE tenant_id = 42) WHERE amount > 100", securedQuery);
-    }
+    // The legacy RlsListener / RewriteRls rewriting tests are replaced by the governed compile path (FastSqlEngine.Compile). Their
+    // outcomes are asserted by these tests and by Compiler/TypedInjectionTests, CteShadowingTests, DmlCoverageTests,
+    // DmlCompileTests (DML mechanics, tenant forcing, guards) and CompileApiTests (read-only, DDL and table functions rejected).
 
     [Fact]
-    public void Rls_ShouldNotRewriteCteTable()
+    public void Compile_SimpleSelect_WrapsTheTableAndBindsTheTenant()
     {
-        var engine = new FastSqlEngine();
-        var query = "WITH orders AS (SELECT 1 AS id) SELECT * FROM orders".AsMemory();
+        var compiled = new TrinoSqlEngine.Tests.Security.ProbeEnv(TargetSqlDialect.PostgreSql)
+            .Compile("SELECT id, amount FROM orders WHERE amount > 100");
 
-        var (tree, tokens) = engine.Parse(query);
-
-        var rewriter = new RlsListener(tokens);
-        ParseTreeWalker.Default.Walk(rewriter, tree);
-
-        string securedQuery = rewriter.GetSecuredSql();
-        Assert.Equal("WITH orders AS (SELECT 1 AS id) SELECT * FROM orders", securedQuery);
-    }
-
-    [Fact]
-    public void Rls_ShouldRejectDmlWhenReadOnlyEnforced()
-    {
-        var engine = new FastSqlEngine();
-        var dmlQuery = "DELETE FROM orders WHERE id = 1".AsMemory();
-
-        Assert.Throws<System.Security.SecurityException>(() =>
-        {
-            engine.RewriteRls(dmlQuery, new RlsOptions { EnforceReadOnlyQueries = true });
-        });
-    }
-
-    [Fact]
-    public void Rls_ShouldAppendAliasWhenOptionEnabled()
-    {
-        var engine = new FastSqlEngine();
-        var query = "SELECT orders.id FROM orders".AsMemory();
-
-        string secured = engine.RewriteRls(query, new RlsOptions { AppendTableAlias = true });
-        Assert.Equal("SELECT orders.id FROM (SELECT * FROM orders WHERE tenant_id = 42) AS orders", secured);
-    }
-
-    [Fact]
-    public void Rls_ShouldUseCustomPolicyProvider()
-    {
-        var engine = new FastSqlEngine();
-        var query = "SELECT * FROM orders JOIN audit_log ON orders.id = audit_log.order_id".AsMemory();
-
-        var customPolicy = new DefaultRlsPolicyProvider(
-            defaultFilter: "org_id = 'ABC'",
-            predicate: table => !table.Equals("audit_log", StringComparison.OrdinalIgnoreCase));
-
-        string secured = engine.RewriteRls(query, new RlsOptions { PolicyProvider = customPolicy });
-        Assert.Contains("WHERE org_id = 'ABC'", secured);
-        // audit_log is excluded from policy filter
-        Assert.Contains("JOIN audit_log ON", secured);
+        Assert.Contains(compiled.Parameters, p => p.Origin == TrinoSqlEngine.Ast.Emit.ParameterOrigin.Tenant);
+        Assert.Contains("SELECT", compiled.Sql);
     }
 
     [Fact]
@@ -206,218 +152,33 @@ public class TrinoParserComplianceTests
     }
 
     [Fact]
-    public void Engine_RewriteRlsFacadeMethodWorks()
+    public void Compile_AllowlistedTableFunction_IsStillRejected_FailClosed()
     {
-        var engine = new FastSqlEngine();
-        var query = "SELECT id, amount FROM orders WHERE amount > 100".AsMemory();
+        // SEC H-14: the governed compiler has no emission rule for polymorphic table functions; an allowlist cannot open them.
+        var env = new TrinoSqlEngine.Tests.Security.ProbeEnv(TargetSqlDialect.SqlServer);
+        var request = env.Request() with { AllowedTableFunctions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "my_ptf" } };
 
-        string secured = engine.RewriteRls(query);
-        Assert.Equal("SELECT id, amount FROM (SELECT * FROM orders WHERE tenant_id = 42) WHERE amount > 100", secured);
+        var ex = Record.Exception(() =>
+            env.Engine.Compile("SELECT * FROM TABLE(my_ptf(TABLE(orders)))".AsMemory(), request, System.Threading.CancellationToken.None));
+        Assert.True(ex is System.Security.SecurityException or NotSupportedException, ex?.GetType().Name ?? "compiled");
     }
 
-    [Fact]
-    public void Rls_ShouldHandleQuotedIdentifiersAndNormalization()
+    [Theory]
+    [InlineData("UPDATE orders SET status = 'shipped', tenantid = 'other' WHERE id = 10")]
+    [InlineData("UPDATE orders SET status = 'shipped', \"TenantId\" = 'other' WHERE id = 10")]
+    public void Compile_UpdateOfTheTenantColumn_IsRejected(string sql)
     {
-        var engine = new FastSqlEngine();
-        var options = new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42", t => t.Equals("orders", StringComparison.OrdinalIgnoreCase))
-        };
-
-        // Quoted table: "orders"
-        string sql1 = "SELECT * FROM \"orders\"";
-        string secured1 = engine.RewriteRls(sql1.AsMemory(), options);
-        Assert.Equal("SELECT * FROM (SELECT * FROM \"orders\" WHERE tenant_id = 42)", secured1);
-
-        // Schema qualified: "my_schema"."orders"
-        string sql2 = "SELECT * FROM \"my_schema\".\"orders\"";
-        string secured2 = engine.RewriteRls(sql2.AsMemory(), options);
-        Assert.Equal("SELECT * FROM (SELECT * FROM \"my_schema\".\"orders\" WHERE tenant_id = 42)", secured2);
+        Assert.ThrowsAny<System.Security.SecurityException>(() =>
+            new TrinoSqlEngine.Tests.Security.ProbeEnv(TargetSqlDialect.SqlServer).Compile(sql));
     }
 
-    [Fact]
-    public void Rls_ShouldPreventCteShadowingAttack()
+    [Theory]
+    [InlineData("INSERT INTO orders (id, tenantid) VALUES (1, 'other')")]
+    [InlineData("INSERT INTO orders (id, \"TenantId\") VALUES (1, 'acme'), (2, 'other')")]
+    [InlineData("INSERT INTO orders (id, tenantid) SELECT 1, 'other'")]
+    public void Compile_InsertWithAForeignTenantValue_IsRejected(string sql)
     {
-        var engine = new FastSqlEngine();
-        // Attack: Attacker tries to shadow 'orders' with CTE named 'orders', hoping the inner query bypasses RLS
-        string sql = "WITH orders AS (SELECT * FROM orders) SELECT * FROM orders";
-        string secured = engine.RewriteRls(sql.AsMemory());
-
-        // Inner physical 'orders' must be secured, while outer CTE reference is in CTE scope
-        Assert.Equal("WITH orders AS (SELECT * FROM (SELECT * FROM orders WHERE tenant_id = 42)) SELECT * FROM orders", secured);
-    }
-
-    [Fact]
-    public void Rls_ShouldSupportMultiCteChaining()
-    {
-        var engine = new FastSqlEngine();
-        string sql = "WITH a AS (SELECT * FROM orders), b AS (SELECT * FROM a) SELECT * FROM b";
-        string secured = engine.RewriteRls(sql.AsMemory());
-
-        Assert.Equal("WITH a AS (SELECT * FROM (SELECT * FROM orders WHERE tenant_id = 42)), b AS (SELECT * FROM a) SELECT * FROM b", secured);
-    }
-
-    [Fact]
-    public void Rls_ShouldRewritePolymorphicTableFunctionArguments()
-    {
-        var engine = new FastSqlEngine();
-        string sql = "SELECT * FROM TABLE(my_ptf(TABLE(orders)))";
-        // SEC H-14: table functions are rejected unless allowlisted.
-        var options = new RlsOptions { AllowedTableFunctions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "my_ptf" } };
-        string secured = engine.RewriteRls(sql.AsMemory(), options);
-
-        Assert.Equal("SELECT * FROM TABLE(my_ptf(TABLE((SELECT * FROM orders WHERE tenant_id = 42))))", secured);
-    }
-
-    [Fact]
-    public void Rls_DeleteWithoutWhere_AppendsFilter()
-    {
-        var engine = new FastSqlEngine();
-        // Tests the RLS WHERE injection mechanics; the unfiltered-DML guardrail is covered by DML_* tests.
-        var options = new RlsOptions { EnforceReadOnlyQueries = false, RejectUnfilteredDml = false };
-        string sql = "DELETE FROM orders";
-        string secured = engine.RewriteRls(sql.AsMemory(), options);
-
-        Assert.Equal("DELETE FROM orders WHERE (tenant_id = 42)", secured);
-    }
-
-    [Fact]
-    public void Rls_DeleteWithWhere_InjectsAndWrapsInParentheses()
-    {
-        var engine = new FastSqlEngine();
-        // Tests the RLS WHERE injection mechanics; the unfiltered-DML guardrail is covered by DML_* tests.
-        var options = new RlsOptions { EnforceReadOnlyQueries = false, RejectUnfilteredDml = false };
-        string sql = "DELETE FROM orders WHERE id = 10 OR 1=1";
-        string secured = engine.RewriteRls(sql.AsMemory(), options);
-
-        // Parentheses prevent OR bypass
-        Assert.Equal("DELETE FROM orders WHERE (tenant_id = 42) AND (id = 10 OR 1=1)", secured);
-    }
-
-    [Fact]
-    public void Rls_UpdateWithoutWhere_AppendsFilter()
-    {
-        var engine = new FastSqlEngine();
-        // Tests the RLS WHERE injection mechanics; the unfiltered-DML guardrail is covered by DML_* tests.
-        var options = new RlsOptions { EnforceReadOnlyQueries = false, RejectUnfilteredDml = false };
-        string sql = "UPDATE orders SET status = 'shipped'";
-        string secured = engine.RewriteRls(sql.AsMemory(), options);
-
-        Assert.Equal("UPDATE orders SET status = 'shipped' WHERE (tenant_id = 42)", secured);
-    }
-
-    [Fact]
-    public void Rls_UpdateWithWhere_InjectsAndWrapsInParentheses()
-    {
-        var engine = new FastSqlEngine();
-        var options = new RlsOptions { EnforceReadOnlyQueries = false };
-        string sql = "UPDATE orders SET status = 'shipped' WHERE id = 10";
-        string secured = engine.RewriteRls(sql.AsMemory(), options);
-
-        Assert.Equal("UPDATE orders SET status = 'shipped' WHERE (tenant_id = 42) AND (id = 10)", secured);
-    }
-
-    [Fact]
-    public void Rls_UpdateWithCheckOption_RejectsTenantModification()
-    {
-        var engine = new FastSqlEngine();
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            DisallowTenantColumnModificationInUpdate = true
-        };
-
-        string sqlUnquoted = "UPDATE orders SET status = 'shipped', tenant_id = 99 WHERE id = 10";
-        Assert.Throws<System.Security.SecurityException>(() =>
-        {
-            engine.RewriteRls(sqlUnquoted.AsMemory(), options);
-        });
-
-        string sqlQuoted = "UPDATE orders SET status = 'shipped', \"tenant_id\" = 99 WHERE id = 10";
-        Assert.Throws<System.Security.SecurityException>(() =>
-        {
-            engine.RewriteRls(sqlQuoted.AsMemory(), options);
-        });
-    }
-
-    [Fact]
-    public void Rls_InsertWithCheckOption_AcceptsMatchingTenant()
-    {
-        var engine = new FastSqlEngine();
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            ExpectedTenantValue = "42"
-        };
-
-        string sql = "INSERT INTO orders (id, tenant_id) VALUES (1, 42)";
-        string secured = engine.RewriteRls(sql.AsMemory(), options);
-        Assert.Equal("INSERT INTO orders (id, tenant_id) VALUES (1, 42)", secured);
-    }
-
-    [Fact]
-    public void Rls_InsertWithCheckOption_RejectsMismatchingTenant()
-    {
-        var engine = new FastSqlEngine();
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            ExpectedTenantValue = "42"
-        };
-
-        string sqlSingle = "INSERT INTO orders (id, tenant_id) VALUES (1, 99)";
-        Assert.Throws<System.Security.SecurityException>(() =>
-        {
-            engine.RewriteRls(sqlSingle.AsMemory(), options);
-        });
-
-        string sqlMulti = "INSERT INTO orders (id, \"tenant_id\") VALUES (1, 42), (2, 99)";
-        Assert.Throws<System.Security.SecurityException>(() =>
-        {
-            engine.RewriteRls(sqlMulti.AsMemory(), options);
-        });
-    }
-
-    [Fact]
-    public void Rls_InsertSelectWithCheckOption_RejectsConstantMismatch()
-    {
-        var engine = new FastSqlEngine();
-        var options = new RlsOptions
-        {
-            EnforceReadOnlyQueries = false,
-            EnforceWithCheckOption = true,
-            ExpectedTenantValue = "42"
-        };
-
-        string sql = "INSERT INTO orders (id, tenant_id) SELECT 1, 99";
-        Assert.Throws<System.Security.SecurityException>(() =>
-        {
-            engine.RewriteRls(sql.AsMemory(), options);
-        });
-    }
-
-    [Fact]
-    public void Rls_RejectsDdlAndAdministrativeCommands()
-    {
-        var engine = new FastSqlEngine();
-        var options = new RlsOptions { EnforceReadOnlyQueries = false };
-
-        Assert.Throws<System.Security.SecurityException>(() =>
-        {
-            engine.RewriteRls("DROP TABLE orders".AsMemory(), options);
-        });
-
-        Assert.Throws<System.Security.SecurityException>(() =>
-        {
-            engine.RewriteRls("CREATE TABLE orders (id INT)".AsMemory(), options);
-        });
-
-        Assert.Throws<System.Security.SecurityException>(() =>
-        {
-            engine.RewriteRls("TRUNCATE TABLE orders".AsMemory(), options);
-        });
+        Assert.ThrowsAny<System.Security.SecurityException>(() =>
+            new TrinoSqlEngine.Tests.Security.ProbeEnv(TargetSqlDialect.SqlServer).Compile(sql));
     }
 }

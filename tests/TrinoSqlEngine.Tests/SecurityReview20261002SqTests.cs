@@ -3,32 +3,23 @@ namespace TrinoSqlEngine.Tests;
 using System;
 using System.Collections.Generic;
 using System.Security;
+using System.Threading;
 using Antlr4.Runtime;
 using Antlr4.Runtime.Misc;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Analysis;
+using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Tests.Security;
 using Xunit;
 
 public class SecurityReview20261002SqTests
 {
     private readonly FastSqlEngine _engine = new();
 
-    private static RlsOptions CreateGovernedOptions(TargetSqlDialect dialect = TargetSqlDialect.Ansi) => new()
-    {
-        TargetDialect = dialect,
-        RejectComments = false,
-        RejectBackslashInStrings = true,
-        RejectEscapedStringLiterals = true,
-        RejectDollarQuoting = dialect == TargetSqlDialect.SqlServer,
-        RejectConsentFilteredInsert = true,
-        RejectWholeRowReferencesInDml = true,
-        // SEC P-06: dots in quoted identifiers are rejected by default; SQ-03 tests use "schema.table" whole-row references.
-        RejectDotsInQuotedIdentifiers = false,
-        EnforceReadOnlyQueries = false,
-        EnforceWithCheckOption = true,
-        ExpectedTenantValue = "42",
-        PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42")
-    };
+    // The governed behaviour is asserted on the AST path (FastSqlEngine.Compile through ProbeEnv). The legacy rewriter (RewriteRls)
+    // and its string policy providers are gone since the X1 cutover; assertions are semantic (exception type and message, bound
+    // values, the structure of the emitted statement), never the legacy text format.
+    private static ProbeEnv Env(TargetSqlDialect dialect = TargetSqlDialect.PostgreSql) => new(dialect);
 
     // =========================================================================
     // SQ-01: String Literal Lexer-Differential (PostgreSQL E'...' & Backslashes)
@@ -40,10 +31,7 @@ public class SecurityReview20261002SqTests
     [InlineData("SELECT '\\' FROM orders")]
     public void SQ01_BackslashInStringLiteral_IsRejected(string sql)
     {
-        var options = CreateGovernedOptions(TargetSqlDialect.PostgreSql);
-        options.RejectBackslashInStrings = true;
-
-        var ex = Assert.Throws<ParseCanceledException>(() => _engine.RewriteRls(sql.AsMemory(), options));
+        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile(sql));
         Assert.Contains("Backslash escapes in string literals", ex.Message);
     }
 
@@ -53,23 +41,18 @@ public class SecurityReview20261002SqTests
     [InlineData("SELECT E'foo bar' FROM orders")]
     public void SQ01_TypeConstructorWithE_IsRejected(string sql)
     {
-        var options = CreateGovernedOptions(TargetSqlDialect.PostgreSql);
-        options.RejectEscapedStringLiterals = true;
-
-        var ex = Assert.Throws<ParseCanceledException>(() => _engine.RewriteRls(sql.AsMemory(), options));
+        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile(sql));
         Assert.Contains("Escaped string literal type constructors", ex.Message);
     }
 
     [Fact]
     public void SQ01_StandardEscapedSingleQuotes_AreAllowed()
     {
-        var options = CreateGovernedOptions(TargetSqlDialect.PostgreSql);
-        options.RejectBackslashInStrings = true;
-        options.RejectEscapedStringLiterals = true;
+        var compiled = Env().Compile("SELECT 'O''Reilly' FROM orders");
 
-        string sql = "SELECT 'O''Reilly' FROM orders";
-        string secured = _engine.RewriteRls(sql.AsMemory(), options);
-        Assert.Contains("'O''Reilly'", secured);
+        // the value is bound, never part of the text
+        Assert.Contains(compiled.Parameters, p => Equals(p.Value, "O'Reilly"));
+        Assert.DoesNotContain("Reilly", compiled.Sql);
     }
 
     // =========================================================================
@@ -81,20 +64,16 @@ public class SecurityReview20261002SqTests
     [InlineData("SELECT /* /* double */ */ 1 FROM orders")]
     public void SQ02_NestedBlockComments_AreStrictlyRejected(string sql)
     {
-        var options = CreateGovernedOptions();
-        var ex = Assert.Throws<ParseCanceledException>(() => _engine.RewriteRls(sql.AsMemory(), options));
+        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile(sql));
         Assert.Contains("Nested block comments", ex.Message);
     }
 
     [Theory]
     [InlineData("SELECT 1 FROM orders -- end of line comment")]
     [InlineData("SELECT /* standard comment */ 1 FROM orders")]
-    public void SQ02_RejectComments_WhenEnabled_RejectsAllComments(string sql)
+    public void SQ02_RejectComments_RejectsAllComments(string sql)
     {
-        var options = CreateGovernedOptions();
-        options.RejectComments = true;
-
-        var ex = Assert.Throws<ParseCanceledException>(() => _engine.RewriteRls(sql.AsMemory(), options));
+        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile(sql));
         Assert.Contains("SQL comments are not permitted", ex.Message);
     }
 
@@ -103,8 +82,7 @@ public class SecurityReview20261002SqTests
     [InlineData("SELECT $$line1\nline2$$ FROM orders")]
     public void SQ02_DollarQuoting_IsRejected_ForSqlServer(string sql)
     {
-        var options = CreateGovernedOptions(TargetSqlDialect.SqlServer);
-        var ex = Assert.Throws<ParseCanceledException>(() => _engine.RewriteRls(sql.AsMemory(), options));
+        var ex = Assert.Throws<ParseCanceledException>(() => Env(TargetSqlDialect.SqlServer).Compile(sql));
         Assert.Contains("Dollar-quoted strings", ex.Message);
     }
 
@@ -113,91 +91,49 @@ public class SecurityReview20261002SqTests
     // =========================================================================
 
     [Theory]
-    [InlineData("UPDATE customers SET notes = CAST(customers AS VARCHAR) WHERE id = 1")]
-    [InlineData("UPDATE sales.customers SET notes = CAST(\"sales.customers\" AS VARCHAR) WHERE id = 1")]
-    [InlineData("DELETE FROM customers WHERE customers IS NOT NULL AND id = 1")]
+    [InlineData("UPDATE orders SET status = CAST(orders AS VARCHAR) WHERE id = 1")]
+    [InlineData("DELETE FROM orders WHERE orders IS NOT NULL AND id = 1")]
     public void SQ03_WholeRowReference_InDml_IsRejected_WhenMaskedColumnsExist(string sql)
     {
-        var options = CreateGovernedOptions();
-        options.RejectWholeRowReferencesInDml = true;
-        options.TablesWithMaskedColumns.Add("customers");
-        options.TablesWithMaskedColumns.Add("sales.customers");
-        options.ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
-            hasMaskPredicate: (tbl, col) => col.Equals("ssn", StringComparison.OrdinalIgnoreCase),
-            maskExpressionProvider: (tbl, col) => "'***'");
+        var env = Env(TargetSqlDialect.SqlServer);
+        env.MaskEmail();
 
-        var ex = Assert.Throws<SecurityException>(() => _engine.RewriteRls(sql.AsMemory(), options));
-        Assert.Contains("Whole-row reference", ex.Message);
+        var ex = Assert.ThrowsAny<SecurityException>(() => env.Compile(sql));
+        Assert.Contains("whole-row", ex.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
-    public void SQ03_DmlWithoutMaskedColumns_AllowsRowReference_OrUnmaskedColumns()
+    public void SQ03_DmlWithoutMaskedColumns_AllowsUnmaskedColumns()
     {
-        var options = CreateGovernedOptions();
-        options.RejectWholeRowReferencesInDml = true;
-        options.ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
-            hasMaskPredicate: (tbl, col) => false,
-            maskExpressionProvider: (tbl, col) => "'***'");
+        var compiled = Env(TargetSqlDialect.SqlServer).Compile("UPDATE orders SET status = 'clean' WHERE id = 1");
 
-        string secured = _engine.RewriteRls("UPDATE customers SET notes = 'clean' WHERE id = 1".AsMemory(), options);
-        Assert.Contains("UPDATE customers SET notes = 'clean'", secured);
+        Assert.Equal(SqlStatementClass.Update, compiled.StatementClass);
     }
 
     // =========================================================================
     // SQ-04: Cross-Schema Policy Confusion via Short Table Name
+    //   The string policy provider (FallbackToSimpleName) is gone; the typed catalog resolves a table by its full identity, and
+    //   AstSecurityRegressionTests.SQ04_ATableInAnotherSchema_NeverResolvesToTheCatalogTableOfTheSameShortName guards the outcome.
     // =========================================================================
-
-    [Fact]
-    public void SQ04_FallbackToSimpleName_False_PreventsCrossSchemaPolicyConfusion()
-    {
-        var provider = new DefaultRlsPolicyProvider(
-            defaultFilter: "1 = 0",
-            predicate: tbl => tbl == "schema_a.orders",
-            filterFunc: tbl => tbl == "schema_a.orders" ? "tenant_id = 'A'" : "1 = 0")
-        {
-            FallbackToSimpleName = false
-        };
-
-        // Fully qualified table matches
-        Assert.True(provider.ShouldApplyPolicy("schema_a.orders"));
-        Assert.Equal("tenant_id = 'A'", provider.GetPolicyFilter("schema_a.orders"));
-
-        // Other schema with same short table name does NOT match and gets fail-closed filter
-        Assert.False(provider.ShouldApplyPolicy("schema_b.orders"));
-        Assert.Equal("1 = 0", provider.GetPolicyFilter("schema_b.orders"));
-    }
 
     // =========================================================================
     // SQ-05: Dialect-Specific AST Rewriting (Aliases & LIMIT / FETCH NEXT)
+    //   The simple table alias is asserted by AstSecurityRegressionTests.SQ05_TableAlias_IsTheSimpleName_NeverSchemaQualified.
     // =========================================================================
 
     [Fact]
-    public void SQ05_WrapTableSource_EmitsSimpleUnqualifiedAlias()
+    public void SQ05_SqlServer_RewritesAnExistingLimit_ToOffsetFetchNext()
     {
-        var options = CreateGovernedOptions();
-        options.AppendTableAlias = true;
+        var env = Env(TargetSqlDialect.SqlServer);
 
-        string secured = _engine.RewriteRls("SELECT * FROM sales.orders".AsMemory(), options);
+        var capped = env.Engine.Compile("SELECT id FROM orders ORDER BY id".AsMemory(), env.Request(enforcedMaxRows: 100), CancellationToken.None);
+        Assert.Contains("OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY", capped.Sql);
+        Assert.DoesNotContain("LIMIT", capped.Sql);
 
-        // Alias must be AS orders, not AS sales.orders
-        Assert.Contains("AS orders", secured);
-        Assert.DoesNotContain("AS sales.orders", secured);
-    }
-
-    [Fact]
-    public void SQ05_SqlServer_RewritesRootLimit_ToOffsetFetchNext()
-    {
-        var options = CreateGovernedOptions(TargetSqlDialect.SqlServer);
-        options.EnforcedMaxRows = 100;
-
-        string secured = _engine.RewriteRls("SELECT id, name FROM orders ORDER BY id".AsMemory(), options);
-        Assert.Contains("OFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY", secured);
-        Assert.DoesNotContain("LIMIT", secured);
-
-        // When query already has a LIMIT clause, it should be rewritten to FETCH NEXT
-        string securedWithLimit = _engine.RewriteRls("SELECT id FROM orders LIMIT 20".AsMemory(), options);
-        Assert.Contains("OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY", securedWithLimit);
-        Assert.DoesNotContain("LIMIT", securedWithLimit);
+        // a smaller user limit survives the clamp and is emitted as FETCH NEXT, never as LIMIT
+        var withLimit = env.Engine.Compile("SELECT id FROM orders LIMIT 20".AsMemory(), env.Request(enforcedMaxRows: 100), CancellationToken.None);
+        Assert.Contains("OFFSET 0 ROWS FETCH NEXT 20 ROWS ONLY", withLimit.Sql);
+        Assert.DoesNotContain("LIMIT", withLimit.Sql);
     }
 
     // =========================================================================
@@ -219,11 +155,11 @@ public class SecurityReview20261002SqTests
     [InlineData("SELECT is_srvrolemember('sysadmin')")]
     public void SQ06_SensitiveBuiltinFunctions_AreDenied(string sql)
     {
-        var options = CreateGovernedOptions();
-        options.EnforceFunctionPolicy = true;
-
-        var ex = Assert.Throws<SecurityException>(() => _engine.RewriteRls(sql.AsMemory(), options));
-        Assert.Contains("is not permitted", ex.Message);
+        foreach (var dialect in new[] { TargetSqlDialect.PostgreSql, TargetSqlDialect.SqlServer })
+        {
+            var ex = Assert.ThrowsAny<SecurityException>(() => Env(dialect).Compile(sql));
+            Assert.Contains("is not permitted", ex.Message);
+        }
     }
 
     // =========================================================================
@@ -233,23 +169,21 @@ public class SecurityReview20261002SqTests
     [Fact]
     public void SQ07_InsertIntoTableWithConsentRowFilter_IsRejected()
     {
-        var options = CreateGovernedOptions();
-        options.RejectConsentFilteredInsert = true;
-        options.TablesWithConsentRowFilter.Add("patients");
-        options.TablesWithConsentRowFilter.Add("health.records");
+        var env = Env(TargetSqlDialect.SqlServer);
+        env.RegionPolicy();   // a consent-style row filter on orders
+        var baseRequest = env.Request();
+        var request = baseRequest with
+        {
+            Policy = baseRequest.Policy with { TablesWithConsentRowFilter = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "orders", "dbo.Orders" } }
+        };
 
-        // Table with consent filter is rejected
-        var ex1 = Assert.Throws<SecurityException>(() =>
-            _engine.RewriteRls("INSERT INTO patients (id, tenant_id) VALUES (1, 42)".AsMemory(), options));
-        Assert.Contains("custom row-level consent filter", ex1.Message);
+        var ex = Assert.ThrowsAny<SecurityException>(() =>
+            env.Engine.Compile("INSERT INTO orders (id, tenantid) VALUES (1, 'acme')".AsMemory(), request, CancellationToken.None));
+        Assert.Contains("consent", ex.Message, StringComparison.OrdinalIgnoreCase);
 
-        var ex2 = Assert.Throws<SecurityException>(() =>
-            _engine.RewriteRls("INSERT INTO health.records (id, tenant_id) VALUES (1, 42)".AsMemory(), options));
-        Assert.Contains("custom row-level consent filter", ex2.Message);
-
-        // Table without consent filter can insert normally
-        string secured = _engine.RewriteRls("INSERT INTO orders (id, tenant_id) VALUES (1, 42)".AsMemory(), options);
-        Assert.Contains("INSERT INTO orders", secured);
+        // a table without a consent filter inserts normally
+        var secured = Env(TargetSqlDialect.SqlServer).Compile("INSERT INTO entitlements (id, tenantid) VALUES (1, 'acme')");
+        Assert.Equal(SqlStatementClass.Insert, secured.StatementClass);
     }
 
     // =========================================================================
@@ -341,11 +275,7 @@ public class SecurityReview20261002SqTests
     [Fact]
     public void SQ11_DotsInQuotedIdentifiers_WhenStrict_IsRejected()
     {
-        var options = CreateGovernedOptions();
-        options.RejectDotsInQuotedIdentifiers = true;
-
-        var ex = Assert.Throws<ParseCanceledException>(() =>
-            _engine.RewriteRls("SELECT * FROM \"my.table\"".AsMemory(), options));
+        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile("SELECT * FROM \"my.table\""));
         Assert.Contains("Dots inside quoted identifiers", ex.Message);
     }
 
@@ -358,11 +288,7 @@ public class SecurityReview20261002SqTests
     [InlineData("SELECT * FROM orders FOR VERSION AS OF 100")]
     public void SQ13_TimeTravelQueries_WhenStrict_AreRejected(string sql)
     {
-        var options = CreateGovernedOptions();
-        options.RejectTimeTravelQueries = true;
-
-        var ex = Assert.Throws<ParseCanceledException>(() =>
-            _engine.RewriteRls(sql.AsMemory(), options));
+        var ex = Assert.Throws<ParseCanceledException>(() => Env().Compile(sql));
         Assert.Contains("Time-travel queries", ex.Message);
     }
 
