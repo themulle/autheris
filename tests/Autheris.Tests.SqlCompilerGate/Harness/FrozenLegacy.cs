@@ -75,6 +75,17 @@ public sealed class FrozenLegacy
         int colon = text.IndexOf(':', StringComparison.Ordinal);
         string type = text[..colon], value = text[(colon + 1)..];
         var inv = CultureInfo.InvariantCulture;
+        if (type.EndsWith("[]", StringComparison.Ordinal) && type != "Byte[]")
+        {
+            // an array cell (PostgreSQL): the elements are frozen one by one, the type is rebuilt from the first element's type name
+            string elementName = type[..^2];
+            var elements = value.Length == 0 ? [] : value.Split(ArraySeparator).Select(e => ReadCell(elementName + ":" + e)).ToArray();
+            var elementType = ElementType(elementName);
+            var array = Array.CreateInstance(elementType, elements.Length);
+            for (int i = 0; i < elements.Length; i++) array.SetValue(elements[i], i);
+            return array;
+        }
+
         return type switch
         {
             "String" => value,
@@ -101,9 +112,30 @@ public sealed class FrozenLegacy
         };
     }
 
+    private const char ArraySeparator = '\u001f';
+
+    private static Type ElementType(string name) => name switch
+    {
+        "String" => typeof(string), "Boolean" => typeof(bool), "SByte" => typeof(sbyte), "Byte" => typeof(byte), "Int16" => typeof(short),
+        "UInt16" => typeof(ushort), "Int32" => typeof(int), "UInt32" => typeof(uint), "Int64" => typeof(long), "UInt64" => typeof(ulong),
+        "Decimal" => typeof(decimal), "Double" => typeof(double), "Single" => typeof(float), "DateTime" => typeof(DateTime),
+        "DateTimeOffset" => typeof(DateTimeOffset), "DateOnly" => typeof(DateOnly), "TimeOnly" => typeof(TimeOnly), "TimeSpan" => typeof(TimeSpan),
+        "Guid" => typeof(Guid),
+        _ => throw new InvalidDataException($"Unsupported frozen array element type '{name}'.")
+    };
+
     public static string WriteCell(object? value)
     {
         var inv = CultureInfo.InvariantCulture;
+        if (value is Array array and not byte[])
+        {
+            var parts = array.Cast<object?>().Select(e => e is null ? throw new InvalidDataException("Null array elements are not frozen.") : WriteCell(e)).ToList();
+            string elementName = array.GetType().GetElementType()!.Name;
+            var texts = parts.Select(p => p[(p.IndexOf(':', StringComparison.Ordinal) + 1)..]).ToList();
+            if (texts.Any(t => t.Contains(ArraySeparator, StringComparison.Ordinal))) throw new InvalidDataException("An array element contains the separator.");
+            return elementName + "[]:" + string.Join(ArraySeparator, texts);
+        }
+
         return value switch
         {
             string s => "String:" + s,

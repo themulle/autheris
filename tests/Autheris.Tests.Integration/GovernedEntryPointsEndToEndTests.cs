@@ -293,6 +293,26 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
         await AssertCompiledAuditAsync(audited, "async query job");
     }
 
+    /// <summary>
+    /// L-A3: the executor requires a provider execution guard (no silent pass-through). The real host must hand it the SQLite guard, both
+    /// as the registered service and inside the governed service that every door uses.
+    /// </summary>
+    [Fact]
+    public void ProviderExecutionGuard_IsTheSqliteGuard_InTheRealHost()
+    {
+        using var scope = _factory.Services.CreateScope();
+
+        var registered = scope.ServiceProvider.GetRequiredService<Autheris.Application.Sql.Interfaces.IProviderExecutionGuard>();
+        registered.ShouldBeOfType<Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard>();
+
+        var service = scope.ServiceProvider.GetRequiredService<Autheris.Application.Sql.Interfaces.IGovernedSqlExecutionService>();
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var executor = service.GetType().GetField("_executor", flags)!.GetValue(service)!;
+        var guard = executor.GetType().GetField("_executionGuard", flags)!.GetValue(executor);
+        guard.ShouldBeOfType<Autheris.Infrastructure.Persistence.SqliteProviderExecutionGuard>(
+            "the governed service must run provider calls under the SQLite guard, not the pass-through fallback");
+    }
+
     [Fact]
     public async Task WebSqlAsyncStatement_ReturnsTheCallersTenantOnly()
     {

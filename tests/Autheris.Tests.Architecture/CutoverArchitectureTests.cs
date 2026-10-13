@@ -67,7 +67,7 @@ public sealed class CutoverArchitectureTests
     private static readonly string[] LegacyMemberNames =
     [
         "RewriteRls", "RunLegacyRewrite", "GenerateGovernedSql", "RestoreClientParameters", "AddInternalRowFilterParameters",
-        "BuildDialectMaskExpression", "FormatTableAlias", "LastIdentifierPart", "BuildTsqlLimitClause", "MaxParameterBudget",
+        "BuildDialectMaskExpression", "FormatTableAlias", "LastIdentifierPart", "BuildTsqlLimitClause",
         "get_SqlRewriterEngine", "set_SqlRewriterEngine", "get_PolicyFiltersAreTargetDialectSql", "get_RewriterEngine"
     ];
 
@@ -95,6 +95,15 @@ public sealed class CutoverArchitectureTests
             foreach (var method in type.Methods.Where(m => LegacyMemberNames.Contains(m.Name)))
             {
                 violations.Add($"{module.Assembly.Name.Name}: member {type.FullName}.{method.Name}");
+            }
+
+            // L-13: the parameter budget of a dialect comes from the capability table, never from a per-generator override.
+            if (type.Name.EndsWith("DialectGenerator", StringComparison.Ordinal) || type.FullName == "TrinoSqlEngine.Ast.Generators.ISqlDialectGenerator")
+            {
+                foreach (var method in type.Methods.Where(m => m.Name == "get_MaxParameterBudget"))
+                {
+                    violations.Add($"{module.Assembly.Name.Name}: member {type.FullName}.{method.Name}");
+                }
             }
         }
 
