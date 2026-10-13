@@ -28,8 +28,8 @@ using TrinoSqlEngine.Governance;
 /// </summary>
 internal static class GovernedTestSupport
 {
-    public static GovernancePolicyFactory PolicyFactory(ITableMetadataRepository? repository) =>
-        new(new MetadataCatalogProvider(repository));
+    public static GovernancePolicyFactory PolicyFactory(ITableMetadataRepository? repository, IOptions<GatewayOptions>? options = null) =>
+        new(new MetadataCatalogProvider(repository), repository ?? Substitute.For<ITableMetadataRepository>(), options ?? Options.Create(new GatewayOptions()));
 
     /// <param name="options">The gateway options of the service under test (the HMAC key reference lives in them).</param>
     /// <param name="secrets">The secret provider of the service under test; without it an HMAC mask degrades to Redact (fail closed).</param>

@@ -7,12 +7,15 @@ using System.Linq;
 using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Sql.Masking;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
+using Microsoft.Extensions.Options;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Governance;
@@ -41,9 +44,14 @@ public sealed record GovernedPolicyInput(
 /// compiler builds it from the catalog's tenant column and its database type, with the tenant bound as
 /// <see cref="RowPolicyFactory.TenantParameterName"/>.
 /// </summary>
-public sealed class GovernancePolicyFactory(IGovernedCatalogProvider catalogs)
+public sealed class GovernancePolicyFactory(
+    IGovernedCatalogProvider catalogs,
+    ITableMetadataRepository tables,
+    IOptions<GatewayOptions> options)
 {
     private readonly IGovernedCatalogProvider _catalogs = catalogs ?? throw new ArgumentNullException(nameof(catalogs));
+    private readonly ITableMetadataRepository _tables = tables ?? throw new ArgumentNullException(nameof(tables));
+    private readonly IOptions<GatewayOptions> _options = options ?? throw new ArgumentNullException(nameof(options));
 
     /// <exception cref="SecurityException">The decisions carry row policies of different target dialects (a gateway defect).</exception>
     public async ValueTask<GovernancePolicy> CreateAsync(GovernedPolicyInput input, CancellationToken ct)
@@ -78,6 +86,10 @@ public sealed class GovernancePolicyFactory(IGovernedCatalogProvider catalogs)
 
         var catalog = await _catalogs.GetCatalogAsync(input.DataSourceName, requested, ct).ConfigureAwait(false);
 
+        // M-A1: a table that only a policy subquery reads is governed like a primary table: it must be active and satisfy
+        // DataSources:RequireTenantColumn. The policy that needs a table that violates this denies its own table (below).
+        var unusableDependents = await FindUnusableDependentsAsync(input, catalog, requested, ct).ConfigureAwait(false);
+
         var rowPredicates = new Dictionary<TableIdentity, PolicyPredicate?>();
         var masks = new Dictionary<TableIdentity, ColumnMaskPolicy>();
         var consentFiltered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -87,7 +99,7 @@ public sealed class GovernancePolicyFactory(IGovernedCatalogProvider catalogs)
         foreach (var (identity, decision) in input.Decisions)
         {
             var metadata = input.Metadata is { } all && all.TryGetValue(identity, out var m) ? m : null;
-            if (!TryAdmit(catalog, identity, decision, metadata, input.TablesWithoutRls.Contains(identity), out var rowPolicy, out var tableMasks))
+            if (!TryAdmit(catalog, unusableDependents, identity, decision, metadata, input.TablesWithoutRls.Contains(identity), out var rowPolicy, out var tableMasks))
             {
                 continue;
             }
@@ -142,8 +154,71 @@ public sealed class GovernancePolicyFactory(IGovernedCatalogProvider catalogs)
         };
     }
 
+    /// <summary>
+    /// M-A1: the verified tables that the policies read in a subquery and that are inactive, have no governance record, or violate
+    /// <c>DataSources:RequireTenantColumn</c> (not exempt). Any failure to load the governance record counts as unusable (fail closed).
+    /// </summary>
+    private async ValueTask<HashSet<TableIdentity>> FindUnusableDependentsAsync(
+        GovernedPolicyInput input, ITableCatalog catalog, List<TableIdentifier> requested, CancellationToken ct)
+    {
+        var unusable = new HashSet<TableIdentity>();
+        var checkedTables = new HashSet<TableIdentity>();
+        var dataSources = _options.Value.DataSources;
+        foreach (var decision in input.Decisions.Values)
+        {
+            if (decision.RowPolicy is not PolicyPredicateRowPolicy policy)
+            {
+                continue;
+            }
+
+            foreach (var name in PolicySubqueryTables.Names(policy.Predicate))
+            {
+                if (catalog.Resolve(name) is not { } entry || !checkedTables.Add(entry.Identity))
+                {
+                    continue;
+                }
+
+                TableIdentifier? identifier = requested.Cast<TableIdentifier?>().FirstOrDefault(r => r!.Value.Schema == entry.Identity.Schema && r.Value.TableName == entry.Identity.Table);
+                TableMetadata? metadata = null;
+                try
+                {
+                    if (identifier is { } found)
+                    {
+                        metadata = await _tables.GetTableMetadataAsync(found, ct).ConfigureAwait(false);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception)
+                {
+                    metadata = null;
+                }
+
+                if (metadata is null || !metadata.Table.IsActive)
+                {
+                    unusable.Add(entry.Identity);
+                    continue;
+                }
+
+                try
+                {
+                    TableMetadata.RequireTenantColumnOrThrow(metadata, dataSources?.RequireTenantColumn == true, dataSources?.TenantColumnExemptTables);
+                }
+                catch (SecurityException)
+                {
+                    unusable.Add(entry.Identity);
+                }
+            }
+        }
+
+        return unusable;
+    }
+
     private static bool TryAdmit(
         ITableCatalog catalog,
+        IReadOnlySet<TableIdentity> unusableDependents,
         TableIdentity identity,
         TableAccessDecision decision,
         TableMetadata? metadata,
@@ -182,7 +257,8 @@ public sealed class GovernancePolicyFactory(IGovernedCatalogProvider catalogs)
 
             // SEC-X1-05: a policy that reads a table the catalog cannot verify cannot be enforced, so its own table is denied (fail closed,
             // reported like every other "table not usable" cause) instead of failing inside the compiler with another code.
-            if (PolicySubqueryTables.Names(predicateRowPolicy.Predicate).Any(name => catalog.Resolve(name) is null))
+            if (PolicySubqueryTables.Names(predicateRowPolicy.Predicate).Any(name =>
+                    catalog.Resolve(name) is not { } dependent || unusableDependents.Contains(dependent.Identity)))
             {
                 rowPolicy = null;
                 return false;
