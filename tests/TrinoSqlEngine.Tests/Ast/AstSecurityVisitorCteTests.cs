@@ -1,111 +1,43 @@
 namespace TrinoSqlEngine.Tests.Ast;
 
-using System;
 using TrinoSqlEngine;
-using TrinoSqlEngine.Ast.Builder;
-using TrinoSqlEngine.Ast.Generators;
-using TrinoSqlEngine.Ast.Nodes;
-using TrinoSqlEngine.Ast.Visitors;
+using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Tests.Security;
 using Xunit;
 
+/// <summary>
+/// CTE scoping of the governed compile path. Covered elsewhere (Compiler/CteShadowingTests): self-reference in a non-recursive WITH
+/// (<c>NonRecursiveWith_SelfReference_IsRejected</c>), a qualified reference inside a CTE body
+/// (<c>CteShadowingPhysicalName_StillSecuresTheQualifiedPhysicalTableInsideTheBody</c>) and quoted/unquoted case variants
+/// (<c>QuotedCteVsUnquotedPhysical_CaseVariants_AlwaysSecured</c>, SEC C-02).
+/// </summary>
+[Trait("Category", "Security")]
 public sealed class AstSecurityVisitorCteTests
 {
-    private readonly FastSqlEngine _engine = new();
-
-    private string SecureAndGenerate(string sql, RlsOptions options)
+    public static TheoryData<TargetSqlDialect> Dialects => new()
     {
-        var (tree, _) = _engine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
-        var builder = new SqlAstBuilder(AstBuilderOptions.FromRlsOptions(options));
-        var ast = builder.BuildStatement(tree);
+        TargetSqlDialect.PostgreSql, TargetSqlDialect.SqlServer, TargetSqlDialect.Oracle
+    };
 
-        var visitor = new AstSecurityVisitor(options, _engine);
-        var secured = (SqlStatement)visitor.Visit(ast);
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void Cte_QualifiedName_IsNeverTreatedAsTheCte(TargetSqlDialect dialect)
+    {
+        // Even though a CTE named 'orders' exists, dbo.orders is qualified and must be the physical (secured) table
+        var compiled = new ProbeEnv(dialect).Compile("WITH orders AS (SELECT 1 AS x) SELECT * FROM dbo.orders");
 
-        var generator = SqlDialectGeneratorFactory.GetGenerator(options.TargetDialect);
-        return generator.GenerateSql(secured);
+        Assert.Single(compiled.Parameters, p => p.Origin == ParameterOrigin.Tenant);
+        ProbeAsserts.TenantPredicates(compiled, 1);
     }
 
-    [Fact]
-    public void Cte_ExitTiming_SelfNamedReferenceInNonRecursiveWith_IsRejected()
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public void Cte_OuterReference_UsesTheCte_WithoutAnyInjection(TargetSqlDialect dialect)
     {
-        var options = new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42"),
-            TargetDialect = TargetSqlDialect.PostgreSql
-        };
+        // virtual CTE without a physical table: nothing to secure
+        var compiled = new ProbeEnv(dialect).Compile("WITH virtual_table AS (SELECT 1 AS col) SELECT * FROM virtual_table");
 
-        // CR-ADG-32: a self-reference needs WITH RECURSIVE; it is never silently a physical scan
-        Assert.Throws<System.Security.SecurityException>(() => SecureAndGenerate("WITH orders AS (SELECT * FROM orders) SELECT * FROM orders", options));
-
-        // A schema-qualified reference is never the CTE: the physical table keeps its RLS
-        string result = SecureAndGenerate("WITH orders AS (SELECT * FROM public.orders) SELECT * FROM orders", options);
-        Assert.Contains("\"tenant_id\" = 42", result, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Cte_QualifiedName_NeverTreatedAsCte()
-    {
-        var options = new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42"),
-            TargetDialect = TargetSqlDialect.PostgreSql
-        };
-
-        // Even though CTE named 'orders' exists, schema.orders is qualified and must be treated as physical table
-        string sql = "WITH orders AS (SELECT 1 AS x) SELECT * FROM public.orders";
-        string result = SecureAndGenerate(sql, options);
-
-        Assert.Contains("\"tenant_id\" = 42", result, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Cte_OuterReference_UsesCteWithoutRls()
-    {
-        var options = new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42"),
-            TargetDialect = TargetSqlDialect.PostgreSql
-        };
-
-        // Virtual CTE with no physical table references
-        string sql = "WITH virtual_table AS (SELECT 1 AS col) SELECT * FROM virtual_table";
-        string result = SecureAndGenerate(sql, options);
-
-        // No physical table access, so tenant_id = 42 should not appear
-        Assert.DoesNotContain("tenant_id = 42", result, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Cte_SecC02_QuotedCteDoesNotShadowDifferentCasedPhysicalTable()
-    {
-        var options = new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42", predicate: t => t == "mycte"),
-            TargetDialect = TargetSqlDialect.PostgreSql
-        };
-
-        // Quoted CTE "MyCte" must NOT shadow unquoted physical table 'mycte'
-        string sql = "WITH \"MyCte\" AS (SELECT 1 AS col) SELECT * FROM mycte";
-        string result = SecureAndGenerate(sql, options);
-
-        // Physical table 'mycte' MUST have RLS applied
-        Assert.Contains("\"tenant_id\" = 42", result, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void Cte_SecC02_QuotedReferenceDoesNotShadowLowercaseCte()
-    {
-        var options = new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 42", predicate: t => t == "MYCTE"),
-            TargetDialect = TargetSqlDialect.PostgreSql
-        };
-
-        // Unquoted CTE 'mycte' folds to lowercase; quoted "MYCTE" is case-sensitive and must not match the CTE
-        string sql = "WITH mycte AS (SELECT 1 AS col) SELECT * FROM \"MYCTE\"";
-        string result = SecureAndGenerate(sql, options);
-
-        // Physical table "MYCTE" MUST have RLS applied
-        Assert.Contains("\"tenant_id\" = 42", result, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(compiled.Parameters, p => p.Origin == ParameterOrigin.Tenant);
+        Assert.Empty(compiled.AppliedPredicates);
     }
 }

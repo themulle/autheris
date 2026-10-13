@@ -169,59 +169,18 @@ public sealed class AstSimplificationVisitorTests
         Assert.Contains("\"tenant_id\" = 't1'", sql);
     }
 
-    [Fact]
-    public void EndToEnd_GenerateGovernedSql_IncorporatesSimplifier_DmlStatement()
+    // The compile path simplifies the USER tree (before any injection) and binds the literals that remain.
+    [Theory]
+    [InlineData("SELECT id FROM orders WHERE 1 = 1 AND status = 'x' AND status = 'x'")]
+    [InlineData("DELETE FROM orders WHERE 1 = 1 AND status = 'x' AND status = 'x'")]
+    public void EndToEnd_Compile_IncorporatesSimplifier(string sql)
     {
-        var options = new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            EnforceReadOnlyQueries = false,
-            TargetDialect = TargetSqlDialect.PostgreSql
-        };
+        var env = new TrinoSqlEngine.Tests.Security.ProbeEnv(TargetSqlDialect.PostgreSql);
+        var compiled = env.Compile(sql);
 
-        // DML statement containing 1 = 1 and user filter; policy provider injects matching filter
-        string sql = "DELETE FROM orders WHERE 1 = 1 AND tenant_id = 't1'";
-        string result = _engine.GenerateGovernedSql(sql, options);
-
-        // 1 = 1 should be gone, duplicate tenant_id filter deduplicated
-        Assert.DoesNotContain("1 = 1", result);
-        Assert.Contains("\"tenant_id\" = 't1'", result);
-
-        int count = 0;
-        int idx = 0;
-        while ((idx = result.IndexOf("\"tenant_id\" = 't1'", idx, StringComparison.Ordinal)) != -1)
-        {
-            count++;
-            idx += 18;
-        }
-
-        Assert.Equal(1, count);
-    }
-
-    [Fact]
-    public void EndToEnd_GenerateGovernedSql_IncorporatesSimplifier_SelectStatement()
-    {
-        var options = new RlsOptions
-        {
-            TargetDialect = TargetSqlDialect.PostgreSql
-        };
-
-        // Query containing 1 = 1 and duplicate filters in WHERE clause
-        string sql = "SELECT id FROM orders WHERE 1 = 1 AND tenant_id = 't1' AND tenant_id = 't1'";
-        string result = _engine.GenerateGovernedSql(sql, options);
-
-        // 1 = 1 should be gone, duplicate tenant_id filter deduplicated
-        Assert.DoesNotContain("1 = 1", result);
-        Assert.Contains("\"tenant_id\" = 't1'", result);
-
-        int count = 0;
-        int idx = 0;
-        while ((idx = result.IndexOf("\"tenant_id\" = 't1'", idx, StringComparison.Ordinal)) != -1)
-        {
-            count++;
-            idx += 18;
-        }
-
-        Assert.Equal(1, count);
+        // 1 = 1 is gone and the duplicate conjunct is deduplicated: one status comparison, one bound query literal
+        Assert.DoesNotContain("1 = 1", compiled.Sql);
+        Assert.Single(compiled.Parameters, p => p.Origin == TrinoSqlEngine.Ast.Emit.ParameterOrigin.QueryLiteral);
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(compiled.Sql, "\"status\" = "));
     }
 }

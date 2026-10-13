@@ -1,69 +1,42 @@
 namespace TrinoSqlEngine.Tests.Ast;
 
 using System;
-using System.Collections.Generic;
-using System.Security;
 using TrinoSqlEngine;
-using TrinoSqlEngine.Ast.Builder;
-using TrinoSqlEngine.Ast.Generators;
-using TrinoSqlEngine.Ast.Nodes;
-using TrinoSqlEngine.Ast.Visitors;
+using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Tests.Security;
 using Xunit;
 
+/// <summary>
+/// Wildcard expansion with column masks on the governed compile path. (The legacy "masking without a column provider" case has no
+/// typed form: a table outside the catalog is rejected, see <c>TypedInjectionTests.UnknownTable_IsRejected</c>.)
+/// </summary>
+[Trait("Category", "Security")]
 public sealed class AstSecurityVisitorMaskingTests
 {
-    private readonly FastSqlEngine _engine = new();
-
-    private string SecureAndGenerate(string sql, RlsOptions options)
+    [Theory]
+    [InlineData(TargetSqlDialect.PostgreSql, "\"Email\"")]
+    [InlineData(TargetSqlDialect.SqlServer, "[Email]")]
+    public void Masking_WildcardExpansion_ProjectsTheMaskWithADelimitedAlias(TargetSqlDialect dialect, string quotedEmail)
     {
-        var (tree, _) = _engine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
-        var builder = new SqlAstBuilder(AstBuilderOptions.FromRlsOptions(options));
-        var ast = builder.BuildStatement(tree);
+        var env = new ProbeEnv(dialect);
+        env.MaskEmail();
 
-        var visitor = new AstSecurityVisitor(options, _engine);
-        var secured = (SqlStatement)visitor.Visit(ast);
+        var compiled = env.Compile("SELECT * FROM orders");
 
-        var generator = SqlDialectGeneratorFactory.GetGenerator(options.TargetDialect);
-        return generator.GenerateSql(secured);
+        // SEC M-24: the masked column keeps its (delimited) name, the other columns are projected as cataloged columns
+        Assert.Contains($"AS {quotedEmail}", compiled.Sql, StringComparison.Ordinal);
+        Assert.Contains("NULL", compiled.Sql, StringComparison.Ordinal);
+        Assert.Contains(dialect == TargetSqlDialect.SqlServer ? "[Status]" : "\"Status\"", compiled.Sql, StringComparison.Ordinal);
+        // the unmasked source column is never projected: the name appears only as the alias of the mask
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(compiled.Sql, System.Text.RegularExpressions.Regex.Escape(quotedEmail)));
     }
 
     [Fact]
-    public void Masking_WildcardExpansion_AppliesMaskExpressionWithDelimitedQuotes()
+    public void Masking_MaskedColumnInAPredicate_IsRejected()
     {
-        var options = new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("1=1"),
-            TargetDialect = TargetSqlDialect.PostgreSql,
-            TableColumnsProvider = table => new[] { "id", "email", "ssn" },
-            ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
-                hasMaskPredicate: (t, c) => c.Equals("ssn", StringComparison.OrdinalIgnoreCase),
-                maskExpressionProvider: (t, c) => "'***'")
-        };
+        var env = new ProbeEnv(TargetSqlDialect.PostgreSql);
+        env.MaskEmail();
 
-        string sql = "SELECT * FROM users";
-        string result = SecureAndGenerate(sql, options);
-
-        // SEC M-24: ssn should be masked with '***' AS "ssn"
-        Assert.Contains("'***' AS \"ssn\"", result, StringComparison.Ordinal);
-        Assert.Contains("\"id\"", result, StringComparison.Ordinal);
-        Assert.Contains("\"email\"", result, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Masking_WithoutColumnProvider_ThrowsSecurityException()
-    {
-        var options = new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("1=1"),
-            TargetDialect = TargetSqlDialect.PostgreSql,
-            TableColumnsProvider = null, // No column provider
-            TablesWithMaskedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "users" },
-            ColumnMaskingProvider = new DefaultColumnMaskingPolicyProvider(
-                hasMaskPredicate: (t, c) => true,
-                maskExpressionProvider: (t, c) => "NULL")
-        };
-
-        string sql = "SELECT * FROM users";
-        Assert.Throws<SecurityException>(() => SecureAndGenerate(sql, options));
+        Assert.ThrowsAny<System.Security.SecurityException>(() => env.Compile("SELECT id FROM orders WHERE email = 'x'"));
     }
 }
