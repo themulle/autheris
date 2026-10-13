@@ -86,7 +86,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
         IClientIpResolver? clientIpResolver = null,
         ILogger? logger = null,
         IConsentRepository? consentRepository = null,
-        IKeyVaultSecretProvider? secretProvider = null,
         ISqlEngine? sqlEngine = null,
         GovernancePolicyFactory? policyFactory = null,
         ISqlSecurityValidator? sqlSecurityValidator = null,
@@ -344,26 +343,6 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
             referenceSpellings[target.FullName] = target.FullName;
         }
 
-        var tableNameCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        var schemaTableCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var t in metadata.ReferencedTables)
-        {
-            tableNameCounts[t.TableName] = tableNameCounts.GetValueOrDefault(t.TableName) + 1;
-            if (!string.IsNullOrWhiteSpace(t.Schema))
-            {
-                var st = $"{t.Schema}.{t.TableName}";
-                schemaTableCounts[st] = schemaTableCounts.GetValueOrDefault(st) + 1;
-            }
-        }
-
-        void RegisterTableLookup<T>(IDictionary<string, T> dict, TableAccessTarget target, TableIdentifier resolvedId, T value)
-        {
-            dict[target.FullName] = value;
-            dict[resolvedId.ToQualifiedName()] = value;
-            if (tableNameCounts.TryGetValue(target.TableName, out var count) && count == 1) dict[target.TableName] = value;
-            if (!string.IsNullOrWhiteSpace(target.Schema) && schemaTableCounts.TryGetValue($"{target.Schema}.{target.TableName}", out var sc) && sc == 1) dict[$"{target.Schema}.{target.TableName}"] = value;
-        }
-
         foreach (var target in metadata.ReferencedTables)
         {
             TableIdentifier tableId = SqlDataSourceResolver.ResolveTableIdentifier(target, effectiveDataSourceName);
@@ -537,7 +516,8 @@ public sealed class GovernedSqlRewriter : ISqlRewritePipeline
 
             if (decision.AppliedVirtualFilters is { Count: > 0 } applied)
             {
-                RegisterTableLookup(virtualFilters, target, resolvedId, applied);
+                // One audit key per table: the resolved qualified name (the other spellings of the same table would only multiply the record).
+                virtualFilters[resolvedId.ToQualifiedName()] = applied;
             }
 
             var identity = new TableIdentity(tableMeta.Table.SchemaName, tableMeta.Table.TableName);

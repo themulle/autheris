@@ -41,7 +41,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
 
     private readonly GovernedSqlRewriter _rewriter;
     private readonly GovernedSqlExecutor _executor;
-    private readonly IMandatoryRowFilterResolver? _rowFilterResolver;
     private readonly IServiceProvider? _serviceProvider;
     private readonly IFederatedQueryExecutionService? _federatedExecutionService;
 
@@ -119,7 +118,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             clientIpResolver,
             logger,
             consentRepository,
-            secretProvider,
             sqlEngine,
             policyFactory,
             sqlSecurityValidator,
@@ -130,8 +128,6 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             accessProfileRepository,
             memoryCache,
             typedPolicies: typedPolicies);
-
-        _rowFilterResolver = mandatoryFilters;
 
         _executor = new GovernedSqlExecutor(
             _rewriter,

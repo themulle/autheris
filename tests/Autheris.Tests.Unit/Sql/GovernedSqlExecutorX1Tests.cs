@@ -521,7 +521,6 @@ public sealed class GovernedSqlExecutorX1Tests
         var compiled = await service.CompileAsync("SELECT id FROM orders", user, new TenantId(Tenant));
         var allowed = await service.ExecuteQueryBufferedAsync(new GovernedSqlQueryRequest("SELECT id FROM orders"), user, new TenantId(Tenant));
         allowed.Rows.ShouldHaveSingleItem()["query"].ShouldBe(compiled.Sql);
-        allowed.RewrittenSql.ShouldBe(compiled.Sql);
         allowed.Rows[0]["query"]!.ToString()!.ShouldNotContain(Tenant);
 
         // a denied statement never reaches the synthetic reader: the compile (and the governance before it) comes first

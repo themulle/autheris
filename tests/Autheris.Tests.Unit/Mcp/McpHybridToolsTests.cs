@@ -70,7 +70,6 @@ public sealed class McpHybridToolsTests
             Arg.Any<CancellationToken>())
             .Returns(new GovernedSqlResult(
                 OriginalSql: query,
-                RewrittenSql: "SELECT id, mask(email) FROM sales.public.customers",
                 Columns: ["id", "email"],
                 Rows: [new Dictionary<string, object?> { ["id"] = 1, ["email"] = "a***@example.com" }],
                 RowCount: 1,

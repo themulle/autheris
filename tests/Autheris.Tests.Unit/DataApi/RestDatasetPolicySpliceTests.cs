@@ -107,7 +107,7 @@ public sealed class RestDatasetPolicySpliceTests
             Pdp.EvaluateAccessAsync(Customers, meta, Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<string>?>(), Arg.Any<CancellationToken>())
                 .Returns(decision ?? SqlServerPolicyDecision());
             Sql.ExecuteQueryBufferedAsync(Arg.Do<GovernedSqlQueryRequest>(Captured.Add), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-                .Returns(new GovernedSqlResult("q", "q", ["id"], [], 0, 1));
+                .Returns(new GovernedSqlResult("q", ["id"], [], 0, 1));
         }
 
         public GovernedDataQueryService Service(IFederatedQueryExecutionService? federated = null) =>
@@ -316,7 +316,7 @@ public sealed class RestDatasetPolicySpliceTests
             .Returns(ci =>
             {
                 rest.Captured.Add(ci.Arg<GovernedSqlQueryRequest>());
-                return new GovernedSqlResult("q", "q", ["id", "name"], rows, 2, 1);
+                return new GovernedSqlResult("q", ["id", "name"], rows, 2, 1);
             });
         var restEnvelope = await rest.Service().ExecuteQueryAsync(
             new DatasetQueryRequest(Customers, ["id", "name"], "id gt 0", "name", 10, 0, SqlTransports.Rest),
@@ -327,7 +327,7 @@ public sealed class RestDatasetPolicySpliceTests
             .Returns(ci =>
             {
                 mcp.Captured.Add(ci.Arg<GovernedSqlQueryRequest>());
-                return new GovernedSqlResult("q", "q", ["id", "name"], rows, 2, 1);
+                return new GovernedSqlResult("q", ["id", "name"], rows, 2, 1);
             });
         var handler = new McpToolExecutionHandler(
             Substitute.For<IGovernedSqlExecutionService>(), new Services(mcp), Substitute.For<ICatalogDiscoveryService>(),

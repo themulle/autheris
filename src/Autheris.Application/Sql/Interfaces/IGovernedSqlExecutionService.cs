@@ -34,7 +34,6 @@ public sealed record GovernedSqlQueryRequest(
 
 public sealed record GovernedSqlResult(
     string OriginalSql,
-    string RewrittenSql,
     IReadOnlyList<string> Columns,
     IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
     int RowCount,

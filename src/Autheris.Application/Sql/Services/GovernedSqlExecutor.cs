@@ -110,7 +110,7 @@ public sealed class GovernedSqlExecutor
         bool isTruncated = false;
         var sw = Stopwatch.StartNew();
 
-        string securedSql = await ExecuteCoreAsync(
+        await ExecuteCoreAsync(
             request,
             user,
             tenantId,
@@ -140,7 +140,6 @@ public sealed class GovernedSqlExecutor
 
         return new GovernedSqlResult(
             OriginalSql: request.Sql,
-            RewrittenSql: securedSql,
             Columns: columns.AsReadOnly(),
             Rows: rows.AsReadOnly(),
             RowCount: rows.Count,

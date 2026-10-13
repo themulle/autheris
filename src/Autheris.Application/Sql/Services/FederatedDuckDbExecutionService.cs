@@ -189,7 +189,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
         return new GovernedSqlResult(
             request.Sql,
-            plan.GeneratedDuckDbSql,
             duckDbResult.Columns,
             rows,
             rows.Count,

@@ -145,7 +145,7 @@ public sealed class ArrowExportRebacBodyTests
         var context = CreateContext(services, "{\"table\":\"sales.public.orders\",\"sql\":\"SELECT id FROM sales.public.orders\"}");
         var sql = Substitute.For<IGovernedSqlExecutionService>();
         sql.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
-            .Returns(new GovernedSqlResult("q", "q", ["id"], [new Dictionary<string, object?> { ["id"] = 1 }], 1, 1));
+            .Returns(new GovernedSqlResult("q", ["id"], [new Dictionary<string, object?> { ["id"] = 1 }], 1, 1));
 
         var result = await ArrowExportEndpoints.HandleArrowExportAsync(
             context, new ArrowExportService(services.GetRequiredService<IOptions<GatewayOptions>>(), NullLogger<ArrowExportService>.Instance), sql, CancellationToken.None);

@@ -222,7 +222,6 @@ public sealed class SqlEndpointsTests
             onRequest(request);
             return Task.FromResult(new GovernedSqlResult(
                 OriginalSql: request.Sql,
-                RewrittenSql: request.Sql,
                 Columns: ["id", "company_name", "total_revenue"],
                 Rows: [new Dictionary<string, object?> { ["id"] = 1, ["company_name"] = "Acme", ["total_revenue"] = 500m }],
                 RowCount: 1,

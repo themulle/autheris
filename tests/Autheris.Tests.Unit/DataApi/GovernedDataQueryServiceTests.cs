@@ -94,7 +94,7 @@ public sealed class GovernedDataQueryServiceTests
             Arg.Any<ClaimsPrincipal>(),
             Arg.Any<TenantId>(),
             Arg.Any<CancellationToken>())
-            .Returns(new GovernedSqlResult("SELECT id, email, name FROM sales.dbo.customers", "SELECT ...", new[] { "id", "email", "name" }, rows, 1, 10));
+            .Returns(new GovernedSqlResult("SELECT id, email, name FROM sales.dbo.customers", new[] { "id", "email", "name" }, rows, 1, 10));
 
         _maskingProvider.MaskValue("email", "doe@example.com", Arg.Any<MaskingRule>())
             .Returns("d***@example.com");
@@ -257,7 +257,7 @@ public sealed class GovernedDataQueryServiceTests
         new(new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("sub", "user-123") }, "TestAuth")), new TenantId("default"));
 
     private static GovernedSqlResult SqlResult(int rowCount, bool truncated = false) =>
-        new("q", "q", new[] { "id", "name" }, Rows(rowCount), rowCount, 1, truncated);
+        new("q", new[] { "id", "name" }, Rows(rowCount), rowCount, 1, truncated);
 
     [Fact]
     public async Task ExecuteQueryAsync_WithOffset_EmitsNoOffsetAndLimitOffsetPlusLimitPlusOne_ThreePartName()
