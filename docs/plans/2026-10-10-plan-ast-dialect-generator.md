@@ -4114,7 +4114,7 @@ Result on the reverted tree: `dotnet build Autheris.sln` 0 errors, 0 warnings; G
 - Timing flakes (parse budget under load, never retried): `DmlCompileTests.Insert_MultiRow_OverTheBindLimit_IsRejected_WithTheTypedError` (PostgreSQL, DuckDB) and `LimitBoundaryProperties.BindLimit_IsExact_ForEveryGovernedDialect` failed once under heavy machine load and passed in an isolated rerun; one DuckDB bind-limit compile-time test failed once in a fork run and passed alone.
 - Revert rehearsal tree: build 0/0; `TrinoSqlEngine.Tests` 7265 with only the load flake above (isolated rerun green), Unit 4995, Architecture 29, Extensions 233 green; G7 (`Category=Security`) 395/395 green after the catalog adjustment of step 6. The scratch worktree and branch were deleted.
 
-**X1 squash commit message (draft).**
+**X1 squash commit message (draft).** Rewritten after the Phase 5 review (M-4): complete breaking changes and new items; the revert section is a placeholder until the orchestrator has re-rehearsed M-11 on the final squash.
 
 ```
 feat(governed-sql): cut over to the AST compiler and delete the legacy rewriter (WP-X1)
@@ -4126,42 +4126,80 @@ and everything that fed it are gone; there is no runtime switch.
 Deleted: RlsListener, RewriteRls/GenerateGovernedSql, FastSqlEngine.SqlRewriterEngine,
 the string policy providers and RlsOptions, TrustedSqlExpression, BuildDialectMaskExpression,
 DialectLimitExceededException, the string plan cache (ICompiledSqlQueryPlanCache and
-implementations), RestoreClientParameters and the __param_ text emission.
-New: architecture guards (no legacy types, no free-text expression nodes, CompiledSql only
-built by the engine, CommandText only set by the binder, entry points reach Compile and
-the binder, deleted paths stay deleted), frozen legacy results for the G4 differential,
-NamedBindMarkerExpression for the OQ-4 text renderers, door-level audit proofs.
+implementations), RestoreClientParameters, the __param_ text emission, the WebSQL governance
+bypass (danger_bypass_websql_governance is inert), TokenStreamRewriter in production code
+(SD-1), GovernedSqlResult.RewrittenSql and the unused secretProvider parameter of
+GovernedSqlRewriter.
+
+New:
+- Startup: AuditKeyStartupCheck (the audit digest key is resolved at the start; outside
+  Development and Test a missing, unreadable or too short key stops the host),
+  DeniedTablesStartupReporter (background listing of the tables the pipeline denies, ids and
+  stable codes only), a single startup warning for the inert governance bypass flag.
+- Providers: SQLite provider execution guard (a statement is interrupted at the timeout);
+  IProviderExecutionGuard is a required dependency of the executors.
+- Audit: keyed originalSqlHash (HMAC over the literal-redacted statement, key derived from the
+  audit key), compiled digest key derived from the audit key, compiler_version / dialect /
+  bind_count / sql.compiled_digest on every record; DML audits are written without the request
+  token and an audit failure after the commit is logged as Critical and counted
+  (autheris_dml_audit_failed_total) instead of failing the request; engine rejections
+  (unsupported construct, reserved identifier, syntax error, limits) are audited with their
+  stable code, never the message.
+- Tenants: tenant registry resolve-collision endpoint
+  (POST /api/admin/tenant-registry/{tenantId}/resolve-collision, ClusterAdmin, optional
+  expectedCurrent compare-and-swap, audit TENANT_COLLISION_RESOLVED), ITenantRegistry
+  TryGetAsync / ResolveCollisionAsync.
+- Policy: policy-subquery (dependent) tables are governed like primary tables (active,
+  DataSources:RequireTenantColumn, the governance record the catalog provider can admit);
+  only admittable candidates are requested from the catalog provider.
+- Guards: architecture guards (no legacy types, no free-text expression nodes, CompiledSql only
+  built by the engine, CommandText / command text only set by allowlisted types, entry points
+  reach Compile and the binder, deleted paths stay deleted, no TokenStreamRewriter),
+  NamedBindMarkerExpression for the OQ-4 text renderers, frozen legacy results for the G4
+  differential, door-level audit proofs.
 
 Breaking changes (release notes):
 - WebSql:SqlRewriterEngine is removed; configuring it fails the start (SEC-ADG-28).
+- Startup: AuditKeyStartupCheck fails the start outside Development and Test without
+  GovernanceDb:AuditHmacKeyVaultRef or DataMasking:HmacSecretKeyVaultRef (a usable key of the
+  minimum length). Before, the first governed statement failed.
+- danger_bypass_websql_governance has no effect: every statement is governed. It stays a
+  DANGER switch, so it fails the start outside Development and is warned about once in
+  Development.
+- Tenants: a tenant selected by header must be registered (IdP login or the Tenants
+  configuration), otherwise 403 TENANT_UNKNOWN; the tenant registry is on by default. A
+  ClusterAdmin header never registers a tenant or marks a collision. New ClusterAdmin endpoint
+  to resolve a collision (body expectedCurrent; 409 when the group holds another spelling;
+  audit TENANT_COLLISION_RESOLVED); every other spelling of the tenant id stays denied.
+- ITenantRegistry gains TryGetAsync and ResolveCollisionAsync (implementers must add them).
 - RewriteSqlAsync is ValidateAsync; error statuses and codes follow section 28.4.3 (also
-  for dataset endpoints).
-- RequireDefaultSchema defaults to true for PostgreSQL and Oracle; the tenant registry is
-  on by default; WebSql:PlanCache is removed.
+  for dataset endpoints). Identifiers starting with autheris_ are reserved: 400
+  SQL_RESERVED_IDENTIFIER. GitOps (policy/endpoint declarations) answer a curated 400.
 - Audit records carry compiler_version, dialect, bind_count and sql.compiled_digest instead
-  of the secured SQL text.
-- Stricter than legacy: "[" is rejected on every dialect, constant-only DML predicates count
-  as unfiltered, qualified functions are not accepted from the caller list, FETCH WITH TIES
-  is downgraded under an enforced row cap.
+  of the secured SQL text; the compiled text is stored only with Audit:StoreCompiledSql.
+  originalSqlHash is a keyed HMAC over the redacted text (key derived from the audit key), not
+  a SHA-256 over the raw text; statements that differ only in literal values share it. The
+  compiled digest key derives from the audit key, not from the master secret.
+- Stricter than legacy: "[" is rejected on every dialect; constant-only DML predicates count
+  as unfiltered; qualified functions are not accepted from the caller list; AdditionalAllowedFunctions
+  only narrows the dialect function map; FETCH WITH TIES is downgraded under an enforced row
+  cap; recursive CTEs are not usable; HMAC-masked columns are rejected in predicates and joins;
+  an INSERT that names a foreign tenant is a security rejection (tenant mismatch).
+- Configuration: RequireDefaultSchema defaults to true for PostgreSQL and Oracle;
+  WebSql:PlanCache is removed; RowFilters.SubqueryStrategy is ignored.
+- Public API: SqlTokenSecurityOptions.FromRlsOptions is now ForDialect; AstBuilderOptions.
+  FromRlsOptions and the legacy ISqlEngine members are removed; the constructors of the
+  governed services require IProviderExecutionGuard; GovernedSqlResult.RewrittenSql is removed
+  (it was the compiled text with markers, never read by the gateway); the secretProvider
+  parameter of GovernedSqlRewriter is removed.
+- SQLite statements are interrupted at WebSql:ExecutionTimeoutSeconds (504); a client that
+  relied on an unbounded SQLite statement is cut off.
 - Oracle is admitted but not announced until S-1 is cleared.
 
-Revert (M-11, rehearsed; the tree builds and G1 + G7 are green). The revert set is
-{X1, X0y, X0l, X0g, X0f, X0e, X0d (X0d-2 folded in), X0x}:
-  git switch -c revert-x1 <this commit>
-  git revert --no-edit <this commit>                                 # X1 (rehearsed as bb80e29..HEAD, no conflicts)
-  then, newest first:
-  git revert --no-edit c9bc3c9 45e88bb bf2dd42                       # X0y (keep cd953de)
-  git revert --no-edit 5201a34 8d8a754 385ed74 6ed50f3 a5a06b3 a37d2aa 1490f43   # X0l
-  git revert --no-edit d9c75eb 3c57b01 393e210 bfa181b 3b5a1d1      # X0g, X0f, X0e, X0d
-  git revert -m 1 3da0248                                            # X0x (needs X0d's generator method)
-  Manual resolutions: gate csproj (45e88bb: keep the BenchCheck reference), GovernedDataQueryService.cs
-  (385ed74: keep the current file, X0n stays), CompileRequestFactory.cs and its test (1490f43: delete),
-  plan conflicts: keep the current plan. Reverted tree: SecurityRegressionCatalog loses the evidence
-  entries of the removed X0y/X0l tests. An operator who set WebSql:SqlRewriterEngine must remove it
-  before deploying a revert only if the old default is not wanted; the old default is legacy.
+Revert procedure: re-rehearsed on the final squash by the orchestrator (see M-11).
 No schema or data migration is involved.
 
-Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ```
 
 #### Phase 3 review (X1 part A) and security fixes implementation log
