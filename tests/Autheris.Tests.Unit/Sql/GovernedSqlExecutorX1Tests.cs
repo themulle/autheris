@@ -114,7 +114,8 @@ public sealed class GovernedSqlExecutorX1Tests
         GatewayOptions? options = null,
         IKeyVaultSecretProvider? secrets = null,
         IProviderExecutionGuard? guard = null,
-        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
+        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
+        Func<AuditLogEntry, CancellationToken, Task>? auditSink = null)
     {
         var gateway = options ?? Gateway(provider);
         var connection = new FakeDbConnection(commandFactory);
@@ -125,7 +126,17 @@ public sealed class GovernedSqlExecutorX1Tests
             .Returns(ci => Task.FromResult<DbTransaction?>(sessionTransaction ? ((FakeDbConnection)ci.Arg<DbConnection>()).BeginSessionTransaction() : null));
         var audit = new List<AuditLogEntry>();
         var auditRepo = Substitute.For<IAuditLogRepository>();
-        auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(audit.Add), Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        auditRepo.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>()).Returns(ci =>
+        {
+            var entry = ci.Arg<AuditLogEntry>();
+            return auditSink is null ? Record(entry) : auditSink(entry, ci.Arg<CancellationToken>()).ContinueWith(_ => Record(entry), TaskContinuationOptions.OnlyOnRanToCompletion);
+
+            Task Record(AuditLogEntry e)
+            {
+                audit.Add(e);
+                return Task.CompletedTask;
+            }
+        });
         var log = new CapturingLogger<GovernedSqlExecutor>();
         var opts = Options.Create(gateway);
         var executor = new GovernedSqlExecutor(
@@ -169,6 +180,48 @@ public sealed class GovernedSqlExecutorX1Tests
         }
 
         h.Audit.ShouldContain(e => e.EventType == "WEBSQL_DML_EXECUTED" && e.DetailsJson.Contains("sql.compiled_digest"));
+    }
+
+    [Fact]
+    public async Task WebSqlDml_TokenCancelledAfterCommit_StillWritesTheAuditRecord_AndTheResponseSucceeds()
+    {
+        // M-1: a client that disconnects right after the commit must not leave a committed DML without its audit record.
+        var compiled = await CompileAsync("Sqlite", "UPDATE orders SET amount = 1 WHERE id = 1");
+        using var cts = new CancellationTokenSource();
+        var h = CreateHarness("Sqlite", auditSink: (_, token) => { token.ThrowIfCancellationRequested(); return Task.CompletedTask; });
+        h.Connection.AfterCommit = cts.Cancel;
+
+        await h.Executor.ExecuteRewrittenAsync(
+            new GovernedSqlQueryRequest("UPDATE orders SET amount = 1 WHERE id = 1"), Writer(), new TenantId(Tenant), Rewrite(compiled), Dml(),
+            new Dictionary<string, object?>(), (_, _) => Task.CompletedTask, cts.Token);
+
+        h.Connection.Transactions.ShouldHaveSingleItem().Commits.ShouldBe(1);
+        h.Audit.ShouldContain(e => e.EventType == "WEBSQL_DML_EXECUTED" && e.Decision == "ALLOW");
+    }
+
+    [Fact]
+    public async Task WebSqlDml_AuditFailsAfterCommit_IsNotARequestFailure_LogsCritical_AndCountsAMetric()
+    {
+        // M-1: a request failure after the commit would make the client retry (and duplicate) the DML.
+        var compiled = await CompileAsync("Sqlite", "UPDATE orders SET amount = 1 WHERE id = 1");
+        var h = CreateHarness("Sqlite", auditSink: (_, _) => throw new InvalidOperationException("audit store down"));
+        long failures = 0;
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (instrument, l) =>
+        {
+            if (instrument.Name == "autheris_dml_audit_failed_total")
+            {
+                l.EnableMeasurementEvents(instrument);
+            }
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, _, _) => Interlocked.Add(ref failures, value));
+        listener.Start();
+
+        await ExecuteAsync(h, compiled, dml: Dml());   // does not throw
+
+        h.Connection.Transactions.ShouldHaveSingleItem().Commits.ShouldBe(1);
+        h.Log.Entries.ShouldContain(e => e.Level == Microsoft.Extensions.Logging.LogLevel.Critical);
+        Interlocked.Read(ref failures).ShouldBe(1);
     }
 
     [Theory]

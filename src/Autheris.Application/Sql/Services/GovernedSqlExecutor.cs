@@ -24,6 +24,7 @@ using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.Synthetic;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -193,7 +194,7 @@ public sealed class GovernedSqlExecutor
             string reason = DeniedReason(policyEx);
             if (dmlContext.IsDml)
             {
-                await RecordDmlAuditAsync(tenantId, user, auditDs, dmlContext, "WEBSQL_DML_REJECTED", "DENY", compiled: null, affectedRows: null, reason: reason, synthetic: false, ct, originalSql: request.Sql).ConfigureAwait(false);
+                await RecordDmlAuditAsync(tenantId, user, auditDs, dmlContext, "WEBSQL_DML_REJECTED", "DENY", compiled: null, affectedRows: null, reason: reason, synthetic: false, originalSql: request.Sql).ConfigureAwait(false);
             }
             else if (_auditLogRepository != null)
             {
@@ -256,7 +257,7 @@ public sealed class GovernedSqlExecutor
             await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
             {
                 TenantId = tenantId,
-                EventType = "WEBSQL_QUERY",
+                EventType = AuditEventTypes.WebSqlQuery,
                 ActorSid = userSid,
                 TargetTable = dsName,
                 Decision = "ALLOW",
@@ -280,7 +281,7 @@ public sealed class GovernedSqlExecutor
 
             if (dmlContext.IsDml)
             {
-                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_EXECUTED", "ALLOW", compiled, affectedRows: 0, reason: null, synthetic: true, ct).ConfigureAwait(false);
+                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_EXECUTED", "ALLOW", compiled, affectedRows: 0, reason: null, synthetic: true).ConfigureAwait(false);
             }
 
             // G-11: only after a successful Compile, and only the compiled text (markers, never a bound value).
@@ -378,14 +379,23 @@ public sealed class GovernedSqlExecutor
                 catch (Exception dmlEx)
                 {
                     bool rejected = dmlEx is DmlAffectedRowsLimitException or DmlCheckOptionViolationException;
-                    await RecordDmlAuditAsync(
-                        tenantId, user, dsName, dmlContext,
-                        rejected ? "WEBSQL_DML_REJECTED" : "WEBSQL_DML_FAILED", "DENY", compiled,
-                        affectedRows: null, reason: rejected ? ErrorCodeOf(dmlEx) : dmlEx.GetType().Name, synthetic: false, ct).ConfigureAwait(false);
+                    try
+                    {
+                        await RecordDmlAuditAsync(
+                            tenantId, user, dsName, dmlContext,
+                            rejected ? "WEBSQL_DML_REJECTED" : "WEBSQL_DML_FAILED", "DENY", compiled,
+                            affectedRows: null, reason: rejected ? ErrorCodeOf(dmlEx) : dmlEx.GetType().Name, synthetic: false).ConfigureAwait(false);
+                    }
+                    catch (Exception auditEx)
+                    {
+                        // The statement's own failure is what the caller must see, not a failure of its audit.
+                        _logger?.LogError(auditEx, "WebSQL DML failure audit could not be written on data source {DataSource}.", dsName);
+                    }
+
                     throw;
                 }
 
-                await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, "WEBSQL_DML_EXECUTED", "ALLOW", compiled, affectedRows, reason: null, synthetic: false, ct).ConfigureAwait(false);
+                await RecordCommittedDmlAuditAsync(tenantId, user, dsName, dmlContext, compiled, affectedRows).ConfigureAwait(false);
 
                 using var emptyTable = new DataTable();
                 using var emptyReader = emptyTable.CreateDataReader();
@@ -587,7 +597,6 @@ public sealed class GovernedSqlExecutor
         int? affectedRows,
         string? reason,
         bool synthetic,
-        CancellationToken ct,
         string? originalSql = null)
     {
         if (_auditLogRepository == null)
@@ -624,6 +633,28 @@ public sealed class GovernedSqlExecutor
             Decision = decision,
             TraceId = Guid.NewGuid().ToString("N"),
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
-        }, ct).ConfigureAwait(false);
+            // M-1: a DML audit never takes the request token. The statement may already be committed; a client that disconnects must not
+            // leave it without its audit record.
+        }, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The audit of a DML that is already committed. An audit failure here is never a request failure (the client would retry and
+    /// duplicate the write): it is logged as Critical and counted for the operators.
+    /// </summary>
+    private async Task RecordCommittedDmlAuditAsync(
+        TenantId tenantId, ClaimsPrincipal user, string dsName, DmlAuditContext dmlContext, CompiledSql compiled, int affectedRows)
+    {
+        try
+        {
+            await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlExecuted, "ALLOW", compiled, affectedRows, reason: null, synthetic: false).ConfigureAwait(false);
+        }
+        catch (Exception auditEx)
+        {
+            GatewayDiagnostics.DmlAuditFailedCounter.Add(1);
+            _logger?.LogCritical(auditEx,
+                "WebSQL DML on data source {DataSource} is committed but its audit record could not be written. TraceId={TraceId}",
+                dsName, Activity.Current?.TraceId.ToString());
+        }
     }
 }

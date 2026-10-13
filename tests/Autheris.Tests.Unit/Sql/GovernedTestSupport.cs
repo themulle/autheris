@@ -127,6 +127,9 @@ internal sealed class FakeDbConnection : System.Data.Common.DbConnection
 
     public List<FakeDbTransaction> Transactions { get; } = [];
 
+    /// <summary>Runs right after a transaction of this connection committed (e.g. to cancel the request token "after the commit").</summary>
+    public Action? AfterCommit { get; set; }
+
     [System.Diagnostics.CodeAnalysis.AllowNull]
     public override string ConnectionString { get; set; } = string.Empty;
 
@@ -184,6 +187,7 @@ internal sealed class FakeDbTransaction(FakeDbConnection connection, System.Data
     {
         LastCommitTokenCanBeCanceled = cancellationToken.CanBeCanceled;
         Commits++;
+        connection.AfterCommit?.Invoke();
         return Task.CompletedTask;
     }
 
