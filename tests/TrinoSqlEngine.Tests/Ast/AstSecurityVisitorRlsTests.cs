@@ -15,6 +15,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 /// Row-level security injection of the governed compile path (typed policy). Formerly these tests drove the visitor through the
 /// removed string provider; the outcomes are asserted semantically now (bound values, placement, rejections).
 /// </summary>
+[Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
 public sealed class AstSecurityVisitorRlsTests
 {

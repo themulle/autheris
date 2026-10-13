@@ -14,6 +14,7 @@ using Xunit;
 /// and UPDATE (<c>DmlCompileTests.InsertValues_*</c>, <c>Update_TenantColumnAssignment_IsRejected</c>), subqueries in UPDATE/DELETE
 /// (<c>Update_SubqueriesInWhereAndSet_AreSecuredOnEverySource</c>, <c>Delete_SubqueryInWhere_IsSecured</c>).
 /// </summary>
+[Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
 public sealed class AstSecurityVisitorDmlTests
 {

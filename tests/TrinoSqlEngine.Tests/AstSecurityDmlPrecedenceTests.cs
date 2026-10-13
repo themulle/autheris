@@ -10,6 +10,7 @@ using Xunit;
 /// A user condition in a DML WHERE clause is grouped, so that it cannot absorb the injected tenant predicate by operator
 /// precedence (OR below AND), and composite operands keep their parentheses. Asserted on the compiled text of the AST path.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class AstSecurityDmlPrecedenceTests
 {
     private static CompiledSql Compile(TargetSqlDialect dialect, string sql) => new ProbeEnv(dialect).Compile(sql);

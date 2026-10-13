@@ -9,6 +9,7 @@ using Xunit;
 /// Emission of complex Trino statements per dialect. The tenant predicate of the tables (CTEs, joins, EXISTS, set operations) is
 /// asserted by the governed compile tests (<c>TypedInjectionTests</c>, <c>CteShadowingTests</c>, <c>TenantPredicateStructureTests</c>).
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class ComplexTrinoBenchmarkQueriesTests
 {
     [Fact]

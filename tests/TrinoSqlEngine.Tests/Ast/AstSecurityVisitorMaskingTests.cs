@@ -10,6 +10,7 @@ using Xunit;
 /// Wildcard expansion with column masks on the governed compile path. (The legacy "masking without a column provider" case has no
 /// typed form: a table outside the catalog is rejected, see <c>TypedInjectionTests.UnknownTable_IsRejected</c>.)
 /// </summary>
+[Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
 public sealed class AstSecurityVisitorMaskingTests
 {
