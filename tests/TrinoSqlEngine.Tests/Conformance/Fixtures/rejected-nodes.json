@@ -3,6 +3,8 @@
     "NamedBindMarkerExpression": "A text-consumer node: only the inline text rendering (IPolicyPredicateRenderer) emits it; the bound compile path rejects it in every dialect (NotSupportedException)."
   },
   "Oracle": {
+    "ArrayConstructorExpression": "Oracle has no array type; the generator rejects the construct (SqlCompileNotSupportedException).",
+    "SubscriptExpression": "Oracle has no array subscripts; the generator rejects the construct (SqlCompileNotSupportedException).",
     "IntervalLiteralExpression": "An interval value has no bound form on Oracle (NUMTODSINTERVAL has no MONTH or YEAR field); the generator rejects the construct (SqlCompileNotSupportedException).",
     "MergeDeleteClause": "The compile pipeline rejects the MERGE ... THEN DELETE fixtures for Oracle (SqlCompileNotSupportedException)."
   },
