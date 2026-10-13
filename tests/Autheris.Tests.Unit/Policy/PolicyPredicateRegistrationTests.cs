@@ -40,6 +40,9 @@ public sealed class PolicyPredicateRegistrationTests
         services.AddAutherisGovernance(new GatewayOptions());
         services.AddSingleton<ISqlEngine, FastSqlEngine>();
         services.AddSingleton(NSubstitute.Substitute.For<Autheris.Application.Sql.Catalog.IGovernedCatalogProvider>());
+        services.AddSingleton(NSubstitute.Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>());   // M-A1: the factory reads governance records of policy tables
+        services.AddOptions();
+        services.AddSingleton(Microsoft.Extensions.Options.Options.Create(new GatewayOptions()));
 
         services.Count(d => d.ServiceType == typeof(GovernancePolicyFactory)).ShouldBe(1);
         services.Single(d => d.ServiceType == typeof(GovernancePolicyFactory)).Lifetime.ShouldBe(ServiceLifetime.Singleton);
