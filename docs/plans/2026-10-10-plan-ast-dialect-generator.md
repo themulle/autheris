@@ -4254,3 +4254,55 @@ The Phase 3 re-check of `feat/ast-x1-cutover` (`1ee24e6`) signed off with condit
 **L-4.** `ITenantRegistry.ResolveCollisionAsync(keep, expectedCurrent, ct)` returns `TenantCollisionResolution(Status, PreviousTenantId)` (`NotFound`, `ExpectedMismatch`, `Resolved`). The store reads the group's `tenant_id` first, and the UPDATE is a compare-and-swap on that value (a concurrent change reports `ExpectedMismatch`). The endpoint takes an optional body `{ "expectedCurrent": "<spelling>" }`; a different current spelling answers 409 with `current` and changes nothing. The audit event (`TENANT_COLLISION_RESOLVED`) and the 200 response carry `previousSpelling`/`previous` (and `expectedCurrent` in the audit). Runbook addition: read the current spelling of the group from the audit record `TENANT_COLLISION_DENIED` or the 409 response, pass it as `expectedCurrent` so that two operators cannot overwrite each other's choice, and keep `previousSpelling` of the resolution audit record for the case that the wrong spelling was kept. Tests: store (previous spelling, matching and differing `expectedCurrent`), endpoint (audit, response, pass-through, 409), gate.
 
 **Later items.** `Dml_GroupByAMaskedColumnInASubquery_Hmac_And_PartialMask_GroupTheProjectedAlias` (regression guards, green by construction: the compiled text computes the mask inside the derived table of `orders` and the GROUP BY outside reads only the projected alias). `GovernedSqlExecutionService` takes `IProviderExecutionGuard` as a required constructor parameter (null is rejected, the pass-through fallback is gone); unit tests take it from `GovernedTestSupport.Guard`.
+
+#### Phase 5 review (X1 cutover) and fixes implementation log
+
+Phase 5 reviewed `bb80e29..a924f2b`: approve with conditions, no Blocker/High. Fixes on branch `feat/ast-x1-p5fix` (from `a924f2b`), one commit per finding (or small group), Red-Green where technically possible.
+
+| Finding | Summary | Disposition |
+|---|---|---|
+| M-1 | DML audit after the commit used the request token; an audit failure after the commit became a request failure (client retry duplicates the DML) | Fixed |
+| M-2 | `PolicySubqueryTables.Candidates` requested an inadmissible homonym that evicted the admitted catalog cache entry (one reload per statement) | Fixed |
+| M-3 | Flaky bind-limit probes (5 s parse budget incl. the wait on the static parser limiter, not the compile budget) | Fixed |
+| M-4 | Squash message draft incomplete | Fixed (revert section left as a placeholder for the orchestrator, M-11) |
+| L-1 | Cache-poisoning tests did not assert hits, shared engine | Fixed |
+| L-2 | `TokenStreamRewriter` in `RedactSqlLiterals` (SD-1) | Fixed, IL guard added |
+| L-3 | CommandText scan missed command constructors and `CreateCommand(string)` | Fixed |
+| L-4 | Engine errors (`AstBuildException`, `ReservedIdentifierException`, parse `ArgumentException`, ...) were not audited | Fixed |
+| L-5 | Dead code, multiplied `virtual_filters` audit keys | Fixed |
+| L-6 | Bypass flag warned per statement | Fixed (startup warning; the DANGER switch already fails the start outside Development) |
+| L-7 | Collision audit used the request token | Fixed |
+| L-8 | Stale docs | Phase 6 |
+| L-9 | Door tests matched the audit record by a global count | Fixed |
+| Nits | TryMap twice, ctor field copy, `"WEBSQL_QUERY"`, German comments, FrozenSet copy, repeated predicate walks, `DeniedTablesStartupReporter` | Fixed |
+| Perf (later) | Pipeline-level microbenchmark | G8, not done |
+
+**M-1.** `RecordDmlAuditAsync` never takes the request token (`CancellationToken.None`). The audit after the commit goes through `RecordCommittedDmlAuditAsync`: a failure is logged as Critical and counted by the new metric `autheris_dml_audit_failed_total`, and the response stays a success. The failure audit of a DML that failed before the commit never masks the original exception. Tests (`GovernedSqlExecutorX1Tests`, red before the change: both failed): token cancelled by the commit still writes the record; an audit failure after the commit does not throw, logs Critical, counts one failure.
+
+**M-2.** `GovernancePolicyFactory` reads the governance record of each candidate once per assembly and requests from the catalog provider only candidates whose record belongs to the statement's data source (an unreadable record stays requested and unusable: fail closed; the legacy `default` domain keeps working, a record only there is requested and resolvable). `PolicySubqueryTables.Names` is memoized per predicate instance (the repeated-walk nit). The domain is deliberately not removed from the candidate list: the primary tables resolve the same way (data source domain, then `default`). Tests: compile twice with a correlated policy and the real `GovernedCatalogProvider`: exactly two column loads in total (orders and the policy table), also with a homonym or no record under `default` (red before: three loads); a record only under `default` stays resolvable.
+
+**M-3.** The probes use `LimitProbeSupport.Engine()` (`ParseTimeout = TimeSpan.Zero`, own `ParseConcurrencyLimiter`, compile budget at its maximum). The boundary logic is deterministic: `GovernedSqlCompiler` now hands its resolved capabilities to the generator (`SqlDialectGeneratorBase.Generate(..., capabilities, ...)`, internal), so a capability provider with a lowered `MaxBindParameters` (`LimitProbeSupport.WithBindLimit`) governs the bind limit (red before: the lowered table was ignored, 6 tests failed). `DmlCompileTests.Insert_MultiRow_OverTheBindLimit...` and `LimitBoundaryProperties.BindLimit_IsExact...` run at a limit of 40 and 100; the production-limit probes (`BindLimitProductionProbeTests`, `BindLimit_IsExact..._AtTheProductionLimit`) are in the non-parallel collection `ProductionLimitProbes`; the DuckDB compile test uses a reduced table and an unbudgeted engine (the former "over the table" test only asserted that 2,200 values compile and is split into an honest rejection test and a compile test). Stability: the TrinoSqlEngine probe set (13 tests) and the DuckDB bind-limit tests passed in 5 consecutive runs while Stryker ran on the same machine. The misleading comment (it named the compile budget) is replaced.
+
+**L-1.** Fresh engine per test, `CompileCache.Stats` asserted (misses/hits for two principals, tenant case variants, catalog change, cancelled compile, writer then reader). These strengthen assertions on green behavior; there is no red phase.
+
+**L-2.** `RedactSqlLiterals` builds the text with a `StringBuilder` from the token stream (hidden-channel text included); the characterization test `RedactSqlLiteralsTests` passed before and after. `NoProductionAssembly_ReferencesTheTokenStreamRewriter` scans fields, locals and every operand of every production method (red before: `RedactSqlLiterals`), with a positive control.
+
+**L-3.** `PutsTextIntoACommand` also detects `newobj` of `*Command::.ctor` overloads taking a `string` and `CreateCommand(string)` / `CreateBatchCommand(string)`; positive controls for both. Production has no new site (the allowlist is unchanged and has no unused entry).
+
+**L-4.** The compile half audits every `SecurityException`, every exception the error mapper owns and every `ArgumentException` (code `SQL_BAD_REQUEST` when no mapper rule owns it), with the stable code (never the message), then rethrows; a client cancellation is not a rejection. A DML refused during the analysis (reserved identifier) is audited as a denied query because the statement is not yet known as DML there. Tests (`GovernedSqlRejectionAuditTests`, red before: no audit): construct, reserved identifier, syntax error, DML construct, bad request, cancelled request.
+
+**L-5.** Removed the unused `secretProvider` parameter of `GovernedSqlRewriter`, `_rowFilterResolver` of the service and `GovernedSqlResult.RewrittenSql` (no reader in `src`; about 30 test constructions adjusted; this changes the public record). `virtual_filters` has one key per table, the resolved qualified name (test red before: several keys). `VirtualFilterWiringTests` reads the resolver from the rewriter.
+
+**L-6.** The per-statement warning is gone. `GatewayStartupValidator` warns once that `danger_bypass_websql_governance` has no effect; the flag stays a DANGER switch and fails the start outside Development (test documents it). Decision: no new failure mode, because the existing DANGER rule is already fail closed.
+
+**L-7.** The collision audit uses `CancellationToken.None` (test red before).
+
+**L-9.** The door tests match the audit record by actor, data source, event type and outcome (`IsCompiledAuditOfTheCaller`); trace ids are generated per audit record, so they cannot be matched.
+
+**Nits.** `DatasetDataEndpoints` maps with one `catch ... when (TryMap(ex, out mapped))`; `AuditKeyStartupCheck` uses the primary-constructor parameter; `AuditEventTypes.WebSqlQuery`; German comments translated in `ISqlRewritePipeline.cs` and `GovernedSqlRewriter.cs`; `BuildOptions` passes a frozen case-insensitive set on without a copy; `DeniedTablesStartupReporter` is a `BackgroundService` (the host start no longer waits for the store; the test needs `ExecuteTask`, so there is no clean red run).
+
+**M-4.** The squash message draft above is complete (breaking changes, new items; the revert section is the placeholder "Revert procedure: re-rehearsed on the final squash by the orchestrator (see M-11)"; trailer `Co-Authored-By: Claude Opus 5.5`).
+
+**Deviations.** The environment was lost once and the work was redone from the findings; every commit is pushed. Red runs were recorded for M-1, M-2, M-3, L-2 (guard), L-4, L-5 (keys), L-6, L-7; not possible or not meaningful for L-1, L-3, L-9, the nits and M-4. Phase 6 keeps L-8 (docs) and the documentation of the new metric, `SQL_BAD_REQUEST` audit code and startup behavior.
+
+**Evidence.** `dotnet build Autheris.sln -m:2`: 0 errors, 0 warnings. `Autheris.Tests.Unit` 5375, `TrinoSqlEngine.Tests` (Debug) 7714, `Autheris.Tests.Architecture` 62, `Autheris.Extensions.Tests` 233, `SqlCompilerGate` (`SQLGATE_PROFILE=pr`) 181: all green. `Autheris.Tests.Integration` 1024: one load-sensitive timing test (`AstCompilerSqliteExecutionTests.ACrossJoinOfTheCallersRows_IsInterruptedWithinTheTimeoutPlusOneSecond`, 58 minute run next to Stryker) failed once and passed in an isolated rerun; the rest green.
