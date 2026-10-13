@@ -452,6 +452,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapGovernanceApiEndpoints();
         app.MapGovernancePlanEndpoints();
         app.MapTokenRevocationEndpoints(); // SEC M-14 (GAP-B)
+        app.MapTenantRegistryAdminEndpoints(); // M-A2: operator resolution of a tenant id collision
         app.MapFinOpsEndpoints();
         app.MapRebacEndpoints();
         app.MapVirtualFilterEndpoints();

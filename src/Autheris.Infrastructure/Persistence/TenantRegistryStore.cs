@@ -50,6 +50,18 @@ internal static class TenantRegistryStore
         return string.Equals(row.Value.TenantId, tenant.Value, StringComparison.Ordinal) ? TenantRegistration.Existing : null;
     }
 
+    /// <summary>
+    /// M-A2: clears the collision mark of the group of <paramref name="keep"/> and makes that exact spelling the group's tenant. Only a marked
+    /// group changes (the UPDATE is conditional on the mark), so this is never a way to rename a healthy tenant.
+    /// </summary>
+    public static async Task<bool> ResolveCollisionAsync(DbConnection connection, TenantId keep, CancellationToken ct)
+    {
+        await using var cmd = Command(connection,
+            "UPDATE TENANT_REGISTRY SET tenant_id = @t, collided = 0 WHERE normalized_key = @k AND collided = 1",
+            ("@t", keep.Value), ("@k", TenantRegistryKey.Normalize(keep.Value)));
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
     /// <summary>Records configured ids. Spellings that are not valid tenant ids are skipped (they can never authenticate).</summary>
     public static async Task PreseedAsync(DbConnection connection, IEnumerable<string> tenantIds, CancellationToken ct)
     {

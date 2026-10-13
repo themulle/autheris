@@ -20,6 +20,12 @@ public sealed record SecurityPrincipalContext
     public required IReadOnlySet<string> ClusterRoles { get; init; }
     public required string AuthenticationScheme { get; init; }
     public bool IsAuthenticated { get; init; } = true;
+
+    /// <summary>
+    /// M-A2: the tenant was selected by a ClusterAdmin through the tenant header (not taken from the token claim). Such a tenant is only
+    /// looked up in the tenant registry: a header can never register a tenant or mark a collision.
+    /// </summary>
+    public bool TenantSelectedByHeader { get; init; }
     public string? BreakGlassJustification { get; init; }
     public System.Net.IPAddress? ClientIp { get; init; }
     public CallerContext? Caller { get; init; }

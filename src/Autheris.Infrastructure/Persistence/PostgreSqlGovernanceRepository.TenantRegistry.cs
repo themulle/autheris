@@ -17,6 +17,12 @@ public partial class PostgreSqlGovernanceRepository : ITenantRegistry
         return await TenantRegistryStore.LookupAsync(conn, tenant, ct).ConfigureAwait(false);
     }
 
+    public async ValueTask<bool> ResolveCollisionAsync(TenantId keep, CancellationToken ct)
+    {
+        await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await TenantRegistryStore.ResolveCollisionAsync(conn, keep, ct).ConfigureAwait(false);
+    }
+
     public async ValueTask PreseedAsync(IEnumerable<string> configuredTenantIds, CancellationToken ct)
     {
         await using var conn = await _dataSource.OpenConnectionAsync(ct).ConfigureAwait(false);

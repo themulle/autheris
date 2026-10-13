@@ -123,6 +123,35 @@ public sealed class TenantRegistryGate(ITenantRegistry inner, TenantRegistryGate
         }
     }
 
+    /// <summary>M-A2: a read-only lookup (never registers, never costs budget). Only a positive answer is remembered.</summary>
+    public async ValueTask<TenantRegistration?> TryGetAsync(TenantId tenant, CancellationToken ct)
+    {
+        var now = _clock.GetUtcNow();
+        if (_cache.TryGetValue(tenant.Value, out var hit) && hit.ExpiresAt > now)
+        {
+            return TenantRegistration.Existing;
+        }
+
+        var result = await inner.TryGetAsync(tenant, ct).ConfigureAwait(false);
+        if (result == TenantRegistration.Existing)
+        {
+            Remember(tenant, now);
+        }
+        else if (result == TenantRegistration.Collision)
+        {
+            EvictGroup(TenantRegistryKey.Normalize(tenant.Value));
+        }
+
+        return result;
+    }
+
+    public async ValueTask<bool> ResolveCollisionAsync(TenantId keep, CancellationToken ct)
+    {
+        var resolved = await inner.ResolveCollisionAsync(keep, ct).ConfigureAwait(false);
+        EvictGroup(TenantRegistryKey.Normalize(keep.Value));
+        return resolved;
+    }
+
     public ValueTask PreseedAsync(IEnumerable<string> configuredTenantIds, CancellationToken ct) =>
         inner.PreseedAsync(configuredTenantIds, ct);
 

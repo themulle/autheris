@@ -40,6 +40,14 @@ public interface ITenantRegistry
     /// </summary>
     ValueTask<TenantRegistration?> TryGetAsync(TenantId tenant, CancellationToken ct) => ValueTask.FromResult<TenantRegistration?>(null);
 
+    /// <summary>
+    /// M-A2: operator resolution of a collided group. Keeps <paramref name="keep"/> (exact spelling) as the tenant of its group and clears the
+    /// collision mark; every other spelling of the group is denied again (the lookup treats it as unknown and a registration marks the group
+    /// anew). Returns false, and changes nothing, when the group is not marked (so it cannot rename a healthy tenant). The default (a store
+    /// without a resolution path) is "not resolved".
+    /// </summary>
+    ValueTask<bool> ResolveCollisionAsync(TenantId keep, CancellationToken ct) => ValueTask.FromResult(false);
+
     /// <summary>Records the configured tenant ids (not rate limited); configured spellings that collide mark their group.</summary>
     ValueTask PreseedAsync(IEnumerable<string> configuredTenantIds, CancellationToken ct);
 }

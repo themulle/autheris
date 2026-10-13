@@ -104,4 +104,40 @@ public sealed class TenantRegistryStoreTests : IDisposable
 
         (await Registry.RegisterOrGetAsync(new TenantId("beta"), "iss", default)).ShouldBe(TenantRegistration.Existing);
     }
+
+    [Fact]
+    public async Task ExistingCollisionGroup_AllSpellingsDenied()
+    {
+        // X0p: a group that already carries two spellings (here recorded through the IdP path) denies every spelling, also a new one.
+        (await Registry.RegisterOrGetAsync(new TenantId("acme"), "iss", default)).ShouldBe(TenantRegistration.Registered);
+        (await Registry.RegisterOrGetAsync(new TenantId("ACME"), "iss", default)).ShouldBe(TenantRegistration.Collision);
+
+        foreach (var spelling in new[] { "acme", "ACME", "Acme", "aCmE" })
+        {
+            (await Registry.RegisterOrGetAsync(new TenantId(spelling), "iss", default)).ShouldBe(TenantRegistration.Collision);
+            (await Registry.TryGetAsync(new TenantId(spelling), default)).ShouldBe(TenantRegistration.Collision);
+        }
+    }
+
+    [Fact]
+    public async Task ResolveCollision_KeepsTheChosenSpelling_AndReleasesTheGroup()
+    {
+        await Registry.RegisterOrGetAsync(new TenantId("acme"), "iss", default);
+        await Registry.RegisterOrGetAsync(new TenantId("ACME"), "iss", default);   // marks the group
+
+        (await Registry.ResolveCollisionAsync(new TenantId("ACME"), default)).ShouldBeTrue();
+
+        (await Registry.TryGetAsync(new TenantId("ACME"), default)).ShouldBe(TenantRegistration.Existing);   // the kept spelling is the group's tenant now
+        (await Registry.TryGetAsync(new TenantId("acme"), default)).ShouldBeNull();                          // the other spelling is denied again (unknown to a lookup)
+    }
+
+    [Fact]
+    public async Task ResolveCollision_GroupWithoutMark_ChangesNothing()
+    {
+        await Registry.RegisterOrGetAsync(new TenantId("acme"), "iss", default);
+
+        (await Registry.ResolveCollisionAsync(new TenantId("ACME"), default)).ShouldBeFalse();   // unmarked: cannot be used to rename a tenant
+        (await Registry.ResolveCollisionAsync(new TenantId("never"), default)).ShouldBeFalse();
+        (await Registry.TryGetAsync(new TenantId("acme"), default)).ShouldBe(TenantRegistration.Existing);
+    }
 }

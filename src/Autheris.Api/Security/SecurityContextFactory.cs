@@ -88,6 +88,7 @@ public static class SecurityContextFactory
         }
 
         TenantId finalTenant;
+        bool tenantSelectedByHeader = false;
         if (!string.IsNullOrWhiteSpace(claimTenant))
         {
             if (!string.IsNullOrWhiteSpace(headerTenant) &&
@@ -98,6 +99,7 @@ public static class SecurityContextFactory
                     throw new SecurityException("Cross-tenant access forbidden. Header tenant does not match authenticated token claim.");
                 }
                 finalTenant = new TenantId(headerTenant);
+                tenantSelectedByHeader = true;
             }
             else
             {
@@ -114,6 +116,7 @@ public static class SecurityContextFactory
                     throw new SecurityException("Cross-tenant access forbidden. Authenticated user lacks tenant claim and is not authorized to select arbitrary tenant.");
                 }
                 finalTenant = new TenantId(headerTenant);
+                tenantSelectedByHeader = true;
             }
             else
             {
@@ -146,6 +149,7 @@ public static class SecurityContextFactory
             ClusterRoles = clusterRoles,
             AuthenticationScheme = user.Identity?.AuthenticationType ?? "Unknown",
             IsAuthenticated = true,
+            TenantSelectedByHeader = tenantSelectedByHeader,
             BreakGlassJustification = justification,
             ClientIp = clientIp,
             Caller = caller

@@ -11,6 +11,9 @@ public partial class SqliteGovernanceRepository : ITenantRegistry
     public async ValueTask<TenantRegistration?> TryGetAsync(TenantId tenant, CancellationToken ct) =>
         await LockedAsync(() => TenantRegistryStore.LookupAsync(_connection, tenant, ct), ct).ConfigureAwait(false);
 
+    public async ValueTask<bool> ResolveCollisionAsync(TenantId keep, CancellationToken ct) =>
+        await LockedAsync(() => TenantRegistryStore.ResolveCollisionAsync(_connection, keep, ct), ct).ConfigureAwait(false);
+
     public async ValueTask PreseedAsync(IEnumerable<string> configuredTenantIds, CancellationToken ct) =>
         await LockedAsync(async () => { await TenantRegistryStore.PreseedAsync(_connection, configuredTenantIds, ct).ConfigureAwait(false); return true; }, ct).ConfigureAwait(false);
 }

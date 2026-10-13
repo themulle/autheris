@@ -17,6 +17,12 @@ public partial class SqlServerGovernanceRepository : ITenantRegistry
         return await TenantRegistryStore.LookupAsync(conn, tenant, ct).ConfigureAwait(false);
     }
 
+    public async ValueTask<bool> ResolveCollisionAsync(TenantId keep, CancellationToken ct)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await TenantRegistryStore.ResolveCollisionAsync(conn, keep, ct).ConfigureAwait(false);
+    }
+
     public async ValueTask PreseedAsync(IEnumerable<string> configuredTenantIds, CancellationToken ct)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
