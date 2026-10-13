@@ -187,10 +187,12 @@ public sealed class GovernedSqlExecutor
         {
             rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true).ConfigureAwait(false);
         }
-        catch (SecurityException policyEx)
+        catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
         {
             string auditDs = requestedDs ?? _options.Value.WebSql.DefaultDataSourceName;
             // SEC-ADG-23: only the gateway's own policy messages are stored; an engine exception is reduced to its stable code.
+            // L-4: the same holds for the engine errors that the error mapper owns (unsupported construct, reserved identifier, syntax
+            // error, limits): the stable code is stored, never the message, and the exception is rethrown for the error surface to map.
             string reason = DeniedReason(policyEx);
             if (dmlContext.IsDml)
             {
@@ -204,7 +206,12 @@ public sealed class GovernedSqlExecutor
                     .WithField("originalSql", redactedOriginalSql)
                     .WithField("originalSqlHash", originalSqlHash)
                     .WithField("dataSource", auditDs)
-                    .WithField("reasonCode", policyEx is WebSqlPolicyException ? "POLICY_VIOLATION" : "SECURITY_VIOLATION")
+                    .WithField("reasonCode", policyEx switch
+                    {
+                        WebSqlPolicyException => "POLICY_VIOLATION",
+                        SecurityException => "SECURITY_VIOLATION",
+                        _ => reason
+                    })
                     .WithField("error", reason)
                     .Build();
 
@@ -553,8 +560,24 @@ public sealed class GovernedSqlExecutor
         SqlCompilerErrorMapper.TryMap(error, out var mapping) ? mapping.Code : "UNMAPPED";
 
     /// <summary>The audit reason of a rejected statement: the gateway's own policy message, or the stable code of an engine rejection.</summary>
-    private static string DeniedReason(SecurityException error) =>
-        error is WebSqlPolicyException ? error.Message : ErrorCodeOf(error);
+    private static string DeniedReason(Exception error) => error switch
+    {
+        WebSqlPolicyException => error.Message,
+        SecurityException => ErrorCodeOf(error),
+        _ => SqlCompilerErrorMapper.TryMap(error, out var mapping) ? mapping.Code : BadRequestCode
+    };
+
+    /// <summary>The audit code of an <see cref="ArgumentException"/> that no mapper rule owns (an empty or oversized statement).</summary>
+    private const string BadRequestCode = "SQL_BAD_REQUEST";
+
+    /// <summary>
+    /// L-4: what the compile half refuses and audits before it rethrows: every security exception, and every exception that the error
+    /// mapper owns or that is a bad request (<see cref="ArgumentException"/>). A client that cancelled is not a rejection.
+    /// </summary>
+    private static bool IsAuditedRejection(Exception error, CancellationToken ct) =>
+        error is SecurityException ||
+        (!(error is OperationCanceledException && ct.IsCancellationRequested) &&
+         (error is ArgumentException || SqlCompilerErrorMapper.TryMap(error, out _)));
 
     private static IReadOnlyDictionary<string, object?> BuildClientValues(IReadOnlyDictionary<string, object?>? parameters)
     {
