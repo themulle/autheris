@@ -33,4 +33,10 @@ public interface IUniversalDocStore
     /// Safely unpacks and applies an application documentation ZIP archive with Zip-Slip defense.
     /// </summary>
     Task<DepositDocResult> ExtractBundleAsync(string appId, Stream zipStream, CancellationToken ct = default);
+
+    /// <summary>
+    /// Scans the physical document store directory, discovers all existing application documents,
+    /// and indexes them into the search engine.
+    /// </summary>
+    Task<int> SyncExistingDocumentsAsync(CancellationToken ct = default);
 }

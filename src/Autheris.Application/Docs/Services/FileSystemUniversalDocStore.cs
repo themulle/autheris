@@ -315,6 +315,67 @@ public sealed class FileSystemUniversalDocStore : IUniversalDocStore
             Message: $"Bundle applied successfully: {extractedFiles.Count} files unpacked, {allChunks.Count} sections indexed.");
     }
 
+    public async Task<int> SyncExistingDocumentsAsync(CancellationToken ct = default)
+    {
+        if (!Directory.Exists(_rootPath))
+        {
+            return 0;
+        }
+
+        int totalIndexed = 0;
+        var appDirs = Directory.GetDirectories(_rootPath);
+
+        foreach (var dir in appDirs)
+        {
+            ct.ThrowIfCancellationRequested();
+            var appId = Path.GetFileName(dir);
+            if (!SafeIdentifierRegex.IsMatch(appId))
+            {
+                continue;
+            }
+
+            var mdFiles = Directory.GetFiles(dir, "*.md", SearchOption.AllDirectories);
+            var allChunks = new List<DocChunk>();
+
+            foreach (var file in mdFiles)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    var content = await File.ReadAllTextAsync(file, ct).ConfigureAwait(false);
+                    var docId = Path.GetFileNameWithoutExtension(file);
+                    var relativePath = Path.GetRelativePath(dir, file);
+                    var category = ResolveCategoryFromPath(relativePath);
+
+                    var chunks = await _ingestor.IngestMarkdownContentAsync(
+                        content,
+                        docId,
+                        appId,
+                        category,
+                        file,
+                        ct).ConfigureAwait(false);
+
+                    allChunks.AddRange(chunks);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to index existing document '{FilePath}' for app '{AppId}'", file, appId);
+                }
+            }
+
+            if (allChunks.Count > 0)
+            {
+                await _searchService.IndexChunksAsync(allChunks, ct).ConfigureAwait(false);
+                totalIndexed += allChunks.Count;
+            }
+        }
+
+        _logger.LogInformation("Completed document store sync: {Count} total sections indexed across {AppCount} applications.",
+            totalIndexed, appDirs.Length);
+
+        return totalIndexed;
+    }
+
     private static DocCategory ResolveCategoryFromPath(string relativePath)
     {
         var lower = relativePath.ToLowerInvariant();

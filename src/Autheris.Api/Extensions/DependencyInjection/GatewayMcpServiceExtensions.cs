@@ -43,6 +43,7 @@ public static class GatewayMcpServiceExtensions
         services.AddScoped<IMcpProtocolHandler, McpProtocolHandler>();
         services.AddScoped<IMcpStdioRunner, McpStdioRunner>();
         services.AddHostedService<McpSchemaDiscoveryService>();
+        services.AddHostedService<Autheris.Application.Docs.Services.DocStoreStartupSyncService>();
 
         // Human-in-the-Loop Step-Up Approval (F-AI-05)
         services.AddSingleton<IHitLStepUpApprovalService, HitLStepUpApprovalService>();

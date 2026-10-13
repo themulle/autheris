@@ -13,6 +13,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Docs.Interfaces;
 using Autheris.Application.Mcp.Tools;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -39,6 +40,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IHitLStepUpApprovalService? _stepUpApprovalService;
     private readonly IGraphQlCatalogMap? _graphQlCatalogMap;
     private readonly IAccessPlanningService? _accessPlanningService;
+    private readonly IDocSearchService? _docSearchService;
+    private readonly IUniversalDocStore? _docStore;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
 
@@ -71,8 +74,10 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IHitLStepUpApprovalService? stepUpApprovalService = null,
         IGraphQlCatalogMap? graphQlCatalogMap = null,
         IConsentRepository? consentRepository = null,
-        IAccessPlanningService? accessPlanningService = null)
-        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository, accessPlanningService)
+        IAccessPlanningService? accessPlanningService = null,
+        IDocSearchService? docSearchService = null,
+        IUniversalDocStore? docStore = null)
+        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository, accessPlanningService, docSearchService, docStore)
     {
     }
 
@@ -90,7 +95,9 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IHitLStepUpApprovalService? stepUpApprovalService = null,
         IGraphQlCatalogMap? graphQlCatalogMap = null,
         IConsentRepository? consentRepository = null,
-        IAccessPlanningService? accessPlanningService = null)
+        IAccessPlanningService? accessPlanningService = null,
+        IDocSearchService? docSearchService = null,
+        IUniversalDocStore? docStore = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -106,6 +113,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         _graphQlCatalogMap = graphQlCatalogMap;
         _consentRepository = consentRepository;
         _accessPlanningService = accessPlanningService;
+        _docSearchService = docSearchService;
+        _docStore = docStore;
     }
 
 
@@ -238,6 +247,34 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                     _accessPlanningService,
                     cancellationToken).ConfigureAwait(false);
             }
+        }
+
+        // Documentation & Runbook MCP Tools Execution (F-AI-15, F-AI-16)
+        if (McpDocTools.IsDocTool(tool.Name))
+        {
+            var rawDocJson = await McpDocTools.ExecuteDocToolAsync(
+                tool.Name,
+                request.ArgumentsJson ?? "{}",
+                _docSearchService,
+                _docStore,
+                cancellationToken).ConfigureAwait(false);
+
+            await RecordAuditEventAsync(
+                tool.Name,
+                sessionContext,
+                decision: "ALLOW",
+                details: "Document MCP tool executed successfully under AI guardrails.",
+                isMasked: false,
+                truncated: false,
+                estimatedTokens: Math.Max(1, rawDocJson.Length / 4),
+                cancellationToken).ConfigureAwait(false);
+
+            return new McpToolCallResult(
+                IsSuccess: true,
+                ContentJson: rawDocJson,
+                ErrorMessage: null,
+                IsMasked: false
+            );
         }
 
         // Resolve real TargetTable for ABAC policy and Four-Eyes checks
