@@ -178,35 +178,53 @@ public sealed class GovernancePolicyFactory(
                     continue;
                 }
 
-                TableIdentifier? identifier = requested.Cast<TableIdentifier?>().FirstOrDefault(r => r!.Value.Schema == entry.Identity.Schema && r.Value.TableName == entry.Identity.Table);
-                TableMetadata? metadata = null;
-                try
+                // L-1: the governance record that decides is the one the catalog provider can admit (its data source is the one of the
+                // statement). Homonymous tables of other domains are candidates too, so every record that could be admitted is checked and
+                // one unusable admittable record denies the table; no admittable record at all is unusable as well (fail closed).
+                var admittable = 0;
+                var usable = true;
+                foreach (var candidate in requested.Where(r => string.Equals(r.Schema, entry.Identity.Schema, StringComparison.OrdinalIgnoreCase)
+                                                               && string.Equals(r.TableName, entry.Identity.Table, StringComparison.OrdinalIgnoreCase)))
                 {
-                    if (identifier is { } found)
+                    TableMetadata? metadata;
+                    try
                     {
-                        metadata = await _tables.GetTableMetadataAsync(found, ct).ConfigureAwait(false);
+                        metadata = await _tables.GetTableMetadataAsync(candidate, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception)
+                    {
+                        usable = false;
+                        break;
+                    }
+
+                    if (metadata is null || !string.Equals(metadata.Table.SourceName, input.DataSourceName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    admittable++;
+                    if (!metadata.Table.IsActive)
+                    {
+                        usable = false;
+                        break;
+                    }
+
+                    try
+                    {
+                        TableMetadata.RequireTenantColumnOrThrow(metadata, dataSources?.RequireTenantColumn == true, dataSources?.TenantColumnExemptTables);
+                    }
+                    catch (SecurityException)
+                    {
+                        usable = false;
+                        break;
                     }
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception)
-                {
-                    metadata = null;
-                }
 
-                if (metadata is null || !metadata.Table.IsActive)
-                {
-                    unusable.Add(entry.Identity);
-                    continue;
-                }
-
-                try
-                {
-                    TableMetadata.RequireTenantColumnOrThrow(metadata, dataSources?.RequireTenantColumn == true, dataSources?.TenantColumnExemptTables);
-                }
-                catch (SecurityException)
+                if (!usable || admittable == 0)
                 {
                     unusable.Add(entry.Identity);
                 }

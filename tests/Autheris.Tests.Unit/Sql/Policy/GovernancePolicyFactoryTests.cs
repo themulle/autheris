@@ -49,9 +49,9 @@ public sealed class GovernancePolicyFactoryTests
         return new GovernancePolicyFactory(provider, tables, Microsoft.Extensions.Options.Options.Create(options ?? new GatewayOptions()));
     }
 
-    private static TableMetadata DependentMetadata(TableIdentifier id, bool withTenant, bool active = true) => new()
+    private static TableMetadata DependentMetadata(TableIdentifier id, bool withTenant, bool active = true, string sourceName = "ds") => new()
     {
-        Table = new Table { SourceName = "ds", SchemaName = id.Schema, TableName = id.TableName, IsActive = active },
+        Table = new Table { SourceName = sourceName, SchemaName = id.Schema, TableName = id.TableName, IsActive = active },
         Identifier = id,
         Columns = withTenant
             ? [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "tenant_id" }]
@@ -396,13 +396,15 @@ public sealed class GovernancePolicyFactoryTests
     // ---- X1: tables read by a policy subquery -----------------------------------------------------------------------------------
 
     /// <summary>EXISTS (SELECT 1 FROM main.invoices dep WHERE dep.id = autheris_target.id): the shape of a correlated consent filter.</summary>
-    private static IRowPolicy CorrelatedPolicy() => new PolicyPredicateRowPolicy(PolicyPredicate.Create(
+    private static IRowPolicy CorrelatedPolicy(string? domain = null) => new PolicyPredicateRowPolicy(PolicyPredicate.Create(
         new ExistsExpression(new SelectStatement(null,
             new QuerySpecification(
                 false,
                 [new ColumnSelectItem(new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier("dep", true), new SqlIdentifier("id", true) })), null)],
                 new NamedTableSource(
-                    new SqlQualifiedName(new[] { new SqlIdentifier("main", true), new SqlIdentifier("invoices", true) }),
+                    new SqlQualifiedName(domain is null
+                        ? new[] { new SqlIdentifier("main", true), new SqlIdentifier("invoices", true) }
+                        : new[] { new SqlIdentifier(domain, true), new SqlIdentifier("main", true), new SqlIdentifier("invoices", true) }),
                     new SqlIdentifier("dep", true)),
                 new BinaryExpression(
                     new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier("dep", true), new SqlIdentifier("id", true) })),
@@ -514,5 +516,44 @@ public sealed class GovernancePolicyFactoryTests
         var policy = await factory.CreateAsync(
             Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy()) }), CancellationToken.None);
         policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    // ---- L-1: the governance record that the catalog provider can admit decides, not the first homonymous one ---------------------
+
+    private static TableMetadata HomonymMetadata(TableIdentifier id, bool admittedRecordWithTenant, bool admittedRecordActive)
+    {
+        // The provider only admits a record whose data source is the one of the statement ("ds"); the homonym of the other domain is
+        // active and has a tenant column, i.e. it would pass every check if it were the one that was looked at.
+        var admitted = string.Equals(id.Domain, "ds", StringComparison.OrdinalIgnoreCase);
+        return DependentMetadata(id, admitted ? admittedRecordWithTenant : true, admitted ? admittedRecordActive : true, admitted ? "ds" : "elsewhere");
+    }
+
+    private async Task<GovernancePolicy> AssembleHomonymAsync(GatewayOptions options, bool admittedWithTenant, bool admittedActive)
+    {
+        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _, options,
+            id => id.TableName == "invoices" ? HomonymMetadata(id, admittedWithTenant, admittedActive) : DependentMetadata(id, true));
+        return await factory.CreateAsync(
+            Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy("elsewhere")) }), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task DependentTable_HomonymInAnotherDomain_InactiveAdmittedRecord_DeniesTheTableOfThePolicy()
+    {
+        var policy = await AssembleHomonymAsync(new GatewayOptions(), admittedWithTenant: true, admittedActive: false);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_HomonymInAnotherDomain_TenantlessAdmittedRecord_RequireTenantColumn_DeniesTheTableOfThePolicy()
+    {
+        var policy = await AssembleHomonymAsync(RequireTenant(), admittedWithTenant: false, admittedActive: true);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_HomonymInAnotherDomain_UsableAdmittedRecord_IsAllowed()
+    {
+        var policy = await AssembleHomonymAsync(RequireTenant(), admittedWithTenant: true, admittedActive: true);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldNotBeNull();
     }
 }
