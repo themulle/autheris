@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Buffer;
+using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
@@ -93,7 +94,7 @@ public sealed class SqlServerDialectTests
     }
 
     [Fact]
-    public void SqlServer_ParameterBudget_Exceeding2100_ThrowsException()
+    public void SqlServer_ParameterBudget_Exceeding2100_ThrowsLimitException()
     {
         // Generate a statement with 2101 parameters
         var paramsList = new List<Expression>();
@@ -114,7 +115,9 @@ public sealed class SqlServerDialectTests
             OrderBy: null,
             Pagination: null);
 
-        Assert.Throws<DialectLimitExceededException>(() => _generator.GenerateSql(stmt));
+        var ex = Assert.Throws<SqlLimitExceededException>(() => _generator.GenerateSql(stmt));
+        Assert.Equal(SqlLimitKind.BindParameters, ex.Kind);
+        Assert.Equal(2100, ex.Maximum);
     }
 
     [Fact]

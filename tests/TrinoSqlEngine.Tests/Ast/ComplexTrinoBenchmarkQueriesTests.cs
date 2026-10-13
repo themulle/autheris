@@ -5,19 +5,12 @@ using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Generators;
 using Xunit;
 
+/// <summary>
+/// Emission of complex Trino statements per dialect. The tenant predicate of the tables (CTEs, joins, EXISTS, set operations) is
+/// asserted by the governed compile tests (<c>TypedInjectionTests</c>, <c>CteShadowingTests</c>, <c>TenantPredicateStructureTests</c>).
+/// </summary>
 public sealed class ComplexTrinoBenchmarkQueriesTests
 {
-    private readonly FastSqlEngine _engine = new();
-
-    private static RlsOptions CreateOptions(TargetSqlDialect dialect, string tenantId = "tenant-test-01")
-    {
-        return new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider($"tenant_id = '{tenantId}'"),
-            TargetDialect = dialect
-        };
-    }
-
     [Fact]
     public void Statement1_ChainedCtes_WithAggregationJoinAndPaging()
     {
@@ -40,25 +33,21 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
             OFFSET 0 LIMIT 10";
 
         // 1. PostgreSQL
-        var pgOptions = CreateOptions(TargetSqlDialect.PostgreSql);
-        string pgSql = _engine.GenerateGovernedSql(sql, pgOptions);
+        string pgSql = AstEmit.Inline(sql, TargetSqlDialect.PostgreSql);
 
         Assert.Contains("WITH \"dept_summary\" AS (", pgSql);
         Assert.Contains("\"high_value_invoices\" AS (", pgSql);
         Assert.Contains("\"invoices\"", pgSql);
-        Assert.Contains("\"tenant_id\" = 'tenant-test-01'", pgSql);
         Assert.Contains("GROUP BY \"department\"", pgSql);
         Assert.Contains("HAVING COUNT(*) > 5", pgSql);
         Assert.Contains("LIMIT 10 OFFSET 0", pgSql);
 
         // 2. SQL Server (T-SQL)
-        var msOptions = CreateOptions(TargetSqlDialect.SqlServer);
-        string msSql = _engine.GenerateGovernedSql(sql, msOptions);
+        string msSql = AstEmit.Inline(sql, TargetSqlDialect.SqlServer);
 
         Assert.Contains("WITH [dept_summary] AS (", msSql);
         Assert.Contains("[high_value_invoices] AS (", msSql);
         Assert.Contains("[invoices]", msSql);
-        Assert.Contains("[tenant_id] = N'tenant-test-01'", msSql);
         Assert.Contains("GROUP BY [department]", msSql);
         Assert.Contains("HAVING COUNT(*) > 5", msSql);
         Assert.Contains("OFFSET 0 ROWS FETCH NEXT 10 ROWS ONLY", msSql);
@@ -84,24 +73,20 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
             ORDER BY total_revenue DESC";
 
         // 1. PostgreSQL
-        var pgOptions = CreateOptions(TargetSqlDialect.PostgreSql);
-        string pgSql = _engine.GenerateGovernedSql(sql, pgOptions);
+        string pgSql = AstEmit.Inline(sql, TargetSqlDialect.PostgreSql);
 
         Assert.Contains("\"customers\"", pgSql);
         Assert.Contains("\"orders\"", pgSql);
-        Assert.Contains("\"tenant_id\" = 'tenant-test-01'", pgSql);
         Assert.Contains("SUM(\"o\".\"total_amount\")", pgSql);
         Assert.Contains("\"o\".\"customer_id\" = \"c\".\"id\"", pgSql);
         Assert.Contains("GROUP BY \"o\".\"customer_id\"", pgSql);
         Assert.Contains("HAVING COUNT(\"o\".\"id\") >= 3", pgSql);
 
         // 2. SQL Server (T-SQL)
-        var msOptions = CreateOptions(TargetSqlDialect.SqlServer);
-        string msSql = _engine.GenerateGovernedSql(sql, msOptions);
+        string msSql = AstEmit.Inline(sql, TargetSqlDialect.SqlServer);
 
         Assert.Contains("[customers]", msSql);
         Assert.Contains("[orders]", msSql);
-        Assert.Contains("[tenant_id] = N'tenant-test-01'", msSql);
         Assert.Contains("SUM([o].[total_amount])", msSql);
         Assert.Contains("[o].[customer_id] = [c].[id]", msSql);
         Assert.Contains("GROUP BY [o].[customer_id]", msSql);
@@ -132,8 +117,7 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
               )";
 
         // 1. PostgreSQL
-        var pgOptions = CreateOptions(TargetSqlDialect.PostgreSql);
-        string pgSql = _engine.GenerateGovernedSql(sql, pgOptions);
+        string pgSql = AstEmit.Inline(sql, TargetSqlDialect.PostgreSql);
 
         Assert.Contains("CASE", pgSql);
         Assert.Contains("WHEN \"o\".\"total_amount\" >= 1000 THEN 'PLATINUM'", pgSql);
@@ -141,11 +125,9 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("\"finance_items\"", pgSql);
         Assert.Contains("\"shipments\"", pgSql);
         Assert.Contains("NOT (EXISTS (", pgSql);
-        Assert.Contains("\"tenant_id\" = 'tenant-test-01'", pgSql);
 
         // 2. SQL Server (T-SQL)
-        var msOptions = CreateOptions(TargetSqlDialect.SqlServer);
-        string msSql = _engine.GenerateGovernedSql(sql, msOptions);
+        string msSql = AstEmit.Inline(sql, TargetSqlDialect.SqlServer);
 
         Assert.Contains("CASE", msSql);
         Assert.Contains("N'PLATINUM'", msSql);
@@ -153,7 +135,6 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("[finance_items]", msSql);
         Assert.Contains("[shipments]", msSql);
         Assert.Contains("NOT (EXISTS (", msSql);
-        Assert.Contains("[tenant_id] = N'tenant-test-01'", msSql);
     }
 
     [Fact]
@@ -174,8 +155,7 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
             ORDER BY o.id ASC, f.price DESC";
 
         // 1. PostgreSQL
-        var pgOptions = CreateOptions(TargetSqlDialect.PostgreSql);
-        string pgSql = _engine.GenerateGovernedSql(sql, pgOptions);
+        string pgSql = AstEmit.Inline(sql, TargetSqlDialect.PostgreSql);
 
         Assert.Contains("INNER JOIN", pgSql);
         Assert.Contains("LEFT OUTER JOIN", pgSql);
@@ -184,11 +164,9 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("\"shipments\"", pgSql);
         Assert.Contains("\"finance_items\"", pgSql);
         Assert.Contains("\"s\".\"status\" IS NULL OR \"s\".\"status\" <> 'CANCELLED'", pgSql);
-        Assert.Contains("\"tenant_id\" = 'tenant-test-01'", pgSql);
 
         // 2. SQL Server (T-SQL)
-        var msOptions = CreateOptions(TargetSqlDialect.SqlServer);
-        string msSql = _engine.GenerateGovernedSql(sql, msOptions);
+        string msSql = AstEmit.Inline(sql, TargetSqlDialect.SqlServer);
 
         Assert.Contains("INNER JOIN", msSql);
         Assert.Contains("LEFT OUTER JOIN", msSql);
@@ -197,7 +175,6 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("[shipments]", msSql);
         Assert.Contains("[finance_items]", msSql);
         Assert.Contains("[s].[status] IS NULL OR [s].[status] <> N'CANCELLED'", msSql);
-        Assert.Contains("[tenant_id] = N'tenant-test-01'", msSql);
     }
 
     [Fact]
@@ -217,8 +194,7 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
             HAVING COUNT(o.id) >= 5";
 
         // 1. PostgreSQL
-        var pgOptions = CreateOptions(TargetSqlDialect.PostgreSql);
-        string pgSql = _engine.GenerateGovernedSql(sql, pgOptions);
+        string pgSql = AstEmit.Inline(sql, TargetSqlDialect.PostgreSql);
 
         Assert.Contains("UNION ALL", pgSql);
         Assert.Contains("\"customers\"", pgSql);
@@ -226,11 +202,9 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("GROUP BY \"c\".\"id\", \"c\".\"name\"", pgSql);
         Assert.Contains("HAVING SUM(\"o\".\"total_amount\") > 10000", pgSql);
         Assert.Contains("HAVING COUNT(\"o\".\"id\") >= 5", pgSql);
-        Assert.Contains("\"tenant_id\" = 'tenant-test-01'", pgSql);
 
         // 2. SQL Server (T-SQL)
-        var msOptions = CreateOptions(TargetSqlDialect.SqlServer);
-        string msSql = _engine.GenerateGovernedSql(sql, msOptions);
+        string msSql = AstEmit.Inline(sql, TargetSqlDialect.SqlServer);
 
         Assert.Contains("UNION ALL", msSql);
         Assert.Contains("[customers]", msSql);
@@ -238,6 +212,5 @@ public sealed class ComplexTrinoBenchmarkQueriesTests
         Assert.Contains("GROUP BY [c].[id], [c].[name]", msSql);
         Assert.Contains("HAVING SUM([o].[total_amount]) > 10000", msSql);
         Assert.Contains("HAVING COUNT([o].[id]) >= 5", msSql);
-        Assert.Contains("[tenant_id] = N'tenant-test-01'", msSql);
     }
 }

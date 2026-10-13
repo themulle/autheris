@@ -351,9 +351,9 @@ public class SecurityCoverageTests
     }
 
     [Fact]
-    public void TrustedSqlExpression_OnTheTypedPath_IsRejected()
+    public void NamedBindMarker_OnTheTypedPath_IsRejected()
     {
-        var stmt = Select(Secured("t", "t", Pred(RootId, SecurityScope.Root)), new BinaryExpression(Col("x"), Equal, new TrustedSqlExpression("1")));
+        var stmt = Select(Secured("t", "t", Pred(RootId, SecurityScope.Root)), new BinaryExpression(Col("x"), Equal, new NamedBindMarkerExpression("m")));
         Assert.Throws<SecurityCoverageException>(() => Verify(stmt));
     }
 
@@ -462,8 +462,16 @@ public class SecurityCoverageTests
     public void SecurityVisitor_DoesNotReenterAnInjectedPredicate()
     {
         var injected = Pred(RootId, SecurityScope.Root, new ExistsExpression(Select(new NamedTableSource(Canonical("zzz"), null))));
-        var visitor = new AstSecurityVisitor(new RlsOptions { PolicyProvider = new DefaultRlsPolicyProvider("1 = 1") });
-        var result = (SelectStatement)visitor.Visit(Select(new SubqueryTableSource(Select(Secured("t", "x", null)), new SqlIdentifier("a", true)), injected));
+        var table = new TrinoSqlEngine.Governance.TableIdentity("dbo", "t");
+        var catalog = new TrinoSqlEngine.Governance.InMemoryTableCatalog(new[]
+        {
+            new TrinoSqlEngine.Governance.TableCatalogEntry(table, System.Collections.Immutable.ImmutableArray.Create(new TrinoSqlEngine.Governance.CatalogColumn("id", "int")), null, 1)
+        }, "dbo");
+        var rowFilters = new DictPolicyProvider();
+        rowFilters.NoPolicy.Add(table);
+        var typed = new TrinoSqlEngine.Governance.TypedPolicyContext(catalog, rowFilters, new DictMaskProvider(),
+            new TrinoSqlEngine.Governance.TenantBinding("__autheris_tenant", "acme", SqlParameterType.String), DialectCapabilityTable.Default.Get(TargetSqlDialect.SqlServer));
+        var result = (SelectStatement)TypedVisitor.Secure(Select(new SubqueryTableSource(Select(Secured("t", "x", null)), new SqlIdentifier("a", true)), injected), typed);
         Assert.Same(injected, FindSecurityPredicate(((QuerySpecification)result.Body).Where!));
     }
 

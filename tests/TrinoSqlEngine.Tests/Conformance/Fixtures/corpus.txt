@@ -643,7 +643,7 @@ ast;ast-001;@policy-param-where
 ast;ast-002;@policy-param-like
 ast;ast-003;@policy-param-int
 ast;ast-004;@security-predicate
-ast;ast-005;@trusted-sql
+ast;ast-005;@named-bind-marker
 ast;ast-006;@param-ref-named
 ast;ast-007;@param-ref-positional
 ast;ast-008;@mask-nullify

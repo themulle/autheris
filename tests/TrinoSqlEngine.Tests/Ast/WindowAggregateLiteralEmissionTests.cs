@@ -11,14 +11,8 @@ using Xunit;
 /// </summary>
 public sealed class WindowAggregateLiteralEmissionTests
 {
-    private readonly FastSqlEngine _engine = new();
-
     private string Generate(string sql, TargetSqlDialect dialect) =>
-        _engine.GenerateGovernedSql(sql, new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TargetDialect = dialect
-        });
+        AstEmit.Inline(sql, dialect);
 
     // ---- window ORDER BY (was: OVER () or InvalidCastException) ----
 

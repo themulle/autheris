@@ -55,8 +55,7 @@ internal static class Oracles
     private static readonly Regex LiteralValue = new(@"^(LIT|OTH)\d+_", RegexOptions.Compiled);
 
     /// <summary>Exception types that count as a typed rejection. Anything else is an unhandled failure.</summary>
-    public static bool IsTypedRejection(Exception e) => e is ParseCanceledException or SecurityException or AstBuildException or GovernedSqlException
-        or DialectLimitExceededException;
+    public static bool IsTypedRejection(Exception e) => e is ParseCanceledException or SecurityException or AstBuildException or GovernedSqlException;
 
     // ---- compile and classify ----
 

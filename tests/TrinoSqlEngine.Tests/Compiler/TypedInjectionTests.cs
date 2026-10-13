@@ -32,8 +32,7 @@ public class TypedInjectionTests
     private SqlStatement Secure(string sql, TypedPolicyContext typed)
     {
         var ast = CompilerTestHelpers.Build(sql);
-        var visitor = new AstSecurityVisitor(new RlsOptions { EnforceReadOnlyQueries = true }, new FastSqlEngine(), typed);
-        return (SqlStatement)visitor.Visit(ast);
+        return TypedVisitor.Secure(ast, typed);
     }
 
     private static IEnumerable<SecurityPredicateExpression> Predicates(object? node)

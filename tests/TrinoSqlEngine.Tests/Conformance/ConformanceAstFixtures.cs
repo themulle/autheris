@@ -41,7 +41,7 @@ internal static class ConformanceAstFixtures
             new Dictionary<string, PolicyValue> { ["tenant"] = new("acme", SqlParameterType.String) }),
         ["parenthesized"] = () => Case(Select(Col("a"), new BinaryExpression(new ParenthesizedExpression(Eq(Col("b"), new LiteralExpression(1, LiteralType.Integer))), BinaryOperator.And,
             new ParenthesizedExpression(Eq(Col("c"), new LiteralExpression("x", LiteralType.String)))))),
-        ["trusted-sql"] = () => Case(Select(new TrustedSqlExpression("UPPER(email)"))),
+        ["named-bind-marker"] = () => Case(Select(new NamedBindMarkerExpression("m"))),
         ["param-ref-named"] = () => Case(Select(Col("a"), Eq(Col("b"), new ParameterReference("p", IsSynthetic: true))),
             client: new Dictionary<string, object?> { ["p"] = 5 }),
         ["param-ref-positional"] = () => Case(Select(Col("a"), Eq(Col("b"), new ParameterReference("p0", PositionalIndex: 0)))),

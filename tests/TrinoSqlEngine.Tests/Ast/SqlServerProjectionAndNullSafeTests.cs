@@ -11,14 +11,8 @@ using Xunit;
 /// </summary>
 public sealed class SqlServerProjectionAndNullSafeTests
 {
-    private readonly FastSqlEngine _engine = new();
-
     private string Generate(string sql, TargetSqlDialect dialect) =>
-        _engine.GenerateGovernedSql(sql, new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TargetDialect = dialect
-        });
+        AstEmit.Inline(sql, dialect);
 
     [Fact]
     public void Case_InProjection_IsNotWrappedTwice()

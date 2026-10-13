@@ -12,14 +12,8 @@ using Xunit;
 /// </summary>
 public sealed class CastTypeNameTests
 {
-    private readonly FastSqlEngine _engine = new();
-
     private string Cast(string type, TargetSqlDialect dialect, string function = "CAST") =>
-        _engine.GenerateGovernedSql($"SELECT {function}(amount AS {type}) FROM orders", new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TargetDialect = dialect
-        });
+        AstEmit.Inline($"SELECT {function}(amount AS {type}) FROM orders", dialect);
 
     [Theory]
     [InlineData("double", "AS float)")]

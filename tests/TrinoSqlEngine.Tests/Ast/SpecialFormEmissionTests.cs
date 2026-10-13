@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Security;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Builder;
+using TrinoSqlEngine.Tests.Security;
 using Xunit;
 
 /// <summary>
@@ -13,15 +14,8 @@ using Xunit;
 /// </summary>
 public sealed class SpecialFormEmissionTests
 {
-    private readonly FastSqlEngine _engine = new();
-
-    private string Generate(string sql, TargetSqlDialect dialect, RlsOptions? options = null)
-    {
-        options ??= new RlsOptions();
-        options.PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'");
-        options.TargetDialect = dialect;
-        return _engine.GenerateGovernedSql(sql, options);
-    }
+    private static string Generate(string sql, TargetSqlDialect dialect, IReadOnlySet<string>? allowedFunctions = null) =>
+        AstEmit.Inline(sql, dialect, allowedFunctions: allowedFunctions);
 
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql, "current_date", "CURRENT_DATE")]
@@ -105,20 +99,20 @@ public sealed class SpecialFormEmissionTests
     [Fact]
     public void SpecialForms_FollowTheFunctionPolicy()
     {
-        var options = new RlsOptions
-        {
-            EnforceFunctionPolicy = true,
-            AllowedFunctions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "upper" }
-        };
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "upper" };
 
-        Assert.Throws<SecurityException>(() => Generate("SELECT trim(name) FROM orders", TargetSqlDialect.PostgreSql, options));
+        Assert.Throws<SecurityException>(() => Generate("SELECT trim(name) FROM orders", TargetSqlDialect.PostgreSql, allowed));
     }
 
-    [Fact]
-    public void SubqueryInsideSpecialForm_GetsRowFilter()
+    // The row filter of a table inside a special form: the governed compile path puts the tenant predicate around every table,
+    // also the one of the subquery (two tables, two predicates).
+    [Theory]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    public void SubqueryInsideSpecialForm_GetsRowFilter(TargetSqlDialect dialect)
     {
-        string sql = Generate("SELECT substring(name FROM (SELECT MIN(id) FROM customers)) FROM orders", TargetSqlDialect.PostgreSql);
+        var compiled = new ProbeEnv(dialect).Compile("SELECT substring(email FROM (SELECT MIN(id) FROM entitlements)) FROM orders");
 
-        Assert.Contains("FROM \"customers\" WHERE \"tenant_id\" = 't1'", sql);
+        ProbeAsserts.TenantPredicates(compiled, expectedPredicates: 2);
     }
 }

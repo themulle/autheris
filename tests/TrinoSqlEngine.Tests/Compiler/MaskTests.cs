@@ -216,7 +216,7 @@ public class MaskTests
         new Dictionary<string, PolicyValue> { ["__mask_email"] = new("[REDACTED]", SqlParameterType.String) }.ToFrozenDictionary());
 
     private SqlStatement Secure(string sql, TypedPolicyContext typed) =>
-        (SqlStatement)new AstSecurityVisitor(new RlsOptions(), new FastSqlEngine(), typed).Visit(CompilerTestHelpers.Build(sql));
+        TypedVisitor.Secure(CompilerTestHelpers.Build(sql), typed);
 
     [Fact]
     public void TypedInjection_ProjectsMaskExpression_ForMaskedColumns_AndCollectsValues()

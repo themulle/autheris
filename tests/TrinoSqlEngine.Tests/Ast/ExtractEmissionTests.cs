@@ -11,14 +11,8 @@ using Xunit;
 /// </summary>
 public sealed class ExtractEmissionTests
 {
-    private readonly FastSqlEngine _engine = new();
-
     private string Generate(string sql, TargetSqlDialect dialect) =>
-        _engine.GenerateGovernedSql(sql, new RlsOptions
-        {
-            PolicyProvider = new DefaultRlsPolicyProvider("tenant_id = 't1'"),
-            TargetDialect = dialect
-        });
+        AstEmit.Inline(sql, dialect);
 
     private string Extract(string field, TargetSqlDialect dialect) =>
         Generate($"SELECT EXTRACT({field} FROM created_at) AS v FROM orders", dialect);
