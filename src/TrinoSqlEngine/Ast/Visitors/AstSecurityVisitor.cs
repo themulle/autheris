@@ -161,7 +161,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             if (pagination != null)
             {
                 var clampedLimit = ClampLimit(pagination.Limit, _options.EnforcedMaxRows);
-                pagination = pagination with { Limit = clampedLimit };
+                // M-22: WITH TIES can return more rows than the limit, so it is downgraded to ONLY under an enforced cap.
+                pagination = pagination with { Limit = clampedLimit, WithTies = false };
             }
             else
             {
