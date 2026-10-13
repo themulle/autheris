@@ -108,40 +108,52 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<WebApplicat
     }
 
 
+    private const string CallerSid = "S-1-5-X1-EP";
+    private const string DataSourceName = "default";
+
+    /// <summary>
+    /// L-9: the audit record of an executed governed statement of THIS caller on THIS data source (the actor and the data source of the
+    /// request, the allowed outcome, and the compiled-statement fields). Another actor, another data source, a denied statement or a record
+    /// without the compiled fields (for example the denied probe of a door test) cannot vouch for the door under test.
+    /// </summary>
+    private static bool IsCompiledAuditOfTheCaller(AuditLogEntry e) =>
+        e.EventType == Autheris.Domain.Audit.AuditEventTypes.WebSqlQuery &&
+        e.Decision == "ALLOW" &&
+        e.ActorSid.Value == CallerSid &&
+        e.TargetTable == DataSourceName &&
+        e.DetailsJson != null &&
+        e.DetailsJson.Contains("\"compiler_version\"", StringComparison.Ordinal) &&
+        e.DetailsJson.Contains("\"sql.compiled_digest\"", StringComparison.Ordinal);
+
     /// <summary>
     /// L-A2: the outcome (acme rows only) does not prove the path. A compiled statement that ran through the executor leaves an audit
     /// record with the compiler version and the keyed digest of the compiled text; only Compile plus the executor write both.
     /// </summary>
-    private async Task<int> CompiledAuditCountAsync()
+    private async Task<IReadOnlyList<AuditLogEntry>> CompiledAuditsAsync()
     {
         using var scope = _factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
-        var entries = await repo.GetAuditLogEntriesAsync(1000);
-        return entries.Count(e => e.DetailsJson != null && e.DetailsJson.Contains("\"compiler_version\"", StringComparison.Ordinal)
-                                                         && e.DetailsJson.Contains("\"sql.compiled_digest\"", StringComparison.Ordinal));
+        return (await repo.GetAuditLogEntriesAsync(1000)).Where(IsCompiledAuditOfTheCaller).ToList();
     }
+
+    private async Task<int> CompiledAuditCountAsync() => (await CompiledAuditsAsync()).Count;
 
     private async Task AssertCompiledAuditAsync(int before, string door)
     {
-        int after = before;
-        for (var attempt = 0; attempt < 40 && after <= before; attempt++)
+        IReadOnlyList<AuditLogEntry> audits = await CompiledAuditsAsync();
+        for (var attempt = 0; attempt < 40 && audits.Count <= before; attempt++)
         {
-            after = await CompiledAuditCountAsync();
-            if (after <= before) await Task.Delay(250);
+            await Task.Delay(250);
+            audits = await CompiledAuditsAsync();
         }
 
-        after.ShouldBeGreaterThan(before, $"{door}: no audit record with compiler_version and sql.compiled_digest was written");
+        audits.Count.ShouldBeGreaterThan(before, $"{door}: no audit record of the caller on '{DataSourceName}' with compiler_version and sql.compiled_digest was written");
 
-        using var scope = _factory.Services.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
-        var newest = (await repo.GetAuditLogEntriesAsync(1000))
-            .Where(e => e.DetailsJson != null && e.DetailsJson.Contains("\"sql.compiled_digest\"", StringComparison.Ordinal))
-            .Select(e => JsonDocument.Parse(e.DetailsJson!).RootElement.Clone())
-            .ToList();
-        newest.ShouldNotBeEmpty();
-        foreach (var details in newest)
+        foreach (var entry in audits)
         {
+            var details = JsonDocument.Parse(entry.DetailsJson!).RootElement;
             details.GetProperty("compiler_version").GetString().ShouldNotBeNullOrWhiteSpace(door);
+            details.GetProperty("dataSource").GetString().ShouldBe(DataSourceName, door);
             var digest = details.GetProperty("sql.compiled_digest").GetString();
             digest.ShouldNotBeNullOrWhiteSpace(door);
             digest!.Length.ShouldBe(64, $"{door}: the digest is a hex HMAC-SHA256");
