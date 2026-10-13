@@ -6,6 +6,7 @@ using Xunit;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class CompiledSqlBinderTests
 {
     private static CompiledSql Compiled(string sql, params BoundParameter[] ps) =>

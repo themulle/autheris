@@ -13,6 +13,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 
 namespace TrinoSqlEngine.Tests.Compiler;
 
+[Trait("Category", "SqlGate")]
 public class MaskTests
 {
     private static ColumnReference Col(string name) => new(new SqlQualifiedName(new[] { new SqlIdentifier(name, true) }));

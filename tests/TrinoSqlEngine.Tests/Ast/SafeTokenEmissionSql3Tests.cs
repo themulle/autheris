@@ -10,6 +10,7 @@ using Xunit;
 /// SQL-3: the AST generators emit cast target types and EXTRACT fields verbatim; only plain tokens are allowed, and an
 /// unknown dialect no longer falls back to ANSI.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class SafeTokenEmissionSql3Tests
 {
     [Theory]

@@ -7,6 +7,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>CR-ADG-16: the implicit alias of a policy-subquery table keeps the user's quoting, like <c>SecureTyped</c>.</summary>
+[Trait("Category", "SqlGate")]
 public class PolicySubqueryAliasTests
 {
     private readonly FastSqlEngine _engine = new();

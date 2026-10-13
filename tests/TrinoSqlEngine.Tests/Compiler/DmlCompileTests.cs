@@ -15,6 +15,7 @@ namespace TrinoSqlEngine.Tests.Compiler;
 /// was rejected as "not yet supported") and drive the typed DML injection. They run on every dialect that lists DML in its
 /// capability entry.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public class DmlCompileTests
 {
     public static readonly TargetSqlDialect[] Dialects = { TargetSqlDialect.SqlServer, TargetSqlDialect.DuckDb, TargetSqlDialect.PostgreSql, TargetSqlDialect.Databricks, TargetSqlDialect.Oracle };

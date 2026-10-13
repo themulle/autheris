@@ -11,6 +11,7 @@ using Xunit;
 /// (<c>CteShadowingPhysicalName_StillSecuresTheQualifiedPhysicalTableInsideTheBody</c>) and quoted/unquoted case variants
 /// (<c>QuotedCteVsUnquotedPhysical_CaseVariants_AlwaysSecured</c>, SEC C-02).
 /// </summary>
+[Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
 public sealed class AstSecurityVisitorCteTests
 {

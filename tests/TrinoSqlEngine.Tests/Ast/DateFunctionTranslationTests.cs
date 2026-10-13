@@ -11,6 +11,7 @@ using Xunit;
 /// the AST compiler translates <c>date_add</c>, <c>date_trunc</c>, <c>now()</c> and <c>x ± INTERVAL</c> into each dialect's
 /// date arithmetic. Without the option (WebSQL) nothing changes.
 /// </summary>
+[Trait("Category", "SqlGate")]
 public sealed class DateFunctionTranslationTests
 {
     private string Generate(string expression, TargetSqlDialect dialect, bool translate = true) =>

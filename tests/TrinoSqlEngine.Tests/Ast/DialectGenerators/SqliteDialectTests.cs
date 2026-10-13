@@ -8,6 +8,7 @@ using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class SqliteDialectTests
 {
     private readonly SqliteDialectGenerator _generator = new();

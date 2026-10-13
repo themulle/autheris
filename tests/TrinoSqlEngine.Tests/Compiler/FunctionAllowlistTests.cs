@@ -9,6 +9,7 @@ using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
 namespace TrinoSqlEngine.Tests.Compiler;
 
 /// <summary>CR-ADG-02: no rule means reject. The compiler is fail-closed by allowlist, per dialect.</summary>
+[Trait("Category", "SqlGate")]
 public class FunctionAllowlistTests
 {
     private readonly FastSqlEngine _engine = new();
