@@ -7,7 +7,9 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Docs.Interfaces;
+using Autheris.Application.Events;
 using Autheris.Domain.Audit;
+using Autheris.Domain.Events;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -78,6 +80,7 @@ public static class DocIngestionEndpoints
             string docId,
             DepositDocumentBody body,
             IUniversalDocStore docStore,
+            IGatewayEventBus? eventBus,
             CancellationToken ct) =>
         {
             if (!Enum.TryParse<DocCategory>(category, true, out var parsedCategory))
@@ -101,6 +104,19 @@ public static class DocIngestionEndpoints
                 body.Tags);
 
             var result = await docStore.DepositDocumentAsync(depositRequest, ct).ConfigureAwait(false);
+
+            if (result.Success && eventBus != null)
+            {
+                await eventBus.PublishAsync(new DocumentDepositedEvent(
+                    EventId: Guid.NewGuid().ToString("N"),
+                    AppId: appId,
+                    Category: category,
+                    DocId: docId,
+                    Title: title,
+                    SourceFilePath: result.FilePath ?? string.Empty,
+                    Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+            }
+
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.DocIngestionDocumentApplied);
 

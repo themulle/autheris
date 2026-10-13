@@ -55,6 +55,7 @@ Every feature document includes an architectural overview, explanation of busine
 | **F-DIALECT-01** | Multi-Target SQL AST Compiler & Native Dialect Pushdown | [f-dialect-01-ast-target-dialect-pushdown.md](f-dialect-01-ast-target-dialect-pushdown.md) |
 | **F-DOC-01** | Omnichannel Semantic Documentation Passthrough | [f-doc-01-omnichannel-documentation.md](f-doc-01-omnichannel-documentation.md) |
 | **F-DX-01** | Zero-Config Developer Quickstart & Dev Portal Hub | [f-dx-01-developer-quickstart.md](f-dx-01-developer-quickstart.md) |
+| **F-EXT-01** | Generic C# DLL Plugin & Event/Webhook Subsystem | [f-ext-01-generic-plugin-events-and-webhooks.md](f-ext-01-generic-plugin-events-and-webhooks.md) |
 | **F-GOV-06** | Multi-Stage Pushdown Cascades & Cross-Domain Joins (not implemented) | [f-gov-06-cross-domain-joins.md](f-gov-06-cross-domain-joins.md) |
 | **F-GOV-08** | Dynamic Schema Contracts & Tag-Based Projection (@tag) | [f-gov-08-schema-contracts-tag-projection.md](f-gov-08-schema-contracts-tag-projection.md) |
 | **F-GOV-09** | Virtual Filters (Relation-Scoped Cross-Channel Mandatory Row Filtering) | [f-gov-09-virtual-filters.md](f-gov-09-virtual-filters.md) |
