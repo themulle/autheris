@@ -29,6 +29,13 @@ public sealed class AstSecurityVisitorDmlTests
         return env;
     }
 
+    private static ProbeEnv MaskedEnv(string kind)
+    {
+        var env = new ProbeEnv(TargetSqlDialect.PostgreSql);
+        if (kind == "hmac") env.MaskEmailHmac(); else env.MaskEmailPartial();
+        return env;
+    }
+
     [Theory]
     [MemberData(nameof(Dialects))]
     public void Dml_UnfilteredDml_ThrowsUnfilteredDmlException(TargetSqlDialect dialect)
@@ -98,6 +105,27 @@ public sealed class AstSecurityVisitorDmlTests
             .Compile("DELETE FROM entitlements WHERE orderid IN (SELECT count(*) FROM orders GROUP BY email)");
 
         Assert.Contains("CAST(NULL AS", compiled.Sql, StringComparison.Ordinal);
+    }
+
+    // The same for the keyed and the partial masks: the GROUP BY of the subquery groups the projected (masked) column of the derived table,
+    // never the stored value, so the mask is not an equality oracle.
+    [Theory]
+    [InlineData("hmac", "HMAC(")]
+    [InlineData("partial", "right(")]
+    public void Dml_GroupByAMaskedColumnInASubquery_Hmac_And_PartialMask_GroupTheProjectedAlias(string kind, string maskFunction)
+    {
+        var compiled = MaskedEnv(kind).Compile("DELETE FROM entitlements WHERE orderid IN (SELECT count(*) FROM orders GROUP BY email)");
+
+        // the mask is computed inside the derived table that stands for orders ...
+        const string derivedTableEnd = ") AS \"orders\" GROUP BY ";
+        int end = compiled.Sql.IndexOf(derivedTableEnd, StringComparison.Ordinal);
+        Assert.True(end > 0, compiled.Sql);
+        Assert.Contains(maskFunction, compiled.Sql[..end], StringComparison.OrdinalIgnoreCase);
+
+        // ... and the grouping outside of it reads only the projected alias: never the mask function, never the stored column of the base table
+        string grouping = compiled.Sql[(end + derivedTableEnd.Length)..];
+        string groupingExpression = grouping[..grouping.IndexOf(')', StringComparison.Ordinal)];
+        Assert.Equal("\"email\"", groupingExpression);
     }
 
     [Theory]
