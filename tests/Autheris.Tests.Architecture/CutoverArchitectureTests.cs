@@ -13,7 +13,27 @@ namespace Autheris.Tests.Architecture;
 /// </summary>
 public sealed class CutoverArchitectureTests
 {
-    private static readonly Assembly[] ProductionAssemblies =
+    /// <summary>
+    /// L-6: the production assemblies are the projects under <c>src/**</c> (the assembly name is the <c>AssemblyName</c> of the project, else its
+    /// file name), so a new production project is scanned without a code change here. A project that this test project cannot load fails
+    /// the test instead of being skipped.
+    /// </summary>
+    private static readonly Assembly[] ProductionAssemblies = LoadProductionAssemblies();
+
+    private static string[] ProductionProjectNames()
+    {
+        var src = Path.Combine(RepositoryRoot(), "src");
+        return Directory.EnumerateFiles(src, "*.csproj", SearchOption.AllDirectories)
+            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}") && !p.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .Select(p => System.Xml.Linq.XDocument.Load(p).Descendants("AssemblyName").FirstOrDefault()?.Value.Trim() ?? Path.GetFileNameWithoutExtension(p))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    private static Assembly[] LoadProductionAssemblies() => ProductionProjectNames().Select(name => Assembly.Load(new AssemblyName(name))).ToArray();
+
+    /// <summary>The assemblies that this test project references on purpose; a production project that is not among them has no anchor here.</summary>
+    private static readonly Assembly[] AnchorAssemblies =
     [
         typeof(Autheris.Domain.Common.Sid).Assembly,
         typeof(Autheris.Application.Services.ConsentResolutionService).Assembly,
@@ -24,12 +44,26 @@ public sealed class CutoverArchitectureTests
         typeof(TrinoSqlEngine.FastSqlEngine).Assembly
     ];
 
+    [Fact]
+    public void TheScannedAssemblies_AreExactlyTheProjectsUnderSrc()
+    {
+        var projects = ProductionProjectNames();
+        projects.Length.ShouldBeGreaterThan(5, "positive control: the project scan sees the production projects");
+
+        ProductionAssemblies.Select(a => a.GetName().Name!).Order(StringComparer.Ordinal).ShouldBe(projects);
+        ProductionTypes().Select(t => t.Module.Assembly.Name.Name).Distinct().Order(StringComparer.Ordinal).ShouldBe(projects);
+        // a new production project under src/ needs an anchor type in AnchorAssemblies (and a reference of this test project)
+        AnchorAssemblies.Select(a => a.GetName().Name!).Order(StringComparer.Ordinal).ShouldBe(projects);
+    }
+
     private static readonly string EngineAssemblyName = typeof(TrinoSqlEngine.FastSqlEngine).Assembly.GetName().Name!;
 
-    private static List<(ModuleDefinition Module, TypeDefinition Type)> ProductionTypes()
+    private static List<(ModuleDefinition Module, TypeDefinition Type)> ProductionTypes() => TypesOf(ProductionAssemblies);
+
+    private static List<(ModuleDefinition Module, TypeDefinition Type)> TypesOf(IEnumerable<Assembly> assemblies)
     {
         var result = new List<(ModuleDefinition, TypeDefinition)>();
-        foreach (var assembly in ProductionAssemblies)
+        foreach (var assembly in assemblies)
         {
             var module = ModuleDefinition.ReadModule(assembly.Location);
             result.AddRange(module.GetTypes().Select(t => (module, t)));
@@ -203,17 +237,29 @@ public sealed class CutoverArchitectureTests
     }
 
     // ---------------------------------------------------------------------------------------------------------------------
-    // NoCommandTextAssignmentOnGovernedPath (§28.4)
+    // NamedBindMarkerExpression is only created by the policy predicate renderer (L-5)
     // ---------------------------------------------------------------------------------------------------------------------
 
-    private static List<string> CommandTextSetters(TypeDefinition type)
+    private const string NamedBindMarker = "TrinoSqlEngine.Ast.Nodes.NamedBindMarkerExpression";
+
+    /// <summary>
+    /// The callers that construct or copy a <c>NamedBindMarkerExpression</c> (a bind marker that the generator emits as a bind name verbatim),
+    /// outside the type itself, as "top-level type: Type.Method".
+    /// </summary>
+    private static List<(string Top, string Site)> NamedBindMarkerConstructions(IEnumerable<Assembly> assemblies)
     {
-        var found = new List<string>();
-        foreach (var method in type.Methods.Where(m => m.HasBody))
+        var found = new List<(string, string)>();
+        foreach (var (_, type) in TypesOf(assemblies))
         {
-            if (method.Body.Instructions.Any(i => i.OpCode.Code is Code.Call or Code.Callvirt && i.Operand is MethodReference { Name: "set_CommandText" }))
+            if (Top(type) == NamedBindMarker) continue;
+            foreach (var method in type.Methods.Where(m => m.HasBody))
             {
-                found.Add(method.Name);
+                if (method.Body.Instructions.Any(i => i.OpCode.Code is Code.Newobj or Code.Call or Code.Callvirt && i.Operand is MethodReference called
+                                                       && called.DeclaringType.FullName == NamedBindMarker
+                                                       && (called.Name == ".ctor" || called.Name == "<Clone>$")))
+                {
+                    found.Add((Top(type), $"{type.FullName}.{method.Name}"));
+                }
             }
         }
 
@@ -221,46 +267,148 @@ public sealed class CutoverArchitectureTests
     }
 
     [Fact]
-    public void NoCommandTextAssignmentOnGovernedPath()
-    {
-        var types = ProductionTypes();
+    public void TheBindMarkerScanner_FindsAKnownConstruction() =>
+        NamedBindMarkerConstructions([typeof(CutoverArchitectureTests).Assembly])
+            .ShouldContain(c => c.Top == typeof(ControlBindMarkerFactory).FullName);
 
-        // The governed executor, its service and the rewriter never assign CommandText; the binder does (positive control).
+    [Fact]
+    public void NamedBindMarkerExpression_IsOnlyConstructedByThePolicyPredicateRenderer()
+    {
+        var sites = NamedBindMarkerConstructions(ProductionAssemblies);
+
+        sites.ShouldContain(c => c.Top == "Autheris.Application.Sql.Policy.PolicyPredicateRenderer", "positive control: the renderer creates the markers");
+        var violations = sites.Where(c => c.Top != "Autheris.Application.Sql.Policy.PolicyPredicateRenderer").Select(c => c.Site).ToList();
+        violations.ShouldBeEmpty("A NamedBindMarkerExpression emits its name as a bind marker verbatim, so only the policy predicate renderer (which names it from the policy's own parameters) may create one: " + string.Join(", ", violations));
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------
+    // NoCommandTextAssignmentOnGovernedPath (§28.4)
+    // ---------------------------------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Every call of a <c>CommandText</c> setter (<c>DbCommand</c>, <c>IDbCommand</c> and any provider command: the scan is on the member name,
+    /// so a subtype or an interface call cannot hide it) as (top-level type, "Type.Method").
+    /// </summary>
+    private static List<(string Top, string Site)> CommandTextSetterSites(IEnumerable<(ModuleDefinition Module, TypeDefinition Type)> types)
+    {
+        var found = new List<(string, string)>();
+        foreach (var (_, type) in types)
+        {
+            foreach (var method in type.Methods.Where(m => m.HasBody))
+            {
+                if (method.Body.Instructions.Any(i => i.OpCode.Code is Code.Call or Code.Callvirt && i.Operand is MethodReference { Name: "set_CommandText" }))
+                {
+                    found.Add((Top(type), $"{type.FullName}.{method.Name}"));
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// The only production types that may assign <c>CommandText</c> (§28.4). Everything else, in particular every type of the governed path,
+    /// reaches a database through <c>CompiledSql</c> and the binder. A type is allowed with a reason or not at all; the key is the top-level
+    /// type, and a trailing <c>*</c> allows a namespace prefix.
+    /// </summary>
+    private static readonly (string Type, string Reason)[] CommandTextAllowlist =
+    [
+        // -- governed SQL: compiled text only --
+        ("TrinoSqlEngine.Ast.Emit.DbCommandCompiledSqlBinder", "the binder: the only place that turns CompiledSql into command text"),
+        ("Autheris.Infrastructure.Persistence.BindByNameOracleCommand", "DbCommand decorator: forwards the text the binder gave it to the Oracle command (BindByName)"),
+        // -- the allowed exceptions of §28.9 (the text comes from the typed IR / the compiler, never from a client string) --
+        ("Autheris.Application.Sql.Tree.GovernedTreeQueryService", "§28.9 OQ-GQL: executes compiled.Sql of the GraphQL tree compiler"),
+        ("Autheris.Application.Services.SqlDataSourceExecutor", "§28.9 OQ-4: REST/MCP dataset text consumer rendered through the policy and mask renderers"),
+        ("Autheris.Application.Olap.DuckDbOlapEngine", "§28.9 DuckDB staging: runs on the in-process staged copy, after the governed fetch"),
+        ("Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider", "virtual-filter key set: the query is rendered from the typed key-source definition"),
+        // -- statements of the gateway itself (no client text) --
+        ("Autheris.Application.Services.DbSessionContextInitializer", "fixed session-initialisation statements (tenant and user session context)"),
+        ("Autheris.Infrastructure.Persistence.SqlConnectionFactory", "fixed session pinning and hardening statements of a new connection"),
+        ("Autheris.Extensions.Cdc.MssqlChangeTrackingPoller", "CDC polling: fixed change-tracking queries over catalog table and column names"),
+        ("Autheris.Application.Procedures.Services.MssqlProcedureInvoker", "stored-procedure call by a validated catalog name with bound parameters (not a WebSQL statement)"),
+        ("Autheris.Application.Procedures.Services.SqlProcedureRowScopeResolver", "procedure row-scope key query over validated catalog identifiers, bound values, read-only"),
+        ("Autheris.Application.Procedures.Services.StoredProcedureCatalogValidator", "catalog validation queries over the procedure definitions (metadata only)"),
+        ("Autheris.Infrastructure.Persistence.Catalog.*", "column-metadata readers: fixed information_schema/PRAGMA queries of the governed catalog provider"),
+        // -- persistence of the gateway's own governance store (its schema bootstrap and repositories) --
+        ("Autheris.Infrastructure.Persistence.SqliteGovernanceRepository", "governance store repository and schema bootstrap/migrations"),
+        ("Autheris.Infrastructure.Persistence.SqlServerGovernanceRepository", "governance store repository and schema bootstrap"),
+        ("Autheris.Infrastructure.Persistence.PostgreSqlGovernanceRepository", "governance store repository and schema bootstrap"),
+        ("Autheris.Infrastructure.Persistence.SqliteGovernanceLintSource", "read-only governance store reader of the pre-deploy policy lint"),
+        ("Autheris.Infrastructure.Persistence.TenantRegistryStore", "tenant registry table of the governance store"),
+        ("Autheris.Infrastructure.Persistence.VirtualFilterStore", "virtual filter table of the governance store"),
+    ];
+
+    private static bool IsAllowedCommandTextSite(string top) =>
+        CommandTextAllowlist.Any(e => e.Type.EndsWith('*') ? top.StartsWith(e.Type[..^1], StringComparison.Ordinal) : top == e.Type);
+
+    internal sealed class ControlSetsCommandText
+    {
+        public void Run(System.Data.Common.DbCommand command) => command.CommandText = "SELECT 1";
+    }
+
+    [Fact]
+    public void TheCommandTextScanner_FindsAKnownSetter_OnADbCommandSubtype()
+    {
+        CommandTextSetterSites(TypesOf([typeof(CutoverArchitectureTests).Assembly]))
+            .ShouldContain(site => site.Site.Contains(nameof(ControlSetsCommandText), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void NoCommandTextAssignmentOutsideTheAllowlist()
+    {
+        var sites = CommandTextSetterSites(ProductionTypes());
+
+        sites.ShouldContain(s => s.Top == "TrinoSqlEngine.Ast.Emit.DbCommandCompiledSqlBinder", "positive control: the binder assigns CommandText");
+        var violations = sites.Where(s => !IsAllowedCommandTextSite(s.Top)).Select(s => s.Site).Distinct().Order(StringComparer.Ordinal).ToList();
+        violations.ShouldBeEmpty("CommandText is assigned only by the allowlisted types (every entry has a reason): " + string.Join(", ", violations));
+
+        // an allowlist entry that no longer matches anything is dead weight that would silently re-allow a rename
+        var unused = CommandTextAllowlist.Where(e => !sites.Any(s => e.Type.EndsWith('*') ? s.Top.StartsWith(e.Type[..^1], StringComparison.Ordinal) : s.Top == e.Type))
+            .Select(e => e.Type).ToList();
+        unused.ShouldBeEmpty("Remove the allowlist entries that assign no CommandText any more: " + string.Join(", ", unused));
+    }
+
+    [Fact]
+    public void TheGovernedPath_NeverAssignsCommandText()
+    {
         string[] governed =
         [
             "Autheris.Application.Sql.Services.GovernedSqlExecutor", "Autheris.Application.Sql.Services.GovernedSqlExecutionService",
             "Autheris.Application.Sql.Services.GovernedSqlRewriter", "Autheris.Application.Sql.Services.WebSqlStatementManager"
         ];
-        var violations = new List<string>();
+        var types = ProductionTypes();
+        var sites = CommandTextSetterSites(types);
         foreach (string name in governed)
         {
-            var matching = types.Where(t => Top(t.Type) == name).ToList();
-            matching.ShouldNotBeEmpty($"{name} exists");
-            foreach (var (_, type) in matching) violations.AddRange(CommandTextSetters(type).Select(m => $"{type.FullName}.{m}"));
+            types.ShouldContain(t => Top(t.Type) == name, $"{name} exists");
+            sites.Where(s => s.Top == name).ShouldBeEmpty($"{name} never assigns CommandText");
         }
-
-        violations.ShouldBeEmpty("CommandText on the governed path is assigned only by DbCommandCompiledSqlBinder: " + string.Join(", ", violations));
-
-        var binderSetters = types.Where(t => Top(t.Type) == "TrinoSqlEngine.Ast.Emit.DbCommandCompiledSqlBinder").SelectMany(t => CommandTextSetters(t.Type)).ToList();
-        binderSetters.ShouldNotBeEmpty("positive control: the binder assigns CommandText");
     }
 
     // ---------------------------------------------------------------------------------------------------------------------
     // GovernedEntryPoints_ReachCompileAndBinder (M-7, §28.2)
     // ---------------------------------------------------------------------------------------------------------------------
 
-    /// <summary>The entry points of §28.2 marked "via X1": each reaches <c>ISqlEngine.Compile</c> and a binder through the call graph.</summary>
-    private static readonly string[] GovernedEntryPoints =
+    /// <summary>
+    /// The request-handling methods of the entry points of §28.2 marked "via X1" (the endpoint handler that a route is mapped to, the public
+    /// execute method of a service, the worker's job loop): each must itself reach <c>ISqlEngine.Compile</c> and a binder through the call
+    /// graph. Starting at these methods, and not at every method of the type, means that a helper that compiles cannot vouch for a handler
+    /// that does not.
+    /// </summary>
+    private static readonly (string Type, string Method, bool Executes)[] GovernedEntryPoints =
     [
-        "Autheris.Api.Endpoints.WebSqlEndpoints",
-        "Autheris.Application.Sql.Services.WebSqlStatementManager",
-        "Autheris.Application.SqlEndpoints.Services.SqlEndpointExecutionService",
-        "Autheris.Application.Jobs.Services.AsyncQueryJobBackgroundWorker",
-        "Autheris.Api.Endpoints.ArrowExportEndpoints",
-        "Autheris.Application.Serialization.ArrowFlightSqlServer",
-        "Autheris.Application.Mcp.Services.McpToolExecutionHandler",
-        "Autheris.Application.Mcp.Services.ApiDispatcherService",
-        "Autheris.Application.Data.Services.GovernedDataQueryService"
+        ("Autheris.Api.Endpoints.WebSqlEndpoints", "HandleWebSqlRequest", true),
+        ("Autheris.Api.Endpoints.WebSqlEndpoints", "HandleParquetWebSqlRequestAsync", true),
+        ("Autheris.Application.Sql.Services.WebSqlStatementManager", "SubmitOrWaitAsync", true),
+        ("Autheris.Application.SqlEndpoints.Services.SqlEndpointExecutionService", "ExecuteEndpointAsync", true),
+        ("Autheris.Application.Jobs.Services.AsyncQueryJobBackgroundWorker", "ProcessJobItemAsync", true),
+        ("Autheris.Api.Endpoints.ArrowExportEndpoints", "HandleArrowExportAsync", true),
+        // Flight SQL: GetFlightInfo only validates (compiles) the statement before it issues a ticket; DoGet executes it.
+        ("Autheris.Application.Serialization.ArrowFlightSqlServer", "GetFlightInfoAsync", false),
+        ("Autheris.Application.Serialization.ArrowFlightSqlServer", "DoGetStreamAsync", true),
+        ("Autheris.Application.Mcp.Services.McpToolExecutionHandler", "ExecuteToolAsync", true),
+        ("Autheris.Application.Mcp.Services.ApiDispatcherService", "InvokeApiAsync", true),
+        ("Autheris.Application.Data.Services.GovernedDataQueryService", "ExecuteQueryAsync", true)
     ];
 
     /// <summary>
@@ -278,35 +426,64 @@ public sealed class CutoverArchitectureTests
 
     private sealed record Node(string Type, string Method);
 
-    /// <summary>
-    /// Call graph on (top-level type, method name). Compiler generated types (async state machines, closures) are folded into the
-    /// method they came from; a call through an interface or a virtual method links to every implementation of that name.
-    /// </summary>
-    private static (Dictionary<Node, HashSet<Node>> Edges, Dictionary<Node, HashSet<string>> Targets) BuildCallGraph()
-    {
-        var types = ProductionTypes();
-        var edges = new Dictionary<Node, HashSet<Node>>();
-        var targets = new Dictionary<Node, HashSet<string>>();
-        var implementations = new Dictionary<string, List<Node>>();
+    private sealed record CallGraph(Dictionary<Node, HashSet<Node>> Edges, Dictionary<Node, HashSet<string>> Targets);
 
-        static string OriginalMethod(TypeDefinition type, MethodDefinition method)
+    /// <summary>The user-written method that a compiler generated name stands for: <c>&lt;Run&gt;d__3</c>, <c>&lt;&lt;Run&gt;b__0&gt;d</c>, <c>&lt;Run&gt;b__0</c>, <c>&lt;Run&gt;g__Local|1_0</c>.</summary>
+    private static readonly System.Text.RegularExpressions.Regex GeneratedName = new(@"^<+([^<>]+)>", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static string OriginalMethod(TypeDefinition type, MethodDefinition method)
+    {
+        for (var t = type; t.DeclaringType is not null; t = t.DeclaringType)
         {
-            for (var t = type; t.DeclaringType is not null; t = t.DeclaringType)
+            if (GeneratedName.Match(t.Name) is { Success: true } m) return m.Groups[1].Value;
+        }
+
+        return GeneratedName.Match(method.Name) is { Success: true } named ? named.Groups[1].Value : method.Name;
+    }
+
+    /// <summary>The full names of the type, its base types and every interface they implement (generic types by their definition).</summary>
+    private static HashSet<string> Supertypes(TypeDefinition type)
+    {
+        var result = new HashSet<string>();
+        var pending = new Stack<TypeDefinition>();
+        pending.Push(type);
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+            if (!result.Add(current.FullName)) continue;
+            foreach (var i in current.Interfaces)
             {
-                if (t.Name.StartsWith('<') && t.Name.IndexOf('>') > 1) return t.Name[1..t.Name.IndexOf('>')];
+                result.Add(i.InterfaceType.GetElementType().FullName);
+                if (i.InterfaceType.Resolve() is { } resolvedInterface) pending.Push(resolvedInterface);
             }
 
-            if (method.Name.StartsWith('<') && method.Name.IndexOf('>') > 1) return method.Name[1..method.Name.IndexOf('>')];
-            return method.Name;
+            if (current.BaseType?.Resolve() is { } baseType) pending.Push(baseType);
+            else if (current.BaseType is not null) result.Add(current.BaseType.GetElementType().FullName);
         }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Call graph on (top-level type, method name). Compiler generated types (async state machines, closures) are folded into the
+    /// method they came from. A call through an interface, an abstract or a virtual method links only to the implementations of that name in
+    /// types that derive from or implement the declaring type of the call (not to every method of that name).
+    /// </summary>
+    private static CallGraph BuildCallGraph(IEnumerable<Assembly> assemblies)
+    {
+        var types = TypesOf(assemblies);
+        var edges = new Dictionary<Node, HashSet<Node>>();
+        var targets = new Dictionary<Node, HashSet<string>>();
+        var implementations = new Dictionary<string, List<(Node Node, HashSet<string> Supertypes)>>();
 
         foreach (var (_, type) in types)
         {
+            var supertypes = Supertypes(type);
             foreach (var method in type.Methods.Where(m => m.HasBody))
             {
                 var node = new Node(Top(type), OriginalMethod(type, method));
                 if (!implementations.TryGetValue(node.Method, out var list)) implementations[node.Method] = list = [];
-                if (!list.Contains(node)) list.Add(node);
+                list.Add((node, supertypes));
             }
         }
 
@@ -320,21 +497,19 @@ public sealed class CutoverArchitectureTests
                 foreach (var instruction in method.Body.Instructions)
                 {
                     if (instruction.OpCode.Code is not (Code.Call or Code.Callvirt or Code.Newobj) || instruction.Operand is not MethodReference reference) continue;
-                    string owner = reference.DeclaringType.FullName;
-                    called.Add($"{owner}::{reference.Name}");
-                    if (implementations.TryGetValue(reference.Name, out var impls))
+                    string owner = reference.DeclaringType.GetElementType().FullName;
+                    called.Add($"{reference.DeclaringType.FullName}::{reference.Name}");
+                    if (!implementations.TryGetValue(reference.Name, out var impls)) continue;
+                    bool dispatch = reference.Name != ".ctor" && InvolvesDispatch(reference);
+                    foreach (var (impl, supertypes) in impls)
                     {
-                        // Same name, any type: sound over-approximation of virtual and interface dispatch by name.
-                        foreach (var impl in impls)
-                        {
-                            if (impl.Type == owner || reference.Name != ".ctor" && InvolvesDispatch(reference)) outgoing.Add(impl);
-                        }
+                        if (impl.Type == owner || dispatch && supertypes.Contains(owner)) outgoing.Add(impl);
                     }
                 }
             }
         }
 
-        return (edges, targets);
+        return new CallGraph(edges, targets);
     }
 
     private static bool InvolvesDispatch(MethodReference reference)
@@ -343,16 +518,17 @@ public sealed class CutoverArchitectureTests
         return resolved is null || resolved.IsVirtual || resolved.DeclaringType.IsInterface || resolved.DeclaringType.IsAbstract;
     }
 
-    private static bool Reaches(Dictionary<Node, HashSet<Node>> edges, Dictionary<Node, HashSet<string>> targets, string entryType, string target)
+    private static bool Reaches(CallGraph graph, Node entry, string target)
     {
         var seen = new HashSet<Node>();
-        var queue = new Queue<Node>(edges.Keys.Where(n => n.Type == entryType));
+        var queue = new Queue<Node>();
+        queue.Enqueue(entry);
         while (queue.Count > 0)
         {
             var node = queue.Dequeue();
             if (!seen.Add(node)) continue;
-            if (targets.TryGetValue(node, out var called) && called.Contains(target)) return true;
-            if (edges.TryGetValue(node, out var next)) foreach (var n in next) queue.Enqueue(n);
+            if (graph.Targets.TryGetValue(node, out var called) && called.Contains(target)) return true;
+            if (graph.Edges.TryGetValue(node, out var next)) foreach (var n in next) queue.Enqueue(n);
         }
 
         return false;
@@ -361,40 +537,89 @@ public sealed class CutoverArchitectureTests
     private const string CompileTarget = "TrinoSqlEngine.ISqlEngine::Compile";
     private const string BinderTarget = "TrinoSqlEngine.Ast.Emit.CompiledSqlBinders::For";
 
+    private static List<string> EntryPointViolations(
+        CallGraph graph, IEnumerable<(string Type, string Method, bool Executes)> entries, string compileTarget = CompileTarget, string binderTarget = BinderTarget)
+    {
+        var violations = new List<string>();
+        foreach (var (type, method, executes) in entries)
+        {
+            var node = new Node(type, method);
+            if (!graph.Edges.ContainsKey(node))
+            {
+                violations.Add($"{type}.{method} does not exist in a scanned assembly");
+                continue;
+            }
+
+            if (!Reaches(graph, node, compileTarget)) violations.Add($"{type}.{method} does not reach ISqlEngine.Compile");
+            if (executes && !Reaches(graph, node, binderTarget)) violations.Add($"{type}.{method} does not reach CompiledSqlBinders.For");
+        }
+
+        return violations;
+    }
+
     [Fact]
     public void GovernedEntryPoints_ReachCompileAndBinder()
     {
-        var (edges, targets) = BuildCallGraph();
-        var violations = new List<string>();
-        foreach (string entry in GovernedEntryPoints)
-        {
-            edges.Keys.ShouldContain(n => n.Type == entry, $"{entry} exists in a production assembly");
-            if (!Reaches(edges, targets, entry, CompileTarget)) violations.Add($"{entry} does not reach ISqlEngine.Compile");
-            if (!Reaches(edges, targets, entry, BinderTarget)) violations.Add($"{entry} does not reach CompiledSqlBinders.For");
-        }
+        var violations = EntryPointViolations(BuildCallGraph(ProductionAssemblies), GovernedEntryPoints);
 
-        violations.ShouldBeEmpty("Every governed entry point (M-7, plan 28.2) reaches Compile and the binder: " + string.Join("; ", violations));
+        violations.ShouldBeEmpty("Every request-handling method of a governed entry point (M-7, plan 28.2) reaches Compile and the binder: " + string.Join("; ", violations));
     }
 
     [Fact]
     public void TheCallGraphScanner_FindsTheKnownCompileAndBinderCallers()
     {
-        var (_, targets) = BuildCallGraph();
-        targets.Where(kv => kv.Value.Contains(CompileTarget)).Select(kv => kv.Key.Type)
+        var graph = BuildCallGraph(ProductionAssemblies);
+        graph.Targets.Where(kv => kv.Value.Contains(CompileTarget)).Select(kv => kv.Key.Type)
             .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlRewriter" }, ignoreOrder: true);
-        targets.Where(kv => kv.Value.Contains(BinderTarget)).Select(kv => kv.Key.Type)
+        graph.Targets.Where(kv => kv.Value.Contains(BinderTarget)).Select(kv => kv.Key.Type)
             .Distinct().ShouldBe(new[] { "Autheris.Application.Sql.Services.GovernedSqlExecutor" }, ignoreOrder: true);
+    }
+
+    // The fixtures of the controls below are top-level types of this (test) assembly, which the production scans never read
+    // (CutoverArchitectureControls.cs). The control graph uses the control engine as the compile and binder target.
+    private static readonly string ControlCompileTarget = $"{typeof(ControlEntry).Namespace}.{nameof(IControlEngine)}::{nameof(IControlEngine.Compile)}";
+
+    private static CallGraph ControlGraph() => BuildCallGraph([typeof(CutoverArchitectureTests).Assembly]);
+
+    [Fact]
+    public void TheEntryPointScan_AcceptsAHandlerThatCompiles_AndRejectsARawSqlHandlerOnTheSameType()
+    {
+        var graph = ControlGraph();
+        string entryType = typeof(ControlEntry).FullName!;
+
+        // positive control: the governed handler reaches the engine through the interface
+        EntryPointViolations(graph, [(entryType, nameof(ControlEntry.Governed), true)], ControlCompileTarget, ControlCompileTarget).ShouldBeEmpty();
+
+        // negative control: a raw SQL method on the same entry type fails the check that the production entry points go through
+        var violations = EntryPointViolations(graph, [(entryType, nameof(ControlEntry.Raw), true)], ControlCompileTarget, ControlCompileTarget);
+        violations.ShouldContain(v => v.Contains("does not reach ISqlEngine.Compile", StringComparison.Ordinal));
+
+        // a handler that does not exist (a rename) fails as well, so a stale entry list cannot pass vacuously
+        EntryPointViolations(graph, [(entryType, "Renamed", true)], ControlCompileTarget, ControlCompileTarget).ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void TheEntryPointScan_DoesNotLinkAVirtualCallToATypeThatDoesNotImplementIt()
+    {
+        var graph = ControlGraph();
+
+        // ControlEntry.Governed calls IControlEngine.Compile: ControlEngine implements it and is linked, ControlUnrelatedCompiler has a
+        // method of the same name but is no implementation and must not make a handler look governed
+        var edges = graph.Edges[new Node(typeof(ControlEntry).FullName!, nameof(ControlEntry.Governed))];
+        edges.ShouldContain(n => n.Type == typeof(ControlEngine).FullName);
+        edges.ShouldNotContain(n => n.Type == typeof(ControlUnrelatedCompiler).FullName);
+        Reaches(graph, new Node(typeof(ControlEntry).FullName!, nameof(ControlEntry.ViaUnrelated)), ControlCompileTarget).ShouldBeFalse();
     }
 
     [Fact]
     public void TheExplicitExceptions_NeverCallALegacyApi_AndDoNotPretendToCompile()
     {
-        var (edges, targets) = BuildCallGraph();
+        var graph = BuildCallGraph(ProductionAssemblies);
         foreach (string exception in AllowedExceptionsOutsideCompile)
         {
-            edges.Keys.ShouldContain(n => n.Type == exception, $"{exception} exists in a production assembly");
+            graph.Edges.Keys.ShouldContain(n => n.Type == exception, $"{exception} exists in a production assembly");
             // They are not entry points of the governed WebSQL pipeline: they must not own a second binder or a second compile site.
-            targets.Where(kv => kv.Key.Type == exception).SelectMany(kv => kv.Value)
+            graph.Targets.Where(kv => kv.Key.Type == exception).SelectMany(kv => kv.Value)
                 .ShouldNotContain(BinderTarget, $"{exception} must not bind through the governed binder; it is a text consumer");
         }
     }
