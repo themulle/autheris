@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Sql;
 
 using System.Collections.Immutable;
+using System.Threading;
 using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
@@ -57,5 +58,51 @@ public sealed class CompiledSqlTemplateCacheTests
         cache.Add(Template("dialect=PostgreSql;sql=SELECT 1"));
 
         cache.Find("dialect=SqlServer;sql=SELECT 1").ShouldBeNull();
+    }
+
+    private static CompiledSql CompileOn(FastSqlEngine engine, TestCompileEnv catalogOwner, string sql = "SELECT id FROM main.orders") =>
+        engine.Compile(sql.AsMemory(), catalogOwner.Request(), CancellationToken.None);
+
+    /// <summary>
+    /// L-16 (replaces the former "different data source" case): two sources expose the same table name with a different shape. One engine
+    /// (one template cache) serves both; the second catalog must miss, never be answered from the template of the first.
+    /// </summary>
+    [Fact]
+    public void ADifferentDataSource_WithTheSameTableName_NeverServesTheOtherSourcesTemplate()
+    {
+        var engine = new FastSqlEngine();
+        var sourceA = new TestCompileEnv(TargetSqlDialect.PostgreSql, "main").Table("orders", "tenant_id", "id", "tenant_id", "name");
+        var sourceB = new TestCompileEnv(TargetSqlDialect.PostgreSql, "main").Table("orders", "tenant_id", "id", "tenant_id", "email");
+
+        var first = CompileOn(engine, sourceA);
+        CompileOn(engine, sourceA).Sql.ShouldBe(first.Sql);
+        engine.CompileCache.Stats.Hits.ShouldBe(1);   // control: the same catalog is a hit
+        long missesBefore = engine.CompileCache.Stats.Misses;
+
+        var other = CompileOn(engine, sourceB);
+
+        engine.CompileCache.Stats.Misses.ShouldBe(missesBefore + 1);
+        engine.CompileCache.Stats.Hits.ShouldBe(1);
+        first.Sql.ShouldContain("\"name\"");
+        other.Sql.ShouldContain("\"email\"");
+        other.Sql.ShouldNotContain("\"name\"");
+    }
+
+    /// <summary>L-16 (replaces the former "changed catalog columns" case): a catalog change must not be served from a stale template.</summary>
+    [Fact]
+    public void ChangedCatalogColumns_MissTheCache_AndAreNotServedStale()
+    {
+        var engine = new FastSqlEngine();
+        var before = new TestCompileEnv(TargetSqlDialect.PostgreSql, "main").Table("orders", "tenant_id", "id", "tenant_id", "name");
+        var after = new TestCompileEnv(TargetSqlDialect.PostgreSql, "main").Table("orders", "tenant_id", "id", "tenant_id", "name", "extra");
+
+        CompileOn(engine, before, "SELECT * FROM main.orders");
+        long misses = engine.CompileCache.Stats.Misses;
+
+        var changed = CompileOn(engine, after, "SELECT * FROM main.orders");
+
+        engine.CompileCache.Stats.Misses.ShouldBe(misses + 1);
+        engine.CompileCache.Stats.Hits.ShouldBe(0);
+        changed.Sql.ShouldContain("\"extra\"");
     }
 }
