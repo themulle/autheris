@@ -73,11 +73,18 @@ public sealed class GovernancePolicyFactory(
             .Distinct()
             .ToList();
         var requested = new List<TableIdentifier>(tables);
+        var records = new Dictionary<TableIdentifier, GovernanceRecord>();
         foreach (var name in policyTables)
         {
             foreach (var candidate in PolicySubqueryTables.Candidates(name, input.DataSourceName))
             {
-                if (!requested.Contains(candidate))
+                // M-2: only a candidate that the catalog provider can admit (a governance record of the statement's data source) is
+                // requested. The catalog cache is keyed without the domain, so a homonymous candidate that can never be admitted would
+                // evict the admitted one's entry and force a reload per statement. A record that cannot be read stays requested: it is
+                // unusable below (fail closed), exactly as before.
+                var record = await LoadRecordAsync(records, candidate, ct).ConfigureAwait(false);
+                if ((record.Failed || record.Metadata is { } metadata && string.Equals(metadata.Table.SourceName, input.DataSourceName, StringComparison.OrdinalIgnoreCase))
+                    && !requested.Contains(candidate))
                 {
                     requested.Add(candidate);
                 }
@@ -88,7 +95,7 @@ public sealed class GovernancePolicyFactory(
 
         // M-A1: a table that only a policy subquery reads is governed like a primary table: it must be active and satisfy
         // DataSources:RequireTenantColumn. The policy that needs a table that violates this denies its own table (below).
-        var unusableDependents = await FindUnusableDependentsAsync(input, catalog, requested, ct).ConfigureAwait(false);
+        var unusableDependents = await FindUnusableDependentsAsync(input, catalog, requested, records, ct).ConfigureAwait(false);
 
         var rowPredicates = new Dictionary<TableIdentity, PolicyPredicate?>();
         var masks = new Dictionary<TableIdentity, ColumnMaskPolicy>();
@@ -159,7 +166,7 @@ public sealed class GovernancePolicyFactory(
     /// <c>DataSources:RequireTenantColumn</c> (not exempt). Any failure to load the governance record counts as unusable (fail closed).
     /// </summary>
     private async ValueTask<HashSet<TableIdentity>> FindUnusableDependentsAsync(
-        GovernedPolicyInput input, ITableCatalog catalog, List<TableIdentifier> requested, CancellationToken ct)
+        GovernedPolicyInput input, ITableCatalog catalog, List<TableIdentifier> requested, Dictionary<TableIdentifier, GovernanceRecord> records, CancellationToken ct)
     {
         var unusable = new HashSet<TableIdentity>();
         var checkedTables = new HashSet<TableIdentity>();
@@ -186,21 +193,14 @@ public sealed class GovernancePolicyFactory(
                 foreach (var candidate in requested.Where(r => string.Equals(r.Schema, entry.Identity.Schema, StringComparison.OrdinalIgnoreCase)
                                                                && string.Equals(r.TableName, entry.Identity.Table, StringComparison.OrdinalIgnoreCase)))
                 {
-                    TableMetadata? metadata;
-                    try
-                    {
-                        metadata = await _tables.GetTableMetadataAsync(candidate, ct).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        throw;
-                    }
-                    catch (Exception)
+                    var record = await LoadRecordAsync(records, candidate, ct).ConfigureAwait(false);
+                    if (record.Failed)
                     {
                         usable = false;
                         break;
                     }
 
+                    var metadata = record.Metadata;
                     if (metadata is null || !string.Equals(metadata.Table.SourceName, input.DataSourceName, StringComparison.OrdinalIgnoreCase))
                     {
                         continue;
@@ -232,6 +232,34 @@ public sealed class GovernancePolicyFactory(
         }
 
         return unusable;
+    }
+
+    /// <summary>The governance record of a candidate (read once per assembly); a read failure is remembered, never swallowed into "no record".</summary>
+    private readonly record struct GovernanceRecord(TableMetadata? Metadata, bool Failed);
+
+    private async ValueTask<GovernanceRecord> LoadRecordAsync(Dictionary<TableIdentifier, GovernanceRecord> records, TableIdentifier candidate, CancellationToken ct)
+    {
+        if (records.TryGetValue(candidate, out var known))
+        {
+            return known;
+        }
+
+        GovernanceRecord record;
+        try
+        {
+            record = new GovernanceRecord(await _tables.GetTableMetadataAsync(candidate, ct).ConfigureAwait(false), false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            record = new GovernanceRecord(null, true);
+        }
+
+        records[candidate] = record;
+        return record;
     }
 
     private static bool TryAdmit(
@@ -381,13 +409,18 @@ internal static class PolicySubqueryTables
         }
     }
 
+    // The assembly asks for the names of one predicate several times (request list, dependents check, admission); the predicate is
+    // immutable, so the walk happens once per instance.
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<PolicyPredicate, IReadOnlyList<TrinoSqlEngine.Ast.Nodes.SqlQualifiedName>> NameCache = new();
+
     /// <summary>Every table name of the predicate (a predicate without a subquery has none).</summary>
-    public static IReadOnlyList<TrinoSqlEngine.Ast.Nodes.SqlQualifiedName> Names(PolicyPredicate predicate)
-    {
-        var collector = new Collector();
-        collector.Visit(predicate.Expression);
-        return collector.Names;
-    }
+    public static IReadOnlyList<TrinoSqlEngine.Ast.Nodes.SqlQualifiedName> Names(PolicyPredicate predicate) =>
+        NameCache.GetValue(predicate, static p =>
+        {
+            var collector = new Collector();
+            collector.Visit(p.Expression);
+            return collector.Names;
+        });
 
     /// <summary>
     /// The governance identifiers a policy table name may stand for. The policy renders <c>schema.table</c> (SQLite: the table alone), without
