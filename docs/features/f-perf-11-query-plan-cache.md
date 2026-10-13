@@ -1,59 +1,29 @@
-# F-PERF-11: Multi-Tenant Isolated Query Plan Cache & Kestrel Tuning
+# F-PERF-11: Query Plan Cache & Kestrel Tuning
 
-**Status:** [Done] (100% GA – Wave 2)  
-**Components:** [`CompiledSqlQueryPlanCache.cs`](file:///root/autheris/src/Autheris.Application/Sql/CompiledSqlQueryPlanCache.cs), [`IQueryPlanCache.cs`](file:///root/autheris/src/Autheris.Application/Sql/IQueryPlanCache.cs)
+> [!IMPORTANT]
+> The query plan cache part of this feature is superseded. The gateway has no application-level plan cache for SQL or GraphQL: the former compiled-SQL plan cache of the Application layer and its `WebSql:PlanCache` setting were removed. Compiled SQL is cached only inside the SQL engine, as value-free templates, described in [F-DIALECT-02, section 2.3](f-dialect-02-ast-sql-compiler.md#23-value-free-template-cache).
 
----
+## Engine template cache (summary)
 
-## 1. Overview & Problem Statement
+`CompiledSqlTemplateCache` (`src/TrinoSqlEngine/Ast/Emit/CompiledSqlTemplate.cs`) caches the verified output of `ISqlEngine.Compile`:
 
-Parsing GraphQL queries, performing AST validation, and generating parameterized SQL statements for every incoming request wastes CPU cycles. F-PERF-11 implements a high-performance, two-tier Compiled Query Plan Cache. Query plans, RLS expression trees, and parameter bindings are cached using SHA-256 document hashes combined with tenant IDs, cutting query compilation overhead by over 90% while preventing cross-tenant plan pollution.
+- **Key.** SHA-256 of the canonical serialization of the whole `CompileRequest` plus the compiler version, the capability table version, the engine query-length limit and the SQL text (`CompileCacheKey.Material`). A hit also compares the full key material, so a hash collision cannot return another statement's template. Row filters, masks and the catalog are validated per table on a hit (shape and catalog fingerprints) instead of being part of the key.
+- **No values.** A template holds the SQL text and slot descriptors. Tenant, policy and mask values are never stored; they are rebound from the current request on every hit, so tenants with the same policy shape share a template without sharing values.
+- **Integrity.** Only output that passed the coverage proof and the emitted-text check is inserted.
+- **Capacity.** 512 entries, first-in-first-out eviction; not configurable.
 
----
+Policy expressions have their own parse cache inside `PolicyExpressionParser` (`PolicyParseCacheOptions`).
 
-## 2. Business Value
+## Kestrel tuning
 
-- **10x Higher Query Throughput**: Cached query plans bypass lexical analysis, AST traversal, and SQL generation, maximizing RPS on existing CPU hardware.
-- **Tenant-Safe Isolation**: Separate plan cache keys prevent tenant A's RLS filters from ever being applied to tenant B.
-- **Optimized Kestrel Socket Pipeline**: Leverages HTTP/2 multiplexing, lock-free memory rings, and pre-allocated socket buffers.
+Kestrel limits are set in `src/Autheris.Api/Program.cs` from `Gateway:Hosting` (`HostingLimitsOptions`):
 
----
-
-## 3. Architecture & Capabilities
-
-- SHA-256 document hashing with caller tenant ID partitioning.
-- Fast L1 memory cache with lock-free concurrent hash maps.
-- Automatic plan invalidation upon policy epoch increments.
-
----
-
-## 4. Usage Example
-
-```bash
-# Execute query with plan caching enabled
-curl -X POST http://localhost:8080/graphql \
-  -H "Authorization: Bearer <user-token>" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "query GetProduct($id: ID!) { product(id: $id) { name price } }", "variables": {"id": "100"}}'
-
-# Response header verifies plan cache hit:
-# X-Query-Plan-Cache: HIT
-# Execution compilation overhead: <0.05 ms
-```
-
----
-
-## 5. Configuration Example
-
-```json
-{
-  "Gateway": {
-    "QueryPlanCache": {
-      "Enabled": true,
-      "MaxEntries": 10000,
-      "SlidingExpirationMinutes": 60,
-      "PartitionByTenant": true
-    }
-  }
-}
-```
+| Setting | Value |
+|---|---|
+| `Gateway:Hosting:MaxRequestBodySizeBytes` | Default 2 MiB (1 KiB to 1 GiB); endpoints with large payloads raise it per endpoint |
+| `Gateway:Hosting:MaxConcurrentConnections` | Default `0` = no limit |
+| `Gateway:Hosting:MaxConcurrentUpgradedConnections` | Default 1,000 |
+| HTTP/2 streams per connection | 1,024 (fixed) |
+| Keep-alive timeout | 2 minutes (fixed) |
+| Request headers timeout | 10 seconds (fixed) |
+| Server header, synchronous I/O | Disabled |
