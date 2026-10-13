@@ -11,11 +11,13 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Security.Rebac.Interfaces;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Events;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -41,6 +43,7 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly IPolicyEnforcementService? _policyEnforcement;
     private readonly IDataOwnershipRepository? _dataOwnershipRepo;
     private readonly ILogger<AccessPlanningService> _logger;
+    private readonly IGatewayEventBus? _eventBus;
 
     private readonly ConcurrentDictionary<string, StoredPlan> _plans = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _consumedTokens = new(StringComparer.OrdinalIgnoreCase);
@@ -80,7 +83,8 @@ public class AccessPlanningService : IAccessPlanningService
         IPolicyEnforcementService? policyEnforcementService = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
         IOptions<GatewayOptions>? options = null,
-        ILogger<AccessPlanningService>? logger = null)
+        ILogger<AccessPlanningService>? logger = null,
+        IGatewayEventBus? eventBus = null)
     {
         _auditRepo = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
@@ -92,6 +96,7 @@ public class AccessPlanningService : IAccessPlanningService
         _policyEnforcement = policyEnforcementService;
         _dataOwnershipRepo = dataOwnershipRepository;
         _logger = logger ?? NullLogger<AccessPlanningService>.Instance;
+        _eventBus = eventBus;
     }
 
     public async Task<AdminPlanAccessResult> PlanAccessAsync(
@@ -142,6 +147,18 @@ public class AccessPlanningService : IAccessPlanningService
         var result = new AdminPlanAccessResult(planId, request.DatasetId, diffs, warnings, expiresAt);
 
         _plans[planId] = new StoredPlan(result, request, adminSid);
+
+        if (_eventBus != null)
+        {
+            await _eventBus.PublishAsync(new AccessPlanCreatedEvent(
+                EventId: Guid.NewGuid().ToString("N"),
+                PlanId: planId,
+                DatasetId: request.DatasetId,
+                RequesterSid: adminSid,
+                GrantCount: request.Grants.Count,
+                Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+        }
+
         return result;
     }
 
@@ -262,6 +279,18 @@ public class AccessPlanningService : IAccessPlanningService
         };
 
         await _auditRepo.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+
+        if (_eventBus != null)
+        {
+            await _eventBus.PublishAsync(new AccessPlanAppliedEvent(
+                EventId: Guid.NewGuid().ToString("N"),
+                PlanId: request.PlanId,
+                DatasetId: stored.Request.DatasetId,
+                ApproverSid: adminSid,
+                AppliedGrantCount: tuples.Count,
+                Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+        }
+
         return new AdminApplyAccessResult(true, request.PlanId, tuples.Count, "Access applied successfully.");
     }
 
@@ -374,6 +403,19 @@ public class AccessPlanningService : IAccessPlanningService
         };
 
         await _auditRepo.RecordAuditEventAsync(auditEntry, ct).ConfigureAwait(false);
+
+        if (_eventBus != null)
+        {
+            await _eventBus.PublishAsync(new DatasetStateChangedEvent(
+                EventId: Guid.NewGuid().ToString("N"),
+                DatasetId: request.DatasetId,
+                OldState: string.Equals(previousState, "active", StringComparison.OrdinalIgnoreCase),
+                NewState: string.Equals(newState, "active", StringComparison.OrdinalIgnoreCase),
+                ChangedBySid: adminSid,
+                Reason: request.Reason,
+                Timestamp: DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+        }
+
         return new AdminSetDatasetStateResult(request.DatasetId, previousState, newState, true);
     }
 

@@ -7,7 +7,11 @@ using System.Reflection;
 using System.Security;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Application.Events;
 using Autheris.Application.Plugins;
+using Autheris.Domain.Events;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,8 +24,14 @@ public sealed class PluginManager : IPluginManager, IDisposable
     private readonly IServiceProvider? _serviceProvider;
     private readonly IOptions<GatewayOptions>? _options;
     private readonly ConcurrentDictionary<string, PluginEntry> _plugins = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, PluginActionEntry> _actionHandlers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<PluginListenerEntry> _listeners = [];
+    private readonly List<IDisposable> _busSubscriptions = [];
+    private readonly object _lock = new();
 
     private sealed record PluginEntry(IHttpDataSourcePlugin Plugin, PluginAssemblyLoadContext? Context);
+    private sealed record PluginListenerEntry(IPluginEventListener Listener, PluginAssemblyLoadContext? Context);
+    private sealed record PluginActionEntry(IPluginActionHandler Handler, PluginAssemblyLoadContext? Context);
 
     public PluginManager(
         ILogger<PluginManager> logger,
@@ -46,6 +56,62 @@ public sealed class PluginManager : IPluginManager, IDisposable
         ArgumentNullException.ThrowIfNull(plugin);
         _plugins[plugin.Name] = new PluginEntry(plugin, null);
         _logger.LogInformation("Directly registered HTTP Data Source Plugin: {PluginName}", plugin.Name);
+    }
+
+    public IReadOnlyCollection<IPluginEventListener> GetAllListeners()
+    {
+        lock (_lock)
+        {
+            return _listeners.Select(e => e.Listener).ToList();
+        }
+    }
+
+    public void RegisterListener(IPluginEventListener listener)
+    {
+        ArgumentNullException.ThrowIfNull(listener);
+        lock (_lock)
+        {
+            _listeners.Add(new PluginListenerEntry(listener, null));
+        }
+        BindListenerToEventBus(listener);
+        _logger.LogInformation("Directly registered plugin event listener: {ListenerType}", listener.GetType().FullName);
+    }
+
+    public IReadOnlyCollection<IPluginActionHandler> GetAllActionHandlers() =>
+        _actionHandlers.Values.Select(e => e.Handler).ToList();
+
+    public IPluginActionHandler? GetActionHandler(string actionName)
+    {
+        return _actionHandlers.TryGetValue(actionName, out var entry) ? entry.Handler : null;
+    }
+
+    public void RegisterActionHandler(IPluginActionHandler handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _actionHandlers[handler.ActionName] = new PluginActionEntry(handler, null);
+        _logger.LogInformation("Directly registered plugin action handler: {ActionName} ({HandlerType})", handler.ActionName, handler.GetType().FullName);
+    }
+
+    public async Task<PluginActionResult> ExecuteActionAsync(string actionName, PluginActionContext context, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(actionName);
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (!_actionHandlers.TryGetValue(actionName, out var entry))
+        {
+            _logger.LogWarning("Plugin action handler not found for action '{ActionName}'", actionName);
+            return PluginActionResult.Failed($"Action handler '{actionName}' not found.");
+        }
+
+        try
+        {
+            return await entry.Handler.ExecuteActionAsync(context, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unhandled exception executing plugin action '{ActionName}'", actionName);
+            return PluginActionResult.Failed($"Action execution failed: {ex.Message}");
+        }
     }
 
     public int LoadPluginsFromDirectory(string directoryPath)
@@ -129,10 +195,13 @@ public sealed class PluginManager : IPluginManager, IDisposable
                     assembly = alc.LoadFromStream(assemblyStream);
                 }
 
-                var pluginTypes = assembly.GetTypes()
-                    .Where(t => typeof(IHttpDataSourcePlugin).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface);
+                var candidateTypes = assembly.GetTypes()
+                    .Where(t => !t.IsAbstract && !t.IsInterface &&
+                                (typeof(IHttpDataSourcePlugin).IsAssignableFrom(t) ||
+                                 typeof(IPluginEventListener).IsAssignableFrom(t) ||
+                                 typeof(IPluginActionHandler).IsAssignableFrom(t)));
 
-                foreach (var type in pluginTypes)
+                foreach (var type in candidateTypes)
                 {
                     try
                     {
@@ -154,8 +223,28 @@ public sealed class PluginManager : IPluginManager, IDisposable
                         if (instance is IHttpDataSourcePlugin pluginInstance)
                         {
                             _plugins[pluginInstance.Name] = new PluginEntry(pluginInstance, alc);
-                            _logger.LogInformation("Successfully loaded plugin '{PluginName}' from {DllPath} ({Type})",
+                            _logger.LogInformation("Successfully loaded HTTP data source plugin '{PluginName}' from {DllPath} ({Type})",
                                 pluginInstance.Name, dllFile, type.FullName);
+                            loadedCount++;
+                        }
+
+                        if (instance is IPluginEventListener listenerInstance)
+                        {
+                            lock (_lock)
+                            {
+                                _listeners.Add(new PluginListenerEntry(listenerInstance, alc));
+                            }
+                            BindListenerToEventBus(listenerInstance);
+                            _logger.LogInformation("Successfully loaded event listener plugin from {DllPath} ({Type})",
+                                dllFile, type.FullName);
+                            loadedCount++;
+                        }
+
+                        if (instance is IPluginActionHandler actionInstance)
+                        {
+                            _actionHandlers[actionInstance.ActionName] = new PluginActionEntry(actionInstance, alc);
+                            _logger.LogInformation("Successfully loaded action handler plugin '{ActionName}' from {DllPath} ({Type})",
+                                actionInstance.ActionName, dllFile, type.FullName);
                             loadedCount++;
                         }
                     }
@@ -179,17 +268,80 @@ public sealed class PluginManager : IPluginManager, IDisposable
             }
         }
 
-        _logger.LogInformation("Plugin discovery finished. Total plugins loaded: {Count}", loadedCount);
+        _logger.LogInformation("Plugin discovery finished. Total plugin artifacts loaded: {Count}", loadedCount);
         return loadedCount;
+    }
+
+    private void BindListenerToEventBus(IPluginEventListener listener)
+    {
+        var eventBus = _serviceProvider?.GetService(typeof(IGatewayEventBus)) as IGatewayEventBus;
+        if (eventBus == null)
+        {
+            return;
+        }
+
+        var listenerType = listener.GetType();
+        foreach (var iface in listenerType.GetInterfaces())
+        {
+            if (iface.IsGenericType && iface.GetGenericTypeDefinition() == typeof(IPluginEventListener<>))
+            {
+                var eventType = iface.GetGenericArguments()[0];
+                var handleMethod = iface.GetMethod(nameof(IPluginEventListener<IGatewayEvent>.HandleEventAsync));
+                if (handleMethod != null)
+                {
+                    var sub = eventBus.Subscribe(eventType, async (@event, ct) =>
+                    {
+                        try
+                        {
+                            var task = (Task)handleMethod.Invoke(listener, [@event, ct])!;
+                            await task.ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Plugin listener '{ListenerType}' failed while handling event {EventType}", listenerType.FullName, @event.EventType);
+                        }
+                    });
+
+                    lock (_lock)
+                    {
+                        _busSubscriptions.Add(sub);
+                    }
+                }
+            }
+        }
     }
 
     public void Dispose()
     {
+        lock (_lock)
+        {
+            foreach (var sub in _busSubscriptions)
+            {
+                sub.Dispose();
+            }
+            _busSubscriptions.Clear();
+        }
+
         foreach (var entry in _plugins.Values)
         {
             entry.Context?.Unload();
         }
         _plugins.Clear();
+
+        lock (_lock)
+        {
+            foreach (var entry in _listeners)
+            {
+                entry.Context?.Unload();
+            }
+            _listeners.Clear();
+        }
+
+        foreach (var entry in _actionHandlers.Values)
+        {
+            entry.Context?.Unload();
+        }
+        _actionHandlers.Clear();
     }
 
     private static Dictionary<string, string> LoadManifest(string manifestPath)

@@ -6,14 +6,16 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Docs.Interfaces;
+using Autheris.Application.Events;
+using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Interfaces;
 using Autheris.Application.Mcp.Diagnostics;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Events;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
-using Autheris.Application.Governance.Interfaces;
-using Autheris.Application.Docs.Interfaces;
 using Autheris.Application.Mcp.Tools;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
@@ -42,6 +44,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
     private readonly IAccessPlanningService? _accessPlanningService;
     private readonly IDocSearchService? _docSearchService;
     private readonly IUniversalDocStore? _docStore;
+    private readonly IGatewayEventBus? _eventBus;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
 
@@ -76,8 +79,9 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IConsentRepository? consentRepository = null,
         IAccessPlanningService? accessPlanningService = null,
         IDocSearchService? docSearchService = null,
-        IUniversalDocStore? docStore = null)
-        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository, accessPlanningService, docSearchService, docStore)
+        IUniversalDocStore? docStore = null,
+        IGatewayEventBus? eventBus = null)
+        : this(toolRegistry, options, logger, Autheris.Application.Audit.NullAuditLogRepository.Instance, queryExecutor, policyEnforcementService, tableMetadataRepository, sessionStore, promptGuardrail, goldenQueryService, stepUpApprovalService, graphQlCatalogMap, consentRepository, accessPlanningService, docSearchService, docStore, eventBus)
     {
     }
 
@@ -97,7 +101,8 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         IConsentRepository? consentRepository = null,
         IAccessPlanningService? accessPlanningService = null,
         IDocSearchService? docSearchService = null,
-        IUniversalDocStore? docStore = null)
+        IUniversalDocStore? docStore = null,
+        IGatewayEventBus? eventBus = null)
     {
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -115,6 +120,7 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
         _accessPlanningService = accessPlanningService;
         _docSearchService = docSearchService;
         _docStore = docStore;
+        _eventBus = eventBus;
     }
 
 
@@ -182,6 +188,19 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                 truncated: false,
                 estimatedTokens: 0,
                 cancellationToken).ConfigureAwait(false);
+
+            if (_eventBus != null)
+            {
+                await _eventBus.PublishAsync(new SecurityAlertEvent(
+                    EventId: Guid.NewGuid().ToString("N"),
+                    AlertType: promptEvaluation.AttackType ?? "PROMPT_INJECTION",
+                    Severity: "HIGH",
+                    Details: promptEvaluation.Reason ?? "Prompt injection detected",
+                    SourceIp: sessionContext.ClientIp,
+                    UserSid: sessionContext.UserSid,
+                    Timestamp: DateTimeOffset.UtcNow,
+                    TenantId: sessionContext.TenantId), cancellationToken).ConfigureAwait(false);
+            }
 
             return new McpToolCallResult(
                 IsSuccess: false,
@@ -380,6 +399,18 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                         truncated: false,
                         estimatedTokens: 0,
                         cancellationToken).ConfigureAwait(false);
+
+                    if (_eventBus != null)
+                    {
+                        await _eventBus.PublishAsync(new PolicyDeniedEvent(
+                            EventId: Guid.NewGuid().ToString("N"),
+                            SubjectSid: userSidStr,
+                            Action: tool.Name,
+                            Resource: effectiveTable.ToString(),
+                            Reason: string.Join("; ", policyDecision.DeniedReasons),
+                            Timestamp: DateTimeOffset.UtcNow,
+                            TenantId: sessionContext.TenantId), cancellationToken).ConfigureAwait(false);
+                    }
 
                     return new McpToolCallResult(
                         IsSuccess: false,
