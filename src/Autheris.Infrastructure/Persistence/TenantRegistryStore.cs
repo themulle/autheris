@@ -54,12 +54,31 @@ internal static class TenantRegistryStore
     /// M-A2: clears the collision mark of the group of <paramref name="keep"/> and makes that exact spelling the group's tenant. Only a marked
     /// group changes (the UPDATE is conditional on the mark), so this is never a way to rename a healthy tenant.
     /// </summary>
-    public static async Task<bool> ResolveCollisionAsync(DbConnection connection, TenantId keep, CancellationToken ct)
+    public static async Task<TenantCollisionResolution> ResolveCollisionAsync(DbConnection connection, TenantId keep, string? expectedCurrent, CancellationToken ct)
     {
+        var key = TenantRegistryKey.Normalize(keep.Value);
+
+        // L-4: the spelling that the update overwrites is read first, so that the audit record and the response can name it.
+        var row = await ReadAsync(connection, key, ct).ConfigureAwait(false);
+        if (row is not { Collided: true })
+        {
+            return new TenantCollisionResolution(TenantCollisionResolutionStatus.NotFound, null);
+        }
+
+        var previous = row.Value.TenantId;
+        if (expectedCurrent is not null && !string.Equals(previous, expectedCurrent, StringComparison.Ordinal))
+        {
+            return new TenantCollisionResolution(TenantCollisionResolutionStatus.ExpectedMismatch, previous);
+        }
+
+        // The update is conditional on the spelling that was read (compare-and-swap): a concurrent change makes it a mismatch, never a
+        // silent overwrite of a spelling that nobody saw.
         await using var cmd = Command(connection,
-            "UPDATE TENANT_REGISTRY SET tenant_id = @t, collided = 0 WHERE normalized_key = @k AND collided = 1",
-            ("@t", keep.Value), ("@k", TenantRegistryKey.Normalize(keep.Value)));
-        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+            "UPDATE TENANT_REGISTRY SET tenant_id = @t, collided = 0 WHERE normalized_key = @k AND collided = 1 AND tenant_id = @prev",
+            ("@t", keep.Value), ("@k", key), ("@prev", previous));
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0
+            ? new TenantCollisionResolution(TenantCollisionResolutionStatus.Resolved, previous)
+            : new TenantCollisionResolution(TenantCollisionResolutionStatus.ExpectedMismatch, previous);
     }
 
     /// <summary>Records configured ids. Spellings that are not valid tenant ids are skipped (they can never authenticate).</summary>

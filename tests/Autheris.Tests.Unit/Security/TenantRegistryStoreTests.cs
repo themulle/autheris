@@ -125,7 +125,7 @@ public sealed class TenantRegistryStoreTests : IDisposable
         await Registry.RegisterOrGetAsync(new TenantId("acme"), "iss", default);
         await Registry.RegisterOrGetAsync(new TenantId("ACME"), "iss", default);   // marks the group
 
-        (await Registry.ResolveCollisionAsync(new TenantId("ACME"), default)).ShouldBeTrue();
+        (await Registry.ResolveCollisionAsync(new TenantId("ACME"), null, default)).Status.ShouldBe(TenantCollisionResolutionStatus.Resolved);
 
         (await Registry.TryGetAsync(new TenantId("ACME"), default)).ShouldBe(TenantRegistration.Existing);   // the kept spelling is the group's tenant now
         (await Registry.TryGetAsync(new TenantId("acme"), default)).ShouldBeNull();                          // the other spelling is denied again (unknown to a lookup)
@@ -136,8 +136,47 @@ public sealed class TenantRegistryStoreTests : IDisposable
     {
         await Registry.RegisterOrGetAsync(new TenantId("acme"), "iss", default);
 
-        (await Registry.ResolveCollisionAsync(new TenantId("ACME"), default)).ShouldBeFalse();   // unmarked: cannot be used to rename a tenant
-        (await Registry.ResolveCollisionAsync(new TenantId("never"), default)).ShouldBeFalse();
+        (await Registry.ResolveCollisionAsync(new TenantId("ACME"), null, default)).Status.ShouldBe(TenantCollisionResolutionStatus.NotFound);   // unmarked: cannot be used to rename a tenant
+        (await Registry.ResolveCollisionAsync(new TenantId("never"), null, default)).Status.ShouldBe(TenantCollisionResolutionStatus.NotFound);
         (await Registry.TryGetAsync(new TenantId("acme"), default)).ShouldBe(TenantRegistration.Existing);
+    }
+
+    // ---- L-4 ------------------------------------------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ResolveCollision_ReturnsThePreviousSpelling_BeforeItIsOverwritten()
+    {
+        await Registry.RegisterOrGetAsync(new TenantId("acme"), "iss", default);
+        await Registry.RegisterOrGetAsync(new TenantId("ACME"), "iss", default);
+
+        var resolution = await Registry.ResolveCollisionAsync(new TenantId("ACME"), null, default);
+
+        resolution.Status.ShouldBe(TenantCollisionResolutionStatus.Resolved);
+        resolution.PreviousTenantId.ShouldBe("acme");
+    }
+
+    [Fact]
+    public async Task ResolveCollision_ExpectedCurrentMatches_Resolves()
+    {
+        await Registry.RegisterOrGetAsync(new TenantId("acme"), "iss", default);
+        await Registry.RegisterOrGetAsync(new TenantId("ACME"), "iss", default);
+
+        var resolution = await Registry.ResolveCollisionAsync(new TenantId("ACME"), "acme", default);
+
+        resolution.Status.ShouldBe(TenantCollisionResolutionStatus.Resolved);
+        (await Registry.TryGetAsync(new TenantId("ACME"), default)).ShouldBe(TenantRegistration.Existing);
+    }
+
+    [Fact]
+    public async Task ResolveCollision_ExpectedCurrentDiffers_ChangesNothing()
+    {
+        await Registry.RegisterOrGetAsync(new TenantId("acme"), "iss", default);
+        await Registry.RegisterOrGetAsync(new TenantId("ACME"), "iss", default);
+
+        var resolution = await Registry.ResolveCollisionAsync(new TenantId("ACME"), "Acme", default);
+
+        resolution.Status.ShouldBe(TenantCollisionResolutionStatus.ExpectedMismatch);
+        resolution.PreviousTenantId.ShouldBe("acme");
+        (await Registry.TryGetAsync(new TenantId("ACME"), default)).ShouldBe(TenantRegistration.Collision);   // still marked, still denied
     }
 }

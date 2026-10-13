@@ -145,9 +145,9 @@ public sealed class TenantRegistryGate(ITenantRegistry inner, TenantRegistryGate
         return result;
     }
 
-    public async ValueTask<bool> ResolveCollisionAsync(TenantId keep, CancellationToken ct)
+    public async ValueTask<TenantCollisionResolution> ResolveCollisionAsync(TenantId keep, string? expectedCurrent, CancellationToken ct)
     {
-        var resolved = await inner.ResolveCollisionAsync(keep, ct).ConfigureAwait(false);
+        var resolved = await inner.ResolveCollisionAsync(keep, expectedCurrent, ct).ConfigureAwait(false);
         EvictGroup(TenantRegistryKey.Normalize(keep.Value));
         return resolved;
     }

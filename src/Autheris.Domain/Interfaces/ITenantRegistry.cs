@@ -43,11 +43,30 @@ public interface ITenantRegistry
     /// <summary>
     /// M-A2: operator resolution of a collided group. Keeps <paramref name="keep"/> (exact spelling) as the tenant of its group and clears the
     /// collision mark; every other spelling of the group is denied again (the lookup treats it as unknown and a registration marks the group
-    /// anew). Returns false, and changes nothing, when the group is not marked (so it cannot rename a healthy tenant). The default (a store
-    /// without a resolution path) is "not resolved".
+    /// anew). Changes nothing, and reports <see cref="TenantCollisionResolutionStatus.NotFound"/>, when the group is not marked (so it cannot
+    /// rename a healthy tenant). L-4: the spelling that the group held before is read first and returned (the operation overwrites it), and
+    /// with <paramref name="expectedCurrent"/> the change is a compare-and-swap: a group that holds another spelling is left unchanged
+    /// (<see cref="TenantCollisionResolutionStatus.ExpectedMismatch"/>). The default (a store without a resolution path) is "not found".
     /// </summary>
-    ValueTask<bool> ResolveCollisionAsync(TenantId keep, CancellationToken ct) => ValueTask.FromResult(false);
+    ValueTask<TenantCollisionResolution> ResolveCollisionAsync(TenantId keep, string? expectedCurrent, CancellationToken ct) =>
+        ValueTask.FromResult(new TenantCollisionResolution(TenantCollisionResolutionStatus.NotFound, null));
 
     /// <summary>Records the configured tenant ids (not rate limited); configured spellings that collide mark their group.</summary>
     ValueTask PreseedAsync(IEnumerable<string> configuredTenantIds, CancellationToken ct);
 }
+
+/// <summary>The outcome of <see cref="ITenantRegistry.ResolveCollisionAsync"/>.</summary>
+public enum TenantCollisionResolutionStatus
+{
+    /// <summary>No collided group exists for the tenant id: nothing changed.</summary>
+    NotFound,
+
+    /// <summary>The group holds another spelling than the one the operator expected (or it changed meanwhile): nothing changed.</summary>
+    ExpectedMismatch,
+
+    /// <summary>The collision mark is cleared and the kept spelling is the group's tenant.</summary>
+    Resolved
+}
+
+/// <summary>The status and the spelling that the group held before the operation (null when there is no collided group).</summary>
+public readonly record struct TenantCollisionResolution(TenantCollisionResolutionStatus Status, string? PreviousTenantId);

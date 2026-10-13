@@ -221,11 +221,12 @@ public sealed class TenantRegistryGateTests
     {
         var inner = Substitute.For<ITenantRegistry>();
         inner.RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Registered));
-        inner.ResolveCollisionAsync(Acme, Arg.Any<CancellationToken>()).Returns(new ValueTask<bool>(true));
+        inner.ResolveCollisionAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(new ValueTask<TenantCollisionResolution>(new TenantCollisionResolution(TenantCollisionResolutionStatus.Resolved, "acme")));
         var gate = Gate(inner);
         await gate.RegisterOrGetAsync(Acme, "iss", default);   // cached positive
 
-        (await gate.ResolveCollisionAsync(Acme, default)).ShouldBeTrue();
+        (await gate.ResolveCollisionAsync(Acme, null, default)).Status.ShouldBe(TenantCollisionResolutionStatus.Resolved);
         await gate.RegisterOrGetAsync(Acme, "iss", default);
 
         await inner.Received(2).RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>());   // the cache was evicted

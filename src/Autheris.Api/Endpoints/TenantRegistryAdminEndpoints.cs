@@ -26,16 +26,21 @@ public static class TenantRegistryAdminEndpoints
             HttpContext context,
             ITenantRegistry registry,
             IAuditLogRepository audit,
-            CancellationToken ct) => ResolveCollisionAsync(tenantId, context, registry, audit, ct))
+            CancellationToken ct,
+            [Microsoft.AspNetCore.Mvc.FromBody] ResolveCollisionRequest? body = null) => ResolveCollisionAsync(tenantId, body, context, registry, audit, ct))
             .RequireAuthorization(GatewayPolicies.ClusterAdmin)
             .WithAudit(AuditLevel.Delegated, AuditEventTypes.TenantCollisionResolved);
 
         return app;
     }
 
+    /// <summary>L-4: the optional compare-and-swap of the operation: the spelling that the operator saw as the group's current tenant.</summary>
+    public sealed record ResolveCollisionRequest(string? ExpectedCurrent = null);
+
     /// <param name="tenantId">The exact spelling to keep as the tenant of its group.</param>
+    /// <param name="body">Optional; <see cref="ResolveCollisionRequest.ExpectedCurrent"/> makes the change conditional on the group's current spelling.</param>
     internal static async Task<IResult> ResolveCollisionAsync(
-        string tenantId, HttpContext context, ITenantRegistry registry, IAuditLogRepository audit, CancellationToken ct)
+        string tenantId, ResolveCollisionRequest? body, HttpContext context, ITenantRegistry registry, IAuditLogRepository audit, CancellationToken ct)
     {
         if (!EndpointSecurity.IsCanonicalClusterAdmin(context.User))
         {
@@ -57,9 +62,15 @@ public static class TenantRegistryAdminEndpoints
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        if (!await registry.ResolveCollisionAsync(keep, ct).ConfigureAwait(false))
+        var resolution = await registry.ResolveCollisionAsync(keep, body?.ExpectedCurrent, ct).ConfigureAwait(false);
+        if (resolution.Status == TenantCollisionResolutionStatus.NotFound)
         {
             return Results.NotFound(new { error = "No collided tenant group exists for this tenant id." });
+        }
+
+        if (resolution.Status == TenantCollisionResolutionStatus.ExpectedMismatch)
+        {
+            return Results.Conflict(new { error = "The group holds another spelling than expectedCurrent; nothing was changed.", current = resolution.PreviousTenantId });
         }
 
         await audit.RecordAuditEventAsync(new AuditLogEntry
@@ -70,10 +81,10 @@ public static class TenantRegistryAdminEndpoints
             TargetTable = string.Empty,
             Decision = "ALLOW",
             TraceId = context.TraceIdentifier,
-            DetailsJson = JsonSerializer.Serialize(new { keptSpelling = keep.Value, group = TenantRegistryKey.Normalize(keep.Value) })
+            DetailsJson = JsonSerializer.Serialize(new { keptSpelling = keep.Value, previousSpelling = resolution.PreviousTenantId, expectedCurrent = body?.ExpectedCurrent, group = TenantRegistryKey.Normalize(keep.Value) })
         }, ct).ConfigureAwait(false);
         context.Features.Get<AuditContext>()?.MarkHandled();
 
-        return Results.Ok(new { resolved = keep.Value, note = "Every other spelling of this tenant id stays denied." });
+        return Results.Ok(new { resolved = keep.Value, previous = resolution.PreviousTenantId, note = "Every other spelling of this tenant id stays denied." });
     }
 }
