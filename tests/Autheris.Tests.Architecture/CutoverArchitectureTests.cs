@@ -393,7 +393,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.SqlConnectionFactory", "fixed session pinning and hardening statements of a new connection"),
         ("Autheris.Extensions.Cdc.MssqlChangeTrackingPoller", "CDC polling: fixed change-tracking queries over catalog table and column names"),
         ("Autheris.Application.Procedures.Services.MssqlProcedureInvoker", "stored-procedure call by a validated catalog name with bound parameters (not a WebSQL statement)"),
-        ("Autheris.Application.Procedures.Services.SqlProcedureRowScopeResolver", "procedure row-scope key query over validated catalog identifiers, bound values, read-only"),
+        ("Autheris.Application.Procedures.Services.SqlProcedureRowScopeResolver", "procedure row-scope key query over validated catalog identifiers, bound values, read-only; splices validated policy row-filter text (§7.3 consumer)"),
         ("Autheris.Application.Procedures.Services.StoredProcedureCatalogValidator", "catalog validation queries over the procedure definitions (metadata only)"),
         ("Autheris.Infrastructure.Persistence.Catalog.*", "column-metadata readers: fixed information_schema/PRAGMA queries of the governed catalog provider"),
         // -- persistence of the gateway's own governance store (its schema bootstrap and repositories) --
