@@ -183,4 +183,21 @@ public class TypedGuardMutationTests
     {
         Assert.Equal(SqlStatementClass.Select, Compile("SELECT id FROM orders WHERE email = 'x'").StatementClass);
     }
+
+    [Fact]
+    public void CteScopeRules_AreEnforcedWithTheirOwnReasons()
+    {
+        Assert.Equal("CTE names that differ only in case are ambiguous and are not permitted.",
+            Rejected<SecurityException>("WITH \"c\" AS (SELECT 1 AS x), \"C\" AS (SELECT 2 AS x) SELECT x FROM \"c\""));
+        Assert.Equal("A recursive CTE must not have the name of a catalog table; the reference would be ambiguous.",
+            Rejected<SecurityException>("WITH RECURSIVE orders AS (SELECT 1 AS id UNION ALL SELECT id + 1 FROM orders WHERE id < 3) SELECT id FROM orders"));
+    }
+
+    [Fact]
+    public void ATableQueryBody_IsReadAsAPlainSelectOfTheSecuredTable()
+    {
+        string sql = Compile("TABLE entitlements").Sql;
+        Assert.DoesNotContain("DISTINCT", sql, StringComparison.Ordinal);
+        Assert.Contains("TenantId", sql, StringComparison.Ordinal);
+    }
 }
