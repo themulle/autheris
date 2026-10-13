@@ -1,7 +1,7 @@
 # ADR-017: Multi-Node State Synchronisation, AST Dialect Generator und RBAC-Konsolidierung
 
 ## Status
-Teilweise umgesetzt; §2 durch das Amendment vom 2026-10-11 ergänzt (09.10.2026: AR-01 Epochen-Keying, AR-02/AR-03 ReBAC-Pull-Validierung, AR-04 Atomare DP-/FinOps-Cluster-Zähler umgesetzt; Session-/HitL-Migration ausstehend)
+Teilweise umgesetzt; §2 durch die Amendments vom 2026-10-11 und 2026-10-13 ergänzt (2026-10-13: §2 single-path compiler implemented, see the amendment at the end) (09.10.2026: AR-01 Epochen-Keying, AR-02/AR-03 ReBAC-Pull-Validierung, AR-04 Atomare DP-/FinOps-Cluster-Zähler umgesetzt; Session-/HitL-Migration ausstehend)
 
 ## Kontext
 Nach erfolgreicher Behebung aller 100 operativen Sicherheitsbefunde der Runden 4 und 5 (ADR-016) verbleiben drei architektonische Strukturthemen:
@@ -61,7 +61,7 @@ Folgende prozesslokale Zustände verbleiben vorerst im Monolithen und werden wie
 ### Decision
 
 1. **Target state: one code path.** The governed SQL path has exactly one implementation: the AST compiler (token guards, parse, typed AST, simplify the user tree, inject typed security predicates and masks, verify coverage, validate dialect capabilities, emit, check the emitted text, bind). The token-stream rewriter (`RlsListener`), the `WebSql:SqlRewriterEngine` setting and the `ShadowDualRun` mode are removed in a single, revertable cutover commit. After the cutover there is no runtime engine switch and no shadow mode; rollback is a revert of that commit.
-2. **Engine selection until the cutover.** The AST compiler is opt-in. The default engine is the legacy token-stream rewriter (`LegacyTokenStream`). The earlier statement that `AstCompiler` is the WebSQL default is withdrawn. Confidence comes from a pre-merge evidence gate (differential corpus against legacy, property and grammar fuzzing, execution on real engines, security regression suites), not from a production observation window.
+2. **Engine selection until the cutover** (historical; replaced by the amendment of 2026-10-13). The AST compiler was opt-in. The default engine was the legacy token-stream rewriter (`LegacyTokenStream`). The earlier statement that `AstCompiler` is the WebSQL default is withdrawn. Confidence comes from a pre-merge evidence gate (differential corpus against legacy, property and grammar fuzzing, execution on real engines, security regression suites), not from a production observation window.
 3. **All values are bound.** User literals, tenant, policy and mask values reach the database as bind parameters. Only validated structural integers (row limits, ordinals, frame offsets, type parameters) and keywords are emitted inline. Row filters and column masks are typed AST nodes; raw trusted SQL fragments are not used.
 4. **Dialect limits come from a capability table** (bind-parameter count, IN-list size, identifier length). A statement over a limit is rejected with a typed error and is never split or truncated.
 5. **Tiers.** Production at the compiler tier: SQL Server, PostgreSQL, DuckDB and Oracle (Oracle with a runtime driver, TCPS and non-privileged accounts; the driver license is reviewed before release). Databricks is Experimental until a live warehouse run passes. Snowflake is experimental (generator only, never executable in production). ANSI is internal.
@@ -79,3 +79,21 @@ The former statement that token differentials, comment injection and dialect byp
 - Negative: admin-authored row-filter predicates are written in canonical (Trino) syntax; consumers that render text (GraphQL tree compiler and other text consumers) keep the legacy text path until they are moved to the typed policy model; Databricks evidence depends on a Spark/Delta proxy.
 
 Reference: [F-DIALECT-02](../features/f-dialect-02-ast-sql-compiler.md), implementation plan `docs/plans/2026-10-10-plan-ast-dialect-generator.md` (decisions SD-1 to SD-8 in section 1).
+
+## Amendment 2026-10-13: §2 single-path compiler (SD-1 implemented)
+
+### Decision
+
+1. **One code path, no runtime flag.** Every governed SQL statement is compiled by `ISqlEngine.Compile`, bound by a dialect binder and, for DML, executed by the checked DML executor. The token-stream rewriter (`RlsListener`), the string-returning AST path, the string policy providers (`RlsOptions`), raw SQL expression nodes (`TrustedSqlExpression`), the application plan cache and the `ShadowDualRun` mode are deleted. There is no engine switch: `WebSql:SqlRewriterEngine` in the configuration fails the start, so that no operator relies on a kill switch that does not exist.
+2. **Rollback is a revert.** The cutover is one squash commit. Rolling back means reverting that commit together with the typed-policy packages it depends on (the revert set is recorded in the implementation plan and rehearsed on the final commit); no schema or data migration is involved.
+3. **Confidence before merge, not in production.** The pre-merge gate `sql-compiler-gate` (G1-G10) replaces the shadow mode. The legacy outcomes of the differential corpus are frozen as golden results, because the engine that produced them no longer exists.
+4. **Admission is derived from the capability table.** A dialect is executable through WebSQL when its capability entry is `Production` and the connection factory supports it: PostgreSQL, SQL Server, SQLite and Oracle. Databricks stays Experimental (not admitted) until a live warehouse run; Snowflake and ANSI have no capability entry and fail closed.
+5. **Structural guards.** Architecture tests keep the deleted types and paths deleted, restrict `CompiledSql` construction to the engine and command-text assignment to allowlisted types, and prove that every governed entry point reaches `Compile` and the binder.
+6. **Operational consequences.** A usable audit key is a startup requirement (the audit digest links each record to the executed statement), PostgreSQL and Oracle sources need a pinned default schema, and the tenant registry is on by default.
+
+### Consequences
+
+- Positive: no policy drift between engines; one error contract with stable codes; audit records identify the executed statement without storing values.
+- Negative: rollback needs a release (no flag); statements that the legacy rewriter accepted but the compiler rejects (listed in F-DIALECT-02) fail for clients; the GraphQL tree compiler and the text consumers remain outside `Compile` and render the typed policy model.
+
+Reference: [F-DIALECT-02](../features/f-dialect-02-ast-sql-compiler.md) (section 10 lists the operator-visible changes), implementation plan `docs/plans/2026-10-10-plan-ast-dialect-generator.md` (§28, §29).
