@@ -217,11 +217,11 @@
       <text x="14" y="82" font-size="10" font-weight="600" fill="#818cf8">⚡ Native DB Pushdown · Total Immunity to SQL Injections</text>
     </g>
 
-    <!-- Step 4: Execution, Masking & Plan Cache -->
+    <!-- Step 4: Execution, Masking & Compile Cache -->
     <g transform="translate(20, 308)">
       <rect width="460" height="78" rx="6" fill="#181a30" stroke="#3730a3" stroke-width="1"/>
-      <text x="14" y="20" font-size="12" font-weight="700" fill="#c7d2fe">EXECUTION, MASKING &amp; PLAN CACHING</text>
-      <text x="14" y="38" font-size="11" fill="#e0e7ff">• Compiled SQL Query Plan Cache: Sub-Millisecond Repeat Executions</text>
+      <text x="14" y="20" font-size="12" font-weight="700" fill="#c7d2fe">EXECUTION, MASKING &amp; COMPILE CACHE</text>
+      <text x="14" y="38" font-size="11" fill="#e0e7ff">• Value-Free Compiled SQL Templates: Bound Parameters, Rebound per Request</text>
       <text x="14" y="54" font-size="11" fill="#e0e7ff">• Format-Preserving Masking: Clear, Mask (Span&lt;char&gt;), Redact, HMAC</text>
       <text x="14" y="70" font-size="10" font-weight="600" fill="#818cf8">⚡ Sub-Millisecond Latency (&lt;1ms) · Dynamic PII Protection</text>
     </g>

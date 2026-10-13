@@ -65,7 +65,7 @@ token guards -> parse -> AST build -> validate -> simplify (user tree only) -> s
 ```
 
 1. **Gates.** The dialect must have a capability entry and be `Production` (or the request sets `AllowExperimentalDialect`, which an architecture test forbids in production assemblies). The statement classes must be listed in `CompileRequest.Statements` and in the dialect's `DmlStatements`. `CompileRequest.Policy.Dml` must equal `DmlGuardOptions.Strict`, otherwise `SqlCompileConfigurationException`. `CompileLimits.Normalize` bounds `CompileTimeout` (default 2 s, maximum 30 s) and `MaxExpansionFactor` (default 64, maximum 256) and forces the variable-substitution token guard for Databricks.
-2. **Token guards** (`SqlTokenSecurityOptions.ForDialect`): comments, backslashes and escaped literals in strings, dollar quoting, bracket lexer differentials (`[` is rejected on every dialect), non-ASCII identifiers, dots in quoted identifiers, time-travel clauses and `${...}` variable substitution sequences.
+2. **Token guards** (`SqlTokenSecurityOptions`, set by `CompileRequestFactory`): comments, backslashes and escaped literals in strings, dollar quoting (every dialect except PostgreSQL), bracket lexer differentials (`[`, `]` and bracket or comment sequences inside strings and quoted identifiers; SQL Server and SQLite), non-ASCII identifiers, dots in quoted identifiers, time-travel clauses and reserved `autheris_` identifiers. `CompileRequest.Normalize` forces the `${...}` variable-substitution guard for Databricks.
 3. **Parse** (ANTLR, Trino grammar) with limits: query length 65,536 characters, nesting depth 100, parse-tree depth 3,000.
 4. **AST build and validate.** Function calls are checked against the dialect function map; a qualified or delimited function name (`"lower"(x)`, `"pg_catalog".lower(x)`) is rejected. CAST targets come from a closed type set (`boolean`, `tinyint`, `smallint`, `integer`, `bigint`, `real`, `double`, `decimal`/`numeric`, `varchar`, `char`, `text`, `varbinary`, `date`, `time`, `timestamp` with optional time zone). Identifiers starting with `autheris_` are reserved (`SQL_RESERVED_IDENTIFIER`).
 5. **Simplify** runs on the user tree before injection, so security predicates never exist while the simplifier runs.
@@ -423,7 +423,7 @@ The `sql-compiler-gate` job in `.github/workflows/ci.yml` runs on every pull req
 - Literal bind types follow the literal's type. Comparing a literal with a column of another type (for example a numeric literal against a text tenant column) is rejected or can raise a provider conversion error.
 - Triggers that change policy columns after an insert are not covered by the check option. Governed tables must not have such triggers.
 - The catalog `DataType` and `Collation` come from database metadata; the INSERT check option, the bind types and the Databricks collation shortcut trust them.
-- Not usable on the governed path: recursive CTEs, PostgreSQL array subscripts (`[` is rejected on every dialect), table functions, qualified function names.
+- Not usable on the governed path: recursive CTEs, table functions, qualified function names, and on SQL Server and SQLite any `[` token (bracket lexer differential guard).
 - Client-named parameters are not supported in federated (cross-source) queries; such a statement fails closed.
 - The GraphQL tree compiler and the text consumers (section 2.1) do not run through `Compile`; they render the typed policy model.
 - Oracle uses `Oracle.ManagedDataAccess.Core` under the Oracle Free Use Terms and Conditions; the license review is a release gate for announcing Oracle as supported.
@@ -464,7 +464,6 @@ Reference for operators and API clients moving from a release with the legacy to
 
 **Stricter statement rules**
 
-- `[` is rejected on every dialect (PostgreSQL array subscripts included).
 - Constant-only DML predicates count as unfiltered DML.
 - Qualified functions are not accepted from the caller list; `AdditionalAllowedFunctions` only narrows the dialect function map; an allowlisted table function is still rejected.
 - `FETCH FIRST ... WITH TIES` is downgraded under an enforced row cap.

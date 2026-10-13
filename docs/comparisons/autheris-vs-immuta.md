@@ -11,7 +11,7 @@ Comprehensive competitive breakdown between **Autheris Enterprise Gateway** and 
 | **Architecture Layer** | **Unified API Gateway (L7):** Operates at the application & query boundary (GraphQL, REST, OData, Arrow Flight) | **Storage Engine / Database Layer:** Operates deep inside specific data warehouses (Snowflake, Databricks) |
 | **Developer Experience (DX)** | **Frictionless:** App developers and AI agents query standard GraphQL/REST with policies automatically enforced | **Complex:** Requires database drivers, custom proxy configurations, and steep learning curve for developers |
 | **Protocol Diversity** | **Universal:** Single governed view exposed simultaneously as GraphQL, REST, WebSQL, OData v4, Arrow Flight | **SQL Only:** Primarily limited to JDBC/ODBC and SQL data warehouses |
-| **Application-Level Features** | **Full Gateway Capabilities:** Caching (Redis L1/L2), query plan cache, rate limiting, subscriptions, MCP tools | **Pure Governance:** No API routing, schema stitching, caching, or GraphQL capabilities |
+| **Application-Level Features** | **Full Gateway Capabilities:** Caching (Redis L1/L2), compiled SQL template cache, rate limiting, subscriptions, MCP tools | **Pure Governance:** No API routing, schema stitching, caching, or GraphQL capabilities |
 | **Deployment Complexity** | **Single .NET 10 Binary / Helm Chart:** Lightweight footprint, runs locally or in high-availability Kubernetes | **Heavyweight Infrastructure:** Complex multi-component control plane requiring dedicated infrastructure teams |
 
 ---

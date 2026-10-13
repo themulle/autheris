@@ -41,7 +41,7 @@ Autheris is a **Zero-Trust Enterprise Data Access Gateway** that securely expose
 |---|---|---|
 | **🛡️ Perimeter & Data Security** | Open database ports across corporate networks, static credentials, high risk of SQL injection, and data exfiltration. | **Zero-Port Exposure:** Databases remain isolated. All queries flow through hardened APIs with native ANTLR4 AST validation and rewriting. |
 | **🔐 Access Control & Governance** | Rigid, coarse-grained RBAC; central IT assigns blanket rights; data owners have zero visibility or control. | **Data-Owner Consent & ReBAC:** Data owners govern table, row, and column permissions directly — with Dual Authorization (SoD) and vacation delegations. |
-| **⚡ Performance & Scalability** | N+1 roundtrips in REST/GraphQL, slow full-table scans, high latency from post-retrieval in-memory filtering. | **Deep AST Pushdown & Plan Cache:** RLS predicates injected directly into the SQL `WHERE` tree; compiled query plan cache (<1ms latency) & L1/L2 Redis caching. |
+| **⚡ Performance & Scalability** | N+1 roundtrips in REST/GraphQL, slow full-table scans, high latency from post-retrieval in-memory filtering. | **Deep AST Pushdown & Compile Cache:** RLS predicates injected directly into the SQL `WHERE` tree; value-free compiled SQL template cache & L1/L2 Redis caching. |
 | **🤖 Agentic AI & LLMs** | AI agents hallucinate schemas, execute destructive queries, and risk prompt injection attacks. | **Enterprise MCP Gateway:** Semantic schema grounding, golden queries, OWASP LLM01 guardrails, FOCUS FinOps token budgets, and HITL approvals. |
 | **📜 Compliance & Audit** | Incomplete logs, high audit friction, and labor-intensive GDPR Art. 15 disclosure requests. | **Cryptographic WORM Audit:** HMAC-SHA256 tamper-evident hash chaining, SEC Rule 17a-4 S3 export, and one-click GDPR Art. 15 disclosure reports. |
 | **🔌 Multi-Protocol Flexibility** | Data silos split between app developers (GraphQL/REST), BI analysts (Power BI/Excel), and data scientists (Python/Spark). | **Universal Data Access:** Identical governed data exposed as GraphQL, REST, WebSQL, OData v4, Apache Parquet, or Apache Arrow Flight. |
@@ -212,23 +212,21 @@ Autheris encompasses **57+ production-ready enterprise features**, documented in
 
 ### Pillar 4: AST Target Dialect Compiler Pipeline ([`F-DIALECT-02`](docs/features/f-dialect-02-ast-sql-compiler.md), `ADR-017` / `TrinoSqlEngine`)
 
-- **Engine selection**: the legacy token-stream rewriter is the default engine; the typed AST compiler (`ISqlEngine.Compile`, DQL and DML on SQL Server, PostgreSQL, DuckDB and Oracle; Databricks experimental) is opt-in. See [`F-DIALECT-02`](docs/features/f-dialect-02-ast-sql-compiler.md) for tiers, limits and configuration.
-- **High-Performance Multi-Pass Compiler Architecture**:
-  - Replaced brittle regex/token rewriting with a multi-stage ANTLR4-based AST compiler pipeline:
-    1. ParseTree -> Strongly typed, dialect-neutral AST via `SqlAstBuilder`.
-    2. `AstSecurityVisitor`: Direct in-tree injection of tenant isolation, Row-Level Security (RLS) predicates, and column masking rules.
-    3. `AstSimplificationVisitor`: Compile-time constant folding, Boolean algebra simplification (identity laws, absorption, De Morgan's laws), tautology elimination (`1 = 1`), and contradiction detection (`1 = 0`).
-    4. `ISqlDialectGenerator`: High-performance code emitters tailored to target dialects.
-- **Multi-Dialect Code Generation & Native Pushdown**:
-  - **Microsoft SQL Server (T-SQL)**: Bracket identifiers `[...]`, Unicode string literals `N'...'`, wrapped Boolean projections (`CASE WHEN ... THEN 1 ELSE 0 END`), `OFFSET / FETCH` pagination, `@p1` parameters, native `ISNULL()` and `HASHBYTES()` pushdown.
-  - **PostgreSQL**: Double-quoted lowercase identifiers, standard ANSI Boolean expressions, positional parameters (`$1, $2`), `LIMIT / OFFSET`, native `COALESCE()` and `encode(digest(...))` pushdown.
-  - **SQLite**: Standard SQL types, identifier escaping, `?1` parameter emitters, `IFNULL()`.
-  - **Oracle Database**: Uppercase identifiers, double-quote escaping, omitted `AS` keyword on `FROM` table aliases, `NUMBER(1)` Booleans, `:p1` parameters, `OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`.
-  - **Analytical Dialects**: Dedicated AST generators for DuckDB, Databricks / Spark SQL, Snowflake, and Trino.
-- **Compiled SQL Query Plan Cache (`ICompiledSqlQueryPlanCache`)**:
-  - Thread-safe, tenant-isolated cache for compiled AST plans providing sub-millisecond latency for parameterized recurring queries.
-- **Security Invariants**:
-  - Recursion depth guards (Anti-DoS), subquery correlation cycle detection, strict parameter count limits, and total comment stripping.
+- **One governed SQL path**: every governed statement (WebSQL, SQL endpoints, async jobs, Arrow export and Flight SQL, MCP SQL and dataset tools, REST datasets) is compiled by `ISqlEngine.Compile`, bound by a dialect binder and, for DML, executed by the checked DML executor. There is no alternative engine and no runtime switch.
+- **Multi-pass compiler**:
+  1. Token guards and ANTLR4 parse (Trino grammar) with size, depth and time budgets.
+  2. Strongly typed, dialect-neutral AST via `SqlAstBuilder`; closed function and CAST allowlists.
+  3. Simplification of the user tree (constant folding, Boolean algebra) before any security node exists.
+  4. Injection of typed tenant, row-policy and mask nodes around every physical table reference, then an independent coverage proof (`SecurityCoverageVerifier`).
+  5. Capability check and dialect emission (`ISqlDialectGenerator`) with every value as a bind parameter, followed by a dialect-aware check of the emitted text.
+- **Admitted dialects**: PostgreSQL, SQL Server, SQLite and Oracle (derived from the dialect capability table). DuckDB runs federated plans; Databricks is experimental and not admitted; Snowflake fails closed.
+- **Dialect emission**:
+  - **Microsoft SQL Server (T-SQL)**: Bracket identifiers `[...]`, Unicode string literals `N'...'`, wrapped Boolean projections, `OFFSET / FETCH` pagination, `@pN` parameters.
+  - **PostgreSQL**: Double-quoted identifiers, positional parameters (`$1, $2`), `LIMIT / OFFSET`, pinned `search_path`.
+  - **SQLite**: `?N` parameters, in-database HMAC masking through a registered UDF, statement interrupt at the timeout.
+  - **Oracle Database**: Double-quoted identifiers, `:pN` parameters bound by name, `NUMBER(1)` Booleans, `OFFSET ... ROWS FETCH NEXT ... ROWS ONLY`, pinned NLS settings and `CURRENT_SCHEMA`.
+- **Value-free template cache**: verified compile results are cached inside the engine as templates without tenant, policy or mask values; values are rebound on every hit.
+- **Stable errors and keyed audit**: one error mapper with stable codes and fixed messages; audit records carry the compiler version, dialect, bind count and a keyed digest of the executed statement.
 
 ---
 
@@ -376,7 +374,7 @@ Additional Security Invariants (Audit E-01 through E-04):
 | Project | Target | Description |
 |---|---|---|
 | [`Autheris.Domain`](src/Autheris.Domain) | `net10.0` | Value Objects (`Sid`, `TableIdentifier`, `CompositeKey`), Models, Options, Enums, `GatewayRole` |
-| [`Autheris.Application`](src/Autheris.Application) | `net10.0` | Central execution engine (`GatewayExecutionService`), business services (`ConsentResolutionService`, `ColumnMaskingProvider`, `RlsFilterGenerator`), streaming RLS (`StreamRlsPolicyEnforcer`), MCP services, procedures (`ProcedureRegistrationService`), compiled plan cache (`CompiledSqlQueryPlanCache`) |
+| [`Autheris.Application`](src/Autheris.Application) | `net10.0` | Central execution engine (`GatewayExecutionService`), business services (`ConsentResolutionService`, `ColumnMaskingProvider`, `RlsFilterGenerator`), streaming RLS (`StreamRlsPolicyEnforcer`), MCP services, procedures (`ProcedureRegistrationService`), governed SQL pipeline (`GovernedSqlRewriter`, `GovernedSqlExecutor`) |
 | [`Autheris.Infrastructure`](src/Autheris.Infrastructure) | `net10.0` | Persistence (`SqliteGovernanceRepository`, `PostgreSqlGovernanceRepository`, `SqlServerGovernanceRepository`, `SqlConnectionFactory`), Caching (`ConsentCacheService`), Multi-Instance Messaging (`RedisEventBus`), Rate Limiting (`RedisRateLimiterService`), Security Handlers (`ForwardAuthAuthenticationHandler`, `BasicAuthenticationHandler`), Cluster State (`RedisClusterStateProvider`) |
 | [`Autheris.GraphQL`](src/Autheris.GraphQL) | `net10.0` | Hot Chocolate 16.6.7 GraphQL engine, dynamic schemas, Subscriptions, Fusion Router (`FusionGatewayExtensions`), MCP Server, queries & mutations |
 | [`Autheris.Api`](src/Autheris.Api) | `net10.0` | ASP.NET Core Host, Basic Auth Login (`/api/auth/login`), ForwardAuth header security, rate limiting, anti-CSRF, health probes, ITSM webhooks, MCP endpoints, WebSQL, Declarative SQL & Stored Procedure endpoints, FinOps, ReBAC |
