@@ -21,7 +21,7 @@ public enum DatasetVisibility
     Full = 2
 }
 
-public sealed class Table
+public sealed record Table
 {
     public Guid Id { get; init; } = Guid.NewGuid();
     public string SourceType { get; init; } = "PostgreSQL";

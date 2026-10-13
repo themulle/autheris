@@ -5,6 +5,7 @@ using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
@@ -21,7 +22,7 @@ public static class GovernancePlanEndpoints
     {
         // 1. Plan Access: generates preview diffs and warnings without mutating state (R-60)
         app.MapPost("/api/governance/plans", async (
-            AdminPlanAccessRequest request,
+            AdminPlanAccessRequest? request,
             HttpContext context,
             IAccessPlanningService planningService,
             CancellationToken ct) =>
@@ -32,9 +33,14 @@ public static class GovernancePlanEndpoints
                 return Results.Unauthorized();
             }
 
+            if (request == null || string.IsNullOrWhiteSpace(request.DatasetId) || request.Grants == null)
+            {
+                return Results.BadRequest(new { error = "DatasetId and Grants are required." });
+            }
+
             var result = await planningService.PlanAccessAsync(request, adminSid, ct).ConfigureAwait(false);
             return Results.Ok(result);
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRequested);
 
         // 2. Get Plan by ID
         app.MapGet("/api/governance/plans/{planId}", (
@@ -43,12 +49,12 @@ public static class GovernancePlanEndpoints
         {
             var plan = planningService.GetPlan(planId);
             return plan != null ? Results.Ok(plan) : Results.NotFound(new { error = $"Plan '{planId}' not found or expired." });
-        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.AccessPlanRead);
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Summarized, AuditEventTypes.AccessPlanRead);
 
         // 3. Confirm Plan with TOTP 2FA: issues HMAC-signed confirmation token (ADR-03, ADR-05, R-62)
         app.MapPost("/api/governance/plans/{planId}/confirm", async (
             string planId,
-            AdminConfirmPlanRequest request,
+            AdminConfirmPlanRequest? request,
             HttpContext context,
             IAccessPlanningService planningService,
             CancellationToken ct) =>
@@ -57,6 +63,11 @@ public static class GovernancePlanEndpoints
             if (string.IsNullOrWhiteSpace(adminSid))
             {
                 return Results.Unauthorized();
+            }
+
+            if (request == null || string.IsNullOrWhiteSpace(request.TotpCode))
+            {
+                return Results.BadRequest(new { error = "TotpCode is required." });
             }
 
             try
@@ -72,12 +83,12 @@ public static class GovernancePlanEndpoints
             {
                 return Results.BadRequest(new { error = ex.Message });
             }
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         // 4. Apply Access Plan: requires valid confirmation token
         app.MapPost("/api/governance/plans/{planId}/apply", async (
             string planId,
-            AdminApplyAccessRequest request,
+            AdminApplyAccessRequest? request,
             HttpContext context,
             IAccessPlanningService planningService,
             CancellationToken ct) =>
@@ -86,6 +97,11 @@ public static class GovernancePlanEndpoints
             if (string.IsNullOrWhiteSpace(adminSid))
             {
                 return Results.Unauthorized();
+            }
+
+            if (request == null || string.IsNullOrWhiteSpace(request.ConfirmationToken))
+            {
+                return Results.BadRequest(new { error = "ConfirmationToken is required." });
             }
 
             try
@@ -105,7 +121,7 @@ public static class GovernancePlanEndpoints
             {
                 return Results.BadRequest(new { error = ex.Message });
             }
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
+        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
 
         return app;
     }
@@ -119,7 +135,6 @@ public static class GovernancePlanEndpoints
         }
 
         return context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-            ?? context.User.FindFirst("sub")?.Value
-            ?? "S-1-5-21-99999999-500";
+            ?? context.User.FindFirst("sub")?.Value;
     }
 }

@@ -47,6 +47,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private readonly ILogger<GovernedProcedureExecutionService>? _logger;
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? _mandatoryFilters;
+    private readonly IAccessProfileRepository? _accessProfileRepository;
+    private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache;
+    private readonly Autheris.Application.Policy.Interfaces.IAccessProfileCache? _accessProfileCache;
 
     public GovernedProcedureExecutionService(
         IProcedureRegistry registry,
@@ -62,8 +65,11 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IProcedureRowScopeResolver? rowScope = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         IConsentCacheService? consentCache = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
-        : this(registry, invoker, options, Autheris.Application.Audit.NullAuditLogRepository.Instance, tableRepository, consentRepository, consentResolution, masking, policyEnforcement, clientIpResolver, logger, rowScope, rebacEvaluator, consentCache, mandatoryFilters)
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        IAccessProfileRepository? accessProfileRepository = null,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
+        : this(registry, invoker, options, Autheris.Application.Audit.NullAuditLogRepository.Instance, tableRepository, consentRepository, consentResolution, masking, policyEnforcement, clientIpResolver, logger, rowScope, rebacEvaluator, consentCache, mandatoryFilters, accessProfileRepository, memoryCache, accessProfileCache)
     {
     }
 
@@ -82,7 +88,10 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IProcedureRowScopeResolver? rowScope = null,
         Autheris.Application.Security.Rebac.Interfaces.IRebacEvaluator? rebacEvaluator = null,
         IConsentCacheService? consentCache = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null)
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
+        IAccessProfileRepository? accessProfileRepository = null,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
+        Autheris.Application.Policy.Interfaces.IAccessProfileCache? accessProfileCache = null)
     {
         _mandatoryFilters = mandatoryFilters;
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
@@ -99,6 +108,9 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         _rowScope = rowScope;
         _rebacEvaluator = rebacEvaluator;
         _consentCache = consentCache;
+        _accessProfileRepository = accessProfileRepository;
+        _memoryCache = memoryCache;
+        _accessProfileCache = accessProfileCache;
     }
 
     public async Task<GovernedProcedureResult> ExecuteAsync(
@@ -329,7 +341,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         bool allowRowFilter,
         CancellationToken ct)
     {
-        if (!TableIdentifier.TryParse(catalogDomain + "." + tableKey, out var tableId))
+        if (!TableIdentifier.TryParse(catalogDomain + "." + tableKey, out var tableId) &&
+            !TableIdentifier.TryParse(tableKey, out tableId))
         {
             return Task.FromResult<(TableAccessDecision Decision, TableMetadata Meta)?>(null);
         }
@@ -377,7 +390,11 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                 _rebacEvaluator ?? Autheris.Application.Security.Rebac.Services.NullRebacEvaluator.Instance,
                 _clientIpResolver,
                 _options.Value,
-                _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance)
+                _mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+                contractManager: null,
+                accessProfileRepository: _accessProfileRepository,
+                memoryCache: _memoryCache,
+                accessProfileCache: _accessProfileCache)
                 .DecideAsync(
                     new Autheris.Application.Policy.TableAccessQuery(
                         userSid,
@@ -504,8 +521,24 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
         IReadOnlyDictionary<string, ResultColumnSource>? sources,
         TenantId tenantId)
     {
-        (TableAccessDecision Decision, TableMetadata Meta)? mapped =
-            definition.ResultTable != null && decisions.TryGetValue(definition.ResultTable, out var m) ? m : null;
+        (TableAccessDecision Decision, TableMetadata Meta)? mapped = null;
+        if (definition.ResultTable != null)
+        {
+            if (decisions.TryGetValue(definition.ResultTable, out var m))
+            {
+                mapped = m;
+            }
+            else
+            {
+                var rParts = definition.ResultTable.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var rSchema = rParts.Length >= 2 ? rParts[^2] : "dbo";
+                var rTable = rParts[^1];
+                if (TryFindDecision(decisions, rSchema, rTable, out var fm))
+                {
+                    mapped = fm;
+                }
+            }
+        }
 
         var cleared = new HashSet<string>(definition.ClearedResultColumns, StringComparer.OrdinalIgnoreCase);
 
@@ -552,16 +585,18 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
                     continue;
                 }
 
-                var key = $"{(string.IsNullOrWhiteSpace(src.Schema) ? "dbo" : src.Schema)}.{src.Table}";
-                if (!decisions.TryGetValue(key, out var srcMapped) || !srcMapped.Meta.HasColumn(src.Column))
+                var schema = string.IsNullOrWhiteSpace(src.Schema) ? "dbo" : src.Schema;
+                if (!TryFindDecision(decisions, schema, src.Table, out var srcMapped) || !srcMapped.Meta.HasColumn(src.Column))
                 {
                     continue; // source table not governed: fail closed
                 }
 
                 (decision, meta) = srcMapped;
                 sourceColumn = src.Column;
+                var key = $"{schema}.{src.Table}";
                 foreign = definition.ResultTable == null ||
-                          !string.Equals(key, definition.ResultTable, StringComparison.OrdinalIgnoreCase);
+                          (!string.Equals(key, definition.ResultTable, StringComparison.OrdinalIgnoreCase) &&
+                           !string.Equals(src.Table, definition.ResultTable, StringComparison.OrdinalIgnoreCase));
             }
             else
             {
@@ -580,6 +615,11 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             }
 
             var level = decision.GetEffectiveColumnAccess(sourceColumn, meta);
+            if (cleared.Contains(col))
+            {
+                level = ColumnAccessLevel.Clear;
+            }
+
             if (level == ColumnAccessLevel.Deny)
             {
                 continue;
@@ -694,5 +734,39 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
     private System.Net.IPAddress ResolveClientIp(ClaimsPrincipal user)
     {
         return _clientIpResolver?.ResolveClientIp() ?? System.Net.IPAddress.None;
+    }
+
+    private static bool TryFindDecision(
+        Dictionary<string, (TableAccessDecision Decision, TableMetadata Meta)> decisions,
+        string schema,
+        string table,
+        out (TableAccessDecision Decision, TableMetadata Meta) result)
+    {
+        var keyWithSchema = $"{(string.IsNullOrWhiteSpace(schema) ? "dbo" : schema)}.{table}";
+        if (decisions.TryGetValue(keyWithSchema, out result))
+        {
+            return true;
+        }
+
+        if (decisions.TryGetValue(table, out result))
+        {
+            return true;
+        }
+
+        foreach (var kvp in decisions)
+        {
+            if (string.Equals(kvp.Key, keyWithSchema, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(kvp.Key, table, StringComparison.OrdinalIgnoreCase) ||
+                (kvp.Value.Meta != null &&
+                 string.Equals(kvp.Value.Meta.Identifier.TableName, table, StringComparison.OrdinalIgnoreCase) &&
+                 (string.IsNullOrWhiteSpace(schema) || string.Equals(kvp.Value.Meta.Identifier.Schema, schema, StringComparison.OrdinalIgnoreCase))))
+            {
+                result = kvp.Value;
+                return true;
+            }
+        }
+
+        result = default;
+        return false;
     }
 }
