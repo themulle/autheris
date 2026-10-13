@@ -1513,47 +1513,17 @@
       "Id": "operator-040",
       "Group": "operator",
       "Sql": "SELECT a[1] AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT \"A\"[:p1] AS \"R\" FROM \"T\"",
-      "Parameters": [
-        {
-          "Marker": ":p1",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "1"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "operator-041",
       "Group": "operator",
       "Sql": "SELECT ARRAY[1, 2, 3] AS r FROM t",
-      "Outcome": "ok",
-      "Expected": "SELECT ARRAY[:p1, :p2, :p3] AS \"R\" FROM \"T\"",
-      "Parameters": [
-        {
-          "Marker": ":p1",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "1"
-        },
-        {
-          "Marker": ":p2",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "2"
-        },
-        {
-          "Marker": ":p3",
-          "Type": "Int32",
-          "Origin": "QueryLiteral",
-          "ValueType": "Int64",
-          "Value": "3"
-        }
-      ]
+      "Outcome": "rejected",
+      "Parameters": [],
+      "ExceptionType": "SqlCompileNotSupportedException"
     },
     {
       "Id": "operator-042",
