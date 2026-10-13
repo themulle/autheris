@@ -26,7 +26,7 @@ public partial class SqliteGovernanceRepository : IGovernanceRepository, IDispos
     private readonly ConcurrentDictionary<string, (TableMetadata? Metadata, long CachedAtTicks)> _metadataCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
     private volatile bool _isAuditPipelineFaulted = false;
-    public bool IsAuditPipelineFaulted => _isAuditPipelineFaulted;
+    public bool IsAuditPipelineFaulted => _isAuditPipelineFaulted || Volatile.Read(ref _auditChainViolation) != null;
 
     public async Task<bool> PingAsync(CancellationToken ct = default)
     {

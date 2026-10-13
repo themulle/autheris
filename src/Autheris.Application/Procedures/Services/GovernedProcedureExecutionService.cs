@@ -615,7 +615,8 @@ public sealed class GovernedProcedureExecutionService : IProcedureExecutionServi
             }
 
             var level = decision.GetEffectiveColumnAccess(sourceColumn, meta);
-            if (cleared.Contains(col))
+            // Zero-Trust: procedure metadata cannot override an explicit Deny on catalog columns; ClearedResultColumns overrides Mask to Clear per contract
+            if (cleared.Contains(col) && level != ColumnAccessLevel.Deny)
             {
                 level = ColumnAccessLevel.Clear;
             }

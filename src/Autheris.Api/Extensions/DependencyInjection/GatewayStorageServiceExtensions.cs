@@ -42,13 +42,16 @@ public static class GatewayStorageServiceExtensions
         if (gatewayOptions.Caching.Garnet.EnableEmbeddedServer)
         {
             // SEC H-01 / AR-06: Register GarnetServerManager as singleton and hosted service.
-            // Do NOT call StartServer() here; it will be called asynchronously in IHostedService.StartAsync.
             services.AddSingleton<IGarnetServerManager, GarnetServerManager>();
             services.AddHostedService(sp => (GarnetServerManager)sp.GetRequiredService<IGarnetServerManager>());
 
             services.AddSingleton<IConnectionMultiplexer>(sp =>
             {
                 var garnetManager = sp.GetRequiredService<IGarnetServerManager>();
+                // SEC H-01 / AR-06: Imperatively ensure Garnet is running before establishing RESP connection
+                // to prevent race conditions when services resolve multiplexer before HostedService.StartAsync.
+                garnetManager.StartServer();
+
                 var garnetConfig = new ConfigurationOptions
                 {
                     EndPoints = { $"{gatewayOptions.Caching.Garnet.Host}:{gatewayOptions.Caching.Garnet.Port}" },
@@ -100,7 +103,8 @@ public static class GatewayStorageServiceExtensions
         services.AddSingleton<ITableSensitivityLookup>(sp => new TableMetadataSensitivityLookup(
             () => sp.GetService<ITableMetadataRepository>(),
             sp.GetService<Microsoft.Extensions.Logging.ILogger<TableMetadataSensitivityLookup>>()));
-        services.AddSingleton<IEpochValidationService, EpochValidationService>();
+        services.AddSingleton<EpochValidationService>();
+        services.AddSingleton<IEpochValidationService>(sp => sp.GetRequiredService<EpochValidationService>());
         services.AddSingleton<IParameterBudgetProvider, DatabaseParameterBudgetProvider>();
 
         // SQL Connection Factory & Health Checks

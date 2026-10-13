@@ -21,7 +21,7 @@ public partial class PostgreSqlGovernanceRepository : IGovernanceRepository, IAu
     private static readonly long MetadataCacheTtlTicks = TimeSpan.FromSeconds(30).Ticks;
     private readonly SemaphoreSlim _auditLock = new(1, 1);
     private volatile bool _isAuditPipelineFaulted = false;
-    public bool IsAuditPipelineFaulted => _isAuditPipelineFaulted;
+    public bool IsAuditPipelineFaulted => _isAuditPipelineFaulted || Volatile.Read(ref _auditChainViolation) != null;
 
     private readonly Channel<AuditLogEntry> _auditChannel;
     private readonly CancellationTokenSource _auditCts = new();

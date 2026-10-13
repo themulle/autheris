@@ -276,23 +276,31 @@ public sealed class AiDataGuardrailService : IAiDataGuardrailService
                 request.ArgumentsJson ?? "{}",
                 _docSearchService,
                 _docStore,
+                sessionContext,
                 cancellationToken).ConfigureAwait(false);
+
+            bool docShouldMask = !_options.Value.IsMcpUnmaskedAllowed;
+            bool docWasMasked = false;
+            string scrubbedDocJson = docShouldMask ? ScrubPiiAndSensitiveData(rawDocJson, out docWasMasked) : rawDocJson;
+
+            bool isError = TryGetExecutorError(rawDocJson, out var docErr);
+            string decision = isError ? "DENY" : "ALLOW";
 
             await RecordAuditEventAsync(
                 tool.Name,
                 sessionContext,
-                decision: "ALLOW",
-                details: "Document MCP tool executed successfully under AI guardrails.",
-                isMasked: false,
+                decision: decision,
+                details: isError ? $"Doc tool returned error ({docErr ?? "ERROR"})." : "Document MCP tool executed successfully under AI guardrails.",
+                isMasked: docWasMasked,
                 truncated: false,
-                estimatedTokens: Math.Max(1, rawDocJson.Length / 4),
+                estimatedTokens: Math.Max(1, scrubbedDocJson.Length / 4),
                 cancellationToken).ConfigureAwait(false);
 
             return new McpToolCallResult(
-                IsSuccess: true,
-                ContentJson: rawDocJson,
-                ErrorMessage: null,
-                IsMasked: false
+                IsSuccess: !isError,
+                ContentJson: scrubbedDocJson,
+                ErrorMessage: isError ? scrubbedDocJson : null,
+                IsMasked: docWasMasked
             );
         }
 

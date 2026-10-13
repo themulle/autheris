@@ -177,13 +177,26 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException($"Plan '{planId}' does not exist or has expired.");
         }
 
-        if (_totpService != null && _totpSecretStore != null)
+        if (!string.Equals(stored.AdminSid, adminSid, StringComparison.OrdinalIgnoreCase))
         {
-            var secret = await _totpSecretStore.GetSecretAsync(adminSid, ct).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(secret) || !_totpService.VerifyTotp(secret, totpCode))
-            {
-                throw new SecurityException("Invalid TOTP verification code.");
-            }
+            throw new SecurityException("Plan confirmation must be performed by the initiating administrator.");
+        }
+
+        if (_totpService == null || _totpSecretStore == null)
+        {
+            throw new SecurityException("Two-factor authentication (TOTP) service is required to confirm access plans (ADR-03 / ADR-05).");
+        }
+
+        var secret = await _totpSecretStore.GetSecretAsync(adminSid, ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            throw new SecurityException("No 2FA secret enrolled for administrator. Step-up verification required.");
+        }
+
+        var isValidTotp = await _totpService.VerifyAndConsumeTotpAsync(adminSid, secret, totpCode, ct).ConfigureAwait(false);
+        if (!isValidTotp)
+        {
+            throw new SecurityException("Invalid or already consumed TOTP verification code.");
         }
 
         var tokenExpiresAt = DateTimeOffset.UtcNow.AddMinutes(10);
@@ -216,6 +229,14 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException($"Plan '{request.PlanId}' has expired.");
         }
 
+        if (string.IsNullOrWhiteSpace(stored.ConfirmedToken) ||
+            !CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(request.ConfirmationToken),
+                Encoding.UTF8.GetBytes(stored.ConfirmedToken)))
+        {
+            throw new SecurityException("Confirmation token does not match the confirmed plan token.");
+        }
+
         if (!ValidateConfirmationToken(request.ConfirmationToken, request.PlanId, out var tokenExpiry))
         {
             throw new SecurityException("Invalid or malformed confirmation token.");
@@ -231,8 +252,8 @@ public class AccessPlanningService : IAccessPlanningService
             throw new SecurityException("Confirmation token has already been consumed (replay prevention).");
         }
 
-        var tenantId = "default";
         var tableId = ParseTableIdentifier(stored.Request.DatasetId);
+        var tenantId = !string.IsNullOrWhiteSpace(tableId.Domain) ? tableId.Domain : "default";
         var tuples = new List<RebacTuple>();
 
         foreach (var grant in stored.Request.Grants)

@@ -77,7 +77,9 @@ public sealed class CdcSubscriptionGovernor
         if (table == null)
         {
             var roles = principal.GetUserRoles();
-            if (!roles.Contains("GovernanceAdmin") && !roles.Contains("ClusterAdmin"))
+            bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+            bool isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+            if (!isGovAdmin && !isClusterAdmin)
             {
                 denial = "cdc_all requires a global governance role";
             }

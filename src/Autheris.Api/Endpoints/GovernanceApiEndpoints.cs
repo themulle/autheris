@@ -35,6 +35,15 @@ public static class GovernanceApiEndpoints
                 return Results.Unauthorized();
             }
 
+            if (secretStore != null)
+            {
+                var existing = await secretStore.GetSecretAsync(userSid, context.RequestAborted).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(existing))
+                {
+                    return Results.Conflict(new { error = "2FA is already enrolled for this user." });
+                }
+            }
+
             var email = ResolveUserEmail(context, userSid);
             var enrollment = totpService.GenerateEnrollment(userSid, email, "Autheris");
 
@@ -66,6 +75,15 @@ public static class GovernanceApiEndpoints
             if (string.IsNullOrWhiteSpace(userSid))
             {
                 return Results.Unauthorized();
+            }
+
+            if (secretStore != null)
+            {
+                var existing = await secretStore.GetSecretAsync(userSid, context.RequestAborted).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(existing))
+                {
+                    return Results.Conflict(new { error = "2FA is already enrolled for this user." });
+                }
             }
 
             var email = ResolveUserEmail(context, userSid);
@@ -101,13 +119,19 @@ public static class GovernanceApiEndpoints
                 return Results.Unauthorized();
             }
 
+            var existingSecret = await secretStore.GetSecretAsync(userSid, context.RequestAborted).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(existingSecret))
+            {
+                return Results.Conflict(new TotpVerifyResult(false, "2FA is already enrolled for this user."));
+            }
+
             if (string.IsNullOrWhiteSpace(request?.TotpCode))
             {
                 return Results.BadRequest(new TotpVerifyResult(false, "TotpCode is required."));
             }
 
-            string? secretBase32 = request.SecretBase32;
-            if (string.IsNullOrWhiteSpace(secretBase32) && clusterState != null)
+            string? secretBase32 = null;
+            if (clusterState != null)
             {
                 try
                 {
@@ -122,7 +146,14 @@ public static class GovernanceApiEndpoints
 
             if (string.IsNullOrWhiteSpace(secretBase32))
             {
-                return Results.BadRequest(new TotpVerifyResult(false, "No pending enrollment found. Please call /enroll first or supply SecretBase32."));
+                if (clusterState == null && !string.IsNullOrWhiteSpace(request?.SecretBase32))
+                {
+                    secretBase32 = request.SecretBase32;
+                }
+                else
+                {
+                    return Results.BadRequest(new TotpVerifyResult(false, "No pending enrollment found. Please call /enroll first."));
+                }
             }
 
             var isValid = await totpService.VerifyAndConsumeTotpAsync(userSid, secretBase32, request.TotpCode, context.RequestAborted).ConfigureAwait(false);

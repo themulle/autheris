@@ -126,6 +126,12 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             var filterCols = DataApiFilterTranslator.ExtractReferencedColumns(request.FilterExpression, metadata);
             foreach (var col in filterCols)
             {
+                var colMeta = metadata.GetColumn(col);
+                if (colMeta == null)
+                {
+                    throw new ArgumentException($"Column '{col}' does not exist on table '{request.Table}'.", nameof(request));
+                }
+
                 var access = decision.GetEffectiveColumnAccess(col, metadata);
                 if (access != ColumnAccessLevel.Clear)
                 {
@@ -141,6 +147,12 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             var orderCols = DataApiFilterTranslator.ExtractOrderByColumns(request.OrderBy, metadata);
             foreach (var col in orderCols)
             {
+                var colMeta = metadata.GetColumn(col);
+                if (colMeta == null)
+                {
+                    throw new ArgumentException($"Column '{col}' does not exist on table '{request.Table}'.", nameof(request));
+                }
+
                 var access = decision.GetEffectiveColumnAccess(col, metadata);
                 if (access != ColumnAccessLevel.Clear)
                 {
@@ -164,7 +176,7 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             var translated = DataApiFilterTranslator.TranslateFilterToSql(request.FilterExpression);
             if (!string.IsNullOrWhiteSpace(translated))
             {
-                predicates.Add(translated);
+                predicates.Add($"({translated})");
             }
         }
 

@@ -115,7 +115,28 @@ public sealed partial class ODataHandler(
         {
             try
             {
-                var decision = await _executionService.CheckTableAccessAsync(principal, tableMeta, recordAudit: false, ct).ConfigureAwait(false);
+                TableAccessDecision? decision = null;
+                try
+                {
+                    decision = await _executionService.CheckTableAccessAsync(principal, tableMeta, recordAudit: false, ct).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Fallback to table identifier check
+                }
+
+                if (decision == null)
+                {
+                    try
+                    {
+                        decision = await _executionService.CheckTableAccessAsync(principal, tableMeta.Identifier, ct).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Ignore
+                    }
+                }
+
                 if (decision != null && !decision.IsAllowed)
                 {
                     continue;
