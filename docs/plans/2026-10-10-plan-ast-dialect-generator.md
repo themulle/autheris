@@ -4089,7 +4089,7 @@ Branch `feat/ast-x1-cutover`, on part A (`c1a2af2`). Legacy removal, architectur
 **Production fix found by the port.** The AST path clamped a root `FETCH FIRST n ROWS WITH TIES` but kept `WITH TIES`, so ties could return more rows than the enforced cap; legacy downgraded it. Fixed with a Red test first (`6ee1c72`).
 
 **Stricter than legacy (ported tests document each).**
-- The strict token guards reject `[` on every dialect, so PostgreSQL array subscripts such as `tags[1]` are rejected on the governed path. Legacy kept them for PostgreSQL.
+- `[` is rejected on SQL Server and SQLite (bracket-quoting lexer differential); on PostgreSQL it is array syntax; on Oracle arrays/subscripts are rejected with a typed not-supported error. Dollar-quoted strings are rejected on every dialect (pre-squash fix; the first draft of this log said `[` was rejected everywhere).
 - `DELETE ... WHERE 1 = 0` and a predicate such as `id = 3 AND 1 = 0` count as unfiltered DML (the predicate must not be literal-only or constant). Legacy accepted them.
 - An allowlisted table function is still rejected, with `NotSupportedException` instead of `SecurityException`.
 - Qualified function names are not accepted even when the caller lists them; only the dialect function map applies.
@@ -4160,6 +4160,9 @@ New:
 
 Breaking changes (release notes):
 - WebSql:SqlRewriterEngine is removed; configuring it fails the start (SEC-ADG-28).
+- A WebSql:PlanCache section fails the start (removed; the engine template cache has a fixed
+  size of 512).
+- Dollar-quoted strings are rejected on every dialect.
 - Startup: AuditKeyStartupCheck fails the start outside Development and Test without
   GovernanceDb:AuditHmacKeyVaultRef or DataMasking:HmacSecretKeyVaultRef (a usable key of the
   minimum length). Before, the first governed statement failed.
@@ -4180,7 +4183,7 @@ Breaking changes (release notes):
   originalSqlHash is a keyed HMAC over the redacted text (key derived from the audit key), not
   a SHA-256 over the raw text; statements that differ only in literal values share it. The
   compiled digest key derives from the audit key, not from the master secret.
-- Stricter than legacy: "[" is rejected on every dialect; constant-only DML predicates count
+- Stricter than legacy: "[" is rejected on SQL Server and SQLite (bracket-quoting lexer differential); on PostgreSQL it is array syntax; on Oracle arrays/subscripts are rejected with a typed not-supported error; dollar-quoted strings are rejected on every dialect; constant-only DML predicates count
   as unfiltered; qualified functions are not accepted from the caller list; AdditionalAllowedFunctions
   only narrows the dialect function map; FETCH WITH TIES is downgraded under an enforced row
   cap; recursive CTEs are not usable; HMAC-masked columns are rejected in predicates and joins;
@@ -4306,3 +4309,13 @@ Phase 5 reviewed `bb80e29..a924f2b`: approve with conditions, no Blocker/High. F
 **Deviations.** The environment was lost once and the work was redone from the findings; every commit is pushed. Red runs were recorded for M-1, M-2, M-3, L-2 (guard), L-4, L-5 (keys), L-6, L-7; not possible or not meaningful for L-1, L-3, L-9, the nits and M-4. Phase 6 keeps L-8 (docs) and the documentation of the new metric, `SQL_BAD_REQUEST` audit code and startup behavior.
 
 **Evidence.** `dotnet build Autheris.sln -m:2`: 0 errors, 0 warnings. `Autheris.Tests.Unit` 5375, `TrinoSqlEngine.Tests` (Debug) 7714, `Autheris.Tests.Architecture` 62, `Autheris.Extensions.Tests` 233, `SqlCompilerGate` (`SQLGATE_PROFILE=pr`) 181: all green. `Autheris.Tests.Integration` 1024: one load-sensitive timing test (`AstCompilerSqliteExecutionTests.ACrossJoinOfTheCallersRows_IsInterruptedWithinTheTimeoutPlusOneSecond`, 58 minute run next to Stryker) failed once and passed in an isolated rerun; the rest green.
+
+### Pre-squash fixes (Phase 3 spot check, Phase 6 findings) implementation log
+
+Branch `feat/ast-x1-smallfix` (from `83fb8ce`), one commit per item, strict Red-Green.
+
+1. **Dollar quoting.** `CompileRequestFactory` sets `RejectDollarQuoting = true` for every dialect (as `SqlTokenSecurityOptions.ForDialect`). Red: `Create_MapsTokenGuards_PerDialect` failed for PostgreSQL. The gate harness `GatePolicies` uses `ForDialect(Target)` unchanged.
+2. **Oracle arrays.** `OracleDialectGenerator.GenerateExpression` rejects `SubscriptExpression` and `ArrayConstructorExpression` with the typed `SqlCompileNotSupportedException` (reason `Construct`, as SQL Server); the error mapper answers 422 `ConstructNotSupported`. Red: `Oracle_ArraysAndSubscripts` (both inputs) failed.
+3. **`WebSql:PlanCache`.** `GatewayStartupValidator.ValidateRemovedWebSqlSettings` fails the start when the section exists (any environment, value never echoed); called from `AddGatewayOptions` next to the `SqlRewriterEngine` check. Red: three registration tests failed.
+4. **Architecture allowlist.** The reason of `SqlProcedureRowScopeResolver` now names the policy row-filter splice (section 7.3 consumer). Test-only text change.
+5. **Docs.** The `[` claims, the squash draft breaking-change list (`PlanCache`, dollar quoting) and `f-dialect-02` (token guards, Oracle arrays, removed settings) corrected.

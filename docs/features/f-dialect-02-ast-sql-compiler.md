@@ -65,7 +65,7 @@ token guards -> parse -> AST build -> validate -> simplify (user tree only) -> s
 ```
 
 1. **Gates.** The dialect must have a capability entry and be `Production` (or the request sets `AllowExperimentalDialect`, which an architecture test forbids in production assemblies). The statement classes must be listed in `CompileRequest.Statements` and in the dialect's `DmlStatements`. `CompileRequest.Policy.Dml` must equal `DmlGuardOptions.Strict`, otherwise `SqlCompileConfigurationException`. `CompileLimits.Normalize` bounds `CompileTimeout` (default 2 s, maximum 30 s) and `MaxExpansionFactor` (default 64, maximum 256) and forces the variable-substitution token guard for Databricks.
-2. **Token guards** (`SqlTokenSecurityOptions`, set by `CompileRequestFactory`): comments, backslashes and escaped literals in strings, dollar quoting (every dialect except PostgreSQL), bracket lexer differentials (`[`, `]` and bracket or comment sequences inside strings and quoted identifiers; SQL Server and SQLite), non-ASCII identifiers, dots in quoted identifiers, time-travel clauses and reserved `autheris_` identifiers. `CompileRequest.Normalize` forces the `${...}` variable-substitution guard for Databricks.
+2. **Token guards** (`SqlTokenSecurityOptions`, set by `CompileRequestFactory`): comments, backslashes and escaped literals in strings, dollar quoting (every dialect), bracket lexer differentials (`[`, `]` and bracket or comment sequences inside strings and quoted identifiers; SQL Server and SQLite), non-ASCII identifiers, dots in quoted identifiers, time-travel clauses and reserved `autheris_` identifiers. `CompileRequest.Normalize` forces the `${...}` variable-substitution guard for Databricks. `[` is rejected on SQL Server and SQLite only; on PostgreSQL it is array syntax (`tags[1]`, `ARRAY[...]`). Oracle has no array type: array constructors and subscripts are rejected with a typed not-supported error (422 `ConstructNotSupported`), as on SQL Server.
 3. **Parse** (ANTLR, Trino grammar) with limits: query length 65,536 characters, nesting depth 100, parse-tree depth 3,000.
 4. **AST build and validate.** Function calls are checked against the dialect function map; a qualified or delimited function name (`"lower"(x)`, `"pg_catalog".lower(x)`) is rejected. CAST targets come from a closed type set (`boolean`, `tinyint`, `smallint`, `integer`, `bigint`, `real`, `double`, `decimal`/`numeric`, `varchar`, `char`, `text`, `varbinary`, `date`, `time`, `timestamp` with optional time zone). Identifiers starting with `autheris_` are reserved (`SQL_RESERVED_IDENTIFIER`).
 5. **Simplify** runs on the user tree before injection, so security predicates never exist while the simplifier runs.
@@ -379,7 +379,7 @@ Removed or inert settings:
 | Key | Behavior |
 |---|---|
 | `Gateway:WebSql:SqlRewriterEngine` | Removed; configuring it fails the start |
-| `Gateway:WebSql:PlanCache` | Removed and ignored; the engine template cache has a fixed capacity (section 2.3) |
+| `Gateway:WebSql:PlanCache` | Removed; configuring the section fails the start. The engine template cache has a fixed size of 512 (section 2.3) |
 | `Gateway:Insecure:danger_bypass_websql_governance` | No effect; fails the start outside Development (DANGER switch) |
 | `RowFilters:SubqueryStrategy` | Ignored on the governed path; policy subqueries are always correlated |
 
@@ -440,7 +440,7 @@ Reference for operators and API clients moving from a release with the legacy to
 | Change | Action |
 |---|---|
 | `WebSql:SqlRewriterEngine` fails the start | Remove the key from every configuration source |
-| `WebSql:PlanCache` is ignored | Remove it |
+| `WebSql:PlanCache` fails the start | Remove the section from every configuration source |
 | `danger_bypass_websql_governance` has no effect and fails the start outside Development | Remove it |
 | `AuditKeyStartupCheck` stops the host outside Development and Test without a usable audit key | Configure `GovernanceDb:AuditHmacKeyVaultRef` or `DataMasking:HmacSecretKeyVaultRef` (at least 32 bytes) |
 | `RequireDefaultSchema` defaults to `true` | Set `DefaultSchema` for every PostgreSQL and Oracle source, or `RequireDefaultSchema = false` for a source that no WebSQL path reaches |
