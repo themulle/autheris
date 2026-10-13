@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Autheris.Application.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Sql.Masking;
@@ -36,13 +37,26 @@ public sealed class GovernancePolicyFactoryTests
 
     private static ITableCatalog Catalog(params TableCatalogEntry[] entries) => new InMemoryTableCatalog(entries, "main");
 
-    private static GovernancePolicyFactory Factory(ITableCatalog catalog, out IGovernedCatalogProvider provider)
+    private static GovernancePolicyFactory Factory(
+        ITableCatalog catalog, out IGovernedCatalogProvider provider, GatewayOptions? options = null, Func<TableIdentifier, TableMetadata?>? metadata = null)
     {
         provider = Substitute.For<IGovernedCatalogProvider>();
         provider.GetCatalogAsync(Arg.Any<string>(), Arg.Any<IReadOnlyCollection<TableIdentifier>>(), Arg.Any<CancellationToken>())
             .Returns(new ValueTask<ITableCatalog>(catalog));
-        return new GovernancePolicyFactory(provider);
+        var tables = Substitute.For<ITableMetadataRepository>();
+        tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult(metadata is null ? DependentMetadata(call.Arg<TableIdentifier>(), withTenant: true) : metadata(call.Arg<TableIdentifier>())));
+        return new GovernancePolicyFactory(provider, tables, Microsoft.Extensions.Options.Options.Create(options ?? new GatewayOptions()));
     }
+
+    private static TableMetadata DependentMetadata(TableIdentifier id, bool withTenant, bool active = true) => new()
+    {
+        Table = new Table { SourceName = "ds", SchemaName = id.Schema, TableName = id.TableName, IsActive = active },
+        Identifier = id,
+        Columns = withTenant
+            ? [new TableColumn { ColumnName = "id" }, new TableColumn { ColumnName = "tenant_id" }]
+            : [new TableColumn { ColumnName = "id" }]
+    };
 
     private static IRowPolicy RegionPolicy(string region = "EU", TargetSqlDialect dialect = TargetSqlDialect.Sqlite)
     {
@@ -448,5 +462,57 @@ public sealed class GovernancePolicyFactoryTests
         var request = Request(gp);
 
         Ids(Run(request, "SELECT id FROM orders ORDER BY id")).ShouldBe(new List<int> { 1 });
+    }
+
+    // ---- M-A1: dependent (policy-subquery) tables are governed like primary tables ---------------------------------------------
+
+    private static GatewayOptions RequireTenant(params string[] exempt) => new()
+    {
+        DataSources = new SqlDataSourceOptions { RequireTenantColumn = true, TenantColumnExemptTables = exempt.ToList() }
+    };
+
+    private async Task<GovernancePolicy> AssembleDependentAsync(GatewayOptions options, bool withTenant, bool active = true)
+    {
+        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _, options,
+            id => id.TableName == "invoices" ? DependentMetadata(id, withTenant, active) : DependentMetadata(id, true));
+        return await factory.CreateAsync(
+            Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy()) }), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task DependentTable_WithoutTenantColumn_RequireTenantColumn_DeniesTheTableOfThePolicy()
+    {
+        var policy = await AssembleDependentAsync(RequireTenant(), withTenant: false);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_WithoutTenantColumn_Exempt_IsAllowed()
+    {
+        var policy = await AssembleDependentAsync(RequireTenant("main.invoices"), withTenant: false);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_WithoutTenantColumn_RequirementOff_Unchanged()
+    {
+        var policy = await AssembleDependentAsync(new GatewayOptions(), withTenant: false);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_Inactive_DeniesTheTableOfThePolicy()
+    {
+        var policy = await AssembleDependentAsync(new GatewayOptions(), withTenant: true, active: false);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task DependentTable_WithoutGovernanceRecord_DeniesTheTableOfThePolicy()
+    {
+        var factory = Factory(Catalog(Entry(Orders), Entry(Invoices)), out _, null, id => id.TableName == "invoices" ? null : DependentMetadata(id, true));
+        var policy = await factory.CreateAsync(
+            Input(new Dictionary<TableIdentity, TableAccessDecision> { [Orders] = Allowed(OrdersId, CorrelatedPolicy()) }), CancellationToken.None);
+        policy.Catalog.Resolve(Orders.ToQualifiedName()).ShouldBeNull();
     }
 }

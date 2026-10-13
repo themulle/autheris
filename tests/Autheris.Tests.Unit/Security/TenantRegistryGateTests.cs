@@ -203,4 +203,31 @@ public sealed class TenantRegistryGateTests
         await gate.PreseedAsync(["a"], default);
         await inner.Received(1).PreseedAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task Lookup_IsAnsweredByTheStore_NeverRegistersAndNeverConsumesBudget()
+    {
+        var inner = Substitute.For<ITenantRegistry>();
+        inner.TryGetAsync(Acme, Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration?>(TenantRegistration.Existing));
+        var gate = Gate(inner, perIssuer: 0);
+
+        (await gate.TryGetAsync(Acme, default)).ShouldBe(TenantRegistration.Existing);
+        (await gate.TryGetAsync(new TenantId("unknown"), default)).ShouldBeNull();
+        await inner.DidNotReceiveWithAnyArgs().RegisterOrGetAsync(default, default, default);
+    }
+
+    [Fact]
+    public async Task ResolveCollision_IsForwarded_AndEvictsTheCachedGroup()
+    {
+        var inner = Substitute.For<ITenantRegistry>();
+        inner.RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new ValueTask<TenantRegistration>(TenantRegistration.Registered));
+        inner.ResolveCollisionAsync(Acme, Arg.Any<CancellationToken>()).Returns(new ValueTask<bool>(true));
+        var gate = Gate(inner);
+        await gate.RegisterOrGetAsync(Acme, "iss", default);   // cached positive
+
+        (await gate.ResolveCollisionAsync(Acme, default)).ShouldBeTrue();
+        await gate.RegisterOrGetAsync(Acme, "iss", default);
+
+        await inner.Received(2).RegisterOrGetAsync(Acme, Arg.Any<string?>(), Arg.Any<CancellationToken>());   // the cache was evicted
+    }
 }

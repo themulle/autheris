@@ -4164,3 +4164,22 @@ No schema or data migration is involved.
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
 ```
 
+#### Phase 3 review (X1 part A) and security fixes implementation log
+
+Phase 3 reviewed WP-X1 part A (`bb80e29..c1a2af2`): sign-off with conditions, no Critical/High. Fixes on branch `feat/ast-x1-secfix` (from `181f2c5`).
+
+| Finding | Summary | Disposition |
+|---|---|---|
+| M-A1 | Policy-subquery (dependent) tables skipped `DataSources:RequireTenantColumn` and `IsActive` | Fixed (`d925271`) |
+| M-A2 | Tenant registry on by default: a ClusterAdmin header (or IdP variant claim) could mark a spelling group collided permanently, no clear path | Fixed (`2a610bc`) |
+| M-A3 | `originalSqlHash` was an unkeyed SHA-256 over raw SQL including values (SEC-ADG-23) | Fixed (keyed, see below) |
+| L-A1 | `CompiledSqlAuditDigester` ignored `AuditHmacKeyVaultRef`, no length check, silent ephemeral key in every environment, one digester per scoped executor | Fixed (same commit as M-A3) |
+| L-A2, L-A3 | Sent to part B | Handled by part B |
+| Info | `RequireDefaultSchema` XML doc is outdated (the pin matters for functions/operators, not tables) | Open for Phase 6 docs |
+| Info | EXISTS constant-projection relaxation only in policy scope (optional) | Not done, optional |
+
+**M-A1.** `GovernancePolicyFactory` now takes `ITableMetadataRepository` and `IOptions<GatewayOptions>` (both required). For every table that an admitted policy reads in a subquery it loads the governance record and applies `IsActive` and `TableMetadata.RequireTenantColumnOrThrow` (with `TenantColumnExemptTables`). A missing record, a load failure, an inactive table or a tenant-less non-exempt table under `RequireTenantColumn=true` denies the policy's own table (like SEC-X1-05). Tests (`GovernancePolicyFactoryTests`): no tenant column + required -> denied (red: 3 of 5 new tests failed before the check, exempt/off cases are regression guards), exempt -> allowed, requirement off -> unchanged, inactive -> denied, no record -> denied.
+
+**M-A2.** `SecurityPrincipalContext.TenantSelectedByHeader` is set by `SecurityContextFactory` when a ClusterAdmin selects the tenant by header. The middleware then calls `ITenantRegistry.TryGetAsync` only: never registers, never marks a collision; unknown -> 403 `TENANT_UNKNOWN`, collided -> 403 `TENANT_ID_COLLISION`, registry failure -> 503. `TenantRegistryGate` forwards `TryGetAsync` (positive cache only). New `ITenantRegistry.ResolveCollisionAsync(keep)` (store: conditional UPDATE, only a marked group changes) and the endpoint `POST /api/admin/tenant-registry/{tenantId}/resolve-collision` (policy ClusterAdmin plus canonical check; audit `TENANT_COLLISION_RESOLVED`; listed as a delegated audit route in `AuditEndpointCoverageTests`). Runbook: find the colliding spellings (audit `TENANT_COLLISION_DENIED`), call the endpoint with the exact spelling to keep; every other spelling stays denied (an IdP that still issues the other spelling marks the group again, so fix the IdP). `ExistingCollisionGroup_AllSpellingsDenied` (X0p) exists next to the preseed variant. Release note: header-selected tenants must already be registered (IdP login or `Tenants` configuration).
+
+**M-A3 / L-A1.** `AstSecurityVisitor.AnonymizeSqlForAudit` is gone (no hash over raw text); `RedactSqlLiterals` and `TruncateForAudit` replace it. `CompiledSqlAuditDigester.Anonymize` returns the redacted text and `originalSqlHash = HMAC-SHA256(HKDF(auditKey, "Autheris:SqlOriginalHash:v1"), redacted full text)`; statements that differ only in values share the hash. The digest key is `HKDF(auditKey, "Autheris:SqlCompiledDigest:v1")`. The audit key is `GovernanceDb:AuditHmacKeyVaultRef`, else the `Autheris:AuditChain:v1` key of `DataMasking:HmacSecretKeyVaultRef` (as the audit repositories); minimum length outside Development; no ephemeral fallback outside Development/Test: `Compute`/`Anonymize` throw and the governed statement fails closed (decision: per statement, not at startup, because the digester is created on first use). The key is read once (DI singleton, shared by the governed and federated executors). `FederatedDuckDbExecutionService` uses the same digester. Tests: `CompiledSqlAuditDigesterTests` (13; red = compile failure before `Anonymize`/the 3-argument constructor existed). Behavior change: the compiled digest key now derives from the audit key (the chain key for the master-secret fallback), not from the master secret directly.

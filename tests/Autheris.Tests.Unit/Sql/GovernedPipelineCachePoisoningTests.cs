@@ -175,7 +175,7 @@ public sealed class GovernedPipelineCachePoisoningTests
         var writer = await service.CompileAsync(Sql, User("S-W"), new TenantId(Tenant));
         writer.StatementClass.ShouldBe(SqlStatementClass.Delete);
 
-        var policy = await new GovernancePolicyFactory(new StubCatalogProvider(table)).CreateAsync(
+        var policy = await new GovernancePolicyFactory(new StubCatalogProvider(table), Substitute.For<Autheris.Application.Interfaces.ITableMetadataRepository>(), Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions())).CreateAsync(
             new GovernedPolicyInput("default", new TenantId(Tenant),
                 new Dictionary<TableIdentity, TableAccessDecision>
                 {

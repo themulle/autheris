@@ -58,6 +58,8 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddSingleton<IDataSourceExecutor, PluginHttpDataSourceExecutor>();
         services.AddSingleton<ISqlEngine, FastSqlEngine>();
         services.AddSingleton<ISqlSecurityValidator, DefaultSqlSecurityValidator>();
+        // L-A1: one key resolution for the process (singleton), shared by the governed and the federated executors.
+        services.AddSingleton<CompiledSqlAuditDigester>();
         services.AddScoped<IGovernedSqlExecutionService, GovernedSqlExecutionService>();
         if (gatewayOptions.WebSql.Enabled)
         {
