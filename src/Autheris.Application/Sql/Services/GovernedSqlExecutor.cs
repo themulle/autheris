@@ -303,6 +303,13 @@ public sealed class GovernedSqlExecutor
 
         var binder = CompiledSqlBinders.For(binderDialect);
 
+        if (dmlContext.IsDml)
+        {
+            // L-2: the audit key is resolved before the statement can write. A key that cannot be read fails the statement closed here,
+            // not after the commit (a committed write without its audit record).
+            _digester.EnsureKey();
+        }
+
         var maxConcurrentReads = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
         List<IDisposable>? leases = null;
         if (_concurrencyGate != null && maxConcurrentReads > 0 && rewrite.AccessedTables.Count > 0)

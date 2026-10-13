@@ -63,6 +63,8 @@ public static class GatewaySqlEngineServiceExtensions
         services.AddScoped<IGovernedSqlExecutionService, GovernedSqlExecutionService>();
         if (gatewayOptions.WebSql.Enabled)
         {
+            // L-2: an unusable audit digest key stops the start outside Development and Test.
+            services.AddHostedService<AuditKeyStartupCheck>();
             // SEC-ADG-26: the start lists the tables that the governed pipeline denies (ids only).
             services.AddHostedService<DeniedTablesStartupReporter>();
         }

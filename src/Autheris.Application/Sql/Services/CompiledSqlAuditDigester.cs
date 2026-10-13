@@ -62,6 +62,13 @@ public sealed class CompiledSqlAuditDigester
         return HKDF.DeriveKey(HashAlgorithmName.SHA256, masterKey, 32, info: AuditChainInfo);
     }
 
+    /// <summary>
+    /// Resolves the audit key now (L-2): a statement that has side effects calls this before it executes, so that a key that cannot be read
+    /// fails the statement before any write instead of after its commit. Also the startup check outside Development and Test.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No usable audit key outside Development and Test (fail closed).</exception>
+    public void EnsureKey() => _ = Resolved();
+
     /// <exception cref="InvalidOperationException">No usable audit key outside Development and Test (fail closed).</exception>
     public string Compute(CompiledSql compiled)
     {

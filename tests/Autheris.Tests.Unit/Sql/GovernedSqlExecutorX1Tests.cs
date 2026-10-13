@@ -113,7 +113,8 @@ public sealed class GovernedSqlExecutorX1Tests
         bool sessionTransaction = false,
         GatewayOptions? options = null,
         IKeyVaultSecretProvider? secrets = null,
-        IProviderExecutionGuard? guard = null)
+        IProviderExecutionGuard? guard = null,
+        Microsoft.Extensions.Hosting.IHostEnvironment? environment = null)
     {
         var gateway = options ?? Gateway(provider);
         var connection = new FakeDbConnection(commandFactory);
@@ -128,7 +129,7 @@ public sealed class GovernedSqlExecutorX1Tests
         var log = new CapturingLogger<GovernedSqlExecutor>();
         var opts = Options.Create(gateway);
         var executor = new GovernedSqlExecutor(
-            new GovernedSqlRewriter(opts), opts, auditRepo, guard ?? PassThroughExecutionGuard.Instance, factory, environment: null, logger: log, sessionInitializer: session, secretProvider: secrets);
+            new GovernedSqlRewriter(opts), opts, auditRepo, guard ?? PassThroughExecutionGuard.Instance, factory, environment: environment, logger: log, sessionInitializer: session, secretProvider: secrets);
         return new Harness { Executor = executor, Factory = factory, Connection = connection, Audit = audit, Log = log };
     }
 
@@ -168,6 +169,28 @@ public sealed class GovernedSqlExecutorX1Tests
         }
 
         h.Audit.ShouldContain(e => e.EventType == "WEBSQL_DML_EXECUTED" && e.DetailsJson.Contains("sql.compiled_digest"));
+    }
+
+    [Theory]
+    [InlineData("PostgreSql", "PostgreSQL", true)]
+    [InlineData("Sqlite", "Sqlite", false)]
+    public async Task WebSqlDml_AuditKeyUnavailable_FailsClosedBeforeAnyWrite(string provider, string sourceType, bool sessionGivesTransaction)
+    {
+        // L-2: the audit digest is first needed after the commit; a vault failure must not leave a committed, unaudited write.
+        var compiled = await CompileAsync(sourceType, "UPDATE orders SET amount = 1 WHERE id = 1");
+        var secrets = Substitute.For<IKeyVaultSecretProvider>();
+        secrets.GetSecretBytes(Arg.Any<string>()).Returns(_ => throw new InvalidOperationException("vault down"));
+        var production = Substitute.For<Microsoft.Extensions.Hosting.IHostEnvironment>();
+        production.EnvironmentName.Returns("Production");
+        var h = CreateHarness(provider, sessionTransaction: sessionGivesTransaction, options: Gateway(provider, hmacRef: "GQL-HMAC"),
+            secrets: secrets, environment: production);
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => ExecuteAsync(h, compiled, dml: Dml()));
+
+        ex.Message.ShouldContain("Security critical");
+        h.Connection.Commands.ShouldBeEmpty();                         // nothing was executed
+        h.Connection.Transactions.ShouldAllBe(t => t.Commits == 0);    // and nothing was committed
+        h.Audit.ShouldBeEmpty();
     }
 
     [Fact]
