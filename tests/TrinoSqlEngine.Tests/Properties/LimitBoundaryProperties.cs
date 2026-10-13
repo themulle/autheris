@@ -16,27 +16,40 @@ namespace TrinoSqlEngine.Tests.Properties;
 /// </summary>
 [Trait("Category", "SqlGate")]
 [Trait("Category", "Security")]
+[Collection(ProductionLimitProbes.Name)]
 public class LimitBoundaryProperties(ITestOutputHelper output)
 {
-    /// <summary>Compile function of the limit properties: the query-length guard is raised so that the bind limit is the binding one.</summary>
+    /// <summary>The bind limit of the deterministic boundary checks (a lowered capability table); small enough that no probe is heavy.</summary>
+    private const int ReducedLimit = 100;
+
+    /// <summary>
+    /// Compile function of the limit properties at the production capability table: the query-length guard is raised so that the bind
+    /// limit is the binding one, the compile budget is at its maximum, and the engine has no parse budget and its own parser limiter.
+    /// A loaded CI machine can therefore not turn a boundary probe of 65,535 values into a parse or compile time rejection (a flaky
+    /// security test would fail the gate, M-5): the 5 s parse budget (which includes the wait on the process-wide parser slot limiter)
+    /// is the one that fired, not the compile budget.
+    /// </summary>
     internal static CompileFn Production { get; } = (sql, ctx, permissions) =>
-        // The compile budget is raised to its maximum so that a loaded CI machine cannot turn a boundary probe of 65,535 values into a
-        // CompileTime rejection (a flaky security test would fail the gate, M-5).
-        new FastSqlEngine { MaxQueryLength = int.MaxValue }.Compile(
+        LimitProbeSupport.Engine().Compile(
+            sql.AsMemory(), ctx.Request(permissions) with { CompileTimeout = CompileLimits.MaxCompileTimeout }, CancellationToken.None);
+
+    /// <summary>The same compile function over a capability table whose <c>MaxBindParameters</c> is <paramref name="limit"/>.</summary>
+    internal static CompileFn Reduced(int limit) => (sql, ctx, permissions) =>
+        LimitProbeSupport.WithBindLimit(LimitProbeSupport.Engine(), limit).Compile(
             sql.AsMemory(), ctx.Request(permissions) with { CompileTimeout = CompileLimits.MaxCompileTimeout }, CancellationToken.None);
 
     /// <summary>
     /// <paramref name="ChunkChoice"/> is the generated preference; the effective chunk keeps the OR chain below the engine's AST
     /// nesting guard (64) and an IN list below the dialect's IN-list limit.
     /// </summary>
-    internal sealed record Shape(TargetSqlDialect Dialect, int ChunkChoice, bool Strings)
+    internal sealed record Shape(TargetSqlDialect Dialect, int ChunkChoice, bool Strings, int? MaxBind = null)
     {
         public int ChunkSize
         {
             get
             {
                 var caps = DialectCapabilityTable.Default.Get(Dialect);
-                int min = (caps.MaxBindParameters + 49) / 50;
+                int min = ((MaxBind ?? caps.MaxBindParameters) + 49) / 50;
                 return Math.Clamp(ChunkChoice, min, caps.MaxInListItems ?? int.MaxValue);
             }
         }
@@ -83,7 +96,7 @@ public class LimitBoundaryProperties(ITestOutputHelper output)
     internal static IEnumerable<Violation> Check(Shape shape, CompileFn compile)
     {
         var ctx = new CaseCtx(shape.Dialect, true, "TNT1_acme", "POL1_eu");
-        int max = DialectCapabilityTable.Default.Get(shape.Dialect).MaxBindParameters;
+        int max = shape.MaxBind ?? DialectCapabilityTable.Default.Get(shape.Dialect).MaxBindParameters;
         int fixedCount = FixedParameters(shape, ctx, compile);
 
         var (atMax, errorAtMax) = Oracles.TryCompile(compile, Query(shape, max - fixedCount), ctx, StatementPermissions.ReadOnly);
@@ -109,6 +122,38 @@ public class LimitBoundaryProperties(ITestOutputHelper output)
 
     [Fact]
     public void BindLimit_IsExact_ForEveryGovernedDialect()
+    {
+        // Deterministic: a lowered capability table (the boundary logic does not depend on the production value), many shapes.
+        var failures = new List<string>();
+        var reduced = Reduced(ReducedLimit);
+        foreach (var seed in GateProfile.AllSeeds())
+        {
+            foreach (var shape in GateProfile.Sample(ShapeGen(), seed, 12))
+            {
+                foreach (var v in Check(shape with { MaxBind = ReducedLimit }, reduced))
+                {
+                    failures.Add($"seed={seed} {shape}: {v.Message}");
+                }
+            }
+        }
+
+        foreach (var dialect in CaseCtx.Governed)
+        {
+            foreach (var strings in new[] { false, true })
+            {
+                foreach (var v in Check(new Shape(dialect, 7, strings, ReducedLimit), reduced))
+                {
+                    failures.Add($"reduced {dialect}: {v.Message}");
+                }
+            }
+        }
+
+        output.WriteLine($"failures={failures.Count}");
+        Assert.True(failures.Count == 0, string.Join("\n", failures.Take(10)));
+    }
+
+    [Fact]
+    public void BindLimit_IsExact_ForEveryGovernedDialect_AtTheProductionLimit()
     {
         var failures = new List<string>();
         foreach (var seed in GateProfile.AllSeeds())

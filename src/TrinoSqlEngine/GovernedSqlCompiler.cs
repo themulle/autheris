@@ -221,7 +221,10 @@ internal sealed class GovernedSqlCompiler
         // 9. emit (+ bind limit and emitted-text checker inside)
         Pass("emit");
         var generator = SqlDialectGeneratorFactory.GetGenerator(request.TargetDialect);
-        var compiled = generator.Generate(secured, new ParameterSource(typed.PolicyValues, ClientNoValues), token)
+        var parameterSource = new ParameterSource(typed.PolicyValues, ClientNoValues);
+        var compiled = (generator is SqlDialectGeneratorBase capabilityAware
+                ? capabilityAware.Generate(secured, parameterSource, caps, token)
+                : generator.Generate(secured, parameterSource, token))
             with { AppliedPredicates = applied, ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured) };
 
         // 10. output budget

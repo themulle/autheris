@@ -36,12 +36,19 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     /// <see cref="BoundParameter"/> and counted against the capability bind limit. The emitted text is verified by
     /// <see cref="EmittedSqlInvariantChecker"/> before it is returned.
     /// </summary>
-    public virtual CompiledSql Generate(SqlStatement statement, ParameterSource values, CancellationToken cancellationToken = default)
+    public virtual CompiledSql Generate(SqlStatement statement, ParameterSource values, CancellationToken cancellationToken = default) =>
+        Generate(statement, values, Capabilities, cancellationToken);
+
+    /// <summary>
+    /// Generates with the capabilities the compiler resolved for the request (the bind limit comes from them, not from a second lookup in
+    /// the default table), so the capability provider of the compiler governs the whole pipeline.
+    /// </summary>
+    internal CompiledSql Generate(SqlStatement statement, ParameterSource values, DialectCapabilities capabilities, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(statement);
         ArgumentNullException.ThrowIfNull(values);
+        ArgumentNullException.ThrowIfNull(capabilities);
 
-        var capabilities = Capabilities;
         cancellationToken.ThrowIfCancellationRequested();
         var context = new SqlEmitterContext(TargetDialect, capabilities, values, cancellationToken);
         Span<char> initialBuffer = stackalloc char[512];
